@@ -59,6 +59,7 @@ See `spec.md` §4 for the user surface (slash commands, shell escape, project id
 - **Freshness:** pre-commit hook regenerates index files from canonical sources; commit fails on stale index. Same pattern lockfiles use.
 - **Single-source policy:** if any derived index disagrees with the canonical source, the source wins and the index is rebuilt. Drift cannot accumulate.
 - **Autonomic git management:** the deterministic runtime is the only entity that mutates `~/.personant/`'s git tree. `git init` (first run), `git add`/`commit` (on canonical mutations), and pre-commit hook installation/invocation are runtime concerns, performed without user ack — same lifecycle status as writing to `spine.jsonl` itself. The LLM never invokes git. (The runtime may also issue read-only git queries against the *workspace* — `ls-files`, `status`, `diff` — for permission-tier classification and ack-prompt diff rendering, but it never mutates workspace git; that's the user's territory.)
+- **Git as archival substrate.** Deep-cold thread archival (v0.2; spec §3.8) leverages the same git tree rather than building a bespoke archive format. Archive = `git rm` + `git commit` + an entry in `archive/index.jsonl` recording commit + blob hash; recovery = `git show <commit>:<path>`. Git's content-addressed, zlib-deflated, delta-compressed object store handles storage and dedup across versions. Personant never rewrites history — that invariant is what keeps archived blobs reachable across `git gc`.
 
 ### Implementation language
 
@@ -108,6 +109,8 @@ Per-turn context is composed from layers with explicit budget caps:
 Under budget pressure, bumpable in order: C-oldest, then B-oldest (compressed to summary). A and E are sacrosanct — losing them breaks recognition, which is the whole point.
 
 **Recognition flow:** spine is always loaded → model recognizes prior topic directly from spine entries → emits topic tag at turn start → corresponding thread fetched into Layer B → response generated. **No speculative prefetch** — every loaded thread is loaded because the model said it was needed.
+
+**Content de-redundification** (v0.2; spec §3.9). When the same file content is included in working context across many turns (file read, modified, re-read), the runtime de-redundifies: literal current state at the most-recent position; N most-recent diffs in literal form; older states replaced with content-addressed identifiers. Persistent storage keeps the full diff chain with periodic literal anchors (every K-th change) to prevent cumulative drift. Diff format starts as unified diff with a planned natural-language fallback for cases where the model has trouble applying. The persistent vs. live distinction is structural — same primitives (content-addressed identifiers, diffs, anchor literals) serve different concerns.
 
 ---
 
@@ -219,6 +222,8 @@ Without this, declined offers due to bad matches accidentally suppress good offe
 3. On ack: thread file written to `threads/thr_<id>.md`; spine entry generated; Layer B/C eviction follows.
 
 **The ack is the integrity gate** — the user catches misclassification at the moment of retirement, the only point where its accuracy matters most. This is high-leverage human verification baked into the natural flow.
+
+**Deep cold archival** (v0.2; spec §3.8) is the next stage past retirement: when spine cardinality pressure builds, the runtime archives the oldest retired threads off-spine via `git rm` + `git commit` + an `archive/index.jsonl` entry. Recovery via `git show <commit>:<path>` is one command; the entry preserves the spine summary and anchors so search across archived material is possible without recovering the file. No bespoke archive format — git's existing content-addressed object store does the work.
 
 ---
 
@@ -376,11 +381,14 @@ The design originated in conversation 2026-05-07/08, building on observations ab
 
 [`spec.md`](spec.md) carries the field-level material:
 - Storage schema definitions (JSONL field-level): §2
+- Deep cold archival mechanism (v0.2): §3.8
+- Working-set content dedup (v0.2): §3.9
 - Tool surface and permission tiers: §6
-- Go package layout for the runtime; CLI command surface: §4, §7 *(stubs as of 2026-05-09)*
-- Slash command catalog (borrowed where possible from Claude Code / OpenCode): §4 *(stub)*
+- Go package layout for the runtime; CLI command surface: §4 (substantive), §7 *(stub as of 2026-05-09)*
+- Slash command catalog (borrowed where possible from Claude Code / OpenCode): §4.2
 - Directive file format specification: §2.6, §6.2.3
-- Implementation milestone breakdown: §10
+- Bootstrap, lifecycle, providers.toml, pre-commit hook: §8
+- Implementation milestone breakdown: §10 (Phase 1 done; §10.1 tracks v0.2 / v1.0)
 - Testing approach (especially for instrumented behavior): §11
 
 The outline is for orientation; the spec is for execution. Both documents are living and edited in place as decisions evolve.

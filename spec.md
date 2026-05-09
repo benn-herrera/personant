@@ -1,6 +1,6 @@
 # Personant — v0.1 Specification
 
-**Status:** in progress. §0–§2, §4, §6, §8.2 substantively drafted; §3, §5, §7, §8.{1,3,4}, §9–§11 stubbed.
+**Status:** in progress. §0–§2, §3.8, §3.9, §4, §6, §8.2 substantively drafted; §3.{1–7}, §5, §7, §8.{1,3,4}, §9–§11 stubbed.
 **Derives from:** [`outline.md`](outline.md).
 **Audience:** implementation work. Specifies field-level schemas, algorithms, and surface APIs.
 **Relationship to outline:** outline is the *why*; spec is the *what and how*. Where the outline says "the model emits a topic tag at turn start," the spec specifies the prompt fragment, the parser regex, and the parser's normalization rules.
@@ -445,6 +445,159 @@ Sections planned:
 - 3.5 Closure flow: trigger detection (engagement decay or `/done`), curator-drafted summary, user ack with resolution choice, frontmatter+spine update, Layer B/C eviction.
 - 3.6 Fallback dissection: budget-pressure trigger, dissector LLM clustering of oldest content, batch retirement, ack flow.
 - 3.7 Cross-project digest maintenance: regeneration triggers, per-project byte budget enforcement, recent-anchor selection.
+
+§3.8 and §3.9 below are substantively drafted; the rest of §3 is stub.
+
+### 3.8 Deep cold archival
+
+Per §3.5, threads can be archived "off-spine" when spine cardinality
+pressure builds, with recovery via explicit fetch. The mechanism leverages
+the autonomic git layer (§8.3) rather than a bespoke archive format.
+
+#### 3.8.1 Mechanism
+
+To archive thread `thr_<n>`:
+
+1. The runtime confirms `threads/thr_<n>.md` is in git's working tree at
+   HEAD.
+2. `git rm threads/thr_<n>.md`.
+3. `git commit -m "archive thr_<n>"` — the commit captures the deletion.
+4. Append an archive index entry to `archive/index.jsonl`:
+   ```jsonl
+   {"thr_id":"thr_42","commit_hash":"<sha>","blob_hash":"<sha>","archived_at":"<RFC3339>","original_path":"threads/thr_42.md","spine_summary":"<summary at archival time>","anchors":["..."],"project":"prj_3"}
+   ```
+   The `spine_summary` and `anchors` are preserved verbatim from the
+   spine record at archival time so a `personant search` over archive
+   entries can match without recovering the full thread.
+5. Remove the spine record from `spine.jsonl` (the thread is no longer
+   active recall material).
+6. Commit the spine and archive-index changes together (one commit, so
+   the archived state is atomic).
+
+The archive index is **canonical** (per §2.1 ownership table); sorted by
+`thr_id` for line-grain git diffs.
+
+#### 3.8.2 Storage properties
+
+- Git's object store is content-addressed and zlib-deflated (loose
+  objects) or delta-compressed (packfiles). Multiple historical
+  versions of the same thread file are stored compactly via git's
+  delta-compression — better than independent `tar.gz` archives, which
+  would not compress across entries.
+- `git gc` is safe to run autonomically: archived blobs remain
+  reachable via the deletion commit's parent commit. Personant never
+  rewrites history (see watch-list §12 entry on this invariant).
+- Periodic `git gc --aggressive` can be invoked on a schedule when
+  pack-file size starts mattering. Storage pressure isn't a v0.1
+  concern.
+
+#### 3.8.3 Recovery
+
+To recover archived thread `thr_<n>`:
+
+1. Look up the archive index entry by `thr_id`.
+2. `git show <commit_hash>:<original_path>` → write to working tree.
+3. Compute `git hash-object` on the recovered file; verify against the
+   stored `blob_hash`. Mismatch indicates index corruption — abort and
+   surface the discrepancy as an error.
+4. Append a fresh spine record (using current parameters; `state` is
+   typically `wip` after recovery, with `last_engaged` updated).
+5. Commit the recovery to the personant home git tree.
+
+The archive index entry is **kept** as a forensic breadcrumb. A future
+`personant archive list` / `personant archive recover` command surfaces
+deep-cold history.
+
+#### 3.8.4 Relationship to other deferrals
+
+This obsoletes the outline's "Archives off-spine" handwave: the
+mechanism is now concrete. The outline's "Symbol decay over time"
+deferral remains separate — that's about evicting *symbols* from the
+inverse index when they go cold, not about archiving threads.
+
+[OPEN: archival trigger threshold ("spine cardinality pressure" is
+hand-wavy). Calibrate empirically; defer to v0.2.]
+
+### 3.9 Working-set content dedup
+
+When file content (or other large content blobs) appears in the working
+context multiple times — a file is read, then modified, then re-read —
+the runtime de-redundifies content to keep the working window's
+information density high.
+
+The key observation: **persistent storage and live context composition
+are separate concerns** sharing the same primitives — content-addressed
+identifiers, diffs, anchor literals.
+
+#### 3.9.1 Persistent storage (thread file body, log)
+
+The full chain is preserved:
+
+- Initial content read → stored as literal.
+- Subsequent change → stored as a unified diff against the previous
+  state.
+- Periodic anchor literals every K-th change (default K = 10) — full
+  literal stored to prevent cumulative drift through long diff chains.
+  Same trick I-frames in video compression use. Configurable via the
+  directive `dedup.anchor-cadence`.
+- A diff that is ≥ `dedup.diff-literal-threshold` (default 0.7) of the
+  literal size is stored as a literal instead — the diff isn't earning
+  its keep. Same heuristic as lzma's literal-vs-match decision.
+
+This gives forensic-quality history with bounded storage cost.
+
+#### 3.9.2 Live context composition (working window)
+
+The working window's representation is more aggressive:
+
+- **Literal current state** at the most-recent position (where active
+  cognition is happening).
+- **N most-recent diffs** in literal form (default N = 3, configurable
+  via `dedup.live-diff-window`) for forensic queries that look back a
+  few steps.
+- **Older states** replaced with content-addressed identifiers:
+  `[content #<hash> — see most-recent position]`. The identifier
+  preserves causal/temporal ordering without the storage cost of
+  redundant copies.
+
+When N is exceeded, the oldest diff in window is collapsed to its
+identifier; the displaced literal content is unrecoverable from window
+alone but still recoverable from persistent storage.
+
+#### 3.9.3 Diff format
+
+**Default: unified diff.** The format LLMs encounter most often (git,
+patch, code review) — parsing burden is familiar. Start here.
+
+**Fallback: natural-language descriptive diff** ("added a line `foo`
+after line 12; removed lines 20–22"). When unified diff produces output
+that the model has trouble applying — empirically: complex
+multi-region changes, very long files — the runtime can switch
+formats per-diff. The directive `dedup.diff-format` controls the
+global default; per-thread override is possible.
+
+The empirical-calibration plan: ship unified-diff-only; instrument
+"diff misapplication" signals (cases where the model's post-state
+guess diverges from the runtime's deterministic apply); switch to
+natural-language fallback when frequency warrants. v0.2 work.
+
+#### 3.9.4 Identifier-only references
+
+Pure identifier references (no nearby literal) are appropriate when:
+
+- Cognition is about *meta* (this file has been mentioned, that file
+  was modified) rather than content.
+- The content has been displaced from the live window and forensic
+  recovery is the user's path.
+
+**For active reasoning over content, identifier-only is insufficient.**
+The LLM must have the literal in attention range to reason about it
+directly; resolving an identifier to remote content costs attention
+bandwidth and exhibits "lost-in-the-middle" effects when the original
+is far from where it's needed. The runtime tracks active engagement
+via the engaged thread's tool-call history: a file recently the
+subject of `fs.read` or `fs.propose_promote` keeps its literal in the
+active layers (B / C), regardless of how many references precede it.
 
 ---
 
@@ -1008,6 +1161,22 @@ Capabilities that expand the role beyond v0.1's read-and-think research
 assistant. Noted so v0.1 implementation does not preclude them; not on the
 near-term dev list.
 
+- **v0.2: Deep cold archival via git** (per §3.8). Triggered by spine
+  cardinality pressure (threshold TBD); leverages the autonomic git
+  layer for storage and recovery. Adds the archive index
+  (`archive/index.jsonl`), the archival trigger logic, and `personant
+  archive list` / `personant archive recover` CLI commands. Storage is
+  effectively free because git's object store handles compression and
+  deduplication across historical versions.
+- **v0.2: Working-set content dedup** (per §3.9). Live context window
+  uses content-addressed identifiers + recent-N diffs + literal anchors;
+  persistent storage (thread file body, log) preserves the full chain
+  with periodic anchors. Includes the diff-format selector (unified
+  default, natural-language fallback), the directive parameters
+  (`dedup.anchor-cadence`, `dedup.diff-literal-threshold`,
+  `dedup.live-diff-window`, `dedup.diff-format`), and the instrumentation
+  to surface "diff misapplication" signals for the unified→NL switchover
+  decision.
 - **v1.0: Computational tool surface for math/physics projects.** Python
   authoring (via the existing `fs.propose_promote` flow) plus *execution* of
   scripts, simulations, and formatter/linter tooling (`black`, `isort`,
@@ -1052,6 +1221,8 @@ Sections planned:
 14. **File-move detection false negatives.** A project root that was *renamed in place* but otherwise untouched will trigger ENOENT identically to a relocation; the runtime prompt covers it, but a parent-directory scan heuristic might offer better UX.
 15. **API-key leakage via capture-into-context.** `providers.toml` is secret-bearing (§8.2.1); `#`-prefixed shell capture, `fs.read`, `fs.grep`, log accidental inclusion — any path that surfaces file content into the LLM working window — must redact. The redaction filter is a single chokepoint in principle, but its coverage is the watch item: every new capture/inclusion path must be audited against this rule.
 16. **Sensitive-pattern drift.** The seed sensitive-pattern list (`.env`, `secrets/**`, `*.key`, `*.pem`) plus `providers.toml` will not cover everything. As empirical pressure surfaces new patterns (`.npmrc` auth tokens, `~/.aws/credentials`, `id_rsa*`, etc.), the list must grow.
+17. **Deep-cold blob reachability under `git gc`.** Archived blobs stay reachable as long as personant never rewrites history in `~/.personant/.git/`. Any future tool or accidental command that runs `git rebase` / `git filter-branch` / `git reflog expire` against the personant home could prune archived content. Mitigation: document the never-rewrite invariant in §8.3; have `personant verify` resolve every archive-index `commit_hash` and `blob_hash` to confirm reachability.
+18. **Diff-chain cumulative drift.** Long chains of diffs reconstructed end-to-end can accumulate small errors if intermediate diffs are computed approximately or with a slightly drifted base. Mitigation: periodic literal anchors (§3.9.1, default K=10). Verification: walk the chain forward from each anchor and confirm intermediate states match expected literal at each anchor point.
 
 ---
 
@@ -1077,6 +1248,9 @@ Compiled from inline `[OPEN: ...]` markers and design-pass uncertainties.
 16. **§4.5.4 — Polling cadence for git remote detection.** Per-turn vs. on-engagement vs. on-explicit-trigger. Default to on-engagement to keep cost down; revisit if remote changes are common enough that lag becomes noticeable.
 17. **§4.4.3 — Interactive-app handoff.** Whether to support `vim`/`nano`/`less` via terminal-mode handoff, or keep deferring to "open another terminal." Likely held until empirical pressure makes the friction onerous.
 18. **§8.2.1 — `providers.toml` redaction strategy.** When `#`-prefixed shell capture or `fs.read` would expose `providers.toml` content: redact-and-pass-through (replace content with placeholder), refuse-outright (deny the op with an explicit error), or hybrid (refuse on agent-initiated reads, redact on user-initiated captures)? Hybrid feels right but warrants explicit calibration during implementation.
+19. **§3.8 — Deep-cold trigger threshold.** "Spine cardinality pressure" is hand-wavy. Default likely 500–1000 active threads; calibrate empirically once enough spine accumulates to feel pressure.
+20. **§3.9 — Live context dedup tuning.** `dedup.live-diff-window` (default 3), `dedup.anchor-cadence` (default 10), `dedup.diff-literal-threshold` (default 0.7) are starting guesses. All TBD; instrumentation drives calibration.
+21. **§3.9.3 — Diff format empirical fallback trigger.** When does unified diff become harder for an LLM to apply correctly than a natural-language descriptive diff? Probably multi-region changes >50 lines and/or files >2000 lines, but this needs the model + content combination to confirm. Instrument and calibrate.
 
 ---
 
@@ -1088,3 +1262,4 @@ Compiled from inline `[OPEN: ...]` markers and design-pass uncertainties.
 - 2026-05-09 — §4 expanded substantively: §4.1 CLI command list seeded; §4.2 slash command catalog (incl. `/cd-project`, `/project switch|rename`, `/model`, `/stats`); new §4.4 "Shell escape (`$` and `#`)" with long-lived interactive shell subprocess (interactive apps deferred); new §4.5 "Project identity, project root, and shell cwd" with dual-cwd model. §6.2 gains §6.2.6 "Active-project boundary as a tier axis." §2.8 vocabulary adds `user.*` and `project.*` categories.
 - 2026-05-09 — Project identity model revised to use stable internal handle (`prj_<n>`) + canonical external identity (normalized git remote URL) + mutable display name. §2.1 storage layout uses `projects/prj_<n>/` (and parallel for project-scoped directives). §2.2 spine `project` field is now the prj id. §2.5.1 ProjectMeta gets `id`, `current_root_path`, `historical_root_paths`, `remote_urls`, `historical_remote_urls`. §4.5 expanded to specify three identity layers, `/cd-project` resolution flow, local→remote promotion, file-move detection, and `/project rename`. §2.8 vocabulary extends `project.*` with `renamed`, `remote-adopted`, `remote-updated`, `remote-collision-prompt`. Watch-list items 12–14 and open questions 15–17 added.
 - 2026-05-09 — `providers.toml` added to §2.1 storage layout (canonical, secret-bearing) and `tmp/` added (operational, gitignored). New "Secret-bearing" file ownership tier introduced. §8.2 substantively drafted: §8.2.1 covers `providers.toml` format and the security boundary (no inclusion in any LLM-context artifact; redaction rules for `#` capture and `fs.read`/`fs.grep`); §8.2.2 / §8.2.3 stubs for env-var and directive-precedence (latter cross-references §2.6). §8.3 stub clarified for pre-commit hook scope. Watch-list items 15–16 and open question 18 added.
+- 2026-05-09 — §3.8 "Deep cold archival" drafted: thread archival mechanism leveraging the autonomic git layer (delete + commit + archive index entry); recovery via `git show <commit>:<path>` with blob-hash verification; storage properties rely on git's content-addressed object store and delta-compressed packfiles. §3.9 "Working-set content dedup" drafted: persistent storage preserves the full diff chain with periodic literal anchors (default K=10) and a literal-vs-diff threshold (default 0.7); live context window keeps literal current + N most-recent diffs (default N=3) + content-addressed identifiers for older states; diff format defaults to unified diff with a planned natural-language fallback for cases where the model has trouble applying. §10.1 gains two v0.2 milestones (deep cold, dedup); watch-list items 17–18 and open questions 19–21 added.
