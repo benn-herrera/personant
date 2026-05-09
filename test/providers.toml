@@ -1,7 +1,12 @@
+# actually valid for local testing
+[local]
+baseUrl = "http://localhost:11117"
+apiKey = "dummy"
+defaultModel = "gemma-4-26B-A4B-it-MXFP4_MOE"
+
 [dummyrouter]
 baseUrl = "https://dummyrouter.ai/api/v1"
 apiKey = "sk-or-v1-0123456789abcdefghijklmnopqrstuvwxyz0123457890abcdefghijklmnopqr"
-
 defaultModel = "google/gemma-4-31b-it"
 
 [superinf]

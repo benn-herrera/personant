@@ -1,6 +1,6 @@
 # Personant — v0.1 Specification
 
-**Status:** in progress. §0–§2, §4, and §6 substantively drafted; §3, §5, §7+ stubbed.
+**Status:** in progress. §0–§2, §4, §6, §8.2 substantively drafted; §3, §5, §7, §8.{1,3,4}, §9–§11 stubbed.
 **Derives from:** [`outline.md`](outline.md).
 **Audience:** implementation work. Specifies field-level schemas, algorithms, and surface APIs.
 **Relationship to outline:** outline is the *why*; spec is the *what and how*. Where the outline says "the model emits a topic tag at turn start," the spec specifies the prompt fragment, the parser regex, and the parser's normalization rules.
@@ -65,17 +65,20 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
     YYYY-MM-DD.log                  # plain-text, append-only, daily rotation
     archive/
       YYYY-MM.tar.gz                # rotated logs older than 90 days, gzipped
+  providers.toml                    # LLM provider config (canonical; secret-bearing — see §8.2)
   README.md                         # layout documentation for human inspection
   .git/                             # git-init'd at first run
+  tmp/                              # agent's drafting scratch (see §6.3); never git-committed
 ```
 
 **File ownership classification:**
 
 | Type | Examples | Drift policy |
 |---|---|---|
-| Canonical | `spine.jsonl` rows, `threads/*.md`, `directives/*.md`, `projects/*/meta.json`, `logs/*.log` | Source of truth. Hand-editable. Other files derive from these. |
-| Derived | `symbols.jsonl`, `projects/*/digest.json` | Regenerable from canonical. Pre-commit hook fails if stale. Never hand-edited. |
-| Operational | `logs/*.log`, `.git/` | System-managed; not subject to drift checking. |
+| Canonical | `spine.jsonl` rows, `threads/*.md`, `directives/*.md`, `projects/prj_<n>/meta.json`, `logs/*.log`, `providers.toml` | Source of truth. Hand-editable. Other files derive from these. |
+| Derived | `symbols.jsonl`, `projects/prj_<n>/digest.json` | Regenerable from canonical. Pre-commit hook fails if stale. Never hand-edited. |
+| Operational | `logs/*.log`, `.git/`, `tmp/` | System-managed; not subject to drift checking. `tmp/` is gitignored (agent drafts, not history). |
+| Secret-bearing | `providers.toml` | Contains API keys. Treated specially by the runtime: never included in any LLM-context artifact, log line, ack prompt, or captured output. See §8.2. |
 
 **Storage commands** (Go binary subcommands; see §4.1):
 - `personant init` — first-run scaffold, idempotent.
@@ -923,14 +926,53 @@ Sections planned:
 
 ## 8. Bootstrap and lifecycle
 
-[STUB.]
+### 8.1 First-run scaffolding (`personant init`)
 
-Sections planned:
+[STUB — semantics TBD with implementation. Idempotent; creates the directory layout from §2.1; runs `git init`; writes seed `directives/defaults.md`, `README.md`, and an empty `providers.toml` with a commented-out example block.]
 
-- 8.1 First-run scaffolding (`personant init` semantics)
-- 8.2 Configuration override mechanism (env vars, config file, directive precedence)
-- 8.3 Pre-commit hook installation and behavior
-- 8.4 Upgrade path placeholder (deferred per outline)
+### 8.2 Configuration sources and precedence
+
+The runtime reads configuration from three layers, each with distinct purpose and security posture:
+
+#### 8.2.1 Provider configuration: `providers.toml`
+
+LLM provider connectivity lives in `$PERSONANT_HOME/providers.toml`. This file is **canonical, hand-editable, and secret-bearing** — it carries API keys.
+
+Format:
+
+```toml
+[provider-name]
+baseUrl      = "https://api.example.com/v1"
+apiKey       = "sk-..."
+defaultModel = "gpt-5.4-2026-03-05"
+```
+
+One TOML table per provider. The provider name is the lookup key used by `/model <provider>:<model>` (or `/model <provider>` to use that provider's `defaultModel`) and by the runtime's outbound LLM-client wiring.
+
+**Security boundary (load-bearing):**
+
+- `providers.toml` content is **never** included in any LLM context, log line, ack prompt, or captured shell output. The runtime is the only consumer; it resolves a provider name → `baseUrl`/`apiKey`/`defaultModel` at the moment of an outbound API call and that's where the key material lifecycle ends.
+- `#`-prefixed shell commands (§4.4) that target this file path (or any path matching it after symlink resolution) have their captured output **redacted before reaching context** — replaced with a `[redacted: providers.toml]` placeholder. Logged as `permissions.redaction-fire`.
+- The same redaction applies to `fs.read`/`fs.grep` results targeting `providers.toml` from the agent's tool surface, but the agent should not need to read this file at all under normal operation; an attempt is itself loggable as `permissions.suspicious-access`.
+- The file is not git-committed inside `~/.personant/`'s git tree by default — `.gitignore` in the home tree excludes it. (Optional opt-in for users who want their own private repo containing it; out of scope for v0.1.)
+
+[OPEN: redaction strategy under partial-read or grep — should the runtime refuse the operation outright, or pass through with redacted content? See §13.]
+
+#### 8.2.2 Environment variables
+
+[STUB.] At minimum: `PERSONANT_HOME` overrides the home directory (resolved in §2.1's `$PERSONANT_HOME`). Other env-var overrides as needed during implementation.
+
+#### 8.2.3 Directive precedence
+
+Detailed in §2.6. Briefly: `directives/defaults.md` < `directives/user.md` < `directives/prj_<n>/project.md`. The runtime walks the precedence chain at parameter-read time and returns the first match.
+
+### 8.3 Pre-commit hook installation and behavior
+
+[STUB.] Hook is installed at `.git/hooks/pre-commit` inside `$PERSONANT_HOME/` by `personant init`. On commit attempt, regenerates derived files (`symbols.jsonl`, `projects/prj_<n>/digest.json`); fails the commit if regeneration produces output different from what's currently checked in (drift detected).
+
+### 8.4 Upgrade path placeholder
+
+[STUB. Deferred per outline; v1.0+ concern.]
 
 ---
 
@@ -1008,6 +1050,8 @@ Sections planned:
 12. **Remote URL normalization edge cases.** Gerrit URLs, custom SSH hosts, IDN hostnames, mirrored URLs. Initial normalization handles the common cases (lowercase host, strip `.git`, `git@` ↔ `https://`); expect long-tail surprises.
 13. **Remote-collision merge fidelity.** Two stubs converging onto the same upstream is the easy case (one has threads, the other doesn't, or both are nascent). Merging two projects that have *already* accumulated divergent threads + anchors is the hard case — symbol-history reconciliation and possible rename collisions in `name`. Instrument to discover the empirical frequency before designing the merge algorithm in detail.
 14. **File-move detection false negatives.** A project root that was *renamed in place* but otherwise untouched will trigger ENOENT identically to a relocation; the runtime prompt covers it, but a parent-directory scan heuristic might offer better UX.
+15. **API-key leakage via capture-into-context.** `providers.toml` is secret-bearing (§8.2.1); `#`-prefixed shell capture, `fs.read`, `fs.grep`, log accidental inclusion — any path that surfaces file content into the LLM working window — must redact. The redaction filter is a single chokepoint in principle, but its coverage is the watch item: every new capture/inclusion path must be audited against this rule.
+16. **Sensitive-pattern drift.** The seed sensitive-pattern list (`.env`, `secrets/**`, `*.key`, `*.pem`) plus `providers.toml` will not cover everything. As empirical pressure surfaces new patterns (`.npmrc` auth tokens, `~/.aws/credentials`, `id_rsa*`, etc.), the list must grow.
 
 ---
 
@@ -1032,6 +1076,7 @@ Compiled from inline `[OPEN: ...]` markers and design-pass uncertainties.
 15. **§4.5 — Project marker file.** A `.personant-project` file at the project root would make rebinding bulletproof when there is no git remote. Defaults to no marker file in v0.1 (don't pollute the user's workspace), with the user-prompt fallback handling missed rebinds. Reconsider in v0.1.1 if local-only projects empirically thrash on `/cd-project` resolution.
 16. **§4.5.4 — Polling cadence for git remote detection.** Per-turn vs. on-engagement vs. on-explicit-trigger. Default to on-engagement to keep cost down; revisit if remote changes are common enough that lag becomes noticeable.
 17. **§4.4.3 — Interactive-app handoff.** Whether to support `vim`/`nano`/`less` via terminal-mode handoff, or keep deferring to "open another terminal." Likely held until empirical pressure makes the friction onerous.
+18. **§8.2.1 — `providers.toml` redaction strategy.** When `#`-prefixed shell capture or `fs.read` would expose `providers.toml` content: redact-and-pass-through (replace content with placeholder), refuse-outright (deny the op with an explicit error), or hybrid (refuse on agent-initiated reads, redact on user-initiated captures)? Hybrid feels right but warrants explicit calibration during implementation.
 
 ---
 
@@ -1042,3 +1087,4 @@ Compiled from inline `[OPEN: ...]` markers and design-pass uncertainties.
 - 2026-05-09 — §10.1 "Beyond v0.1" added to track v1.0 computational tool surface (Python execution + black/isort/flake8) as a planned but uncommitted post-v0.1 role expansion. Outline mirrors the deferral.
 - 2026-05-09 — §4 expanded substantively: §4.1 CLI command list seeded; §4.2 slash command catalog (incl. `/cd-project`, `/project switch|rename`, `/model`, `/stats`); new §4.4 "Shell escape (`$` and `#`)" with long-lived interactive shell subprocess (interactive apps deferred); new §4.5 "Project identity, project root, and shell cwd" with dual-cwd model. §6.2 gains §6.2.6 "Active-project boundary as a tier axis." §2.8 vocabulary adds `user.*` and `project.*` categories.
 - 2026-05-09 — Project identity model revised to use stable internal handle (`prj_<n>`) + canonical external identity (normalized git remote URL) + mutable display name. §2.1 storage layout uses `projects/prj_<n>/` (and parallel for project-scoped directives). §2.2 spine `project` field is now the prj id. §2.5.1 ProjectMeta gets `id`, `current_root_path`, `historical_root_paths`, `remote_urls`, `historical_remote_urls`. §4.5 expanded to specify three identity layers, `/cd-project` resolution flow, local→remote promotion, file-move detection, and `/project rename`. §2.8 vocabulary extends `project.*` with `renamed`, `remote-adopted`, `remote-updated`, `remote-collision-prompt`. Watch-list items 12–14 and open questions 15–17 added.
+- 2026-05-09 — `providers.toml` added to §2.1 storage layout (canonical, secret-bearing) and `tmp/` added (operational, gitignored). New "Secret-bearing" file ownership tier introduced. §8.2 substantively drafted: §8.2.1 covers `providers.toml` format and the security boundary (no inclusion in any LLM-context artifact; redaction rules for `#` capture and `fs.read`/`fs.grep`); §8.2.2 / §8.2.3 stubs for env-var and directive-precedence (latter cross-references §2.6). §8.3 stub clarified for pre-commit hook scope. Watch-list items 15–16 and open question 18 added.

@@ -50,5 +50,8 @@ test: build
 integration-test:
 	@echo Integration Test TBD
 
+serve-local-api:
+	@llama-server --models-dir ~/projects/JIC/models --port 11117 --ctx-size 16384
+
 clean:
 	rm -f $(BINDIR)/personant
