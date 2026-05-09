@@ -10,10 +10,10 @@ cross-project recognition.
 **v0.1, pre-implementation.** The design is settled and documented; the
 runtime itself is a Go skeleton. The canonical sources are:
 
-- [`v0.1-outline.md`](v0.1-outline.md) — design rationale, "why" decisions
+- [`outline.md`](outline.md) — design rationale, "why" decisions
   were made the way they were, watch list, deferrals.
-- [`v0.1-spec.md`](v0.1-spec.md) — field-level schemas, algorithms, surface
-  APIs. §0–§2 are substantive; §3+ are stubbed pending implementation.
+- [`spec.md`](spec.md) — field-level schemas, algorithms, surface
+  APIs. §0–§2 and §6 are substantive; §3–§5 and §7+ are stubbed.
 
 Read the outline first if you want the shape of the system; read the spec
 when you need to write code that conforms to it.
@@ -35,7 +35,7 @@ recoverability, and history come for free.
 
 By default Personant uses `~/.personant/` (override with `$PERSONANT_HOME`).
 The directory is git-init'd on first run. See
-[`v0.1-spec.md` §2.1](v0.1-spec.md) for the full layout; a sketch:
+[`spec.md` §2.1](spec.md) for the full layout; a sketch:
 
 ```
 ~/.personant/

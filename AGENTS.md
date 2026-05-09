@@ -9,11 +9,11 @@ Read it before making non-trivial changes. Human-facing project info is in
 The design is in two markdown files at the repo root. Read them, in this
 order, before proposing structural changes:
 
-1. [`v0.1-outline.md`](v0.1-outline.md) — design rationale, watch list,
+1. [`outline.md`](outline.md) — design rationale, watch list,
    deferrals. The "why" of every decision.
-2. [`v0.1-spec.md`](v0.1-spec.md) — field-level schemas, algorithms,
-   surface APIs. The "what" and "how". §0–§2 are substantive; §3+ are
-   stubbed.
+2. [`spec.md`](spec.md) — field-level schemas, algorithms,
+   surface APIs. The "what" and "how". §0–§2 and §6 are substantive;
+   §3–§5 and §7+ are stubbed.
 
 If a question of design comes up, the outline and spec are authoritative.
 Update them when behavior changes; don't let code and docs drift.
@@ -68,14 +68,14 @@ The runtime is a skeleton. Current shape:
 cmd/main.go                 cobra root (no subcommands implemented yet)
 internal/log/               level-aware logger (stderr + file split)
 internal/util/paths.go      PersonantPaths — $PERSONANT_HOME resolution
-v0.1-outline.md             design rationale
-v0.1-spec.md                §0–§2 substantive; §3+ stubbed
+outline.md             design rationale
+spec.md                §0–§2 and §6 substantive; §3–§5 and §7+ stubbed
 Makefile                    build + agents-submodule pinning
 ```
 
 Phase 1 (skeleton + storage: `init`, JSONL read/write, schema validation,
 pre-commit hook, `verify`) is the next implementation milestone. See
-[`v0.1-spec.md` §9](v0.1-spec.md).
+[`spec.md` §10](spec.md).
 
 ## Build / test
 
@@ -98,7 +98,7 @@ Go 1.26.1+.
 - **Verify with the canonical docs.** Before assuming a behavior, grep the
   outline and spec. If they're silent, surface it as an open question rather
   than guessing.
-- **Open questions go in `v0.1-spec.md` §12.** Don't accumulate them in code
+- **Open questions go in `spec.md` §13.** Don't accumulate them in code
   comments or commit messages.
 - **Auxiliary Python is stdlib-only.** No exceptions for "just one little
   dependency".

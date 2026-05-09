@@ -1,8 +1,8 @@
 # Personant — v0.1 Architecture Outline
 
-**Status:** initial design outline, derived from the 2026-05-07/08 design discussion.
+**Status:** living design outline. Initial decisions from the 2026-05-07/08 design discussion; refined in subsequent passes (most recently 2026-05-09 — agent role and tool surface).
 **Audience:** the author, future implementation work, future agents revisiting the design.
-**Not a spec:** a structured summary of decisions made, with explicit watchlist items and deferrals. The next document in the lineage is a v0.1 spec; this is its prelude.
+**Not a spec:** a structured summary of decisions made, with explicit watchlist items and deferrals. The companion document [`spec.md`](spec.md) carries the field-level schemas and surface APIs.
 
 ---
 
@@ -30,6 +30,26 @@ A red flag for any future design decision: it wants to push canonical state into
 
 ---
 
+## Role and capability scope
+
+The agent role is **research assistant**, not general-capability agent. This constraint is load-bearing — not a v0.1 limitation that lifts in later versions, but a deliberate boundary for two reasons:
+
+1. **Focus.** The load-bearing innovation is the context-management mechanism (continuity across projects, drift-resistant memory, opportunistic recall). Bounding the action surface lets v0.1 actually exercise that mechanism instead of being absorbed into re-implementing the broader agent-coding surface area.
+2. **Anti-folly.** Reproducing a fully-featured agent-coding system (a multi-year effort) is unnecessary at this scope, infeasible at this scale, and *undesirable* — that class of system represents an engineering failure mode worth not reproducing.
+
+A research assistant **reads and thinks** rather than **builds and runs**. The capability surface follows:
+
+- **External tool inventory is bounded** at twelve tools, split between read/think (`fs.read`, `fs.list`, `fs.grep`, `web.fetch`, `web.search`, `model.consult`) and draft/mutate (`fs.tmp_write`, `fs.tmp_read`, `fs.tmp_list`, `fs.propose_promote`, `fs.propose_rename`, `fs.propose_delete`).
+- **The LLM never directly mutates the user's workspace.** Writes flow through `.personant/tmp/`; deterministic code promotes drafts to workspace targets through ack-gated `propose_*` operations. This narrows the LLM's failure surface and keeps every workspace mutation a recorded, acked event.
+- **`.personant/` is the single spelunking location** for everything the agent does. No usage of `/tmp/`, no scattered state across the host system.
+- **Permission accrual replaces per-call ack.** Ack prompts offer scope-grant keystrokes; granted scopes accumulate in `directives/prj_<n>/permissions.md`. Friction trends toward zero as the system learns the user's working pattern. Loud acks are reserved for genuinely consequential ops (deletes of tracked files, batches over a threshold, dirs containing foreign git repos).
+- **User retains full shell power.** Constraining the *LLM* surface does not constrain the *user*. The personant prompt accepts `$ <cmd>` (run in user's shell, output streams to terminal) and `# <cmd>` (run and capture output into next-turn context) — user-initiated shell access that bypasses the LLM tool inventory entirely. The runtime owns a long-lived interactive shell subprocess across the personant session. Slash commands like `/cd-project`, `/project switch|rename`, `/model` provide user controls without involving the LLM.
+- **Project identity is dual-layered.** Every project has a stable internal handle (`prj_<n>`) used as storage key and spine reference. When the project's git tree has a remote, the *normalized* remote URL is its canonical external identity — survives file moves, survives renames. Display name is mutable. Path is just an attribute. This means moving files on disk doesn't break project association, and `/project rename` is a metadata-only op.
+
+See `spec.md` §4 for the user surface (slash commands, shell escape, project identity), §6 for the tool surface and permission policy, and §2.5.1 for the project metadata schema.
+
+---
+
 ## Substrate
 
 - **Storage:** text files committed to git. Inspectability, recoverability, history, branching, free `git log` / `git diff` / `git blame` / `git grep`.
@@ -38,6 +58,7 @@ A red flag for any future design decision: it wants to push canonical state into
 - **Reversibility:** the storage choice is reversible. Query API is the contract; if scale forces SQLite later, the substrate can change without callers noticing.
 - **Freshness:** pre-commit hook regenerates index files from canonical sources; commit fails on stale index. Same pattern lockfiles use.
 - **Single-source policy:** if any derived index disagrees with the canonical source, the source wins and the index is rebuilt. Drift cannot accumulate.
+- **Autonomic git management:** the deterministic runtime is the only entity that mutates `~/.personant/`'s git tree. `git init` (first run), `git add`/`commit` (on canonical mutations), and pre-commit hook installation/invocation are runtime concerns, performed without user ack — same lifecycle status as writing to `spine.jsonl` itself. The LLM never invokes git. (The runtime may also issue read-only git queries against the *workspace* — `ls-files`, `status`, `diff` — for permission-tier classification and ack-prompt diff rendering, but it never mutates workspace git; that's the user's territory.)
 
 ### Implementation language
 
@@ -57,11 +78,11 @@ personant/
   threads/
     thr_<id>.md                  # full content per thread (operational notes, not pedagogy)
   projects/
-    <project>/                   # per-project metadata + recent-anchor digest for Layer A2
+    prj_<n>/                     # per-project metadata + recent-anchor digest for Layer A2 (stable internal handle)
   directives/
     defaults.md                  # system-default parameter values
     user.md                      # user-wide overrides (accrued)
-    <project>/...                # project-scoped overrides
+    prj_<n>/...                  # project-scoped overrides
   logs/
     YYYY-MM-DD.log               # plain-text append-only event log, daily rotation
   README.md                      # explains layout for human inspection (rare path)
@@ -127,7 +148,7 @@ JSONL form in `spine.jsonl`:
 ```json
 {
   "id": "thr_88",
-  "project": "ave-kb",
+  "project": "prj_3",
   "anchors": ["trefoil", "unknot", "body-topology", "electron-shape"],
   "summary": "electron body-topology conflict; entries trf3bd / unk0bd added; awaiting Grant resolution",
   "state": "WIP",
@@ -232,7 +253,7 @@ Behavior tuning lives in inspectable directive files that accrue under the hood 
 
 - **System defaults:** `directives/defaults.md` — initial values, baked in.
 - **User overrides:** `directives/user.md` — accrue from explicit user instructions, decline categorizations, accept/decline running statistics, spontaneous-curiosity signals.
-- **Project overrides:** `directives/<project>/*.md` — project-specific tuning.
+- **Project overrides:** `directives/prj_<n>/*.md` — project-specific tuning.
 
 The directives are text files. Inspectable, editable by hand, portable, version-controlled. This is the property that elevates the system from "smart assistant" to "real research partner": the agent learns how the user works, *and the user can read what it learned and correct it.*
 
@@ -302,6 +323,8 @@ The first-pass design is guaranteed to have holes. Instrumentation is what makes
 
 ## Out of scope for v0.1
 
+### Deferred (may revisit in later versions)
+
 - **Multi-user** — v2.0 boundary; locked.
 - **Configuration migration on system upgrade** — v1.0+ concern, not blocking; will not be intractable when it arrives.
 - **UI specifics** — borrow patterns from Claude Code / OpenCode rather than reinventing prompts and slash commands.
@@ -310,6 +333,20 @@ The first-pass design is guaranteed to have holes. Instrumentation is what makes
 - **Sub-agent runtime extension** — architecture supports it (sub-agents would have their own spines, threads, directives in the same substrate, with optional cross-agent visibility); instantiate when a sub-agent use case actually demands it.
 - **Symbol decay over time** — defer; storage cost is negligible at v0.1 scale.
 - **Phrasal-concept symbol extraction** — deferred to v0.2.
+- **Computational research workflow** — targeted for v1.0. Python authoring (via the existing `propose_promote` flow) *plus execution* of scripts, simulations, and formatter/linter tooling (`black`, `isort`, `flake8`) for math/physics projects. Expands the role from "reads and thinks" to "reads, thinks, and computes." Requires a sandboxed subprocess execution surface for the LLM, stdout/stderr capture, resource limits, and lifecycle management. **Not on the v0.1 dev list** — held until the memory-context mechanism is proven out. The shell-execution exclusion in role scope lifts only for this targeted capability when it lands; it does not become a general "agent can now run anything."
+
+### Outside role scope (research-assistant boundary)
+
+These are *not* deferred-to-future-versions items — they are deliberate non-goals consistent with the research-assistant role. They do not enter scope by accident.
+
+The exclusions below are at the **LLM tool inventory** layer. The deterministic runtime may perform analogous operations *autonomically* (without LLM or user direction at the moment of invocation) when they are required to maintain the canonical KB — most notably autonomic git management of `~/.personant/` itself (init, add, commit, pre-commit hook), and read-only git queries against the workspace (`git ls-files`, `git status`, `git diff`) for permission-tier classification and ack-prompt diff rendering. What follows is what the *LLM* cannot do.
+
+- **Shell command execution and subprocess spawning** — outside research-assistant role.
+- **LLM-controlled git operations** — the LLM has no `git` tool. The user owns workspace git; the runtime owns `~/.personant/` git autonomically.
+- **Package management, build, test orchestration** — outside research-assistant role.
+- **IDE / editor integration** — outside research-assistant role.
+- **Deployment, service control, running-system manipulation** — outside research-assistant role.
+- **Direct filesystem writes outside the `propose_*` channel** — every workspace mutation must be a recorded, acked event.
 
 ---
 
@@ -335,14 +372,17 @@ The design originated in conversation 2026-05-07/08, building on observations ab
 
 ---
 
-## Next document in the lineage
+## Companion document
 
-A proper v0.1 spec, derived from this outline. Sections likely:
-- Storage schema definitions (JSONL field-level)
-- Go package layout for the runtime; CLI command surface
-- Slash command catalog (borrowed where possible from Claude Code / OpenCode)
-- Directive file format specification
-- Implementation milestone breakdown
-- Testing approach (especially for instrumented behavior)
+[`spec.md`](spec.md) carries the field-level material:
+- Storage schema definitions (JSONL field-level): §2
+- Tool surface and permission tiers: §6
+- Go package layout for the runtime; CLI command surface: §4, §7 *(stubs as of 2026-05-09)*
+- Slash command catalog (borrowed where possible from Claude Code / OpenCode): §4 *(stub)*
+- Directive file format specification: §2.6, §6.2.3
+- Implementation milestone breakdown: §10
+- Testing approach (especially for instrumented behavior): §11
 
-Should be written when implementation is about to start, not before. The outline is for orientation; the spec is for execution.
+The outline is for orientation; the spec is for execution. Both documents are living and edited in place as decisions evolve.
+
+Both files are temporary scaffolding for the current pre-implementation phase. Once the project is sufficiently mature, this content will migrate into `ARCHITECTURE.md` (with companion updates to `AGENTS.md` and `README.md`) and these files will go away.
