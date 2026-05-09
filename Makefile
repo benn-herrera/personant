@@ -1,5 +1,4 @@
-# GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
-GH_ROOT := git@github.com:ave-veritas-et-enodatio
+GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
 .PHONY: all build test integration-test update-dependencies udpate-agents-dependency clean agents
 
