@@ -1,0 +1,45 @@
+*.db
+*.o
+*.obj
+*.exe
+*.dylib
+*.dll
+*.so
+*.pdb
+*.a
+*.lib
+*.gguf
+*.bin
+*.modulemap
+*.modulemap.svg
+*.st/
+*.st
+*.pyc
+__debug_*
+__pycache__/
+.venv/
+build/
+lib/
+bin/
+nohup.out
+.DS_Store
+.claude/settings.local.json
+# agent set working file
+.claude/session-state.md
+# agent set might create a temp worktree
+.claude/worktrees/
+
+# makefile pulls shared agents from repo
+.claude/agents/
+.claude/commands/
+.claude/commands
+
+src/third_party/ggml/
+memory/session-state.md
+tools/llama.cpp/
+tools/llama.cpp
+
+# MAD review and status - this output is primarily for local work.
+# if persistence is needed extract burndown list and open an issue or issues.
+mad-review/
+mad-design/
