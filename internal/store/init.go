@@ -26,8 +26,11 @@ type InitOptions struct {
 // already exists, and the initial commit is made only if the repo has no
 // commits yet. Hand-edited content under canonical paths is never overwritten.
 //
-// Pre-commit hook installation (spec §8.3) is a separate step and not handled
-// here.
+// After git init, Init installs a pre-commit hook (spec §8.3) at
+// .git/hooks/pre-commit that invokes `personant index check` to fail the
+// commit on derived-index drift. The hook is rewritten when present and
+// carries the personant marker line; an unmanaged pre-commit hook is left
+// alone with a warning. See installPreCommitHook for details.
 func Init(paths PersonantPaths, opts InitOptions) error {
 	logf := func(format string, args ...any) {
 		if opts.Quiet || opts.Logger == nil {
@@ -97,7 +100,94 @@ func Init(paths PersonantPaths, opts InitOptions) error {
 		return err
 	}
 
+	if err := installPreCommitHook(paths, logf); err != nil {
+		return err
+	}
+
 	logf("init: ok")
+	return nil
+}
+
+// preCommitHookMarker is the substring that identifies a personant-managed
+// pre-commit hook. Its presence in an existing hook authorizes rewrite on a
+// subsequent `personant init`; its absence means the hook is user-owned and
+// must not be clobbered.
+const preCommitHookMarker = "# personant pre-commit hook — managed by"
+
+// preCommitHookScript is the body written to .git/hooks/pre-commit. The
+// marker line in the comment header is what gates idempotent rewrite.
+//
+// The hook assumes `personant` is on $PATH at the time git invokes it.
+// That is reasonable for users running `git commit` inside ~/.personant/
+// where the binary is installed; if empirical pressure shows otherwise,
+// add a $PERSONANT_BIN override path to the script.
+const preCommitHookScript = `#!/bin/sh
+# personant pre-commit hook — managed by ` + "`personant init`" + `.
+#
+# Runs ` + "`personant index check`" + ` against this home directory; aborts the
+# commit if any derived index file (symbols.jsonl, projects/*/digest.json)
+# is stale relative to the canonical sources.
+#
+# Auto-installed; do not edit by hand. Re-running ` + "`personant init`" + ` will
+# overwrite this file only if the marker line above is present.
+
+set -e
+
+# $GIT_DIR is .../<personant-home>/.git when invoked by git as a hook.
+HOME_DIR="$(dirname "$GIT_DIR")"
+exec personant index check --home "$HOME_DIR"
+`
+
+// installPreCommitHook writes (or rewrites) the personant-managed pre-commit
+// hook at <Home>/.git/hooks/pre-commit. Best-effort: a missing .git/ logs a
+// warning and returns nil; an unmanaged existing hook logs a warning and
+// returns nil; anything else is a hard error so the caller can surface it.
+//
+// Idempotency rules:
+//   - hook absent       → write it (mode 0755)
+//   - hook present, has marker line → rewrite (refresh managed content)
+//   - hook present, no marker line  → leave alone, log a warning
+func installPreCommitHook(paths PersonantPaths, logf func(format string, args ...any)) error {
+	gitDir := filepath.Join(paths.Home, ".git")
+	if _, err := os.Stat(gitDir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			logf("init: .git/ missing; skipping pre-commit hook install")
+			return nil
+		}
+		return fmt.Errorf("init: stat .git: %w", err)
+	}
+
+	hooksDir := filepath.Join(gitDir, "hooks")
+	if _, err := mkdirIfMissing(hooksDir); err != nil {
+		return fmt.Errorf("init: mkdir .git/hooks: %w", err)
+	}
+
+	hookPath := filepath.Join(hooksDir, "pre-commit")
+	existing, err := os.ReadFile(hookPath)
+	switch {
+	case err == nil:
+		if !bytes.Contains(existing, []byte(preCommitHookMarker)) {
+			logf("init: existing pre-commit hook is not personant-managed; skipping")
+			return nil
+		}
+		// Managed hook present; refresh it. No-op if the body already
+		// matches what we'd write.
+		if bytes.Equal(existing, []byte(preCommitHookScript)) {
+			return nil
+		}
+	case !errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("init: read pre-commit hook: %w", err)
+	}
+
+	if err := os.WriteFile(hookPath, []byte(preCommitHookScript), 0o755); err != nil {
+		return fmt.Errorf("init: write pre-commit hook: %w", err)
+	}
+	// WriteFile honors umask, which can mask 0o755 down to 0o755 & ~umask.
+	// Force exact mode so the hook is executable regardless of inherited umask.
+	if err := os.Chmod(hookPath, 0o755); err != nil {
+		return fmt.Errorf("init: chmod pre-commit hook: %w", err)
+	}
+	logf("init: wrote %s", hookPath)
 	return nil
 }
 
