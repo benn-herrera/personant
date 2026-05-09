@@ -1,0 +1,10 @@
+[dummyrouter]
+baseUrl = "https://dummyrouter.ai/api/v1"
+apiKey = "sk-or-v1-0123456789abcdefghijklmnopqrstuvwxyz0123457890abcdefghijklmnopqr"
+
+defaultModel = "google/gemma-4-31b-it"
+
+[superinf]
+baseUrl = "https://api.superinf.ai/v1"
+apiKey = "supe_01234_56789abcdefghijklmnopqrstuvwxyzABCDEF"
+defaultModel = "gpt-5.4-2026-03-05"
