@@ -1,6 +1,6 @@
 # Personant — v0.1 Specification
 
-**Status:** in progress. §0–§2, §3.0, §3.8, §3.9, §4, §6, §8.2 substantively drafted; §3.{1–7}, §5, §7, §8.{1,3,4}, §9–§11 stubbed.
+**Status:** in progress. §0–§2, §3.0, §3.8, §3.9, §4, §5.{1,5}, §6, §8.2, §11 substantively drafted; §3.{1–7}, §5.{2–4}, §7, §8.{1,3,4}, §9, §10 stubbed.
 **Derives from:** [`outline.md`](outline.md).
 **Audience:** implementation work. Specifies field-level schemas, algorithms, and surface APIs.
 **Relationship to outline:** outline is the *why*; spec is the *what and how*. Where the outline says "the model emits a topic tag at turn start," the spec specifies the prompt fragment, the parser regex, and the parser's normalization rules.
@@ -39,6 +39,8 @@ Substrate: text files committed to git; JSONL for structured records; markdown f
 Working set is layered (E + A1 + A2 + B + C + current turn) with explicit budget caps and decay-driven layer transitions. Recognition is model-native (spine in window); recall is opportunistic (deterministic match → user-acked surface prompt → explicit fetch). Closure is event-driven (engagement decay + ack). Fallback dissection handles overflow when normal retirement falls behind.
 
 Success criterion: months-long seamless continuity. Externally a research partner picking up where work was left off; internally a substrate doing constant work to make that appearance honest.
+
+**Operationalized acceptance (v0.1):** the system must pass a **six-month simulated workload** (§11.1) — sustained continuity of memory quality, zero out-of-context-space events, measured runtime costs for recall / retirement / archival / resurrection within bounds. After six simulated months the system must be in a state demonstrating it could run another six months without degradation. This is what makes "months-long continuity" a proven property rather than an aspiration.
 
 ---
 
@@ -978,15 +980,117 @@ prompt for disambiguation. Defer the prompt format to v0.2.]
 
 ## 5. Model interaction
 
-[STUB.]
+§5.1 and §5.5 are substantively drafted; §5.2–§5.4 are stub.
 
-Sections planned:
+### 5.1 Topic tag emission format
 
-- 5.1 Topic-tagging prompt fragment and parser regex
-- 5.2 Curator prompt for retirement summary
-- 5.3 Dissector prompt for fallback clustering
-- 5.4 Recognition-context construction (spine + recent + active threads + project conventions)
-- 5.5 Tool-call surface for mid-turn thread fetch
+The model emits a topic tag at the **start of every response** identifying
+which threads the current turn engages and which symbols attach to that
+engagement. The runtime parses the tag before any other response
+processing.
+
+#### 5.1.1 Format
+
+Single-line, asterisk-bracketed, parsed deterministically:
+
+```
+*topic: <thread-list> [<anchor-list>]*
+```
+
+Where:
+
+- `<thread-list>` is a comma-separated list of `thr_<n>` identifiers,
+  optionally including the literal `*new-topic*` to indicate a new
+  thread should be created.
+- `<anchor-list>` is a comma-separated list of normalized anchor symbols
+  (per §2.7.2) attached to this turn's engagement.
+
+Examples:
+
+```
+*topic: thr_42 [trefoil, unknot, body-topology]*
+*topic: thr_42, thr_88 [trefoil, neutrino, helical-screw]*
+*topic: *new-topic* [neutrino, oscillation]*
+```
+
+The single-line form is deliberate: no multi-line state for the parser
+to track, no envelope syntax that varies across providers, no JSON
+escaping. The asterisks are a low-collision sentinel that survives
+markdown rendering (rendering as italic text doesn't break parsing —
+the runtime strips the tag from the user-visible output before
+display).
+
+#### 5.1.2 Parser
+
+Regex (Go `regexp` syntax):
+
+```
+^\s*\*topic:\s*([^\[]+?)\s*\[([^\]]*)\]\s*\*\s*$
+```
+
+Group 1: thread list (comma-split, trim whitespace, validate against
+`thr_\d+|\*new-topic\*`).
+Group 2: anchor list (comma-split, trim whitespace, run §2.7.2
+normalization).
+
+If the response contains multiple matches, take the first; warn-log the
+rest. Empty thread list or empty anchor list → not a valid topic tag;
+warn-log and continue without engagement update for this delta.
+
+#### 5.1.3 Prompt template
+
+The system prompt instructs the model to emit a topic tag at response
+start. The exact template lives in `internal/prompt/template.go` (Phase
+2 deliverable); the template is hot-reloadable for empirical tuning.
+
+[OPEN: format reliability calibration. Smaller models may fail to emit
+tags consistently. Fallback: runtime detects missing tag, retries with
+a more directive system prompt; last-resort, infers engagement from
+symbol-anchor overlap with the response body. v0.2 work if needed.]
+
+### 5.2 Curator prompt for retirement summary
+
+[STUB — Phase 4 retirement work.]
+
+### 5.3 Dissector prompt for fallback clustering
+
+[STUB — Phase 5 dissection work.]
+
+### 5.4 Recognition-context construction
+
+[STUB — Phase 2 prompt-template work; covers spine + active threads + project conventions assembly into the system prompt.]
+
+### 5.5 Mid-turn thread fetch (system-injected)
+
+When a topic tag references one or more `thr_<n>` not currently in
+Layer B (i.e., not in the model's working window), the runtime fetches
+those threads' contents and injects them into context **before the
+model generates its response body**. This is system-injected; the model
+does not invoke a tool to request fetch.
+
+Mechanism:
+
+1. Model emits topic tag at response start.
+2. Runtime parses tag (per §5.1.2) before consuming any response body.
+3. For each `thr_<n>` in the tag not currently in Layer B:
+   - Read `threads/thr_<n>.md` (frontmatter + body).
+   - Truncate to budget allowance (subject to §3.1 layer caps).
+   - Inject as a `thread.fetched` context delta (per §3.0).
+4. Re-prompt the model with the augmented context; the model's actual
+   response body is generated against that augmented context.
+
+**Rationale:** mechanical arbitration is straightforward and does the
+job. Reserving tool-call overhead for things the model genuinely needs
+to *decide* (workspace reads, web fetch, model.consult) keeps the
+model's decision-making narrow. Topic tag is the request; system
+injection is the fulfillment.
+
+[OPEN: re-prompt cost. Each fetch implies a re-roundtrip to the LLM.
+Speculative pre-fetch was rejected in the outline as an explicit
+non-goal (every loaded thread is loaded because the model said it was
+needed), so re-prompt cost is the path; quantify the latency penalty
+during Phase 2 instrumentation. The six-month simulation (§11.1) will
+expose the steady-state impact.]
 
 ---
 
@@ -1280,11 +1384,14 @@ One TOML table per provider. The provider name is the lookup key used by `/model
 **Security boundary (load-bearing):**
 
 - `providers.toml` content is **never** included in any LLM context, log line, ack prompt, or captured shell output. The runtime is the only consumer; it resolves a provider name → `baseUrl`/`apiKey`/`defaultModel` at the moment of an outbound API call and that's where the key material lifecycle ends.
-- `#`-prefixed shell commands (§4.4) that target this file path (or any path matching it after symlink resolution) have their captured output **redacted before reaching context** — replaced with a `[redacted: providers.toml]` placeholder. Logged as `permissions.redaction-fire`.
-- The same redaction applies to `fs.read`/`fs.grep` results targeting `providers.toml` from the agent's tool surface, but the agent should not need to read this file at all under normal operation; an attempt is itself loggable as `permissions.suspicious-access`.
 - The file is not git-committed inside `~/.personant/`'s git tree by default — `.gitignore` in the home tree excludes it. (Optional opt-in for users who want their own private repo containing it; out of scope for v0.1.)
 
-[OPEN: redaction strategy under partial-read or grep — should the runtime refuse the operation outright, or pass through with redacted content? See §13.]
+**Hybrid redaction policy** (refuse vs. redact, by initiator):
+
+- **Agent-initiated reads** (`fs.read`, `fs.grep`, `fs.list` listing the file's parent dir) targeting `providers.toml` (after symlink resolution): the runtime **refuses outright** — the tool returns a deny-error to the model with a message like `permission denied: providers.toml is secret-bearing and cannot be read by the agent`. Logged as `permissions.suspicious-access` (the agent should not be reaching for this file under normal operation; reaching for it at all is signal worth surfacing).
+- **User-initiated captures** (`#`-prefixed shell commands per §4.4 whose output contains content from `providers.toml`): the runtime **redacts before reaching context** — captured output is replaced with `[redacted: providers.toml content]`. The user's terminal still sees the unredacted output (the `$`-prefixed equivalent is unaffected; `$` doesn't capture into context); only the path-into-LLM-context is filtered. Logged as `permissions.redaction-fire`.
+
+The split reflects intent: an agent reaching for secrets is suspicious and warrants refusal; a user `#`-grepping their own home dir for context inclusion is reasonable but accidental in this case and just gets quietly cleaned up.
 
 #### 8.2.2 Environment variables
 
@@ -1330,6 +1437,8 @@ Anticipated phases:
 
 Each phase is independently shippable as a working subset; later phases extend rather than replace.
 
+**v0.1 acceptance gate:** the six-month simulation (§11.1, §11.10) passes. Phase 5 isn't "feature complete and ship"; it's "feature complete, simulation green, and the runtime is in a steady state that demonstrates another six months of equivalent operation." Each phase before 5 builds toward enabling the simulation: Phase 2 brings the mock LLM, scenario harness, and metrics emission online; Phase 3+ scenarios extend to cover the full lifecycle; Phase 5 is when the simulation can run end-to-end with all mechanisms exercised.
+
 ### 10.1 Beyond v0.1 (tracking, not committed scope)
 
 Capabilities that expand the role beyond v0.1's read-and-think research
@@ -1365,16 +1474,249 @@ near-term dev list.
 
 ---
 
-## 11. Testing approach
+## 11. Measurement and validation regime
 
-[STUB.]
+The architectural thesis cannot be validated by inspection. Personant's
+value proposition — months-long seamless continuity, drift-resistant
+memory, opportunistic recall, retire-and-recover cycles that preserve
+meaning — is a behavioral claim about a complex, time-evolving system.
+Either the runtime delivers these properties under realistic load, or
+it doesn't. **The measurement regime is what proves it.**
 
-Sections planned:
+This section is therefore framed not as a quality gate bolted on after
+features land, but as the **measurement instrument** by which we
+validate the thesis and *evolve techniques iteratively until they
+deliver*. Personant studies its own behavior; the test fabric is its
+lab bench.
 
-- 11.1 Unit testing (deterministic state operations, JSONL round-trips, schema validation)
-- 11.2 Integration testing (turn loop with mock model, recall flow end-to-end)
-- 11.3 Live instrumentation as testing (the log itself is the test fixture; replay-based regression)
-- 11.4 Property-based tests for layer-budget invariants
+### 11.1 The six-month simulation (v0.1 acceptance gate)
+
+The v0.1 acceptance criterion:
+
+- **Simulate six continuous months** of realistic usage via a synthetic
+  workload (§11.8) running against the real runtime with a mock LLM
+  (§11.2) supplying canned responses.
+- **Memory quality maintained** throughout, measured via the metrics
+  emitted at every event (§11.6): recall hit rate, engagement accuracy,
+  retirement timing, round-trip information-preservation through
+  retire→archive→recover.
+- **Zero out-of-context-space events.** The layered budget (E/A1/A2/B/C)
+  must never overflow; bumpable layers must always free enough room
+  before the next event lands. Any overflow is a fail.
+- **Operation runtime costs measured and within bounds.** Wall-clock
+  P50/P95/P99 latency for: engagement update, spine match, thread
+  fetch, retirement, archival, recovery, index rebuild, index check.
+  Bounds are calibrated empirically; "within bounds" means stable
+  across the simulation, not exceeding a threshold that grows with
+  accumulated state.
+- **Steady-state demonstrated.** After six simulated months, the
+  trajectory of working-set size, spine size, and per-operation
+  latency should be **flat** — not creeping upward. The acceptance
+  criterion is "the system is in a state from which it could run
+  another six months without degradation," not "the system has
+  survived six months."
+
+This is the load-bearing test. Phase-1 unit tests, Phase-2 scenario
+tests, and Phase-3 churn tests all build toward enabling this
+simulation.
+
+### 11.2 Mock LLM client
+
+Tests exercise the full runtime path except the actual LLM round-trip.
+The mock client (`internal/testing/mockllm/`) implements the same
+`model.consult` interface as the production OpenAI-compatible client.
+
+Two modes:
+
+- **Scripted**: a queue of canned responses is preloaded; each call
+  returns the next response. Deterministic, replay-friendly.
+- **Generated**: on-demand from a seeded RNG. Lorem-ipsum-style body
+  text with a counter-suffix or seed-derived UUID for guaranteed
+  uniqueness (no accidental dedup). Programmable: caller specifies
+  topic-tag content, anchors emitted, response length. Format-correct
+  per §5.1.
+
+The same mock satisfies all test layers (scenario, churn, calibration,
+six-month sim).
+
+### 11.3 Unit testing
+
+Standard Go `testing` patterns. Existing pattern from Phase 1
+(`internal/store/`, `internal/index/`, `internal/verify/`). Targets:
+- Pure-function correctness (JSONL round-trips, schema validation,
+  symbol normalization, ID parsing).
+- Atomic-write semantics, idempotency.
+- No mock LLM needed at this layer; tests don't exercise the turn
+  loop.
+
+### 11.4 Scenario testing
+
+Named lifecycle flows demonstrated end-to-end through the real
+`onContextDelta` chain (§3.0). Each test is a story:
+"thread A is created → engaged for 5 turns → retired → archived →
+recovered → re-retired."
+
+Scenarios drive the synthetic turn driver (`internal/testing/turn/`)
+which pumps user-prompt + mock-LLM-response + faked tool-results
+through production code paths. After each turn (or operation): assert
+invariants from §11.5; emit metrics from §11.6.
+
+Scenarios worth covering explicitly (initial set):
+
+- **Single-thread lifecycle.** Create → engage 5 turns → retire →
+  archive → recover → engage → re-retire → re-archive. Verify content
+  survives the round-trip.
+- **Multi-thread interleaving.** 5 threads alive simultaneously,
+  alternating engagement; verify per-thread `turn_count` and
+  `last_engaged` match the operation log.
+- **Project switching.** Thread in project A → `/cd-project` to B →
+  engage in B → switch back to A → re-engage. Project tags stay
+  consistent.
+- **Heavy retirement.** 50 threads, 30 retired, 20 archived, 10
+  recovered. Verify spine cardinality, archive integrity, no orphan
+  files.
+- **Same-anchor collision.** Two threads with overlapping anchors;
+  one retires; the other engages later via the shared anchor.
+  Verify recall semantics.
+- **Cross-boundary recovery.** Project remote URL added → identity
+  promoted → original local-only project state preserved.
+
+Scenarios extend through Phase 2 and 3 as features land.
+
+### 11.5 Invariant validators
+
+Standalone validators (`internal/testing/invariants/`) callable from
+any test:
+
+- `VerifySpineIntegrity` — wraps `verify`; asserts exit 0.
+- `VerifyIndexFresh` — wraps `index check`; asserts exit 0 (no drift
+  between canonical and derived).
+- `VerifyEngagementConsistency` — replay the operation log;
+  reconstruct expected `turn_count` and `last_engaged`; compare.
+- `VerifyArchiveResolvable` — every `archive/index.jsonl` entry's
+  `commit_hash` resolves via `git show`, and the recovered blob
+  matches the recorded `blob_hash`.
+- `VerifyProjectReferences` — every `spine.project` resolves to a
+  known `prj_<n>` or `prj_default`.
+- `VerifyLastActiveValid` — `last-active` points to a known project.
+- `VerifyNoBudgetOverflow` — replay turn-by-turn; assert no layer
+  exceeded its allocation cap.
+- `VerifyDedupConsistency` — content reachable via identifier
+  references reconstructs to its canonical form. (Phase 2+.)
+
+Invariants are non-optional after every operation in churn tests
+(§11.7); selectively after key checkpoints in scenario tests (§11.4).
+
+### 11.6 Metrics emission
+
+Every test (scenario, churn, calibration, simulation) emits a
+machine-readable metrics blob (`internal/testing/metrics/`). Stable
+JSON schema so cross-version comparison works.
+
+Metrics worth capturing:
+
+- **Recall fidelity.** Of N expected matches, how many fired?
+  Precision/recall.
+- **Engagement accuracy.** Were tagged-engaged threads the actual
+  active threads? (Compared against canonical-by-construction ground
+  truth in synthetic scenarios.)
+- **Retirement timing.** Lag between "thread effectively complete"
+  (scenario marker) and "retirement prompt fired."
+- **Budget pressure profile.** Peak fill, eviction count, layer
+  displacement events.
+- **Round-trip fidelity.** Archive → recover → diff against original.
+  Information-preservation rate.
+- **Dedup compression ratio.** Literal bytes vs. encoded bytes
+  (Phase 2+).
+- **Symbol-extraction yield.** Deterministic-pass hits vs.
+  model-emitted vs. curator-selected.
+- **Operation latency** (per type): P50, P95, P99 wall-clock.
+
+Metrics are emitted from day 1 of Phase 2 — bolting them on later is
+much more expensive than building them in.
+
+### 11.7 Churn testing
+
+Randomized but seeded operation sequences
+(`internal/testing/churn/`). A driver picks valid operations from a
+weighted distribution (e.g., 80% engage existing, 10% create new, 5%
+retire, 5% project switch); after each operation, the invariant suite
+(§11.5) runs. Failures dump the operation log + seed for replay.
+
+Churn coverage scales as features land. By Phase 3, churn drives
+should generate sequences that include retirement, archival, recovery,
+project switching, and cross-project recall.
+
+### 11.8 Calibration testing
+
+Same scenario, different parameter values
+(`internal/testing/calibration/`). The harness sweeps a directive-file
+parameter across a configured range and emits a metrics matrix:
+
+```
+calibrate recall.symbolic-threshold ∈ [0.3, 0.4, 0.5, 0.6]
+          on scenario "cross-project-recall-100-turns"
+→ metrics matrix (one row per threshold value)
+→ best operating point identified by the metric we're optimizing for
+```
+
+This is how the bootstrap-default values in §2.6.1
+(`recall.symbolic-threshold: 0.4`, `engagement.decay-turns: 8`, etc.)
+earn their numbers empirically rather than by guess. The
+directive-accrual mechanism (§2.6) and calibration scenarios are the
+two ends of the same feedback loop: directives let the running system
+learn from one user; calibration scenarios let the *project* learn
+from canonical workloads.
+
+### 11.9 Cross-run baseline comparison
+
+`personant test report` (or equivalent CLI tool):
+
+- Reads metrics output from a test run.
+- Compares against a stored baseline (`testdata/baselines/<scenario>.json`).
+- Highlights regressions and improvements.
+- Optionally fails CI when key metrics regress beyond a threshold.
+
+Baselines are git-tracked so the project's improvement trajectory is
+itself version-controlled. This is what makes "iterating on the
+techniques" actually work: every change is measured against the prior
+baseline.
+
+### 11.10 Six-month simulation harness
+
+The capstone test (§11.1). Implementation
+(`internal/testing/sixmonth/`):
+
+- **Synthetic workload generator.** Realistic patterns of turn arrival
+  (bursty with quiet periods), thread creation/engagement/retirement
+  rates, cross-project workflow, configurable workload "shape"
+  (researcher, software-engineer, mixed).
+- **Logical-clock acceleration.** Six months of wall-clock time can't
+  run in six months of test time. The simulation uses a logical clock
+  that advances at a configurable rate (e.g., one simulated hour per
+  100ms of real time). All time-based logic
+  (`engagement.decay-time`, retirement triggers) consults the logical
+  clock. Tests run in minutes.
+- **Steady-state assertions.** Working-set size trajectory plateaus,
+  not climbs. Spine cardinality grows but plateaus as retirement →
+  archival keeps pace. Per-operation latency stays stable as
+  accumulated state grows. The full-test pass criterion is in §11.1.
+- **Operation-cost profiling.** Per-operation wall-clock latency
+  histogram across the full simulation. Particularly: archival cost
+  (git ops), recovery cost (git fetch + spine update), index rebuild
+  cost as state grows.
+
+Output: a single comprehensive metrics JSON + a human-readable
+summary (`make six-month-sim` or similar). Pass/fail per §11.1
+criteria.
+
+### 11.11 Live instrumentation as testing
+
+The runtime log (`logs/YYYY-MM-DD.log`) is itself a test fixture for
+real sessions. Future capability: replay-based regression — record a
+real user session's event log, replay it against a candidate runtime,
+verify behavior matches the recorded baseline within tolerance. Out of
+scope for v0.1 but the log format (§2.8) is designed to enable it.
 
 ---
 
@@ -1410,22 +1752,22 @@ Compiled from inline `[OPEN: ...]` markers and design-pass uncertainties.
 3. **§2.6.1 — Full parameter namespace.** Initial seed exists; will grow during implementation.
 4. **§3.5 — Closure prompt phrasing variants.** Calibrate empirically; expose via directive file once tuning becomes useful.
 5. **§3.6 — Fallback dissection batch size.** How many clusters max per dissection event? Likely 3-5 to keep ack burden manageable.
-6. **§5.1 — Topic-tagging prompt format.** Need to settle exact syntax (single-line tag vs structured prefix vs JSON envelope) — affects parser robustness.
-7. **§5.5 — Tool-call surface.** Whether mid-turn thread fetch is a tool call or a system-injected context augmentation.
-8. **§7 — Package boundaries.** Concrete Go layout — to be drafted with package skeletons before Phase 1 implementation.
-9. **`/back-to` semantics.** Resume thread or just reload context? Probably both as separate commands.
-10. **Multi-project digest budget.** How much total budget for Layer A2 when many projects exist? Flat per-project cap (current spec) vs. dynamic allocation.
-11. **§6.1.1 — Web search provider.** Brave / DuckDuckGo / no-search-in-v0.1. Suggest deferring `web.search` until empirical pressure proves `web.fetch` alone is insufficient.
-12. **§6.5 — Tool-output cap value and head/tail ratio.** 8 KB starting guess; calibrate with use.
-13. **§6.1 — PDF support.** Research consumes papers; `web.fetch` returns bytes. Whether to ship a thin PDF extractor in v0.1 or defer until empirical pressure.
-14. **§6.2.5 — Batch threshold.** 5 files is an initial guess. Smaller (3?) might be safer; larger (10?) less friction. Calibrate.
-15. **§4.5 — Project marker file.** A `.personant-project` file at the project root would make rebinding bulletproof when there is no git remote. Defaults to no marker file in v0.1 (don't pollute the user's workspace), with the user-prompt fallback handling missed rebinds. Reconsider in v0.1.1 if local-only projects empirically thrash on `/cd-project` resolution.
-16. **§4.5.4 — Polling cadence for git remote detection.** Per-turn vs. on-engagement vs. on-explicit-trigger. Default to on-engagement to keep cost down; revisit if remote changes are common enough that lag becomes noticeable.
-17. **§4.4.3 — Interactive-app handoff.** Whether to support `vim`/`nano`/`less` via terminal-mode handoff, or keep deferring to "open another terminal." Likely held until empirical pressure makes the friction onerous.
-18. **§8.2.1 — `providers.toml` redaction strategy.** When `#`-prefixed shell capture or `fs.read` would expose `providers.toml` content: redact-and-pass-through (replace content with placeholder), refuse-outright (deny the op with an explicit error), or hybrid (refuse on agent-initiated reads, redact on user-initiated captures)? Hybrid feels right but warrants explicit calibration during implementation.
-19. **§3.8 — Deep-cold trigger threshold.** "Spine cardinality pressure" is hand-wavy. Default likely 500–1000 active threads; calibrate empirically once enough spine accumulates to feel pressure.
-20. **§3.9 — Live context dedup tuning.** `dedup.live-diff-window` (default 3), `dedup.anchor-cadence` (default 10), `dedup.diff-literal-threshold` (default 0.7) are starting guesses. All TBD; instrumentation drives calibration.
-21. **§3.9.3 — Diff format empirical fallback trigger.** When does unified diff become harder for an LLM to apply correctly than a natural-language descriptive diff? Probably multi-region changes >50 lines and/or files >2000 lines, but this needs the model + content combination to confirm. Instrument and calibrate.
+6. **§7 — Package boundaries.** Concrete Go layout — to be drafted with package skeletons as Phase 2 lands its first packages (prompt, model, workset, turn).
+7. **`/back-to` semantics.** Resume thread or just reload context? Probably both as separate commands.
+8. **Multi-project digest budget.** How much total budget for Layer A2 when many projects exist? Flat per-project cap (current spec) vs. dynamic allocation.
+9. **§6.1.1 — Web search provider.** Brave / DuckDuckGo / no-search-in-v0.1. Suggest deferring `web.search` until empirical pressure proves `web.fetch` alone is insufficient.
+10. **§6.5 — Tool-output cap value and head/tail ratio.** 8 KB starting guess; calibrate with use.
+11. **§6.1 — PDF support.** Research consumes papers; `web.fetch` returns bytes. Whether to ship a thin PDF extractor in v0.1 or defer until empirical pressure.
+12. **§6.2.5 — Batch threshold.** 5 files is an initial guess. Smaller (3?) might be safer; larger (10?) less friction. Calibrate.
+13. **§4.5 — Project marker file.** A `.personant-project` file at the project root would make rebinding bulletproof when there is no git remote. Defaults to no marker file in v0.1 (don't pollute the user's workspace), with the user-prompt fallback handling missed rebinds. Reconsider in v0.1.1 if local-only projects empirically thrash on `/cd-project` resolution.
+14. **§4.5.4 — Polling cadence for git remote detection.** Per-turn vs. on-engagement vs. on-explicit-trigger. Default to on-engagement to keep cost down; revisit if remote changes are common enough that lag becomes noticeable.
+15. **§4.4.3 — Interactive-app handoff.** Whether to support `vim`/`nano`/`less` via terminal-mode handoff, or keep deferring to "open another terminal." Likely held until empirical pressure makes the friction onerous.
+16. **§3.8 — Deep-cold trigger threshold.** "Spine cardinality pressure" is hand-wavy. Default likely 500–1000 active threads; calibrate empirically once enough spine accumulates to feel pressure.
+17. **§3.9 — Live context dedup tuning.** `dedup.live-diff-window` (default 3), `dedup.anchor-cadence` (default 10), `dedup.diff-literal-threshold` (default 0.7) are starting guesses. All TBD; instrumentation drives calibration.
+18. **§3.9.3 — Diff format empirical fallback trigger.** When does unified diff become harder for an LLM to apply correctly than a natural-language descriptive diff? Probably multi-region changes >50 lines and/or files >2000 lines, but this needs the model + content combination to confirm. Instrument and calibrate.
+19. **§5.1 — Topic-tag emission reliability across models.** Smaller models may fail to emit tags consistently. Fallback strategy is sketched in §5.1.3; calibrate during Phase 2 with the local llama-server target.
+20. **§5.5 — Re-prompt latency cost from system-injected fetches.** Each thread fetch implies a re-roundtrip to the LLM. Quantify steady-state impact in the six-month simulation (§11.1).
+21. **§11.1 — Six-month simulation pass thresholds.** What are the concrete numeric bounds for "memory quality maintained" and "operation runtime within bounds"? Initial pass: derive thresholds from the first end-to-end simulation run; subsequent runs must not regress beyond a percentage. The first pass establishes the baseline.
 
 ---
 
@@ -1439,3 +1781,4 @@ Compiled from inline `[OPEN: ...]` markers and design-pass uncertainties.
 - 2026-05-09 — `providers.toml` added to §2.1 storage layout (canonical, secret-bearing) and `tmp/` added (operational, gitignored). New "Secret-bearing" file ownership tier introduced. §8.2 substantively drafted: §8.2.1 covers `providers.toml` format and the security boundary (no inclusion in any LLM-context artifact; redaction rules for `#` capture and `fs.read`/`fs.grep`); §8.2.2 / §8.2.3 stubs for env-var and directive-precedence (latter cross-references §2.6). §8.3 stub clarified for pre-commit hook scope. Watch-list items 15–16 and open question 18 added.
 - 2026-05-09 — §3.8 "Deep cold archival" drafted: thread archival mechanism leveraging the autonomic git layer (delete + commit + archive index entry); recovery via `git show <commit>:<path>` with blob-hash verification; storage properties rely on git's content-addressed object store and delta-compressed packfiles. §3.9 "Working-set content dedup" drafted: persistent storage preserves the full diff chain with periodic literal anchors (default K=10) and a literal-vs-diff threshold (default 0.7); live context window keeps literal current + N most-recent diffs (default N=3) + content-addressed identifiers for older states; diff format defaults to unified diff with a planned natural-language fallback for cases where the model has trouble applying. §10.1 gains two v0.2 milestones (deep cold, dedup); watch-list items 17–18 and open questions 19–21 added.
 - 2026-05-09 — §3.0 "Context-modification events" drafted as the architectural primitive that §3.1–§3.4 and §3.9 hang off of. Frames the working window as a sequence of deltas (user.prompt, model.response, tool.result, user.shell-capture, thread.fetched, digest.refresh, slash.injected, directive.reloaded) rather than turns. Each delta runs a hook chain: symbol extraction → engagement → dedup → budget check → logging. Per-turn engagement coalescing prevents N-tool-call turns from inflating `turn_count`. §3.1–§3.7 stubs tightened to forward-reference §3.0 rather than restating the work. §4.5.7 "Project bootstrap at startup" drafted: explicit `--project` override; three-step heuristic waterfall (git remote match → CWD path match → last-active prompt); final fallback for fresh installs. New `last-active` operational file added to §2.1 storage layout (single line, prj_<n>, gitignored). New `archive/index.jsonl` listed in §2.1 (canonical, empty until v0.2).
+- 2026-05-09 — §1 system overview gains operationalized acceptance language pointing to §11.1. §5.1 "Topic tag emission format" drafted: single-line `*topic: <thread-list> [<anchor-list>]*` form with parser regex; the deferred multi-form question is decided. §5.5 "Mid-turn thread fetch" drafted as **system-injected** (not tool-call) — runtime parses the topic tag and pre-loads referenced threads before re-prompting the model. §8.2.1 redaction policy explicitly **hybrid**: refuse on agent-initiated reads (deny error to the model + `permissions.suspicious-access` log); redact on user-initiated `#` captures (placeholder content + `permissions.redaction-fire` log). §10 acceptance gate clarified: Phase 5 isn't "feature complete"; it's "feature complete + six-month simulation green + steady state demonstrated." §11 fully restructured from stub to "Measurement and validation regime" with eleven subsections covering the test fabric: §11.1 six-month-simulation acceptance, §11.2 mock LLM, §11.3 unit, §11.4 scenario, §11.5 invariant validators, §11.6 metrics emission, §11.7 churn, §11.8 calibration, §11.9 cross-run baseline comparison, §11.10 six-month simulation harness, §11.11 live instrumentation. Open questions 6, 7, 18 resolved (closed) and renumbered; new questions 19, 20, 21 added (topic-tag reliability, system-injected re-prompt cost, six-month sim pass thresholds).

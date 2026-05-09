@@ -367,6 +367,8 @@ This pattern recurs at every layer of the design — from how spine entries get 
 
 The success criterion: months-long seamless continuity. Externally, the user just talks to a partner who picks up where they left off. Internally, the substrate is doing constant work to make that appearance honest.
 
+**Operationalized acceptance (v0.1):** the system passes a **six-month simulated workload** with synthetic-but-realistic operation patterns. Memory quality maintained throughout. Zero out-of-context-space events. Operation runtime costs (recall, retirement, archival, resurrection from deep cold) measured and stable. After six simulated months the system must be in a state demonstrating it could run another six months without degradation. The measurement regime — see spec.md §11 — is what makes "months-long continuity" a proven property rather than an aspiration; iterating the underlying techniques without it reduces to guesswork.
+
 ---
 
 ## Project lineage / shape
