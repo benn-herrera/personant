@@ -1,6 +1,6 @@
 # Personant — v0.1 Specification
 
-**Status:** in progress. §0–§2, §3.8, §3.9, §4, §6, §8.2 substantively drafted; §3.{1–7}, §5, §7, §8.{1,3,4}, §9–§11 stubbed.
+**Status:** in progress. §0–§2, §3.0, §3.8, §3.9, §4, §6, §8.2 substantively drafted; §3.{1–7}, §5, §7, §8.{1,3,4}, §9–§11 stubbed.
 **Derives from:** [`outline.md`](outline.md).
 **Audience:** implementation work. Specifies field-level schemas, algorithms, and surface APIs.
 **Relationship to outline:** outline is the *why*; spec is the *what and how*. Where the outline says "the model emits a topic tag at turn start," the spec specifies the prompt fragment, the parser regex, and the parser's normalization rules.
@@ -67,6 +67,9 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
       YYYY-MM.tar.gz                # rotated logs older than 90 days, gzipped
   providers.toml                    # LLM provider config (canonical; secret-bearing — see §8.2)
   README.md                         # layout documentation for human inspection
+  last-active                       # operational; one line: prj_<n> of most-recently-active project (§4.5.7)
+  archive/
+    index.jsonl                     # canonical; deep cold archive index (§3.8); empty until v0.2
   .git/                             # git-init'd at first run
   tmp/                              # agent's drafting scratch (see §6.3); never git-committed
 ```
@@ -75,9 +78,9 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
 
 | Type | Examples | Drift policy |
 |---|---|---|
-| Canonical | `spine.jsonl` rows, `threads/*.md`, `directives/*.md`, `projects/prj_<n>/meta.json`, `logs/*.log`, `providers.toml` | Source of truth. Hand-editable. Other files derive from these. |
+| Canonical | `spine.jsonl` rows, `threads/*.md`, `directives/*.md`, `projects/prj_<n>/meta.json`, `logs/*.log`, `providers.toml`, `archive/index.jsonl` | Source of truth. Hand-editable. Other files derive from these. |
 | Derived | `symbols.jsonl`, `projects/prj_<n>/digest.json` | Regenerable from canonical. Pre-commit hook fails if stale. Never hand-edited. |
-| Operational | `logs/*.log`, `.git/`, `tmp/` | System-managed; not subject to drift checking. `tmp/` is gitignored (agent drafts, not history). |
+| Operational | `logs/*.log`, `.git/`, `tmp/`, `last-active` | System-managed; not subject to drift checking. `tmp/` and `last-active` are gitignored. |
 | Secret-bearing | `providers.toml` | Contains API keys. Treated specially by the runtime: never included in any LLM-context artifact, log line, ack prompt, or captured output. See §8.2. |
 
 **Storage commands** (Go binary subcommands; see §4.1):
@@ -434,19 +437,130 @@ No JSON schema in v0.1. Promote individual event types to structured form when q
 
 ## 3. Core algorithms
 
-[STUB — to be drafted next.]
+### 3.0 Context-modification events (the architectural primitive)
 
-Sections planned:
+Personant treats the working window as a sequence of **context-modification
+events**, not as user-agent turns. A "turn" is a logging convenience —
+useful for grouping events into human-readable spans — but the
+load-bearing primitive is the per-event hook chain. The principle: **no
+gaps**. Any path by which content enters the working window is a path
+through this chain, so the runtime never loses an opportunity to
+extract, dedup, or budget-check.
 
-- 3.1 Working-set composition (per-turn): given current thread state, layer budgets, and active project, produce the actual context window contents for the upcoming turn.
-- 3.2 Topic tagging and engagement update: prompt the model for topic tags + per-thread symbol lists, parse, validate, normalize, update thread engagement state.
-- 3.3 Symbol extraction (three passes): deterministic regex pass over turn content; model emission integration; curator anchor selection at retirement.
-- 3.4 Recall matching: symbolic Jaccard match (cheap pre-filter), embedding similarity (mid-cost), model judgment (expensive last resort).
-- 3.5 Closure flow: trigger detection (engagement decay or `/done`), curator-drafted summary, user ack with resolution choice, frontmatter+spine update, Layer B/C eviction.
-- 3.6 Fallback dissection: budget-pressure trigger, dissector LLM clustering of oldest content, batch retirement, ack flow.
-- 3.7 Cross-project digest maintenance: regeneration triggers, per-project byte budget enforcement, recent-anchor selection.
+#### 3.0.1 The event taxonomy
 
-§3.8 and §3.9 below are substantively drafted; the rest of §3 is stub.
+| Event | Source | Content shape |
+|---|---|---|
+| `user.prompt` | user types or pastes | message text |
+| `user.shell-capture` | `# <cmd>` stdout/stderr (§4.4.1) | captured bytes (subject to §6.5 byte cap) |
+| `model.response` | LLM emits final reply (or response segment) | response text + optional tool-call envelope |
+| `tool.result` | each tool dispatch returns | tool output bytes |
+| `thread.fetched` | topic tag triggered a thread load into Layer B | thread body + frontmatter |
+| `digest.refresh` | cross-project Layer A2 digest regenerated | digest content |
+| `slash.injected` | `/cd-project`, `/back-to`, `/project switch`, etc. inject content | varies |
+| `directive.reloaded` | a directive file changed and the runtime re-read it | merged parameter set |
+
+Future capabilities (deep-cold recovery, dedup-promotion of identifiers
+back to literal) add more event types via the same chain.
+
+#### 3.0.2 The hook chain
+
+Each context-modification event runs the chain, in this order:
+
+1. **Symbol extraction** (§3.3) — deterministic regex pass over the
+   delta's content extracts identifiers (file paths, URLs, claim IDs,
+   user `#`-tags). Model-emitted symbols (in `topic` blocks) are also
+   parsed here.
+2. **Engagement signal** (§3.2) — does the delta's symbol set overlap
+   any active thread's anchors above threshold? If so, fire engagement
+   for those threads. Engagement updates are coalesced per-turn (see
+   §3.0.4) so 5 deltas hitting the same thread don't multiply
+   `turn_count`.
+3. **Dedup decision** (§3.9) — is the delta a duplicate or near-duplicate
+   of content already in window? Apply identifier-replacement or
+   diff-encoding per §3.9.2. Persistent storage (§3.9.1) is also updated
+   at this step.
+4. **Budget check** (§3.1) — did the delta push the working window over
+   its layer budget caps? Bump-eviction fires immediately so the budget
+   is honored before the next event lands.
+5. **Logging** (§2.8) — emit the source-specific event (`tool.result`,
+   `user.shell-capture`, etc.) plus a `context.modified` event if the
+   delta materially changed window contents.
+
+The chain runs at **semantic boundaries** — complete response segment,
+complete tool result, complete capture — not per token. If the LLM
+streams, hooks fire on stream-completion (or on logical sub-segment
+boundaries, TBD per provider).
+
+#### 3.0.3 Hook-firing order matters
+
+Within the chain:
+
+- Symbol extraction must run before engagement (engagement depends on
+  the extracted set).
+- Dedup runs after extraction (extracted identifiers are the things we
+  may dedup against).
+- Budget check runs last (eviction may displace content; that
+  displacement is itself a context modification, but recursive hook
+  firing is **capped at depth 1** — eviction emits a log line and is
+  done).
+
+#### 3.0.4 Per-turn coalescing for engagement
+
+A "turn" is bracketed by consecutive `user.prompt` events: every
+context-modification event between two user prompts belongs to the same
+turn for engagement-coalescing purposes. Within a turn, the symbol set
+is union-accumulated across all deltas; engagement updates fire once
+per affected thread with the union as input. This prevents
+N-tool-call turns from inflating `turn_count` for every thread mentioned
+in any tool result.
+
+`last_engaged` updates to the *latest* delta's timestamp; `turn_count`
+increments by 1 per turn per affected thread, regardless of how many
+deltas in the turn touched its anchors.
+
+#### 3.0.5 Implementation contract
+
+The runtime exposes a single internal entry point — roughly
+`onContextDelta(source, content, metadata)` — that every content-emitting
+code path calls. The chain is not optional; there is no path by which
+content reaches the working window without passing through it. Code
+review on Phase 2 should treat any direct working-window mutation that
+bypasses this entry point as a bug.
+
+### 3.1 Working-set composition
+
+[STUB — see §3.0.2 step 4 for the budget-check hook; full composition
+algorithm draft lands with Phase 2 implementation.]
+
+### 3.2 Topic tagging and engagement update
+
+[STUB — see §3.0.2 step 2 and §3.0.4 for the engagement model; topic-tag
+parsing detail lands with Phase 2.]
+
+### 3.3 Symbol extraction (three passes)
+
+[STUB — see §3.0.2 step 1 for the per-event hook context; full
+three-pass algorithm (deterministic / model-emitted / curator) lands as
+implementation requires.]
+
+### 3.4 Recall matching
+
+[STUB — symbolic Jaccard match (cheap pre-filter), embedding similarity (mid-cost), model judgment (expensive last resort).]
+
+### 3.5 Closure flow
+
+[STUB — trigger detection (engagement decay or `/done`), curator-drafted summary, user ack with resolution choice, frontmatter+spine update, Layer B/C eviction. Deep cold archival (§3.8) is the next stage past closure when spine cardinality pressure builds.]
+
+### 3.6 Fallback dissection
+
+[STUB — budget-pressure trigger, dissector LLM clustering of oldest content, batch retirement, ack flow.]
+
+### 3.7 Cross-project digest maintenance
+
+[STUB — regeneration triggers, per-project byte budget enforcement, recent-anchor selection.]
+
+§3.0, §3.8, and §3.9 are substantively drafted; §3.1–§3.7 are stub.
 
 ### 3.8 Deep cold archival
 
@@ -798,6 +912,67 @@ identity is unchanged. Logged as `project.cd-changed`.
 internal handle (`id`), the storage path (`projects/prj_<n>/`), the
 canonical remote URL, and every spine entry's `project` field are
 unaffected. Logged as `project.renamed`.
+
+#### 4.5.7 Project bootstrap at startup
+
+When the personant binary starts a new session, it resolves the active
+project via a three-step waterfall, with an explicit-override rail above
+and a final-fallback rail below.
+
+**Explicit override:** if `--project <name-or-id>` is given on the command
+line, use it directly; skip the heuristics. Error if the project isn't
+known. This is the deterministic path for scripts and explicit
+invocations.
+
+**Heuristic waterfall** (in order; first hit wins):
+
+1. **Git remote match.** If CWD (or any ancestor) is a git working tree,
+   read its `origin` remote URL (or the first remote if no `origin`).
+   Normalize per §2.5.1. Look up known projects by `remote_urls` and
+   `historical_remote_urls`. On match: silent switch. Update
+   `current_root_path` if it has drifted from the matched project's
+   stored value (and append the old path to `historical_root_paths`).
+   This is the strongest signal — remote URL is canonical identity.
+
+2. **CWD path match.** If step 1 produced no match (no remote, or remote
+   doesn't resolve to any known project): check whether CWD (or any
+   ancestor) is `current_root_path` or appears in `historical_root_paths`
+   of any known project. On match: silent switch. Updates as in step 1.
+   This handles local-only projects (no git remote yet) and recovery
+   from earlier file moves.
+
+3. **Last-active confirmation.** If neither step 1 nor step 2 matched:
+   read `<Home>/last-active` (operational; one line: `prj_<n>` of the
+   most recently active project). Surface a prompt:
+   ```
+   Resume work on '<display_name>' (last active <RFC3339>)? [y/n/<other-name-or-id>]
+   ```
+   On `y`: silent switch. On `<other>`: treat as `/project switch`
+   target. On `n`: fall through to final fallback.
+
+**Final fallback** — fresh install, never-used home, or all heuristics
+declined:
+
+```
+No active project resolved. Choose:
+  [c]  create a new project rooted at this directory
+  [s]  switch to a known project (lists ids/names)
+  [n]  no project (use prj_default)
+```
+
+`prj_default` is always available as a no-project escape hatch.
+
+**`last-active` file maintenance.** The runtime writes the active
+project's `prj_<n>` to `<Home>/last-active` whenever the active project
+changes — bootstrap, `/project switch`, `/cd-project`. The file is
+operational (per §2.1: runtime-managed, not git-tracked, not
+canonical), single-line, plain text, fast to read. Rewriting on every
+active-project change is fine; the write volume is trivial.
+
+[OPEN: collisions in step 1 — if a CWD's remote URL matches
+`historical_remote_urls` of multiple projects (rare; only if remote
+URLs were merged or a fork was registered as a separate project),
+prompt for disambiguation. Defer the prompt format to v0.2.]
 
 ---
 
@@ -1263,3 +1438,4 @@ Compiled from inline `[OPEN: ...]` markers and design-pass uncertainties.
 - 2026-05-09 — Project identity model revised to use stable internal handle (`prj_<n>`) + canonical external identity (normalized git remote URL) + mutable display name. §2.1 storage layout uses `projects/prj_<n>/` (and parallel for project-scoped directives). §2.2 spine `project` field is now the prj id. §2.5.1 ProjectMeta gets `id`, `current_root_path`, `historical_root_paths`, `remote_urls`, `historical_remote_urls`. §4.5 expanded to specify three identity layers, `/cd-project` resolution flow, local→remote promotion, file-move detection, and `/project rename`. §2.8 vocabulary extends `project.*` with `renamed`, `remote-adopted`, `remote-updated`, `remote-collision-prompt`. Watch-list items 12–14 and open questions 15–17 added.
 - 2026-05-09 — `providers.toml` added to §2.1 storage layout (canonical, secret-bearing) and `tmp/` added (operational, gitignored). New "Secret-bearing" file ownership tier introduced. §8.2 substantively drafted: §8.2.1 covers `providers.toml` format and the security boundary (no inclusion in any LLM-context artifact; redaction rules for `#` capture and `fs.read`/`fs.grep`); §8.2.2 / §8.2.3 stubs for env-var and directive-precedence (latter cross-references §2.6). §8.3 stub clarified for pre-commit hook scope. Watch-list items 15–16 and open question 18 added.
 - 2026-05-09 — §3.8 "Deep cold archival" drafted: thread archival mechanism leveraging the autonomic git layer (delete + commit + archive index entry); recovery via `git show <commit>:<path>` with blob-hash verification; storage properties rely on git's content-addressed object store and delta-compressed packfiles. §3.9 "Working-set content dedup" drafted: persistent storage preserves the full diff chain with periodic literal anchors (default K=10) and a literal-vs-diff threshold (default 0.7); live context window keeps literal current + N most-recent diffs (default N=3) + content-addressed identifiers for older states; diff format defaults to unified diff with a planned natural-language fallback for cases where the model has trouble applying. §10.1 gains two v0.2 milestones (deep cold, dedup); watch-list items 17–18 and open questions 19–21 added.
+- 2026-05-09 — §3.0 "Context-modification events" drafted as the architectural primitive that §3.1–§3.4 and §3.9 hang off of. Frames the working window as a sequence of deltas (user.prompt, model.response, tool.result, user.shell-capture, thread.fetched, digest.refresh, slash.injected, directive.reloaded) rather than turns. Each delta runs a hook chain: symbol extraction → engagement → dedup → budget check → logging. Per-turn engagement coalescing prevents N-tool-call turns from inflating `turn_count`. §3.1–§3.7 stubs tightened to forward-reference §3.0 rather than restating the work. §4.5.7 "Project bootstrap at startup" drafted: explicit `--project` override; three-step heuristic waterfall (git remote match → CWD path match → last-active prompt); final fallback for fresh installs. New `last-active` operational file added to §2.1 storage layout (single line, prj_<n>, gitignored). New `archive/index.jsonl` listed in §2.1 (canonical, empty until v0.2).
