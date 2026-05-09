@@ -10,10 +10,6 @@
 *.lib
 *.gguf
 *.bin
-*.modulemap
-*.modulemap.svg
-*.st/
-*.st
 *.pyc
 __debug_*
 __pycache__/
@@ -34,10 +30,7 @@ nohup.out
 .claude/commands/
 .claude/commands
 
-src/third_party/ggml/
 memory/session-state.md
-tools/llama.cpp/
-tools/llama.cpp
 
 # MAD review and status - this output is primarily for local work.
 # if persistence is needed extract burndown list and open an issue or issues.
