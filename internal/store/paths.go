@@ -21,7 +21,10 @@ type PersonantPaths struct {
 	DirectivesDir string // Home/directives/                  (defaults.md, user.md, <project>/...)
 	LogsDir       string // Home/logs/                        (YYYY-MM-DD.log + archive/)
 	LogsArchive   string // Home/logs/archive/                (rotated tar.gz)
+	TmpDir        string // Home/tmp/                         (agent drafting scratch; not git-committed)
 	Readme        string // Home/README.md                    (layout doc for human inspection)
+	Providers     string // Home/providers.toml               (canonical, secret-bearing)
+	Gitignore     string // Home/.gitignore                   (excludes tmp/, providers.toml)
 }
 
 // EnvHome is the environment variable that overrides the default home.
@@ -29,6 +32,13 @@ const EnvHome = "PERSONANT_HOME"
 
 // DefaultHomeName is the directory name used under $HOME when EnvHome is unset.
 const DefaultHomeName = ".personant"
+
+// PathsForHome returns a PersonantPaths rooted at an explicit home directory.
+// Used by tests and by `personant init --home <dir>` to bypass the cached
+// global resolution.
+func PathsForHome(home string) PersonantPaths {
+	return makePaths(home)
+}
 
 func makePaths(home string) PersonantPaths {
 	return PersonantPaths{
@@ -40,7 +50,10 @@ func makePaths(home string) PersonantPaths {
 		DirectivesDir: filepath.Join(home, "directives"),
 		LogsDir:       filepath.Join(home, "logs"),
 		LogsArchive:   filepath.Join(home, "logs", "archive"),
+		TmpDir:        filepath.Join(home, "tmp"),
 		Readme:        filepath.Join(home, "README.md"),
+		Providers:     filepath.Join(home, "providers.toml"),
+		Gitignore:     filepath.Join(home, ".gitignore"),
 	}
 }
 
