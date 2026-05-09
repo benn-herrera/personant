@@ -22,15 +22,23 @@ type InitOptions struct {
 // Init scaffolds $PERSONANT_HOME according to spec §2.1.
 //
 // The operation is idempotent by construction: directories are created with
-// MkdirAll, files are written only if absent, git init is skipped if .git/
-// already exists, and the initial commit is made only if the repo has no
-// commits yet. Hand-edited content under canonical paths is never overwritten.
+// MkdirAll, git init is skipped if .git/ already exists, and the initial
+// commit is made only if the repo has no commits yet.
+//
+// Per-file install policy on re-init:
+//   - Install-shipped templates (directives/defaults.md, README.md,
+//     .gitignore) are *always rewritten* to match the binary. They are
+//     bootstrap snapshots, not user content.
+//   - Files that accrue canonical state (directives/user.md,
+//     providers.toml) are *preserved* if present; re-init cannot
+//     reconstruct them.
+//   - Canonical/derived data files (spine.jsonl, symbols.jsonl) are
+//     created empty if missing and never truncated.
 //
 // After git init, Init installs a pre-commit hook (spec §8.3) at
 // .git/hooks/pre-commit that invokes `personant index check` to fail the
-// commit on derived-index drift. The hook is rewritten when present and
-// carries the personant marker line; an unmanaged pre-commit hook is left
-// alone with a warning. See installPreCommitHook for details.
+// commit on derived-index drift. The hook is wholly agent-owned and is
+// rewritten unconditionally on every init; see installPreCommitHook.
 func Init(paths PersonantPaths, opts InitOptions) error {
 	logf := func(format string, args ...any) {
 		if opts.Quiet || opts.Logger == nil {
@@ -76,17 +84,35 @@ func Init(paths PersonantPaths, opts InitOptions) error {
 		}
 	}
 
-	seedFiles := []struct {
+	// Install-shipped templates: rewrite on every init to match the binary.
+	// These are not user content; they are bootstrap snapshots and the point
+	// of re-running init is to refresh them.
+	rewriteFiles := []struct {
 		path    string
 		content string
 	}{
 		{filepath.Join(paths.DirectivesDir, "defaults.md"), seedDefaultsMD},
-		{filepath.Join(paths.DirectivesDir, "user.md"), seedUserMD},
-		{paths.Providers, seedProvidersTOML},
 		{paths.Readme, seedReadmeMD},
 		{paths.Gitignore, seedGitignore},
 	}
-	for _, s := range seedFiles {
+	for _, s := range rewriteFiles {
+		if err := writeAlways(s.path, []byte(s.content)); err != nil {
+			return fmt.Errorf("init: write %s: %w", filepath.Base(s.path), err)
+		}
+		logf("init: wrote %s", s.path)
+	}
+
+	// Accrual files: preserve if present. user.md accumulates ack-prompt
+	// scope grants and decline categorizations; providers.toml holds
+	// hand-entered API keys. Re-init cannot reconstruct either.
+	preserveFiles := []struct {
+		path    string
+		content string
+	}{
+		{filepath.Join(paths.DirectivesDir, "user.md"), seedUserMD},
+		{paths.Providers, seedProvidersTOML},
+	}
+	for _, s := range preserveFiles {
 		created, err := writeIfMissing(s.path, []byte(s.content))
 		if err != nil {
 			return fmt.Errorf("init: write %s: %w", filepath.Base(s.path), err)
@@ -108,28 +134,22 @@ func Init(paths PersonantPaths, opts InitOptions) error {
 	return nil
 }
 
-// preCommitHookMarker is the substring that identifies a personant-managed
-// pre-commit hook. Its presence in an existing hook authorizes rewrite on a
-// subsequent `personant init`; its absence means the hook is user-owned and
-// must not be clobbered.
-const preCommitHookMarker = "# personant pre-commit hook — managed by"
-
 // preCommitHookScript is the body written to .git/hooks/pre-commit. The
-// marker line in the comment header is what gates idempotent rewrite.
+// hook is wholly agent-owned: any pre-existing pre-commit hook is overwritten.
+// The descriptive header is for forensic trace, not install-time gating.
 //
 // The hook assumes `personant` is on $PATH at the time git invokes it.
 // That is reasonable for users running `git commit` inside ~/.personant/
 // where the binary is installed; if empirical pressure shows otherwise,
 // add a $PERSONANT_BIN override path to the script.
 const preCommitHookScript = `#!/bin/sh
-# personant pre-commit hook — managed by ` + "`personant init`" + `.
+# personant pre-commit hook, written by ` + "`personant init`" + `.
 #
 # Runs ` + "`personant index check`" + ` against this home directory; aborts the
 # commit if any derived index file (symbols.jsonl, projects/*/digest.json)
 # is stale relative to the canonical sources.
 #
-# Auto-installed; do not edit by hand. Re-running ` + "`personant init`" + ` will
-# overwrite this file only if the marker line above is present.
+# Auto-installed; do not edit by hand.
 
 set -e
 
@@ -138,15 +158,15 @@ HOME_DIR="$(dirname "$GIT_DIR")"
 exec personant index check --home "$HOME_DIR"
 `
 
-// installPreCommitHook writes (or rewrites) the personant-managed pre-commit
-// hook at <Home>/.git/hooks/pre-commit. Best-effort: a missing .git/ logs a
-// warning and returns nil; an unmanaged existing hook logs a warning and
-// returns nil; anything else is a hard error so the caller can surface it.
+// installPreCommitHook writes the personant pre-commit hook at
+// <Home>/.git/hooks/pre-commit. The hook is wholly agent-owned: any
+// pre-existing hook is overwritten with the canonical script. Best-effort:
+// a missing .git/ logs a warning and returns nil; anything else (read or
+// write failure) is a hard error so the caller can surface it.
 //
-// Idempotency rules:
-//   - hook absent       → write it (mode 0755)
-//   - hook present, has marker line → rewrite (refresh managed content)
-//   - hook present, no marker line  → leave alone, log a warning
+// Idempotency: when the on-disk hook is byte-identical to the canonical
+// script, the file is not rewritten. This avoids mtime churn but is not
+// a content-preservation policy.
 func installPreCommitHook(paths PersonantPaths, logf func(format string, args ...any)) error {
 	gitDir := filepath.Join(paths.Home, ".git")
 	if _, err := os.Stat(gitDir); err != nil {
@@ -166,12 +186,6 @@ func installPreCommitHook(paths PersonantPaths, logf func(format string, args ..
 	existing, err := os.ReadFile(hookPath)
 	switch {
 	case err == nil:
-		if !bytes.Contains(existing, []byte(preCommitHookMarker)) {
-			logf("init: existing pre-commit hook is not personant-managed; skipping")
-			return nil
-		}
-		// Managed hook present; refresh it. No-op if the body already
-		// matches what we'd write.
 		if bytes.Equal(existing, []byte(preCommitHookScript)) {
 			return nil
 		}
@@ -242,6 +256,14 @@ func writeIfMissing(path string, content []byte) (bool, error) {
 		return false, cerr
 	}
 	return true, nil
+}
+
+// writeAlways writes content to path, replacing any existing file at that
+// path. Used for install-shipped templates whose canonical version lives
+// in the binary; the on-disk copy is a refreshable artifact, not user
+// content.
+func writeAlways(path string, content []byte) error {
+	return os.WriteFile(path, content, 0o644)
 }
 
 // initGit ensures Home is a git repository with at least one commit.
@@ -360,8 +382,9 @@ func runGit(dir string, env []string, args ...string) error {
 }
 
 // Seed content. Verbatim from the implementation spec for the init step.
-// Hand-editing of the seeded files is supported; the runtime never rewrites
-// them after install (see §2.6 directive precedence).
+// See Init for the per-file rewrite-vs-preserve policy: install-shipped
+// templates (defaults.md, README.md, .gitignore) are rewritten on every
+// init; accrual files (user.md, providers.toml) are preserved if present.
 
 const seedDefaultsMD = `---
 scope: defaults
@@ -393,9 +416,9 @@ These are the baked-in default parameter values for the personant runtime.
 Per spec §2.6, user.md and project-scoped overrides take precedence in that
 order; this file is the floor.
 
-This file is rewritten on ` + "`personant init`" + ` only when missing — it is not
-re-seeded on upgrade. Hand-editing is supported but unusual; prefer setting
-overrides in ` + "`user.md`" + ` or project directives.
+This file is install-shipped and rewritten on every ` + "`personant init`" + `
+to match the binary. Hand-editing is unsupported here — set overrides in
+` + "`user.md`" + ` or project directives instead (see spec §2.6).
 `
 
 const seedUserMD = `---

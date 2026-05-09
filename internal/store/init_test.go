@@ -151,31 +151,93 @@ func TestInitIdempotent(t *testing.T) {
 	}
 }
 
-func TestInitDoesNotOverwriteUserContent(t *testing.T) {
+// TestInitPreservesAccruedState: files that accrue canonical state
+// (user.md, providers.toml) survive re-init with their custom contents
+// intact. Re-init cannot reconstruct ack-prompt scope grants, decline
+// categorizations, or hand-entered API keys; preserving these is the
+// point.
+func TestInitPreservesAccruedState(t *testing.T) {
 	hasGit(t)
 	home := t.TempDir()
 	paths := PathsForHome(home)
 
-	// Pre-create a customized defaults.md before Init runs.
 	if err := os.MkdirAll(paths.DirectivesDir, 0o755); err != nil {
 		t.Fatalf("mkdir directives: %v", err)
 	}
-	custom := []byte("---\nscope: defaults\n# user-customized; init must not clobber\n---\n\n# custom\n")
-	defaultsPath := filepath.Join(paths.DirectivesDir, "defaults.md")
-	if err := os.WriteFile(defaultsPath, custom, 0o644); err != nil {
-		t.Fatalf("write custom defaults: %v", err)
+
+	customUser := []byte("---\nscope: user\nparameters:\n  recall.symbolic-threshold: 0.35\n---\n\n# user-edited\n")
+	userPath := filepath.Join(paths.DirectivesDir, "user.md")
+	if err := os.WriteFile(userPath, customUser, 0o644); err != nil {
+		t.Fatalf("write custom user.md: %v", err)
+	}
+
+	customProviders := []byte("[openai]\nbaseUrl = \"https://api.openai.com/v1\"\napiKey = \"sk-fake-but-mine\"\n")
+	if err := os.WriteFile(paths.Providers, customProviders, 0o644); err != nil {
+		t.Fatalf("write custom providers.toml: %v", err)
 	}
 
 	if err := Init(paths, InitOptions{Quiet: true}); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 
-	got, err := os.ReadFile(defaultsPath)
+	gotUser, err := os.ReadFile(userPath)
 	if err != nil {
-		t.Fatalf("read defaults: %v", err)
+		t.Fatalf("read user.md: %v", err)
 	}
-	if string(got) != string(custom) {
-		t.Errorf("defaults.md was overwritten\nwant: %q\n got: %q", custom, got)
+	if string(gotUser) != string(customUser) {
+		t.Errorf("user.md was overwritten\nwant: %q\n got: %q", customUser, gotUser)
+	}
+
+	gotProviders, err := os.ReadFile(paths.Providers)
+	if err != nil {
+		t.Fatalf("read providers.toml: %v", err)
+	}
+	if string(gotProviders) != string(customProviders) {
+		t.Errorf("providers.toml was overwritten\nwant: %q\n got: %q", customProviders, gotProviders)
+	}
+}
+
+// TestInitRefreshesShippedTemplates: install-shipped templates
+// (defaults.md, README.md, .gitignore) are rewritten on re-init even when
+// pre-existing on disk with non-canonical content. The on-disk copy is a
+// refreshable snapshot, not user content.
+func TestInitRefreshesShippedTemplates(t *testing.T) {
+	hasGit(t)
+	home := t.TempDir()
+	paths := PathsForHome(home)
+
+	if err := os.MkdirAll(paths.DirectivesDir, 0o755); err != nil {
+		t.Fatalf("mkdir directives: %v", err)
+	}
+
+	tampered := []byte("# tampered — init must rewrite this\n")
+	defaultsPath := filepath.Join(paths.DirectivesDir, "defaults.md")
+	for _, p := range []string{defaultsPath, paths.Readme, paths.Gitignore} {
+		if err := os.WriteFile(p, tampered, 0o644); err != nil {
+			t.Fatalf("write tampered %s: %v", p, err)
+		}
+	}
+
+	if err := Init(paths, InitOptions{Quiet: true}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	cases := []struct {
+		path string
+		want string
+	}{
+		{defaultsPath, seedDefaultsMD},
+		{paths.Readme, seedReadmeMD},
+		{paths.Gitignore, seedGitignore},
+	}
+	for _, c := range cases {
+		got, err := os.ReadFile(c.path)
+		if err != nil {
+			t.Fatalf("read %s: %v", c.path, err)
+		}
+		if string(got) != c.want {
+			t.Errorf("%s was not refreshed to canonical content\ngot: %q\nwant: %q", c.path, got, c.want)
+		}
 	}
 }
 
@@ -285,8 +347,8 @@ func TestInitCanonicalEmptyFilesAreEmpty(t *testing.T) {
 	}
 }
 
-// TestInitInstallsPreCommitHook: a fresh init writes the managed
-// pre-commit hook with mode 0755 and the expected marker line.
+// TestInitInstallsPreCommitHook: a fresh init writes the canonical
+// pre-commit hook with mode 0755.
 func TestInitInstallsPreCommitHook(t *testing.T) {
 	hasGit(t)
 	paths := initIntoTempDir(t)
@@ -308,9 +370,6 @@ func TestInitInstallsPreCommitHook(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read pre-commit hook: %v", err)
 	}
-	if !strings.Contains(string(body), preCommitHookMarker) {
-		t.Errorf("pre-commit hook missing marker %q\ncontent:\n%s", preCommitHookMarker, body)
-	}
 	// Sanity: the hook should invoke `personant index check --home`, since
 	// that is the behavior the spec promises.
 	if !strings.Contains(string(body), "personant index check --home") {
@@ -318,51 +377,15 @@ func TestInitInstallsPreCommitHook(t *testing.T) {
 	}
 }
 
-// TestInitOverwritesManagedHook: a hook carrying the personant marker is
-// rewritten on subsequent init, restoring the canonical content.
-func TestInitOverwritesManagedHook(t *testing.T) {
+// TestInitRewritesPreCommitHook: any pre-existing pre-commit hook is
+// overwritten with the canonical script. The hook is wholly agent-owned;
+// there is no "leave unmanaged hook alone" branch.
+func TestInitRewritesPreCommitHook(t *testing.T) {
 	hasGit(t)
 	home := t.TempDir()
 	paths := PathsForHome(home)
 
-	if err := Init(paths, InitOptions{Quiet: true}); err != nil {
-		t.Fatalf("first Init: %v", err)
-	}
-
-	hookPath := filepath.Join(paths.Home, ".git", "hooks", "pre-commit")
-	// Write a tampered version that still carries the marker (simulating
-	// "managed but drifted" state, e.g. an older personant version's hook).
-	tampered := "#!/bin/sh\n" + preCommitHookMarker + " (tampered version)\nexit 0\n"
-	if err := os.WriteFile(hookPath, []byte(tampered), 0o755); err != nil {
-		t.Fatalf("write tampered hook: %v", err)
-	}
-
-	if err := Init(paths, InitOptions{Quiet: true}); err != nil {
-		t.Fatalf("second Init: %v", err)
-	}
-
-	got, err := os.ReadFile(hookPath)
-	if err != nil {
-		t.Fatalf("read hook: %v", err)
-	}
-	if string(got) == tampered {
-		t.Fatalf("managed hook was not rewritten\ncontent:\n%s", got)
-	}
-	if !strings.Contains(string(got), "personant index check --home") {
-		t.Errorf("rewritten hook missing canonical body\ncontent:\n%s", got)
-	}
-}
-
-// TestInitPreservesUnmanagedHook: a hook without the marker is left
-// untouched and a warning is logged.
-func TestInitPreservesUnmanagedHook(t *testing.T) {
-	hasGit(t)
-	home := t.TempDir()
-	paths := PathsForHome(home)
-
-	// We need the hooks directory to exist before we drop the user's hook
-	// in. Run a no-op git init by hand to create the .git tree, then
-	// pre-place an unmanaged hook before personant Init runs.
+	// Stand up the .git tree so we can pre-place a hook before Init runs.
 	cmd := exec.Command("git", "-C", home, "init", "-q")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("pre-git init: %v: %s", err, out)
@@ -372,16 +395,12 @@ func TestInitPreservesUnmanagedHook(t *testing.T) {
 		t.Fatalf("mkdir hooks: %v", err)
 	}
 	hookPath := filepath.Join(hooksDir, "pre-commit")
-	userHook := []byte("#!/bin/sh\n# my own hook — no personant marker here\necho hi\nexit 0\n")
-	if err := os.WriteFile(hookPath, userHook, 0o755); err != nil {
-		t.Fatalf("write user hook: %v", err)
+	preexisting := []byte("#!/bin/sh\n# arbitrary pre-existing hook\necho hi\nexit 0\n")
+	if err := os.WriteFile(hookPath, preexisting, 0o755); err != nil {
+		t.Fatalf("write preexisting hook: %v", err)
 	}
 
-	var logLines []string
-	logger := func(format string, args ...any) {
-		logLines = append(logLines, format)
-	}
-	if err := Init(paths, InitOptions{Logger: logger}); err != nil {
+	if err := Init(paths, InitOptions{Quiet: true}); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 
@@ -389,21 +408,11 @@ func TestInitPreservesUnmanagedHook(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read hook: %v", err)
 	}
-	if string(got) != string(userHook) {
-		t.Errorf("unmanaged hook was clobbered\nwant: %q\n got: %q", userHook, got)
+	if string(got) == string(preexisting) {
+		t.Fatalf("pre-existing hook was not rewritten\ncontent:\n%s", got)
 	}
-
-	// A warning should have been logged. The exact wording is checked
-	// loosely; we want to fail if the warning silently disappeared.
-	var sawWarn bool
-	for _, l := range logLines {
-		if strings.Contains(l, "not personant-managed") {
-			sawWarn = true
-			break
-		}
-	}
-	if !sawWarn {
-		t.Errorf("expected warning about unmanaged hook; got log:\n%s", strings.Join(logLines, "\n"))
+	if !strings.Contains(string(got), "personant index check --home") {
+		t.Errorf("rewritten hook missing canonical body\ncontent:\n%s", got)
 	}
 }
 
