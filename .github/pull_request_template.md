@@ -1,8 +1,8 @@
 # Major Topic Here
 
 ## Issues 
-* [Issue Title](https://github.com/ave-veritas-et-enodatio/inference-lab-bench/issues)
-* [Issue Title](https://github.com/ave-veritas-et-enodatio/inference-lab-bench/issues)
+* [Issue Title](https://github.com/ave-veritas-et-enodatio/personant/issues)
+* [Issue Title](https://github.com/ave-veritas-et-enodatio/personant/issues)
 
 ## Change Notes
 
@@ -22,7 +22,5 @@ If > 0 describe validation
 [ ] AI coding usage declared
 [ ] Changes have test coverage
 [ ] AGENTS.md and ARCHITECTURE.md updated
-[ ] ```make test``` passes (go unit tests)
-[ ] ```make integration-test``` passes (inference end-to-end test)
-[ ] ```make equiv-test``` passes (llama-server reference equivalence)
-[ ] if model architecture added ```make arch-diagrams``` produces valid diagrams
+[ ] ```make test``` passes
+[ ] ```make integration-test``` passes

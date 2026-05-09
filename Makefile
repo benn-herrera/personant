@@ -1,6 +1,6 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build test integration-test update-dependencies udpate-agents-dependency clean agents
+.PHONY: all build test integration-test update-dependencies update-agents-dependency clean agents
 
 all: build
 
@@ -30,23 +30,9 @@ update-agents-dependency: agents
 		echo "AGENTS_VERSION: $(AGENTS_VERSION) -> $$VTAG" \
 	)
 
-# integration-test:
-
-update-attributions:
-	claude -p "read AGENTS.md and ARCHITECTURE.md, then read the direct imports section of src/go.mod and update 'Third Party Acknowledgements' at the end of README.md" \
-	      --allowedTools "Read,Edit,Write,Glob,Grep" \
-				--model sonnet
-
 BINDIR := bin
 
 build: $(BINDIR)/personant
-
-all: build
-
-$(GGML_MARKER):
-		@mkdir -p $(dir $(GGML_DIR))
-		@[[ -d $(GGML_DIR) ]] && (cd $(GGML_DIR) && git fetch --tags) || git clone $(GGML_REPO) $(GGML_DIR)
-		@cd $(GGML_DIR) && git -c advice.detachedHead=false checkout $(GGML_VERSION)
 
 $(BINDIR)/personant:
 	@mkdir -p $(BINDIR)
@@ -60,6 +46,9 @@ update-dependencies: update-agents-dependency
 test: build
 	go vet ./...
 	go test ./... --count=1
+
+integration-test:
+	@echo Integration Test TBD
 
 clean:
 	rm -f $(BINDIR)/personant

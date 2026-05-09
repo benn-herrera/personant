@@ -2,103 +2,82 @@ package util
 
 import (
 	"fmt"
-	"personant/internal/log"
 	"os"
 	"path/filepath"
 	"sync"
 )
 
-// Custom file extensions used across the project.
-const (
-	ExtArchToml       = ".arch.toml" // architecture definition
-	ExtSafetensorsDir = ".st"        // safetensors model directory
-)
-
-// benchPaths holds standard directory paths derived from the executable location.
-// All subcommands use this to find config, models, and arch definitions without
-// hardcoding paths or requiring flags.
-type BenchPaths struct {
-	ExeDir    string // directory containing the bench binary
-	ConfigDir string // ExeDir/config - configuration files
-	ModelsDir string // ExeDir/models - model files
-	ArchDir   string // ExeDir/models/arch - architecture definitions
-	DiagDir   string // ExeDir/diag - diagnostic output
+// PersonantPaths holds the canonical layout of $PERSONANT_HOME.
+// See v0.1-spec.md §2.1.
+//
+// The struct is value-based; every field is an absolute path. Paths are
+// computed but not created — `personant init` is the scaffolder.
+type PersonantPaths struct {
+	Home          string // $PERSONANT_HOME (default ~/.personant)
+	Spine         string // Home/spine.jsonl                  (canonical)
+	Symbols       string // Home/symbols.jsonl                (derived)
+	ThreadsDir    string // Home/threads/                     (canonical: thr_<id>.md)
+	ProjectsDir   string // Home/projects/                    (per-project meta + digest)
+	DirectivesDir string // Home/directives/                  (defaults.md, user.md, <project>/...)
+	LogsDir       string // Home/logs/                        (YYYY-MM-DD.log + archive/)
+	LogsArchive   string // Home/logs/archive/                (rotated tar.gz)
+	Readme        string // Home/README.md                    (layout doc for human inspection)
 }
 
-func makeBenchPaths(exeDir string) BenchPaths {
-	return BenchPaths{
-		ExeDir:    exeDir,
-		ConfigDir: filepath.Join(exeDir, "config"),
-		ModelsDir: filepath.Join(exeDir, "models"),
-		ArchDir:   filepath.Join(exeDir, "models/arch"),
-		DiagDir:   filepath.Join(exeDir, "diag"),
+// EnvHome is the environment variable that overrides the default home.
+const EnvHome = "PERSONANT_HOME"
+
+// DefaultHomeName is the directory name used under $HOME when EnvHome is unset.
+const DefaultHomeName = ".personant"
+
+func makePaths(home string) PersonantPaths {
+	return PersonantPaths{
+		Home:          home,
+		Spine:         filepath.Join(home, "spine.jsonl"),
+		Symbols:       filepath.Join(home, "symbols.jsonl"),
+		ThreadsDir:    filepath.Join(home, "threads"),
+		ProjectsDir:   filepath.Join(home, "projects"),
+		DirectivesDir: filepath.Join(home, "directives"),
+		LogsDir:       filepath.Join(home, "logs"),
+		LogsArchive:   filepath.Join(home, "logs", "archive"),
+		Readme:        filepath.Join(home, "README.md"),
 	}
 }
 
 var (
-	resolvedPaths BenchPaths
+	resolvedPaths PersonantPaths
 	resolveErr    error
 	resolveOnce   sync.Once
 )
 
+// IsDir reports whether path exists and is a directory.
 func IsDir(path string) bool {
 	stat, err := os.Stat(path)
 	return err == nil && stat.IsDir()
 }
 
-func getExeDir() (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("determine executable path: %w", err)
-	}
-	return filepath.Dir(exe), nil
-}
-
-// ResolvePaths computes standard paths relative to the running executable.
-// Falls back to the current directory if the executable path cannot be determined.
-// The result is computed once and cached for the lifetime of the process —
-// subsequent calls return the same (paths, err) pair.
-// Handles hacky debugging envar BENCH_EXE_DIR because debug.json configs
-// don't let you separate the source level CWD from runtime CWD.
-func ResolvePaths() (BenchPaths, error) {
+// ResolvePaths returns the canonical PersonantPaths for this process.
+//
+// Resolution order:
+//  1. $PERSONANT_HOME if set and non-empty.
+//  2. $HOME/.personant otherwise.
+//
+// The result is computed once and cached for the lifetime of the process.
+// Path validity (existence, scaffold completeness) is not checked here —
+// callers that require an initialized home should consult `personant init`
+// or `personant verify`.
+func ResolvePaths() (PersonantPaths, error) {
 	resolveOnce.Do(func() {
-		if exeDir := os.Getenv("BENCH_EXE_DIR"); exeDir != "" {
-			// hacky debug envar was provided
-			log.Info("using BENCH_EXE_DIR=%s instead of getExeDir()", exeDir)
-			resolvedPaths = makeBenchPaths(exeDir)
-		} else {
-			// normal path
-			exeDir, err := getExeDir()
+		home := os.Getenv(EnvHome)
+		if home == "" {
+			userHome, err := os.UserHomeDir()
 			if err != nil {
-				resolveErr = err
+				resolveErr = fmt.Errorf("resolve user home: %w", err)
 				return
 			}
-			resolvedPaths = makeBenchPaths(exeDir)
+			home = filepath.Join(userHome, DefaultHomeName)
 		}
-		configRel, _ := filepath.Rel(resolvedPaths.ExeDir, resolvedPaths.ConfigDir)
-		if !IsDir(resolvedPaths.ConfigDir) {
-			cwd, err := os.Getwd()
-			if err != nil {
-				resolveErr = fmt.Errorf("determine current directory: %w", err)
-				return
-			}
-			log.Error("%s does not contain %s falling back to %s",
-				resolvedPaths.ExeDir, configRel, cwd)
-			resolvedPaths = makeBenchPaths(cwd)
-		}
-		if !IsDir(resolvedPaths.ConfigDir) {
-			log.Error("%s does not contain %s",
-				resolvedPaths.ExeDir, configRel)
-		}
+		resolvedPaths = makePaths(home)
 	})
 	return resolvedPaths, resolveErr
-}
-
-// EnsureDiagDir creates the diagnostics output directory if it doesn't exist.
-// Call once at server startup — not on every request.
-func EnsureDiagDir(paths BenchPaths) error {
-	if err := os.MkdirAll(paths.DiagDir, 0755); err != nil {
-		return fmt.Errorf("creating diag dir %s: %w", paths.DiagDir, err)
-	}
-	return nil
 }
