@@ -11,6 +11,7 @@ import (
 
 	"personant/internal/model"
 	"personant/internal/store"
+	"personant/internal/workset"
 )
 
 // newTestHome scaffolds the minimum home layout the turn package needs:
@@ -244,6 +245,155 @@ func TestRunReturnsErrorOnNilClient(t *testing.T) {
 	if _, err := Run(context.Background(), state, "x", io.Discard); err == nil {
 		t.Fatalf("expected error for nil client")
 	}
+}
+
+// TestRunPopulatesActiveThreadsOnNewTopic — after a *new-topic* turn,
+// the new thread enters ActiveThreads at index 0.
+func TestRunPopulatesActiveThreadsOnNewTopic(t *testing.T) {
+	paths, meta := newTestHome(t)
+	mock := model.NewScriptedMock([]model.Response{
+		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHi."},
+	}, nil)
+	state := NewState(paths, meta, store.Provider{}, mock)
+	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
+	if _, err := Run(context.Background(), state, "hello", io.Discard); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(state.ActiveThreads) != 1 || state.ActiveThreads[0] != "thr_1" {
+		t.Errorf("ActiveThreads after new-topic: got %v want [thr_1]", state.ActiveThreads)
+	}
+}
+
+// TestRunActiveThreadsRefreshOnRepeatEngagement — repeating a turn on
+// thr_1 should leave ActiveThreads = [thr_1] (no duplicate; LRU front).
+func TestRunActiveThreadsRefreshOnRepeatEngagement(t *testing.T) {
+	paths, meta := newTestHome(t)
+	if err := store.AppendSpineRecord(paths, store.SpineRecord{
+		ID: "thr_1", Project: meta.ID,
+		Anchors: []string{"a", "b", "c", "d"},
+		Summary: "thr_1", State: store.ThreadActive,
+	}); err != nil {
+		t.Fatalf("seed spine: %v", err)
+	}
+	state := NewState(paths, meta, store.Provider{}, nil)
+	state.ActiveThreads = []string{"thr_1"}
+	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
+	state.Client = model.NewScriptedMock([]model.Response{
+		{Content: "*topic: thr_1 [a, b, c, d]*\nFollow-up."},
+	}, nil)
+	if _, err := Run(context.Background(), state, "more", io.Discard); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(state.ActiveThreads) != 1 || state.ActiveThreads[0] != "thr_1" {
+		t.Errorf("ActiveThreads: got %v want [thr_1]", state.ActiveThreads)
+	}
+}
+
+// TestRunActiveThreadsLRUInsert — engaging thr_2 with thr_1 already
+// active produces [thr_2, thr_1].
+func TestRunActiveThreadsLRUInsert(t *testing.T) {
+	paths, meta := newTestHome(t)
+	for _, id := range []string{"thr_1", "thr_2"} {
+		if err := store.AppendSpineRecord(paths, store.SpineRecord{
+			ID: id, Project: meta.ID,
+			Anchors: []string{"a", "b", "c", "d"},
+			Summary: id, State: store.ThreadActive,
+		}); err != nil {
+			t.Fatalf("seed spine %s: %v", id, err)
+		}
+	}
+	state := NewState(paths, meta, store.Provider{}, nil)
+	state.ActiveThreads = []string{"thr_1"}
+	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
+	state.Client = model.NewScriptedMock([]model.Response{
+		{Content: "*topic: thr_2 [a, b, c, d]*\nNow on thr_2."},
+	}, nil)
+	if _, err := Run(context.Background(), state, "switch", io.Discard); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	want := []string{"thr_2", "thr_1"}
+	if !sliceEqual(state.ActiveThreads, want) {
+		t.Errorf("ActiveThreads: got %v want %v", state.ActiveThreads, want)
+	}
+}
+
+// TestRunActiveThreadsBTopKOverflow — with BTopK=3 and three threads
+// already active, engaging a fourth bumps the oldest into
+// DormantThreads.
+func TestRunActiveThreadsBTopKOverflow(t *testing.T) {
+	paths, meta := newTestHome(t)
+	for _, id := range []string{"thr_1", "thr_2", "thr_3", "thr_4"} {
+		if err := store.AppendSpineRecord(paths, store.SpineRecord{
+			ID: id, Project: meta.ID,
+			Anchors: []string{"a", "b", "c", "d"},
+			Summary: id, State: store.ThreadActive,
+		}); err != nil {
+			t.Fatalf("seed spine %s: %v", id, err)
+		}
+	}
+	state := NewState(paths, meta, store.Provider{}, nil)
+	state.ActiveThreads = []string{"thr_3", "thr_2", "thr_1"} // index 0 = most recent
+	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
+	state.Client = model.NewScriptedMock([]model.Response{
+		{Content: "*topic: thr_4 [a, b, c, d]*\nFourth thread."},
+	}, nil)
+	if _, err := Run(context.Background(), state, "fourth", io.Discard); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !sliceEqual(state.ActiveThreads, []string{"thr_4", "thr_3", "thr_2"}) {
+		t.Errorf("ActiveThreads: got %v want [thr_4, thr_3, thr_2]", state.ActiveThreads)
+	}
+	if !sliceEqual(state.DormantThreads, []string{"thr_1"}) {
+		t.Errorf("DormantThreads: got %v want [thr_1]", state.DormantThreads)
+	}
+}
+
+// TestUpdateLayerLRUDormantPromotionDeduplication — re-engaging a
+// thread that was previously demoted to DormantThreads pulls it back
+// up to ActiveThreads (and not to both layers simultaneously).
+func TestUpdateLayerLRUDormantPromotionDeduplication(t *testing.T) {
+	state := &State{
+		Budget:         workset.DefaultBudget(),
+		ActiveThreads:  []string{"thr_3", "thr_2"},
+		DormantThreads: []string{"thr_1"},
+	}
+	updateLayerLRU(state, []string{"thr_1"})
+	if !sliceEqual(state.ActiveThreads, []string{"thr_1", "thr_3", "thr_2"}) {
+		t.Errorf("ActiveThreads: got %v", state.ActiveThreads)
+	}
+	if len(state.DormantThreads) != 0 {
+		t.Errorf("DormantThreads: got %v want empty", state.DormantThreads)
+	}
+}
+
+// TestUpdateLayerLRUDormantCap — DormantThreads must not exceed
+// dormantThreadsCap.
+func TestUpdateLayerLRUDormantCap(t *testing.T) {
+	state := &State{
+		Budget: workset.Budget{BTopK: 3},
+	}
+	// Engage many threads in sequence, far exceeding the cap.
+	count := dormantThreadsCap + 10
+	for i := 1; i <= count; i++ {
+		updateLayerLRU(state, []string{itoaThreadID(i)})
+	}
+	if len(state.DormantThreads) > dormantThreadsCap {
+		t.Errorf("DormantThreads exceeded cap: got %d want <= %d", len(state.DormantThreads), dormantThreadsCap)
+	}
+}
+
+func itoaThreadID(n int) string { return "thr_" + itoa(n) }
+
+func sliceEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // TestRunNewTopicWritesThreadFile verifies that *new-topic* creation

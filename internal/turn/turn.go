@@ -41,6 +41,24 @@ type State struct {
 	// user/assistant exchange is replayed from History.
 	History []model.Message
 
+	// ActiveThreads is Layer B membership: thread IDs the working set
+	// renders as full thread bodies (per workset.Compose). Index 0 is
+	// the most-recently-engaged thread. The list is bounded by
+	// Budget.BTopK; overflow demotes to the head of DormantThreads.
+	ActiveThreads []string
+
+	// DormantThreads is Layer C membership: thread IDs the working set
+	// renders as spine display lines. Index 0 is the most-recently
+	// demoted (or independently engaged) thread. The list is capped by
+	// dormantThreadsCap; the on-disk byte budget is honored at render
+	// time by workset.Compose.
+	DormantThreads []string
+
+	// Budget is the byte budget composed into the working set. Defaults
+	// to workset.DefaultBudget() at NewState; future directive plumbing
+	// (Phase 3+) will recompute this per-turn.
+	Budget workset.Budget
+
 	// turn-scoped state
 	coalesce *coalesceBuffer
 
@@ -49,6 +67,14 @@ type State struct {
 	// and Run substitutes time.Now.
 	nowFn func() time.Time
 }
+
+// dormantThreadsCap is the v0.1 maximum count for State.DormantThreads.
+// The byte budget on Layer C is enforced at workset.Compose render
+// time; this count cap is a coarser upstream bound to keep the slice
+// from growing unboundedly across a long session. Once the directive
+// layer can plumb actual byte counts to the LRU update path (Phase
+// 3+), the count cap goes away.
+const dormantThreadsCap = 20
 
 // NewState constructs a State for a chat session. The coalesce buffer
 // is initialized empty; Client must be non-nil (the chat REPL passes
@@ -59,6 +85,7 @@ func NewState(paths store.PersonantPaths, project store.ProjectMeta, provider st
 		ActiveProject: project,
 		Provider:      provider,
 		Client:        client,
+		Budget:        workset.DefaultBudget(),
 		coalesce:      newCoalesceBuffer(),
 	}
 }
@@ -116,10 +143,24 @@ func Run(ctx context.Context, state *State, userInput string, out io.Writer) (st
 	}
 
 	// Step 2: compose working-set and assemble the system prompt.
-	params, err := workset.Compose(workset.State{
-		Paths:         state.Paths,
-		ActiveProject: state.ActiveProject,
-	})
+	if state.Budget.Total == 0 {
+		state.Budget = workset.DefaultBudget()
+	}
+	params, err := workset.Compose(
+		workset.State{
+			Paths:          state.Paths,
+			ActiveProject:  state.ActiveProject,
+			ActiveThreads:  state.ActiveThreads,
+			DormantThreads: state.DormantThreads,
+			Budget:         state.Budget,
+		},
+		workset.ComposeOptions{
+			Logger: func(format string, args ...any) {
+				_ = eventlog.Log(state.Paths, "workset", "warning",
+					sanitizeDetail(fmt.Sprintf(format, args...)))
+			},
+		},
+	)
 	if err != nil {
 		return "", fmt.Errorf("turn: compose working set: %w", err)
 	}
@@ -250,6 +291,16 @@ const historyCapPerThread = 40
 // placeholders if there are fewer) are used. v0.1 deliberately does
 // not fail the turn over malformed tag output — that judgment is
 // recorded in the spec changelog.
+//
+// Phase 2.e-A simplification: the model may have referenced thr_<n>
+// in its topic tag that wasn't in Layer B at prompt-construction
+// time. The §5.5 system-injected re-prompt mechanism (which would
+// stop the stream, fetch the thread, and re-issue the request with
+// augmented context) is deferred to 2.e-B. For now, the referenced
+// thread enters ActiveThreads here, so the next turn's prompt
+// includes it; the current turn's response was generated against
+// whatever was in B at the start. Document this in commits and the
+// spec changelog.
 func closeTurnAndUpdateEngagement(state *State, userInput, responseBody string) error {
 	if len(state.coalesce.threads) == 0 {
 		return nil
@@ -259,18 +310,85 @@ func closeTurnAndUpdateEngagement(state *State, userInput, responseBody string) 
 	turnSymbols := state.coalesce.coalescedList()
 	turnAnchors := turnAnchorList(responseBody, state.coalesce.symbolList())
 
+	// Engaged thread IDs in this turn — includes resolved IDs for the
+	// *new-topic* sentinel. Used to update the Layer B/C LRU below.
+	engaged := make([]string, 0, len(state.coalesce.threads))
+
 	for _, threadID := range state.coalesce.threadList() {
 		if threadID == "*new-topic*" {
-			if err := createNewThread(state, userInput, responseBody, now, turnSymbols, turnAnchors); err != nil {
+			newID, err := createNewThread(state, userInput, responseBody, now, turnSymbols, turnAnchors)
+			if err != nil {
 				return err
 			}
+			engaged = append(engaged, newID)
 			continue
 		}
 		if err := updateExistingThread(state, threadID, userInput, responseBody, now, turnSymbols, turnAnchors); err != nil {
 			return err
 		}
+		engaged = append(engaged, threadID)
 	}
+
+	updateLayerLRU(state, engaged)
 	return nil
+}
+
+// updateLayerLRU applies the §3.1 Layer B/C eviction policy after a
+// turn's engagements are committed.
+//
+// For each engaged thread (in coalesce-order — map iteration is
+// non-deterministic, but every thread in the slice was definitely
+// touched this turn so any order is correct):
+//
+//   - If the thread is already in ActiveThreads, move it to the
+//     front (most-recent).
+//   - Otherwise, prepend it. If ActiveThreads then exceeds Budget.BTopK,
+//     pop the tail and prepend it to DormantThreads.
+//   - If a thread newly entering ActiveThreads is currently in
+//     DormantThreads, remove it from there before inserting at front.
+//
+// Threads not engaged this turn are left in place; decay is by
+// overflow at the next engagement (per §3.1's "no per-thread decay
+// counter; eviction is bounded by budget pressure"). DormantThreads
+// is capped by count to keep the slice bounded across a long session.
+func updateLayerLRU(state *State, engaged []string) {
+	bTopK := state.Budget.BTopK
+	if bTopK <= 0 {
+		bTopK = workset.DefaultBTopK
+	}
+	for _, id := range engaged {
+		// Drop from current positions in either layer.
+		state.ActiveThreads = removeString(state.ActiveThreads, id)
+		state.DormantThreads = removeString(state.DormantThreads, id)
+		// Insert at the front of ActiveThreads.
+		state.ActiveThreads = append([]string{id}, state.ActiveThreads...)
+		// Overflow: tail of ActiveThreads demotes to head of
+		// DormantThreads.
+		for len(state.ActiveThreads) > bTopK {
+			demoted := state.ActiveThreads[len(state.ActiveThreads)-1]
+			state.ActiveThreads = state.ActiveThreads[:len(state.ActiveThreads)-1]
+			state.DormantThreads = append([]string{demoted}, state.DormantThreads...)
+		}
+	}
+	// Cap DormantThreads by count.
+	if len(state.DormantThreads) > dormantThreadsCap {
+		state.DormantThreads = state.DormantThreads[:dormantThreadsCap]
+	}
+}
+
+// removeString returns ss with the first occurrence of v removed. ss
+// is unmodified; the result aliases its tail when v is found at the
+// head, otherwise allocates a fresh slice. Order-preserving.
+func removeString(ss []string, v string) []string {
+	for i, s := range ss {
+		if s == v {
+			out := make([]string, 0, len(ss)-1)
+			out = append(out, ss[:i]...)
+			out = append(out, ss[i+1:]...)
+			return out
+		}
+	}
+	return ss
 }
 
 // turnAnchorList returns the anchor list to print in the per-turn
@@ -355,12 +473,12 @@ func updateExistingThread(state *State, threadID, userInput, responseBody, now s
 		threadID+" turn_count="+itoa(rec.TurnCount))
 }
 
-func createNewThread(state *State, userInput, responseBody, now string, turnSymbols []coalescedSymbol, turnAnchors []string) error {
+func createNewThread(state *State, userInput, responseBody, now string, turnSymbols []coalescedSymbol, turnAnchors []string) (string, error) {
 	// NextThreadID needs the full spine, not just this project's, so a
 	// new id never collides with a thread in a sibling project.
 	allRecords, err := store.ReadSpine(state.Paths.Spine)
 	if err != nil {
-		return err
+		return "", err
 	}
 	newID := store.NextThreadID(allRecords)
 
@@ -405,13 +523,16 @@ func createNewThread(state *State, userInput, responseBody, now string, turnSymb
 	// is only for the thread file. The Frontmatter struct is built
 	// in-line from store.ThreadFrontmatter via the type alias below.
 	if err := store.SaveThread(state.Paths, thr); err != nil {
-		return fmt.Errorf("save thread %s: %w", newID, err)
+		return "", fmt.Errorf("save thread %s: %w", newID, err)
 	}
 	if err := store.AppendSpineRecord(state.Paths, rec); err != nil {
-		return err
+		return "", err
 	}
-	return eventlog.Log(state.Paths, "thread", "created",
-		newID+" anchors="+itoa(len(anchors))+" project="+state.ActiveProject.ID)
+	if err := eventlog.Log(state.Paths, "thread", "created",
+		newID+" anchors="+itoa(len(anchors))+" project="+state.ActiveProject.ID); err != nil {
+		return "", err
+	}
+	return newID, nil
 }
 
 // ThreadFrontmatter is a local alias to avoid a long-form type literal in

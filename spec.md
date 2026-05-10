@@ -350,6 +350,8 @@ recall.symbolic-threshold: 0.4      # Jaccard threshold for opportunistic recall
 recall.cross-project-threshold: 0.5 # higher bar for cross-project surface
 layer.b-top-k: 3                    # max active threads in Layer B
 layer.budget.percentages: {E: 8, A1: 8, A2: variable, B: 50, C: 15, current_turn: 15}
+context.byte-budget: 65536          # total system-prompt byte budget; v0.1
+                                    # uses bytes as a token proxy (see §6.5)
 anchors.cap-per-thread: 6           # max anchor symbols per thread (within [4,8] hard range)
 history.cap-per-thread: 40          # max history symbols per thread
 spine.entry-max-chars: 200          # hard cap for SpineRecord.summary
@@ -535,8 +537,47 @@ bypasses this entry point as a bug.
 
 ### 3.1 Working-set composition
 
-[STUB — see §3.0.2 step 4 for the budget-check hook; full composition
-algorithm draft lands with Phase 2 implementation.]
+The working set is rendered into the system prompt as five layers, each
+truncated to a byte budget derived from `context.byte-budget` and the
+`layer.budget.percentages` table (§2.6.1). v0.1 uses byte counts as a
+token proxy (see §6.5); real tokenizer integration is deferred until
+empirical pressure requires it.
+
+**Layer order and contents** (§2.1 maps these to on-disk sources):
+
+| Layer | Source | Render |
+|---|---|---|
+| E    | `directives/defaults.md`, `directives/user.md`, `directives/<active>/project.md`, plus `ProjectMeta.ConventionsPaths` | Section-divided concatenation; YAML frontmatter is stripped from each directive file. |
+| A1   | `spine.jsonl` filtered to `project == active` | One §2.2.2 display line per record. |
+| A2   | `projects/<id>/digest.json` for every other project (excluding `prj_default`) | One line per project: `<name> (<id>): <one_line_summary> :: <recent_anchors[:5]>`, sorted by `last_active` desc. Each line capped at `cross-project.digest-per-project-bytes`. |
+| B    | `threads/<id>.md` for each id in the runtime's `ActiveThreads` LRU | Up to `layer.b-top-k` threads, most-recently-engaged first; each rendered as a heading + frontmatter line + body. Per-thread share = `LayerB / k`; oversized threads are individually truncated. |
+| C    | `spine.jsonl` records for each id in the runtime's `DormantThreads` LRU | One §2.2.2 display line per record. |
+
+**LRU update rule** (driven by the §3.0.4 turn-close path):
+
+After per-turn engagements commit, for each engaged thread id:
+- Remove from both `ActiveThreads` and `DormantThreads` if present.
+- Prepend to `ActiveThreads`.
+- If `len(ActiveThreads) > layer.b-top-k`, demote the tail to the head
+  of `DormantThreads`.
+
+`DormantThreads` is bounded by a count cap in v0.1 (default 20); future
+phases plumb actual byte counts from rendered Layer C content.
+
+**Truncation policy:** each layer's rendered string is truncated to its
+byte budget at a UTF-8 rune boundary, with a marker
+`... [Layer X truncated; budget=N bytes] ...` appended. A failure to
+render one layer (e.g. a project's `digest.json` is missing) emits a
+`workset.warning` log line and that layer renders empty; neighbour
+layers proceed.
+
+**Phase 2.e-A simplification (deferred to 2.e-B):** when the model's
+topic tag references a `thr_<n>` not currently in `ActiveThreads`, the
+runtime adds it during turn close. The next turn's prompt includes it.
+The §5.5 system-injected mid-turn fetch (which would stop the stream,
+fetch the thread, and re-issue the request with augmented context) is
+not yet implemented; the current turn's response was generated against
+whatever was in B at the start.
 
 ### 3.2 Topic tagging and engagement update
 
@@ -1860,3 +1901,4 @@ Compiled from inline `[OPEN: ...]` markers and design-pass uncertainties.
 - 2026-05-09 — §1 system overview gains operationalized acceptance language pointing to §11.1. §5.1 "Topic tag emission format" drafted: single-line `*topic: <thread-list> [<anchor-list>]*` form with parser regex; the deferred multi-form question is decided. §5.5 "Mid-turn thread fetch" drafted as **system-injected** (not tool-call) — runtime parses the topic tag and pre-loads referenced threads before re-prompting the model. §8.2.1 redaction policy explicitly **hybrid**: refuse on agent-initiated reads (deny error to the model + `permissions.suspicious-access` log); redact on user-initiated `#` captures (placeholder content + `permissions.redaction-fire` log). §10 acceptance gate clarified: Phase 5 isn't "feature complete"; it's "feature complete + six-month simulation green + steady state demonstrated." §11 fully restructured from stub to "Measurement and validation regime" with eleven subsections covering the test fabric: §11.1 six-month-simulation acceptance, §11.2 mock LLM, §11.3 unit, §11.4 scenario, §11.5 invariant validators, §11.6 metrics emission, §11.7 churn, §11.8 calibration, §11.9 cross-run baseline comparison, §11.10 six-month simulation harness, §11.11 live instrumentation. Open questions 6, 7, 18 resolved (closed) and renumbered; new questions 19, 20, 21 added (topic-tag reliability, system-injected re-prompt cost, six-month sim pass thresholds).
 - 2026-05-09 — §11 lead strengthened with the **asymmetric cost framing**: there is no graceful recovery from "use it and find out" — if six months of accumulated state reveal the storage strategy is structurally wrong, the choice is between a complex/risky refactor of accumulated memory or losing it all. The simulation regime exists because proof must come ahead of time. §10.1 v1.0 Python entry refined: confirmed math/physics computational workflow as a real (not speculative) v1.0 commitment with concrete tool list (`python.run`, `python.format`, `python.lint`, possibly `python.repl`); explicitly **Python-only** (other coding languages out of scope — not building a polyglot agent-coding tool). New watch-list item 19: Python execution environment policy (system / venv / uv) for v1.0 design.
 - 2026-05-09 — Phase 2.c.2 lands: chat REPL with project bootstrap (§4.5.7) handling all five BootstrapResult branches; turn handler with §3.0 chain skeleton and per-turn engagement coalescing (§3.0.4); event log writer (§2.8); working-set composer MVP (LayerA1 only). Default cobra command is now chat — `personant` with no subcommand drops into a session.
+- 2026-05-10 — Phase 2.e-A lands: §3.1 fully drafted with the five-layer composition algorithm, byte-budget truncation policy, and the LRU update rule that runs at §3.0.4 turn close. New `context.byte-budget` parameter (default 65536) added to §2.6.1. v0.1 simplification documented: when the model's topic tag references a thread not currently in Layer B, the thread enters Layer B at turn close and is visible on the *next* turn's prompt; the §5.5 system-injected mid-turn re-prompt mechanism is deferred to Phase 2.e-B (the current turn's response was generated without that thread in context).
