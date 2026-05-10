@@ -62,11 +62,18 @@ func onContextDelta(state *State, delta Delta) error {
 	return nil
 }
 
-// extractSymbols applies the source-specific extraction policy. v0.1
-// supports user.prompt (regex-based hash-tag extraction) and
-// model.response (topic-tag parser). Other sources are no-op
-// placeholders awaiting Phase 3+ work.
+// extractSymbols applies the §3.3 three-pass extraction policy. The
+// deterministic pass (URLs, file paths, hex IDs) runs over every
+// delta source; source-specific passes layer on top:
+//   - user.prompt: hash-tag regex → SourceUser
+//   - model.response: topic-tag parser → SourceModel
+//
+// Other sources (tool.result, thread.fetched, slash.injected,
+// digest.refresh, directive.reloaded, user.shell-capture) currently
+// contribute through the deterministic pass only.
 func extractSymbols(state *State, delta Delta) error {
+	deterministicExtract(state, delta.Content)
+
 	switch delta.Source {
 	case "user.prompt":
 		for _, tag := range userTagRE.FindAllStringSubmatch(delta.Content, -1) {
@@ -105,8 +112,9 @@ func extractSymbols(state *State, delta Delta) error {
 		return nil
 
 	default:
-		// tool.result, thread.fetched, slash.injected, etc. — no extraction
-		// policy in v0.1. Phase 3+ adds deterministic regex passes per §3.3.
+		// Deterministic pass already ran above; no source-specific
+		// extractor for tool.result, thread.fetched, slash.injected,
+		// digest.refresh, directive.reloaded, user.shell-capture.
 		return nil
 	}
 }
