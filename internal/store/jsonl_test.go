@@ -81,16 +81,27 @@ func idsOf(rs []SpineRecord) []string {
 
 func TestReadEmptyAndMissing(t *testing.T) {
 	dir := t.TempDir()
+	// Missing canonical files are treated as empty by ReadSpine /
+	// ReadSymbols — semantically equivalent to "no records yet."
 	missing := filepath.Join(dir, "nope.jsonl")
-	if _, err := ReadSpine(missing); err == nil {
-		t.Fatal("ReadSpine on missing path: expected error, got nil")
+	got, err := ReadSpine(missing)
+	if err != nil {
+		t.Fatalf("ReadSpine on missing path: want nil err, got %v", err)
+	}
+	if got != nil {
+		t.Fatalf("ReadSpine on missing path: want nil slice, got %v", got)
+	}
+	// Generic ReadJSONL (non-canonical typed wrappers) is still strict —
+	// missing file errors so other callers aren't surprised.
+	if _, err := ReadJSONL[SpineRecord](missing); err == nil {
+		t.Fatal("ReadJSONL on missing path: expected error, got nil")
 	}
 
 	empty := filepath.Join(dir, "empty.jsonl")
 	if err := os.WriteFile(empty, nil, 0o644); err != nil {
 		t.Fatalf("create empty file: %v", err)
 	}
-	got, err := ReadSpine(empty)
+	got, err = ReadSpine(empty)
 	if err != nil {
 		t.Fatalf("ReadSpine empty: %v", err)
 	}

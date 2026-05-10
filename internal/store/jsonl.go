@@ -119,9 +119,15 @@ func WriteJSONL[T any](path string, records []T, keyFn func(T) string) error {
 	return nil
 }
 
-// ReadSpine reads a spine.jsonl file.
+// ReadSpine reads a spine.jsonl file. A missing file is treated as an
+// empty spine — the canonical "no records yet" state, semantically
+// equivalent to an empty file. Other read errors propagate.
 func ReadSpine(path string) ([]SpineRecord, error) {
-	return ReadJSONL[SpineRecord](path)
+	records, err := ReadJSONL[SpineRecord](path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	return records, err
 }
 
 // WriteSpine writes a spine.jsonl file, sorted by thread ID.
@@ -129,9 +135,14 @@ func WriteSpine(path string, records []SpineRecord) error {
 	return WriteJSONL(path, records, func(r SpineRecord) string { return r.ID })
 }
 
-// ReadSymbols reads a symbols.jsonl file.
+// ReadSymbols reads a symbols.jsonl file. Missing-file semantics match
+// ReadSpine: treated as an empty index.
 func ReadSymbols(path string) ([]SymbolRecord, error) {
-	return ReadJSONL[SymbolRecord](path)
+	records, err := ReadJSONL[SymbolRecord](path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	return records, err
 }
 
 // WriteSymbols writes a symbols.jsonl file, sorted by symbol.

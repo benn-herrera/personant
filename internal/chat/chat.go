@@ -77,6 +77,15 @@ func Run(opts Options) error {
 		return fmt.Errorf("chat: resolve paths: %w", err)
 	}
 
+	// Idempotent home scaffold. If the home is already initialized this is
+	// a near-noop; if it's a bare directory (e.g. user manually created
+	// providers.toml without running `personant init`), this lands the
+	// canonical layout (spine.jsonl, threads/, projects/, directives/, .git/,
+	// etc.) without clobbering accrued state files (user.md, providers.toml).
+	if err := store.Init(paths, store.InitOptions{Quiet: true}); err != nil {
+		return fmt.Errorf("chat: scaffold home: %w", err)
+	}
+
 	providers, err := store.LoadProviders(paths.Providers)
 	if err != nil {
 		return fmt.Errorf("chat: load providers: %w", err)
