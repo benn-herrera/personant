@@ -1550,8 +1550,9 @@ simulation.
 ### 11.2 Mock LLM client
 
 Tests exercise the full runtime path except the actual LLM round-trip.
-The mock client (`internal/testing/mockllm/`) implements the same
-`model.consult` interface as the production OpenAI-compatible client.
+The mock client lives in `internal/model/` alongside the production
+`HTTPClient` and implements the same `Client` interface — production
+callers and tests use the same import; only the constructor differs.
 
 Two modes:
 

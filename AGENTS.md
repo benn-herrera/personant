@@ -90,9 +90,18 @@ Go 1.26.1+.
 
 ## House rules for agents
 
-- **Don't reintroduce removed dependencies.** `langchaingo`, `mattn/go-sqlite3`,
-  `BurntSushi/toml`, and the langchaingo memory layer were intentionally
-  removed; they conflict with the substrate non-negotiables above.
+- **Be deliberate about dependencies.** Two categories:
+  - **Permanently out** (architectural conflict with the substrate
+    non-negotiables): `langchaingo/memory`, `langchaingo/chains`,
+    `mattn/go-sqlite3`. Do not reintroduce.
+  - **Approved-when-earned** (compatible; pull in *with their consumer*,
+    not before): `github.com/BurntSushi/toml` (consumer: `providers.toml`
+    loader, landed Phase 2.a); `gopkg.in/yaml.v3` (consumer: thread
+    frontmatter writes, lands Phase 2.d). Do not pull these in
+    speculatively; do pull them in when the consumer arrives.
+  - **`langchaingo/llms`** is *compatible* but excluded from v0.1 on
+    dep-hygiene + scope grounds — see substrate-decisions memory for the
+    revisit conditions.
 - **Match the spec's data model.** Spine records, thread frontmatter, and the
   symbol index have field-level schemas in §2. Don't invent your own.
 - **Verify with the canonical docs.** Before assuming a behavior, grep the
