@@ -2,7 +2,12 @@
 
 **Status:** living design outline. Initial decisions from the 2026-05-07/08 design discussion; refined in subsequent passes (most recently 2026-05-09 — agent role and tool surface).
 **Audience:** the author, future implementation work, future agents revisiting the design.
-**Not a spec:** a structured summary of decisions made, with explicit watchlist items and deferrals. The companion document [`spec.md`](spec.md) carries the field-level schemas and surface APIs.
+**This document is the *why*** — narrative rationale for design decisions. Companions:
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — compressed orientation for AI agents: principles, patterns, anti-patterns, navigation. Read first.
+- [`spec.md`](spec.md) — field-level schemas, algorithms, surface APIs.
+- [`AGENTS.md`](AGENTS.md) — house rules for agents working in this repo.
+
+Tables, diagrams, and schemas that already live in `ARCHITECTURE.md` or `spec.md` are not reproduced here — outline.md is prose-narrative-shaped.
 
 ---
 
@@ -18,11 +23,9 @@ The system inverts the typical agent-app pattern: instead of letting the model d
 
 ## Architectural thesis
 
-| Tier | Role |
-|---|---|
-| Deterministic code | canonical state holder; integrity enforcer; build / query / index operations |
-| LLM | narrow generative/judgment roles (topic tagging, summary drafting, anchor selection, recognition, dissection clustering) |
-| Human | final ack at high-leverage moments only (closure, opportunistic recall surfacing, fallback dissection trigger) |
+> **Deterministic state as canonical, LLM in narrow judgment roles, human acks at high-leverage moments only.**
+
+The tier-by-tier responsibility table is in `ARCHITECTURE.md`. This section captures the *why* behind the thesis.
 
 The bet: deterministic mechanisms can do most of the load-bearing work, the LLM is leveraged surgically, and the human only intervenes where their input is the most valuable signal available. This is the opposite of "agent that figures it all out" and is what enables drift-resistance over months-long timeframes.
 
@@ -52,14 +55,11 @@ See `spec.md` §4 for the user surface (slash commands, shell escape, project id
 
 ## Substrate
 
-- **Storage:** text files committed to git. Inspectability, recoverability, history, branching, free `git log` / `git diff` / `git blame` / `git grep`.
-- **Format:** JSONL files for structured data (spine, symbols, threads metadata); markdown for thread bodies and directive files. Sorted deterministically (by ID) so git diffs stay record-grain rather than reformat-grain.
-- **Build/query layer:** thin Go package within the agent runtime reads JSONL into memory once per process; lookup is a map access — sub-millisecond at any plausible v0.1 scale. The same binary serves the agent runtime and CLI commands (`personant deps thr_42`, `personant search "Cosserat"`, etc.) for ad-hoc shell work.
-- **Reversibility:** the storage choice is reversible. Query API is the contract; if scale forces SQLite later, the substrate can change without callers noticing.
-- **Freshness:** pre-commit hook regenerates index files from canonical sources; commit fails on stale index. Same pattern lockfiles use.
-- **Single-source policy:** if any derived index disagrees with the canonical source, the source wins and the index is rebuilt. Drift cannot accumulate.
-- **Autonomic git management:** the deterministic runtime is the only entity that mutates `~/.personant/`'s git tree. `git init` (first run), `git add`/`commit` (on canonical mutations), and pre-commit hook installation/invocation are runtime concerns, performed without user ack — same lifecycle status as writing to `spine.jsonl` itself. The LLM never invokes git. (The runtime may also issue read-only git queries against the *workspace* — `ls-files`, `status`, `diff` — for permission-tier classification and ack-prompt diff rendering, but it never mutates workspace git; that's the user's territory.)
-- **Git as archival substrate.** Deep-cold thread archival (v0.2; spec §3.8) leverages the same git tree rather than building a bespoke archive format. Archive = `git rm` + `git commit` + an entry in `archive/index.jsonl` recording commit + blob hash; recovery = `git show <commit>:<path>`. Git's content-addressed, zlib-deflated, delta-compressed object store handles storage and dedup across versions. Personant never rewrites history — that invariant is what keeps archived blobs reachable across `git gc`.
+The substrate non-negotiables (text in git, JSONL records, markdown bodies, derived-not-canonical indexes, autonomic git management, git as archival substrate) are tabulated in `ARCHITECTURE.md`. This section addresses the *reasoning* for those choices and is the place to record substrate decisions as they evolve.
+
+The reasoning underneath: text-in-git buys inspectability, recoverability, history, and branching for free. JSONL sorted by ID keeps git diffs record-grain rather than reformat-grain. The build/query layer is a thin Go package that reads JSONL into memory once per process; lookup is map-access at sub-millisecond scale. The storage choice is reversible — the query API is the contract, so a future SQLite *index* (canonical state staying as text) can be added without callers noticing.
+
+Drift cannot accumulate: any derived index disagreeing with the canonical source loses; the index gets rebuilt. The pre-commit hook is what enforces this — same pattern lockfiles use.
 
 ### Implementation language
 
@@ -72,43 +72,17 @@ The Go runtime never has a Python dependency surface; Python utilities never acc
 
 ## Storage layout (default `~/.personant/`)
 
-```
-personant/
-  spine.jsonl                    # unified across all projects, line-grain entries
-  symbols.jsonl                  # inverse index, symbol → [thread_id, ...]
-  threads/
-    thr_<id>.md                  # full content per thread (operational notes, not pedagogy)
-  projects/
-    prj_<n>/                     # per-project metadata + recent-anchor digest for Layer A2 (stable internal handle)
-  directives/
-    defaults.md                  # system-default parameter values
-    user.md                      # user-wide overrides (accrued)
-    prj_<n>/...                  # project-scoped overrides
-  logs/
-    YYYY-MM-DD.log               # plain-text append-only event log, daily rotation
-  README.md                      # explains layout for human inspection (rare path)
-```
-
-Storage is git-init'd on first run. The user gets free history and recoverability without any setup ceremony.
+The full directory layout (spine, symbols, threads, projects, directives, logs, providers, archive index, last-active marker, tmp scratch, .git tree) is in `spec.md` §2.1, with the canonical / derived / operational / secret-bearing classification table. Storage is git-init'd on first run; the user gets free history and recoverability with no setup ceremony.
 
 ---
 
 ## Working-set composition (layered)
 
-Per-turn context is composed from layers with explicit budget caps:
+The layer table (E / A1 / A2 / B / C / current_turn with default budget percentages) and eviction order are tabulated in `ARCHITECTURE.md`. Detailed algorithms are in `spec.md` §3.1 and §3.0 (the context-modification event chain that does the per-event work).
 
-| Layer | Content | Allocation | Loading |
-|---|---|---|---|
-| E | directive files + project conventions (CLAUDE.md, AGENTS.md analog) | 5–10% | always |
-| A1 | current project's spine entries (full) | 5–10% | always |
-| A2 | other projects' compressed digest (per-project summary + recent anchors) | ~150 bytes / project | always |
-| B | actively engaged threads (top-K full content) | up to 50% | populated by per-turn topic tag |
-| C | recently engaged dormant threads (summaries) | up to 15% | decay-driven from B |
-| current turn | user input + agent response | 15% | reserved |
+The narrative reasoning: *Layers E and A are recognition surface; Layer B is active engagement.* Spine is always in window so the model can recognize prior topics directly. The model emits a topic tag → corresponding threads are fetched into B → the augmented context is what generates the response. **No speculative prefetch** — every loaded thread is loaded because the model said it was needed.
 
-Under budget pressure, bumpable in order: C-oldest, then B-oldest (compressed to summary). A and E are sacrosanct — losing them breaks recognition, which is the whole point.
-
-**Recognition flow:** spine is always loaded → model recognizes prior topic directly from spine entries → emits topic tag at turn start → corresponding thread fetched into Layer B → response generated. **No speculative prefetch** — every loaded thread is loaded because the model said it was needed.
+A and E are sacrosanct under budget pressure because losing them breaks recognition, which is the whole point.
 
 **Content de-redundification** (v0.2; spec §3.9). When the same file content is included in working context across many turns (file read, modified, re-read), the runtime de-redundifies: literal current state at the most-recent position; N most-recent diffs in literal form; older states replaced with content-addressed identifiers. Persistent storage keeps the full diff chain with periodic literal anchors (every K-th change) to prevent cumulative drift. Diff format starts as unified diff with a planned natural-language fallback for cases where the model has trouble applying. The persistent vs. live distinction is structural — same primitives (content-addressed identifiers, diffs, anchor literals) serve different concerns.
 
@@ -130,38 +104,24 @@ Under budget pressure, bumpable in order: C-oldest, then B-oldest (compressed to
 
 ## Spine entry format (schema)
 
-Display form (line in spine):
+The full schema (field types, validation constraints, JSONL wire form, display rendering) is in `spec.md` §2.2. The narrative point worth holding onto:
+
+> The spine line is the load-bearing artifact. It must encode enough decision-state that the model can answer most "what was the outcome of X" questions from the line alone, without needing to fetch the thread file.
+
+Display form, briefly:
 
 ```
-thr_<id> [<4–8 normalized anchor symbols, comma-separated>] — <100–150 char gist> [<state>]
+thr_<id> [<4–8 anchors>] — <100–150 char gist> [<state>]
 ```
 
-Examples:
+Example lines (the gist is what the model reads to recognize a prior topic):
 
 ```
 thr_88 [trefoil, unknot, body-topology, electron-shape] — electron body-topology conflict; entries trf3bd / unk0bd added; awaiting Grant resolution [WIP]
 thr_92 [neutrino, helical-screw, cosserat, corrigendum] — closed-unknot → open-helical-screw correction across KB + LaTeX [resolved 2026-05-06]
-thr_103 [kb, latex, canonicality, latex-is-derived] — KB inverted to canonical, LaTeX now derived [decided 2026-05-07]
 ```
 
-State markers (informal vocabulary): `[WIP]`, `[blocked]`, `[paused]`, `[resolved <date>]`, `[decided <date>]`, `[abandoned]`.
-
-JSONL form in `spine.jsonl`:
-
-```json
-{
-  "id": "thr_88",
-  "project": "prj_3",
-  "anchors": ["trefoil", "unknot", "body-topology", "electron-shape"],
-  "summary": "electron body-topology conflict; entries trf3bd / unk0bd added; awaiting Grant resolution",
-  "state": "WIP",
-  "created": "2026-05-06T...",
-  "last_engaged": "2026-05-08T...",
-  "state_changed": "2026-05-07T..."
-}
-```
-
-The spine line is the load-bearing artifact. It must encode enough decision-state that the model can answer most "what was the outcome of X" questions from the line alone, without needing to fetch the thread file.
+The anchor set is what makes recall possible. The summary is what makes recognition cheap. Together they're the *whole* recognition surface for retired threads — getting them right at retirement is the point of the curator-summary ack flow.
 
 ---
 
@@ -268,61 +228,30 @@ Same pattern extends naturally to closure prompting frequency, prefetch aggressi
 
 ## Bootstrap defaults
 
-Storage scaffold created and git-init'd at first run. Initial parameter values:
+The full parameter table (engagement decay, recall thresholds, layer budgets, anchor caps, etc.) lives in `spec.md` §2.6.1 — that's the single source of truth and the first place to look when calibrating. The values are first-pass guesses; the calibration regime (spec §11.8) tunes them empirically against canonical workloads.
 
-| Knob | Default |
-|---|---|
-| `engagement.decay-turns` | 8 |
-| `engagement.decay-time` | 7 days |
-| `recall.symbolic-threshold` | 0.4 (Jaccard, permissive — tightens via accrual) |
-| `recall.cross-project-threshold` | 0.5 |
-| `layer.b-top-k` | 3 |
-| `layer.budget-percentages` | E:5–10, A:5–10, B:50, C:15, current:15 |
-| `anchors.cap-per-thread` | 6 |
-| `history.cap-per-thread` | 40 |
-| `spine.entry-max-chars` | 200 |
-| `cross-project.digest-per-project-bytes` | 150 |
-| `dissect.pressure-threshold` | 0.90 |
-
-These are first-pass guesses. They are tuned via the directive-accrual mechanism; logged metrics show which defaults are off.
-
-**First-run behavior:**
-- Empty spine → opportunistic recall structurally disabled (no false "we discussed this before").
-- Project inferred from CWD; explicit `/project <name>` overrides.
-- No tutorial / onboarding ceremony — the agent is ready.
-- `system.bootstrap` event written to today's log with version, paths, defaults snapshot.
+**First-run behavior:** empty spine → opportunistic recall structurally disabled (no false "we discussed this before"). Project resolved per the §4.5.7 bootstrap waterfall (git remote → CWD path → last-active prompt → fallback). No tutorial / onboarding ceremony — the agent is ready. A `system.bootstrap` event lands in today's log with version, paths, and defaults snapshot.
 
 ---
 
 ## Logging
 
-- One file per day at `logs/YYYY-MM-DD.log`, append-only.
-- Plain text, timestamped lines, free-form details. No structured event schema in v0.1.
-- Liberal logging — when in doubt, log it. Cost of an extra line is essentially zero.
-- Rotation: 90 days plain; older archived/gzipped.
-- Schema-promote frequently-queried log patterns to structured form when patterns emerge — not before.
-
-Examples of natural events:
-
-```
-2026-05-08T02:55:44 thread.engaged thr_42 [trefoil, unknot] turn=1247
-2026-05-08T02:55:44 spine.match-fire thr_88 type=symbolic
-2026-05-08T02:55:44 retire.prompt thr_42 inactivity=12 ack=yes
-2026-05-08T02:55:44 dissect.fire reason=budget-pressure clusters=4
-```
+Format and event vocabulary are in `spec.md` §2.8. The narrative point: **liberal logging — when in doubt, log it.** Cost of a log line is essentially zero; the value of having a forensic record when something surprises you later is high. Schema-promote frequently-queried log patterns to structured form when patterns emerge — not before.
 
 ---
 
 ## Watch list (known weak spots; instrumentation will reveal scale)
 
-1. **Synonym fragmentation** — same concept emitted as different surface forms across threads. Most likely v0.2 driver.
-2. **Anchor selection quality at retirement** — curator may pick subtly-wrong anchors. Track which anchors actually fire recall later; anchors that never trigger over months are dead weight, anchors that fire repeatedly are load-bearing.
-3. **Cross-thread symbol collision** — single-symbol matches return ambiguous threads. May force richer match (combinations) or thread-cluster concept.
-4. **Low-information symbol leakage** — generic words leaking past stopword filters.
-5. **Model emission drift** — model behavior changes silently affecting symbol consistency.
-6. **Pattern coverage in deterministic pass** — per-project regex curation needs.
+The numbered watch list (the canonical, navigable form, kept up-to-date as items resolve or new ones surface) lives in `spec.md` §12. The narrative point worth holding onto:
 
-The first-pass design is guaranteed to have holes. Instrumentation is what makes v0.2 design empirical instead of guessed.
+> The first-pass design is guaranteed to have holes. Instrumentation is what makes v0.2 design empirical instead of guessed.
+
+Categories of known weakness, broadly:
+- **Symbol-extraction noise** — synonym fragmentation, low-information leakage, model emission drift.
+- **Recall precision** — cross-thread symbol collision, anchor selection quality at retirement.
+- **Deterministic-pass coverage** — per-project regex curation needs.
+
+These aren't blockers; they're *expected* findings the simulation regime (spec §11) is designed to surface and quantify.
 
 ---
 
@@ -355,15 +284,9 @@ The exclusions below are at the **LLM tool inventory** layer. The deterministic 
 
 ---
 
-## Architectural thesis recap
+## Recap: pattern consistency as design signal
 
-The system bets that **deterministic state + narrow LLM roles + minimal human acks at high-leverage moments** scales further than any of the alternatives. Concretely:
-
-- LLM is in narrow roles only — topic tagging, summary drafting, anchor selection, dissection clustering, recall recognition. Never the canonical-state holder.
-- Deterministic code holds canonical state, enforces integrity, and provides query/build operations.
-- Human acks at exactly three moments: closure, opportunistic recall surfacing, fallback dissection trigger. Three places the user pays a small UX cost; everything else is deterministic background.
-
-This pattern recurs at every layer of the design — from how spine entries get curated to how directive files accrue to how cross-project recognition fires. That consistency is the strongest signal the design is converging toward something coherent rather than a collection of clever pieces.
+The thesis recurs at every layer of the design — from how spine entries get curated to how directive files accrue to how cross-project recognition fires to how workspace mutations route through `propose_*`. That consistency is the strongest signal the design is converging toward something coherent rather than a collection of clever pieces. The pattern itself, applied to a new design question, is usually the right move.
 
 The success criterion: months-long seamless continuity. Externally, the user just talks to a partner who picks up where they left off. Internally, the substrate is doing constant work to make that appearance honest.
 
@@ -379,20 +302,21 @@ The design originated in conversation 2026-05-07/08, building on observations ab
 
 ---
 
-## Companion document
+## Companion documents
 
-[`spec.md`](spec.md) carries the field-level material:
-- Storage schema definitions (JSONL field-level): §2
-- Deep cold archival mechanism (v0.2): §3.8
-- Working-set content dedup (v0.2): §3.9
-- Tool surface and permission tiers: §6
-- Go package layout for the runtime; CLI command surface: §4 (substantive), §7 *(stub as of 2026-05-09)*
-- Slash command catalog (borrowed where possible from Claude Code / OpenCode): §4.2
-- Directive file format specification: §2.6, §6.2.3
-- Bootstrap, lifecycle, providers.toml, pre-commit hook: §8
-- Implementation milestone breakdown: §10 (Phase 1 done; §10.1 tracks v0.2 / v1.0)
-- Testing approach (especially for instrumented behavior): §11
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — orientation, principles, patterns, anti-patterns, navigation map. Read first.
+- [`spec.md`](spec.md) — field-level material:
+  - Storage schemas (JSONL): §2
+  - Context-modification event chain: §3.0
+  - Working-set composition: §3.1
+  - Deep cold archival (v0.2): §3.8
+  - Working-set content dedup (v0.2): §3.9
+  - User surface (CLI + slash commands + shell escape + project root): §4
+  - Tool surface and permission tiers: §6
+  - Bootstrap, lifecycle, providers.toml, pre-commit hook: §8
+  - Implementation milestones: §10 (Phase 1 done; §10.1 tracks v0.2 / v1.0)
+  - Measurement and validation regime: §11 (six-month simulation acceptance gate at §11.1)
+  - Watch list: §12; open questions: §13
+- [`AGENTS.md`](AGENTS.md) — house rules for AI agents in this repo.
 
-The outline is for orientation; the spec is for execution. Both documents are living and edited in place as decisions evolve.
-
-Both files are temporary scaffolding for the current pre-implementation phase. Once the project is sufficiently mature, this content will migrate into `ARCHITECTURE.md` (with companion updates to `AGENTS.md` and `README.md`) and these files will go away.
+The outline is for orientation in narrative form; ARCHITECTURE.md is for orientation in compressed form; spec is for execution. All four are living and edited in place as decisions evolve.

@@ -1,9 +1,13 @@
 # Personant — v0.1 Specification
 
-**Status:** in progress. §0–§2, §3.0, §3.8, §3.9, §4, §5.{1,5}, §6, §8.2, §11 substantively drafted; §3.{1–7}, §5.{2–4}, §7, §8.{1,3,4}, §9, §10 stubbed.
-**Derives from:** [`outline.md`](outline.md).
+**Status:** in progress. §0–§2, §3.0, §3.1, §3.8, §3.9, §4, §5.{1,5}, §6, §8.2, §11 substantively drafted; §3.{2–7}, §5.{2–4}, §7, §8.{1,3,4}, §9, §10 stubbed.
 **Audience:** implementation work. Specifies field-level schemas, algorithms, and surface APIs.
-**Relationship to outline:** outline is the *why*; spec is the *what and how*. Where the outline says "the model emits a topic tag at turn start," the spec specifies the prompt fragment, the parser regex, and the parser's normalization rules.
+**Companion docs:**
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — orientation, principles, patterns, anti-patterns. **Read first.**
+- [`outline.md`](outline.md) — design narrative; the *why* of decisions.
+- [`AGENTS.md`](AGENTS.md) — house rules for agents in this repo.
+
+This spec is the *what and how*: schemas, algorithms, surface APIs. Tables and diagrams that already live in `ARCHITECTURE.md` are not reproduced here unless the spec needs them at higher resolution.
 
 ---
 
@@ -20,25 +24,11 @@
 
 ---
 
-## 1. System overview (one-page recap)
+## 1. System overview
 
-Personant is a single-user, single-agent runtime for managing an AI assistant's working memory across arbitrary projects with continuity. The agent has one continuous career: a unified persistent memory, no session boundaries, no compaction-driven information loss, cross-project recognition.
+Personant is a single-user, single-agent runtime for managing an AI assistant's working memory across arbitrary projects with continuity. The agent has one continuous career — unified persistent memory, no session boundaries, no compaction-driven information loss, cross-project recognition. Role: **research assistant**, not general-capability agent.
 
-**Role: research assistant**, not general-capability agent. The constraint is load-bearing — see §6 for the bounded external tool surface and the rationale.
-
-The architectural thesis: **deterministic state as canonical, LLM in narrow judgment roles, human acks at high-leverage moments only.**
-
-| Tier | Role |
-|---|---|
-| Deterministic code (Go) | canonical state holder, integrity enforcer, build/query/index operations |
-| LLM | narrow generative/judgment roles (topic tagging, summary drafting, anchor selection, recognition, dissection clustering) |
-| Human | final ack at three moments (closure, opportunistic recall surfacing, fallback dissection trigger) |
-
-Substrate: text files committed to git; JSONL for structured records; markdown for thread bodies and directive files; sub-millisecond in-memory query layer in Go; pre-commit hook enforces derived-index freshness.
-
-Working set is layered (E + A1 + A2 + B + C + current turn) with explicit budget caps and decay-driven layer transitions. Recognition is model-native (spine in window); recall is opportunistic (deterministic match → user-acked surface prompt → explicit fetch). Closure is event-driven (engagement decay + ack). Fallback dissection handles overflow when normal retirement falls behind.
-
-Success criterion: months-long seamless continuity. Externally a research partner picking up where work was left off; internally a substrate doing constant work to make that appearance honest.
+For orientation (the architectural thesis, recurring patterns, layer model, tool surface, permission tiers, etc.), see `ARCHITECTURE.md`. This spec assumes that orientation and goes directly to operational detail.
 
 **Operationalized acceptance (v0.1):** the system must pass a **six-month simulated workload** (§11.1) — sustained continuity of memory quality, zero out-of-context-space events, measured runtime costs for recall / retirement / archival / resurrection within bounds. After six simulated months the system must be in a state demonstrating it could run another six months without degradation. This is what makes "months-long continuity" a proven property rather than an aspiration.
 
