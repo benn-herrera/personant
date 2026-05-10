@@ -548,6 +548,15 @@ func closeTurnAndUpdateEngagement(state *State, userInput, responseBody string) 
 	}
 
 	updateLayerLRU(state, engaged)
+
+	engagedSet := make(map[string]struct{}, len(engaged))
+	for _, id := range engaged {
+		engagedSet[id] = struct{}{}
+	}
+	if err := surfaceRecallCandidates(state, engagedSet); err != nil {
+		_ = eventlog.Log(state.Paths, "recall", "error", sanitizeDetail(err.Error()))
+		// Non-fatal: opportunistic recall failure does not abort the turn.
+	}
 	return nil
 }
 
