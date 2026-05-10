@@ -3,9 +3,9 @@
 **Status:** in progress. §0–§2, §3.0, §3.1, §3.8, §3.9, §4, §5.{1,5}, §6, §8.2, §11 substantively drafted; §3.{2–7}, §5.{2–4}, §7, §8.{1,3,4}, §9, §10 stubbed.
 **Audience:** implementation work. Specifies field-level schemas, algorithms, and surface APIs.
 **Companion docs:**
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — orientation, principles, patterns, anti-patterns. **Read first.**
-- [`outline.md`](outline.md) — design narrative; the *why* of decisions.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — orientation, principles, patterns, mechanisms, anti-patterns. **Read first.**
 - [`AGENTS.md`](AGENTS.md) — house rules for agents in this repo.
+- [`README.md`](README.md) — user-facing description; getting started.
 
 This spec is the *what and how*: schemas, algorithms, surface APIs. Tables and diagrams that already live in `ARCHITECTURE.md` are not reproduced here unless the spec needs them at higher resolution.
 
@@ -331,7 +331,7 @@ When a parameter is read, the runtime walks the precedence chain and returns the
 
 #### 2.6.1 Recognized parameters
 
-[OPEN: full parameter table. Initial seed from outline §"Bootstrap defaults". Will expand as implementation progresses.]
+[OPEN: full parameter table. Will expand as implementation progresses.]
 
 ```yaml
 engagement.decay-turns: 8           # turns of non-engagement before closure prompt fires
@@ -660,10 +660,10 @@ deep-cold history.
 
 #### 3.8.4 Relationship to other deferrals
 
-This obsoletes the outline's "Archives off-spine" handwave: the
-mechanism is now concrete. The outline's "Symbol decay over time"
-deferral remains separate — that's about evicting *symbols* from the
-inverse index when they go cold, not about archiving threads.
+This obsoletes the earlier "Archives off-spine" handwave: the mechanism
+is now concrete. "Symbol decay over time" remains a separate deferral
+— that's about evicting *symbols* from the inverse index when they go
+cold, not about archiving threads.
 
 [OPEN: archival trigger threshold ("spine cardinality pressure" is
 hand-wavy). Calibrate empirically; defer to v0.2.]
@@ -1152,11 +1152,11 @@ model's decision-making narrow. Topic tag is the request; system
 injection is the fulfillment.
 
 [OPEN: re-prompt cost. Each fetch implies a re-roundtrip to the LLM.
-Speculative pre-fetch was rejected in the outline as an explicit
-non-goal (every loaded thread is loaded because the model said it was
-needed), so re-prompt cost is the path; quantify the latency penalty
-during Phase 2 instrumentation. The six-month simulation (§11.1) will
-expose the steady-state impact.]
+Speculative pre-fetch is rejected as an explicit non-goal (every
+loaded thread is loaded because the model said it was needed; see
+ARCHITECTURE.md "No speculative prefetch"), so re-prompt cost is the
+path; quantify the latency penalty during Phase 2 instrumentation.
+The six-month simulation (§11.1) will expose the steady-state impact.]
 
 ---
 
@@ -1473,7 +1473,7 @@ Detailed in §2.6. Briefly: `directives/defaults.md` < `directives/user.md` < `d
 
 ### 8.4 Upgrade path placeholder
 
-[STUB. Deferred per outline; v1.0+ concern.]
+[STUB. v1.0+ concern.]
 
 ---
 
@@ -1824,7 +1824,7 @@ scope for v0.1 but the log format (§2.8) is designed to enable it.
 
 ---
 
-## 12. Watch list (carried from outline)
+## 12. Watch list
 
 1. **Synonym fragmentation** — same concept emitted as different surface forms. Most likely v0.2 driver.
 2. **Anchor selection quality at retirement** — track `recall_fires` per anchor; anchors that never fire over time are dead weight.
@@ -1880,7 +1880,7 @@ Compiled from inline `[OPEN: ...]` markers and design-pass uncertainties.
 
 ## Document changelog
 
-- 2026-05-08 — initial draft (§0–§2 substantive; §3+ stubs; watch list / open questions carried from outline / inline markers).
+- 2026-05-08 — initial draft (§0–§2 substantive; §3+ stubs; watch list / open questions seeded from inline markers and prior design discussion).
 - 2026-05-09 — §6 "Tool surface and permissions" drafted; subsequent sections renumbered §6→§7 through §12→§13. §1 mentions research-assistant role. Watch-list items 8–11 and open questions 11–14 added from the same design pass. §6.1.3 clarified: exclusion is at the LLM-tool layer; runtime performs git operations autonomically on `~/.personant/` and read-only git queries on the workspace.
 - 2026-05-09 — §10.1 "Beyond v0.1" added to track v1.0 computational tool surface (Python execution + black/isort/flake8) as a planned but uncommitted post-v0.1 role expansion. Outline mirrors the deferral.
 - 2026-05-09 — §4 expanded substantively: §4.1 CLI command list seeded; §4.2 slash command catalog (incl. `/cd-project`, `/project switch|rename`, `/model`, `/stats`); new §4.4 "Shell escape (`$` and `#`)" with long-lived interactive shell subprocess (interactive apps deferred); new §4.5 "Project identity, project root, and shell cwd" with dual-cwd model. §6.2 gains §6.2.6 "Active-project boundary as a tier axis." §2.8 vocabulary adds `user.*` and `project.*` categories.

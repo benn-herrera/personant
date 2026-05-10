@@ -7,16 +7,13 @@ cross-project recognition.
 
 ## Status
 
-**v0.1, pre-implementation.** The design is settled and documented; the
-runtime itself is a Go skeleton. The canonical sources are:
+**v0.1, in active development.** Phase 1 (storage scaffold) is complete; Phase 2 (turn loop, chat REPL, working-set composition, scenario harness) is substantially landed. The canonical sources are:
 
-- [`outline.md`](outline.md) — design rationale, "why" decisions
-  were made the way they were, watch list, deferrals.
-- [`spec.md`](spec.md) — field-level schemas, algorithms, surface
-  APIs. §0–§2 and §6 are substantive; §3–§5 and §7+ are stubbed.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — orientation for AI agents and contributors; principles, patterns, mechanisms, anti-patterns. Read first.
+- [`spec.md`](spec.md) — field-level schemas, algorithms, surface APIs.
+- [`AGENTS.md`](AGENTS.md) — house rules for agents working in this repo.
 
-Read the outline first if you want the shape of the system; read the spec
-when you need to write code that conforms to it.
+Read ARCHITECTURE.md first for the shape of the system; read the spec when you need to write code that conforms to it.
 
 ## What it does
 
@@ -65,5 +62,5 @@ dependencies.
   multi-project recognition, opportunistic recall, closure ack flow,
   fallback dissection.
 - **Out of scope:** multi-user (v2.0), encrypted-at-rest storage, sub-agent
-  runtime extension, phrasal-concept symbol extraction. See the outline for
-  the full deferral list.
+  runtime extension, phrasal-concept symbol extraction. See ARCHITECTURE.md
+  "Out of scope" for the full categorization.

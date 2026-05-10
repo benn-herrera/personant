@@ -9,14 +9,17 @@ Read it before making non-trivial changes. Human-facing project info is in
 The design is in two markdown files at the repo root. Read them, in this
 order, before proposing structural changes:
 
-1. [`outline.md`](outline.md) — design rationale, watch list,
-   deferrals. The "why" of every decision.
-2. [`spec.md`](spec.md) — field-level schemas, algorithms,
-   surface APIs. The "what" and "how". §0–§2 and §6 are substantive;
-   §3–§5 and §7+ are stubbed.
+1. [`ARCHITECTURE.md`](ARCHITECTURE.md) — orientation, principles,
+   patterns, mechanisms, anti-patterns, navigation. Compressed
+   ~12-minute read covering everything an agent needs to ground
+   itself in the project's thinking style. **Read first.**
+2. [`spec.md`](spec.md) — field-level schemas, algorithms, surface
+   APIs. The execution-level detail. §0–§2, §3.0, §3.1, §3.8, §3.9,
+   §4, §5.{1,5}, §6, §8.2, §11 are substantively drafted; rest stubbed.
 
-If a question of design comes up, the outline and spec are authoritative.
-Update them when behavior changes; don't let code and docs drift.
+If a question of design comes up, ARCHITECTURE.md and the spec are
+authoritative. Update them when behavior changes; don't let code and
+docs drift.
 
 ## Architectural thesis (load-bearing)
 
@@ -62,20 +65,36 @@ accumulate a pip dependency surface.
 
 ## Repo state
 
-The runtime is a skeleton. Current shape:
+Phase 1 (skeleton + storage) is complete; Phase 2 (turn loop + topic
+tagging + chat REPL + working-set composition + scenario harness) is
+substantially landed; the v0.2 surface (deep cold archival, dedup,
+re-prompt) is queued. Current top-level shape:
 
 ```
-cmd/main.go                 cobra root (no subcommands implemented yet)
-internal/log/               level-aware logger (stderr + file split)
-internal/util/paths.go      PersonantPaths — $PERSONANT_HOME resolution
-outline.md             design rationale
-spec.md                §0–§2 and §6 substantive; §3–§5 and §7+ stubbed
-Makefile                    build + agents-submodule pinning
+cmd/                        cobra subcommands (init, index, verify, ping,
+                            models, chat — bare `personant` defaults to chat)
+internal/store/             canonical types, paths, JSONL helpers, init,
+                            spine ops, project ops, providers, thread I/O,
+                            bootstrap, etc.
+internal/turn/              §3.0 chain, turn loop, per-turn coalescing
+internal/chat/              REPL, slash dispatch, bootstrap UX
+internal/workset/           layered context composition (E/A1/A2/B/C)
+internal/prompt/            template + topic-tag parser + stream filter
+internal/model/             OpenAI-compatible HTTP client + scripted/generated
+                            mock + SSE streaming
+internal/scenarios/         scenario harness, invariants, metrics
+internal/{eventlog,metrics,
+  index,verify,
+  ping,modellist,log}/      supporting subsystems
+ARCHITECTURE.md             orientation (read first)
+spec.md                     operational spec
+README.md                   user-facing
+AGENTS.md                   this file
+Makefile                    build + agents-submodule pinning + serve-local-api
 ```
 
-Phase 1 (skeleton + storage: `init`, JSONL read/write, schema validation,
-pre-commit hook, `verify`) is the next implementation milestone. See
-[`spec.md` §10](spec.md).
+See [`spec.md` §10](spec.md) for the full milestone list and what's
+landed where.
 
 ## Build / test
 
@@ -104,9 +123,9 @@ Go 1.26.1+.
     revisit conditions.
 - **Match the spec's data model.** Spine records, thread frontmatter, and the
   symbol index have field-level schemas in §2. Don't invent your own.
-- **Verify with the canonical docs.** Before assuming a behavior, grep the
-  outline and spec. If they're silent, surface it as an open question rather
-  than guessing.
+- **Verify with the canonical docs.** Before assuming a behavior, grep
+  ARCHITECTURE.md and the spec. If they're silent, surface it as an open
+  question rather than guessing.
 - **Open questions go in `spec.md` §13.** Don't accumulate them in code
   comments or commit messages.
 - **Auxiliary Python is stdlib-only.** No exceptions for "just one little

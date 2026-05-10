@@ -4,15 +4,14 @@
 
 | Document | Purpose |
 |---|---|
-| `ARCHITECTURE.md` (you are here) | principles, patterns, mental models — read first |
+| `ARCHITECTURE.md` (you are here) | principles, patterns, mechanisms, mental models — read first |
 | `AGENTS.md` | house rules for AI agents working in this repo |
-| `outline.md` | design *narrative* — the *why* of every decision |
 | `spec.md` | operational *specification* — field-level schemas, algorithms, APIs |
 | `README.md` | user-facing description; getting started |
 
-Read this file first. Descend into the others for detail.
+Read this file first. Descend into `spec.md` for execution detail; `AGENTS.md` for the contract on agent behavior.
 
-**Reading time:** ~10 minutes.
+**Reading time:** ~12 minutes.
 
 ---
 
@@ -189,6 +188,99 @@ Layers E and A are the *recognition* surface; Layer B is *active engagement*. Th
 
 ---
 
+## Mechanisms
+
+Brief design-rationale notes for the major mechanisms. Schemas and algorithms live in `spec.md`; this section captures the *why*.
+
+### Thread lifecycle
+
+A thread's life moves through five stages:
+
+1. **Created** when the model emits `*new-topic*` in a topic tag, or when the user explicitly invokes `/topic <name>`.
+2. **Active** in Layer B while engaged (model tags it in per-turn topic list).
+3. **Dormant** in Layer C as engagement decays (no longer in the model's recent topic tags).
+4. **Retired** to Layer A (spine only) on closure, with full content preserved in `threads/thr_<n>.md`.
+5. **Archived** off-spine (deep cold; v0.2) only if spine cardinality pressure builds — recoverable by explicit fetch through git.
+
+The natural retirement boundary is "thread reached a resting point," not "context window pressure." Resting points are recognized at retirement-prompt time; the user's ack is what makes the call. (Spec §3.5.)
+
+### Spine entries are the recognition surface
+
+> The spine line is the load-bearing artifact. It must encode enough decision-state that the model can answer most "what was the outcome of X" questions from the line alone, without needing to fetch the thread file.
+
+Display form, briefly:
+
+```
+thr_<n> [<4–8 anchors>] — <100–150 char gist> [<state>]
+```
+
+The anchor set is what makes recall possible. The summary is what makes recognition cheap. Together they're the *whole* recognition surface for retired threads — getting them right at retirement is the point of the curator-summary ack flow.
+
+### Symbol extraction (three passes ordered cheapest-first)
+
+1. **Deterministic** (every turn) — regex/parser scan over turn content extracts identifiers (file paths, URLs, code symbols, project-configured patterns, user `#tags`). Free, reliable, narrow.
+2. **Model-emitted** (every turn) — the topic tag's anchor list provides named-entity coverage the deterministic pass can't reach.
+3. **Curator** (at retirement) — LLM picks 4–8 anchor symbols from accumulated history; user ack at retirement gates the choice.
+
+**Anchors vs. history:** anchors are the curated 4–8 that drive recall and surface in the spine line; history is the soft-capped (~30–40) accumulated set used as a deeper match surface but not surfaced. (Spec §2.7, §3.3.)
+
+### Recall mechanisms (three, layered by cost)
+
+1. **Model-native recognition** (default; cheapest). The spine is in window; the model recognizes prior topics directly when a turn engages them. Emits topic tag at turn start. Handles synonyms and paraphrases for free since the model is the recognition oracle.
+2. **Opportunistic surfacing** (deterministic backstop). When current-turn symbols match a retired thread's anchors above threshold, surface a prompt: *"We talked about X 2 days ago — pick up there?"* User ack drives explicit fetch.
+3. **Cross-project recall** (Layer A2 → fetch). Per-project anchor digests in A2 are scanned each turn. Same opportunistic mechanism as (2), slightly higher threshold.
+
+**Decline categorization** matters for accrual:
+
+- *Not relevant* → improve matching, do not tighten threshold.
+- *Not now* → no parameter change.
+- *Stop offering* → tighten threshold.
+
+Without this distinction, declined offers due to bad matches accidentally suppress good offers too. (Spec §3.4.)
+
+### Closure and retirement
+
+The ack is the **integrity gate** at the highest-leverage moment. The user catches misclassification at retirement, the only point where its accuracy matters most.
+
+Triggers:
+
+- Auto-prompt when no engagement for `engagement.decay-turns` AND `engagement.decay-time` wall-clock.
+- Explicit `/done` from the user.
+
+Flow: curator drafts retirement summary + anchor symbol set → user acks (single keystroke), edits, or defers → on ack, thread file written, spine entry generated, Layer B/C eviction follows. (Spec §3.5.)
+
+Deep cold archival is the next stage past retirement (v0.2): when spine cardinality pressure builds, the runtime archives oldest retired threads off-spine via `git rm` + `git commit` + an `archive/index.jsonl` entry. Recovery via `git show <commit>:<path>` is one command — no bespoke archive format. (Spec §3.8.)
+
+### Fallback dissection (worst-case path)
+
+When budget pressure exceeds threshold AND normal retirement isn't catching up:
+
+- Dissector LLM clusters the oldest poorly-threaded content into semantically related groups.
+- Each cluster produces a thread file + spine entry, identical in shape to a normal retirement.
+- User-acked under default conditions; absolute-emergency mode dissects without ack and notifies after.
+
+Structurally the same as normal retirement, *reactively* triggered on poorly-threaded content. Same artifacts produced; same recovery path; same invariant preserved.
+
+Handles three failure modes with one mechanism: wandering user, single-thread overrun, never-cleanly-threaded content. **Quality is best-effort by design** — graceful degradation under stress, not catastrophic loss. (Spec §3.6.)
+
+### Multi-project as lifelong accrual
+
+One unified spine across all projects. Every thread carries a `project` tag. Layer A1 = current project's full spine; Layer A2 = compressed cross-project digests. **Cross-project recall is a *designed feature*, not an emergent property** — it fires through the same opportunistic mechanism as same-project recall, with a higher threshold.
+
+This is what makes the agent's *career* possible — accumulated experience across all projects, transfer across domains. The architectural commitment: **one entity, many projects, lifelong accrual**. (Spec §2.5, §4.5.)
+
+### Personalization through directive accrual
+
+Behavior tuning lives in inspectable directive files that accrue from feedback signals:
+
+- `directives/defaults.md` — system defaults, baked in.
+- `directives/user.md` — user-wide overrides; accrues from explicit instructions, decline categorizations, accept/decline running statistics.
+- `directives/prj_<n>/*.md` — project-specific tuning.
+
+The directives are *text files*. Inspectable, editable by hand, portable, version-controlled. **This is the property that elevates the system from "smart assistant" to "real research partner": the agent learns how the user works, *and the user can read what it learned and correct it*.** (Spec §2.6.)
+
+---
+
 ## Tool surface (bounded, role-shaped)
 
 **Twelve external tools** total. Read-and-think (6) + draft-and-mutate (6). The LLM never names a workspace path on a write call; all mutations go through `fs.propose_*` (ack-gated).
@@ -326,7 +418,6 @@ If you see one of these proposed (or are about to write it), stop and surface th
 |---|---|
 | Architecture orientation | `ARCHITECTURE.md` (this file) |
 | House rules for AI agents | `AGENTS.md` |
-| The *why* of decisions, narrative form | `outline.md` |
 | Field-level schemas + algorithms + APIs | `spec.md` |
 | User-facing description, getting started | `README.md` |
 | Substrate-level decision history | persistent memory: `project_personant_substrate.md` |
@@ -355,6 +446,14 @@ When you propose a change, ask:
 
 Honest answers shape whether the change lands now, lands behind a directive, lands behind a watch-list entry, or stays an open question.
 
+**Categories of known weakness** (the canonical numbered list lives in `spec.md` §12; categorically):
+
+- **Symbol-extraction noise** — synonym fragmentation, low-information leakage, model emission drift.
+- **Recall precision** — cross-thread symbol collision, anchor selection quality at retirement.
+- **Deterministic-pass coverage** — per-project regex curation needs.
+
+These aren't blockers; they're *expected* findings the simulation regime is designed to surface and quantify.
+
 ---
 
 ## Mental model summary
@@ -363,4 +462,14 @@ If you internalize one thing from this document, make it this:
 
 > The runtime is the canonical-state holder. The LLM is a narrow judgment instrument. The human appears at three high-leverage moments. Every working-window mutation goes through the §3.0 chain. Every dependency earns its keep with a real consumer. Testing is the lab bench, not a quality gate. Constraints are load-bearing.
 
-Recognize these patterns, push back on violations, and you'll be on safe ground. Read `outline.md` for the rationale; read `spec.md` for execution detail.
+Recognize these patterns, push back on violations, and you'll be on safe ground. Read `spec.md` for execution detail.
+
+---
+
+## Provenance
+
+The architecture is shaped more like an **agent runtime** than a chat app. Memory hierarchy, paging mechanism, lookup index, personalization layer, persistence substrate, instrumentation, multi-agent capability. The naming follows: Personant is a runtime, not a feature set.
+
+The design originated in conversation 2026-05-07/08, building on observations about Claude Code's compaction-driven information loss, the AVE-KB's text-in-git knowledge structure, and the asymmetry between current AI systems' session-bounded context and what a long-term research partnership actually requires. AVE-KB conventions (text + git, frontmatter, claim-quality propagation, derived indexes) were the inspiration; the system is independent.
+
+The name "Personant" is a portmanteau of *personal assistant*. Latin *personare* (to sound through) and *persona* (the mask one speaks through) are bonus resonances rather than load-bearing meaning.
