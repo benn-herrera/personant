@@ -4,6 +4,42 @@ This file is for AI agents (Claude Code, etc.) working in this repository.
 Read it before making non-trivial changes. Human-facing project info is in
 [`README.md`](README.md).
 
+## Founding tenet
+
+> **The best use of AI *by* humans is use of AI *with* humans.**
+>
+> The human must not abdicate their participation and impose all work
+> upon the AI. The best outcome requires a fully collaborative
+> engagement, with their respective strengths interleaved like the
+> braided strands of a multi-material, high-performance cable.
+>
+> Adherence to this principle results in an enhanced and growing
+> symbiote rather than an atrophied parasite clinging to a stunted
+> host.
+
+This is the highest-level frame personant operates under; the
+architectural thesis below and every design choice that follows
+derive from it. Concretely, this means:
+
+- **Deterministic code** does mechanical work (regex, file I/O,
+  set math, atomic writes). The LLM is the wrong tool for mechanical
+  jobs — expensive, non-deterministic, error-prone where a regex
+  would be reliable.
+- **The LLM** brings what nothing else can: pan-subject-matter
+  expertise, cross-domain pattern recognition, judgment over
+  ambiguity informed by broad knowledge. Not grinding — *expertise*.
+- **The human** contributes direction, judgment under ownership,
+  and personal-experience bridges (the "this emulsion problem
+  reminds me of viscosity work in another project" link no static
+  system can have).
+
+A proposed feature or change that tries to make the agent
+*anticipate* the user (rather than *assist* the user) is suspect.
+The same goes for any change that lets the user offload the
+judgment that's actually theirs. Personant is not building
+agents-gone-wild software with promises of retirement-fund-filling
+products obtained via wishful thinking and inchoate dreams.
+
 ## Canonical documents
 
 The design is in two markdown files at the repo root. Read them, in this
