@@ -71,6 +71,54 @@ func assertHistorySymbolsContain(threadID, normalized string, minCount int) Inva
 	}
 }
 
+// assertSpineMatchFires returns an InvariantCheck that walks every log
+// file under h.Paths.LogsDir, counts `spine.match-fire <thrID>` lines
+// per thread, and verifies the totals match `want`. A thread present
+// in `want` with count 0 means "no match-fire expected for this
+// thread"; a thread NOT in `want` is unconstrained (i.e. only listed
+// threads are checked). totalCount, when non-negative, additionally
+// asserts the total spine.match-fire line count across the run.
+func assertSpineMatchFires(want map[string]int, totalCount int) InvariantCheck {
+	return func(h *Harness) error {
+		entries, err := os.ReadDir(h.Paths.LogsDir)
+		if err != nil {
+			return fmt.Errorf("assertSpineMatchFires: read logs dir: %w", err)
+		}
+		got := map[string]int{}
+		total := 0
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
+				continue
+			}
+			body, err := os.ReadFile(filepath.Join(h.Paths.LogsDir, e.Name()))
+			if err != nil {
+				return fmt.Errorf("assertSpineMatchFires: read %s: %w", e.Name(), err)
+			}
+			for line := range strings.SplitSeq(string(body), "\n") {
+				// Match shape: "<RFC3339> spine.match-fire <thrID> score=...".
+				_, rest, ok := strings.Cut(line, "spine.match-fire ")
+				if !ok {
+					continue
+				}
+				total++
+				thrID, _, _ := strings.Cut(rest, " ")
+				got[thrID]++
+			}
+		}
+		for thrID, w := range want {
+			if got[thrID] != w {
+				return fmt.Errorf("assertSpineMatchFires: %s match-fire count got %d want %d (all observed: %v)",
+					thrID, got[thrID], w, got)
+			}
+		}
+		if totalCount >= 0 && total != totalCount {
+			return fmt.Errorf("assertSpineMatchFires: total match-fire count got %d want %d (per-thread: %v)",
+				total, totalCount, got)
+		}
+		return nil
+	}
+}
+
 // assertHistorySymbolsCap returns an InvariantCheck asserting the
 // thread's history_symbols length never exceeds the spec §2.6.1 cap
 // (default 40).
@@ -555,6 +603,75 @@ func TestScenarioMetricsBlobShapeIsStable(t *testing.T) {
 	if gauges["final_spine_size"] == nil {
 		t.Errorf("gauges.final_spine_size missing")
 	}
+}
+
+// TestScenario_OpportunisticRecall_Surfaces exercises the §3.4
+// opportunistic recall mechanism end-to-end across a multi-turn arc.
+// Three threads are created with disjoint anchor sets except that
+// turn 3's coalesced symbol set overlaps thr_1's anchors above the
+// 0.4 Jaccard threshold. The recall matcher (Phase 3.c/3.d) must
+// observe thr_1 as a candidate and emit exactly one `spine.match-fire`
+// event for it.
+//
+// Jaccard arithmetic for turn 3 (the only turn that should produce a
+// match-fire):
+//   - thr_1 anchors: {trefoil, unknot, body-topology, electron-shape}
+//   - turn 3 query (after coalesce): user-tags + model-emitted anchors
+//     = {trefoil, unknot, body-topology, electron-shape} (user)
+//     ∪ {knot-theory, manifold, embedding, topology-extra} (model)
+//     = 8 distinct symbols
+//   - intersection with thr_1 = 4
+//   - union with thr_1 = 8
+//   - score = 4/8 = 0.50 ≥ 0.4 ✓
+//   - thr_2 anchors disjoint from query → score 0, dropped
+//   - thr_3 engaged this turn → excluded via engagedSet
+//
+// Turns 1 and 2 produce no match-fire (turn 1 has no other threads to
+// match against; turn 2's neutrino-flavored anchors don't overlap
+// thr_1).
+func TestScenario_OpportunisticRecall_Surfaces(t *testing.T) {
+	sc := Scenario{
+		Name: "opportunistic-recall-surfaces",
+		Steps: []Step{
+			{
+				UserInput: "tell me about topology — #trefoil #unknot #body-topology #electron-shape",
+				MockResponse: NewMockResponseWithTag([]string{"*new-topic*"},
+					[]string{"trefoil", "unknot", "body-topology", "electron-shape"},
+					"First pass on topology."),
+				Annotation: "create thr_1 (topology)",
+			},
+			{
+				UserInput: "now switching topic: tell me about neutrinos",
+				MockResponse: NewMockResponseWithTag([]string{"*new-topic*"},
+					[]string{"neutrino", "oscillation", "flavor-mixing", "pmns-matrix"},
+					"Neutrinos oscillate between flavors."),
+				Annotation: "create thr_2 (neutrinos; disjoint from thr_1)",
+			},
+			{
+				UserInput: "going back to topology — what about #trefoil #unknot #body-topology #electron-shape?",
+				MockResponse: NewMockResponseWithTag([]string{"*new-topic*"},
+					[]string{"knot-theory", "manifold", "embedding", "topology-extra"},
+					"More on knot theory."),
+				Annotation: "create thr_3; user-tags overlap thr_1 anchors → recall match-fire for thr_1",
+			},
+		},
+		FinalInvariants: append(append([]InvariantCheck{},
+			DefaultInvariants...),
+			VerifyEngagementConsistency,
+			assertThreadCount(3),
+			// Recall semantics — load-bearing for this scenario.
+			//   thr_1: 1 fire (from turn 3)
+			//   thr_2: 0 fires (anchors disjoint from every turn's query)
+			//   thr_3: 0 fires (created in turn 3; engaged ⇒ excluded that turn)
+			//   total: 1 across the whole run
+			assertSpineMatchFires(map[string]int{
+				"thr_1": 1,
+				"thr_2": 0,
+				"thr_3": 0,
+			}, 1),
+		),
+	}
+	RunScenario(t, sc)
 }
 
 // TestScenario_TransientShellCapture_Stub is a forward-marker test for
