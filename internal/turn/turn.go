@@ -869,7 +869,7 @@ func evictLowestWeight(out []store.HistorySymbol, cap int) []store.HistorySymbol
 		return a.FirstSeenTurn > b.FirstSeenTurn
 	})
 	keepIdx := make(map[int]struct{}, cap)
-	for i := 0; i < cap; i++ {
+	for i := range cap {
 		keepIdx[scored[i].idx] = struct{}{}
 	}
 	survivors := make([]store.HistorySymbol, 0, cap)

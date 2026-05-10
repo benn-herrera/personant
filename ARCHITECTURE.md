@@ -88,7 +88,7 @@ Spine is always in window → model recognizes prior topic from spine entries �
 
 When the cost of being wrong is far higher than the cost of being right, the bar shifts toward "prove it."
 
-- The architectural thesis cannot be validated by inspection. The §11 measurement regime exists because "use it and find out for six months and then revise if it's wrong" has no graceful recovery — you'd have to either complex-refactor accumulated memory or lose it all.
+- The architectural thesis cannot be validated by inspection. The §9 measurement regime exists because "use it and find out for six months and then revise if it's wrong" has no graceful recovery — you'd have to either complex-refactor accumulated memory or lose it all.
 - The migration-cost asymmetry favored YAML over TOML for thread frontmatter: switching later costs a script + validation pass over every thread file; the immediate gain from going off-standard was modest. Pick the standard path.
 
 When evaluating a "modest gain now" decision, explicitly compute the migration cost if we change our mind later. If it's high, default to the standard path.
@@ -340,7 +340,7 @@ When a project gains a remote URL after creation (local-only → published), the
 
 ## Testing as the lab bench
 
-Spec §11 is **not a quality gate bolted on after features land**. It is the measurement instrument by which the architectural thesis gets proven empirically — and the substrate by which the techniques evolve iteratively.
+Spec §9 is **not a quality gate bolted on after features land**. It is the measurement instrument by which the architectural thesis gets proven empirically — and the substrate by which the techniques evolve iteratively.
 
 The cost of getting this wrong without proof ahead of time is **asymmetric and severe**: six months of accumulated memory state under a structurally-wrong storage strategy has no graceful recovery. The simulation regime exists *because* proof must come ahead of time.
 
@@ -421,10 +421,7 @@ If you see one of these proposed (or are about to write it), stop and surface th
 | Field-level schemas + algorithms + APIs | `spec.md` |
 | User-facing description, getting started | `README.md` |
 | Substrate-level decision history | persistent memory: `project_personant_substrate.md` |
-| v0.1 acceptance criteria | `spec.md` §11.1 |
-| Roadmap (phases, post-v0.1) | `spec.md` §10, §10.1 |
-| Open questions (numbered, navigable) | `spec.md` §13 |
-| Watch list (known weak spots) | `spec.md` §12 |
+| v0.1 acceptance criteria | `spec.md` §9.1 |
 
 ---
 
@@ -432,10 +429,9 @@ If you see one of these proposed (or are about to write it), stop and surface th
 
 The first-pass design is guaranteed to have holes. Personant evolves by:
 
-1. **Watch list** (`spec.md` §12) — named known weak spots. Instrumentation surfaces them; v0.2+ work targets them.
-2. **Open questions** (`spec.md` §13) — inline `[OPEN: ...]` markers, aggregated; calibration runs decide.
-3. **Calibration scenarios** — parameter sweeps over canonical workloads; metrics matrices identify operating points.
-4. **Directive accrual** — per-user / per-project tuning happens automatically through ack patterns.
+1. **Calibration scenarios** — parameter sweeps over canonical workloads; metrics matrices identify operating points.
+2. **Directive accrual** — per-user / per-project tuning happens automatically through ack patterns.
+3. **Empirical pressure on watch items** — known weak spots (categorized below) surface via instrumentation; targeted work follows the data.
 
 When you propose a change, ask:
 
@@ -444,15 +440,14 @@ When you propose a change, ask:
 - Does it preserve or invert a recurring pattern (above)?
 - Does it create migration cost we can't recover from?
 
-Honest answers shape whether the change lands now, lands behind a directive, lands behind a watch-list entry, or stays an open question.
-
-**Categories of known weakness** (the canonical numbered list lives in `spec.md` §12; categorically):
+**Categories of known weakness** the simulation regime is designed to
+surface and quantify:
 
 - **Symbol-extraction noise** — synonym fragmentation, low-information leakage, model emission drift.
 - **Recall precision** — cross-thread symbol collision, anchor selection quality at retirement.
 - **Deterministic-pass coverage** — per-project regex curation needs.
 
-These aren't blockers; they're *expected* findings the simulation regime is designed to surface and quantify.
+These aren't blockers; they're *expected* findings.
 
 ---
 

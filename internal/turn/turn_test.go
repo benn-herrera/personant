@@ -614,7 +614,7 @@ func TestMergeHistorySymbolsCapAndEvict(t *testing.T) {
 	// Build a history that already sits at the cap: 40 entries, all
 	// count=1, distinct first_seen_turn from 1..40.
 	existing := make([]store.HistorySymbol, historyCapPerThread)
-	for i := 0; i < historyCapPerThread; i++ {
+	for i := range historyCapPerThread {
 		existing[i] = store.HistorySymbol{
 			Raw:           "s" + itoa(i+1),
 			Normalized:    "s" + itoa(i+1),
@@ -659,7 +659,7 @@ func TestMergeHistorySymbolsCountWeightedEviction(t *testing.T) {
 	existing := []store.HistorySymbol{
 		{Raw: "old-popular", Normalized: "old-popular", FirstSeenTurn: 1, Count: 50, Source: store.SourceModel},
 	}
-	for i := 0; i < historyCapPerThread; i++ {
+	for i := range historyCapPerThread {
 		existing = append(existing, store.HistorySymbol{
 			Raw:           "young" + itoa(i),
 			Normalized:    "young" + itoa(i),

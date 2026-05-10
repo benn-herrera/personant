@@ -14,8 +14,7 @@ order, before proposing structural changes:
    ~12-minute read covering everything an agent needs to ground
    itself in the project's thinking style. **Read first.**
 2. [`spec.md`](spec.md) — field-level schemas, algorithms, surface
-   APIs. The execution-level detail. §0–§2, §3.0, §3.1, §3.8, §3.9,
-   §4, §5.{1,5}, §6, §8.2, §11 are substantively drafted; rest stubbed.
+   APIs. The execution-level detail.
 
 If a question of design comes up, ARCHITECTURE.md and the spec are
 authoritative. Update them when behavior changes; don't let code and
@@ -93,9 +92,6 @@ AGENTS.md                   this file
 Makefile                    build + agents-submodule pinning + serve-local-api
 ```
 
-See [`spec.md` §10](spec.md) for the full milestone list and what's
-landed where.
-
 ## Build / test
 
 ```sh
@@ -115,18 +111,16 @@ Go 1.26.1+.
     `mattn/go-sqlite3`. Do not reintroduce.
   - **Approved-when-earned** (compatible; pull in *with their consumer*,
     not before): `github.com/BurntSushi/toml` (consumer: `providers.toml`
-    loader, landed Phase 2.a); `gopkg.in/yaml.v3` (consumer: thread
-    frontmatter writes, lands Phase 2.d). Do not pull these in
-    speculatively; do pull them in when the consumer arrives.
-  - **`langchaingo/llms`** is *compatible* but excluded from v0.1 on
-    dep-hygiene + scope grounds — see substrate-decisions memory for the
-    revisit conditions.
+    loader); `gopkg.in/yaml.v3` (consumer: thread frontmatter writes).
+    Do not pull these in speculatively; do pull them in when the
+    consumer arrives.
+  - **`langchaingo/llms`** is *compatible* but excluded on dep-hygiene
+    + scope grounds — see substrate-decisions memory for the revisit
+    conditions.
 - **Match the spec's data model.** Spine records, thread frontmatter, and the
   symbol index have field-level schemas in §2. Don't invent your own.
 - **Verify with the canonical docs.** Before assuming a behavior, grep
   ARCHITECTURE.md and the spec. If they're silent, surface it as an open
   question rather than guessing.
-- **Open questions go in `spec.md` §13.** Don't accumulate them in code
-  comments or commit messages.
 - **Auxiliary Python is stdlib-only.** No exceptions for "just one little
   dependency".
