@@ -25,6 +25,7 @@ type PersonantPaths struct {
 	Readme        string // Home/README.md                    (layout doc for human inspection)
 	Providers     string // Home/providers.toml               (canonical, secret-bearing)
 	Gitignore     string // Home/.gitignore                   (excludes tmp/, providers.toml)
+	LastActive    string // Home/last-active                  (operational; one line: prj_<n>; gitignored)
 }
 
 // EnvHome is the environment variable that overrides the default home.
@@ -54,6 +55,7 @@ func makePaths(home string) PersonantPaths {
 		Readme:        filepath.Join(home, "README.md"),
 		Providers:     filepath.Join(home, "providers.toml"),
 		Gitignore:     filepath.Join(home, ".gitignore"),
+		LastActive:    filepath.Join(home, "last-active"),
 	}
 }
 

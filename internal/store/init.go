@@ -479,4 +479,5 @@ const seedReadmeMD = "# personant home\n" +
 const seedGitignore = `# personant home gitignore
 tmp/
 providers.toml
+last-active
 `
