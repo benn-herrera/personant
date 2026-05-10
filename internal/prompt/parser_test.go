@@ -1,0 +1,282 @@
+package prompt
+
+import (
+	"errors"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+func TestParseHappyPath(t *testing.T) {
+	in := "*topic: thr_42 [trefoil, unknot, body-topology, electron-shape]*\nresponse body"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	wantThreads := []string{"thr_42"}
+	wantAnchors := []string{"trefoil", "unknot", "body-topology", "electron-shape"}
+	if !reflect.DeepEqual(got.Tag.Threads, wantThreads) {
+		t.Errorf("Threads: got %v, want %v", got.Tag.Threads, wantThreads)
+	}
+	if !reflect.DeepEqual(got.Tag.Anchors, wantAnchors) {
+		t.Errorf("Anchors: got %v, want %v", got.Tag.Anchors, wantAnchors)
+	}
+	if got.Body != "response body" {
+		t.Errorf("Body: got %q, want %q", got.Body, "response body")
+	}
+	if len(got.Warnings) != 0 {
+		t.Errorf("expected no warnings, got %v", got.Warnings)
+	}
+}
+
+func TestParseMultipleThreads(t *testing.T) {
+	in := "*topic: thr_42, thr_88 [a, b, c, d]*\nbody"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := []string{"thr_42", "thr_88"}
+	if !reflect.DeepEqual(got.Tag.Threads, want) {
+		t.Errorf("Threads: got %v, want %v", got.Tag.Threads, want)
+	}
+}
+
+func TestParseNewTopicLiteral(t *testing.T) {
+	in := "*topic: *new-topic* [a, b, c, d]*\nbody"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := []string{"*new-topic*"}
+	if !reflect.DeepEqual(got.Tag.Threads, want) {
+		t.Errorf("Threads: got %v, want %v", got.Tag.Threads, want)
+	}
+}
+
+func TestParseMixedExplicitAndNewTopic(t *testing.T) {
+	in := "*topic: thr_42, *new-topic* [a, b, c, d]*\nbody"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := []string{"thr_42", "*new-topic*"}
+	if !reflect.DeepEqual(got.Tag.Threads, want) {
+		t.Errorf("Threads: got %v, want %v", got.Tag.Threads, want)
+	}
+}
+
+func TestParseAnchorNormalization(t *testing.T) {
+	in := "*topic: thr_1 [Cosserat Sector, the trefoil, body-topology, electron]*\nbody"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := []string{"cosserat-sector", "trefoil", "body-topology", "electron"}
+	if !reflect.DeepEqual(got.Tag.Anchors, want) {
+		t.Errorf("Anchors: got %v, want %v", got.Tag.Anchors, want)
+	}
+}
+
+func TestParseAnchorCountWarningTooFew(t *testing.T) {
+	in := "*topic: thr_1 [a, b, c]*\nbody"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(got.Tag.Anchors) != 3 {
+		t.Errorf("Anchors len: got %d, want 3", len(got.Tag.Anchors))
+	}
+	if !hasWarningContaining(got.Warnings, "anchor count 3") {
+		t.Errorf("expected warning naming count 3, got %v", got.Warnings)
+	}
+}
+
+func TestParseAnchorCountWarningTooMany(t *testing.T) {
+	in := "*topic: thr_1 [a, b, c, d, e, f, g, h, i]*\nbody"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(got.Tag.Anchors) != 9 {
+		t.Errorf("Anchors len: got %d, want 9", len(got.Tag.Anchors))
+	}
+	if !hasWarningContaining(got.Warnings, "anchor count 9") {
+		t.Errorf("expected warning naming count 9, got %v", got.Warnings)
+	}
+}
+
+func TestParseMultipleValidTagsFirstWins(t *testing.T) {
+	in := "*topic: thr_1 [a, b, c, d]*\nbody one\n" +
+		"*topic: thr_2 [e, f, g, h]*\nbody two\n" +
+		"*topic: thr_3 [i, j, k, l]*\nbody three"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got.Tag.Threads[0] != "thr_1" {
+		t.Errorf("first wins: got %v", got.Tag.Threads)
+	}
+	if !hasWarningContaining(got.Warnings, "additional topic tag(s) ignored: 2") {
+		t.Errorf("expected extras=2 warning, got %v", got.Warnings)
+	}
+	// Subsequent tags retained as-is in the body.
+	if !strings.Contains(got.Body, "*topic: thr_2 [e, f, g, h]*") {
+		t.Errorf("expected later tag retained in body, body=%q", got.Body)
+	}
+}
+
+func TestParseTagMidDocument(t *testing.T) {
+	in := "line one\n" +
+		"line two\n" +
+		"line three\n" +
+		"line four\n" +
+		"*topic: thr_5 [a, b, c, d]*\n" +
+		"line six\n" +
+		"line seven\n"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got.Tag.Threads[0] != "thr_5" {
+		t.Errorf("Threads: got %v", got.Tag.Threads)
+	}
+	wantBody := "line one\nline two\nline three\nline four\nline six\nline seven\n"
+	if got.Body != wantBody {
+		t.Errorf("Body:\n got: %q\nwant: %q", got.Body, wantBody)
+	}
+}
+
+func TestParseLeadingWhitespace(t *testing.T) {
+	in := "   \t*topic: thr_1 [a, b, c, d]*\nbody"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got.Tag.Threads[0] != "thr_1" {
+		t.Errorf("Threads: got %v", got.Tag.Threads)
+	}
+	if got.Body != "body" {
+		t.Errorf("Body: got %q, want %q", got.Body, "body")
+	}
+}
+
+func TestParseNoTagAtAll(t *testing.T) {
+	in := "just a plain response\nwith multiple lines\nand no topic tag"
+	got, err := Parse(in)
+	if !errors.Is(err, ErrNoTopicTag) {
+		t.Fatalf("expected ErrNoTopicTag, got %v", err)
+	}
+	if got.Body != in {
+		t.Errorf("Body must be preserved on no-tag, got %q", got.Body)
+	}
+}
+
+func TestParseEmptyThreadList(t *testing.T) {
+	in := "*topic:  [a, b, c, d]*\nbody"
+	_, err := Parse(in)
+	if !errors.Is(err, ErrNoTopicTag) {
+		t.Fatalf("expected ErrNoTopicTag for empty thread list, got %v", err)
+	}
+}
+
+func TestParseEmptyAnchorList(t *testing.T) {
+	in := "*topic: thr_42 []*\nbody"
+	_, err := Parse(in)
+	if !errors.Is(err, ErrNoTopicTag) {
+		t.Fatalf("expected ErrNoTopicTag for empty anchor list, got %v", err)
+	}
+}
+
+func TestParseMalformedThreadID(t *testing.T) {
+	in := "*topic: foo [a, b, c, d]*\nbody"
+	_, err := Parse(in)
+	if !errors.Is(err, ErrNoTopicTag) {
+		t.Fatalf("expected ErrNoTopicTag for bad thread id, got %v", err)
+	}
+}
+
+// A malformed tag should not gate a later valid tag from winning.
+func TestParseMalformedThreadIDFollowedByValid(t *testing.T) {
+	in := "*topic: foo [a, b, c, d]*\n" +
+		"*topic: thr_7 [w, x, y, z]*\nbody"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got.Tag.Threads[0] != "thr_7" {
+		t.Errorf("Threads: got %v, want [thr_7]", got.Tag.Threads)
+	}
+}
+
+func TestParseTrailingCommaInAnchors(t *testing.T) {
+	in := "*topic: thr_1 [a, b, c, d,]*\nbody"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := []string{"a", "b", "c", "d"}
+	if !reflect.DeepEqual(got.Tag.Anchors, want) {
+		t.Errorf("Anchors: got %v, want %v", got.Tag.Anchors, want)
+	}
+	// Four anchors → no out-of-range warning.
+	if len(got.Warnings) != 0 {
+		t.Errorf("expected no warnings, got %v", got.Warnings)
+	}
+}
+
+func TestParseWhitespaceInAnchorList(t *testing.T) {
+	in := "*topic: thr_1 [ a , b , c , d ]*\nbody"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := []string{"a", "b", "c", "d"}
+	if !reflect.DeepEqual(got.Tag.Anchors, want) {
+		t.Errorf("Anchors: got %v, want %v", got.Tag.Anchors, want)
+	}
+}
+
+func TestParseTrailingCommaInThreads(t *testing.T) {
+	// A trailing comma in the thread list yields an empty entry which fails
+	// the §5.1.2 alternation. The whole tag is rejected.
+	in := "*topic: thr_1, [a, b, c, d]*\nbody"
+	_, err := Parse(in)
+	if !errors.Is(err, ErrNoTopicTag) {
+		t.Fatalf("expected ErrNoTopicTag, got %v", err)
+	}
+}
+
+func TestParseTagNotOnOwnLine(t *testing.T) {
+	// The §5.1.2 regex anchors with ^...$ in multi-line mode; anything other
+	// than whitespace on the same line invalidates the match.
+	in := "prefix *topic: thr_1 [a, b, c, d]* suffix\n"
+	_, err := Parse(in)
+	if !errors.Is(err, ErrNoTopicTag) {
+		t.Fatalf("expected ErrNoTopicTag for embedded tag, got %v", err)
+	}
+}
+
+func TestParseBodyPreservesContent(t *testing.T) {
+	// The parser strips only the chosen tag's line + its trailing newline.
+	// All other whitespace (interior blank lines, indentation) is preserved.
+	in := "*topic: thr_1 [a, b, c, d]*\n\n  indented line\n\nlast"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := "\n  indented line\n\nlast"
+	if got.Body != want {
+		t.Errorf("Body:\n got: %q\nwant: %q", got.Body, want)
+	}
+}
+
+// hasWarningContaining is a test helper that returns true if any of the
+// strings in ws contains the substring sub.
+func hasWarningContaining(ws []string, sub string) bool {
+	for _, w := range ws {
+		if strings.Contains(w, sub) {
+			return true
+		}
+	}
+	return false
+}

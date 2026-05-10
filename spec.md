@@ -382,6 +382,8 @@ type SymbolCategory =
 the, a, an, of, in, on, at, by, for, to, with, from, as, is, are, was, were, be, been, being
 ```
 
+The stop-word filter applies only to multi-word entities. A single-token entity that happens to match a stop word (e.g. the bare entity `"the"`) is preserved as-is — the rule is "drop stop words *from* multi-word phrases," not "reject any input matching a stop word."
+
 **Storage form:** `{raw: original surface, normalized: per-rules-above}`. Matching uses `normalized`; display uses `raw`.
 
 #### 2.7.3 Source
