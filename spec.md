@@ -1461,16 +1461,31 @@ near-term dev list.
   `dedup.live-diff-window`, `dedup.diff-format`), and the instrumentation
   to surface "diff misapplication" signals for the unified→NL switchover
   decision.
-- **v1.0: Computational tool surface for math/physics projects.** Python
-  authoring (via the existing `fs.propose_promote` flow) plus *execution* of
-  scripts, simulations, and formatter/linter tooling (`black`, `isort`,
-  `flake8`). Requires a sandboxed subprocess execution surface, stdout/stderr
+- **v1.0: Computational research workflow for math/physics projects.**
+  Confirmed need, not speculative — math and physics work requires
+  Python simulation to **validate** analytical claims, **verify** known
+  results, and **explore** design space. Scope is deliberately **Python-only**;
+  other coding languages are explicitly out of scope (we are not building
+  a polyglot agent-coding tool — see §6.1.3 framing about general-agent
+  scope creep). Python source-code authoring is already supported in v0.1
+  via `fs.tmp_write` + `fs.propose_promote`; v1.0 adds *execution*:
+  - `python.run <script> [args...]` — execute a Python script; capture stdout/stderr.
+  - `python.format <path>` — apply `black` + `isort`.
+  - `python.lint <path>` — run `flake8`.
+  - `python.repl` (TBD) — session-persistent REPL for interactive exploration.
+
+  Requires a sandboxed subprocess execution surface, stdout/stderr
   capture into the engaged thread (subject to the §6.5 budget policy),
   resource limits (wall-clock, memory, output bytes), and lifecycle
-  management (cancellation, orphan reaping). The shell-execution exclusion in
-  §6.1.3 lifts only for this targeted capability when it lands — not as a
-  general "agent can now run anything." Held until the v0.1 memory-context
-  mechanism is proven.
+  management (cancellation, orphan reaping). The Python-environment
+  policy (system Python on `$PATH` vs runtime-managed per-project venv
+  vs `uv` integration) is a v1.0 design question — see watch-list.
+
+  The shell-execution exclusion in §6.1.3 lifts **only** for this
+  targeted Python capability when it lands — not as a general "agent can
+  now run anything." Held until the v0.1 memory-context mechanism is
+  proven; the six-month simulation (§11.1) does **not** need to exercise
+  Python execution to pass.
 
 ---
 
@@ -1482,6 +1497,18 @@ memory, opportunistic recall, retire-and-recover cycles that preserve
 meaning — is a behavioral claim about a complex, time-evolving system.
 Either the runtime delivers these properties under realistic load, or
 it doesn't. **The measurement regime is what proves it.**
+
+**The cost of getting this wrong without proof ahead of time is
+asymmetric and severe.** The "use it and find out" path has no graceful
+recovery: if six months of accumulated usage reveals the storage
+strategy or memory mechanics are structurally wrong, the choice is
+between a complex, risky refactor of accumulated agent memory state or
+losing all of it. The user's accumulated continuity is the property the
+system exists to deliver in the first place — sacrificing it to
+validate the architecture would defeat the purpose. The simulation
+regime exists because the proof must come **ahead of time**, not after
+six months of real use have built up the very state we'd be putting at
+risk.
 
 This section is therefore framed not as a quality gate bolted on after
 features land, but as the **measurement instrument** by which we
@@ -1740,6 +1767,7 @@ scope for v0.1 but the log format (§2.8) is designed to enable it.
 16. **Sensitive-pattern drift.** The seed sensitive-pattern list (`.env`, `secrets/**`, `*.key`, `*.pem`) plus `providers.toml` will not cover everything. As empirical pressure surfaces new patterns (`.npmrc` auth tokens, `~/.aws/credentials`, `id_rsa*`, etc.), the list must grow.
 17. **Deep-cold blob reachability under `git gc`.** Archived blobs stay reachable as long as personant never rewrites history in `~/.personant/.git/`. Any future tool or accidental command that runs `git rebase` / `git filter-branch` / `git reflog expire` against the personant home could prune archived content. Mitigation: document the never-rewrite invariant in §8.3; have `personant verify` resolve every archive-index `commit_hash` and `blob_hash` to confirm reachability.
 18. **Diff-chain cumulative drift.** Long chains of diffs reconstructed end-to-end can accumulate small errors if intermediate diffs are computed approximately or with a slightly drifted base. Mitigation: periodic literal anchors (§3.9.1, default K=10). Verification: walk the chain forward from each anchor and confirm intermediate states match expected literal at each anchor point.
+19. **Python execution environment policy (v1.0).** Math/physics simulation requires arbitrary Python deps (`numpy`, `scipy`, `matplotlib`, etc.); the agent cannot impose stdlib-only on the user's research code (the stdlib-only constraint applies to personant's own auxiliary scripts, not user-written Python). Three options to weigh during v1.0 design: (a) use whatever `python` is on `$PATH` in the project's directory (simplest, least deterministic); (b) per-project venv managed by the runtime (more determinism, more lifecycle code); (c) leverage `uv` or similar modern tooling (modern, adds a hard external dependency). Decide before `python.run` lands.
 
 ---
 
@@ -1782,3 +1810,4 @@ Compiled from inline `[OPEN: ...]` markers and design-pass uncertainties.
 - 2026-05-09 — §3.8 "Deep cold archival" drafted: thread archival mechanism leveraging the autonomic git layer (delete + commit + archive index entry); recovery via `git show <commit>:<path>` with blob-hash verification; storage properties rely on git's content-addressed object store and delta-compressed packfiles. §3.9 "Working-set content dedup" drafted: persistent storage preserves the full diff chain with periodic literal anchors (default K=10) and a literal-vs-diff threshold (default 0.7); live context window keeps literal current + N most-recent diffs (default N=3) + content-addressed identifiers for older states; diff format defaults to unified diff with a planned natural-language fallback for cases where the model has trouble applying. §10.1 gains two v0.2 milestones (deep cold, dedup); watch-list items 17–18 and open questions 19–21 added.
 - 2026-05-09 — §3.0 "Context-modification events" drafted as the architectural primitive that §3.1–§3.4 and §3.9 hang off of. Frames the working window as a sequence of deltas (user.prompt, model.response, tool.result, user.shell-capture, thread.fetched, digest.refresh, slash.injected, directive.reloaded) rather than turns. Each delta runs a hook chain: symbol extraction → engagement → dedup → budget check → logging. Per-turn engagement coalescing prevents N-tool-call turns from inflating `turn_count`. §3.1–§3.7 stubs tightened to forward-reference §3.0 rather than restating the work. §4.5.7 "Project bootstrap at startup" drafted: explicit `--project` override; three-step heuristic waterfall (git remote match → CWD path match → last-active prompt); final fallback for fresh installs. New `last-active` operational file added to §2.1 storage layout (single line, prj_<n>, gitignored). New `archive/index.jsonl` listed in §2.1 (canonical, empty until v0.2).
 - 2026-05-09 — §1 system overview gains operationalized acceptance language pointing to §11.1. §5.1 "Topic tag emission format" drafted: single-line `*topic: <thread-list> [<anchor-list>]*` form with parser regex; the deferred multi-form question is decided. §5.5 "Mid-turn thread fetch" drafted as **system-injected** (not tool-call) — runtime parses the topic tag and pre-loads referenced threads before re-prompting the model. §8.2.1 redaction policy explicitly **hybrid**: refuse on agent-initiated reads (deny error to the model + `permissions.suspicious-access` log); redact on user-initiated `#` captures (placeholder content + `permissions.redaction-fire` log). §10 acceptance gate clarified: Phase 5 isn't "feature complete"; it's "feature complete + six-month simulation green + steady state demonstrated." §11 fully restructured from stub to "Measurement and validation regime" with eleven subsections covering the test fabric: §11.1 six-month-simulation acceptance, §11.2 mock LLM, §11.3 unit, §11.4 scenario, §11.5 invariant validators, §11.6 metrics emission, §11.7 churn, §11.8 calibration, §11.9 cross-run baseline comparison, §11.10 six-month simulation harness, §11.11 live instrumentation. Open questions 6, 7, 18 resolved (closed) and renumbered; new questions 19, 20, 21 added (topic-tag reliability, system-injected re-prompt cost, six-month sim pass thresholds).
+- 2026-05-09 — §11 lead strengthened with the **asymmetric cost framing**: there is no graceful recovery from "use it and find out" — if six months of accumulated state reveal the storage strategy is structurally wrong, the choice is between a complex/risky refactor of accumulated memory or losing it all. The simulation regime exists because proof must come ahead of time. §10.1 v1.0 Python entry refined: confirmed math/physics computational workflow as a real (not speculative) v1.0 commitment with concrete tool list (`python.run`, `python.format`, `python.lint`, possibly `python.repl`); explicitly **Python-only** (other coding languages out of scope — not building a polyglot agent-coding tool). New watch-list item 19: Python execution environment policy (system / venv / uv) for v1.0 design.
