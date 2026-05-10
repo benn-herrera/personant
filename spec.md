@@ -1641,6 +1641,16 @@ Scenarios worth covering explicitly (initial set):
 - **Same-anchor collision.** Two threads with overlapping anchors;
   one retires; the other engages later via the shared anchor.
   Verify recall semantics.
+- **Transient shell-capture content.** Several normal turns interleaved
+  with `user.shell-capture` events carrying 1–2 pages of unique
+  transient content (simulated `# cat ...`-style captures). Verify the
+  transient content does not appear in any spine record's anchors /
+  summary, does not bloat any thread's history_symbols (transient ≠
+  anchored), and evicts cleanly from working-window layers under
+  budget pressure. Same shape covers `tool.result` deltas with large
+  payloads (`fs.read` of a long file, `web.fetch` of a long page).
+  Cannot run until §4.4 shell escape + Phase 2.e eviction + v0.2 dedup
+  land; required for v0.1 acceptance per §11.1.
 - **Cross-boundary recovery.** Project remote URL added → identity
   promoted → original local-only project state preserved.
 
@@ -1833,6 +1843,7 @@ Compiled from inline `[OPEN: ...]` markers and design-pass uncertainties.
 20. **§5.5 — Re-prompt latency cost from system-injected fetches.** Each thread fetch implies a re-roundtrip to the LLM. Quantify steady-state impact in the six-month simulation (§11.1).
 21. **§11.1 — Six-month simulation pass thresholds.** What are the concrete numeric bounds for "memory quality maintained" and "operation runtime within bounds"? Initial pass: derive thresholds from the first end-to-end simulation run; subsequent runs must not regress beyond a percentage. The first pass establishes the baseline.
 22. **§4.3.1 — Readline implementation strategy.** Three viable options (custom on `golang.org/x/term`, `peterh/liner`, `chzyer/readline`). Decide before line-edit/history support lands. Required for v0.1 polish; not blocking earlier Phase 2 work.
+23. **§11.4 — Scenario harness event-injection API.** Current `Step{UserInput, MockResponse}` shape only drives `user.prompt → model.response` pairs. The transient shell-capture scenario (and any future scenario exercising `tool.result`, `thread.fetched`, `digest.refresh`, `slash.injected`, or `directive.reloaded` deltas) needs a way to inject standalone context-modify events between turns. Cleanest extension: `Step.PreEvents []turn.Delta` injected before the user prompt; or an `EventStep` type that carries a delta without a turn pair. Decide when implementing the transient-content scenario (after Phase 2.e + §4.4 land).
 
 ---
 

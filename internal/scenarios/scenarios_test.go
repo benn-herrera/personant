@@ -557,6 +557,57 @@ func TestScenarioMetricsBlobShapeIsStable(t *testing.T) {
 	}
 }
 
+// TestScenario_TransientShellCapture_Stub is a forward-marker test for
+// a scenario that v0.1 acceptance (§11.1 six-month simulation) requires
+// but which currently cannot run.
+//
+// The intended scenario:
+//
+//   - Drive several user.prompt → model.response turns normally.
+//   - Between turns (or as part of a turn's chain) inject one or more
+//     `user.shell-capture` events carrying 1–2 pages of unique
+//     transient content (e.g. simulated `# cat large-paper.md` output)
+//     that is referenced exactly once in the immediately following
+//     turn and never again.
+//   - Assert: the transient content does not appear in any spine
+//     record's anchors / summary; does not bloat history_symbols on
+//     any thread (transient ≠ anchored); contributes to
+//     deterministic-pass extracted symbols when those land (Phase 3);
+//     evicts cleanly from working-window layers under budget pressure
+//     (Phase 2.e); is replaced by content-addressed identifiers per
+//     §3.9 dedup (v0.2).
+//
+// Why this is skipped today:
+//
+//   - The runtime's §3.0 chain currently no-ops on `tool.result` and
+//     `user.shell-capture` events; only `user.prompt` and
+//     `model.response` are processed substantively.
+//   - The chat REPL stubs `$` / `#` shell escape with a "not yet
+//     implemented" message; the long-lived `$SHELL -i` subprocess
+//     specified in §4.4 hasn't landed.
+//   - Layer-B/C eviction under budget pressure is a Phase 2.e
+//     deliverable; without it, the "evicts cleanly" assertion has
+//     nothing to validate.
+//   - Working-set dedup (§3.9) is v0.2; the
+//     content-addressed-identifier replacement isn't testable until
+//     that work lands.
+//
+// What this test costs while skipped:
+//
+//   - Visibility. A scenario at this name in this file means a future
+//     agent (or future maintainer) inspecting the test surface knows
+//     this gap exists and is tracked. The v0.1 acceptance gate at
+//     §11.1 will not be honestly green without this scenario
+//     activated.
+//   - Negative space. When the dependencies land, this test should be
+//     filled in (not just have its t.Skip removed) — the scenario
+//     details above are the design intent; the implementation needs
+//     extending Harness with an event-injection API beyond the
+//     current Step{UserInput, MockResponse} shape.
+func TestScenario_TransientShellCapture_Stub(t *testing.T) {
+	t.Skip("requires §4.4 shell escape + Phase 2.e budget eviction + v0.2 dedup; activate when those land. See test godoc.")
+}
+
 // findMetricsBlobs walks the test's TempDir-parent recursively and
 // returns paths to any *.metrics.json files. The harness writes its
 // metrics blob to its own t.TempDir() call (different sub-dir than
