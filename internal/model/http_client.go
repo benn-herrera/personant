@@ -50,18 +50,18 @@ func NewHTTPClient(p store.Provider) Client {
 // constructed by this client.
 func (c *HTTPClient) Consult(ctx context.Context, req Request) (Response, error) {
 	if c.provider.BaseURL == "" {
-		return Response{}, fmt.Errorf("model: provider BaseURL is empty")
+		return Response{}, fmt.Errorf("provider BaseURL is empty")
 	}
 
 	body, err := encodeRequest(req)
 	if err != nil {
-		return Response{}, fmt.Errorf("model: encode request: %w", err)
+		return Response{}, fmt.Errorf("encode request: %w", err)
 	}
 
 	url := joinURL(c.provider.BaseURL, "chat/completions")
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return Response{}, fmt.Errorf("model: build request: %w", err)
+		return Response{}, fmt.Errorf("build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
@@ -75,22 +75,22 @@ func (c *HTTPClient) Consult(ctx context.Context, req Request) (Response, error)
 		// http.Client.Do already wraps ctx errors usefully; make sure the
 		// caller can errors.Is(err, context.Canceled) without our wrapper
 		// hiding it.
-		return Response{}, fmt.Errorf("model: http: %w", err)
+		return Response{}, fmt.Errorf("http: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return Response{}, fmt.Errorf("model: read response: %w", err)
+		return Response{}, fmt.Errorf("read response: %w", err)
 	}
 
 	if resp.StatusCode/100 != 2 {
-		return Response{}, fmt.Errorf("model: http %d: %s", resp.StatusCode, scrubAuthorization(string(respBody), c.provider.APIKey))
+		return Response{}, fmt.Errorf("http %d: %s", resp.StatusCode, scrubAuthorization(string(respBody), c.provider.APIKey))
 	}
 
 	out, err := decodeResponse(respBody)
 	if err != nil {
-		return Response{}, fmt.Errorf("model: decode response: %w", err)
+		return Response{}, fmt.Errorf("decode response: %w", err)
 	}
 	return out, nil
 }
@@ -100,13 +100,13 @@ func (c *HTTPClient) Consult(ctx context.Context, req Request) (Response, error)
 // body, with the API key scrubbed.
 func (c *HTTPClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	if c.provider.BaseURL == "" {
-		return nil, fmt.Errorf("model: provider BaseURL is empty")
+		return nil, fmt.Errorf("provider BaseURL is empty")
 	}
 
 	url := joinURL(c.provider.BaseURL, "models")
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("model: build request: %w", err)
+		return nil, fmt.Errorf("build request: %w", err)
 	}
 	httpReq.Header.Set("Accept", "application/json")
 	httpReq.Header.Set("User-Agent", userAgent)
@@ -116,22 +116,22 @@ func (c *HTTPClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("model: http: %w", err)
+		return nil, fmt.Errorf("http: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("model: read response: %w", err)
+		return nil, fmt.Errorf("read response: %w", err)
 	}
 
 	if resp.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("model: http %d: %s", resp.StatusCode, scrubAuthorization(string(respBody), c.provider.APIKey))
+		return nil, fmt.Errorf("http %d: %s", resp.StatusCode, scrubAuthorization(string(respBody), c.provider.APIKey))
 	}
 
 	var w wireModelList
 	if err := json.Unmarshal(respBody, &w); err != nil {
-		return nil, fmt.Errorf("model: decode models: %w", err)
+		return nil, fmt.Errorf("decode models: %w", err)
 	}
 	out := make([]ModelInfo, 0, len(w.Data))
 	for _, m := range w.Data {

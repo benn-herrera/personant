@@ -367,8 +367,13 @@ func promptConfirmation(opts Options, in *bufio.Reader, paths store.PersonantPat
 		return promptFallback(opts, in, paths, cwd)
 	}
 	for {
-		fmt.Fprintf(opts.Stdout, "Resume work on '%s' (last active %s)? [y]es / [n]o / <other-name-or-id>: ",
-			candidate.Name, candidate.LastActive)
+		if candidate.LastActive == "" {
+			fmt.Fprintf(opts.Stdout, "Resume work on '%s'? [y]es / [n]o / <other-name-or-id>: ",
+				candidate.Name)
+		} else {
+			fmt.Fprintf(opts.Stdout, "Resume work on '%s' (last active %s)? [y]es / [n]o / <other-name-or-id>: ",
+				candidate.Name, candidate.LastActive)
+		}
 		ans, err := readLine(in)
 		if err != nil {
 			return store.ProjectMeta{}, err
