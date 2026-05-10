@@ -4,6 +4,7 @@
 package turn
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -101,12 +102,24 @@ func (s *State) now() time.Time {
 	return time.Now()
 }
 
+// maxRePromptsPerTurn caps the §5.5 system-injected mid-turn re-prompt at
+// 1 per turn. Total LLM stream attempts within a turn ≤ 1 +
+// maxRePromptsPerTurn = 2. The constant exists for symmetry with future
+// directive plumbing (§2.6.1) that may expose it as a parameter; the
+// six-month simulation (§11.1) will measure incidence and steady-state
+// latency cost.
+const maxRePromptsPerTurn = 1
+
 // Run drives one complete user turn end-to-end (spec §3.0):
 //
 //  1. Fire user.prompt context-modify event.
 //  2. Compose working-set + build system prompt.
 //  3. Stream the model response via state.Client.ConsultStream, writing
 //     chunks through a topic-tag stream filter to out as they arrive.
+//     If the model's topic tag references a thread not in Layer B, the
+//     in-flight stream is aborted, the missing thread is fetched (per
+//     §5.5), and the request is re-issued with augmented context. The
+//     re-prompt is capped at maxRePromptsPerTurn per turn.
 //  4. Fire model.response context-modify event (parses topic tag,
 //     accumulates symbols, defers engagement) after the stream completes.
 //     Per §3.0.5 the model.response delta fires once with the full body,
@@ -146,70 +159,129 @@ func Run(ctx context.Context, state *State, userInput string, out io.Writer) (st
 	if state.Budget.Total == 0 {
 		state.Budget = workset.DefaultBudget()
 	}
-	params, err := workset.Compose(
-		workset.State{
-			Paths:          state.Paths,
-			ActiveProject:  state.ActiveProject,
-			ActiveThreads:  state.ActiveThreads,
-			DormantThreads: state.DormantThreads,
-			Budget:         state.Budget,
-		},
-		workset.ComposeOptions{
-			Logger: func(format string, args ...any) {
-				_ = eventlog.Log(state.Paths, "workset", "warning",
-					sanitizeDetail(fmt.Sprintf(format, args...)))
+	buildSystemPrompt := func() (string, error) {
+		params, err := workset.Compose(
+			workset.State{
+				Paths:          state.Paths,
+				ActiveProject:  state.ActiveProject,
+				ActiveThreads:  state.ActiveThreads,
+				DormantThreads: state.DormantThreads,
+				Budget:         state.Budget,
 			},
-		},
-	)
+			workset.ComposeOptions{
+				Logger: func(format string, args ...any) {
+					_ = eventlog.Log(state.Paths, "workset", "warning",
+						sanitizeDetail(fmt.Sprintf(format, args...)))
+				},
+			},
+		)
+		if err != nil {
+			return "", err
+		}
+		return prompt.BuildSystemPrompt(params), nil
+	}
+
+	systemPrompt, err := buildSystemPrompt()
 	if err != nil {
 		return "", fmt.Errorf("turn: compose working set: %w", err)
 	}
-	systemPrompt := prompt.BuildSystemPrompt(params)
 
-	// Step 3: LLM round-trip (streaming).
+	// Step 3: LLM round-trip (streaming) with §5.5 mid-turn re-prompt.
 	chosenModel := state.Model
 	if chosenModel == "" {
 		chosenModel = state.Provider.DefaultModel
 	}
-	messages := make([]model.Message, 0, 2+len(state.History))
-	messages = append(messages, model.Message{Role: "system", Content: systemPrompt})
-	messages = append(messages, state.History...)
-	messages = append(messages, model.Message{Role: "user", Content: userInput})
 
-	req := model.DefaultRequest(chosenModel, messages)
-	// State-level overrides — when set, they win over the defaults.
-	if state.Temperature != 0 {
-		req.Temperature = state.Temperature
-	}
-	if state.MaxTokens != 0 {
-		req.MaxTokens = state.MaxTokens
-	}
-
-	sr, err := state.Client.ConsultStream(ctx, req)
-	if err != nil {
-		return "", fmt.Errorf("turn: model consult: %w", err)
-	}
-	// Stream filter strips the §5.1 topic tag from the user-visible body.
+	// The stream filter strips the §5.1 topic tag from the user-visible
+	// body. It is created once and only receives writes on the final
+	// (non-aborted) attempt; aborted attempts never touch out.
 	filter := prompt.NewStreamFilter(out)
-	streamErr := streamThroughFilter(sr, filter)
-	// Always flush the filter (even on error) so any buffered non-tag
-	// content reaches the user before we surface the failure.
-	flushErr := filter.Close()
-	closeErr := sr.Close()
 
-	if streamErr != nil {
-		return "", fmt.Errorf("turn: stream: %w", streamErr)
-	}
-	if flushErr != nil {
-		return "", fmt.Errorf("turn: flush stream filter: %w", flushErr)
-	}
-	if closeErr != nil {
-		// Close-after-EOF errors are usually benign (e.g. the body was
-		// already drained); surface them but don't lose the response.
-		_ = eventlog.Log(state.Paths, "model", "stream-close-warn", closeErr.Error())
-	}
+	var full model.Response
+	for attempt := 0; ; attempt++ {
+		messages := make([]model.Message, 0, 2+len(state.History))
+		messages = append(messages, model.Message{Role: "system", Content: systemPrompt})
+		messages = append(messages, state.History...)
+		messages = append(messages, model.Message{Role: "user", Content: userInput})
 
-	full := sr.Final()
+		req := model.DefaultRequest(chosenModel, messages)
+		// State-level overrides — when set, they win over the defaults.
+		if state.Temperature != 0 {
+			req.Temperature = state.Temperature
+		}
+		if state.MaxTokens != 0 {
+			req.MaxTokens = state.MaxTokens
+		}
+
+		sr, err := state.Client.ConsultStream(ctx, req)
+		if err != nil {
+			return "", fmt.Errorf("turn: model consult: %w", err)
+		}
+
+		pre, err := readPreamble(sr)
+		if err != nil {
+			_ = sr.Close()
+			return "", fmt.Errorf("turn: read preamble: %w", err)
+		}
+
+		// §5.5 mid-turn fetch: if the preamble is a topic tag referencing
+		// a thr_<n> not in Layer B, abort the stream, fetch the thread,
+		// and re-prompt. Capped at maxRePromptsPerTurn per turn.
+		if attempt < maxRePromptsPerTurn && pre.tag != nil {
+			missing := missingFromActiveB(pre.tag.Threads, state.ActiveThreads)
+			fetched := 0
+			for _, thrID := range missing {
+				if fetchThreadForReprompt(state, thrID) {
+					fetched++
+				}
+			}
+			if fetched > 0 {
+				_ = sr.Close()
+				_ = eventlog.Log(state.Paths, "topic", "re-prompt",
+					"fetched="+itoa(fetched)+" attempt="+itoa(attempt+1))
+				systemPrompt, err = buildSystemPrompt()
+				if err != nil {
+					return "", fmt.Errorf("turn: recompose working set: %w", err)
+				}
+				continue
+			}
+		}
+
+		// No re-prompt — drain the stream through the filter, starting
+		// with the buffered preamble.
+		if _, werr := filter.Write(pre.head); werr != nil {
+			_ = sr.Close()
+			return "", fmt.Errorf("turn: filter write head: %w", werr)
+		}
+		if len(pre.tail) > 0 {
+			if _, werr := filter.Write(pre.tail); werr != nil {
+				_ = sr.Close()
+				return "", fmt.Errorf("turn: filter write tail: %w", werr)
+			}
+		}
+		var streamErr error
+		if !pre.ended {
+			streamErr = streamThroughFilter(sr, filter)
+		}
+		// Always flush the filter (even on error) so any buffered non-tag
+		// content reaches the user before we surface the failure.
+		flushErr := filter.Close()
+		closeErr := sr.Close()
+
+		if streamErr != nil {
+			return "", fmt.Errorf("turn: stream: %w", streamErr)
+		}
+		if flushErr != nil {
+			return "", fmt.Errorf("turn: flush stream filter: %w", flushErr)
+		}
+		if closeErr != nil {
+			// Close-after-EOF errors are usually benign (e.g. the body was
+			// already drained); surface them but don't lose the response.
+			_ = eventlog.Log(state.Paths, "model", "stream-close-warn", closeErr.Error())
+		}
+		full = sr.Final()
+		break
+	}
 
 	// Step 4: model.response delta with the full accumulated body —
 	// fired once, not per chunk (spec §3.0.5).
@@ -262,6 +334,151 @@ func streamThroughFilter(sr model.StreamReader, filter io.Writer) error {
 	}
 }
 
+// preambleResult bundles the bytes accumulated from a streaming response
+// up through the first newline (head), bytes that arrived in the same
+// chunk after that newline (tail), and a parsed topic tag if head was
+// recognized as one (per §5.1.2). ended==true signals the stream EOF'd
+// before any newline was seen — head holds whatever bytes did arrive,
+// tail is empty.
+//
+// readPreamble + classifyPreamble are split so the unit tests can
+// exercise the classification in isolation from the StreamReader pump.
+type preambleResult struct {
+	head  []byte         // first line up to and including its trailing \n
+	tail  []byte         // bytes after that \n in the chunk that contained it
+	tag   *prompt.TopicTag // non-nil iff head parsed as a §5.1.2 topic tag
+	ended bool           // true when EOF arrived before any \n
+}
+
+// readPreamble loops over chunks from sr until either the first newline
+// arrives or the stream ends. Returned head/tail point into freshly
+// allocated buffers — the caller owns them across subsequent sr.Next()
+// calls. Errors other than io.EOF are surfaced verbatim.
+func readPreamble(sr model.StreamReader) (preambleResult, error) {
+	var buf []byte
+	for {
+		chunk, err := sr.Next()
+		if errors.Is(err, io.EOF) {
+			return classifyPreamble(buf, nil, true), nil
+		}
+		if err != nil {
+			return preambleResult{}, err
+		}
+		if chunk.Content == "" {
+			continue
+		}
+		buf = append(buf, chunk.Content...)
+		if i := bytes.IndexByte(buf, '\n'); i >= 0 {
+			head := append([]byte(nil), buf[:i+1]...)
+			tail := append([]byte(nil), buf[i+1:]...)
+			return classifyPreamble(head, tail, false), nil
+		}
+	}
+}
+
+// classifyPreamble inspects head and reports a parsed topic tag if it
+// matches §5.1.2 with a non-empty thread list. tail and ended are
+// passed through unchanged. head may or may not include a trailing
+// newline (it does when readPreamble found one; it doesn't when the
+// stream ended early); prompt.Parse is multi-line anchored so we feed
+// it head as-is plus a synthetic newline only if absent.
+func classifyPreamble(head, tail []byte, ended bool) preambleResult {
+	res := preambleResult{head: head, tail: tail, ended: ended}
+	if len(head) == 0 {
+		return res
+	}
+	candidate := head
+	if candidate[len(candidate)-1] != '\n' {
+		c := make([]byte, len(candidate)+1)
+		copy(c, candidate)
+		c[len(c)-1] = '\n'
+		candidate = c
+	}
+	pr, err := prompt.Parse(string(candidate))
+	if err != nil {
+		return res
+	}
+	if len(pr.Tag.Threads) == 0 {
+		return res
+	}
+	tag := pr.Tag
+	res.tag = &tag
+	return res
+}
+
+// missingFromActiveB returns thread ids from threads that are not
+// present in active. The literal "*new-topic*" sentinel never needs
+// fetching and is filtered out unconditionally.
+func missingFromActiveB(threads, active []string) []string {
+	if len(threads) == 0 {
+		return nil
+	}
+	have := make(map[string]struct{}, len(active))
+	for _, id := range active {
+		have[id] = struct{}{}
+	}
+	var out []string
+	for _, t := range threads {
+		if t == "*new-topic*" {
+			continue
+		}
+		if _, ok := have[t]; ok {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// fetchThreadForReprompt loads thread thrID from disk, fires a
+// thread.fetched context delta, and promotes the thread into
+// state.ActiveThreads (de-duped, capped by Budget.BTopK; overflow
+// demotes the tail to the head of state.DormantThreads).
+//
+// On a load error (missing file or otherwise unloadable), logs
+// thread.fetch-miss and returns false — the caller skips that thread
+// and proceeds with whichever others succeeded.
+//
+// fetchThreadForReprompt deliberately does not add thrID to
+// coalesce.threads: engagement is owed by the second response's tag
+// (which the model emits against the augmented context), not by the
+// fetch action itself.
+func fetchThreadForReprompt(state *State, thrID string) bool {
+	thr, err := store.LoadThread(state.Paths, thrID)
+	if err != nil {
+		_ = eventlog.Log(state.Paths, "thread", "fetch-miss",
+			"thr="+thrID+" err="+sanitizeDetail(err.Error()))
+		return false
+	}
+	if err := onContextDelta(state, Delta{
+		Source:  "thread.fetched",
+		Content: thr.Body,
+		Meta:    map[string]string{"thr": thrID},
+	}); err != nil {
+		_ = eventlog.Log(state.Paths, "thread", "fetch-miss",
+			"thr="+thrID+" err="+sanitizeDetail(err.Error()))
+		return false
+	}
+
+	// Promote into ActiveThreads at the front; demote tail on overflow.
+	bTopK := state.Budget.BTopK
+	if bTopK <= 0 {
+		bTopK = workset.DefaultBTopK
+	}
+	state.ActiveThreads = removeString(state.ActiveThreads, thrID)
+	state.DormantThreads = removeString(state.DormantThreads, thrID)
+	state.ActiveThreads = append([]string{thrID}, state.ActiveThreads...)
+	for len(state.ActiveThreads) > bTopK {
+		demoted := state.ActiveThreads[len(state.ActiveThreads)-1]
+		state.ActiveThreads = state.ActiveThreads[:len(state.ActiveThreads)-1]
+		state.DormantThreads = append([]string{demoted}, state.DormantThreads...)
+	}
+	if len(state.DormantThreads) > dormantThreadsCap {
+		state.DormantThreads = state.DormantThreads[:dormantThreadsCap]
+	}
+	return true
+}
+
 // historyCapPerThread is the v0.1 default for `history.cap-per-thread`
 // (spec §2.6.1). Directive-file lookup arrives in Phase 3+; until then
 // the cap is a constant.
@@ -292,15 +509,16 @@ const historyCapPerThread = 40
 // not fail the turn over malformed tag output — that judgment is
 // recorded in the spec changelog.
 //
-// Phase 2.e-A simplification: the model may have referenced thr_<n>
-// in its topic tag that wasn't in Layer B at prompt-construction
-// time. The §5.5 system-injected re-prompt mechanism (which would
-// stop the stream, fetch the thread, and re-issue the request with
-// augmented context) is deferred to 2.e-B. For now, the referenced
-// thread enters ActiveThreads here, so the next turn's prompt
-// includes it; the current turn's response was generated against
-// whatever was in B at the start. Document this in commits and the
-// spec changelog.
+// §5.5 mid-turn fetch (Phase 2.e-B) handles the common case where the
+// model's topic tag references a thr_<n> not in Layer B at
+// prompt-construction time: Run aborts the in-flight stream, loads the
+// thread, and re-issues the request with augmented context. The
+// close-time LRU update here still picks up any threads that the
+// mid-turn fetch couldn't service (e.g. a missing thread file →
+// thread.fetch-miss) or didn't trigger (re-prompt cap reached, or the
+// model's second-stream tag introduces a new thr_<n> that we no longer
+// re-prompt for). Those threads enter ActiveThreads at turn close so
+// the next turn's prompt includes them.
 func closeTurnAndUpdateEngagement(state *State, userInput, responseBody string) error {
 	if len(state.coalesce.threads) == 0 {
 		return nil

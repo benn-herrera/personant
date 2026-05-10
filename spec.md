@@ -561,13 +561,21 @@ render one layer (e.g. a project's `digest.json` is missing) emits a
 `workset.warning` log line and that layer renders empty; neighbour
 layers proceed.
 
-**Phase 2.e-A simplification (deferred to 2.e-B):** when the model's
-topic tag references a `thr_<n>` not currently in `ActiveThreads`, the
-runtime adds it during turn close. The next turn's prompt includes it.
-The §5.5 system-injected mid-turn fetch (which would stop the stream,
-fetch the thread, and re-issue the request with augmented context) is
-not yet implemented; the current turn's response was generated against
-whatever was in B at the start.
+**§5.5 mid-turn fetch (Phase 2.e-B):** when the model's topic tag at
+response start references a `thr_<n>` not currently in `ActiveThreads`,
+the runtime aborts the in-flight stream, loads the missing thread,
+fires a `thread.fetched` context delta (per §3.0.1), promotes the
+thread into `ActiveThreads` (front, BTopK-capped — overflow demotes
+the tail to `DormantThreads`), and re-issues the request with the
+recomposed system prompt. The user-visible response is the second
+stream's body. The re-prompt is capped at 1 per turn.
+
+The close-time LRU update still picks up any thread that the mid-turn
+fetch couldn't service (an unloadable thread file logs
+`thread.fetch-miss` and is skipped) or didn't trigger (e.g. the
+second-stream tag introduces yet another missing `thr_<n>`; with the
+cap reached, that thread enters `ActiveThreads` at close, not via
+§5.5).
 
 ### 3.2 Topic tagging and engagement update
 
@@ -1151,12 +1159,14 @@ to *decide* (workspace reads, web fetch, model.consult) keeps the
 model's decision-making narrow. Topic tag is the request; system
 injection is the fulfillment.
 
-[OPEN: re-prompt cost. Each fetch implies a re-roundtrip to the LLM.
-Speculative pre-fetch is rejected as an explicit non-goal (every
-loaded thread is loaded because the model said it was needed; see
-ARCHITECTURE.md "No speculative prefetch"), so re-prompt cost is the
-path; quantify the latency penalty during Phase 2 instrumentation.
-The six-month simulation (§11.1) will expose the steady-state impact.]
+Re-prompt is capped at 1 per turn (Phase 2.e-B). Latency cost on a
+turn that triggers a fetch is up to 2× the no-fetch case (one aborted
+stream + one full stream); turns that don't trigger a fetch pay
+nothing. Speculative pre-fetch is rejected as an explicit non-goal
+(every loaded thread is loaded because the model said it was needed;
+see ARCHITECTURE.md "No speculative prefetch"), so re-prompt cost is
+the path; the six-month simulation (§11.1) will measure incidence and
+expose the steady-state impact.
 
 ---
 
@@ -1892,3 +1902,4 @@ Compiled from inline `[OPEN: ...]` markers and design-pass uncertainties.
 - 2026-05-09 — §11 lead strengthened with the **asymmetric cost framing**: there is no graceful recovery from "use it and find out" — if six months of accumulated state reveal the storage strategy is structurally wrong, the choice is between a complex/risky refactor of accumulated memory or losing it all. The simulation regime exists because proof must come ahead of time. §10.1 v1.0 Python entry refined: confirmed math/physics computational workflow as a real (not speculative) v1.0 commitment with concrete tool list (`python.run`, `python.format`, `python.lint`, possibly `python.repl`); explicitly **Python-only** (other coding languages out of scope — not building a polyglot agent-coding tool). New watch-list item 19: Python execution environment policy (system / venv / uv) for v1.0 design.
 - 2026-05-09 — Phase 2.c.2 lands: chat REPL with project bootstrap (§4.5.7) handling all five BootstrapResult branches; turn handler with §3.0 chain skeleton and per-turn engagement coalescing (§3.0.4); event log writer (§2.8); working-set composer MVP (LayerA1 only). Default cobra command is now chat — `personant` with no subcommand drops into a session.
 - 2026-05-10 — Phase 2.e-A lands: §3.1 fully drafted with the five-layer composition algorithm, byte-budget truncation policy, and the LRU update rule that runs at §3.0.4 turn close. New `context.byte-budget` parameter (default 65536) added to §2.6.1. v0.1 simplification documented: when the model's topic tag references a thread not currently in Layer B, the thread enters Layer B at turn close and is visible on the *next* turn's prompt; the §5.5 system-injected mid-turn re-prompt mechanism is deferred to Phase 2.e-B (the current turn's response was generated without that thread in context).
+- 2026-05-10 — Phase 2.e-B lands: §5.5 system-injected mid-turn thread fetch implemented. When the model's first-stream topic tag references a `thr_<n>` not in Layer B, the runtime aborts the in-flight stream, loads the thread, fires a `thread.fetched` context delta, promotes the thread into `ActiveThreads` (BTopK-capped with overflow demotion), and re-issues the request with augmented context — the user-visible response is the second stream's body. Cap: 1 re-prompt per turn (total stream attempts ≤ 2). Unloadable misses log `thread.fetch-miss` and are skipped. The §3.1 close-time LRU update remains the safety net for threads the mid-turn fetch couldn't or didn't service. §5.5 OPEN on re-prompt cost replaced with a concrete latency note (up to 2× on triggering turns); steady-state incidence will be measured in the six-month simulation.

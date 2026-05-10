@@ -503,6 +503,10 @@ func TestRunExistingThreadAppendsExcerpt(t *testing.T) {
 		{Content: "*topic: thr_42 [trefoil, unknot, body-topology, electron-shape]*\nFollow-up reply."},
 	}, nil)
 	state := NewState(paths, meta, store.Provider{}, mock)
+	// Pre-populate ActiveThreads so the §5.5 mid-turn fetch does not
+	// fire — this test is about the close-time engagement-update path,
+	// not the re-prompt path.
+	state.ActiveThreads = []string{"thr_42"}
 	now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
 	state.SetClock(fixedClock(now))
 
@@ -677,5 +681,216 @@ func TestMergeHistorySymbolsCountWeightedEviction(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("high-count entry was evicted; expected to survive")
+	}
+}
+
+// seedThreadAndSpine writes a minimal-but-valid thread file plus the
+// matching spine record for thrID. Returns nothing — t.Fatalf on any
+// error so tests fail fast at setup.
+func seedThreadAndSpine(t *testing.T, paths store.PersonantPaths, project, thrID string) {
+	t.Helper()
+	rec := store.SpineRecord{
+		ID:           thrID,
+		Project:      project,
+		Anchors:      []string{"a", "b", "c", "d"},
+		Summary:      thrID,
+		State:        store.ThreadActive,
+		Created:      "2026-04-01T00:00:00Z",
+		LastEngaged:  "2026-04-01T00:00:00Z",
+		StateChanged: "2026-04-01T00:00:00Z",
+		TurnCount:    1,
+	}
+	if err := store.AppendSpineRecord(paths, rec); err != nil {
+		t.Fatalf("seed spine %s: %v", thrID, err)
+	}
+	thr := store.Thread{
+		Frontmatter: store.ThreadFrontmatter{
+			ID:           rec.ID,
+			Project:      rec.Project,
+			Anchors:      rec.Anchors,
+			Summary:      rec.Summary,
+			State:        rec.State,
+			Created:      rec.Created,
+			LastEngaged:  rec.LastEngaged,
+			StateChanged: rec.StateChanged,
+			TurnCount:    rec.TurnCount,
+		},
+		Body: "# " + thrID + "\n\n## Turn 1 · 2026-04-01T00:00:00Z · [a, b, c, d]\n\n**user:** seed\n\n**agent:** seed reply\n",
+	}
+	if err := store.SaveThread(paths, thr); err != nil {
+		t.Fatalf("seed thread %s: %v", thrID, err)
+	}
+}
+
+// TestRunRePromptFiresForMissingThread — when the model's first-stream
+// topic tag references a thread not in Layer B but loadable from disk,
+// the runtime aborts the stream, fetches the thread, re-issues the
+// request, and the user sees only the second response.
+func TestRunRePromptFiresForMissingThread(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedThreadAndSpine(t, paths, meta.ID, "thr_42")
+
+	mock := model.NewScriptedMock([]model.Response{
+		{Content: "*topic: thr_42 [a, b, c, d]*\nFIRST."},
+		{Content: "*topic: thr_42 [a, b, c, d]*\nSECOND."},
+	}, nil)
+	state := NewState(paths, meta, store.Provider{}, mock)
+	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
+
+	var out bytes.Buffer
+	body, err := Run(context.Background(), state, "ask about thr_42", &out)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := len(mock.Calls()); got != 2 {
+		t.Fatalf("mock call count: got %d want 2", got)
+	}
+	if !strings.Contains(body, "SECOND") {
+		t.Errorf("body missing SECOND: %q", body)
+	}
+	if strings.Contains(body, "FIRST") {
+		t.Errorf("body unexpectedly contains FIRST: %q", body)
+	}
+	if !strings.Contains(out.String(), "SECOND") {
+		t.Errorf("streamed out missing SECOND: %q", out.String())
+	}
+	if strings.Contains(out.String(), "FIRST") {
+		t.Errorf("streamed out leaked aborted FIRST: %q", out.String())
+	}
+	if len(state.ActiveThreads) == 0 || state.ActiveThreads[0] != "thr_42" {
+		t.Errorf("ActiveThreads: got %v want [thr_42, ...]", state.ActiveThreads)
+	}
+}
+
+// TestRunRePromptSkippedWhenFetchFails — when the missing thread has no
+// thread file on disk, fetch fails, no re-prompt is issued, and the
+// user sees the first stream's body.
+func TestRunRePromptSkippedWhenFetchFails(t *testing.T) {
+	paths, meta := newTestHome(t)
+	// Spine record exists but no thread file — LoadThread returns
+	// ErrThreadFileNotFound.
+	if err := store.AppendSpineRecord(paths, store.SpineRecord{
+		ID: "thr_99", Project: meta.ID,
+		Anchors: []string{"a", "b", "c", "d"},
+		Summary: "thr_99", State: store.ThreadActive,
+	}); err != nil {
+		t.Fatalf("seed spine: %v", err)
+	}
+
+	mock := model.NewScriptedMock([]model.Response{
+		{Content: "*topic: thr_99 [a, b, c, d]*\nFIRST."},
+	}, nil)
+	state := NewState(paths, meta, store.Provider{}, mock)
+	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
+
+	body, err := Run(context.Background(), state, "ask", io.Discard)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := len(mock.Calls()); got != 1 {
+		t.Fatalf("mock call count: got %d want 1 (no re-prompt for unfetchable miss)", got)
+	}
+	if !strings.Contains(body, "FIRST") {
+		t.Errorf("body missing FIRST: %q", body)
+	}
+}
+
+// TestRunRePromptCappedAtOnePerTurn — even if the second response's tag
+// references yet another missing thread (with a loadable file), the
+// re-prompt cap holds: total stream attempts == 2, and the third
+// thread is not fetched mid-turn (it would enter ActiveThreads at
+// close via the LRU fallback path, not via §5.5).
+func TestRunRePromptCappedAtOnePerTurn(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedThreadAndSpine(t, paths, meta.ID, "thr_99")
+	seedThreadAndSpine(t, paths, meta.ID, "thr_88")
+
+	mock := model.NewScriptedMock([]model.Response{
+		{Content: "*topic: thr_99 [a, b, c, d]*\nFIRST."},
+		{Content: "*topic: thr_88 [a, b, c, d]*\nSECOND."},
+	}, nil)
+	state := NewState(paths, meta, store.Provider{}, mock)
+	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
+
+	body, err := Run(context.Background(), state, "ask", io.Discard)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := len(mock.Calls()); got != 2 {
+		t.Fatalf("mock call count: got %d want 2 (re-prompt capped at 1)", got)
+	}
+	if !strings.Contains(body, "SECOND") {
+		t.Errorf("body missing SECOND: %q", body)
+	}
+	// thr_88 was referenced in response 2 — it enters ActiveThreads via
+	// the close-time LRU update (not via mid-turn fetch).
+	if len(state.ActiveThreads) == 0 || state.ActiveThreads[0] != "thr_88" {
+		t.Errorf("ActiveThreads front: got %v want [thr_88, ...]", state.ActiveThreads)
+	}
+}
+
+// TestRunNoRePromptWhenTagThreadsAlreadyActive — when every thread in
+// the model's tag is already in Layer B, the runtime drains the stream
+// without re-prompting.
+func TestRunNoRePromptWhenTagThreadsAlreadyActive(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedThreadAndSpine(t, paths, meta.ID, "thr_42")
+
+	mock := model.NewScriptedMock([]model.Response{
+		{Content: "*topic: thr_42 [a, b, c, d]*\nbody."},
+	}, nil)
+	state := NewState(paths, meta, store.Provider{}, mock)
+	state.ActiveThreads = []string{"thr_42"}
+	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
+
+	body, err := Run(context.Background(), state, "ask", io.Discard)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := len(mock.Calls()); got != 1 {
+		t.Fatalf("mock call count: got %d want 1 (no re-prompt; tag's threads already active)", got)
+	}
+	if !strings.Contains(body, "body") {
+		t.Errorf("body: %q", body)
+	}
+}
+
+// TestRunRePromptLogsThreadFetchedDelta — the §5.5 fetch must fire a
+// thread.fetched context delta (logged as context.modified) and a
+// topic.re-prompt event line.
+func TestRunRePromptLogsThreadFetchedDelta(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedThreadAndSpine(t, paths, meta.ID, "thr_42")
+
+	mock := model.NewScriptedMock([]model.Response{
+		{Content: "*topic: thr_42 [a, b, c, d]*\nFIRST."},
+		{Content: "*topic: thr_42 [a, b, c, d]*\nSECOND."},
+	}, nil)
+	state := NewState(paths, meta, store.Provider{}, mock)
+	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
+
+	if _, err := Run(context.Background(), state, "ask", io.Discard); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// The eventlog uses its own clock (real time.Now at write); read the
+	// only file that exists in LogsDir.
+	entries, err := os.ReadDir(paths.LogsDir)
+	if err != nil {
+		t.Fatalf("read logs dir: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("logs dir entries: got %d want 1 (%v)", len(entries), entries)
+	}
+	data, err := os.ReadFile(paths.LogsDir + "/" + entries[0].Name())
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	logBody := string(data)
+	if !strings.Contains(logBody, "context.modified source=thread.fetched") {
+		t.Errorf("log missing thread.fetched context-modified line:\n%s", logBody)
+	}
+	if !strings.Contains(logBody, "topic.re-prompt") {
+		t.Errorf("log missing topic.re-prompt line:\n%s", logBody)
 	}
 }
