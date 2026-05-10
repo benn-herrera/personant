@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -76,21 +77,32 @@ func (s *State) now() time.Time {
 //
 //  1. Fire user.prompt context-modify event.
 //  2. Compose working-set + build system prompt.
-//  3. Call the LLM via state.Client.
+//  3. Stream the model response via state.Client.ConsultStream, writing
+//     chunks through a topic-tag stream filter to out as they arrive.
 //  4. Fire model.response context-modify event (parses topic tag,
-//     accumulates symbols, defers engagement).
+//     accumulates symbols, defers engagement) after the stream completes.
+//     Per §3.0.5 the model.response delta fires once with the full body,
+//     not per chunk.
 //  5. Close-out the turn: fire engagement updates with the coalesced
 //     symbol set (§3.0.4).
-//  6. Return the response body with the topic tag stripped.
+//  6. Return the response body with the topic tag stripped (matches what
+//     the user saw on out).
 //
 // Errors at any step are wrapped and returned. The coalesce buffer is
 // reset at the start of each Run so per-turn accumulation is fresh.
-func Run(ctx context.Context, state *State, userInput string) (string, error) {
+//
+// out receives the streamed response body with the §5.1 topic tag
+// suppressed; pass io.Discard to keep the streaming behavior without
+// presenting tokens (e.g. tests that only assert on side-effects).
+func Run(ctx context.Context, state *State, userInput string, out io.Writer) (string, error) {
 	if state == nil {
 		return "", errors.New("turn: nil state")
 	}
 	if state.Client == nil {
 		return "", errors.New("turn: nil model client")
+	}
+	if out == nil {
+		out = io.Discard
 	}
 	if state.coalesce == nil {
 		state.coalesce = newCoalesceBuffer()
@@ -112,7 +124,7 @@ func Run(ctx context.Context, state *State, userInput string) (string, error) {
 	}
 	systemPrompt := prompt.BuildSystemPrompt(params)
 
-	// Step 3: LLM round-trip.
+	// Step 3: LLM round-trip (streaming).
 	chosenModel := state.Model
 	if chosenModel == "" {
 		chosenModel = state.Provider.DefaultModel
@@ -122,32 +134,57 @@ func Run(ctx context.Context, state *State, userInput string) (string, error) {
 	messages = append(messages, state.History...)
 	messages = append(messages, model.Message{Role: "user", Content: userInput})
 
-	req := model.Request{
-		Model:       chosenModel,
-		Messages:    messages,
-		Temperature: state.Temperature,
-		MaxTokens:   state.MaxTokens,
+	req := model.DefaultRequest(chosenModel, messages)
+	// State-level overrides — when set, they win over the defaults.
+	if state.Temperature != 0 {
+		req.Temperature = state.Temperature
 	}
-	resp, err := state.Client.Consult(ctx, req)
+	if state.MaxTokens != 0 {
+		req.MaxTokens = state.MaxTokens
+	}
+
+	sr, err := state.Client.ConsultStream(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("turn: model consult: %w", err)
 	}
+	// Stream filter strips the §5.1 topic tag from the user-visible body.
+	filter := prompt.NewStreamFilter(out)
+	streamErr := streamThroughFilter(sr, filter)
+	// Always flush the filter (even on error) so any buffered non-tag
+	// content reaches the user before we surface the failure.
+	flushErr := filter.Close()
+	closeErr := sr.Close()
 
-	// Step 4: model.response delta. The chain extracts symbols and
-	// accumulates engagement targets but does not write spine yet.
-	if err := onContextDelta(state, Delta{Source: "model.response", Content: resp.Content}); err != nil {
+	if streamErr != nil {
+		return "", fmt.Errorf("turn: stream: %w", streamErr)
+	}
+	if flushErr != nil {
+		return "", fmt.Errorf("turn: flush stream filter: %w", flushErr)
+	}
+	if closeErr != nil {
+		// Close-after-EOF errors are usually benign (e.g. the body was
+		// already drained); surface them but don't lose the response.
+		_ = eventlog.Log(state.Paths, "model", "stream-close-warn", closeErr.Error())
+	}
+
+	full := sr.Final()
+
+	// Step 4: model.response delta with the full accumulated body —
+	// fired once, not per chunk (spec §3.0.5).
+	if err := onContextDelta(state, Delta{Source: "model.response", Content: full.Content}); err != nil {
 		return "", err
 	}
 
 	// Step 5: turn close — fire deferred engagement updates with the
 	// coalesced symbol set.
-	if err := closeTurnAndUpdateEngagement(state, resp.Content); err != nil {
+	if err := closeTurnAndUpdateEngagement(state, full.Content); err != nil {
 		return "", fmt.Errorf("turn: close: %w", err)
 	}
 
-	// Step 6: strip the topic tag from the body for user display.
-	body := resp.Content
-	if pr, perr := prompt.Parse(resp.Content); perr == nil {
+	// Step 6: derive the topic-tag-stripped body for the return value.
+	// (out has already received the same content in chunks.)
+	body := full.Content
+	if pr, perr := prompt.Parse(full.Content); perr == nil {
 		body = pr.Body
 	}
 	body = strings.TrimRight(body, "\n")
@@ -155,10 +192,32 @@ func Run(ctx context.Context, state *State, userInput string) (string, error) {
 	// Append to History so the next turn sees the exchange.
 	state.History = append(state.History,
 		model.Message{Role: "user", Content: userInput},
-		model.Message{Role: "assistant", Content: resp.Content},
+		model.Message{Role: "assistant", Content: full.Content},
 	)
 
 	return body, nil
+}
+
+// streamThroughFilter pumps every chunk's Content through filter until
+// the StreamReader signals EOF. Errors from filter.Write are surfaced
+// immediately — a sink that fails to accept bytes is not something the
+// runtime can recover from per-chunk.
+func streamThroughFilter(sr model.StreamReader, filter io.Writer) error {
+	for {
+		chunk, err := sr.Next()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if chunk.Content == "" {
+			continue
+		}
+		if _, werr := io.WriteString(filter, chunk.Content); werr != nil {
+			return werr
+		}
+	}
 }
 
 // closeTurnAndUpdateEngagement fires after the model.response delta.

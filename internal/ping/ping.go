@@ -5,6 +5,7 @@ package ping
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -63,29 +64,56 @@ func Run(paths store.PersonantPaths, opts Options) error {
 	}
 
 	client := model.NewHTTPClient(provider)
-	req := model.Request{
-		Model: chosenModel,
-		Messages: []model.Message{
-			{Role: "user", Content: opts.Prompt},
-		},
-	}
+	return runWithClient(client, opts, chosenModel, timeout)
+}
+
+// runWithClient is the model-client-agnostic body of Run. Split out so
+// tests can drive a MockClient without going through providers.toml.
+func runWithClient(client model.Client, opts Options, chosenModel string, timeout time.Duration) error {
+	req := model.DefaultRequest(chosenModel, []model.Message{
+		{Role: "user", Content: opts.Prompt},
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	start := time.Now()
-	resp, err := client.Consult(ctx, req)
-	elapsed := time.Since(start)
+	sr, err := client.ConsultStream(ctx, req)
 	if err != nil {
 		return fmt.Errorf("ping: consult: %w", err)
 	}
+	defer sr.Close()
 
-	if _, err := fmt.Fprintln(opts.Stdout, resp.Content); err != nil {
-		return fmt.Errorf("ping: write stdout: %w", err)
+	// ping is a free-form connectivity probe — no topic-tag stripping.
+	// Stream chunks straight to stdout as they arrive.
+	for {
+		chunk, err := sr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("ping: stream: %w", err)
+		}
+		if chunk.Content == "" {
+			continue
+		}
+		if _, werr := io.WriteString(opts.Stdout, chunk.Content); werr != nil {
+			return fmt.Errorf("ping: write stdout: %w", werr)
+		}
 	}
+	final := sr.Final()
+	elapsed := time.Since(start)
+
+	// Cap with a newline so the summary on stderr lands on a fresh line.
+	if final.Content == "" || final.Content[len(final.Content)-1] != '\n' {
+		if _, err := io.WriteString(opts.Stdout, "\n"); err != nil {
+			return fmt.Errorf("ping: write stdout: %w", err)
+		}
+	}
+
 	fmt.Fprintf(opts.Stderr, "ping ok: %s %s tokens=%d/%d/%d elapsed=%s\n",
 		opts.Provider, chosenModel,
-		resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens,
+		final.Usage.PromptTokens, final.Usage.CompletionTokens, final.Usage.TotalTokens,
 		elapsed.Round(time.Millisecond))
 	return nil
 }

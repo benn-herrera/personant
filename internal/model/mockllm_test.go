@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"errors"
+	"io"
 	"regexp"
 	"strings"
 	"testing"
@@ -215,6 +216,155 @@ func TestMockNoModeErrors(t *testing.T) {
 	_, err := m.Consult(context.Background(), Request{})
 	if err == nil {
 		t.Fatal("expected error from mode-less mock, got nil")
+	}
+}
+
+func TestMockScriptedStreamSplitsResponse(t *testing.T) {
+	scripted := []Response{
+		{Content: "abcdefghijklmnop", FinishReason: "stop", Usage: Usage{TotalTokens: 99}},
+	}
+	m := NewScriptedMock(scripted, nil)
+	m.SetMockChunks(4)
+
+	sr, err := m.ConsultStream(context.Background(), Request{})
+	if err != nil {
+		t.Fatalf("ConsultStream: %v", err)
+	}
+	defer sr.Close()
+
+	var got strings.Builder
+	chunks := 0
+	var lastChunk Chunk
+	for {
+		chunk, err := sr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		got.WriteString(chunk.Content)
+		chunks++
+		lastChunk = chunk
+	}
+	if chunks != 4 {
+		t.Errorf("chunks: got %d, want 4", chunks)
+	}
+	if got.String() != scripted[0].Content {
+		t.Errorf("concat: got %q, want %q", got.String(), scripted[0].Content)
+	}
+	// Final chunk carries the metadata.
+	if lastChunk.FinishReason != "stop" {
+		t.Errorf("last chunk finish_reason: got %q, want stop", lastChunk.FinishReason)
+	}
+	if lastChunk.Usage.TotalTokens != 99 {
+		t.Errorf("last chunk usage: got %d, want 99", lastChunk.Usage.TotalTokens)
+	}
+
+	final := sr.Final()
+	if final.Content != scripted[0].Content {
+		t.Errorf("Final.Content: got %q, want %q", final.Content, scripted[0].Content)
+	}
+	if final.FinishReason != "stop" {
+		t.Errorf("Final.FinishReason: got %q, want stop", final.FinishReason)
+	}
+}
+
+func TestMockStreamCloseIdempotent(t *testing.T) {
+	m := NewScriptedMock([]Response{{Content: "x"}}, nil)
+	sr, err := m.ConsultStream(context.Background(), Request{})
+	if err != nil {
+		t.Fatalf("ConsultStream: %v", err)
+	}
+	if err := sr.Close(); err != nil {
+		t.Errorf("first Close: %v", err)
+	}
+	if err := sr.Close(); err != nil {
+		t.Errorf("second Close: %v", err)
+	}
+	if _, err := sr.Next(); !errors.Is(err, io.EOF) {
+		t.Errorf("Next after Close: got %v, want io.EOF", err)
+	}
+}
+
+func TestMockGeneratedStreamMatchesConsult(t *testing.T) {
+	// Two equally-seeded mocks: Consult on one, ConsultStream on the
+	// other. The streamed concat must match the Consult body byte-for-byte.
+	opts := GeneratedMockOpts{
+		ThreadPool:    []string{"thr_1"},
+		AnchorPool:    []string{"alpha", "beta", "gamma", "delta"},
+		AnchorsPerTag: 4,
+		BodyWords:     30,
+	}
+	a := NewGeneratedMock(123, opts)
+	b := NewGeneratedMock(123, opts)
+
+	respA, err := a.Consult(context.Background(), Request{})
+	if err != nil {
+		t.Fatalf("Consult: %v", err)
+	}
+	sr, err := b.ConsultStream(context.Background(), Request{})
+	if err != nil {
+		t.Fatalf("ConsultStream: %v", err)
+	}
+	defer sr.Close()
+	var got strings.Builder
+	for {
+		chunk, err := sr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		got.WriteString(chunk.Content)
+	}
+	if got.String() != respA.Content {
+		t.Errorf("stream concat differs from Consult body:\n stream: %q\n consult: %q", got.String(), respA.Content)
+	}
+}
+
+func TestMockStreamCtxCancelBetweenChunks(t *testing.T) {
+	m := NewScriptedMock([]Response{{Content: "abcdefgh"}}, nil)
+	m.SetMockChunks(4)
+	ctx, cancel := context.WithCancel(context.Background())
+	sr, err := m.ConsultStream(ctx, Request{})
+	if err != nil {
+		t.Fatalf("ConsultStream: %v", err)
+	}
+	defer sr.Close()
+	// One chunk delivered, then cancel; the next Next must report ctx err.
+	if _, err := sr.Next(); err != nil {
+		t.Fatalf("first Next: %v", err)
+	}
+	cancel()
+	_, err = sr.Next()
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestMockStreamDefaultChunkCount(t *testing.T) {
+	m := NewScriptedMock([]Response{{Content: strings.Repeat("a", 64)}}, nil)
+	// No SetMockChunks call → DefaultMockChunks.
+	sr, err := m.ConsultStream(context.Background(), Request{})
+	if err != nil {
+		t.Fatalf("ConsultStream: %v", err)
+	}
+	defer sr.Close()
+	chunks := 0
+	for {
+		_, err := sr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		chunks++
+	}
+	if chunks != DefaultMockChunks {
+		t.Errorf("chunk count: got %d, want %d", chunks, DefaultMockChunks)
 	}
 }
 

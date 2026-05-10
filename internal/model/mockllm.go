@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
 	"strings"
 	"sync"
@@ -32,7 +33,15 @@ type MockClient struct {
 	Models []ModelInfo
 
 	calls []MockCall
+
+	// chunks is the per-response chunk count for ConsultStream. 0 →
+	// DefaultMockChunks. Set via SetMockChunks.
+	chunks int
 }
+
+// DefaultMockChunks is the per-response chunk count used by ConsultStream
+// when SetMockChunks has not been called.
+const DefaultMockChunks = 8
 
 // MockCall records one Consult invocation for test assertions.
 type MockCall struct {
@@ -136,6 +145,35 @@ func (m *MockClient) Consult(ctx context.Context, req Request) (Response, error)
 	return resp, err
 }
 
+// ConsultStream produces the same Response Consult would have produced,
+// then splits it across chunks for incremental delivery. The number of
+// chunks is set by SetMockChunks (default DefaultMockChunks).
+//
+// All non-content fields (FinishReason, Usage, ToolCalls) attach to the
+// final chunk so iteration order matches a real provider.
+func (m *MockClient) ConsultStream(ctx context.Context, req Request) (StreamReader, error) {
+	resp, err := m.Consult(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	chunkCount := m.chunks
+	m.mu.Unlock()
+	if chunkCount <= 0 {
+		chunkCount = DefaultMockChunks
+	}
+	return newMockStreamReader(ctx, resp, chunkCount), nil
+}
+
+// SetMockChunks overrides the per-response chunk count for streamed mock
+// responses. Subsequent ConsultStream calls use the new value. n ≤ 0 is
+// equivalent to DefaultMockChunks.
+func (m *MockClient) SetMockChunks(n int) {
+	m.mu.Lock()
+	m.chunks = n
+	m.mu.Unlock()
+}
+
 // ListModels returns a copy of the Models field, or an empty slice if
 // none are configured. ctx is honored for cancellation.
 func (m *MockClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
@@ -223,4 +261,112 @@ func (m *MockClient) makeBody(counter int) string {
 	// Counter suffix: guarantees no two generated bodies share content.
 	parts = append(parts, fmt.Sprintf("[#%d]", counter))
 	return strings.Join(parts, " ")
+}
+
+// mockStreamReader splits a Response.Content into N near-equal chunks and
+// hands them out one Next() call at a time. Tool-calls, finish_reason,
+// and usage attach to the final chunk so iteration matches a real
+// provider's emission order.
+type mockStreamReader struct {
+	ctx     context.Context
+	pieces  []string
+	idx     int
+	full    Response
+	closed  bool
+	closeMu sync.Mutex
+}
+
+func newMockStreamReader(ctx context.Context, resp Response, chunks int) *mockStreamReader {
+	if chunks < 1 {
+		chunks = 1
+	}
+	return &mockStreamReader{
+		ctx:    ctx,
+		pieces: splitForChunks(resp.Content, chunks),
+		full:   resp,
+	}
+}
+
+func (r *mockStreamReader) Next() (Chunk, error) {
+	if r.closed {
+		return Chunk{}, io.EOF
+	}
+	if err := r.ctx.Err(); err != nil {
+		return Chunk{}, err
+	}
+	if r.idx >= len(r.pieces) {
+		return Chunk{}, io.EOF
+	}
+	chunk := Chunk{Content: r.pieces[r.idx]}
+	r.idx++
+	if r.idx == len(r.pieces) {
+		// Final chunk carries the non-content fields.
+		chunk.FinishReason = r.full.FinishReason
+		chunk.Usage = r.full.Usage
+		chunk.ToolCalls = r.full.ToolCalls
+	}
+	return chunk, nil
+}
+
+func (r *mockStreamReader) Final() Response {
+	// The mock knows the full response from the start; expose it
+	// directly. (Real providers compute Final() from observed deltas;
+	// the mock cheats but the contract is the same.)
+	if r.idx == 0 {
+		return Response{}
+	}
+	consumed := strings.Join(r.pieces[:r.idx], "")
+	out := Response{Content: consumed}
+	if r.idx == len(r.pieces) {
+		out.FinishReason = r.full.FinishReason
+		out.Usage = r.full.Usage
+		out.ToolCalls = r.full.ToolCalls
+	}
+	return out
+}
+
+func (r *mockStreamReader) Close() error {
+	r.closeMu.Lock()
+	defer r.closeMu.Unlock()
+	r.closed = true
+	return nil
+}
+
+// splitForChunks slices s into n near-equal pieces by rune count. The
+// last piece absorbs any remainder so concat(pieces) == s exactly.
+// If s is empty, the result is a single empty piece (so Next() still
+// emits one chunk carrying the trailing finish_reason/usage).
+func splitForChunks(s string, n int) []string {
+	if n <= 1 {
+		return []string{s}
+	}
+	if s == "" {
+		return []string{""}
+	}
+	runes := []rune(s)
+	total := len(runes)
+	if total < n {
+		// One rune per piece; trailing pieces empty.
+		out := make([]string, 0, n)
+		for i := 0; i < n; i++ {
+			if i < total {
+				out = append(out, string(runes[i:i+1]))
+			} else {
+				out = append(out, "")
+			}
+		}
+		return out
+	}
+	per := total / n
+	out := make([]string, 0, n)
+	cursor := 0
+	for i := 0; i < n; i++ {
+		end := cursor + per
+		if i == n-1 {
+			end = total
+		}
+		out = append(out, string(runes[cursor:end]))
+		cursor = end
+	}
+	return out
 }

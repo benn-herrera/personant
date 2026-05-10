@@ -10,6 +10,7 @@ var (
 	chatFlagHome     string
 	chatFlagProject  string
 	chatFlagProvider string
+	chatFlagModel    string
 )
 
 var chatCmd = &cobra.Command{
@@ -26,6 +27,7 @@ turn-handler chain.`,
 			ExplicitProject: chatFlagProject,
 			HomeOverride:    chatFlagHome,
 			ProviderName:    chatFlagProvider,
+			Model:           chatFlagModel,
 		})
 	},
 	SilenceUsage: true,
@@ -35,5 +37,6 @@ func init() {
 	chatCmd.Flags().StringVar(&chatFlagHome, "home", "", "override $PERSONANT_HOME for this invocation")
 	chatCmd.Flags().StringVar(&chatFlagProject, "project", "", "explicit active project (id or name); skips bootstrap heuristics")
 	chatCmd.Flags().StringVar(&chatFlagProvider, "provider", "", "override the default provider name")
+	chatCmd.Flags().StringVar(&chatFlagModel, "model", "", "override the provider's default model")
 	rootCmd.AddCommand(chatCmd)
 }

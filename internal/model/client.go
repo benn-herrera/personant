@@ -16,8 +16,18 @@ import (
 // Client is the abstraction the runtime depends on for an LLM round-trip.
 // Defined here so test code can swap in MockClient without depending on
 // the HTTP transport.
+//
+// Two consult flavors are provided:
+//   - Consult: blocking, returns the full Response. Right for programmatic
+//     flows that don't surface tokens to a user.
+//   - ConsultStream: returns a StreamReader; callers iterate chunks as
+//     they arrive. Right for interactive flows (chat REPL, ping).
+//
+// Both methods consume the same Request and produce equivalent final
+// content; ConsultStream additionally exposes per-chunk deltas.
 type Client interface {
 	Consult(ctx context.Context, req Request) (Response, error)
+	ConsultStream(ctx context.Context, req Request) (StreamReader, error)
 	ListModels(ctx context.Context) ([]ModelInfo, error)
 }
 
@@ -31,17 +41,59 @@ type ModelInfo struct {
 
 // Request is one chat-completions invocation.
 //
-// Zero values for Temperature, MaxTokens, and StopSequences mean "use the
-// provider's default" — they are omitted from the wire payload entirely
-// rather than serialized as 0/empty, so a provider that distinguishes
-// "unset" from "0" gets the right behavior.
+// Sampling parameters are always wired on the wire — a zero value for
+// Temperature or MaxTokens is a real value, not a "use server default"
+// sentinel. Use DefaultRequest to construct a Request with personant's
+// v0.1 defaults pre-filled; only override what you explicitly need.
 type Request struct {
-	Model         string
-	Messages      []Message
-	Tools         []ToolSpec
-	Temperature   float64
-	MaxTokens     int
+	Model    string
+	Messages []Message
+	Tools    []ToolSpec
+
+	// Temperature is the sampling temperature, always wired on the wire.
+	// 0 means deterministic (greedy decode); it is NOT a "use server
+	// default" sentinel.
+	Temperature float64
+
+	// MaxTokens is the response token cap, always wired on the wire. 0
+	// is a real value (no tokens) — not a "use server default" sentinel.
+	// Production callers should construct Requests via DefaultRequest.
+	MaxTokens int
+
+	// StopSequences is sent as `stop` in the wire payload; nil/empty →
+	// field omitted.
 	StopSequences []string
+
+	// ChatTemplateKwargs is the de-facto OpenAI-API extension for passing
+	// chat-template-level kwargs through to the underlying tokenizer.
+	// Most commonly used for thinking-mode toggles on local-served
+	// models (Qwen3, gpt-oss-style, etc.). Encoded as
+	// `chat_template_kwargs` in the JSON wire format. Empty/nil → field
+	// omitted entirely.
+	ChatTemplateKwargs map[string]any
+}
+
+// DefaultRequest returns a Request prefilled with personant's v0.1
+// defaults. The caller fills in Model and Messages; everything else is
+// preset:
+//
+//   - Temperature: 0 (deterministic)
+//   - MaxTokens:   16384 (16K; revisited per spec calibration work)
+//   - ChatTemplateKwargs: {"thinking": true, "enable_thinking": true}
+//     — both keys are sent so models recognizing either get thinking
+//     on (the actual key varies by model; sending both is harmless
+//     to those that recognize neither).
+func DefaultRequest(model string, messages []Message) Request {
+	return Request{
+		Model:       model,
+		Messages:    messages,
+		Temperature: 0,
+		MaxTokens:   16384,
+		ChatTemplateKwargs: map[string]any{
+			"thinking":        true,
+			"enable_thinking": true,
+		},
+	}
 }
 
 // Message is one turn in the chat history.
@@ -79,6 +131,42 @@ type Response struct {
 	ToolCalls    []ToolCall
 	Usage        Usage
 	FinishReason string
+}
+
+// Chunk is one delta in a streamed chat-completion response. Most chunks
+// carry a non-empty Content; the final chunk(s) typically carry empty
+// Content but a non-empty FinishReason and Usage. Tool-call streaming
+// is best-effort for v0.1 — providers vary in how they fragment tool
+// calls; the runtime surfaces what arrives per chunk and does not merge
+// deltas across chunks.
+type Chunk struct {
+	Content      string
+	ToolCalls    []ToolCall
+	FinishReason string
+	Usage        Usage
+}
+
+// StreamReader iterates the chunks of a streamed response.
+//
+// Usage:
+//
+//	sr, err := client.ConsultStream(ctx, req)
+//	if err != nil { ... }
+//	defer sr.Close()
+//	for {
+//	    chunk, err := sr.Next()
+//	    if errors.Is(err, io.EOF) { break }
+//	    if err != nil { ... }
+//	    // chunk.Content has the next delta
+//	}
+//	final := sr.Final()  // accumulated Response after iteration completes
+//
+// Calling Close before EOF aborts the stream cleanly. Close is
+// idempotent; double-close is safe.
+type StreamReader interface {
+	Next() (Chunk, error)
+	Final() Response
+	Close() error
 }
 
 // Usage is the token-accounting block returned by the provider.

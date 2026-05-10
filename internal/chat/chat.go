@@ -30,6 +30,7 @@ type Options struct {
 	ExplicitProject string // --project flag; "" → run the §4.5.7 waterfall
 	HomeOverride    string // --home flag
 	ProviderName    string // optional override of the default provider name
+	Model           string // optional override of the provider's default model
 
 	Stdin  io.Reader // default os.Stdin
 	Stdout io.Writer // default os.Stdout
@@ -139,6 +140,9 @@ func Run(opts Options) error {
 	}
 
 	state := turn.NewState(paths, project, provider, client)
+	if opts.Model != "" {
+		state.Model = opts.Model
+	}
 
 	banner := opts.Banner
 	if banner == "" {
@@ -224,11 +228,15 @@ func loop(opts Options, in *bufio.Reader, state *turn.State) error {
 func runOneTurn(opts Options, state *turn.State, input string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), turnTimeout)
 	defer cancel()
-	body, err := turn.Run(ctx, state, input)
+	body, err := turn.Run(ctx, state, input, opts.Stdout)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(opts.Stdout, body)
+	// turn.Run streams the body to opts.Stdout as it arrives. Ensure the
+	// next prompt lands on a fresh line.
+	if !strings.HasSuffix(body, "\n") {
+		fmt.Fprintln(opts.Stdout)
+	}
 	return nil
 }
 

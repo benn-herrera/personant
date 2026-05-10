@@ -270,3 +270,260 @@ func TestHTTPClientEmptyBaseURLErrors(t *testing.T) {
 		t.Errorf("error doesn't mention BaseURL: %v", err)
 	}
 }
+
+// TestHTTPClientWiresSamplingDefaults: verify that DefaultRequest's values
+// (Temperature: 0, MaxTokens: 16384, chat_template_kwargs with thinking
+// keys) round-trip onto the wire — `temperature: 0` must be PRESENT in
+// the body, not omitted as it would be with `omitempty`.
+func TestHTTPClientWiresSamplingDefaults(t *testing.T) {
+	var rawBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ = io.ReadAll(r.Body)
+		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],"usage":{}}`))
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(newTestProvider(srv.URL))
+	req := DefaultRequest("test-model", []Message{{Role: "user", Content: "hi"}})
+	if _, err := c.Consult(context.Background(), req); err != nil {
+		t.Fatalf("Consult: %v", err)
+	}
+
+	// Decode raw to assert presence (a map[string]any decode would lose the
+	// "0 vs absent" distinction we care about; check the raw bytes too).
+	var asMap map[string]any
+	if err := json.Unmarshal(rawBody, &asMap); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if v, ok := asMap["temperature"]; !ok {
+		t.Errorf("temperature missing from body: %s", rawBody)
+	} else if v != 0.0 {
+		t.Errorf("temperature: got %v, want 0", v)
+	}
+	if v, ok := asMap["max_tokens"]; !ok {
+		t.Errorf("max_tokens missing from body: %s", rawBody)
+	} else if v != float64(16384) {
+		t.Errorf("max_tokens: got %v, want 16384", v)
+	}
+	// Raw-bytes check that omitempty hasn't dropped temperature: 0.
+	if !strings.Contains(string(rawBody), `"temperature":0`) {
+		t.Errorf("expected literal `\"temperature\":0` in body: %s", rawBody)
+	}
+	// chat_template_kwargs presence + thinking keys.
+	ctk, ok := asMap["chat_template_kwargs"].(map[string]any)
+	if !ok {
+		t.Fatalf("chat_template_kwargs missing or wrong type: %v", asMap["chat_template_kwargs"])
+	}
+	if ctk["thinking"] != true {
+		t.Errorf("chat_template_kwargs.thinking: got %v, want true", ctk["thinking"])
+	}
+	if ctk["enable_thinking"] != true {
+		t.Errorf("chat_template_kwargs.enable_thinking: got %v, want true", ctk["enable_thinking"])
+	}
+	// stream is false (or absent) for blocking Consult.
+	if v, ok := asMap["stream"]; ok && v != false {
+		t.Errorf("stream: got %v, want absent or false", v)
+	}
+}
+
+// TestHTTPClientChatTemplateKwargsOmittedWhenEmpty: an empty/nil map must
+// not emit a `chat_template_kwargs: null` or `: {}` field on the wire —
+// some providers reject the field's mere presence.
+func TestHTTPClientChatTemplateKwargsOmittedWhenEmpty(t *testing.T) {
+	var rawBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ = io.ReadAll(r.Body)
+		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],"usage":{}}`))
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(newTestProvider(srv.URL))
+	// Build directly (not via DefaultRequest) so ChatTemplateKwargs stays nil.
+	req := Request{Model: "m", Messages: []Message{{Role: "user", Content: "hi"}}}
+	if _, err := c.Consult(context.Background(), req); err != nil {
+		t.Fatalf("Consult: %v", err)
+	}
+	if strings.Contains(string(rawBody), "chat_template_kwargs") {
+		t.Errorf("chat_template_kwargs should be omitted when empty; got body: %s", rawBody)
+	}
+}
+
+// TestHTTPClientStreamHappyPath: SSE round-trip. Verify chunks come out in
+// order, Final() concat matches the underlying body, finish_reason and
+// usage populate, the wire body has stream: true, and the Accept header
+// is text/event-stream.
+func TestHTTPClientStreamHappyPath(t *testing.T) {
+	var gotAccept string
+	var rawBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAccept = r.Header.Get("Accept")
+		rawBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		// Three content deltas, then a final chunk with finish_reason
+		// + usage, then [DONE].
+		const sse = `data: {"choices":[{"delta":{"content":"Hello"}}]}
+
+data: {"choices":[{"delta":{"content":" "}}]}
+
+data: {"choices":[{"delta":{"content":"world"}}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}
+
+data: [DONE]
+
+`
+		_, _ = w.Write([]byte(sse))
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(newTestProvider(srv.URL))
+	req := DefaultRequest("test-model", []Message{{Role: "user", Content: "hi"}})
+	sr, err := c.ConsultStream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("ConsultStream: %v", err)
+	}
+	defer sr.Close()
+
+	var got strings.Builder
+	chunks := 0
+	var lastChunk Chunk
+	for {
+		chunk, err := sr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		got.WriteString(chunk.Content)
+		chunks++
+		lastChunk = chunk
+	}
+	if chunks < 3 {
+		t.Errorf("expected at least 3 chunks; got %d", chunks)
+	}
+	if got.String() != "Hello world" {
+		t.Errorf("concat content: got %q, want %q", got.String(), "Hello world")
+	}
+	final := sr.Final()
+	if final.Content != "Hello world" {
+		t.Errorf("Final.Content: got %q, want %q", final.Content, "Hello world")
+	}
+	if final.FinishReason != "stop" {
+		t.Errorf("Final.FinishReason: got %q, want stop (lastChunk=%+v)", final.FinishReason, lastChunk)
+	}
+	if final.Usage.TotalTokens != 6 {
+		t.Errorf("Final.Usage.TotalTokens: got %d, want 6", final.Usage.TotalTokens)
+	}
+
+	if gotAccept != "text/event-stream" {
+		t.Errorf("Accept header: got %q, want text/event-stream", gotAccept)
+	}
+	if !strings.Contains(string(rawBody), `"stream":true`) {
+		t.Errorf("expected `\"stream\":true` in body: %s", rawBody)
+	}
+}
+
+// TestHTTPClientStreamErrorWraps: a 5xx during stream initiation is
+// surfaced as a wrapped error, with the API key scrubbed.
+func TestHTTPClientStreamErrorWraps(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("bad: token=" + testAPIKey))
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(newTestProvider(srv.URL))
+	_, err := c.ConsultStream(context.Background(), DefaultRequest("m", []Message{{Role: "user", Content: "x"}}))
+	if err == nil {
+		t.Fatal("expected error from 500, got nil")
+	}
+	if !strings.Contains(err.Error(), "http 500") {
+		t.Errorf("error missing status code: %v", err)
+	}
+	if strings.Contains(err.Error(), testAPIKey) {
+		t.Fatalf("API key leaked into 5xx error: %v", err)
+	}
+}
+
+// TestHTTPClientStreamCloseBeforeEOF: closing the reader before exhausting
+// it should release the body without leaking. Subsequent Next() returns
+// io.EOF.
+func TestHTTPClientStreamCloseBeforeEOF(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(`data: {"choices":[{"delta":{"content":"a"}}]}
+
+data: {"choices":[{"delta":{"content":"b"}}]}
+
+`))
+		// Hold the connection so the reader sees only what's been flushed.
+		flusher, _ := w.(http.Flusher)
+		if flusher != nil {
+			flusher.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(newTestProvider(srv.URL))
+	sr, err := c.ConsultStream(context.Background(), DefaultRequest("m", []Message{{Role: "user", Content: "x"}}))
+	if err != nil {
+		t.Fatalf("ConsultStream: %v", err)
+	}
+	chunk, err := sr.Next()
+	if err != nil {
+		t.Fatalf("first Next: %v", err)
+	}
+	if chunk.Content != "a" {
+		t.Errorf("first chunk content: got %q, want a", chunk.Content)
+	}
+	if err := sr.Close(); err != nil {
+		t.Errorf("Close: %v", err)
+	}
+	// Idempotent.
+	if err := sr.Close(); err != nil {
+		t.Errorf("Close (second): %v", err)
+	}
+	// After Close, Next returns io.EOF.
+	if _, err := sr.Next(); !errors.Is(err, io.EOF) {
+		t.Errorf("Next after Close: got %v, want io.EOF", err)
+	}
+}
+
+// TestHTTPClientStreamCtxCancellation: a cancelled context mid-stream
+// should surface via Next().
+func TestHTTPClientStreamCtxCancellation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n"))
+		flusher, _ := w.(http.Flusher)
+		if flusher != nil {
+			flusher.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(newTestProvider(srv.URL))
+	ctx, cancel := context.WithCancel(context.Background())
+	sr, err := c.ConsultStream(ctx, DefaultRequest("m", []Message{{Role: "user", Content: "x"}}))
+	if err != nil {
+		t.Fatalf("ConsultStream: %v", err)
+	}
+	defer sr.Close()
+	// Drain the first chunk.
+	if _, err := sr.Next(); err != nil {
+		t.Fatalf("first Next: %v", err)
+	}
+	cancel()
+	// Subsequent Next must surface the ctx error (either via the ctx
+	// check or via the underlying connection failing).
+	_, err = sr.Next()
+	if err == nil {
+		t.Fatal("expected error after cancel, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+}

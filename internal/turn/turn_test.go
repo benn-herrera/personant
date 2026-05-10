@@ -1,7 +1,9 @@
 package turn
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -48,7 +50,8 @@ func TestRunNewTopicCreatesSpineRecord(t *testing.T) {
 	state := NewState(paths, meta, store.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
-	body, err := Run(context.Background(), state, "test prompt")
+	var out bytes.Buffer
+	body, err := Run(context.Background(), state, "test prompt", &out)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -56,7 +59,13 @@ func TestRunNewTopicCreatesSpineRecord(t *testing.T) {
 		t.Errorf("body missing greeting: %q", body)
 	}
 	if strings.Contains(body, "*topic:") {
-		t.Errorf("topic tag not stripped: %q", body)
+		t.Errorf("topic tag not stripped from return: %q", body)
+	}
+	if !strings.Contains(out.String(), "Hello world") {
+		t.Errorf("streamed body missing from out: %q", out.String())
+	}
+	if strings.Contains(out.String(), "*topic:") {
+		t.Errorf("topic tag leaked into streamed out: %q", out.String())
 	}
 
 	records, err := store.ReadSpine(paths.Spine)
@@ -112,7 +121,7 @@ func TestRunUpdatesExistingThread(t *testing.T) {
 	now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
 	state.SetClock(fixedClock(now))
 
-	if _, err := Run(context.Background(), state, "tell me more about #trefoil"); err != nil {
+	if _, err := Run(context.Background(), state, "tell me more about #trefoil", io.Discard); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -183,7 +192,7 @@ func TestRunNoTopicTagIsNonFatal(t *testing.T) {
 	state := NewState(paths, meta, store.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
-	body, err := Run(context.Background(), state, "hello")
+	body, err := Run(context.Background(), state, "hello", io.Discard)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -209,7 +218,7 @@ func TestRunNewTopicAnchorCardinalityOutOfRange(t *testing.T) {
 	state := NewState(paths, meta, store.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
-	if _, err := Run(context.Background(), state, "ping"); err != nil {
+	if _, err := Run(context.Background(), state, "ping", io.Discard); err != nil {
 		// Note: prompt.Parse rejects this tag because anchor count <4 emits
 		// a warning but is still a valid match. The package treats the count
 		// as a warning, not a parse failure, so we should still get a
@@ -232,7 +241,7 @@ func TestRunNewTopicAnchorCardinalityOutOfRange(t *testing.T) {
 func TestRunReturnsErrorOnNilClient(t *testing.T) {
 	paths, meta := newTestHome(t)
 	state := NewState(paths, meta, store.Provider{}, nil)
-	if _, err := Run(context.Background(), state, "x"); err == nil {
+	if _, err := Run(context.Background(), state, "x", io.Discard); err == nil {
 		t.Fatalf("expected error for nil client")
 	}
 }

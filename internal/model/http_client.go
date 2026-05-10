@@ -53,7 +53,7 @@ func (c *HTTPClient) Consult(ctx context.Context, req Request) (Response, error)
 		return Response{}, fmt.Errorf("provider BaseURL is empty")
 	}
 
-	body, err := encodeRequest(req)
+	body, err := encodeRequest(req, false)
 	if err != nil {
 		return Response{}, fmt.Errorf("encode request: %w", err)
 	}
@@ -93,6 +93,59 @@ func (c *HTTPClient) Consult(ctx context.Context, req Request) (Response, error)
 		return Response{}, fmt.Errorf("decode response: %w", err)
 	}
 	return out, nil
+}
+
+// ConsultStream performs one streaming chat-completions round-trip,
+// returning a StreamReader that yields chunks as they arrive.
+//
+// Wire format is OpenAI-compatible Server-Sent Events:
+//
+//	data: {"choices":[{"delta":{"content":"Hello"}}]}
+//
+//	data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{...}}
+//
+//	data: [DONE]
+//
+// On non-2xx the body is read fully, the connection closed, and a wrapped
+// error returned (matching Consult's shape, with the API key scrubbed).
+// On 2xx the response body is owned by the returned StreamReader; the
+// caller MUST Close it.
+func (c *HTTPClient) ConsultStream(ctx context.Context, req Request) (StreamReader, error) {
+	if c.provider.BaseURL == "" {
+		return nil, fmt.Errorf("provider BaseURL is empty")
+	}
+
+	body, err := encodeRequest(req, true)
+	if err != nil {
+		return nil, fmt.Errorf("encode request: %w", err)
+	}
+
+	url := joinURL(c.provider.BaseURL, "chat/completions")
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+	httpReq.Header.Set("User-Agent", userAgent)
+	if c.provider.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.provider.APIKey)
+	}
+
+	resp, err := c.http.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("http: %w", err)
+	}
+
+	if resp.StatusCode/100 != 2 {
+		// Read and discard so the connection can be reused; surface the
+		// body in the error after scrubbing.
+		respBody, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("http %d: %s", resp.StatusCode, scrubAuthorization(string(respBody), c.provider.APIKey))
+	}
+
+	return newHTTPStreamReader(ctx, resp.Body), nil
 }
 
 // ListModels performs a GET against <base>/models and returns the model
@@ -195,14 +248,21 @@ type wireToolSpecParams struct {
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
 }
 
+// wireRequest is the chat-completions request body. Temperature and
+// MaxTokens are always serialized — no `omitempty`. Per the v0.1
+// contract, a zero value for these fields is a real value (deterministic
+// decode, zero-token cap respectively), not a "use server default"
+// sentinel. Callers that want sane defaults use model.DefaultRequest.
 type wireRequest struct {
-	Model       string         `json:"model"`
-	Messages    []wireMessage  `json:"messages"`
-	Tools       []wireToolSpec `json:"tools,omitempty"`
-	ToolChoice  string         `json:"tool_choice,omitempty"`
-	Temperature *float64       `json:"temperature,omitempty"`
-	MaxTokens   *int           `json:"max_tokens,omitempty"`
-	Stop        []string       `json:"stop,omitempty"`
+	Model              string         `json:"model"`
+	Messages           []wireMessage  `json:"messages"`
+	Tools              []wireToolSpec `json:"tools,omitempty"`
+	ToolChoice         string         `json:"tool_choice,omitempty"`
+	Temperature        float64        `json:"temperature"`
+	MaxTokens          int            `json:"max_tokens"`
+	Stop               []string       `json:"stop,omitempty"`
+	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
+	Stream             bool           `json:"stream,omitempty"`
 }
 
 type wireChoice struct {
@@ -234,11 +294,18 @@ type wireModel struct {
 	OwnedBy string `json:"owned_by"`
 }
 
-func encodeRequest(req Request) ([]byte, error) {
+// encodeRequest serializes a Request to the OpenAI chat-completions wire
+// format. stream toggles the `stream` field; it is otherwise identical
+// across blocking and streaming paths.
+func encodeRequest(req Request, stream bool) ([]byte, error) {
 	wr := wireRequest{
-		Model:    req.Model,
-		Messages: make([]wireMessage, 0, len(req.Messages)),
-		Stop:     req.StopSequences,
+		Model:              req.Model,
+		Messages:           make([]wireMessage, 0, len(req.Messages)),
+		Stop:               req.StopSequences,
+		Temperature:        req.Temperature,
+		MaxTokens:          req.MaxTokens,
+		ChatTemplateKwargs: req.ChatTemplateKwargs,
+		Stream:             stream,
 	}
 	for _, m := range req.Messages {
 		wm := wireMessage{
@@ -270,14 +337,6 @@ func encodeRequest(req Request) ([]byte, error) {
 				},
 			})
 		}
-	}
-	if req.Temperature != 0 {
-		t := req.Temperature
-		wr.Temperature = &t
-	}
-	if req.MaxTokens != 0 {
-		mt := req.MaxTokens
-		wr.MaxTokens = &mt
 	}
 	return json.Marshal(wr)
 }
