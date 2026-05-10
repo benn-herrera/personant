@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -34,6 +35,74 @@ const thrFrontmatterDelimiter = "---"
 // <Home>/threads/thr_<n>.md.
 func ThreadPath(paths PersonantPaths, threadID string) string {
 	return filepath.Join(paths.ThreadsDir, threadID+".md")
+}
+
+// ListThreadIDs returns the canonical thread IDs of every file under
+// paths.ThreadsDir whose name matches thr_<digits>.md. Order is sorted
+// lexically. A missing ThreadsDir returns (nil, nil) — that is the
+// fresh-init state, not an error.
+//
+// Files that do not match the canonical naming pattern are silently
+// ignored (e.g. editor swap files, temp files left from a crashed save).
+// The validator in `personant verify` is the place to flag drift.
+func ListThreadIDs(paths PersonantPaths) ([]string, error) {
+	entries, err := os.ReadDir(paths.ThreadsDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("list threads: read dir %s: %w", paths.ThreadsDir, err)
+	}
+	ids := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		id := strings.TrimSuffix(name, ".md")
+		if !ThreadIDPattern.MatchString(id) {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids, nil
+}
+
+// LoadAllThreadFrontmatter reads every threads/thr_<n>.md and returns
+// their parsed frontmatter (the body is discarded — frontmatter alone
+// is enough for derived-index building).
+//
+// Tolerate-and-continue policy: a thread file that fails to read or
+// parse is logged via logf and skipped. Index building tolerates drift;
+// `personant verify` is the validator that fails hard on bad files.
+// A nil logf is silent.
+//
+// A missing ThreadsDir returns (nil, nil) — fresh-init state.
+func LoadAllThreadFrontmatter(paths PersonantPaths, logf func(format string, args ...any)) ([]ThreadFrontmatter, error) {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	ids, err := ListThreadIDs(paths)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	out := make([]ThreadFrontmatter, 0, len(ids))
+	for _, id := range ids {
+		thread, err := LoadThread(paths, id)
+		if err != nil {
+			logf("load thread frontmatter: skip %s: %v", ThreadPath(paths, id), err)
+			continue
+		}
+		out = append(out, thread.Frontmatter)
+	}
+	return out, nil
 }
 
 // LoadThread reads and parses the thread file for threadID.

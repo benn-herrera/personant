@@ -51,7 +51,7 @@ func (b *coalesceBuffer) addSymbol(raw, normalized string, source store.SymbolSo
 	}
 	if existing, ok := b.symbols[normalized]; ok {
 		// Dominant-source merge per §2.7.3.
-		existing.Source = dominantSource(existing.Source, source)
+		existing.Source = store.DominantSource(existing.Source, source)
 		b.symbols[normalized] = existing
 		return
 	}
@@ -103,31 +103,4 @@ func (b *coalesceBuffer) threadList() []string {
 		out = append(out, t)
 	}
 	return out
-}
-
-// dominantSource implements the §2.7.3 precedence:
-// curator > user > model > deterministic.
-//
-// When a symbol is seen from two sources within a single turn, the
-// dominant of the two wins. An empty source is treated as the lowest
-// rank (i.e. anything beats unset).
-func dominantSource(a, b store.SymbolSource) store.SymbolSource {
-	if rank(a) >= rank(b) {
-		return a
-	}
-	return b
-}
-
-func rank(s store.SymbolSource) int {
-	switch s {
-	case store.SourceCurator:
-		return 4
-	case store.SourceUser:
-		return 3
-	case store.SourceModel:
-		return 2
-	case store.SourceDeterministic:
-		return 1
-	}
-	return 0
 }

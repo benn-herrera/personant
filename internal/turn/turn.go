@@ -833,14 +833,14 @@ func mergeHistorySymbols(existing []store.HistorySymbol, turnSymbols []coalesced
 	return evictLowestWeight(out, historyCapPerThread)
 }
 
-// upgradeSource is the persistent-history analogue of dominantSource —
-// same precedence rule, applied on cumulative history rather than
-// per-turn coalescing.
+// upgradeSource is the persistent-history analogue of the per-turn
+// coalesce path — same §2.7.3 precedence rule
+// (curator > user > model > deterministic), applied on cumulative
+// history when merging an incoming observation into an existing
+// HistorySymbol entry. Delegates to store.DominantSource so the rule
+// has exactly one definition site.
 func upgradeSource(existing, incoming store.SymbolSource) store.SymbolSource {
-	if rank(existing) >= rank(incoming) {
-		return existing
-	}
-	return incoming
+	return store.DominantSource(existing, incoming)
 }
 
 // evictLowestWeight returns out with the lowest-cumulative-weight entries

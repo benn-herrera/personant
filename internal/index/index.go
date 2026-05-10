@@ -165,7 +165,11 @@ func buildPlan(paths store.PersonantPaths, warnf func(format string, args ...any
 	if err != nil {
 		return plan{}, fmt.Errorf("read spine: %w", err)
 	}
-	syms := BuildSymbols(spine)
+	threads, err := store.LoadAllThreadFrontmatter(paths, warnf)
+	if err != nil {
+		return plan{}, fmt.Errorf("load thread frontmatter: %w", err)
+	}
+	syms := BuildSymbols(spine, threads)
 	digs, err := BuildDigests(spine, paths.ProjectsDir, warnf)
 	if err != nil {
 		return plan{}, fmt.Errorf("build digests: %w", err)
