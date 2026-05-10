@@ -19,7 +19,7 @@ func TestMockScriptedDeliversInOrder(t *testing.T) {
 		{Content: "second", FinishReason: "stop"},
 		{Content: "third", FinishReason: "stop"},
 	}
-	m := NewScriptedMock(scripted)
+	m := NewScriptedMock(scripted, nil)
 
 	for i, want := range scripted {
 		got, err := m.Consult(context.Background(), Request{})
@@ -33,7 +33,7 @@ func TestMockScriptedDeliversInOrder(t *testing.T) {
 }
 
 func TestMockScriptedExhausted(t *testing.T) {
-	m := NewScriptedMock([]Response{{Content: "only one"}})
+	m := NewScriptedMock([]Response{{Content: "only one"}}, nil)
 	if _, err := m.Consult(context.Background(), Request{}); err != nil {
 		t.Fatalf("first call: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestMockCallsAccumulates(t *testing.T) {
 		{Content: "a"},
 		{Content: "b"},
 		{Content: "c"},
-	})
+	}, nil)
 	for i := 0; i < 4; i++ {
 		_, _ = m.Consult(context.Background(), Request{Model: "test"})
 	}
@@ -199,7 +199,7 @@ func TestMockCallsAccumulates(t *testing.T) {
 
 // TestMockContextCancellation: a cancelled ctx short-circuits Consult.
 func TestMockContextCancellation(t *testing.T) {
-	m := NewScriptedMock([]Response{{Content: "ok"}})
+	m := NewScriptedMock([]Response{{Content: "ok"}}, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := m.Consult(ctx, Request{})

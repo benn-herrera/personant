@@ -58,7 +58,7 @@ func (c *HTTPClient) Consult(ctx context.Context, req Request) (Response, error)
 		return Response{}, fmt.Errorf("model: encode request: %w", err)
 	}
 
-	url := joinChatCompletionsURL(c.provider.BaseURL)
+	url := joinURL(c.provider.BaseURL, "chat/completions")
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return Response{}, fmt.Errorf("model: build request: %w", err)
@@ -95,13 +95,62 @@ func (c *HTTPClient) Consult(ctx context.Context, req Request) (Response, error)
 	return out, nil
 }
 
-// joinChatCompletionsURL appends "chat/completions" to base, handling the
-// trailing-slash variation gracefully.
-func joinChatCompletionsURL(base string) string {
-	if strings.HasSuffix(base, "/") {
-		return base + "chat/completions"
+// ListModels performs a GET against <base>/models and returns the model
+// list in the order the server provided. Errors are wrapped with status +
+// body, with the API key scrubbed.
+func (c *HTTPClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
+	if c.provider.BaseURL == "" {
+		return nil, fmt.Errorf("model: provider BaseURL is empty")
 	}
-	return base + "/chat/completions"
+
+	url := joinURL(c.provider.BaseURL, "models")
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("model: build request: %w", err)
+	}
+	httpReq.Header.Set("Accept", "application/json")
+	httpReq.Header.Set("User-Agent", userAgent)
+	if c.provider.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.provider.APIKey)
+	}
+
+	resp, err := c.http.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("model: http: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("model: read response: %w", err)
+	}
+
+	if resp.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("model: http %d: %s", resp.StatusCode, scrubAuthorization(string(respBody), c.provider.APIKey))
+	}
+
+	var w wireModelList
+	if err := json.Unmarshal(respBody, &w); err != nil {
+		return nil, fmt.Errorf("model: decode models: %w", err)
+	}
+	out := make([]ModelInfo, 0, len(w.Data))
+	for _, m := range w.Data {
+		out = append(out, ModelInfo{
+			ID:      m.ID,
+			Created: m.Created,
+			OwnedBy: m.OwnedBy,
+		})
+	}
+	return out, nil
+}
+
+// joinURL appends path to base, handling the trailing-slash variation
+// gracefully. path must not begin with "/".
+func joinURL(base, path string) string {
+	if strings.HasSuffix(base, "/") {
+		return base + path
+	}
+	return base + "/" + path
 }
 
 // scrubAuthorization removes any occurrence of the bearer-token header
@@ -171,6 +220,18 @@ type wireUsage struct {
 type wireResponse struct {
 	Choices []wireChoice `json:"choices"`
 	Usage   wireUsage    `json:"usage"`
+}
+
+type wireModelList struct {
+	Object string      `json:"object"`
+	Data   []wireModel `json:"data"`
+}
+
+type wireModel struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	OwnedBy string `json:"owned_by"`
 }
 
 func encodeRequest(req Request) ([]byte, error) {

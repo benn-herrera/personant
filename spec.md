@@ -734,6 +734,8 @@ Initial commands (Go binary subcommands; see also §2.1):
 - `personant index rebuild` — regenerate derived files from canonical (§2.1).
 - `personant index check` — validate derived files match canonical; non-zero on mismatch.
 - `personant verify` — full structural validation.
+- `personant ping` — send a single prompt to a configured provider and print the response (`--provider`, `--prompt`, `--model`, `--timeout` flags). Connectivity smoke test.
+- `personant models` — list models available from a provider (`--provider` flag).
 - `personant search <query>` — symbol/text search across spine and threads.
 - `personant deps <thr_id>` — show threads referenced by anchors of the given thread.
 - `personant permissions list` — show accrued grants from directive files (§6.2.3).

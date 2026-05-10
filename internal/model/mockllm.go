@@ -26,6 +26,11 @@ type MockClient struct {
 	genOpts GeneratedMockOpts
 	counter int
 
+	// Models is returned verbatim from ListModels. Settable at
+	// construction (NewScriptedMock) or directly on the returned
+	// *MockClient. nil → ListModels returns an empty slice.
+	Models []ModelInfo
+
 	calls []MockCall
 }
 
@@ -64,10 +69,16 @@ const (
 
 // NewScriptedMock returns a MockClient that pops responses from the given
 // queue, in order. Calling Consult past the end returns ErrMockExhausted.
-func NewScriptedMock(responses []Response) *MockClient {
+// models is returned verbatim from ListModels; nil yields an empty list.
+func NewScriptedMock(responses []Response, models []ModelInfo) *MockClient {
 	q := make([]Response, len(responses))
 	copy(q, responses)
-	return &MockClient{queue: q}
+	m := &MockClient{queue: q}
+	if models != nil {
+		m.Models = make([]ModelInfo, len(models))
+		copy(m.Models, models)
+	}
+	return m
 }
 
 // NewGeneratedMock returns a MockClient that synthesizes responses from a
@@ -123,6 +134,22 @@ func (m *MockClient) Consult(ctx context.Context, req Request) (Response, error)
 		At:       time.Now(),
 	})
 	return resp, err
+}
+
+// ListModels returns a copy of the Models field, or an empty slice if
+// none are configured. ctx is honored for cancellation.
+func (m *MockClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.Models == nil {
+		return []ModelInfo{}, nil
+	}
+	out := make([]ModelInfo, len(m.Models))
+	copy(out, m.Models)
+	return out, nil
 }
 
 // Calls returns a snapshot of every Consult invocation observed so far.

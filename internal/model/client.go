@@ -18,6 +18,15 @@ import (
 // the HTTP transport.
 type Client interface {
 	Consult(ctx context.Context, req Request) (Response, error)
+	ListModels(ctx context.Context) ([]ModelInfo, error)
+}
+
+// ModelInfo describes a single model exposed by a provider, mirroring the
+// shape OpenAI-compatible /models endpoints return.
+type ModelInfo struct {
+	ID      string // provider-specific model identifier
+	Created int64  // unix seconds; 0 if provider didn't supply
+	OwnedBy string // free-form ownership string; "" if absent
 }
 
 // Request is one chat-completions invocation.
