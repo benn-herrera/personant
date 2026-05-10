@@ -70,6 +70,7 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
   providers.toml                    # LLM provider config (canonical; secret-bearing — see §8.2)
   README.md                         # layout documentation for human inspection
   last-active                       # operational; one line: prj_<n> of most-recently-active project (§4.5.7)
+  history                           # operational; REPL line-edit history (§4.3.1); newest last; capped
   archive/
     index.jsonl                     # canonical; deep cold archive index (§3.8); empty until v0.2
   .git/                             # git-init'd at first run
@@ -82,7 +83,7 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
 |---|---|---|
 | Canonical | `spine.jsonl` rows, `threads/*.md`, `directives/*.md`, `projects/prj_<n>/meta.json`, `logs/*.log`, `providers.toml`, `archive/index.jsonl` | Source of truth. Hand-editable. Other files derive from these. |
 | Derived | `symbols.jsonl`, `projects/prj_<n>/digest.json` | Regenerable from canonical. Pre-commit hook fails if stale. Never hand-edited. |
-| Operational | `logs/*.log`, `.git/`, `tmp/`, `last-active` | System-managed; not subject to drift checking. `tmp/` and `last-active` are gitignored. |
+| Operational | `logs/*.log`, `.git/`, `tmp/`, `last-active`, `history` | System-managed; not subject to drift checking. `tmp/`, `last-active`, and `history` are gitignored. |
 | Secret-bearing | `providers.toml` | Contains API keys. Treated specially by the runtime: never included in any LLM-context artifact, log line, ack prompt, or captured output. See §8.2. |
 
 **Storage commands** (Go binary subcommands; see §4.1):
@@ -770,6 +771,36 @@ an open question (§13).
 ### 4.3 Decline categorization UI
 
 [STUB — three-button surface: not-relevant / not-now / stop-offering. See §3.4 for the accrual semantics.]
+
+### 4.3.1 REPL line editing and history
+
+**Currently absent.** The chat REPL reads input via stdlib cooked-mode
+line-buffered I/O, which gets the user backspace and Ctrl-U/W
+line-clearing for free but **no** in-line cursor movement, history
+recall, or tab completion.
+
+**Required for v0.1 polish** (lands before the six-month simulation
+acceptance gate at §11.1):
+
+- `←` / `→` cursor movement within the current line.
+- `↑` / `↓` command history; persistent across sessions in
+  `<Home>/history` (operational, not git-tracked).
+- Standard readline shortcuts: Ctrl-A / Ctrl-E (line start/end),
+  Ctrl-W (kill word), Ctrl-U (kill line), Ctrl-K (kill to end),
+  Alt-B / Alt-F (word-back / word-forward).
+- History deduplication (no consecutive duplicate entries).
+- History size cap (configurable; default 1000 entries).
+
+Tab completion deferred to v0.2 — slash-command names and active
+project IDs are obvious candidates but the surface needs settling.
+
+[OPEN: implementation strategy. Options: (a) `golang.org/x/term` +
+custom minimal readline (~500–800 LoC; full control; one std-adjacent
+dep); (b) `github.com/peterh/liner` (small, BSD-2, well-maintained,
+~1k LoC dep); (c) `github.com/chzyer/readline` (bigger, more features,
+MIT). All compatible with the substrate-memory "approved-when-earned"
+framing; the consumer (chat REPL) is real. Decide before
+implementation lands.]
 
 ### 4.4 Shell escape (`$` and `#`)
 
@@ -1801,6 +1832,7 @@ Compiled from inline `[OPEN: ...]` markers and design-pass uncertainties.
 19. **§5.1 — Topic-tag emission reliability across models.** Smaller models may fail to emit tags consistently. Fallback strategy is sketched in §5.1.3; calibrate during Phase 2 with the local llama-server target.
 20. **§5.5 — Re-prompt latency cost from system-injected fetches.** Each thread fetch implies a re-roundtrip to the LLM. Quantify steady-state impact in the six-month simulation (§11.1).
 21. **§11.1 — Six-month simulation pass thresholds.** What are the concrete numeric bounds for "memory quality maintained" and "operation runtime within bounds"? Initial pass: derive thresholds from the first end-to-end simulation run; subsequent runs must not regress beyond a percentage. The first pass establishes the baseline.
+22. **§4.3.1 — Readline implementation strategy.** Three viable options (custom on `golang.org/x/term`, `peterh/liner`, `chzyer/readline`). Decide before line-edit/history support lands. Required for v0.1 polish; not blocking earlier Phase 2 work.
 
 ---
 
