@@ -70,8 +70,9 @@ func extractSymbols(state *State, delta Delta) error {
 	switch delta.Source {
 	case "user.prompt":
 		for _, tag := range userTagRE.FindAllStringSubmatch(delta.Content, -1) {
-			normalized := store.Normalize(tag[1], store.SymbolTag)
-			state.coalesce.addSymbol(normalized)
+			raw := tag[1]
+			normalized := store.Normalize(raw, store.SymbolTag)
+			state.coalesce.addSymbol(raw, normalized, store.SourceUser)
 		}
 		return nil
 
@@ -87,7 +88,10 @@ func extractSymbols(state *State, delta Delta) error {
 			return err
 		}
 		for _, a := range result.Tag.Anchors {
-			state.coalesce.addSymbol(a)
+			// prompt.Parse already normalizes anchors (§2.7.2 entity rules),
+			// so raw == normalized here. A future surface-form pass would
+			// thread the original through.
+			state.coalesce.addSymbol(a, a, store.SourceModel)
 		}
 		for _, t := range result.Tag.Threads {
 			state.coalesce.addThread(t)

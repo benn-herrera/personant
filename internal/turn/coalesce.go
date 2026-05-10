@@ -1,30 +1,65 @@
 package turn
 
+import "personant/internal/store"
+
+// coalescedSymbol carries the per-turn record for one normalized symbol:
+// the surface form first observed, the dominant source per spec §2.7.3
+// (`curator > user > model > deterministic`), and the normalized key
+// itself for convenient iteration. Order of insertion is not preserved;
+// callers that depend on order must sort.
+type coalescedSymbol struct {
+	Normalized string
+	Raw        string
+	Source     store.SymbolSource
+}
+
 // coalesceBuffer is a per-turn accumulator for symbols and thread-IDs
 // observed across the deltas of a single user turn. It is the data
 // structure behind the §3.0.4 "engagement updates fire once per
 // affected thread, with the union as input" contract.
 //
+// Symbols are keyed by normalized form; the dominant source per §2.7.3
+// wins on collision. The first surface form seen for a given normalized
+// key is preserved as `raw`.
+//
 // Buffer is owned by State; access is single-goroutine within Run.
-// Methods are inlined trivially but kept on a named type so the code
-// reading them telegraphs intent.
 type coalesceBuffer struct {
-	symbols map[string]struct{}
+	symbols map[string]coalescedSymbol
 	threads map[string]struct{}
 }
 
 func newCoalesceBuffer() *coalesceBuffer {
 	return &coalesceBuffer{
-		symbols: map[string]struct{}{},
+		symbols: map[string]coalescedSymbol{},
 		threads: map[string]struct{}{},
 	}
 }
 
-func (b *coalesceBuffer) addSymbol(s string) {
-	if s == "" {
+// addSymbol records a symbol with provenance. raw is the original surface
+// form (used as `raw` in HistorySymbol when this symbol later promotes
+// to thread frontmatter); normalized is the canonical key (already
+// normalized by the caller per §2.7.2). source is the emission origin
+// per §2.7.3.
+//
+// On collision (same normalized key seen multiple times in one turn),
+// the dominant source wins; raw is preserved from the first sighting so
+// downstream HistorySymbol entries reflect the original surface form
+// rather than a later, possibly less-faithful one.
+func (b *coalesceBuffer) addSymbol(raw, normalized string, source store.SymbolSource) {
+	if normalized == "" {
 		return
 	}
-	b.symbols[s] = struct{}{}
+	if existing, ok := b.symbols[normalized]; ok {
+		// Dominant-source merge per §2.7.3.
+		existing.Source = dominantSource(existing.Source, source)
+		b.symbols[normalized] = existing
+		return
+	}
+	b.symbols[normalized] = coalescedSymbol{
+		Normalized: normalized,
+		Raw:        raw,
+		Source:     source,
+	}
 }
 
 func (b *coalesceBuffer) addThread(t string) {
@@ -36,17 +71,28 @@ func (b *coalesceBuffer) addThread(t string) {
 
 // reset clears the accumulator. Called at the start of every Run.
 func (b *coalesceBuffer) reset() {
-	b.symbols = map[string]struct{}{}
+	b.symbols = map[string]coalescedSymbol{}
 	b.threads = map[string]struct{}{}
 }
 
-// symbolList returns the buffered symbols as a slice. Order is map
-// iteration order — callers that care about deterministic order must
-// sort. v0.1 callers (engagement update) do not need ordering.
+// symbolList returns the buffered symbols as normalized strings. Order
+// is map iteration order — callers that care about deterministic order
+// must sort. Used by anchor selection on new-topic creation.
 func (b *coalesceBuffer) symbolList() []string {
 	out := make([]string, 0, len(b.symbols))
 	for s := range b.symbols {
 		out = append(out, s)
+	}
+	return out
+}
+
+// coalescedList returns full per-symbol records (raw + normalized +
+// source). Used by closeTurnAndUpdateEngagement to merge into a thread's
+// history_symbols.
+func (b *coalesceBuffer) coalescedList() []coalescedSymbol {
+	out := make([]coalescedSymbol, 0, len(b.symbols))
+	for _, sym := range b.symbols {
+		out = append(out, sym)
 	}
 	return out
 }
@@ -57,4 +103,31 @@ func (b *coalesceBuffer) threadList() []string {
 		out = append(out, t)
 	}
 	return out
+}
+
+// dominantSource implements the §2.7.3 precedence:
+// curator > user > model > deterministic.
+//
+// When a symbol is seen from two sources within a single turn, the
+// dominant of the two wins. An empty source is treated as the lowest
+// rank (i.e. anything beats unset).
+func dominantSource(a, b store.SymbolSource) store.SymbolSource {
+	if rank(a) >= rank(b) {
+		return a
+	}
+	return b
+}
+
+func rank(s store.SymbolSource) int {
+	switch s {
+	case store.SourceCurator:
+		return 4
+	case store.SourceUser:
+		return 3
+	case store.SourceModel:
+		return 2
+	case store.SourceDeterministic:
+		return 1
+	}
+	return 0
 }

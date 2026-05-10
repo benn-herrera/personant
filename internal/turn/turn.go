@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -177,7 +178,7 @@ func Run(ctx context.Context, state *State, userInput string, out io.Writer) (st
 
 	// Step 5: turn close — fire deferred engagement updates with the
 	// coalesced symbol set.
-	if err := closeTurnAndUpdateEngagement(state, full.Content); err != nil {
+	if err := closeTurnAndUpdateEngagement(state, userInput, full.Content); err != nil {
 		return "", fmt.Errorf("turn: close: %w", err)
 	}
 
@@ -220,13 +221,27 @@ func streamThroughFilter(sr model.StreamReader, filter io.Writer) error {
 	}
 }
 
+// historyCapPerThread is the v0.1 default for `history.cap-per-thread`
+// (spec §2.6.1). Directive-file lookup arrives in Phase 3+; until then
+// the cap is a constant.
+const historyCapPerThread = 40
+
 // closeTurnAndUpdateEngagement fires after the model.response delta.
 // Per §3.0.4: engagement updates fire once per affected thread with
 // the turn's coalesced symbol set as input.
 //
 // For each thr_<n> in state.coalesce.threads:
-//   - if it exists in spine: update last_engaged and turn_count++.
-//   - if it is the literal "*new-topic*": create a new spine record.
+//   - if it exists in spine: load thread file, append turn excerpt,
+//     merge history_symbols, save thread file, update spine record.
+//   - if it is the literal "*new-topic*": create a new thread file
+//     and append a new spine record.
+//
+// File order is: thread file save first, spine update second. A failure
+// after the thread file write but before the spine write would leave
+// the on-disk file ahead of the spine; the next engagement reload would
+// reconcile (it reads the existing file). The opposite order would
+// strand a spine entry pointing at a non-existent file. v0.1 accepts
+// the former trade-off and logs both errors with context.
 //
 // New-record creation requires the topic tag's anchors. v0.1 takes
 // them from state.coalesce.symbols (the union accumulated across the
@@ -235,28 +250,41 @@ func streamThroughFilter(sr model.StreamReader, filter io.Writer) error {
 // placeholders if there are fewer) are used. v0.1 deliberately does
 // not fail the turn over malformed tag output — that judgment is
 // recorded in the spec changelog.
-func closeTurnAndUpdateEngagement(state *State, responseBody string) error {
+func closeTurnAndUpdateEngagement(state *State, userInput, responseBody string) error {
 	if len(state.coalesce.threads) == 0 {
 		return nil
 	}
 
 	now := state.now().Format(time.RFC3339)
+	turnSymbols := state.coalesce.coalescedList()
+	turnAnchors := turnAnchorList(responseBody, state.coalesce.symbolList())
 
 	for _, threadID := range state.coalesce.threadList() {
 		if threadID == "*new-topic*" {
-			if err := createNewThread(state, responseBody, now); err != nil {
+			if err := createNewThread(state, userInput, responseBody, now, turnSymbols, turnAnchors); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := updateExistingThread(state, threadID, now); err != nil {
+		if err := updateExistingThread(state, threadID, userInput, responseBody, now, turnSymbols, turnAnchors); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func updateExistingThread(state *State, threadID, now string) error {
+// turnAnchorList returns the anchor list to print in the per-turn
+// excerpt header. Prefers the model's own topic-tag anchors so the
+// excerpt header matches the wire format exactly; falls back to the
+// per-turn coalesced set when the model omitted a tag.
+func turnAnchorList(responseBody string, fallback []string) []string {
+	if pr, err := prompt.Parse(responseBody); err == nil {
+		return append([]string(nil), pr.Tag.Anchors...)
+	}
+	return append([]string(nil), fallback...)
+}
+
+func updateExistingThread(state *State, threadID, userInput, responseBody, now string, turnSymbols []coalescedSymbol, turnAnchors []string) error {
 	rec, found, err := store.FindSpineRecord(state.Paths, threadID)
 	if err != nil {
 		return err
@@ -274,8 +302,52 @@ func updateExistingThread(state *State, threadID, now string) error {
 		return eventlog.Log(state.Paths, "thread", "engaged-cross-project",
 			"thr="+threadID+" project="+rec.Project+" active="+state.ActiveProject.ID)
 	}
+
+	// Load (or synthesize) the thread file. A spine record without a
+	// matching thread file is a drift state — synthesize a minimal
+	// frontmatter from the spine record so the engagement still produces
+	// a well-formed file going forward.
+	thr, err := store.LoadThread(state.Paths, threadID)
+	if err != nil && !errors.Is(err, store.ErrThreadFileNotFound) {
+		return fmt.Errorf("load thread %s: %w", threadID, err)
+	}
+	if errors.Is(err, store.ErrThreadFileNotFound) {
+		_ = eventlog.Log(state.Paths, "thread", "file-missing-resynth",
+			"thr="+threadID+" project="+rec.Project)
+		thr = store.Thread{Frontmatter: frontmatterFromSpine(rec)}
+	}
+
+	// Bookkeeping update on the in-memory record. The new turn_count is
+	// the value used for the per-turn excerpt header and as
+	// first_seen_turn for any newly introduced history symbols.
+	newTurnCount := rec.TurnCount + 1
+	thr.Frontmatter.LastEngaged = now
+	thr.Frontmatter.TurnCount = newTurnCount
+	// Mirror the canonical spine fields so the frontmatter stays in
+	// sync. The body of work reads the frontmatter; the spine is the
+	// outer index.
+	thr.Frontmatter.ID = rec.ID
+	thr.Frontmatter.Project = rec.Project
+	thr.Frontmatter.Anchors = append([]string(nil), rec.Anchors...)
+	thr.Frontmatter.Summary = rec.Summary
+	thr.Frontmatter.State = rec.State
+	if thr.Frontmatter.Created == "" {
+		thr.Frontmatter.Created = rec.Created
+	}
+	if thr.Frontmatter.StateChanged == "" {
+		thr.Frontmatter.StateChanged = rec.StateChanged
+	}
+	thr.Frontmatter.RecallFires = rec.RecallFires
+
+	thr.Frontmatter.HistorySymbols = mergeHistorySymbols(thr.Frontmatter.HistorySymbols, turnSymbols, newTurnCount)
+	thr.Body = appendTurnExcerpt(thr.Body, newTurnCount, now, turnAnchors, userInput, responseBody)
+
+	if err := store.SaveThread(state.Paths, thr); err != nil {
+		return fmt.Errorf("save thread %s: %w", threadID, err)
+	}
+
 	rec.LastEngaged = now
-	rec.TurnCount++
+	rec.TurnCount = newTurnCount
 	if err := store.UpdateSpineRecord(state.Paths, rec); err != nil {
 		return err
 	}
@@ -283,18 +355,13 @@ func updateExistingThread(state *State, threadID, now string) error {
 		threadID+" turn_count="+itoa(rec.TurnCount))
 }
 
-func createNewThread(state *State, responseBody, now string) error {
-	records, err := store.SpineRecordsByProject(state.Paths, state.ActiveProject.ID)
-	if err != nil {
-		return err
-	}
+func createNewThread(state *State, userInput, responseBody, now string, turnSymbols []coalescedSymbol, turnAnchors []string) error {
 	// NextThreadID needs the full spine, not just this project's, so a
 	// new id never collides with a thread in a sibling project.
 	allRecords, err := store.ReadSpine(state.Paths.Spine)
 	if err != nil {
 		return err
 	}
-	_ = records // (used implicitly via project's spine; keep slice for symmetry)
 	newID := store.NextThreadID(allRecords)
 
 	anchors := state.coalesce.symbolList()
@@ -317,11 +384,221 @@ func createNewThread(state *State, responseBody, now string) error {
 		StateChanged: now,
 		TurnCount:    1,
 	}
+
+	thr := store.Thread{
+		Frontmatter: ThreadFrontmatter{
+			ID:             newID,
+			Project:        rec.Project,
+			Anchors:        append([]string(nil), anchors...),
+			Summary:        summary,
+			State:          store.ThreadWIP,
+			Created:        now,
+			LastEngaged:    now,
+			StateChanged:   now,
+			TurnCount:      1,
+			RecallFires:    0,
+			HistorySymbols: mergeHistorySymbols(nil, turnSymbols, 1),
+		},
+		Body: newThreadBody(anchors, 1, now, turnAnchors, userInput, responseBody),
+	}
+	// rec.HistorySymbols is not part of SpineRecord; the field name above
+	// is only for the thread file. The Frontmatter struct is built
+	// in-line from store.ThreadFrontmatter via the type alias below.
+	if err := store.SaveThread(state.Paths, thr); err != nil {
+		return fmt.Errorf("save thread %s: %w", newID, err)
+	}
 	if err := store.AppendSpineRecord(state.Paths, rec); err != nil {
 		return err
 	}
 	return eventlog.Log(state.Paths, "thread", "created",
 		newID+" anchors="+itoa(len(anchors))+" project="+state.ActiveProject.ID)
+}
+
+// ThreadFrontmatter is a local alias to avoid a long-form type literal in
+// the createNewThread frontmatter construction. Kept at package scope so
+// the literal in the function body reads naturally.
+type ThreadFrontmatter = store.ThreadFrontmatter
+
+// frontmatterFromSpine builds a minimal-but-valid ThreadFrontmatter from
+// a SpineRecord. Used when a thread's on-disk file is missing while its
+// spine entry persists — the engagement update synthesizes a fresh file
+// rather than failing the turn.
+func frontmatterFromSpine(rec store.SpineRecord) ThreadFrontmatter {
+	return ThreadFrontmatter{
+		ID:           rec.ID,
+		Project:      rec.Project,
+		Anchors:      append([]string(nil), rec.Anchors...),
+		Summary:      rec.Summary,
+		State:        rec.State,
+		Created:      rec.Created,
+		LastEngaged:  rec.LastEngaged,
+		StateChanged: rec.StateChanged,
+		TurnCount:    rec.TurnCount,
+		RecallFires:  rec.RecallFires,
+	}
+}
+
+// mergeHistorySymbols folds the per-turn coalesced symbol set into an
+// existing history_symbols list and enforces the cap (spec §2.3 +
+// §2.6.1, default 40).
+//
+// For each per-turn symbol:
+//   - if its normalized form already appears: increment count, upgrade
+//     source per §2.7.3 dominance.
+//   - else: append a new entry with first_seen_turn = currentTurn.
+//
+// Eviction policy when the merged list exceeds the cap: lowest count
+// first; ties broken by lowest first_seen_turn (oldest among lowest).
+// Spec §2.3 OPEN flags the precise weight formula as deferred to v0.1.1;
+// v0.1 uses count alone. Order of return is stable: existing entries
+// retain insertion order, new entries append in the input order.
+func mergeHistorySymbols(existing []store.HistorySymbol, turnSymbols []coalescedSymbol, currentTurn int) []store.HistorySymbol {
+	// Index existing by normalized for O(1) lookup.
+	idx := make(map[string]int, len(existing))
+	out := make([]store.HistorySymbol, len(existing))
+	copy(out, existing)
+	for i, h := range out {
+		idx[h.Normalized] = i
+	}
+
+	// Sort turnSymbols by normalized for deterministic append order.
+	turnSorted := make([]coalescedSymbol, len(turnSymbols))
+	copy(turnSorted, turnSymbols)
+	sort.Slice(turnSorted, func(i, j int) bool {
+		return turnSorted[i].Normalized < turnSorted[j].Normalized
+	})
+
+	for _, sym := range turnSorted {
+		if i, ok := idx[sym.Normalized]; ok {
+			out[i].Count++
+			out[i].Source = upgradeSource(out[i].Source, sym.Source)
+			continue
+		}
+		raw := sym.Raw
+		if raw == "" {
+			raw = sym.Normalized
+		}
+		out = append(out, store.HistorySymbol{
+			Raw:           raw,
+			Normalized:    sym.Normalized,
+			FirstSeenTurn: currentTurn,
+			Count:         1,
+			Source:        sym.Source,
+		})
+		idx[sym.Normalized] = len(out) - 1
+	}
+
+	if len(out) <= historyCapPerThread {
+		return out
+	}
+	return evictLowestWeight(out, historyCapPerThread)
+}
+
+// upgradeSource is the persistent-history analogue of dominantSource —
+// same precedence rule, applied on cumulative history rather than
+// per-turn coalescing.
+func upgradeSource(existing, incoming store.SymbolSource) store.SymbolSource {
+	if rank(existing) >= rank(incoming) {
+		return existing
+	}
+	return incoming
+}
+
+// evictLowestWeight returns out with the lowest-cumulative-weight entries
+// removed until len == cap. Weight = count alone in v0.1; ties broken by
+// lowest first_seen_turn (evict oldest among lowest-count). Stable
+// ordering of the survivors is preserved.
+func evictLowestWeight(out []store.HistorySymbol, cap int) []store.HistorySymbol {
+	if len(out) <= cap {
+		return out
+	}
+	type indexed struct {
+		idx int
+		ref *store.HistorySymbol
+	}
+	scored := make([]indexed, len(out))
+	for i := range out {
+		scored[i] = indexed{idx: i, ref: &out[i]}
+	}
+	// Sort: highest count first; ties broken by highest first_seen_turn
+	// (newest survives when counts tie).
+	sort.SliceStable(scored, func(i, j int) bool {
+		a, b := scored[i].ref, scored[j].ref
+		if a.Count != b.Count {
+			return a.Count > b.Count
+		}
+		return a.FirstSeenTurn > b.FirstSeenTurn
+	})
+	keepIdx := make(map[int]struct{}, cap)
+	for i := 0; i < cap; i++ {
+		keepIdx[scored[i].idx] = struct{}{}
+	}
+	survivors := make([]store.HistorySymbol, 0, cap)
+	for i := range out {
+		if _, ok := keepIdx[i]; ok {
+			survivors = append(survivors, out[i])
+		}
+	}
+	return survivors
+}
+
+// appendTurnExcerpt appends a single per-turn excerpt block to body and
+// returns the new body. The block format (spec §2.3 body content
+// guidelines):
+//
+//	## Turn <N> · <RFC3339> · [a, b, c]
+//
+//	**user:** <userInput>
+//
+//	**agent:** <responseBody with topic tag stripped>
+//
+// Exactly one trailing newline is preserved on the returned body so
+// repeated saves produce byte-identical files when nothing has changed.
+func appendTurnExcerpt(body string, turnN int, when string, anchors []string, userInput, responseBody string) string {
+	excerpt := renderTurnExcerpt(turnN, when, anchors, userInput, responseBody)
+	if body == "" {
+		return excerpt
+	}
+	body = strings.TrimRight(body, "\n") + "\n"
+	return body + "\n" + excerpt
+}
+
+// newThreadBody renders the initial body for a freshly-created thread:
+// a top-level title taken from the first anchor (or fallback) followed
+// by the first turn excerpt.
+func newThreadBody(anchors []string, turnN int, when string, headerAnchors []string, userInput, responseBody string) string {
+	title := "new thread"
+	if len(anchors) > 0 && anchors[0] != "" {
+		title = anchors[0]
+	}
+	excerpt := renderTurnExcerpt(turnN, when, headerAnchors, userInput, responseBody)
+	return "# " + title + "\n\n" + excerpt
+}
+
+func renderTurnExcerpt(turnN int, when string, anchors []string, userInput, responseBody string) string {
+	stripped := responseBody
+	if pr, err := prompt.Parse(responseBody); err == nil {
+		stripped = pr.Body
+	}
+	stripped = strings.TrimRight(stripped, "\n")
+	user := strings.TrimRight(userInput, "\n")
+
+	var b strings.Builder
+	b.Grow(len(userInput) + len(responseBody) + 64)
+	b.WriteString("## Turn ")
+	b.WriteString(itoa(turnN))
+	b.WriteString(" · ")
+	b.WriteString(when)
+	b.WriteString(" · [")
+	b.WriteString(strings.Join(anchors, ", "))
+	b.WriteString("]\n\n")
+	b.WriteString("**user:** ")
+	b.WriteString(user)
+	b.WriteString("\n\n")
+	b.WriteString("**agent:** ")
+	b.WriteString(stripped)
+	b.WriteString("\n")
+	return b.String()
 }
 
 // padOrTruncateAnchors enforces the §2.2 hard range [4, 8]. If the
