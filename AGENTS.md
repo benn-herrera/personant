@@ -83,8 +83,10 @@ Two warning signs that a proposed change is wrong:
 - **No SQLite as canonical state.** It's not the substrate; it can be a
   derived index later if scale forces it, but the canonical form is text.
 - **Drift cannot accumulate.** Derived files (`symbols.jsonl`, project
-  digests) are regenerable from canonical sources. A pre-commit hook fails
-  on stale derived files.
+  digests) are regenerable from canonical sources. `internal/autogit`
+  enforces the gate inline: state-changing git ops in the home tree
+  declare `CheckDerivedFresh` as a post-flag, failing the op on stale
+  derived files. No git pre-commit hook is installed.
 
 ## Language constraints
 
@@ -147,9 +149,11 @@ Go 1.26.1+.
     `mattn/go-sqlite3`. Do not reintroduce.
   - **Approved-when-earned** (compatible; pull in *with their consumer*,
     not before): `github.com/BurntSushi/toml` (consumer: `providers.toml`
-    loader); `gopkg.in/yaml.v3` (consumer: thread frontmatter writes).
-    Do not pull these in speculatively; do pull them in when the
-    consumer arrives.
+    loader); `gopkg.in/yaml.v3` (consumer: thread frontmatter writes);
+    `github.com/go-git/go-git/v5` (consumer: `internal/autogit/` for
+    autonomic git operations on `~/.personant/.git/`; landed during the
+    gitops/policy refactor). Do not pull these in speculatively; do
+    pull them in when the consumer arrives.
   - **`langchaingo/llms`** is *compatible* but excluded on dep-hygiene
     + scope grounds — see substrate-decisions memory for the revisit
     conditions.

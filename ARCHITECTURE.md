@@ -66,7 +66,7 @@ The ack is the **integrity gate** at the moment its accuracy matters most.
 
 The runtime performs many operations the LLM cannot. Most notably **git**:
 
-- The runtime owns `~/.personant/`'s git tree autonomically (init, add/commit on every canonical mutation, pre-commit hook). Same lifecycle status as writing to `spine.jsonl`.
+- The runtime owns `~/.personant/`'s git tree autonomically (init, add/commit on every canonical mutation) via the `internal/autogit` wrapper, which composes in-process go-git operations with policy-driven systemic-validation checks (`CheckDerivedFresh`, `CheckSpineIntegrity`) declared as bitflags on each call. No git pre-commit hook is installed: validation runs as part of personant's own logic at the event points where it's required. Same lifecycle status as writing to `spine.jsonl`.
 - The runtime issues read-only git queries against the user's *workspace* (`git ls-files`, `git status`, `git diff`) for permission-tier classification and ack-prompt diff rendering.
 - The LLM has **no git tool**.
 
@@ -122,7 +122,7 @@ When pressure builds to "just add X," ask: is this constraint load-bearing, or a
 | Structured records | JSONL, sorted by id | line-grain diffs, not record-grain reformat |
 | Thread bodies | markdown + YAML frontmatter | hand-readable; standard tooling (Obsidian, Pandoc) |
 | Configuration | TOML (`providers.toml`) + markdown directives | hand-editable; secret-bearing files separated |
-| Derived files | regenerable from canonical | drift cannot accumulate; pre-commit hook fails on stale |
+| Derived files | regenerable from canonical | drift cannot accumulate; `autogit.CheckDerivedFresh` fails any state-changing git op on stale |
 | Git management | autonomic on `~/.personant/`, never on user's workspace | runtime owns its house; user owns theirs |
 
 All of these are load-bearing. A change that violates them is a red flag.

@@ -1,12 +1,15 @@
 package store
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"time"
+
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
 // InitOptions controls the behavior of Init.
@@ -35,10 +38,11 @@ type InitOptions struct {
 //   - Canonical/derived data files (spine.jsonl, symbols.jsonl) are
 //     created empty if missing and never truncated.
 //
-// After git init, Init installs a pre-commit hook (spec §8.3) at
-// .git/hooks/pre-commit that invokes `personant index check` to fail the
-// commit on derived-index drift. The hook is wholly agent-owned and is
-// rewritten unconditionally on every init; see installPreCommitHook.
+// Git is managed in-process via go-git: `git init` plus the bootstrap
+// "personant init" commit run on the home tree. No git binary is
+// required on $PATH. Substrate validation for autonomic git operations
+// post-init runs through internal/autogit's GitCheckFlags bitmask —
+// not through a git pre-commit hook. See spec §8.3.
 func Init(paths PersonantPaths, opts InitOptions) error {
 	logf := func(format string, args ...any) {
 		if opts.Quiet || opts.Logger == nil {
@@ -126,82 +130,7 @@ func Init(paths PersonantPaths, opts InitOptions) error {
 		return err
 	}
 
-	if err := installPreCommitHook(paths, logf); err != nil {
-		return err
-	}
-
 	logf("init: ok")
-	return nil
-}
-
-// preCommitHookScript is the body written to .git/hooks/pre-commit. The
-// hook is wholly agent-owned: any pre-existing pre-commit hook is overwritten.
-// The descriptive header is for forensic trace, not install-time gating.
-//
-// The hook assumes `personant` is on $PATH at the time git invokes it.
-// That is reasonable for users running `git commit` inside ~/.personant/
-// where the binary is installed; if empirical pressure shows otherwise,
-// add a $PERSONANT_BIN override path to the script.
-const preCommitHookScript = `#!/bin/sh
-# personant pre-commit hook, written by ` + "`personant init`" + `.
-#
-# Runs ` + "`personant index check`" + ` against this home directory; aborts the
-# commit if any derived index file (symbols.jsonl, projects/*/digest.json)
-# is stale relative to the canonical sources.
-#
-# Auto-installed; do not edit by hand.
-
-set -e
-
-# $GIT_DIR is .../<personant-home>/.git when invoked by git as a hook.
-HOME_DIR="$(dirname "$GIT_DIR")"
-exec personant index check --home "$HOME_DIR"
-`
-
-// installPreCommitHook writes the personant pre-commit hook at
-// <Home>/.git/hooks/pre-commit. The hook is wholly agent-owned: any
-// pre-existing hook is overwritten with the canonical script. Best-effort:
-// a missing .git/ logs a warning and returns nil; anything else (read or
-// write failure) is a hard error so the caller can surface it.
-//
-// Idempotency: when the on-disk hook is byte-identical to the canonical
-// script, the file is not rewritten. This avoids mtime churn but is not
-// a content-preservation policy.
-func installPreCommitHook(paths PersonantPaths, logf func(format string, args ...any)) error {
-	gitDir := filepath.Join(paths.Home, ".git")
-	if _, err := os.Stat(gitDir); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			logf("init: .git/ missing; skipping pre-commit hook install")
-			return nil
-		}
-		return fmt.Errorf("init: stat .git: %w", err)
-	}
-
-	hooksDir := filepath.Join(gitDir, "hooks")
-	if _, err := mkdirIfMissing(hooksDir); err != nil {
-		return fmt.Errorf("init: mkdir .git/hooks: %w", err)
-	}
-
-	hookPath := filepath.Join(hooksDir, "pre-commit")
-	existing, err := os.ReadFile(hookPath)
-	switch {
-	case err == nil:
-		if bytes.Equal(existing, []byte(preCommitHookScript)) {
-			return nil
-		}
-	case !errors.Is(err, os.ErrNotExist):
-		return fmt.Errorf("init: read pre-commit hook: %w", err)
-	}
-
-	if err := os.WriteFile(hookPath, []byte(preCommitHookScript), 0o755); err != nil {
-		return fmt.Errorf("init: write pre-commit hook: %w", err)
-	}
-	// WriteFile honors umask, which can mask 0o755 down to 0o755 & ~umask.
-	// Force exact mode so the hook is executable regardless of inherited umask.
-	if err := os.Chmod(hookPath, 0o755); err != nil {
-		return fmt.Errorf("init: chmod pre-commit hook: %w", err)
-	}
-	logf("init: wrote %s", hookPath)
 	return nil
 }
 
@@ -267,118 +196,86 @@ func writeAlways(path string, content []byte) error {
 }
 
 // initGit ensures Home is a git repository with at least one commit.
-//   - If .git/ already exists, it is left untouched.
-//   - Otherwise `git init` is run on Home.
-//   - If HEAD has no commits, an initial "personant init" commit is made.
-//     GIT_*_NAME / GIT_*_EMAIL env vars are set to a personant fallback only
-//     when not already present in the inherited environment, so user-level
-//     git config still wins at runtime when configured.
+//   - If .git/ already exists, it is opened with go-git.PlainOpen and
+//     left otherwise untouched.
+//   - Otherwise go-git.PlainInit creates the repo.
+//   - If HEAD has no commits, an initial "personant init" commit is made
+//     via go-git's worktree. Author identity falls back to a personant
+//     fallback when the repo's git config has no user.name/user.email.
+//
+// No git binary is required on $PATH; the work is done in-process.
 func initGit(home string, logf func(format string, args ...any)) error {
 	gitDir := filepath.Join(home, ".git")
+
+	var repo *git.Repository
 	if _, err := os.Stat(gitDir); err == nil {
-		// Already a repo. Still try the initial commit if the repo has no
-		// commits yet — handles a half-initialized state from an earlier
-		// failed run.
-		if commitErr := initialCommitIfEmpty(home, logf); commitErr != nil {
-			return commitErr
+		opened, oerr := git.PlainOpen(home)
+		if oerr != nil {
+			return fmt.Errorf("init: open existing repo: %w", oerr)
 		}
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
+		repo = opened
+	} else if errors.Is(err, os.ErrNotExist) {
+		created, cerr := git.PlainInit(home, false)
+		if cerr != nil {
+			return fmt.Errorf("init: git init: %w", cerr)
+		}
+		repo = created
+		logf("init: git init %s", home)
+	} else {
 		return fmt.Errorf("init: stat .git: %w", err)
 	}
 
-	if _, err := exec.LookPath("git"); err != nil {
-		return fmt.Errorf("init: git not found in PATH: %w", err)
-	}
-
-	if err := runGit(home, nil, "init", "-q"); err != nil {
-		return fmt.Errorf("init: git init: %w", err)
-	}
-	logf("init: git init %s", home)
-
-	if err := initialCommitIfEmpty(home, logf); err != nil {
+	if err := initialCommitIfEmpty(repo, logf); err != nil {
 		return err
 	}
 	return nil
 }
 
-// initialCommitIfEmpty creates the bootstrap commit if the repo at home has
-// no HEAD yet. Quiet on a repo that already has commits.
-func initialCommitIfEmpty(home string, logf func(format string, args ...any)) error {
-	// `git rev-parse HEAD` prints to stderr ("unknown revision") on a fresh
-	// repo and exits non-zero. We treat that as the empty-repo signal.
-	cmd := exec.Command("git", "-C", home, "rev-parse", "--verify", "HEAD")
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	if err := cmd.Run(); err == nil {
-		// HEAD already exists; nothing to do.
+// initialCommitIfEmpty creates the bootstrap commit if the repo has no
+// HEAD yet. Quiet on a repo that already has at least one commit.
+func initialCommitIfEmpty(repo *git.Repository, logf func(format string, args ...any)) error {
+	if _, err := repo.Head(); err == nil {
 		return nil
+	} else if !errors.Is(err, plumbing.ErrReferenceNotFound) {
+		return fmt.Errorf("init: repo HEAD: %w", err)
 	}
 
-	env := commitEnv(home)
-	if err := runGit(home, env, "add", "."); err != nil {
+	wt, err := repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("init: worktree: %w", err)
+	}
+	if err := wt.AddWithOptions(&git.AddOptions{All: true}); err != nil {
 		return fmt.Errorf("init: git add: %w", err)
 	}
-	if err := runGit(home, env, "commit", "-q", "-m", "personant init"); err != nil {
+	if _, err := wt.Commit("personant init", &git.CommitOptions{
+		Author: commitSignature(repo),
+	}); err != nil {
 		return fmt.Errorf("init: git commit: %w", err)
 	}
 	logf("init: git initial commit")
 	return nil
 }
 
-// commitEnv returns the env vars for the bootstrap commit. The personant
-// fallback identity is supplied *only* if git cannot otherwise resolve a
-// user.name and user.email — env-var precedence outranks git config, so
-// unconditionally setting GIT_AUTHOR_* would override the user's configured
-// identity. When git already has identity (env vars or config), we return
-// nil and let the inherited environment carry through.
-func commitEnv(home string) []string {
-	if gitHasIdentity(home) {
-		return nil
-	}
-	base := os.Environ()
-	base = append(base,
-		"GIT_AUTHOR_NAME=personant",
-		"GIT_AUTHOR_EMAIL=personant@localhost",
-		"GIT_COMMITTER_NAME=personant",
-		"GIT_COMMITTER_EMAIL=personant@localhost",
-	)
-	return base
-}
-
-// gitHasIdentity reports whether `git -C home config user.name` and
-// `user.email` both yield a non-empty value (env, local, global, or system).
-// Used as the gate for whether the personant fallback identity should kick in.
-func gitHasIdentity(home string) bool {
-	for _, key := range []string{"user.name", "user.email"} {
-		out, err := exec.Command("git", "-C", home, "config", "--get", key).Output()
-		if err != nil {
-			return false
-		}
-		if len(bytes.TrimSpace(out)) == 0 {
-			return false
+// commitSignature returns the author signature for the bootstrap
+// commit. If the repo's git config (including local + global scopes via
+// go-git's ConfigScoped) yields a user.name + user.email pair, those
+// are used. Otherwise the personant fallback identity ("personant"
+// <personant@localhost>) kicks in so a freshly-initialized tempdir
+// with no git config still produces a valid commit.
+func commitSignature(repo *git.Repository) *object.Signature {
+	cfg, err := repo.Config()
+	if err == nil && cfg.User.Name != "" && cfg.User.Email != "" {
+		return &object.Signature{
+			Name:  cfg.User.Name,
+			Email: cfg.User.Email,
+			When:  time.Now(),
 		}
 	}
-	return true
-}
-
-// runGit invokes git in dir with the given args. Stderr is captured and
-// included in the returned error on failure.
-func runGit(dir string, env []string, args ...string) error {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	if env != nil {
-		cmd.Env = env
+	return &object.Signature{
+		Name:  "personant",
+		Email: "personant@localhost",
+		When:  time.Now(),
 	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		msg := bytes.TrimSpace(stderr.Bytes())
-		if len(msg) == 0 {
-			return err
-		}
-		return fmt.Errorf("%w: %s", err, string(msg))
-	}
-	return nil
 }
 
 // Seed content. Verbatim from the implementation spec for the init step.

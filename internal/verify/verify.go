@@ -41,9 +41,10 @@ type Finding struct {
 //   - Warnings: recoverable issues (missing meta.json, malformed
 //     directives) — informational, do not affect exit code
 //   - Drift:    pass-through descriptions from index.Check; treated as
-//     errors for the purpose of the exit code (a derived file out of
-//     sync with canonical state is a hard failure, same as the
-//     pre-commit hook would treat it).
+//     errors for the purpose of the exit code. A derived file out of
+//     sync with canonical state is a hard failure — autogit's
+//     CheckDerivedFresh post-flag enforces the same invariant at every
+//     state-changing git op in the home tree.
 type Report struct {
 	Errors   []Finding
 	Warnings []Finding

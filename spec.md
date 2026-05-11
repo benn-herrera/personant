@@ -70,7 +70,7 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
 | Type | Examples | Drift policy |
 |---|---|---|
 | Canonical | `spine.jsonl` rows, `threads/*.md`, `directives/*.md`, `projects/prj_<n>/meta.json`, `logs/*.log`, `providers.toml`, `archive/index.jsonl` | Source of truth. Hand-editable. Other files derive from these. |
-| Derived | `symbols.jsonl`, `projects/prj_<n>/digest.json` | Regenerable from canonical. Pre-commit hook fails if stale. Never hand-edited. |
+| Derived | `symbols.jsonl`, `projects/prj_<n>/digest.json` | Regenerable from canonical. `autogit.CheckDerivedFresh` fails any state-changing git op on stale. Never hand-edited. |
 | Operational | `logs/*.log`, `.git/`, `tmp/`, `last-active`, `history` | System-managed; not subject to drift checking. `tmp/`, `last-active`, and `history` are gitignored. |
 | Secret-bearing | `providers.toml` | Contains API keys. Treated specially by the runtime: never included in any LLM-context artifact, log line, ack prompt, or captured output. See §8.2. |
 
@@ -1195,10 +1195,13 @@ invocation) when they are required to maintain the canonical KB. The two
 notable cases:
 
 - **Autonomic git on `~/.personant/`.** The runtime owns its own home's git
-  tree: `git init` on first run, `git add`/`commit` of canonical mutations
-  with structured messages, and pre-commit hook installation/invocation. Same
-  lifecycle status as writing to `spine.jsonl` itself — no user ack, no LLM
-  involvement. See §8.3 for hook details.
+  tree: `git init` on first run and `git add`/`commit` of canonical mutations
+  with structured messages, all in-process via `internal/autogit` (no git
+  binary required on `$PATH`). Systemic validation runs inline via
+  `autogit.GitCheckFlags` bitmask policy declared on each state-changing
+  operation — no git pre-commit hook. Same lifecycle status as writing to
+  `spine.jsonl` itself — no user ack, no LLM involvement. See §8.3 for
+  details.
 - **Read-only git queries on the workspace.** The runtime issues `git
   ls-files`, `git status`, and `git diff` against the workspace tree to
   classify tracked-vs-untracked status (input to the permission tiers in
@@ -1418,13 +1421,39 @@ The split reflects intent: an agent reaching for secrets is suspicious and warra
 
 Detailed in §2.6. Briefly: `directives/defaults.md` < `directives/user.md` < `directives/prj_<n>/project.md`. The runtime walks the precedence chain at parameter-read time and returns the first match.
 
-### 8.3 Pre-commit hook installation and behavior
+### 8.3 Substrate validation in autonomic git operations
 
-Hook is installed at `.git/hooks/pre-commit` inside `$PERSONANT_HOME/`
-by `personant init`. On commit attempt, regenerates derived files
-(`symbols.jsonl`, `projects/prj_<n>/digest.json`); fails the commit if
-regeneration produces output different from what's currently checked
-in (drift detected).
+Personant's autonomic git operations on `$PERSONANT_HOME/.git/` run
+in-process via the `go-git` library, routed through a domain-specific
+wrapper (`internal/autogit`) that applies systemic validation checks
+before and after each state-changing operation. Checks are declared as
+a bitmask on each call (`PreFlags`, `PostFlags`). The check vocabulary
+is small and bounded; 64 flag slots cover any plausible growth.
+
+Built-in systemic checks:
+
+- `CheckDerivedFresh` — wraps `personant index check`; verifies
+  `symbols.jsonl` and per-project `digest.json` are up to date with
+  canonical sources.
+- `CheckSpineIntegrity` — wraps `personant verify`; full structural
+  validation.
+
+**Systemic vs specific validation.** The `GitCheckFlags` bitmask is
+for *systemic* validation — substrate-wide consistency checks
+parameterized only by `paths`. Operation-tied *specific* verifications
+(e.g., verifying a particular archive entry resolves after a recovery
+checkout) are not expressed through flags — they live inside
+purpose-specific wrapper functions that compose `autogit.Checkout` (or
+similar) with their own internal verification. Flags carry kind, not
+arguments.
+
+**No git pre-commit hook is installed.** Validation is part of
+personant's own logic, invoked at the event points where it's required;
+routing through git's hook mechanism would be unnecessary indirection
+for a function call we make from our own code. A human who runs
+`git commit` manually inside `$PERSONANT_HOME` is operating outside
+the runtime and owns the consequences — same posture as hand-editing
+`spine.jsonl`.
 
 ---
 

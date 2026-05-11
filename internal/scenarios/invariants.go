@@ -43,7 +43,8 @@ func VerifySpineIntegrity(h *Harness) error {
 
 // VerifyIndexFresh runs index.Rebuild (writing derived files) followed
 // by index.Check (which now must report no drift). Equivalent to the
-// pre-commit hook's gate for derived-file freshness.
+// derived-file freshness gate that autogit's CheckDerivedFresh enforces
+// inline at each state-changing git op in the home tree.
 //
 // Rebuild-then-check is the right shape because turn.Run does not
 // regenerate derived indices on every turn; the runtime's contract is
