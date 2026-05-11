@@ -85,31 +85,40 @@ type MemoryOps interface {
 
 	// ---------- Thread operations ----------
 
-	// CreateThread atomically creates a new thread: it appends a new
-	// record to the spine and writes the canonical thread file. Folds
-	// in the createNewThread path currently open-coded in
+	// CreateThread atomically creates a new thread: appends a new spine
+	// record and writes the canonical thread file. Folds in the
+	// createNewThread path currently open-coded in
 	// internal/turn/turn.go (store.SaveThread + store.AppendSpineRecord).
 	//
-	// `rec.ID` must already be allocated via NextThreadID; the adapter
-	// returns ErrDuplicateThreadID (sentinel via errors.Is) if it
-	// collides. `body` is the initial markdown body for the thread
-	// file; the frontmatter is derived from `rec` plus any
-	// per-thread history that the caller assembles before calling.
+	// `w.Spine.ID` must already be allocated via NextThreadID; the
+	// adapter returns ErrDuplicateThreadID (sentinel via errors.Is) if
+	// it collides.
 	//
-	// On any partial failure the adapter is expected to log
-	// substrate-side state and return a wrapped error; reconciliation
-	// on the next engagement (or via Verify) is the recovery path.
-	CreateThread(ctx context.Context, rec SpineRecord, fm ThreadFrontmatter, body string) error
+	// Atomicity is the adapter's responsibility: the adapter handles
+	// write ordering (file then spine, or spine then file — its
+	// choice), retry semantics if one write fails, and any
+	// substrate-internal transaction wrapping (a future SQLite adapter
+	// would wrap both in BEGIN/COMMIT; the file adapter handles partial
+	// failure via reconciliation on next engagement). Application code
+	// passes a fully-built ThreadWrite and trusts the adapter.
+	CreateThread(ctx context.Context, w ThreadWrite) error
 
-	// EngageThread atomically updates an existing thread: it overwrites
-	// the spine record and rewrites the thread file with the supplied
+	// EngageThread atomically updates an existing thread: overwrites the
+	// spine record and rewrites the thread file with the supplied
 	// frontmatter and body. Folds in the updateExistingThread path
 	// currently open-coded in internal/turn/turn.go
 	// (store.SaveThread + store.UpdateSpineRecord).
 	//
-	// Returns ErrThreadNotFound (sentinel) when the spine has no
-	// record matching `rec.ID`.
-	EngageThread(ctx context.Context, rec SpineRecord, fm ThreadFrontmatter, body string) error
+	// Adapter owns the missing-file fallback. When `w.Spine.ID` exists
+	// in the spine but the thread file is missing (drift state), the
+	// adapter materializes a fresh file from `w.Frontmatter` and
+	// `w.Body` rather than failing. The application never sees this
+	// recovery path — it doesn't synthesize frontmatter from spine,
+	// doesn't deal with ErrThreadFileNotFound on engagement.
+	//
+	// Returns ErrThreadNotFound (sentinel) only when the spine itself
+	// has no record matching `w.Spine.ID`.
+	EngageThread(ctx context.Context, w ThreadWrite) error
 
 	// LoadThread returns the full thread (frontmatter + body) for the
 	// given ID. Folds in store.LoadThread. ErrThreadFileNotFound is
@@ -201,19 +210,24 @@ type MemoryOps interface {
 	// caller. Empty query → empty result, no error.
 	ProposeRecall(ctx context.Context, query []string, opts RecallOptions) ([]RecallCandidate, error)
 
-	// RebuildSymbolIndex regenerates every derived index file from
-	// the canonical spine and per-thread frontmatter (symbols.jsonl
-	// plus per-project digest.json). Folds in index.Rebuild.
+	// RegenerateDerivedState regenerates every derived artifact from
+	// canonical sources. For the file adapter this rebuilds
+	// symbols.jsonl plus per-project digest.json. For a SQL-backed
+	// adapter it might refresh materialized views; for a service-backed
+	// adapter it might POST to a /derived/rebuild endpoint. The
+	// application doesn't distinguish — derived state is substrate-
+	// internal and the adapter decides how to materialize it.
+	// Folds in index.Rebuild.
 	//
 	// ALT: callers may want a fine-grained "rebuild only this
 	// project's digest" variant; v0.1 has no such caller, so the
 	// full-rebuild form is the only entry point on the port.
-	RebuildSymbolIndex(ctx context.Context, opts IndexBuildOptions) error
+	RegenerateDerivedState(ctx context.Context, opts IndexBuildOptions) error
 
-	// CheckSymbolIndex computes what RebuildSymbolIndex would write
-	// and compares it to what is currently on disk, reporting any
-	// drift. Never mutates. Folds in index.Check.
-	CheckSymbolIndex(ctx context.Context, opts IndexBuildOptions) (CheckResult, error)
+	// CheckDerivedState computes what RegenerateDerivedState would
+	// write and compares it to what is currently materialized, reporting
+	// any drift. Never mutates. Folds in index.Check.
+	CheckDerivedState(ctx context.Context, opts IndexBuildOptions) (CheckResult, error)
 
 	// ---------- Working set composition ----------
 
@@ -259,6 +273,13 @@ type MemoryOps interface {
 	// Init scaffolds the substrate for first-run use. Idempotent: a
 	// second call is safe when the substrate is already initialized.
 	// Folds in store.Init.
+	//
+	// Substrate-internal setup is the adapter's secret. The file
+	// adapter creates the directory layout, runs `git init` on its
+	// home tree, and writes seed files. A SQLite adapter would create
+	// schema; a network adapter might register a tenant. The port
+	// surface doesn't expose any of that — callers just ask for the
+	// substrate to be ready.
 	Init(ctx context.Context, opts InitOptions) error
 
 	// Verify performs a read-only structural validation pass over the
