@@ -1,11 +1,11 @@
 package turn
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
-	"personant/internal/eventlog"
-	"personant/internal/recall"
+	"personant/internal/memops"
 )
 
 // surfaceRecallCandidates runs the §3.4 cheap-pre-filter (symbolic
@@ -16,7 +16,7 @@ import (
 // surface lands a match isn't a fetch).
 //
 // engagedSet is the set of thread IDs already engaged in this turn —
-// passed to recall.Options.Exclude so an engaged thread doesn't
+// passed to memops.RecallOptions.Exclude so an engaged thread doesn't
 // shadow the turn's own engagement signal. Threads in
 // state.ActiveThreads/DormantThreads but not engaged this turn are
 // NOT excluded; that is the point of opportunistic recall.
@@ -24,9 +24,9 @@ import (
 // On error: returns it. The caller treats recall failure as
 // non-fatal (recall is opportunistic) and logs/swallows. Empty
 // candidate list: no events, no error.
-func surfaceRecallCandidates(state *State, engagedSet map[string]struct{}) error {
+func surfaceRecallCandidates(ctx context.Context, state *State, engagedSet map[string]struct{}) error {
 	query := state.coalesce.symbolList()
-	candidates, err := recall.Propose(state.Paths, query, recall.Options{
+	candidates, err := state.Ops.ProposeRecall(ctx, query, memops.RecallOptions{
 		Project: state.ActiveProject.ID,
 		Exclude: engagedSet,
 	})
@@ -41,7 +41,7 @@ func surfaceRecallCandidates(state *State, engagedSet map[string]struct{}) error
 			strings.Join(c.MatchedSymbols, ","),
 			querySize,
 		)
-		if err := eventlog.Log(state.Paths, "spine", "match-fire", details); err != nil {
+		if err := state.Ops.Log(ctx, "spine", "match-fire", details); err != nil {
 			return fmt.Errorf("log spine.match-fire: %w", err)
 		}
 	}

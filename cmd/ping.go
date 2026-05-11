@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"personant/internal/memops/fileadapter"
 	"personant/internal/ping"
 	"personant/internal/store"
 )
@@ -32,7 +33,8 @@ summary (provider, model, tokens, elapsed) is written to stderr.`,
 		if err != nil {
 			return err
 		}
-		return ping.Run(paths, ping.Options{
+		ops := fileadapter.NewFileAdapter(paths)
+		return ping.Run(ops, ping.Options{
 			Provider: pingFlagProvider,
 			Prompt:   pingFlagPrompt,
 			Model:    pingFlagModel,

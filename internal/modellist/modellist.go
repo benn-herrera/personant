@@ -10,8 +10,8 @@ import (
 	"sort"
 	"time"
 
+	"personant/internal/memops"
 	"personant/internal/model"
-	"personant/internal/store"
 )
 
 // Options carries the call-time knobs from the CLI flag layer.
@@ -22,10 +22,10 @@ type Options struct {
 	Stderr   io.Writer     // summary line + warnings sink
 }
 
-// Run loads providers from paths, picks one, fetches its model list, and
+// Run loads providers via ops, picks one, fetches its model list, and
 // prints one model id per line to opts.Stdout (sorted ascending). A
 // one-line summary goes to opts.Stderr.
-func Run(paths store.PersonantPaths, opts Options) error {
+func Run(ops memops.MemoryOps, opts Options) error {
 	if opts.Stdout == nil || opts.Stderr == nil {
 		return fmt.Errorf("models: Stdout/Stderr are required")
 	}
@@ -38,13 +38,13 @@ func Run(paths store.PersonantPaths, opts Options) error {
 		timeout = 30 * time.Second
 	}
 
-	providers, err := store.LoadProviders(paths.Providers)
+	providers, err := ops.LoadProviders(context.Background())
 	if err != nil {
 		return fmt.Errorf("models: load providers: %w", err)
 	}
-	p, ok := providers.Get(provider)
+	p, ok := providers[provider]
 	if !ok {
-		return fmt.Errorf("models: provider %q not found in %s", provider, paths.Providers)
+		return fmt.Errorf("models: provider %q not found in providers.toml", provider)
 	}
 
 	client := model.NewHTTPClient(p)

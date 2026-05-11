@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"personant/internal/memops/fileadapter"
 	"personant/internal/store"
 )
 
@@ -57,7 +58,7 @@ func TestRunSortedOutput(t *testing.T) {
 
 	paths := writeProviders(t, srv.URL)
 	var stdout, stderr bytes.Buffer
-	err := Run(paths, Options{
+	err := Run(fileadapter.NewFileAdapter(paths), Options{
 		Provider: "test",
 		Stdout:   &stdout,
 		Stderr:   &stderr,
@@ -85,7 +86,7 @@ func TestRunEmptyList(t *testing.T) {
 
 	paths := writeProviders(t, srv.URL)
 	var stdout, stderr bytes.Buffer
-	if err := Run(paths, Options{Provider: "test", Stdout: &stdout, Stderr: &stderr}); err != nil {
+	if err := Run(fileadapter.NewFileAdapter(paths), Options{Provider: "test", Stdout: &stdout, Stderr: &stderr}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if stdout.Len() != 0 {
@@ -99,7 +100,7 @@ func TestRunEmptyList(t *testing.T) {
 func TestRunProviderMissing(t *testing.T) {
 	paths := writeProviders(t, "http://unused.example")
 	var stdout, stderr bytes.Buffer
-	err := Run(paths, Options{Provider: "no-such-provider", Stdout: &stdout, Stderr: &stderr})
+	err := Run(fileadapter.NewFileAdapter(paths), Options{Provider: "no-such-provider", Stdout: &stdout, Stderr: &stderr})
 	if err == nil {
 		t.Fatal("expected error for unknown provider, got nil")
 	}
@@ -126,7 +127,7 @@ defaultModel = "m"
 	}
 
 	var stdout, stderr bytes.Buffer
-	if err := Run(store.PathsForHome(home), Options{Stdout: &stdout, Stderr: &stderr}); err != nil {
+	if err := Run(fileadapter.NewFileAdapter(store.PathsForHome(home)), Options{Stdout: &stdout, Stderr: &stderr}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if stdout.String() != "only\n" {
@@ -154,7 +155,7 @@ func TestRunTimeoutHonored(t *testing.T) {
 
 	paths := writeProviders(t, srv.URL)
 	var stdout, stderr bytes.Buffer
-	err := Run(paths, Options{
+	err := Run(fileadapter.NewFileAdapter(paths), Options{
 		Provider: "test",
 		Timeout:  50 * time.Millisecond,
 		Stdout:   &stdout,
@@ -190,7 +191,7 @@ defaultModel = "m"
 	}
 
 	var stdout, stderr bytes.Buffer
-	err := Run(store.PathsForHome(home), Options{Provider: "test", Stdout: &stdout, Stderr: &stderr})
+	err := Run(fileadapter.NewFileAdapter(store.PathsForHome(home)), Options{Provider: "test", Stdout: &stdout, Stderr: &stderr})
 	if err == nil {
 		t.Fatal("expected 403 error, got nil")
 	}

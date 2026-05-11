@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"personant/internal/index"
+	"personant/internal/memops"
+	"personant/internal/memops/fileadapter"
 	"personant/internal/metrics"
 	"personant/internal/model"
 	"personant/internal/store"
@@ -89,7 +91,12 @@ type Scenario struct {
 // per-step and final-invariant boundaries; turn.Run itself is
 // single-goroutine within RunScenario.
 type Harness struct {
+	// Paths is retained as a direct handle into the substrate so
+	// invariant validators can inspect canonical state without going
+	// through the port. Application code goes through Ops; invariants
+	// are test-side substrate validators and stay on store.* access.
 	Paths    store.PersonantPaths
+	Ops      memops.MemoryOps
 	Project  store.ProjectMeta
 	Provider store.Provider
 	Mock     *model.MockClient
@@ -238,7 +245,8 @@ defaultModel = "harness-mock"
 		t.Fatalf("scenario %s: WriteLastActive: %v", sc.Name, err)
 	}
 
-	state := turn.NewState(paths, project, provider, nil)
+	ops := fileadapter.NewFileAdapter(paths)
+	state := turn.NewState(ops, project, provider, nil)
 	// Pin the clock so timestamps are deterministic — invariant checks
 	// (created ≤ last_engaged) are timestamp-sensitive, and a
 	// scenario's metrics blob is more readable with stable timestamps.
@@ -255,6 +263,7 @@ defaultModel = "harness-mock"
 
 	return &Harness{
 		Paths:       paths,
+		Ops:         ops,
 		Project:     project,
 		Provider:    provider,
 		State:       state,

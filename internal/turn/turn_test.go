@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
 	"personant/internal/store"
 	"personant/internal/workset"
@@ -48,7 +49,7 @@ func TestRunNewTopicCreatesSpineRecord(t *testing.T) {
 		},
 	}, nil)
 
-	state := NewState(paths, meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	var out bytes.Buffer
@@ -118,7 +119,7 @@ func TestRunUpdatesExistingThread(t *testing.T) {
 		},
 	}, nil)
 
-	state := NewState(paths, meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
 	now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
 	state.SetClock(fixedClock(now))
 
@@ -162,16 +163,16 @@ func TestRunCoalescesEngagement(t *testing.T) {
 	// model.response with the topic tag), then close the turn. The
 	// engagement update must fire exactly once.
 	mock := model.NewScriptedMock(nil, nil) // unused
-	state := NewState(paths, meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
-	if err := onContextDelta(state, Delta{Source: "user.prompt", Content: "asking about #alpha and #beta"}); err != nil {
+	if err := onContextDelta(context.Background(), state, Delta{Source: "user.prompt", Content: "asking about #alpha and #beta"}); err != nil {
 		t.Fatalf("user.prompt: %v", err)
 	}
-	if err := onContextDelta(state, Delta{Source: "model.response", Content: "*topic: thr_42 [alpha, beta, gamma, delta]*\nResponse."}); err != nil {
+	if err := onContextDelta(context.Background(), state, Delta{Source: "model.response", Content: "*topic: thr_42 [alpha, beta, gamma, delta]*\nResponse."}); err != nil {
 		t.Fatalf("model.response: %v", err)
 	}
-	if err := closeTurnAndUpdateEngagement(state, "asking about #alpha and #beta", "Response."); err != nil {
+	if err := closeTurnAndUpdateEngagement(context.Background(), state, "asking about #alpha and #beta", "Response."); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
@@ -190,7 +191,7 @@ func TestRunNoTopicTagIsNonFatal(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "Just a plain response with no topic tag."},
 	}, nil)
-	state := NewState(paths, meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	body, err := Run(context.Background(), state, "hello", io.Discard)
@@ -216,7 +217,7 @@ func TestRunNewTopicAnchorCardinalityOutOfRange(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [only-two, anchors]*\nBrief reply."},
 	}, nil)
-	state := NewState(paths, meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	if _, err := Run(context.Background(), state, "ping", io.Discard); err != nil {
@@ -241,7 +242,7 @@ func TestRunNewTopicAnchorCardinalityOutOfRange(t *testing.T) {
 
 func TestRunReturnsErrorOnNilClient(t *testing.T) {
 	paths, meta := newTestHome(t)
-	state := NewState(paths, meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
 	if _, err := Run(context.Background(), state, "x", io.Discard); err == nil {
 		t.Fatalf("expected error for nil client")
 	}
@@ -254,7 +255,7 @@ func TestRunPopulatesActiveThreadsOnNewTopic(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHi."},
 	}, nil)
-	state := NewState(paths, meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 	if _, err := Run(context.Background(), state, "hello", io.Discard); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -275,7 +276,7 @@ func TestRunActiveThreadsRefreshOnRepeatEngagement(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed spine: %v", err)
 	}
-	state := NewState(paths, meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
 	state.ActiveThreads = []string{"thr_1"}
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 	state.Client = model.NewScriptedMock([]model.Response{
@@ -302,7 +303,7 @@ func TestRunActiveThreadsLRUInsert(t *testing.T) {
 			t.Fatalf("seed spine %s: %v", id, err)
 		}
 	}
-	state := NewState(paths, meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
 	state.ActiveThreads = []string{"thr_1"}
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 	state.Client = model.NewScriptedMock([]model.Response{
@@ -331,7 +332,7 @@ func TestRunActiveThreadsBTopKOverflow(t *testing.T) {
 			t.Fatalf("seed spine %s: %v", id, err)
 		}
 	}
-	state := NewState(paths, meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
 	state.ActiveThreads = []string{"thr_3", "thr_2", "thr_1"} // index 0 = most recent
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 	state.Client = model.NewScriptedMock([]model.Response{
@@ -405,7 +406,7 @@ func TestRunNewTopicWritesThreadFile(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nA brief greeting."},
 	}, nil)
-	state := NewState(paths, meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	if _, err := Run(context.Background(), state, "hello", io.Discard); err != nil {
@@ -502,7 +503,7 @@ func TestRunExistingThreadAppendsExcerpt(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_42 [trefoil, unknot, body-topology, electron-shape]*\nFollow-up reply."},
 	}, nil)
-	state := NewState(paths, meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
 	// Pre-populate ActiveThreads so the §5.5 mid-turn fetch does not
 	// fire — this test is about the close-time engagement-update path,
 	// not the re-prompt path.
@@ -564,7 +565,7 @@ func TestRunHistorySymbolsAccumulation(t *testing.T) {
 	mock1 := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [alpha, beta, gamma, delta]*\nFirst."},
 	}, nil)
-	state := NewState(paths, meta, store.Provider{}, mock1)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock1)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 	if _, err := Run(context.Background(), state, "first", io.Discard); err != nil {
 		t.Fatalf("turn 1: %v", err)
@@ -734,7 +735,7 @@ func TestRunRePromptFiresForMissingThread(t *testing.T) {
 		{Content: "*topic: thr_42 [a, b, c, d]*\nFIRST."},
 		{Content: "*topic: thr_42 [a, b, c, d]*\nSECOND."},
 	}, nil)
-	state := NewState(paths, meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	var out bytes.Buffer
@@ -780,7 +781,7 @@ func TestRunRePromptSkippedWhenFetchFails(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_99 [a, b, c, d]*\nFIRST."},
 	}, nil)
-	state := NewState(paths, meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	body, err := Run(context.Background(), state, "ask", io.Discard)
@@ -809,7 +810,7 @@ func TestRunRePromptCappedAtOnePerTurn(t *testing.T) {
 		{Content: "*topic: thr_99 [a, b, c, d]*\nFIRST."},
 		{Content: "*topic: thr_88 [a, b, c, d]*\nSECOND."},
 	}, nil)
-	state := NewState(paths, meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	body, err := Run(context.Background(), state, "ask", io.Discard)
@@ -839,7 +840,7 @@ func TestRunNoRePromptWhenTagThreadsAlreadyActive(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_42 [a, b, c, d]*\nbody."},
 	}, nil)
-	state := NewState(paths, meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
 	state.ActiveThreads = []string{"thr_42"}
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
@@ -866,7 +867,7 @@ func TestRunRePromptLogsThreadFetchedDelta(t *testing.T) {
 		{Content: "*topic: thr_42 [a, b, c, d]*\nFIRST."},
 		{Content: "*topic: thr_42 [a, b, c, d]*\nSECOND."},
 	}, nil)
-	state := NewState(paths, meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	if _, err := Run(context.Background(), state, "ask", io.Discard); err != nil {

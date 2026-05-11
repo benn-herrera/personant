@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"personant/internal/memops/fileadapter"
 	"personant/internal/modellist"
 	"personant/internal/store"
 )
@@ -28,7 +29,8 @@ elapsed) is written to stderr.`,
 		if err != nil {
 			return err
 		}
-		return modellist.Run(paths, modellist.Options{
+		ops := fileadapter.NewFileAdapter(paths)
+		return modellist.Run(ops, modellist.Options{
 			Provider: modelsFlagProvider,
 			Timeout:  modelsFlagTimeout,
 			Stdout:   os.Stdout,

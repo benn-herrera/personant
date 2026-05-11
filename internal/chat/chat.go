@@ -18,7 +18,8 @@ import (
 	"strings"
 	"time"
 
-	"personant/internal/eventlog"
+	"personant/internal/memops"
+	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
 	"personant/internal/store"
 	"personant/internal/turn"
@@ -78,16 +79,19 @@ func Run(opts Options) error {
 		return fmt.Errorf("chat: resolve paths: %w", err)
 	}
 
+	ctx := context.Background()
+	ops := fileadapter.NewFileAdapter(paths)
+
 	// Idempotent home scaffold. If the home is already initialized this is
 	// a near-noop; if it's a bare directory (e.g. user manually created
 	// providers.toml without running `personant init`), this lands the
 	// canonical layout (spine.jsonl, threads/, projects/, directives/, .git/,
 	// etc.) without clobbering accrued state files (user.md, providers.toml).
-	if err := store.Init(paths, store.InitOptions{Quiet: true}); err != nil {
+	if err := ops.Init(ctx, memops.InitOptions{Quiet: true}); err != nil {
 		return fmt.Errorf("chat: scaffold home: %w", err)
 	}
 
-	providers, err := store.LoadProviders(paths.Providers)
+	providers, err := ops.LoadProviders(ctx)
 	if err != nil {
 		return fmt.Errorf("chat: load providers: %w", err)
 	}
@@ -99,7 +103,7 @@ func Run(opts Options) error {
 	if providerName == "" {
 		providerName = defaultProviderName
 	}
-	provider, ok := providers.Get(providerName)
+	provider, ok := providers[providerName]
 	if !ok {
 		// If the conventional default isn't there, pick the first by name.
 		provider, providerName = firstProvider(providers)
@@ -119,7 +123,7 @@ func Run(opts Options) error {
 	// stage when stdin is a pipe.
 	in := bufio.NewReader(opts.Stdin)
 
-	project, err := bootstrapProject(opts, in, paths, cwd)
+	project, err := bootstrapProject(opts, in, ops, paths, cwd)
 	if err != nil {
 		return err
 	}
@@ -134,12 +138,12 @@ func Run(opts Options) error {
 		client = model.NewHTTPClient(provider)
 	}
 
-	if err := eventlog.Log(paths, "system", "bootstrap",
+	if err := ops.Log(ctx, "system", "bootstrap",
 		fmt.Sprintf("active=%s provider=%s", project.ID, providerName)); err != nil {
 		fmt.Fprintf(opts.Stderr, "warn: log session.start: %v\n", err)
 	}
 
-	state := turn.NewState(paths, project, provider, client)
+	state := turn.NewState(ops, project, provider, client)
 	if opts.Model != "" {
 		state.Model = opts.Model
 	}
@@ -151,11 +155,11 @@ func Run(opts Options) error {
 	fmt.Fprintln(opts.Stdout, banner)
 	fmt.Fprintf(opts.Stdout, "active: %s (%s)\n", project.Name, project.ID)
 
-	if err := loop(opts, in, state); err != nil {
+	if err := loop(opts, in, ops, state); err != nil {
 		return err
 	}
 
-	if err := eventlog.Log(paths, "session", "ended", "active="+project.ID); err != nil {
+	if err := ops.Log(ctx, "session", "ended", "active="+project.ID); err != nil {
 		fmt.Fprintf(opts.Stderr, "warn: log session.end: %v\n", err)
 	}
 	return nil
@@ -168,14 +172,14 @@ func resolvePaths(homeOverride string) (store.PersonantPaths, error) {
 	return store.ResolvePaths()
 }
 
-func firstProvider(providers store.Providers) (store.Provider, string) {
+func firstProvider(providers map[string]memops.Provider) (memops.Provider, string) {
 	names := make([]string, 0, len(providers))
 	for name := range providers {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	if len(names) == 0 {
-		return store.Provider{}, ""
+		return memops.Provider{}, ""
 	}
 	return providers[names[0]], names[0]
 }
@@ -183,7 +187,7 @@ func firstProvider(providers store.Providers) (store.Provider, string) {
 // loop is the core REPL. Returns nil on a clean exit; non-nil on an
 // unrecoverable I/O error (e.g. the input reader failing, not a
 // per-turn LLM error which is logged and tolerated).
-func loop(opts Options, in *bufio.Reader, state *turn.State) error {
+func loop(opts Options, in *bufio.Reader, ops memops.MemoryOps, state *turn.State) error {
 	for {
 		fmt.Fprint(opts.Stdout, "> ")
 		line, err := in.ReadString('\n')
@@ -204,7 +208,7 @@ func loop(opts Options, in *bufio.Reader, state *turn.State) error {
 
 		switch {
 		case strings.HasPrefix(trimmed, "/"):
-			done, err := dispatchSlash(opts, state, trimmed)
+			done, err := dispatchSlash(opts, ops, state, trimmed)
 			if err != nil {
 				fmt.Fprintf(opts.Stderr, "command error: %v\n", err)
 				continue
@@ -244,7 +248,7 @@ func runOneTurn(opts Options, state *turn.State, input string) error {
 // Errors are returned for the caller to print; non-fatal command-level
 // problems (unknown command, stub) are written to stderr inside this
 // function and do not return an error.
-func dispatchSlash(opts Options, state *turn.State, line string) (bool, error) {
+func dispatchSlash(opts Options, ops memops.MemoryOps, state *turn.State, line string) (bool, error) {
 	cmd, rest := splitCommand(line)
 	switch cmd {
 	case "/quit", "/exit":
@@ -263,7 +267,7 @@ func dispatchSlash(opts Options, state *turn.State, line string) (bool, error) {
 		return false, nil
 
 	case "/stats":
-		printStats(opts.Stdout, state)
+		printStats(opts.Stdout, ops, state)
 		return false, nil
 
 	case "/topic", "/done", "/pause", "/resume", "/back-to", "/no-revisit",
@@ -316,8 +320,8 @@ func printProjectInfo(w io.Writer, p store.ProjectMeta) {
 	}
 }
 
-func printStats(w io.Writer, state *turn.State) {
-	records, err := store.SpineRecordsByProject(state.Paths, state.ActiveProject.ID)
+func printStats(w io.Writer, ops memops.MemoryOps, state *turn.State) {
+	records, err := ops.ListThreads(context.Background(), memops.ThreadFilter{Project: state.ActiveProject.ID})
 	if err != nil {
 		fmt.Fprintf(w, "stats unavailable: %v\n", err)
 		return
@@ -333,17 +337,18 @@ func printStats(w io.Writer, state *turn.State) {
 }
 
 // bootstrapProject runs §4.5.7. The five BootstrapResult.Step branches
-// are handled here — the resolver itself is in store.ResolveActiveProject;
-// surface UI prompts live in this package.
+// are handled here — the resolver itself lives behind
+// ops.ResolveActiveProject; surface UI prompts live in this package.
 //
 // Returns a zero ProjectMeta only if the user cancels at every prompt.
 // The caller treats that as a clean exit.
-func bootstrapProject(opts Options, in *bufio.Reader, paths store.PersonantPaths, cwd string) (store.ProjectMeta, error) {
-	return bootstrapProjectWithExplicit(opts, in, paths, cwd, opts.ExplicitProject)
+func bootstrapProject(opts Options, in *bufio.Reader, ops memops.MemoryOps, paths store.PersonantPaths, cwd string) (store.ProjectMeta, error) {
+	return bootstrapProjectWithExplicit(opts, in, ops, paths, cwd, opts.ExplicitProject)
 }
 
-func bootstrapProjectWithExplicit(opts Options, in *bufio.Reader, paths store.PersonantPaths, cwd string, explicit string) (store.ProjectMeta, error) {
-	result, err := store.ResolveActiveProject(paths, store.BootstrapOptions{
+func bootstrapProjectWithExplicit(opts Options, in *bufio.Reader, ops memops.MemoryOps, paths store.PersonantPaths, cwd string, explicit string) (store.ProjectMeta, error) {
+	ctx := context.Background()
+	result, err := ops.ResolveActiveProject(ctx, memops.BootstrapHints{
 		ExplicitProject: explicit,
 		CWD:             cwd,
 	})
@@ -352,17 +357,17 @@ func bootstrapProjectWithExplicit(opts Options, in *bufio.Reader, paths store.Pe
 	}
 
 	switch result.Step {
-	case store.StepExplicit, store.StepRemoteMatch, store.StepPathMatch:
+	case memops.StepExplicit, memops.StepRemoteMatch, memops.StepPathMatch:
 		if result.Resolved == nil {
 			return store.ProjectMeta{}, errors.New("chat: bootstrap: resolver returned nil project on success step")
 		}
 		return *result.Resolved, nil
 
-	case store.StepNeedsConfirmation:
-		return promptConfirmation(opts, in, paths, cwd, result.Candidate)
+	case memops.StepNeedsConfirmation:
+		return promptConfirmation(opts, in, ops, paths, cwd, result.Candidate)
 
-	case store.StepNeedsFallback:
-		return promptFallback(opts, in, paths, cwd)
+	case memops.StepNeedsFallback:
+		return promptFallback(opts, in, ops, paths, cwd)
 
 	default:
 		return store.ProjectMeta{}, fmt.Errorf("chat: bootstrap: unrecognized step %v", result.Step)
@@ -370,10 +375,11 @@ func bootstrapProjectWithExplicit(opts Options, in *bufio.Reader, paths store.Pe
 }
 
 // promptConfirmation surfaces the §4.5.7 last-active resume prompt.
-func promptConfirmation(opts Options, in *bufio.Reader, paths store.PersonantPaths, cwd string, candidate *store.ProjectMeta) (store.ProjectMeta, error) {
+func promptConfirmation(opts Options, in *bufio.Reader, ops memops.MemoryOps, paths store.PersonantPaths, cwd string, candidate *store.ProjectMeta) (store.ProjectMeta, error) {
 	if candidate == nil {
-		return promptFallback(opts, in, paths, cwd)
+		return promptFallback(opts, in, ops, paths, cwd)
 	}
+	ctx := context.Background()
 	for {
 		if candidate.LastActive == "" {
 			fmt.Fprintf(opts.Stdout, "Resume work on '%s'? [y]es / [n]o / <other-name-or-id>: ",
@@ -389,21 +395,22 @@ func promptConfirmation(opts Options, in *bufio.Reader, paths store.PersonantPat
 		ans = strings.TrimSpace(ans)
 		switch ans {
 		case "", "y", "Y", "yes":
-			if err := store.WriteLastActive(paths, candidate.ID); err != nil {
+			if err := ops.SetLastActiveProject(ctx, candidate.ID); err != nil {
 				return store.ProjectMeta{}, fmt.Errorf("chat: write last-active: %w", err)
 			}
 			return *candidate, nil
 		case "n", "N", "no":
-			return promptFallback(opts, in, paths, cwd)
+			return promptFallback(opts, in, ops, paths, cwd)
 		default:
 			// Treat as <other-name-or-id> — re-resolve with explicit override.
-			return bootstrapProjectWithExplicit(opts, in, paths, cwd, ans)
+			return bootstrapProjectWithExplicit(opts, in, ops, paths, cwd, ans)
 		}
 	}
 }
 
 // promptFallback surfaces the §4.5.7 final fallback prompt.
-func promptFallback(opts Options, in *bufio.Reader, paths store.PersonantPaths, cwd string) (store.ProjectMeta, error) {
+func promptFallback(opts Options, in *bufio.Reader, ops memops.MemoryOps, paths store.PersonantPaths, cwd string) (store.ProjectMeta, error) {
+	ctx := context.Background()
 	for {
 		fmt.Fprintln(opts.Stdout, "No active project resolved.")
 		fmt.Fprint(opts.Stdout, "  [c] create a new project rooted at this directory\n")
@@ -416,30 +423,30 @@ func promptFallback(opts Options, in *bufio.Reader, paths store.PersonantPaths, 
 		}
 		switch strings.TrimSpace(strings.ToLower(ans)) {
 		case "c":
-			meta, err := createNewProject(opts, in, paths, cwd)
+			meta, err := createNewProject(opts, in, ops, cwd)
 			if err != nil {
 				fmt.Fprintf(opts.Stderr, "create failed: %v\n", err)
 				continue
 			}
 			return meta, nil
 		case "s":
-			meta, ok, err := pickExistingProject(opts, in, paths)
+			meta, ok, err := pickExistingProject(opts, in, ops)
 			if err != nil {
 				return store.ProjectMeta{}, err
 			}
 			if !ok {
 				continue
 			}
-			if err := store.WriteLastActive(paths, meta.ID); err != nil {
+			if err := ops.SetLastActiveProject(ctx, meta.ID); err != nil {
 				return store.ProjectMeta{}, fmt.Errorf("chat: write last-active: %w", err)
 			}
 			return meta, nil
 		case "n":
-			meta, err := store.LoadProjectMeta(paths, store.DefaultProjectID)
+			meta, err := ops.LoadProject(ctx, store.DefaultProjectID)
 			if err != nil {
 				return store.ProjectMeta{}, fmt.Errorf("chat: load default: %w", err)
 			}
-			if err := store.WriteLastActive(paths, store.DefaultProjectID); err != nil {
+			if err := ops.SetLastActiveProject(ctx, store.DefaultProjectID); err != nil {
 				return store.ProjectMeta{}, fmt.Errorf("chat: write last-active: %w", err)
 			}
 			return meta, nil
@@ -449,7 +456,12 @@ func promptFallback(opts Options, in *bufio.Reader, paths store.PersonantPaths, 
 	}
 }
 
-func createNewProject(opts Options, in *bufio.Reader, paths store.PersonantPaths, cwd string) (store.ProjectMeta, error) {
+// NOTE: createNewProject still uses store.NextProjectID directly — that
+// helper is a pure function over a ProjectMeta slice (no substrate state
+// of its own) and is not yet on the port. Lifting it onto the port is
+// future scope (A.x).
+func createNewProject(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string) (store.ProjectMeta, error) {
+	ctx := context.Background()
 	fmt.Fprint(opts.Stdout, "display name: ")
 	name, err := readLine(in)
 	if err != nil {
@@ -459,7 +471,7 @@ func createNewProject(opts Options, in *bufio.Reader, paths store.PersonantPaths
 	if name == "" {
 		return store.ProjectMeta{}, errors.New("chat: empty project name")
 	}
-	existing, err := store.ListProjects(paths)
+	existing, err := ops.ListProjects(ctx)
 	if err != nil {
 		return store.ProjectMeta{}, err
 	}
@@ -472,20 +484,20 @@ func createNewProject(opts Options, in *bufio.Reader, paths store.PersonantPaths
 		Created:         now,
 		LastActive:      now,
 	}
-	if err := store.SaveProjectMeta(paths, meta); err != nil {
+	if err := ops.CreateProject(ctx, meta); err != nil {
 		return store.ProjectMeta{}, err
 	}
-	if err := store.WriteLastActive(paths, id); err != nil {
+	if err := ops.SetLastActiveProject(ctx, id); err != nil {
 		return store.ProjectMeta{}, fmt.Errorf("chat: write last-active: %w", err)
 	}
-	if err := eventlog.Log(paths, "project", "created", "id="+id+" name="+name); err != nil {
+	if err := ops.Log(ctx, "project", "created", "id="+id+" name="+name); err != nil {
 		fmt.Fprintf(opts.Stderr, "warn: log project.created: %v\n", err)
 	}
 	return meta, nil
 }
 
-func pickExistingProject(opts Options, in *bufio.Reader, paths store.PersonantPaths) (store.ProjectMeta, bool, error) {
-	metas, err := store.ListProjects(paths)
+func pickExistingProject(opts Options, in *bufio.Reader, ops memops.MemoryOps) (store.ProjectMeta, bool, error) {
+	metas, err := ops.ListProjects(context.Background())
 	if err != nil {
 		return store.ProjectMeta{}, false, err
 	}

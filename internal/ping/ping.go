@@ -10,8 +10,8 @@ import (
 	"io"
 	"time"
 
+	"personant/internal/memops"
 	"personant/internal/model"
-	"personant/internal/store"
 )
 
 // Options carries the ping-time knobs from the CLI flag layer.
@@ -24,11 +24,11 @@ type Options struct {
 	Stderr   io.Writer     // summary line + warnings sink
 }
 
-// Run loads providers from paths, picks one, and performs one
+// Run loads providers via ops, picks one, and performs one
 // chat-completion round-trip. Stdout receives the response body verbatim;
 // Stderr receives a one-line summary on success or a clear error message
 // on failure.
-func Run(paths store.PersonantPaths, opts Options) error {
+func Run(ops memops.MemoryOps, opts Options) error {
 	if opts.Stdout == nil || opts.Stderr == nil {
 		return fmt.Errorf("ping: Stdout/Stderr are required")
 	}
@@ -43,16 +43,16 @@ func Run(paths store.PersonantPaths, opts Options) error {
 		timeout = 30 * time.Second
 	}
 
-	providers, err := store.LoadProviders(paths.Providers)
+	providers, err := ops.LoadProviders(context.Background())
 	if err != nil {
 		return fmt.Errorf("ping: load providers: %w", err)
 	}
 	if len(providers) == 0 {
-		return fmt.Errorf("ping: no providers configured in %s; edit it to add one (see spec §8.2.1)", paths.Providers)
+		return fmt.Errorf("ping: no providers configured; run `personant init` and edit providers.toml (see spec §8.2.1)")
 	}
-	provider, ok := providers.Get(opts.Provider)
+	provider, ok := providers[opts.Provider]
 	if !ok {
-		return fmt.Errorf("ping: provider %q not found in %s", opts.Provider, paths.Providers)
+		return fmt.Errorf("ping: provider %q not found in providers.toml", opts.Provider)
 	}
 
 	chosenModel := opts.Model

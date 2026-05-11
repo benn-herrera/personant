@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
 	"personant/internal/store"
 )
@@ -79,11 +80,11 @@ func TestSurfaceRecallCandidates_LogsMatchFire(t *testing.T) {
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_2", []string{"alpha", "beta", "zeta", "eta"})
 
-	state := NewState(paths, meta, store.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, model.NewScriptedMock(nil, nil))
 	state.coalesce.addSymbol("alpha", "alpha", store.SourceUser)
 	state.coalesce.addSymbol("beta", "beta", store.SourceUser)
 
-	if err := surfaceRecallCandidates(state, map[string]struct{}{}); err != nil {
+	if err := surfaceRecallCandidates(context.Background(), state, map[string]struct{}{}); err != nil {
 		t.Fatalf("surfaceRecallCandidates: %v", err)
 	}
 
@@ -109,12 +110,12 @@ func TestSurfaceRecallCandidates_ExcludesEngaged(t *testing.T) {
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_2", []string{"alpha", "beta", "zeta", "eta"})
 
-	state := NewState(paths, meta, store.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, model.NewScriptedMock(nil, nil))
 	state.coalesce.addSymbol("alpha", "alpha", store.SourceUser)
 	state.coalesce.addSymbol("beta", "beta", store.SourceUser)
 
 	engaged := map[string]struct{}{"thr_1": {}}
-	if err := surfaceRecallCandidates(state, engaged); err != nil {
+	if err := surfaceRecallCandidates(context.Background(), state, engaged); err != nil {
 		t.Fatalf("surfaceRecallCandidates: %v", err)
 	}
 
@@ -136,11 +137,11 @@ func TestSurfaceRecallCandidates_NoCandidatesIsQuiet(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
 
-	state := NewState(paths, meta, store.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, model.NewScriptedMock(nil, nil))
 	state.coalesce.addSymbol("nope1", "nope1", store.SourceUser)
 	state.coalesce.addSymbol("nope2", "nope2", store.SourceUser)
 
-	if err := surfaceRecallCandidates(state, map[string]struct{}{}); err != nil {
+	if err := surfaceRecallCandidates(context.Background(), state, map[string]struct{}{}); err != nil {
 		t.Fatalf("surfaceRecallCandidates: %v", err)
 	}
 
@@ -175,7 +176,7 @@ func TestRunFiresRecallAtTurnClose(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [alpha, beta, gamma, delta]*\nNew thread."},
 	}, nil)
-	state := NewState(paths, meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	var out bytes.Buffer
@@ -213,7 +214,7 @@ func TestRunNoRecallWhenNoSymbols(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "Just a plain reply, nothing to see."},
 	}, nil)
-	state := NewState(paths, meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	if _, err := Run(context.Background(), state, "hey there", io.Discard); err != nil {

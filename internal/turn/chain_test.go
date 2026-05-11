@@ -1,10 +1,12 @@
 package turn
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
 
+	"personant/internal/memops/fileadapter"
 	"personant/internal/store"
 )
 
@@ -29,9 +31,9 @@ func newChainHome(t *testing.T) (store.PersonantPaths, store.ProjectMeta) {
 
 func TestChainExtractsUserHashTags(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(paths, meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
 
-	if err := onContextDelta(state, Delta{
+	if err := onContextDelta(context.Background(), state, Delta{
 		Source:  "user.prompt",
 		Content: "checking #alpha-beta and #foo_2 and not #InvalidUpper",
 	}); err != nil {
@@ -53,9 +55,9 @@ func TestChainExtractsUserHashTags(t *testing.T) {
 
 func TestChainExtractsModelTopicTag(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(paths, meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
 
-	if err := onContextDelta(state, Delta{
+	if err := onContextDelta(context.Background(), state, Delta{
 		Source:  "model.response",
 		Content: "*topic: thr_5, thr_9 [trefoil, unknot, body-topology, electron-shape]*\nBody.",
 	}); err != nil {
@@ -75,8 +77,8 @@ func TestChainExtractsModelTopicTag(t *testing.T) {
 
 func TestChainTopicTagAbsentIsNonFatal(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(paths, meta, store.Provider{}, nil)
-	if err := onContextDelta(state, Delta{
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
+	if err := onContextDelta(context.Background(), state, Delta{
 		Source:  "model.response",
 		Content: "no topic tag here",
 	}); err != nil {
@@ -90,8 +92,8 @@ func TestChainTopicTagAbsentIsNonFatal(t *testing.T) {
 
 func TestChainLogsContextModified(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(paths, meta, store.Provider{}, nil)
-	if err := onContextDelta(state, Delta{Source: "user.prompt", Content: "hello"}); err != nil {
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
+	if err := onContextDelta(context.Background(), state, Delta{Source: "user.prompt", Content: "hello"}); err != nil {
 		t.Fatalf("onContextDelta: %v", err)
 	}
 	// Find the log file (we don't pin a clock, so any *.log file under LogsDir works).

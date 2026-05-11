@@ -1,12 +1,13 @@
 package turn
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 
-	"personant/internal/eventlog"
+	"personant/internal/memops"
 	"personant/internal/prompt"
 	"personant/internal/store"
 )
@@ -36,13 +37,13 @@ var userTagRE = regexp.MustCompile(`(?:^|[^a-z0-9_-])#([a-z0-9][a-z0-9_-]*)`)
 //
 // The chain mutates state in two places:
 //   - state.coalesce — symbol and thread accumulator (step 1).
-//   - on-disk event log — via eventlog.LogContextModified (step 5).
+//   - on-disk event log — via state.Ops.EmitDelta (step 5).
 //
 // Persistent engagement updates (spine writes) are deferred to turn
 // close — see §3.0.4.
-func onContextDelta(state *State, delta Delta) error {
+func onContextDelta(ctx context.Context, state *State, delta Delta) error {
 	// Step 1: symbol extraction.
-	if err := extractSymbols(state, delta); err != nil {
+	if err := extractSymbols(ctx, state, delta); err != nil {
 		return fmt.Errorf("turn: extract symbols: %w", err)
 	}
 	// Step 2: engagement signal (DEFERRED per §3.0.4 — enqueue only).
@@ -55,9 +56,17 @@ func onContextDelta(state *State, delta Delta) error {
 	// Step 4: budget check — no-op in v0.1.
 	//   TODO(phase-2-budget): track byte counts when working-set composition
 	//   lands more layers (§2.e); evict to honor layer caps.
-	// Step 5: logging.
-	if err := eventlog.LogContextModified(state.Paths, delta.Source, len(delta.Content)); err != nil {
-		return fmt.Errorf("turn: log context.modified: %w", err)
+	// Step 5: logging — record the context-modification event on the
+	// substrate side. The Retention class is the conservative default
+	// (decision); a future transient-data lifecycle pass will refine
+	// per-source classification.
+	if err := state.Ops.EmitDelta(ctx, memops.Delta{
+		Source:    delta.Source,
+		Content:   delta.Content,
+		Meta:      delta.Meta,
+		Retention: memops.RetentionDecision,
+	}); err != nil {
+		return fmt.Errorf("turn: emit delta: %w", err)
 	}
 	return nil
 }
@@ -71,7 +80,7 @@ func onContextDelta(state *State, delta Delta) error {
 // Other sources (tool.result, thread.fetched, slash.injected,
 // digest.refresh, directive.reloaded, user.shell-capture) currently
 // contribute through the deterministic pass only.
-func extractSymbols(state *State, delta Delta) error {
+func extractSymbols(ctx context.Context, state *State, delta Delta) error {
 	deterministicExtract(state, delta.Content)
 
 	switch delta.Source {
@@ -88,7 +97,7 @@ func extractSymbols(state *State, delta Delta) error {
 		if err != nil {
 			if errors.Is(err, prompt.ErrNoTopicTag) {
 				// §5.1.2: missing tag is a warning, not a fatal — log and continue.
-				_ = eventlog.Log(state.Paths, "topic", "tag-missing",
+				_ = state.Ops.Log(ctx, "topic", "tag-missing",
 					"source=model.response bytes="+itoa(len(delta.Content)))
 				return nil
 			}
@@ -107,7 +116,7 @@ func extractSymbols(state *State, delta Delta) error {
 		// symbols; warning lines are surfaced so a calibration pass can
 		// catch malformed-tag drift.
 		for _, w := range result.Warnings {
-			_ = eventlog.Log(state.Paths, "topic", "warning", "source=model.response detail="+sanitizeDetail(w))
+			_ = state.Ops.Log(ctx, "topic", "warning", "source=model.response detail="+sanitizeDetail(w))
 		}
 		return nil
 

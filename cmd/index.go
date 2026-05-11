@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 
-	"personant/internal/index"
+	"personant/internal/memops"
+	"personant/internal/memops/fileadapter"
 	"personant/internal/store"
 )
 
@@ -35,11 +37,12 @@ rebuild produces no changes.`,
 		if err != nil {
 			return err
 		}
-		opts := index.Options{
+		ops := fileadapter.NewFileAdapter(paths)
+		opts := memops.IndexBuildOptions{
 			Quiet:  indexFlagQuiet,
 			Logger: stderrLogger(),
 		}
-		return index.Rebuild(paths, opts)
+		return ops.RegenerateDerivedState(context.Background(), opts)
 	},
 }
 
@@ -55,11 +58,12 @@ anything.`,
 		if err != nil {
 			return err
 		}
-		opts := index.Options{
+		ops := fileadapter.NewFileAdapter(paths)
+		opts := memops.IndexBuildOptions{
 			Quiet:  indexFlagQuiet,
 			Logger: stderrLogger(),
 		}
-		result, err := index.Check(paths, opts)
+		result, err := ops.CheckDerivedState(context.Background(), opts)
 		if err != nil {
 			return err
 		}

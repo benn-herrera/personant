@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"personant/internal/eventlog"
+	"personant/internal/memops"
 	"personant/internal/model"
 	"personant/internal/prompt"
 	"personant/internal/store"
@@ -24,7 +24,7 @@ import (
 // fields are stable across a session; the coalesce buffer is reset at
 // the start of every Run.
 type State struct {
-	Paths         store.PersonantPaths
+	Ops           memops.MemoryOps
 	ActiveProject store.ProjectMeta
 	Provider      store.Provider
 	Client        model.Client
@@ -80,9 +80,9 @@ const dormantThreadsCap = 20
 // NewState constructs a State for a chat session. The coalesce buffer
 // is initialized empty; Client must be non-nil (the chat REPL passes
 // either an HTTPClient or a MockClient, never nil).
-func NewState(paths store.PersonantPaths, project store.ProjectMeta, provider store.Provider, client model.Client) *State {
+func NewState(ops memops.MemoryOps, project store.ProjectMeta, provider store.Provider, client model.Client) *State {
 	return &State{
-		Paths:         paths,
+		Ops:           ops,
 		ActiveProject: project,
 		Provider:      provider,
 		Client:        client,
@@ -151,7 +151,7 @@ func Run(ctx context.Context, state *State, userInput string, out io.Writer) (st
 	state.coalesce.reset()
 
 	// Step 1: user.prompt delta.
-	if err := onContextDelta(state, Delta{Source: "user.prompt", Content: userInput}); err != nil {
+	if err := onContextDelta(ctx, state, Delta{Source: "user.prompt", Content: userInput}); err != nil {
 		return "", err
 	}
 
@@ -160,25 +160,22 @@ func Run(ctx context.Context, state *State, userInput string, out io.Writer) (st
 		state.Budget = workset.DefaultBudget()
 	}
 	buildSystemPrompt := func() (string, error) {
-		params, err := workset.Compose(
-			workset.State{
-				Paths:          state.Paths,
-				ActiveProject:  state.ActiveProject,
-				ActiveThreads:  state.ActiveThreads,
-				DormantThreads: state.DormantThreads,
-				Budget:         state.Budget,
-			},
-			workset.ComposeOptions{
-				Logger: func(format string, args ...any) {
-					_ = eventlog.Log(state.Paths, "workset", "warning",
-						sanitizeDetail(fmt.Sprintf(format, args...)))
-				},
-			},
-		)
+		ws, err := state.Ops.ComposeWorkingSet(ctx, memops.WorksetInput{
+			ActiveProject:  state.ActiveProject,
+			ActiveThreads:  state.ActiveThreads,
+			DormantThreads: state.DormantThreads,
+			Budget:         memopsBudgetFromWorkset(state.Budget),
+		})
 		if err != nil {
 			return "", err
 		}
-		return prompt.BuildSystemPrompt(params), nil
+		return prompt.BuildSystemPrompt(prompt.SystemPromptParams{
+			LayerE:  ws.LayerE,
+			LayerA1: ws.LayerA1,
+			LayerA2: ws.LayerA2,
+			LayerB:  ws.LayerB,
+			LayerC:  ws.LayerC,
+		}), nil
 	}
 
 	systemPrompt, err := buildSystemPrompt()
@@ -231,13 +228,13 @@ func Run(ctx context.Context, state *State, userInput string, out io.Writer) (st
 			missing := missingFromActiveB(pre.tag.Threads, state.ActiveThreads)
 			fetched := 0
 			for _, thrID := range missing {
-				if fetchThreadForReprompt(state, thrID) {
+				if fetchThreadForReprompt(ctx, state, thrID) {
 					fetched++
 				}
 			}
 			if fetched > 0 {
 				_ = sr.Close()
-				_ = eventlog.Log(state.Paths, "topic", "re-prompt",
+				_ = state.Ops.Log(ctx, "topic", "re-prompt",
 					"fetched="+itoa(fetched)+" attempt="+itoa(attempt+1))
 				systemPrompt, err = buildSystemPrompt()
 				if err != nil {
@@ -277,7 +274,7 @@ func Run(ctx context.Context, state *State, userInput string, out io.Writer) (st
 		if closeErr != nil {
 			// Close-after-EOF errors are usually benign (e.g. the body was
 			// already drained); surface them but don't lose the response.
-			_ = eventlog.Log(state.Paths, "model", "stream-close-warn", closeErr.Error())
+			_ = state.Ops.Log(ctx, "model", "stream-close-warn", closeErr.Error())
 		}
 		full = sr.Final()
 		break
@@ -285,13 +282,13 @@ func Run(ctx context.Context, state *State, userInput string, out io.Writer) (st
 
 	// Step 4: model.response delta with the full accumulated body —
 	// fired once, not per chunk (spec §3.0.5).
-	if err := onContextDelta(state, Delta{Source: "model.response", Content: full.Content}); err != nil {
+	if err := onContextDelta(ctx, state, Delta{Source: "model.response", Content: full.Content}); err != nil {
 		return "", err
 	}
 
 	// Step 5: turn close — fire deferred engagement updates with the
 	// coalesced symbol set.
-	if err := closeTurnAndUpdateEngagement(state, userInput, full.Content); err != nil {
+	if err := closeTurnAndUpdateEngagement(ctx, state, userInput, full.Content); err != nil {
 		return "", fmt.Errorf("turn: close: %w", err)
 	}
 
@@ -443,19 +440,19 @@ func missingFromActiveB(threads, active []string) []string {
 // coalesce.threads: engagement is owed by the second response's tag
 // (which the model emits against the augmented context), not by the
 // fetch action itself.
-func fetchThreadForReprompt(state *State, thrID string) bool {
-	thr, err := store.LoadThread(state.Paths, thrID)
+func fetchThreadForReprompt(ctx context.Context, state *State, thrID string) bool {
+	thr, err := state.Ops.LoadThread(ctx, thrID)
 	if err != nil {
-		_ = eventlog.Log(state.Paths, "thread", "fetch-miss",
+		_ = state.Ops.Log(ctx, "thread", "fetch-miss",
 			"thr="+thrID+" err="+sanitizeDetail(err.Error()))
 		return false
 	}
-	if err := onContextDelta(state, Delta{
+	if err := onContextDelta(ctx, state, Delta{
 		Source:  "thread.fetched",
 		Content: thr.Body,
 		Meta:    map[string]string{"thr": thrID},
 	}); err != nil {
-		_ = eventlog.Log(state.Paths, "thread", "fetch-miss",
+		_ = state.Ops.Log(ctx, "thread", "fetch-miss",
 			"thr="+thrID+" err="+sanitizeDetail(err.Error()))
 		return false
 	}
@@ -519,7 +516,7 @@ const historyCapPerThread = 40
 // model's second-stream tag introduces a new thr_<n> that we no longer
 // re-prompt for). Those threads enter ActiveThreads at turn close so
 // the next turn's prompt includes them.
-func closeTurnAndUpdateEngagement(state *State, userInput, responseBody string) error {
+func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, responseBody string) error {
 	if len(state.coalesce.threads) == 0 {
 		return nil
 	}
@@ -534,14 +531,14 @@ func closeTurnAndUpdateEngagement(state *State, userInput, responseBody string) 
 
 	for _, threadID := range state.coalesce.threadList() {
 		if threadID == "*new-topic*" {
-			newID, err := createNewThread(state, userInput, responseBody, now, turnSymbols, turnAnchors)
+			newID, err := createNewThread(ctx, state, userInput, responseBody, now, turnSymbols, turnAnchors)
 			if err != nil {
 				return err
 			}
 			engaged = append(engaged, newID)
 			continue
 		}
-		if err := updateExistingThread(state, threadID, userInput, responseBody, now, turnSymbols, turnAnchors); err != nil {
+		if err := updateExistingThread(ctx, state, threadID, userInput, responseBody, now, turnSymbols, turnAnchors); err != nil {
 			return err
 		}
 		engaged = append(engaged, threadID)
@@ -553,8 +550,8 @@ func closeTurnAndUpdateEngagement(state *State, userInput, responseBody string) 
 	for _, id := range engaged {
 		engagedSet[id] = struct{}{}
 	}
-	if err := surfaceRecallCandidates(state, engagedSet); err != nil {
-		_ = eventlog.Log(state.Paths, "recall", "error", sanitizeDetail(err.Error()))
+	if err := surfaceRecallCandidates(ctx, state, engagedSet); err != nil {
+		_ = state.Ops.Log(ctx, "recall", "error", sanitizeDetail(err.Error()))
 		// Non-fatal: opportunistic recall failure does not abort the turn.
 	}
 	return nil
@@ -629,8 +626,8 @@ func turnAnchorList(responseBody string, fallback []string) []string {
 	return append([]string(nil), fallback...)
 }
 
-func updateExistingThread(state *State, threadID, userInput, responseBody, now string, turnSymbols []coalescedSymbol, turnAnchors []string) error {
-	rec, found, err := store.FindSpineRecord(state.Paths, threadID)
+func updateExistingThread(ctx context.Context, state *State, threadID, userInput, responseBody, now string, turnSymbols []coalescedSymbol, turnAnchors []string) error {
+	rec, found, err := state.Ops.FindThread(ctx, threadID)
 	if err != nil {
 		return err
 	}
@@ -638,28 +635,26 @@ func updateExistingThread(state *State, threadID, userInput, responseBody, now s
 		// The model named a thread that does not exist. v0.1 logs and
 		// continues; future phases may surface this as a recall miss or a
 		// hallucination signal.
-		return eventlog.Log(state.Paths, "thread", "engaged-miss",
+		return state.Ops.Log(ctx, "thread", "engaged-miss",
 			"thr="+threadID+" reason=not-in-spine")
 	}
 	if rec.Project != "" && rec.Project != state.ActiveProject.ID {
 		// Cross-project engagement is reserved for Phase 5; v0.1 warns and
 		// declines to mutate a record that belongs to another project.
-		return eventlog.Log(state.Paths, "thread", "engaged-cross-project",
+		return state.Ops.Log(ctx, "thread", "engaged-cross-project",
 			"thr="+threadID+" project="+rec.Project+" active="+state.ActiveProject.ID)
 	}
 
-	// Load (or synthesize) the thread file. A spine record without a
-	// matching thread file is a drift state — synthesize a minimal
-	// frontmatter from the spine record so the engagement still produces
-	// a well-formed file going forward.
-	thr, err := store.LoadThread(state.Paths, threadID)
-	if err != nil && !errors.Is(err, store.ErrThreadFileNotFound) {
+	// Load the thread file. The adapter owns the missing-file fallback:
+	// EngageThread materializes a fresh file when the spine record exists
+	// but the on-disk file is absent, so we don't special-case
+	// ErrThreadFileNotFound here.
+	thr, err := state.Ops.LoadThread(ctx, threadID)
+	if err != nil && !errors.Is(err, memops.ErrThreadFileNotFound) {
 		return fmt.Errorf("load thread %s: %w", threadID, err)
 	}
-	if errors.Is(err, store.ErrThreadFileNotFound) {
-		_ = eventlog.Log(state.Paths, "thread", "file-missing-resynth",
-			"thr="+threadID+" project="+rec.Project)
-		thr = store.Thread{Frontmatter: frontmatterFromSpine(rec)}
+	if errors.Is(err, memops.ErrThreadFileNotFound) {
+		thr = memops.Thread{Frontmatter: frontmatterFromSpine(rec)}
 	}
 
 	// Bookkeeping update on the in-memory record. The new turn_count is
@@ -687,38 +682,38 @@ func updateExistingThread(state *State, threadID, userInput, responseBody, now s
 	thr.Frontmatter.HistorySymbols = mergeHistorySymbols(thr.Frontmatter.HistorySymbols, turnSymbols, newTurnCount)
 	thr.Body = appendTurnExcerpt(thr.Body, newTurnCount, now, turnAnchors, userInput, responseBody)
 
-	if err := store.SaveThread(state.Paths, thr); err != nil {
-		return fmt.Errorf("save thread %s: %w", threadID, err)
-	}
-
 	rec.LastEngaged = now
 	rec.TurnCount = newTurnCount
-	if err := store.UpdateSpineRecord(state.Paths, rec); err != nil {
-		return err
+	if err := state.Ops.EngageThread(ctx, memops.ThreadWrite{
+		Spine:       rec,
+		Frontmatter: thr.Frontmatter,
+		Body:        thr.Body,
+	}); err != nil {
+		return fmt.Errorf("engage thread %s: %w", threadID, err)
 	}
-	return eventlog.Log(state.Paths, "thread", "engaged",
+	return state.Ops.Log(ctx, "thread", "engaged",
 		threadID+" turn_count="+itoa(rec.TurnCount))
 }
 
-func createNewThread(state *State, userInput, responseBody, now string, turnSymbols []coalescedSymbol, turnAnchors []string) (string, error) {
-	// NextThreadID needs the full spine, not just this project's, so a
-	// new id never collides with a thread in a sibling project.
-	allRecords, err := store.ReadSpine(state.Paths.Spine)
+func createNewThread(ctx context.Context, state *State, userInput, responseBody, now string, turnSymbols []coalescedSymbol, turnAnchors []string) (string, error) {
+	// NextThreadID returns the next available thr_<n> id, scanning the
+	// full spine so a new id never collides with a thread in a sibling
+	// project.
+	newID, err := state.Ops.NextThreadID(ctx)
 	if err != nil {
 		return "", err
 	}
-	newID := store.NextThreadID(allRecords)
 
 	anchors := state.coalesce.symbolList()
 	if len(anchors) < 4 || len(anchors) > 8 {
-		_ = eventlog.Log(state.Paths, "thread", "anchor-cardinality",
+		_ = state.Ops.Log(ctx, "thread", "anchor-cardinality",
 			"new-thread anchors="+itoa(len(anchors))+" using-first-4-with-padding")
 		anchors = padOrTruncateAnchors(anchors, 4)
 	}
 
 	summary := summarizeForNewThread(responseBody)
 
-	rec := store.SpineRecord{
+	rec := memops.SpineRecord{
 		ID:           newID,
 		Project:      state.ActiveProject.ID,
 		Anchors:      anchors,
@@ -730,32 +725,29 @@ func createNewThread(state *State, userInput, responseBody, now string, turnSymb
 		TurnCount:    1,
 	}
 
-	thr := store.Thread{
-		Frontmatter: ThreadFrontmatter{
-			ID:             newID,
-			Project:        rec.Project,
-			Anchors:        append([]string(nil), anchors...),
-			Summary:        summary,
-			State:          store.ThreadWIP,
-			Created:        now,
-			LastEngaged:    now,
-			StateChanged:   now,
-			TurnCount:      1,
-			RecallFires:    0,
-			HistorySymbols: mergeHistorySymbols(nil, turnSymbols, 1),
-		},
-		Body: newThreadBody(anchors, 1, now, turnAnchors, userInput, responseBody),
+	frontmatter := ThreadFrontmatter{
+		ID:             newID,
+		Project:        rec.Project,
+		Anchors:        append([]string(nil), anchors...),
+		Summary:        summary,
+		State:          store.ThreadWIP,
+		Created:        now,
+		LastEngaged:    now,
+		StateChanged:   now,
+		TurnCount:      1,
+		RecallFires:    0,
+		HistorySymbols: mergeHistorySymbols(nil, turnSymbols, 1),
 	}
-	// rec.HistorySymbols is not part of SpineRecord; the field name above
-	// is only for the thread file. The Frontmatter struct is built
-	// in-line from store.ThreadFrontmatter via the type alias below.
-	if err := store.SaveThread(state.Paths, thr); err != nil {
-		return "", fmt.Errorf("save thread %s: %w", newID, err)
+	body := newThreadBody(anchors, 1, now, turnAnchors, userInput, responseBody)
+
+	if err := state.Ops.CreateThread(ctx, memops.ThreadWrite{
+		Spine:       rec,
+		Frontmatter: frontmatter,
+		Body:        body,
+	}); err != nil {
+		return "", fmt.Errorf("create thread %s: %w", newID, err)
 	}
-	if err := store.AppendSpineRecord(state.Paths, rec); err != nil {
-		return "", err
-	}
-	if err := eventlog.Log(state.Paths, "thread", "created",
+	if err := state.Ops.Log(ctx, "thread", "created",
 		newID+" anchors="+itoa(len(anchors))+" project="+state.ActiveProject.ID); err != nil {
 		return "", err
 	}
@@ -766,6 +758,23 @@ func createNewThread(state *State, userInput, responseBody, now string, turnSymb
 // the createNewThread frontmatter construction. Kept at package scope so
 // the literal in the function body reads naturally.
 type ThreadFrontmatter = store.ThreadFrontmatter
+
+// memopsBudgetFromWorkset projects the local workset.Budget value onto the
+// memops.Budget shape carried across the port. Field-for-field identical;
+// the conversion is a no-op except for the named type.
+func memopsBudgetFromWorkset(b workset.Budget) memops.Budget {
+	return memops.Budget{
+		Total:                 b.Total,
+		LayerE:                b.LayerE,
+		LayerA1:               b.LayerA1,
+		LayerA2:               b.LayerA2,
+		LayerB:                b.LayerB,
+		LayerC:                b.LayerC,
+		CurrentTurn:           b.CurrentTurn,
+		BTopK:                 b.BTopK,
+		PerProjectDigestBytes: b.PerProjectDigestBytes,
+	}
+}
 
 // frontmatterFromSpine builds a minimal-but-valid ThreadFrontmatter from
 // a SpineRecord. Used when a thread's on-disk file is missing while its

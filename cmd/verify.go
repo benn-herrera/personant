@@ -1,13 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 
+	"personant/internal/memops"
+	"personant/internal/memops/fileadapter"
 	"personant/internal/store"
-	"personant/internal/verify"
 )
 
 var (
@@ -31,11 +33,13 @@ reported, 0 otherwise.`,
 		if err != nil {
 			return err
 		}
-		opts := verify.VerifyOptions{
-			Quiet:  verifyFlagQuiet,
-			Logger: stderrLogger(),
-		}
-		report, err := verify.Verify(paths, opts)
+		// NOTE: verifyFlagQuiet and the stderrLogger are not yet plumbed
+		// through the port (memops.MemoryOps.Verify takes no options).
+		// If/when verbose verify output is needed, add VerifyOptions to
+		// the port and the fileadapter.
+		_ = verifyFlagQuiet
+		ops := fileadapter.NewFileAdapter(paths)
+		report, err := ops.Verify(context.Background())
 		if err != nil {
 			return err
 		}
@@ -59,7 +63,7 @@ func resolveVerifyPaths() (store.PersonantPaths, error) {
 // printReport emits the report to stdout in the spec's stable order.
 // Errors and drift go to stdout (primary command output); the summary
 // is also stdout. Findings printed with a leading "- " bullet.
-func printReport(r verify.Report) {
+func printReport(r memops.VerifyReport) {
 	if len(r.Errors) > 0 {
 		fmt.Println("errors:")
 		for _, f := range r.Errors {
@@ -87,7 +91,7 @@ func printReport(r verify.Report) {
 	}
 }
 
-func formatFinding(f verify.Finding) string {
+func formatFinding(f memops.VerifyFinding) string {
 	switch {
 	case f.Field == "" && f.Path == "":
 		return f.Message

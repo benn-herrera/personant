@@ -1,8 +1,10 @@
 package turn
 
 import (
+	"context"
 	"testing"
 
+	"personant/internal/memops/fileadapter"
 	"personant/internal/store"
 )
 
@@ -11,7 +13,7 @@ import (
 func extractCoalesce(t *testing.T, content string) *coalesceBuffer {
 	t.Helper()
 	paths, meta := newChainHome(t)
-	state := NewState(paths, meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
 	deterministicExtract(state, content)
 	return state.coalesce
 }
@@ -63,9 +65,9 @@ func TestDeterministicExtractHexID(t *testing.T) {
 
 func TestDeterministicExtractCoalesceWithUserPrompt(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(paths, meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
 
-	if err := onContextDelta(state, Delta{
+	if err := onContextDelta(context.Background(), state, Delta{
 		Source:  "user.prompt",
 		Content: "#trefoil https://wiki/trefoil",
 	}); err != nil {
@@ -91,9 +93,9 @@ func TestDeterministicExtractCoalesceWithUserPrompt(t *testing.T) {
 
 func TestDeterministicExtractFiresOnToolResult(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(paths, meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
 
-	if err := onContextDelta(state, Delta{
+	if err := onContextDelta(context.Background(), state, Delta{
 		Source:  "tool.result",
 		Content: "wrote internal/store/foo.go",
 	}); err != nil {
