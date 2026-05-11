@@ -152,17 +152,21 @@ type MemoryOps interface {
 	// ---------- Project operations ----------
 
 	// CreateProject persists a new ProjectMeta. The caller is
-	// responsible for allocating meta.ID (typically via store-side
-	// NextProjectID once that helper is also lifted onto the port in
-	// a future step; v0.1 callers go through ResolveActiveProject and
-	// hand-rolled init paths). Folds in store.SaveProjectMeta in the
-	// not-yet-existed case.
+	// responsible for allocating meta.ID — typically via NextProjectID
+	// on the port. Folds in store.SaveProjectMeta in the not-yet-existed
+	// case.
 	//
 	// ALT: a unified Upsert may be cleaner; v0.1 splits Create vs.
 	// Save to keep the distinction between first-write and
 	// drift-update visible at call sites. Revisit when project
 	// lifecycle commands land.
 	CreateProject(ctx context.Context, meta ProjectMeta) error
+
+	// NextProjectID returns the next available prj_<n> id, scanning the
+	// known project set so a new id never collides with an existing
+	// project. Folds in store.NextProjectID (which today takes a
+	// pre-read meta slice; the port pushes the read into the adapter).
+	NextProjectID(ctx context.Context) (string, error)
 
 	// LoadProject returns the meta for the given project ID. Folds in
 	// store.LoadProjectMeta, including the synthetic prj_default
@@ -243,7 +247,7 @@ type MemoryOps interface {
 	// configured logger. The only hard error is a missing
 	// ActiveProject.ID — without it the spine cannot be projected
 	// and the prompt is malformed.
-	ComposeWorkingSet(ctx context.Context, in WorksetInput) (WorksetOutput, error)
+	ComposeWorkingSet(ctx context.Context, in WorksetInput) (WorksetLayers, error)
 
 	// ---------- Context-modification event logging ----------
 

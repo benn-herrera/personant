@@ -259,15 +259,18 @@ type WorksetInput struct {
 	Budget Budget
 }
 
-// WorksetOutput is the rendered per-layer content for one turn,
+// WorksetLayers is the rendered per-layer content for one turn,
 // ready to be assembled into a system prompt by internal/prompt.
-// Promoted from prompt.SystemPromptParams; the application layer
-// passes the output straight through to prompt.BuildSystemPrompt.
+// Mirrors the §3.1 layer surface (E / A1 / A2 / B / C) on the port
+// side; the application layer copies it field-by-field into
+// prompt.SystemPromptElements at the prompt-assembly seam.
 //
-// Defined here (rather than re-exporting prompt.SystemPromptParams)
-// so the prompt package's import graph remains independent of the
-// adapter side.
-type WorksetOutput struct {
+// The two types stay distinct on purpose: WorksetLayers is the
+// substrate's output (whatever the composer produced); SystemPromptElements
+// is the prompt template's input contract. They happen to have identical
+// fields today; future prompt-template inputs that aren't layer content
+// (e.g. directive overrides) belong in SystemPromptElements and not here.
+type WorksetLayers struct {
 	// LayerE is directive files + project conventions (spec §3.1).
 	LayerE string
 	// LayerA1 is the current project's spine entries in display

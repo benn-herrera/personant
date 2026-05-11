@@ -33,17 +33,14 @@ reported, 0 otherwise.`,
 		if err != nil {
 			return err
 		}
-		// NOTE: verifyFlagQuiet and the stderrLogger are not yet plumbed
-		// through the port (memops.MemoryOps.Verify takes no options).
-		// If/when verbose verify output is needed, add VerifyOptions to
-		// the port and the fileadapter.
-		_ = verifyFlagQuiet
 		ops := fileadapter.NewFileAdapter(paths)
 		report, err := ops.Verify(context.Background())
 		if err != nil {
 			return err
 		}
-		printReport(report)
+		if !verifyFlagQuiet {
+			printReport(report)
+		}
 		if report.HasErrors() {
 			os.Exit(1)
 		}
@@ -105,6 +102,6 @@ func formatFinding(f memops.VerifyFinding) string {
 
 func init() {
 	verifyCmd.Flags().StringVar(&verifyFlagHome, "home", "", "override $PERSONANT_HOME for this invocation (testing)")
-	verifyCmd.Flags().BoolVar(&verifyFlagQuiet, "quiet", false, "suppress per-step logging (does not affect findings output)")
+	verifyCmd.Flags().BoolVar(&verifyFlagQuiet, "quiet", false, "suppress report output; exit code still reflects errors")
 	rootCmd.AddCommand(verifyCmd)
 }

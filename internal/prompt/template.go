@@ -2,7 +2,7 @@ package prompt
 
 import "strings"
 
-// SystemPromptParams carries the inputs needed to assemble the system
+// SystemPromptElements carries the inputs needed to assemble the system
 // prompt. Layer fields are pre-rendered strings produced by the working-set
 // composer (spec §3.1, Phase 2.e); this package does not assemble them —
 // it only specifies the slots and stitches them together with the
@@ -11,7 +11,7 @@ import "strings"
 // Empty layer strings are skipped (their section header is omitted) so the
 // prompt stays clean during early Phase 2 work where most layers will be
 // empty.
-type SystemPromptParams struct {
+type SystemPromptElements struct {
 	LayerE  string // directive files + project conventions (§3.1)
 	LayerA1 string // current project's spine entries (display form per §2.2.2)
 	LayerA2 string // other projects' compressed digests
@@ -72,7 +72,7 @@ type layerSection struct {
 //
 // Sections are separated by a blank line. The prompt is not terminated
 // with a trailing newline; callers can add framing as needed.
-func BuildSystemPrompt(p SystemPromptParams) string {
+func BuildSystemPrompt(p SystemPromptElements) string {
 	sections := []layerSection{
 		{header: "PROJECT CONVENTIONS AND DIRECTIVES (Layer E)", content: p.LayerE},
 		{header: "CURRENT PROJECT SPINE (Layer A1)", content: p.LayerA1},

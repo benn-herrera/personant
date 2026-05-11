@@ -456,10 +456,6 @@ func promptFallback(opts Options, in *bufio.Reader, ops memops.MemoryOps, paths 
 	}
 }
 
-// NOTE: createNewProject still uses store.NextProjectID directly — that
-// helper is a pure function over a ProjectMeta slice (no substrate state
-// of its own) and is not yet on the port. Lifting it onto the port is
-// future scope (A.x).
 func createNewProject(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string) (store.ProjectMeta, error) {
 	ctx := context.Background()
 	fmt.Fprint(opts.Stdout, "display name: ")
@@ -471,11 +467,10 @@ func createNewProject(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd 
 	if name == "" {
 		return store.ProjectMeta{}, errors.New("chat: empty project name")
 	}
-	existing, err := ops.ListProjects(ctx)
+	id, err := ops.NextProjectID(ctx)
 	if err != nil {
 		return store.ProjectMeta{}, err
 	}
-	id := store.NextProjectID(existing)
 	now := time.Now().UTC().Format(time.RFC3339)
 	meta := store.ProjectMeta{
 		ID:              id,

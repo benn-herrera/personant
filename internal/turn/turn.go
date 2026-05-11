@@ -169,7 +169,7 @@ func Run(ctx context.Context, state *State, userInput string, out io.Writer) (st
 		if err != nil {
 			return "", err
 		}
-		return prompt.BuildSystemPrompt(prompt.SystemPromptParams{
+		return prompt.BuildSystemPrompt(prompt.SystemPromptElements{
 			LayerE:  ws.LayerE,
 			LayerA1: ws.LayerA1,
 			LayerA2: ws.LayerA2,

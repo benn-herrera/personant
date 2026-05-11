@@ -46,7 +46,7 @@ type ComposeOptions struct {
 	Logger func(format string, args ...any)
 }
 
-// Compose builds the SystemPromptParams for one turn. Each layer is
+// Compose builds the SystemPromptElements for one turn. Each layer is
 // rendered independently and truncated to its byte budget; A2 has a
 // per-project cap as well.
 //
@@ -54,9 +54,9 @@ type ComposeOptions struct {
 // failure is logged via opts.Logger; other layers proceed. The only
 // hard error returned is an unset ActiveProject.ID — without it there
 // is no spine to render and downstream prompt assembly is malformed.
-func Compose(state State, opts ComposeOptions) (prompt.SystemPromptParams, error) {
+func Compose(state State, opts ComposeOptions) (prompt.SystemPromptElements, error) {
 	if state.ActiveProject.ID == "" {
-		return prompt.SystemPromptParams{}, fmt.Errorf("workset: ActiveProject.ID is empty")
+		return prompt.SystemPromptElements{}, fmt.Errorf("workset: ActiveProject.ID is empty")
 	}
 	logf := opts.Logger
 	if logf == nil {
@@ -77,7 +77,7 @@ func Compose(state State, opts ComposeOptions) (prompt.SystemPromptParams, error
 	layerB := renderLayerB(state, budget, logf)
 	layerC := renderLayerC(state, budget, logf)
 
-	return prompt.SystemPromptParams{
+	return prompt.SystemPromptElements{
 		LayerE:  layerE,
 		LayerA1: layerA1,
 		LayerA2: layerA2,

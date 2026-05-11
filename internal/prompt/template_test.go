@@ -6,7 +6,7 @@ import (
 )
 
 func TestBuildSystemPromptEmptyLayers(t *testing.T) {
-	got := BuildSystemPrompt(SystemPromptParams{})
+	got := BuildSystemPrompt(SystemPromptElements{})
 
 	// Topic-tag directive is always present.
 	if !strings.Contains(got, TopicTagDirective) {
@@ -22,7 +22,7 @@ func TestBuildSystemPromptEmptyLayers(t *testing.T) {
 }
 
 func TestBuildSystemPromptAllLayers(t *testing.T) {
-	got := BuildSystemPrompt(SystemPromptParams{
+	got := BuildSystemPrompt(SystemPromptElements{
 		LayerE:  "directive-E-content",
 		LayerA1: "spine-A1-content",
 		LayerA2: "digest-A2-content",
@@ -67,7 +67,7 @@ func TestBuildSystemPromptAllLayers(t *testing.T) {
 }
 
 func TestBuildSystemPromptPartialLayers(t *testing.T) {
-	got := BuildSystemPrompt(SystemPromptParams{
+	got := BuildSystemPrompt(SystemPromptElements{
 		LayerA1: "spine-content-only",
 		LayerB:  "active-thread-content",
 	})
@@ -97,7 +97,7 @@ func TestBuildSystemPromptPartialLayers(t *testing.T) {
 }
 
 func TestBuildSystemPromptStartsWithPreamble(t *testing.T) {
-	got := BuildSystemPrompt(SystemPromptParams{})
+	got := BuildSystemPrompt(SystemPromptElements{})
 	if !strings.HasPrefix(got, "You are personant") {
 		t.Errorf("prompt should start with orientation preamble, got prefix: %q", firstN(got, 60))
 	}
