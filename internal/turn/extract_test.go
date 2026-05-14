@@ -18,7 +18,7 @@ func extractCoalesce(t *testing.T, content string) *coalesceBuffer {
 	t.Helper()
 	paths, meta := newChainHome(t)
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
-	deterministicExtract(state, Delta{
+	deterministicExtract(context.Background(), state, Delta{
 		Source:    "user.prompt",
 		Content:   content,
 		Retention: memops.RetentionDecision,

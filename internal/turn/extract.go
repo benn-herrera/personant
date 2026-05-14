@@ -1,6 +1,8 @@
 package turn
 
 import (
+	"context"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -62,17 +64,17 @@ const urlTrailingPunct = `.,;:!?'"`
 // same key still wins when this pass runs alongside source-specific
 // extractors. Efficiency is not yet a concern: regex passes are
 // bounded by content size which is bounded by §6.5's per-delta cap.
-func deterministicExtract(state *State, delta Delta) {
+func deterministicExtract(ctx context.Context, state *State, delta Delta) {
 	content := delta.Content
 	for _, m := range urlRE.FindAllString(content, -1) {
 		raw := strings.TrimRight(m, urlTrailingPunct)
 		if raw == "" {
 			continue
 		}
-		emitIdentifier(state, delta, raw)
+		emitIdentifier(ctx, state, delta, raw)
 	}
 	for _, m := range filePathRE.FindAllString(content, -1) {
-		emitIdentifier(state, delta, m)
+		emitIdentifier(ctx, state, delta, m)
 	}
 	for _, idx := range hexIDRE.FindAllStringIndex(content, -1) {
 		start, end := idx[0], idx[1]
@@ -85,7 +87,7 @@ func deterministicExtract(state *State, delta Delta) {
 		if start >= 1 && content[start-1] == '#' {
 			continue
 		}
-		emitIdentifier(state, delta, content[start:end])
+		emitIdentifier(ctx, state, delta, content[start:end])
 	}
 }
 
@@ -95,16 +97,19 @@ func deterministicExtract(state *State, delta Delta) {
 // for symmetry with the other extractors and to centralize any future
 // identifier rules. The actual buffer choice (staging vs coalesce) is
 // made by addExtractedSymbol based on delta.Retention.
-func emitIdentifier(state *State, delta Delta, raw string) {
+func emitIdentifier(ctx context.Context, state *State, delta Delta, raw string) {
 	normalized := store.Normalize(raw, store.SymbolIdentifier)
-	addExtractedSymbol(state, delta, raw, normalized, store.SourceDeterministic)
+	addExtractedSymbol(ctx, state, delta, raw, normalized, store.SourceDeterministic)
 }
 
 // addExtractedSymbol is the canonical write path for extracted symbols
 // from any delta. Task-class deltas route to the cross-turn staging
 // buffer (awaiting cross-reference promotion per B.3); decision-class
 // deltas route directly to the turn-scoped coalesce buffer (immediate
-// participation in turn-close engagement).
+// participation in turn-close engagement) AND trigger the §3.0
+// cross-reference promotion check: if a staged symbol with the same
+// normalized form is awaiting citation, it is promoted out of staging
+// into coalesce.
 //
 // delta carries the class via delta.Retention (populated by
 // onContextDelta's source-driven default plus any explicit caller
@@ -113,7 +118,7 @@ func emitIdentifier(state *State, delta Delta, raw string) {
 //
 // Empty normalized is silently dropped — same convention as the
 // underlying buffers.
-func addExtractedSymbol(state *State, delta Delta, raw, normalized string, source store.SymbolSource) {
+func addExtractedSymbol(ctx context.Context, state *State, delta Delta, raw, normalized string, source store.SymbolSource) {
 	if normalized == "" {
 		return
 	}
@@ -126,5 +131,23 @@ func addExtractedSymbol(state *State, delta Delta, raw, normalized string, sourc
 		})
 		return
 	}
+	// Decision-class: add the citing delta's symbol to coalesce first,
+	// then promote any matching staged entry. Order matters for Raw —
+	// coalesce.addSymbol only sets Raw on first insert, so the citing
+	// delta's surface form wins as the "Raw that survived into the
+	// decision". The §2.7.3 source-dominance merge is commutative, so
+	// the order does not affect the resulting Source.
 	state.coalesce.addSymbol(raw, normalized, source)
+	staged, found := state.staging.lookup(normalized)
+	if !found {
+		return
+	}
+	state.coalesce.addSymbol(staged.Raw, staged.Normalized, staged.Source)
+	state.staging.remove(normalized)
+	// Instrumentation for window-K calibration and recall-fidelity
+	// measurement. A log-write failure must not fail the chain —
+	// promotion is internal bookkeeping, not user-visible.
+	_ = state.Ops.Log(ctx, "staging", "promoted",
+		fmt.Sprintf("normalized=%s staged_at=%d cited_at=%d turn_span=%d",
+			normalized, staged.StagedAt, state.TurnNumber, state.TurnNumber-staged.StagedAt))
 }
