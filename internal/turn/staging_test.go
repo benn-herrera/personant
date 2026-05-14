@@ -30,7 +30,7 @@ func readPromotionLogLines(t *testing.T, paths store.PersonantPaths) []string {
 		if err != nil {
 			t.Fatalf("read %s: %v", e.Name(), err)
 		}
-		for _, line := range strings.Split(string(body), "\n") {
+		for line := range strings.SplitSeq(string(body), "\n") {
 			if strings.Contains(line, "staging.promoted") {
 				lines = append(lines, line)
 			}
