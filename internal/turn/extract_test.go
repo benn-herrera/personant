@@ -4,17 +4,25 @@ import (
 	"context"
 	"testing"
 
+	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/store"
 )
 
 // extractCoalesce is a thin helper that drives deterministicExtract on
-// a fresh State and returns the coalesce buffer for inspection.
+// a fresh State and returns the coalesce buffer for inspection. The
+// synthetic Delta is decision-class so post-B.2 routing lands extracted
+// symbols in coalesce; staging-routed cases have their own tests in
+// staging_test.go.
 func extractCoalesce(t *testing.T, content string) *coalesceBuffer {
 	t.Helper()
 	paths, meta := newChainHome(t)
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
-	deterministicExtract(state, content)
+	deterministicExtract(state, Delta{
+		Source:    "user.prompt",
+		Content:   content,
+		Retention: memops.RetentionDecision,
+	})
 	return state.coalesce
 }
 
@@ -91,7 +99,11 @@ func TestDeterministicExtractCoalesceWithUserPrompt(t *testing.T) {
 	}
 }
 
-func TestDeterministicExtractFiresOnToolResult(t *testing.T) {
+// TestDeterministicExtract_ToolResultStagesNotCoalesces is the B.2
+// behavior flip: tool.result is task-class, so its extracted symbol now
+// lands in state.staging, not state.coalesce. The same delta would have
+// populated coalesce pre-B.2.
+func TestDeterministicExtract_ToolResultStagesNotCoalesces(t *testing.T) {
 	paths, meta := newChainHome(t)
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
 
@@ -102,12 +114,24 @@ func TestDeterministicExtractFiresOnToolResult(t *testing.T) {
 		t.Fatalf("onContextDelta: %v", err)
 	}
 
-	sym, ok := state.coalesce.symbols["internal/store/foo.go"]
+	staged, ok := state.staging.lookup("internal/store/foo.go")
 	if !ok {
-		t.Fatalf("path not extracted from tool.result; symbols=%v", state.coalesce.symbols)
+		t.Fatalf("path not staged from tool.result; staging.len=%d", state.staging.len())
 	}
-	if sym.Source != store.SourceDeterministic {
-		t.Errorf("source: got %q want %q", sym.Source, store.SourceDeterministic)
+	if staged.Normalized != "internal/store/foo.go" {
+		t.Errorf("staged Normalized: got %q want %q", staged.Normalized, "internal/store/foo.go")
+	}
+	if staged.Source != store.SourceDeterministic {
+		t.Errorf("staged Source: got %q want %q", staged.Source, store.SourceDeterministic)
+	}
+	if staged.StagedAt != state.TurnNumber {
+		t.Errorf("staged StagedAt: got %d want %d (current turn)", staged.StagedAt, state.TurnNumber)
+	}
+	if _, ok := state.coalesce.symbols["internal/store/foo.go"]; ok {
+		t.Errorf("symbol should NOT be in coalesce (task-class routes to staging); symbols=%v", state.coalesce.symbols)
+	}
+	if len(state.coalesce.symbols) != 0 {
+		t.Errorf("coalesce should be empty after task-only delta; got %v", state.coalesce.symbols)
 	}
 }
 

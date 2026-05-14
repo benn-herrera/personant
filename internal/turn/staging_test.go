@@ -201,3 +201,151 @@ func TestOnContextDelta_RespectsExplicitRetention(t *testing.T) {
 			got, memops.RetentionDecision)
 	}
 }
+
+// B.2 routing tests: task-class symbols land in staging, decision-class
+// symbols land in coalesce. The four cases below pin down the matrix
+// (task, decision, mixed-turn, explicit override).
+
+func TestRouting_TaskClassSymbolsGoToStaging(t *testing.T) {
+	state, _ := newRecordingState(t)
+	if err := onContextDelta(context.Background(), state, Delta{
+		Source:  "user.shell-capture",
+		Content: "ls returned: src/main.go src/util.go",
+	}); err != nil {
+		t.Fatalf("onContextDelta: %v", err)
+	}
+
+	for _, want := range []string{"src/main.go", "src/util.go"} {
+		staged, ok := state.staging.lookup(want)
+		if !ok {
+			t.Errorf("staging missing %q; staging.len=%d", want, state.staging.len())
+			continue
+		}
+		if staged.Source != store.SourceDeterministic {
+			t.Errorf("staged %q Source: got %q want %q", want, staged.Source, store.SourceDeterministic)
+		}
+		if staged.StagedAt != state.TurnNumber {
+			t.Errorf("staged %q StagedAt: got %d want %d", want, staged.StagedAt, state.TurnNumber)
+		}
+	}
+	if len(state.coalesce.symbols) != 0 {
+		t.Errorf("coalesce symbols should be empty for pure task delta; got %v", state.coalesce.symbols)
+	}
+}
+
+func TestRouting_DecisionClassSymbolsGoToCoalesce(t *testing.T) {
+	state, _ := newRecordingState(t)
+	if err := onContextDelta(context.Background(), state, Delta{
+		Source:  "user.prompt",
+		Content: "look at internal/foo.go and #notes",
+	}); err != nil {
+		t.Fatalf("onContextDelta: %v", err)
+	}
+
+	path, ok := state.coalesce.symbols["internal/foo.go"]
+	if !ok {
+		t.Fatalf("coalesce missing internal/foo.go; symbols=%v", state.coalesce.symbols)
+	}
+	if path.Source != store.SourceDeterministic {
+		t.Errorf("path Source: got %q want %q", path.Source, store.SourceDeterministic)
+	}
+
+	tag, ok := state.coalesce.symbols["notes"]
+	if !ok {
+		t.Fatalf("coalesce missing #notes; symbols=%v", state.coalesce.symbols)
+	}
+	if tag.Source != store.SourceUser {
+		t.Errorf("tag Source: got %q want %q", tag.Source, store.SourceUser)
+	}
+
+	if state.staging.len() != 0 {
+		t.Errorf("staging should be empty for pure decision delta; len=%d", state.staging.len())
+	}
+}
+
+func TestRouting_MixedTurnIsolatesByClass(t *testing.T) {
+	state, _ := newRecordingState(t)
+	ctx := context.Background()
+
+	if err := onContextDelta(ctx, state, Delta{
+		Source:  "user.prompt",
+		Content: "verify staging worked. #verify",
+	}); err != nil {
+		t.Fatalf("user.prompt delta: %v", err)
+	}
+	if err := onContextDelta(ctx, state, Delta{
+		Source:  "tool.result",
+		Content: "wrote internal/store/foo.go",
+	}); err != nil {
+		t.Fatalf("tool.result delta: %v", err)
+	}
+	if err := onContextDelta(ctx, state, Delta{
+		Source:  "model.response",
+		Content: "*topic: *new-topic* [alpha, beta, gamma, delta]*\nDone. See internal/bar.go",
+	}); err != nil {
+		t.Fatalf("model.response delta: %v", err)
+	}
+
+	// coalesce: decision-class arrivals.
+	wantCoalesce := map[string]store.SymbolSource{
+		"verify":           store.SourceUser,
+		"alpha":            store.SourceModel,
+		"beta":             store.SourceModel,
+		"gamma":            store.SourceModel,
+		"delta":            store.SourceModel,
+		"internal/bar.go":  store.SourceDeterministic,
+	}
+	for norm, wantSrc := range wantCoalesce {
+		sym, ok := state.coalesce.symbols[norm]
+		if !ok {
+			t.Errorf("coalesce missing %q; symbols=%v", norm, state.coalesce.symbols)
+			continue
+		}
+		if sym.Source != wantSrc {
+			t.Errorf("coalesce %q Source: got %q want %q", norm, sym.Source, wantSrc)
+		}
+	}
+	if _, leaked := state.coalesce.symbols["internal/store/foo.go"]; leaked {
+		t.Errorf("coalesce contains task-class symbol internal/store/foo.go; symbols=%v", state.coalesce.symbols)
+	}
+
+	// staging: exactly the task-class symbol.
+	if state.staging.len() != 1 {
+		t.Errorf("staging len: got %d want 1", state.staging.len())
+	}
+	staged, ok := state.staging.lookup("internal/store/foo.go")
+	if !ok {
+		t.Fatalf("staging missing internal/store/foo.go")
+	}
+	if staged.Source != store.SourceDeterministic {
+		t.Errorf("staged Source: got %q want %q", staged.Source, store.SourceDeterministic)
+	}
+	if staged.StagedAt != state.TurnNumber {
+		t.Errorf("staged StagedAt: got %d want %d", staged.StagedAt, state.TurnNumber)
+	}
+}
+
+func TestRouting_ExplicitDecisionOverrideRoutesToCoalesce(t *testing.T) {
+	state, _ := newRecordingState(t)
+	// shell-capture defaults to RetentionTask; explicit RetentionDecision
+	// override (future `##` / `/keep` path) must route extracted symbols
+	// into coalesce, not staging.
+	if err := onContextDelta(context.Background(), state, Delta{
+		Source:    "user.shell-capture",
+		Content:   "ref material: see https://arxiv.org/abs/foo.bar",
+		Retention: memops.RetentionDecision,
+	}); err != nil {
+		t.Fatalf("onContextDelta: %v", err)
+	}
+
+	sym, ok := state.coalesce.symbols["https://arxiv.org/abs/foo.bar"]
+	if !ok {
+		t.Fatalf("coalesce missing url; symbols=%v", state.coalesce.symbols)
+	}
+	if sym.Source != store.SourceDeterministic {
+		t.Errorf("url Source: got %q want %q", sym.Source, store.SourceDeterministic)
+	}
+	if state.staging.len() != 0 {
+		t.Errorf("staging should be empty under explicit decision override; len=%d", state.staging.len())
+	}
+}

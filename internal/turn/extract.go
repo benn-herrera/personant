@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 
+	"personant/internal/memops"
 	"personant/internal/store"
 )
 
@@ -50,24 +51,28 @@ var hexIDRE = regexp.MustCompile(`\b[0-9a-f]{7,40}\b`)
 const urlTrailingPunct = `.,;:!?'"`
 
 // deterministicExtract finds all §2.7.1 identifier-category symbols in
-// content (URLs, file paths, git-SHA-shaped hex IDs) and feeds them to
-// state.coalesce as SourceDeterministic per §3.3 pass 1.
+// delta.Content (URLs, file paths, git-SHA-shaped hex IDs) and routes
+// them via addExtractedSymbol as SourceDeterministic per §3.3 pass 1.
+// delta carries the retention class so the routing helper can send
+// task-class symbols to the staging buffer and decision-class symbols
+// to coalesce (§3.0 transient-data lifecycle).
 //
 // Order is irrelevant — coalesce dedups by normalized form and the
 // dominance rule (§2.7.3) ensures a higher-source emission for the
 // same key still wins when this pass runs alongside source-specific
 // extractors. Efficiency is not yet a concern: regex passes are
 // bounded by content size which is bounded by §6.5's per-delta cap.
-func deterministicExtract(state *State, content string) {
+func deterministicExtract(state *State, delta Delta) {
+	content := delta.Content
 	for _, m := range urlRE.FindAllString(content, -1) {
 		raw := strings.TrimRight(m, urlTrailingPunct)
 		if raw == "" {
 			continue
 		}
-		emitIdentifier(state, raw)
+		emitIdentifier(state, delta, raw)
 	}
 	for _, m := range filePathRE.FindAllString(content, -1) {
-		emitIdentifier(state, m)
+		emitIdentifier(state, delta, m)
 	}
 	for _, idx := range hexIDRE.FindAllStringIndex(content, -1) {
 		start, end := idx[0], idx[1]
@@ -80,16 +85,46 @@ func deterministicExtract(state *State, content string) {
 		if start >= 1 && content[start-1] == '#' {
 			continue
 		}
-		emitIdentifier(state, content[start:end])
+		emitIdentifier(state, delta, content[start:end])
 	}
 }
 
-// emitIdentifier records one identifier-category symbol in the
-// coalesce buffer with SourceDeterministic provenance. Identifier
-// normalization is identity (§2.7.2), so raw == normalized; we still
-// route through store.Normalize for symmetry with the other
-// extractors and to centralize any future identifier rules.
-func emitIdentifier(state *State, raw string) {
+// emitIdentifier records one identifier-category symbol with
+// SourceDeterministic provenance. Identifier normalization is identity
+// (§2.7.2), so raw == normalized; we still route through store.Normalize
+// for symmetry with the other extractors and to centralize any future
+// identifier rules. The actual buffer choice (staging vs coalesce) is
+// made by addExtractedSymbol based on delta.Retention.
+func emitIdentifier(state *State, delta Delta, raw string) {
 	normalized := store.Normalize(raw, store.SymbolIdentifier)
-	state.coalesce.addSymbol(raw, normalized, store.SourceDeterministic)
+	addExtractedSymbol(state, delta, raw, normalized, store.SourceDeterministic)
+}
+
+// addExtractedSymbol is the canonical write path for extracted symbols
+// from any delta. Task-class deltas route to the cross-turn staging
+// buffer (awaiting cross-reference promotion per B.3); decision-class
+// deltas route directly to the turn-scoped coalesce buffer (immediate
+// participation in turn-close engagement).
+//
+// delta carries the class via delta.Retention (populated by
+// onContextDelta's source-driven default plus any explicit caller
+// override). raw is the original surface form; normalized is the
+// canonical form per §2.7.2; source is the §2.7.3 provenance.
+//
+// Empty normalized is silently dropped — same convention as the
+// underlying buffers.
+func addExtractedSymbol(state *State, delta Delta, raw, normalized string, source store.SymbolSource) {
+	if normalized == "" {
+		return
+	}
+	if delta.Retention == memops.RetentionTask {
+		state.staging.add(stagedSymbol{
+			Normalized: normalized,
+			Raw:        raw,
+			Source:     source,
+			StagedAt:   state.TurnNumber,
+		})
+		return
+	}
+	state.coalesce.addSymbol(raw, normalized, source)
 }

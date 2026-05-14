@@ -115,14 +115,14 @@ func provisionalRetention(source string) memops.RetentionClass {
 // digest.refresh, directive.reloaded, user.shell-capture) currently
 // contribute through the deterministic pass only.
 func extractSymbols(ctx context.Context, state *State, delta Delta) error {
-	deterministicExtract(state, delta.Content)
+	deterministicExtract(state, delta)
 
 	switch delta.Source {
 	case "user.prompt":
 		for _, tag := range userTagRE.FindAllStringSubmatch(delta.Content, -1) {
 			raw := tag[1]
 			normalized := store.Normalize(raw, store.SymbolTag)
-			state.coalesce.addSymbol(raw, normalized, store.SourceUser)
+			addExtractedSymbol(state, delta, raw, normalized, store.SourceUser)
 		}
 		return nil
 
@@ -141,7 +141,7 @@ func extractSymbols(ctx context.Context, state *State, delta Delta) error {
 			// prompt.Parse already normalizes anchors (§2.7.2 entity rules),
 			// so raw == normalized here. A future surface-form pass would
 			// thread the original through.
-			state.coalesce.addSymbol(a, a, store.SourceModel)
+			addExtractedSymbol(state, delta, a, a, store.SourceModel)
 		}
 		for _, t := range result.Tag.Threads {
 			state.coalesce.addThread(t)
