@@ -112,6 +112,14 @@ Personant's "research assistant, not polyglot agent-coding tool" framing is what
 
 When pressure builds to "just add X," ask: is this constraint load-bearing, or accidental?
 
+### Port-and-adapter at the substrate boundary
+
+Application code (`internal/turn`, `internal/chat`, `internal/recall`, `internal/workset`, cmd/*, scenarios harness) depends on `memops.MemoryOps` — the conceptual operations port — not on the substrate directly. One adapter ships today (`internal/memops/fileadapter`: JSONL + markdown + YAML frontmatter + TOML + go-git on `~/.personant/`); future adapters (a derived KV index, a SQLite-backed simulation accelerator, anything substrate-shifting that future data demands) implement the same interface without rewriting callers or tests.
+
+What stays direct from `internal/store`: pure helpers (`Normalize`, `DominantSource`), data-type aliases (`SpineRecord`, `ThreadFrontmatter`, ...), and substrate inspection in test invariants (where `h.Paths` access is the *correct* pattern — invariants are validators of the substrate, not application code).
+
+The asymmetric-cost discipline drove the boundary: by the time simulation data reveals an adapter-layer change is needed, the work is local to one new adapter package rather than codebase-wide refactoring.
+
 ---
 
 ## Substrate non-negotiables
@@ -157,9 +165,11 @@ Personant treats the working window as a sequence of **context-modification even
 - `thread.fetched`, `digest.refresh`
 - `slash.injected`, `directive.reloaded`
 
+Every event also carries a **retention class** (`task` vs `decision`) assigned by source. `tool.result` and `user.shell-capture` are provisionally `task`; everything else is provisionally `decision`. The class routes extracted symbols through different paths (see "Transient-data lifecycle" below).
+
 **Every event runs the chain in this fixed order:**
 
-1. **Symbol extraction** (§3.3) — deterministic regex pass + parse model emissions.
+1. **Symbol extraction** (§3.3) — deterministic regex pass + parse model emissions; routing by retention class.
 2. **Engagement signal** (§3.2) — coalesced per-turn (multi-tool-call turns don't multiply `turn_count`).
 3. **Dedup decision** (§3.9) — content-addressed identifier replacement (v0.2).
 4. **Budget check** (§3.1) — bump-eviction so the budget is honored before the next event lands.
@@ -168,6 +178,16 @@ Personant treats the working window as a sequence of **context-modification even
 **Implementation contract** (§3.0.5): a single internal `onContextDelta(source, content, metadata)` entry point. **No path mutates the working window without going through it.** Code review treats any direct mutation as a bug.
 
 When you write code that adds new content to the working window: route it through `onContextDelta`. Don't invent a side-channel.
+
+### Transient-data lifecycle (load-bearing for recall fidelity)
+
+Symbol pollution by one-moment-of-value content (e.g., `# git status` output, search-result noise) would silently degrade Jaccard recall: noise inflates the union, dilutes meaningful symbols, drives spurious matches. The lifecycle prevents this at the source:
+
+1. **Provisional class at delta time** (mechanical, by source). `task` → symbols extracted into a cross-turn **staging buffer** keyed by normalized form. `decision` → symbols extracted directly into the per-turn coalesce buffer (the existing engagement path).
+2. **Confirmation via decision-citation.** When a decision-class delta extracts a symbol whose normalized form matches a staged entry, **promote**: the staged entry migrates from staging into coalesce (where source-dominance merge folds it with the citing delta's contribution), removed from staging. The citing decision delta is what authored the rescue.
+3. **Window-close GC.** At the top of each turn (after `TurnNumber++`, before any chain step), staged entries older than `stagingWindowTurns` (default 3) evict. Their symbols never reach the persistent symbol index.
+
+The principle: **raw task-class bytes are always discardable; only the symbols that crossed over into a decision delta survive.** The canonical symbol index never sees transient pollution because pollution is filtered at insert time, not removed retroactively.
 
 ---
 
@@ -201,7 +221,9 @@ Layers E and A are the *recognition* surface; Layer B is *active engagement*. Th
 | **History symbol** | per-thread accumulated symbol with `raw`, `normalized`, `first_seen_turn`, `count`, `source`; capped per `history.cap-per-thread` | §2.3 |
 | **Symbol category** | `identifier` (preserve case), `entity` (lowercase + hyphenate), `tag` (lowercase, leading `#` stripped) | §2.7.1 |
 | **Symbol source** | `deterministic` / `model` / `user` / `curator`; dominance: `curator > user > model > deterministic` | §2.7.3 |
-| **Context-modification delta** | one event to the chain (§3.0); content-modifying event with source + content + metadata | §3.0 |
+| **Context-modification delta** | one event to the chain (§3.0); content-modifying event with source + content + metadata + retention class | §3.0 |
+| **Retention class** | `task` (default-transient: `tool.result`, `user.shell-capture`) vs `decision` (default-persistent: `user.prompt`, `model.response`, ...). Drives the two-stage transient-data lifecycle. | §3.0.1 |
+| **`MemoryOps` port** | the conceptual operations interface (`internal/memops`) the application layer depends on. One adapter today (`fileadapter`, JSONL + markdown + go-git); future adapters swap in without rewriting callers. | port-and-adapter |
 
 ---
 

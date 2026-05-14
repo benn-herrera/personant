@@ -14,7 +14,7 @@ Read it before making non-trivial changes. Human-facing project info is in
 > braided strands of a multi-material, high-performance cable.
 >
 > Adherence to this principle results in an enhanced and growing
-> symbiote rather than an atrophied parasite clinging to a stunted
+> symbiotic pair rather than an atrophied parasite clinging to a stunted
 > host.
 
 This is the highest-level frame personant operates under; the
@@ -102,23 +102,58 @@ accumulate a pip dependency surface.
 
 ## Repo state
 
-Phase 1 (skeleton + storage) is complete; Phase 2 (turn loop + topic
-tagging + chat REPL + working-set composition + scenario harness) is
-substantially landed; the v0.2 surface (deep cold archival, dedup,
-re-prompt) is queued. Current top-level shape:
+Complete:
+- Phase 1: skeleton + storage scaffold.
+- Phase 2: turn loop, topic-tag parsing, chat REPL, layered working-set
+  composition, scenario harness, mid-turn thread re-prompt (§5.5).
+- Phase 3: opportunistic recall via symbolic Jaccard (within-project,
+  log-only surface; cross-project + UI deferred until Phase C drives
+  the parameter calibration).
+- Phase A: `MemoryOps` port + `FileAdapter`; application layer
+  (turn / chat / cmd / scenarios) migrated to depend on the port.
+  `internal/autogit` (go-git-backed wrapper) handles autonomic
+  git operations on the home tree.
+- Phase B: transient-data lifecycle. Source-driven retention class
+  on every delta; task-class symbols stage cross-turn instead of
+  polluting coalesce; decision-class citation promotes; window-close
+  GC evicts uncited entries at turn K+1.
+
+Queued:
+- Phase C: recall-fidelity test infrastructure (harness extension +
+  mad-libs query generator + Wikipedia corpus + LLM-assisted
+  template authoring + calibration sweeps). Captured in detail at
+  `project_personant_recall_fidelity_design.md` memory.
+- Phase 4: closure / retirement (curator-drafted summaries; ack flow;
+  spine state transitions).
+- Phase 5: cross-project digest, fallback dissection, directive
+  accrual.
+- v0.2: deep cold archival via git; working-set content dedup;
+  shell escape `$`/`#` with long-lived subprocess; transient-data
+  event-log compaction + class-aware tool-output budget.
+- v1.0: Python computational workflow (math/physics simulation).
+
+Current top-level shape:
 
 ```
-cmd/                        cobra subcommands (init, index, verify, ping,
-                            models, chat — bare `personant` defaults to chat)
-internal/store/             canonical types, paths, JSONL helpers, init,
-                            spine ops, project ops, providers, thread I/O,
-                            bootstrap, etc.
-internal/turn/              §3.0 chain, turn loop, per-turn coalescing
+cmd/                        cobra subcommands (init, index, verify,
+                            ping, models, chat — bare `personant`
+                            defaults to chat)
+internal/memops/            MemoryOps port (interface + supporting
+                            types) — application layer depends on this
+internal/memops/fileadapter/  the v0.1 substrate-backed adapter
+internal/store/             canonical types, paths, JSONL helpers,
+                            init, spine ops, project ops, providers,
+                            thread I/O, bootstrap
+internal/autogit/           go-git-backed autonomic git wrapper with
+                            bitflag systemic-validation policy
+internal/turn/              §3.0 chain, turn loop, per-turn coalescing,
+                            transient-data staging buffer
+internal/recall/            symbolic Jaccard recall matcher
 internal/chat/              REPL, slash dispatch, bootstrap UX
 internal/workset/           layered context composition (E/A1/A2/B/C)
 internal/prompt/            template + topic-tag parser + stream filter
-internal/model/             OpenAI-compatible HTTP client + scripted/generated
-                            mock + SSE streaming
+internal/model/             OpenAI-compatible HTTP client + scripted/
+                            generated mock + SSE streaming
 internal/scenarios/         scenario harness, invariants, metrics
 internal/{eventlog,metrics,
   index,verify,
@@ -127,7 +162,8 @@ ARCHITECTURE.md             orientation (read first)
 spec.md                     operational spec
 README.md                   user-facing
 AGENTS.md                   this file
-Makefile                    build + agents-submodule pinning + serve-local-api
+Makefile                    build + agents-submodule pinning +
+                            serve-local-api
 ```
 
 ## Build / test
@@ -157,6 +193,13 @@ Go 1.26.1+.
   - **`langchaingo/llms`** is *compatible* but excluded on dep-hygiene
     + scope grounds — see substrate-decisions memory for the revisit
     conditions.
+- **Application code talks to `MemoryOps`, not to the substrate directly.**
+  `internal/turn`, `internal/chat`, `internal/recall`, `internal/workset`,
+  cmd/*, and the scenarios harness all depend on the port (`memops.MemoryOps`).
+  Pure helpers (`store.Normalize`, `store.DominantSource`) and data-type
+  aliases stay direct because they're not substrate operations. Tests
+  inspect the substrate directly via `h.Paths` in invariants — that's the
+  test-side substrate validator pattern; it's the right access.
 - **Match the spec's data model.** Spine records, thread frontmatter, and the
   symbol index have field-level schemas in §2. Don't invent your own.
 - **Verify with the canonical docs.** Before assuming a behavior, grep
