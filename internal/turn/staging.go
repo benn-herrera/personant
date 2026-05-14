@@ -92,3 +92,30 @@ func (b *stagingBuffer) evictBefore(cutoffTurn int) int {
 
 // len returns the current staging buffer size (for metrics).
 func (b *stagingBuffer) len() int { return len(b.entries) }
+
+// pruneStaging evicts staging entries whose citation window has
+// closed. An entry staged in turn N is eligible for citation in turns
+// N through N+K-1 inclusive (K = stagingWindowTurns); at the start of
+// turn N+K it is no longer eligible and must be evicted before any
+// chain step in the new turn can observe it.
+//
+// Returns the count of evicted entries (callers may use this for
+// instrumentation; the chain emits a `staging.evicted` event on
+// nonzero counts).
+//
+// Safe to call when state.staging is nil (no-op, returns 0).
+func pruneStaging(state *State) int {
+	if state.staging == nil {
+		return 0
+	}
+	if state.TurnNumber <= 0 {
+		// Pre-Run state: nothing has had a chance to stage yet.
+		return 0
+	}
+	cutoff := state.TurnNumber - stagingWindowTurns + 1
+	if cutoff <= 0 {
+		// Early turns (TurnNumber < K): nothing has aged out yet.
+		return 0
+	}
+	return state.staging.evictBefore(cutoff)
+}

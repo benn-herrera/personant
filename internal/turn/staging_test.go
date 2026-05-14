@@ -2,6 +2,7 @@ package turn
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,13 +10,14 @@ import (
 
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
+	"personant/internal/model"
 	"personant/internal/store"
 )
 
-// readPromotionLogLines walks every *.log under paths.LogsDir and
-// returns the lines containing `staging.promoted`. Pattern mirrors
+// readLogLinesContaining walks every *.log under paths.LogsDir and
+// returns the lines containing substr. Pattern mirrors
 // assertSpineMatchFires in internal/scenarios/scenarios_test.go.
-func readPromotionLogLines(t *testing.T, paths store.PersonantPaths) []string {
+func readLogLinesContaining(t *testing.T, paths store.PersonantPaths, substr string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(paths.LogsDir)
 	if err != nil {
@@ -31,12 +33,20 @@ func readPromotionLogLines(t *testing.T, paths store.PersonantPaths) []string {
 			t.Fatalf("read %s: %v", e.Name(), err)
 		}
 		for line := range strings.SplitSeq(string(body), "\n") {
-			if strings.Contains(line, "staging.promoted") {
+			if strings.Contains(line, substr) {
 				lines = append(lines, line)
 			}
 		}
 	}
 	return lines
+}
+
+// readPromotionLogLines is a back-compat shim around
+// readLogLinesContaining for the B.3 promotion tests; new callers
+// should use the general helper directly.
+func readPromotionLogLines(t *testing.T, paths store.PersonantPaths) []string {
+	t.Helper()
+	return readLogLinesContaining(t, paths, "staging.promoted")
 }
 
 func TestProvisionalRetention_KnownSources(t *testing.T) {
@@ -547,5 +557,173 @@ func TestRouting_ExplicitDecisionOverrideRoutesToCoalesce(t *testing.T) {
 	}
 	if state.staging.len() != 0 {
 		t.Errorf("staging should be empty under explicit decision override; len=%d", state.staging.len())
+	}
+}
+
+// B.4 window-close GC: pruneStaging unit tests + Run-level integration.
+
+// TestPruneStaging_NoopBeforeFirstTurn documents the pre-Run guard:
+// when TurnNumber is still zero (state freshly constructed, never
+// Run-ed), pruneStaging must not touch the buffer regardless of what
+// is in it.
+func TestPruneStaging_NoopBeforeFirstTurn(t *testing.T) {
+	state := &State{staging: newStagingBuffer(), TurnNumber: 0}
+	state.staging.add(stagedSymbol{
+		Normalized: "before-any-turn",
+		Raw:        "before-any-turn",
+		Source:     store.SourceDeterministic,
+		StagedAt:   0,
+	})
+	if got := pruneStaging(state); got != 0 {
+		t.Errorf("pruneStaging at TurnNumber=0: got %d evicted, want 0", got)
+	}
+	if _, ok := state.staging.lookup("before-any-turn"); !ok {
+		t.Errorf("pre-Run entry must survive; staging.len=%d", state.staging.len())
+	}
+}
+
+// TestPruneStaging_NoopWithinWindow — at TurnNumber=3, cutoff = 3-3+1
+// = 1, so nothing has StagedAt < 1. The buffer is untouched even
+// though entries from three different turns are present.
+func TestPruneStaging_NoopWithinWindow(t *testing.T) {
+	state := &State{staging: newStagingBuffer(), TurnNumber: 3}
+	for _, sa := range []int{1, 2, 3} {
+		state.staging.add(stagedSymbol{
+			Normalized: "s" + itoa(sa),
+			Raw:        "s" + itoa(sa),
+			Source:     store.SourceDeterministic,
+			StagedAt:   sa,
+		})
+	}
+	if got := pruneStaging(state); got != 0 {
+		t.Errorf("pruneStaging at TurnNumber=3: got %d evicted, want 0 (cutoff=1, nothing older)", got)
+	}
+	if state.staging.len() != 3 {
+		t.Errorf("staging.len: got %d want 3", state.staging.len())
+	}
+}
+
+// TestPruneStaging_EvictsAtWindowClose — at TurnNumber=4, cutoff =
+// 4-3+1 = 2. The StagedAt=1 entry evicts; StagedAt=2 and StagedAt=3
+// survive. This is the first turn at which any entry can age out.
+func TestPruneStaging_EvictsAtWindowClose(t *testing.T) {
+	state := &State{staging: newStagingBuffer(), TurnNumber: 4}
+	for _, sa := range []int{1, 2, 3} {
+		state.staging.add(stagedSymbol{
+			Normalized: "s" + itoa(sa),
+			Raw:        "s" + itoa(sa),
+			Source:     store.SourceDeterministic,
+			StagedAt:   sa,
+		})
+	}
+	if got := pruneStaging(state); got != 1 {
+		t.Errorf("pruneStaging at TurnNumber=4: got %d evicted, want 1", got)
+	}
+	if _, ok := state.staging.lookup("s1"); ok {
+		t.Errorf("s1 (StagedAt=1, cutoff=2) should be evicted")
+	}
+	for _, want := range []string{"s2", "s3"} {
+		if _, ok := state.staging.lookup(want); !ok {
+			t.Errorf("%s should survive (StagedAt >= cutoff=2)", want)
+		}
+	}
+}
+
+// TestPruneStaging_EvictsMultiple — at TurnNumber=10, cutoff=8. Two
+// entries (StagedAt=1 and StagedAt=5) fall below cutoff and evict;
+// StagedAt=8 and StagedAt=10 survive (both >= 8).
+func TestPruneStaging_EvictsMultiple(t *testing.T) {
+	state := &State{staging: newStagingBuffer(), TurnNumber: 10}
+	for _, sa := range []int{1, 5, 8, 10} {
+		state.staging.add(stagedSymbol{
+			Normalized: "s" + itoa(sa),
+			Raw:        "s" + itoa(sa),
+			Source:     store.SourceDeterministic,
+			StagedAt:   sa,
+		})
+	}
+	if got := pruneStaging(state); got != 2 {
+		t.Errorf("pruneStaging at TurnNumber=10: got %d evicted, want 2", got)
+	}
+	for _, gone := range []string{"s1", "s5"} {
+		if _, ok := state.staging.lookup(gone); ok {
+			t.Errorf("%s should be evicted (StagedAt < cutoff=8)", gone)
+		}
+	}
+	for _, kept := range []string{"s8", "s10"} {
+		if _, ok := state.staging.lookup(kept); !ok {
+			t.Errorf("%s should survive (StagedAt >= cutoff=8)", kept)
+		}
+	}
+}
+
+// TestRun_EvictsStaledStagingAtTopOfRun — end-to-end through Run:
+// pre-seed staging with an entry at StagedAt=1, set TurnNumber=3 so
+// Run bumps it to 4 (cutoff = 4-3+1 = 2 -> evicts StagedAt=1). The
+// model mock returns a benign topic-tag response so the rest of Run
+// completes without error.
+func TestRun_EvictsStaledStagingAtTopOfRun(t *testing.T) {
+	paths, meta := newChainHome(t)
+	mock := model.NewScriptedMock([]model.Response{
+		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello."},
+	}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
+
+	// Pre-seed: a staged entry from turn 1, and three turns already
+	// elapsed. Run will bump TurnNumber 3 -> 4; cutoff = 2; "old" evicts.
+	state.staging.add(stagedSymbol{
+		Normalized: "old",
+		Raw:        "old",
+		Source:     store.SourceDeterministic,
+		StagedAt:   1,
+	})
+	state.TurnNumber = 3
+
+	if _, err := Run(context.Background(), state, "hello", io.Discard); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if _, ok := state.staging.lookup("old"); ok {
+		t.Errorf("expected 'old' evicted at top of turn 4; staging.len=%d", state.staging.len())
+	}
+
+	lines := readLogLinesContaining(t, paths, "staging.evicted")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 staging.evicted log line; got %d (%v)", len(lines), lines)
+	}
+	for _, want := range []string{"count=1", "turn=4"} {
+		if !strings.Contains(lines[0], want) {
+			t.Errorf("log line missing %q: %q", want, lines[0])
+		}
+	}
+}
+
+// TestRun_DoesNotEvictBeforeWindowClose — same seeding pattern but
+// TurnNumber=2 going in; Run bumps to 3; cutoff = 3-3+1 = 1; nothing
+// has StagedAt < 1, so no eviction and no log line.
+func TestRun_DoesNotEvictBeforeWindowClose(t *testing.T) {
+	paths, meta := newChainHome(t)
+	mock := model.NewScriptedMock([]model.Response{
+		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello."},
+	}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
+
+	state.staging.add(stagedSymbol{
+		Normalized: "still-fresh",
+		Raw:        "still-fresh",
+		Source:     store.SourceDeterministic,
+		StagedAt:   1,
+	})
+	state.TurnNumber = 2
+
+	if _, err := Run(context.Background(), state, "hello", io.Discard); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if _, ok := state.staging.lookup("still-fresh"); !ok {
+		t.Errorf("expected 'still-fresh' to survive (cutoff=1 at turn 3); staging.len=%d", state.staging.len())
+	}
+	if lines := readLogLinesContaining(t, paths, "staging.evicted"); len(lines) != 0 {
+		t.Errorf("expected zero staging.evicted log lines; got %d (%v)", len(lines), lines)
 	}
 }

@@ -175,6 +175,15 @@ func Run(ctx context.Context, state *State, userInput string, out io.Writer) (st
 	// the in-flight turn" must hold for the whole of Run.
 	state.TurnNumber++
 
+	// B.4 window-close GC: evict staging entries whose citation window
+	// closed at the start of this turn. Must run BEFORE the user.prompt
+	// delta so a same-turn citation cannot accidentally observe (and
+	// promote) an entry that was just supposed to expire.
+	if n := pruneStaging(state); n > 0 {
+		_ = state.Ops.Log(ctx, "staging", "evicted",
+			fmt.Sprintf("count=%d turn=%d", n, state.TurnNumber))
+	}
+
 	// Step 1: user.prompt delta.
 	if err := onContextDelta(ctx, state, Delta{Source: "user.prompt", Content: userInput}); err != nil {
 		return "", err
