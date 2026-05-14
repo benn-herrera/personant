@@ -16,10 +16,18 @@ import (
 // dotted event name from the §3.0.1 vocabulary (e.g. "user.prompt",
 // "model.response", "tool.result"). Content is the raw delta text.
 // Meta carries source-specific metadata; nil-safe.
+//
+// Retention is the provisional retention class (§3.0 transient-data
+// lifecycle). When empty, onContextDelta fills it in via
+// provisionalRetention(Source). Callers may set it explicitly to
+// override the source-driven default — the v0.1 use case is the future
+// `##` / `/keep` shell-capture override that escalates a task-class
+// source to RetentionDecision.
 type Delta struct {
-	Source  string
-	Content string
-	Meta    map[string]string
+	Source    string
+	Content   string
+	Meta      map[string]string
+	Retention memops.RetentionClass
 }
 
 // userTagRE matches user-emitted hash-tags in a prompt. The character
@@ -42,6 +50,13 @@ var userTagRE = regexp.MustCompile(`(?:^|[^a-z0-9_-])#([a-z0-9][a-z0-9_-]*)`)
 // Persistent engagement updates (spine writes) are deferred to turn
 // close — see §3.0.4.
 func onContextDelta(ctx context.Context, state *State, delta Delta) error {
+	// Step 0: provisional retention class (§3.0.1 source-driven default).
+	// Set only when the caller has not already provided one — preserves a
+	// future user-override path (e.g. a `##`-prefix shell capture that
+	// explicitly opts a task-source delta into RetentionDecision).
+	if delta.Retention == "" {
+		delta.Retention = provisionalRetention(delta.Source)
+	}
 	// Step 1: symbol extraction.
 	if err := extractSymbols(ctx, state, delta); err != nil {
 		return fmt.Errorf("turn: extract symbols: %w", err)
@@ -57,18 +72,37 @@ func onContextDelta(ctx context.Context, state *State, delta Delta) error {
 	//   TODO(phase-2-budget): track byte counts when working-set composition
 	//   lands more layers (§2.e); evict to honor layer caps.
 	// Step 5: logging — record the context-modification event on the
-	// substrate side. The Retention class is the conservative default
-	// (decision); a future transient-data lifecycle pass will refine
-	// per-source classification.
+	// substrate side. Retention is the provisional class set above (or
+	// the caller's explicit override). The current file adapter ignores
+	// the field; a future transient-data-aware adapter will route on it.
 	if err := state.Ops.EmitDelta(ctx, memops.Delta{
 		Source:    delta.Source,
 		Content:   delta.Content,
 		Meta:      delta.Meta,
-		Retention: memops.RetentionDecision,
+		Retention: delta.Retention,
 	}); err != nil {
 		return fmt.Errorf("turn: emit delta: %w", err)
 	}
 	return nil
+}
+
+// provisionalRetention returns the §3.0.1 source-driven default
+// retention class for a delta. This is the "stage 1" classification
+// (provisional, mechanical); cross-reference promotion in B.3 confirms
+// or discards. An unknown source defaults to RetentionDecision — the
+// conservative direction (callers that haven't been migrated do not
+// silently drop content).
+func provisionalRetention(source string) memops.RetentionClass {
+	switch source {
+	case "tool.result", "user.shell-capture":
+		return memops.RetentionTask
+	case "user.prompt", "model.response",
+		"thread.fetched", "digest.refresh",
+		"slash.injected", "directive.reloaded":
+		return memops.RetentionDecision
+	default:
+		return memops.RetentionDecision
+	}
 }
 
 // extractSymbols applies the §3.3 three-pass extraction policy. The

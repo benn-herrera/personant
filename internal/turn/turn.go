@@ -63,6 +63,21 @@ type State struct {
 	// turn-scoped state
 	coalesce *coalesceBuffer
 
+	// TurnNumber is the monotonically incrementing turn count for this
+	// State. Incremented at the top of every Run before any chain steps
+	// fire, so a staged delta's StagedAt always matches the turn during
+	// which it was emitted. Used by the §3.0 transient-data lifecycle
+	// (B.4 window-close GC) to evict staging entries older than the
+	// retention window.
+	TurnNumber int
+
+	// staging is the cross-turn buffer for task-class symbols awaiting
+	// cross-reference promotion (§3.0 transient-data lifecycle). Phase
+	// B.1 declares the buffer; B.2 routes task-class symbols into it
+	// instead of coalesce; B.3 cross-references and promotes; B.4 GC's
+	// at window close.
+	staging *stagingBuffer
+
 	// nowFn is a clock source used for last_engaged / created timestamps.
 	// Tests inject a deterministic clock; production callers leave it nil
 	// and Run substitutes time.Now.
@@ -88,6 +103,7 @@ func NewState(ops memops.MemoryOps, project store.ProjectMeta, provider store.Pr
 		Client:        client,
 		Budget:        workset.DefaultBudget(),
 		coalesce:      newCoalesceBuffer(),
+		staging:       newStagingBuffer(),
 	}
 }
 
@@ -148,7 +164,16 @@ func Run(ctx context.Context, state *State, userInput string, out io.Writer) (st
 	if state.coalesce == nil {
 		state.coalesce = newCoalesceBuffer()
 	}
+	if state.staging == nil {
+		state.staging = newStagingBuffer()
+	}
 	state.coalesce.reset()
+	// Bump the turn counter BEFORE any chain step fires so the user.prompt
+	// delta and the model.response delta both observe the same
+	// TurnNumber. The transient-data lifecycle B.4 window-close GC keys
+	// off StagedAt-vs-TurnNumber, so the convention "TurnNumber reflects
+	// the in-flight turn" must hold for the whole of Run.
+	state.TurnNumber++
 
 	// Step 1: user.prompt delta.
 	if err := onContextDelta(ctx, state, Delta{Source: "user.prompt", Content: userInput}); err != nil {
