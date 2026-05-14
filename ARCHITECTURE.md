@@ -127,6 +127,23 @@ When pressure builds to "just add X," ask: is this constraint load-bearing, or a
 
 All of these are load-bearing. A change that violates them is a red flag.
 
+### Substrate evolution: if/when scale forces it
+
+The substrate non-negotiables above are constraints on the *canonical* layer — the source of truth that humans inspect, git tracks, and `cat`/`grep` operate on. They do **not** preclude a fast read-optimized **derived index** alongside the canonical, accessed through the same `MemoryOps` port (an additional adapter or an internal optimization within the file adapter).
+
+If the markdown/JSONL canonical substrate ever hits a critical speed ceiling — most plausibly under six-month-simulation acceleration, not interactive use — the option to reach for is **[bbolt](https://github.com/etcd-io/bbolt)** (the etcd-maintained fork of BoltDB) as a derived KV index, with the markdown-graph remaining canonical.
+
+The reasoning, captured so future-us doesn't redo it cold:
+
+- **Workload shape matches.** Personant is read-heavy with bursty writes at well-defined turn boundaries. B+ trees (bbolt's structure) beat LSM-trees (Pebble, BadgerDB) on read latency and avoid background-compaction stalls.
+- **Pure-Go.** No CGo means the single-binary substrate non-negotiable holds; LMDB would deliver more raw read performance but breaks clean cross-compilation. The CGo cost isn't worth it for personant's likely speed envelope.
+- **Production-hardened.** etcd uses bbolt at non-trivial scale; the failure modes are well-understood.
+- **Hybrid preserves the inspectability invariants.** Canonical stays as markdown + JSONL in git; bbolt is rebuildable from canonical via `MemoryOps.RegenerateDerivedState`. Drift between canonical and bbolt is detected the same way as any derived file. `cat`/`grep`/`git log` still work on the canonical layer.
+
+This is **not** a planned upgrade. The asymmetric-cost discipline says: wait for simulation data that shows substrate I/O dominates the sim's wall-clock per simulated month. The `MemoryOps` port makes the eventual decision local to one adapter — exactly the nimbleness it earned its keep on.
+
+Pebble and LMDB were considered and rejected for this hypothetical role: Pebble for being write-optimized (wrong workload shape) and LMDB for CGo (violates substrate non-negotiable). SQLite remains a candidate if SQL-shaped queries become useful, but for KV-shaped access patterns bbolt is the closer fit.
+
 ---
 
 ## The §3.0 hook chain (load-bearing primitive)
