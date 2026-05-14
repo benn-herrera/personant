@@ -1,6 +1,7 @@
 package scenarios
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"personant/internal/memops"
 	"personant/internal/model"
 	"personant/internal/store"
+	"personant/internal/turn"
 )
 
 // assertThreadCount returns an InvariantCheck asserting len(spine) == n.
@@ -669,6 +672,161 @@ func TestScenario_OpportunisticRecall_Surfaces(t *testing.T) {
 				"thr_2": 0,
 				"thr_3": 0,
 			}, 1),
+		),
+	}
+	RunScenario(t, sc)
+}
+
+// assertThreadHistorySymbolsExclude asserts that none of the given
+// normalized symbols appear in the named thread's frontmatter
+// history_symbols. Used by the transient-data pollution scenario to
+// prove that task-class chaff staged in an earlier turn never crossed
+// over into persistent thread state.
+func assertThreadHistorySymbolsExclude(threadID string, symbols []string) InvariantCheck {
+	return func(h *Harness) error {
+		thr, err := store.LoadThread(h.Paths, threadID)
+		if err != nil {
+			return fmt.Errorf("assertThreadHistorySymbolsExclude: load %s: %w", threadID, err)
+		}
+		for _, s := range symbols {
+			for _, hs := range thr.Frontmatter.HistorySymbols {
+				if hs.Normalized == s {
+					return fmt.Errorf("assertThreadHistorySymbolsExclude: %s history_symbols contains %q (should have been evicted)",
+						threadID, s)
+				}
+			}
+		}
+		return nil
+	}
+}
+
+// assertSymbolIndexExcludes regenerates the persistent derived state
+// (symbols.jsonl) and asserts that none of the given normalized
+// symbols appear as a record. The regeneration is required because
+// the harness does not rebuild the index between operations; the
+// invariant call is the synchronization point.
+func assertSymbolIndexExcludes(symbols []string) InvariantCheck {
+	return func(h *Harness) error {
+		if err := h.Ops.RegenerateDerivedState(context.Background(), memops.IndexBuildOptions{Quiet: true}); err != nil {
+			return fmt.Errorf("assertSymbolIndexExcludes: RegenerateDerivedState: %w", err)
+		}
+		records, err := store.ReadSymbols(h.Paths.Symbols)
+		if err != nil {
+			return fmt.Errorf("assertSymbolIndexExcludes: read symbols.jsonl: %w", err)
+		}
+		present := make(map[string]struct{}, len(records))
+		for _, r := range records {
+			present[r.Symbol] = struct{}{}
+		}
+		for _, s := range symbols {
+			if _, found := present[s]; found {
+				return fmt.Errorf("assertSymbolIndexExcludes: symbol %q polluted the index (should have been evicted at window-close)", s)
+			}
+		}
+		return nil
+	}
+}
+
+// TestScenario_TransientDataPollutionPrevention drives a turn where a
+// tool.result delta carries substantial noise (file paths the model
+// never cites again) alongside a signal symbol (a path the user
+// references in the next decision-class delta). The transient-data
+// lifecycle (B.1-B.4) must:
+//
+//   - Stage all the noise + signal symbols from the task delta.
+//   - Promote ONLY the signal (the one the user.prompt cites) into
+//     the persistent symbol index.
+//   - Evict the noise at window-close (3 turns after staging).
+//
+// After window-close, the persistent symbol index must show no trace
+// of the noise — that is what "the index is not polluted by task
+// chaff" means concretely.
+//
+// This is the B.5 narrow scenario: it covers the symbol-pollution
+// aspect of transient-data only. The broader shell-capture story is
+// still gated on §4.4 + v0.2 dedup (see TransientShellCapture_Stub).
+func TestScenario_TransientDataPollutionPrevention(t *testing.T) {
+	noise := []string{
+		"internal/foo.go",
+		"internal/bar.go",
+		"internal/baz.go",
+		"internal/junk.go",
+		"internal/scratch.go",
+	}
+	const signal = "src/important.go"
+
+	sc := Scenario{
+		Name: "transient-data-pollution-prevention",
+		Steps: []Step{
+			{
+				// Turn 1: tool.result pre-event stages signal+noise;
+				// user.prompt cites only the signal → promotion of
+				// signal into coalesce, noise stays staged with
+				// StagedAt=1. Window K=3 means noise is evicted at the
+				// top of turn 4.
+				PreEvents: []turn.Delta{
+					{
+						Source: "tool.result",
+						Content: "ls returned: internal/foo.go internal/bar.go internal/baz.go " +
+							"internal/junk.go internal/scratch.go src/important.go",
+					},
+				},
+				UserInput: "focus on src/important.go for the next task",
+				MockResponse: NewMockResponseWithTag([]string{"*new-topic*"},
+					[]string{"focus", "task", "important", "work"},
+					"Looking at src/important.go now."),
+				Annotation: "create thr_1 with task pre-event + signal citation",
+				Invariants: []InvariantCheck{
+					assertThreadCount(1),
+					assertHistorySymbolsContain("thr_1", signal, 1),
+					assertThreadHistorySymbolsExclude("thr_1", noise),
+				},
+			},
+			{
+				// Turn 2: unrelated topic.
+				UserInput: "now describe category theory",
+				MockResponse: NewMockResponseWithTag([]string{"*new-topic*"},
+					[]string{"category", "theory", "math", "abstract"},
+					"Category theory studies arrows."),
+				Annotation: "create thr_2 (unrelated)",
+			},
+			{
+				// Turn 3: unrelated topic. Noise is still staged
+				// (StagedAt=1; cutoff at top of turn 3 is 3-3+1=1, not
+				// yet aged out).
+				UserInput: "what about lambda calculus",
+				MockResponse: NewMockResponseWithTag([]string{"*new-topic*"},
+					[]string{"lambda", "calculus", "computation", "logic"},
+					"Lambda calculus is a formal system."),
+				Annotation: "create thr_3 (unrelated)",
+			},
+			{
+				// Turn 4: top-of-turn pruneStaging fires with cutoff =
+				// 4-3+1 = 2; the StagedAt=1 noise evicts before any
+				// chain step in this turn can observe it.
+				UserInput: "one more question - what about type theory",
+				MockResponse: NewMockResponseWithTag([]string{"*new-topic*"},
+					[]string{"types", "theory", "formal", "system"},
+					"Type theory studies typed expressions."),
+				Annotation: "create thr_4; window-close GC evicts noise",
+			},
+		},
+		FinalInvariants: append(append([]InvariantCheck{},
+			DefaultInvariants...),
+			VerifyEngagementConsistency,
+			assertThreadCount(4),
+			// The signal must have made it through promotion into
+			// thr_1's persistent state.
+			assertHistorySymbolsContain("thr_1", signal, 1),
+			// No thread may carry noise in its persistent history_symbols.
+			assertThreadHistorySymbolsExclude("thr_1", noise),
+			assertThreadHistorySymbolsExclude("thr_2", noise),
+			assertThreadHistorySymbolsExclude("thr_3", noise),
+			assertThreadHistorySymbolsExclude("thr_4", noise),
+			// And the persistent inverse index must not list any noise
+			// path as a known symbol (window-close evicted them before
+			// they could be cited).
+			assertSymbolIndexExcludes(noise),
 		),
 	}
 	RunScenario(t, sc)

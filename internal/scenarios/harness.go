@@ -55,6 +55,13 @@ type Step struct {
 	// Annotation is a free-form label printed on assertion failure to
 	// identify which step failed in a multi-step scenario.
 	Annotation string
+
+	// PreEvents are §3.0 deltas emitted BEFORE the user.prompt delta
+	// for this step, sharing the same TurnNumber. Use for scenarios
+	// that exercise tool.result, user.shell-capture, or other
+	// non-user.prompt sources of context modification within a turn.
+	// The harness wires these into turn.RunWithDeltas.
+	PreEvents []turn.Delta
 }
 
 // Scenario is a named end-to-end flow. Setup runs once before the
@@ -286,7 +293,7 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) {
 	preSpine, _ := store.ReadSpine(h.Paths.Spine)
 
 	start := time.Now()
-	body, err := turn.Run(context.Background(), h.State, step.UserInput, io.Discard)
+	body, err := turn.RunWithDeltas(context.Background(), h.State, step.PreEvents, step.UserInput, io.Discard)
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("scenario step %d (%s): turn.Run: %v", idx+1, label, err)

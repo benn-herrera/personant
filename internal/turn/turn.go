@@ -126,32 +126,47 @@ func (s *State) now() time.Time {
 // latency cost.
 const maxRePromptsPerTurn = 1
 
-// Run drives one complete user turn end-to-end (spec §3.0):
+// Run drives one complete user turn end-to-end (spec §3.0). It is a
+// thin wrapper around RunWithDeltas with no pre-prompt deltas; see
+// RunWithDeltas for the step-by-step contract.
+func Run(ctx context.Context, state *State, userInput string, out io.Writer) (string, error) {
+	return RunWithDeltas(ctx, state, nil, userInput, out)
+}
+
+// RunWithDeltas drives one complete user turn (spec §3.0) with an
+// optional slot for pre-prompt deltas. Step ordering:
 //
-//  1. Fire user.prompt context-modify event.
-//  2. Compose working-set + build system prompt.
-//  3. Stream the model response via state.Client.ConsultStream, writing
+//  1. Bump TurnNumber + window-close GC on staging (B.4 lifecycle).
+//  2. Fire each preEvent through the §3.0 chain. preEvents are emitted
+//     AFTER staging GC but BEFORE the user.prompt delta, sharing the
+//     same TurnNumber. Use for tool.result, user.shell-capture,
+//     thread.fetched, and other non-user.prompt context-modification
+//     events that need to stage symbols for the same-turn user.prompt
+//     to cite.
+//  3. Fire user.prompt context-modify event.
+//  4. Compose working-set + build system prompt.
+//  5. Stream the model response via state.Client.ConsultStream, writing
 //     chunks through a topic-tag stream filter to out as they arrive.
 //     If the model's topic tag references a thread not in Layer B, the
 //     in-flight stream is aborted, the missing thread is fetched (per
 //     §5.5), and the request is re-issued with augmented context. The
 //     re-prompt is capped at maxRePromptsPerTurn per turn.
-//  4. Fire model.response context-modify event (parses topic tag,
+//  6. Fire model.response context-modify event (parses topic tag,
 //     accumulates symbols, defers engagement) after the stream completes.
 //     Per §3.0.5 the model.response delta fires once with the full body,
 //     not per chunk.
-//  5. Close-out the turn: fire engagement updates with the coalesced
+//  7. Close-out the turn: fire engagement updates with the coalesced
 //     symbol set (§3.0.4).
-//  6. Return the response body with the topic tag stripped (matches what
+//  8. Return the response body with the topic tag stripped (matches what
 //     the user saw on out).
 //
 // Errors at any step are wrapped and returned. The coalesce buffer is
-// reset at the start of each Run so per-turn accumulation is fresh.
+// reset at the start of each call so per-turn accumulation is fresh.
 //
 // out receives the streamed response body with the §5.1 topic tag
 // suppressed; pass io.Discard to keep the streaming behavior without
 // presenting tokens (e.g. tests that only assert on side-effects).
-func Run(ctx context.Context, state *State, userInput string, out io.Writer) (string, error) {
+func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInput string, out io.Writer) (string, error) {
 	if state == nil {
 		return "", errors.New("turn: nil state")
 	}
@@ -182,6 +197,16 @@ func Run(ctx context.Context, state *State, userInput string, out io.Writer) (st
 	if n := pruneStaging(state); n > 0 {
 		_ = state.Ops.Log(ctx, "staging", "evicted",
 			fmt.Sprintf("count=%d turn=%d", n, state.TurnNumber))
+	}
+
+	// Pre-prompt deltas (tool.result, user.shell-capture, thread.fetched,
+	// etc.). Emitted AFTER staging GC and BEFORE the user.prompt delta so
+	// they share the same TurnNumber as the user.prompt that follows and
+	// can stage task-class symbols for that prompt to cite.
+	for _, pre := range preEvents {
+		if err := onContextDelta(ctx, state, pre); err != nil {
+			return "", err
+		}
 	}
 
 	// Step 1: user.prompt delta.
