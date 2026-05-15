@@ -1,4 +1,4 @@
-# actually valid for local testing
+# none of these are live or valid
 [local]
 baseUrl = "http://localhost:11117"
 apiKey = "dummy"
