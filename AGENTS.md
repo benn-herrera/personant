@@ -151,11 +151,22 @@ In progress:
     non-reproducible source; the mining is a one-off, not a
     deterministic regen. `make recall-corpus-fetch` is the
     heavyweight, networked refresh op — NOT part of `make test`.
-  - **C.5 (next):** LLM-assisted mad-libs template authoring from
-    the corpus topic clusters; human-curated, committed.
-  - C.6 calibration scenario (synonym-depth ×
-    `recall.symbolic-threshold` sweep) — behind a heavyweight,
-    build-tag-isolated make target, not `make test`.
+  - **C.5 (done):** LLM-assisted mad-libs template authoring.
+    152 corpus templates (one per Wikipedia article, 8 domains),
+    Sonnet-authored in batches and human-curated, under
+    `corpus_templates/`. Recipe: 5 columns of 4 tight
+    interchangeable synonyms (canonical term first = the stored
+    anchor), `measure-only`. The corpus-backed scenario tests are
+    build-tag isolated (`//go:build recall_corpus`,
+    `make recall-corpus-test`) — out of `make test`. Hand-crafted
+    C.2/C.3 templates and corpus templates generate separate
+    `queries.json` / `corpus_queries.json` derived artifacts.
+  - **C.6 (next):** calibration sweep — synonym-depth M ×
+    `recall.symbolic-threshold`. Open questions surfaced by C.5,
+    to be settled by calibration data: whether to enrich the
+    stored-thread symbol set beyond the 5 anchors, and whether to
+    move recall off symmetric Jaccard to an asymmetric overlap
+    coefficient. Behind the heavyweight build-tagged target.
 
 Queued:
 - Phase 4: closure / retirement (curator-drafted summaries; ack flow;
