@@ -46,9 +46,8 @@ update-dependencies: update-agents-dependency
 # recall-madlibs regenerates the derived recall-fidelity query set
 # (Phase C.2). The output is .gitignore'd; this target is the only
 # supported way to produce it. Python stdlib only — no venv, no deps.
-MADLIBS_DIR := internal/scenarios/testdata/recall_madlibs
 recall-madlibs:
-	python3 $(MADLIBS_DIR)/generate.py
+	python3 test/tools/madlibs_generate.py
 
 test: build recall-madlibs
 	go vet ./...

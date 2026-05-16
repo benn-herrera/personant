@@ -35,9 +35,14 @@ import random
 import re
 import sys
 
+# This script lives at <repo>/test/tools/; the recall-madlibs data
+# (hand-crafted templates, derived queries.json) lives in the Go test
+# tree so the scenarios harness can consume it.
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-DEFAULT_TEMPLATES_DIR = SCRIPT_DIR / "templates"
-DEFAULT_OUT = SCRIPT_DIR / "queries.json"
+REPO_ROOT = SCRIPT_DIR.parent.parent
+DATA_DIR = REPO_ROOT / "internal" / "scenarios" / "testdata" / "recall_madlibs"
+DEFAULT_TEMPLATES_DIR = DATA_DIR / "templates"
+DEFAULT_OUT = DATA_DIR / "queries.json"
 DEFAULT_SEED = 20260515
 DEFAULT_SAMPLES = 10
 
