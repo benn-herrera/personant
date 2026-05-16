@@ -1618,7 +1618,19 @@ JSON schema so cross-version comparison works.
 Metrics worth capturing:
 
 - **Recall fidelity.** Of N expected matches, how many fired?
-  Precision/recall.
+  Precision/recall/F1 per measured step.
+  - Ground truth: `Step.ExpectedRecallMatches []string` (scenarios
+    harness); `nil` → step unmeasured.
+  - Counters: `recall_fidelity_measured_steps`,
+    `recall_fidelity_unmeasured_steps` (every step contributes
+    exactly one).
+  - Histograms (one observation per measured step):
+    `recall_fidelity_precision`, `recall_fidelity_recall`,
+    `recall_fidelity_f1`. Empty-set conventions: (E=∅, A=∅) → 1/1/1;
+    (E=∅, A≠∅) → 0/1/0; (E≠∅, A=∅) → 1/0/0.
+  - Assertion: strict-set comparison; on mismatch the harness calls
+    `t.Errorf` with the false-positive and false-negative sets so
+    both precision and recall regressions surface in test logs.
 - **Engagement accuracy.** Were tagged-engaged threads the actual
   active threads? (Compared against canonical-by-construction ground
   truth in synthetic scenarios.)

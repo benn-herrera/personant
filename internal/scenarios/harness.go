@@ -62,6 +62,26 @@ type Step struct {
 	// non-user.prompt sources of context modification within a turn.
 	// The harness wires these into turn.RunWithDeltas.
 	PreEvents []turn.Delta
+
+	// ExpectedRecallMatches is the §3.4 recall-fidelity ground truth
+	// for this step: the set of thread IDs the harness expects to
+	// observe `spine.match-fire` records for during turn close. Set
+	// semantics — duplicate IDs and ordering are not significant.
+	//
+	//   - nil           → step is unmeasured; no assertion, no
+	//                     precision/recall/F1 sample emitted. The
+	//                     metrics blob counts these via
+	//                     `recall_fidelity_unmeasured_steps`.
+	//   - non-nil empty → "expect zero matches" (negative probe). The
+	//                     step is measured: emits 1/1/1 on agreement.
+	//   - non-nil set   → exact-set expectation. The harness records
+	//                     per-step precision / recall / F1 into the
+	//                     §9.6 metrics blob and calls t.Errorf when
+	//                     the actual set differs (strict semantics —
+	//                     catches both false positives and false
+	//                     negatives, which is the point of the
+	//                     measurement instrument).
+	ExpectedRecallMatches []string
 }
 
 // Scenario is a named end-to-end flow. Setup runs once before the
@@ -291,6 +311,10 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) {
 	}
 
 	preSpine, _ := store.ReadSpine(h.Paths.Spine)
+	preFires, err := matchFireCounts(h.Paths)
+	if err != nil {
+		t.Fatalf("scenario step %d (%s): matchFireCounts (pre): %v", idx+1, label, err)
+	}
 
 	start := time.Now()
 	body, err := turn.RunWithDeltas(context.Background(), h.State, step.PreEvents, step.UserInput, io.Discard)
@@ -300,6 +324,11 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) {
 	}
 
 	postSpine, _ := store.ReadSpine(h.Paths.Spine)
+	postFires, err := matchFireCounts(h.Paths)
+	if err != nil {
+		t.Fatalf("scenario step %d (%s): matchFireCounts (post): %v", idx+1, label, err)
+	}
+	recordRecallFidelity(t, h, idx, label, step.ExpectedRecallMatches, diffMatchFireSet(preFires, postFires))
 
 	// Per-step metrics.
 	h.Metrics.Counter("turns", 1)

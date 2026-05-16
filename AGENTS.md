@@ -118,11 +118,21 @@ Complete:
   polluting coalesce; decision-class citation promotes; window-close
   GC evicts uncited entries at turn K+1.
 
-Queued:
-- Phase C: recall-fidelity test infrastructure (harness extension +
-  mad-libs query generator + Wikipedia corpus + LLM-assisted
-  template authoring + calibration sweeps). Captured in detail at
+In progress:
+- Phase C: recall-fidelity test infrastructure. Six-step plan in the
   `project_personant_recall_fidelity_design.md` memory.
+  - **C.1 (done):** harness extension —
+    `Step.ExpectedRecallMatches []string` + `recall_fidelity_*`
+    precision/recall/F1 histograms and measured/unmeasured-step
+    counters in the §9.6 metrics blob; strict-set assertion via
+    `t.Errorf` on mismatch.
+  - **C.2 (next):** mad-libs query generator (Python stdlib) with
+    hand-crafted templates to validate the harness end-to-end.
+  - C.3 adversarial templates; C.4 Wikipedia corpus pipeline; C.5
+    LLM-assisted template authoring; C.6 calibration scenario
+    (synonym-depth × `recall.symbolic-threshold` sweep).
+
+Queued:
 - Phase 4: closure / retirement (curator-drafted summaries; ack flow;
   spine state transitions).
 - Phase 5: cross-project digest, fallback dissection, directive

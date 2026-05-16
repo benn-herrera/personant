@@ -593,6 +593,13 @@ func TestScenarioMetricsBlobShapeIsStable(t *testing.T) {
 	if counters["threads_created"] == nil {
 		t.Errorf("counters.threads_created missing")
 	}
+	// Phase C.1 recall-fidelity accounting: every Step is either
+	// measured (ExpectedRecallMatches != nil) or unmeasured. The
+	// shape test's steps leave the field nil → unmeasured_steps
+	// must be present.
+	if counters["recall_fidelity_unmeasured_steps"] == nil {
+		t.Errorf("counters.recall_fidelity_unmeasured_steps missing")
+	}
 
 	histograms, _ := doc["histograms"].(map[string]any)
 	if histograms["turn_duration_ms"] == nil {
