@@ -1,0 +1,51 @@
+{
+  "name": "connectivity-graph-theory-corpus",
+  "topic": "wiki-connectivity-graph-theory",
+  "mode": "measure-only",
+  "source_article": "Connectivity (graph theory)",
+  "description": "Tests recall of graph connectivity concepts — vertex-connectivity, edge-connectivity, connected components, vertex cuts, and bridges — using synonym drift across standard and informal phrasings.",
+  "anchors": [
+    "vertex-connectivity",
+    "edge-connectivity",
+    "connected-component",
+    "vertex-cut",
+    "bridge"
+  ],
+  "columns": [
+    [
+      "vertex-connectivity",
+      "node-connectivity",
+      "point-connectivity",
+      "vertex-cohesion"
+    ],
+    [
+      "edge-connectivity",
+      "bond-connectivity",
+      "line-connectivity",
+      "cut-connectivity"
+    ],
+    [
+      "connected-component",
+      "maximal-connected-subgraph",
+      "connected-cluster",
+      "graph-component"
+    ],
+    [
+      "vertex-cut",
+      "separating-set",
+      "node-separator",
+      "vertex-separator"
+    ],
+    [
+      "bridge",
+      "cut-edge",
+      "isthmus",
+      "disconnecting-edge"
+    ]
+  ],
+  "sentence_templates": [
+    "what is the relationship between {0} and {1}, and how does a {2} relate to a {3} or a {4}?",
+    "if removing a {3} lowers the {0} of a graph, does the {1} also drop, and can a {4} exist in a {2}?",
+    "how do {0} and {1} bound each other, and what role do {2}, {3}, and {4} play in that bound?"
+  ]
+}

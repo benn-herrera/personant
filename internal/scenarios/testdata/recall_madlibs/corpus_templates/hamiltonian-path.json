@@ -1,0 +1,51 @@
+{
+  "name": "hamiltonian-path-corpus",
+  "topic": "wiki-hamiltonian-path",
+  "mode": "measure-only",
+  "source_article": "Hamiltonian path",
+  "description": "Tests recall of the Hamiltonian path article by querying across five core concepts — the path itself, the cycle variant, NP-completeness, the vertex unit, and the knight's tour — using synonym drift.",
+  "anchors": [
+    "hamiltonian-path",
+    "hamiltonian-cycle",
+    "np-complete",
+    "vertex",
+    "knights-tour"
+  ],
+  "columns": [
+    [
+      "hamiltonian-path",
+      "traceable-path",
+      "vertex-spanning-path",
+      "complete-vertex-walk"
+    ],
+    [
+      "hamiltonian-cycle",
+      "hamiltonian-circuit",
+      "vertex-tour",
+      "closed-hamiltonian-walk"
+    ],
+    [
+      "np-complete",
+      "computationally-intractable",
+      "np-hard-decision",
+      "nondeterministic-polynomial-complete"
+    ],
+    [
+      "vertex",
+      "graph-node",
+      "node",
+      "graph-vertex"
+    ],
+    [
+      "knights-tour",
+      "chessboard-hamiltonian-path",
+      "chess-knight-traversal",
+      "knight-hamiltonian-walk"
+    ]
+  ],
+  "sentence_templates": [
+    "what is the relationship between {0} and {1}, and why is finding either considered {2} when every {3} must be visited exactly once as in the {4}?",
+    "how does a {0} differ from a {1} in terms of {2} complexity, and what role does each {3} play in classical examples like the {4}?",
+    "if determining a {0} is {2}, does closing it into a {1} change the difficulty, and how does visiting every {3} exactly once connect to the historical {4}?"
+  ]
+}

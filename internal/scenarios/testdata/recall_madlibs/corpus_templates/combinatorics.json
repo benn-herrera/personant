@@ -1,0 +1,52 @@
+{
+  "name": "combinatorics-corpus",
+  "topic": "wiki-combinatorics",
+  "mode": "measure-only",
+  "source_article": "Combinatorics",
+  "description": "Tests recall of core combinatorics concepts including counting subfields, central formulas, partition theory, Ramsey-type results, and extremal methods.",
+  "anchors": [
+    "enumerative-combinatorics",
+    "binomial-coefficient",
+    "integer-partition",
+    "ramsey-theory",
+    "extremal-combinatorics"
+  ],
+  "columns": [
+    [
+      "enumerative-combinatorics",
+      "counting-combinatorics",
+      "combinatorial-enumeration",
+      "structure-counting"
+    ],
+    [
+      "binomial-coefficient",
+      "n-choose-k",
+      "choose-number",
+      "combination-count"
+    ],
+    [
+      "integer-partition",
+      "number-partition",
+      "additive-partition",
+      "partition-of-n"
+    ],
+    [
+      "ramsey-theory",
+      "ramsey-principle",
+      "partition-regularity",
+      "order-in-large-structures"
+    ],
+    [
+      "extremal-combinatorics",
+      "extremal-set-theory",
+      "max-min-combinatorics",
+      "size-extremal-combinatorics"
+    ]
+  ],
+  "sentence_templates": [
+    "what is the connection between {0} and {1}, and how do {2}, {3}, and {4} fit into the broader picture?",
+    "how does {3} relate to {4}, and what role do {0}, {1}, and {2} play in establishing those results?",
+    "in studying {2} using tools from {0}, how are {1}, {3}, and {4} typically invoked?",
+    "can {4} results about {2} be derived using {0} methods, and where do {1} and {3} enter the argument?"
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "eulerian-path-corpus",
+  "topic": "wiki-eulerian-path",
+  "mode": "measure-only",
+  "source_article": "Eulerian path",
+  "description": "Tests recall of Eulerian path concepts by varying phrasings of the trail type, degree condition, construction algorithm, cut-edge notion, and motivating historical problem.",
+  "anchors": [
+    "eulerian-trail",
+    "even-degree",
+    "hierholzers-algorithm",
+    "bridge",
+    "konigsberg-problem"
+  ],
+  "columns": [
+    [
+      "eulerian-trail",
+      "euler-walk",
+      "edge-traversal-path",
+      "unicursal-trail"
+    ],
+    [
+      "even-degree",
+      "even-valence",
+      "balanced-vertex-degree",
+      "equal-in-out-degree"
+    ],
+    [
+      "hierholzers-algorithm",
+      "euler-tour-construction",
+      "linear-time-circuit-finder",
+      "closed-tour-stitching"
+    ],
+    [
+      "bridge",
+      "cut-edge",
+      "isthmus",
+      "disconnecting-edge"
+    ],
+    [
+      "konigsberg-problem",
+      "seven-bridges-problem",
+      "bridge-crossing-puzzle",
+      "konigsberg-bridge-puzzle"
+    ]
+  ],
+  "sentence_templates": [
+    "what condition on {1} guarantees that a {0} exists, and how does {2} exploit {3} avoidance to solve the {4}",
+    "does finding a {0} require every vertex to satisfy {1}, and can {2} handle graphs with a {3} given its origin in the {4}",
+    "if a graph has a {3} does that prevent a {0} from existing, and what role does {1} play when applying {2} to answer the {4}"
+  ]
+}

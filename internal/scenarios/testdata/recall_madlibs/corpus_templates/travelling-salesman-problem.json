@@ -1,0 +1,51 @@
+{
+  "name": "travelling-salesman-problem-corpus",
+  "topic": "wiki-travelling-salesman-problem",
+  "mode": "measure-only",
+  "source_article": "Travelling salesman problem",
+  "description": "Tests recall of TSP concepts across five dimensions: the core Hamiltonian structure, NP-hardness, the nearest-neighbour greedy heuristic, the Christofides-Serdyukov 1.5-approximation, and the subtour-elimination constraint from the DFJ formulation.",
+  "anchors": [
+    "hamiltonian-cycle",
+    "np-hardness",
+    "nearest-neighbour-heuristic",
+    "christofides-serdyukov-algorithm",
+    "subtour-elimination-constraint"
+  ],
+  "columns": [
+    [
+      "hamiltonian-cycle",
+      "hamiltonian-tour",
+      "closed-hamiltonian-path",
+      "round-trip-tour"
+    ],
+    [
+      "np-hardness",
+      "intractability",
+      "computational-hardness",
+      "exponential-worst-case-complexity"
+    ],
+    [
+      "nearest-neighbour-heuristic",
+      "greedy-nearest-city",
+      "closest-unvisited-heuristic",
+      "proximity-first-search"
+    ],
+    [
+      "christofides-serdyukov-algorithm",
+      "1-5-approximation-algorithm",
+      "three-halves-approximation",
+      "serdyukov-christofides-method"
+    ],
+    [
+      "subtour-elimination-constraint",
+      "sub-tour-prevention-inequality",
+      "no-proper-subset-cycle-condition",
+      "cycle-breaking-constraint"
+    ]
+  ],
+  "sentence_templates": [
+    "how does {0} relate to {1}, and what do {2}, {3}, and {4} reveal about solving the problem?",
+    "in the context of {1}, why is finding a {0} hard, and how do {2} and {3} exploit {4} to improve solutions?",
+    "what role does {4} play in formulating {0}, and how does {1} explain why {2} and {3} are valued approximations?"
+  ]
+}

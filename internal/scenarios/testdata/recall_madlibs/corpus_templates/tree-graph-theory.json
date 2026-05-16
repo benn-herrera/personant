@@ -1,0 +1,51 @@
+{
+  "name": "tree-graph-theory-corpus",
+  "topic": "wiki-tree-graph-theory",
+  "mode": "measure-only",
+  "source_article": "Tree (graph theory)",
+  "description": "Tests recall of tree graph theory concepts by querying with synonym drift across acyclicity, leaf vertices, spanning trees, arborescences, and Prüfer sequences.",
+  "anchors": [
+    "acyclic-graph",
+    "leaf",
+    "spanning-tree",
+    "arborescence",
+    "prufer-sequence"
+  ],
+  "columns": [
+    [
+      "acyclic-graph",
+      "cycle-free-graph",
+      "forest-graph",
+      "cycle-absent-graph"
+    ],
+    [
+      "leaf",
+      "terminal-vertex",
+      "external-vertex",
+      "pendant-vertex"
+    ],
+    [
+      "spanning-tree",
+      "covering-tree",
+      "connecting-subtree",
+      "minimal-connected-subgraph"
+    ],
+    [
+      "arborescence",
+      "out-tree",
+      "directed-rooted-tree",
+      "outward-branching"
+    ],
+    [
+      "prufer-sequence",
+      "prufer-code",
+      "tree-encoding",
+      "vertex-label-sequence"
+    ]
+  ],
+  "sentence_templates": [
+    "what is the relationship between {0} and {2}, and how do {1} nodes, {3} structure, and {4} all connect?",
+    "in a {0} with one designated root forming a {3}, how does a {2} relate to {1} count and what role does {4} play in enumeration?",
+    "how does {4} encode a {0} as a {2}, and what constraints does {3} impose on {1} vertices?"
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "planar-graph-corpus",
+  "topic": "wiki-planar-graph",
+  "mode": "measure-only",
+  "source_article": "Planar graph",
+  "description": "Tests recall of planar graph theory concepts including embedding, Kuratowski's theorem, Euler's formula, dual graphs, and the four color theorem.",
+  "anchors": [
+    "planar-embedding",
+    "kuratowskis-theorem",
+    "eulers-formula",
+    "dual-graph",
+    "four-color-theorem"
+  ],
+  "columns": [
+    [
+      "planar-embedding",
+      "plane-drawing",
+      "crossing-free-drawing",
+      "planar-representation"
+    ],
+    [
+      "kuratowskis-theorem",
+      "forbidden-subgraph-theorem",
+      "subdivision-characterization",
+      "planarity-obstruction-theorem"
+    ],
+    [
+      "eulers-formula",
+      "euler-characteristic",
+      "vertex-edge-face-relation",
+      "polyhedron-formula"
+    ],
+    [
+      "dual-graph",
+      "planar-dual",
+      "face-adjacency-graph",
+      "geometric-dual"
+    ],
+    [
+      "four-color-theorem",
+      "four-colorability",
+      "4-chromatic-bound",
+      "planar-coloring-theorem"
+    ]
+  ],
+  "sentence_templates": [
+    "what is the relationship between {0} and {1}, and how do {2}, {3}, and {4} each depend on planarity?",
+    "if {3} is constructed from a graph that satisfies {1}, does {2} still hold, and what does {0} imply for {4}?",
+    "how does {2} constrain the structure of a {0}, given that {1} forbids certain subgraphs, and what does {4} say about the {3}?"
+  ]
+}

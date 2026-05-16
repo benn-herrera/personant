@@ -1,0 +1,52 @@
+{
+  "name": "flow-network-corpus",
+  "topic": "wiki-flow-network",
+  "mode": "measure-only",
+  "source_article": "Flow network",
+  "description": "Tests recall of flow-network concepts including conservation, residual graphs, augmenting paths, the max-flow min-cut theorem, and flow decomposition.",
+  "anchors": [
+    "flow-conservation",
+    "residual-network",
+    "augmenting-path",
+    "max-flow-min-cut",
+    "flow-decomposition"
+  ],
+  "columns": [
+    [
+      "flow-conservation",
+      "kirchhoff-current-analogy",
+      "balance-constraint",
+      "in-out-balance"
+    ],
+    [
+      "residual-network",
+      "residual-graph",
+      "capacity-graph",
+      "leftover-capacity-graph"
+    ],
+    [
+      "augmenting-path",
+      "flow-augmenting-path",
+      "available-flow-path",
+      "residual-path"
+    ],
+    [
+      "max-flow-min-cut",
+      "maxflow-mincut-theorem",
+      "flow-cut-duality",
+      "capacity-cut-bound"
+    ],
+    [
+      "flow-decomposition",
+      "path-flow-decomposition",
+      "flow-path-breakdown",
+      "cycle-path-decomposition"
+    ]
+  ],
+  "sentence_templates": [
+    "how does {0} determine whether a {1} still has available capacity, and can {2} always be found using {3} together with {4}?",
+    "what is the relationship between {0} and {3}, and how do {1}, {2}, and {4} help explain it?",
+    "if {2} exists in a {1}, does {0} still hold at every intermediate node, and how does {3} connect to {4}?",
+    "explain how {4} relies on {2} found in the {1}, given that {0} governs each internal node under {3}"
+  ]
+}

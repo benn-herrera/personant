@@ -1,0 +1,51 @@
+{
+  "name": "spanning-tree-corpus",
+  "topic": "wiki-spanning-tree",
+  "mode": "measure-only",
+  "source_article": "Spanning tree",
+  "description": "Tests recall of spanning tree concepts including tree construction, cycle structure, counting theorems, and optimization variants.",
+  "anchors": [
+    "spanning-tree",
+    "minimum-spanning-tree",
+    "fundamental-cycle",
+    "kirchhoffs-theorem",
+    "depth-first-search"
+  ],
+  "columns": [
+    [
+      "spanning-tree",
+      "covering-tree",
+      "spanning-subgraph-tree",
+      "connector-tree"
+    ],
+    [
+      "minimum-spanning-tree",
+      "lightest-spanning-tree",
+      "least-cost-spanning-tree",
+      "optimal-spanning-tree"
+    ],
+    [
+      "fundamental-cycle",
+      "back-edge-cycle",
+      "chord-cycle",
+      "cotree-cycle"
+    ],
+    [
+      "kirchhoffs-theorem",
+      "matrix-tree-theorem",
+      "kirchhoff-matrix-rule",
+      "laplacian-determinant-method"
+    ],
+    [
+      "depth-first-search",
+      "dfs-traversal",
+      "backtracking-search",
+      "stack-based-traversal"
+    ]
+  ],
+  "sentence_templates": [
+    "what is the relationship between {0} and {1}, and how does {2} arise when {3} is applied during {4}?",
+    "when building a {0} using {4}, does each {2} correspond to a non-tree edge, and can {3} count the result alongside {1}?",
+    "how does {3} enumerate {0} instances for a graph where {1} is sought, given that {2} emerges from each added edge during {4}?"
+  ]
+}

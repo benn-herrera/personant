@@ -1,0 +1,51 @@
+{
+  "name": "adjacency-matrix-corpus",
+  "topic": "wiki-adjacency-matrix",
+  "mode": "measure-only",
+  "source_article": "Adjacency matrix",
+  "description": "Tests recall of graph-representation concepts from the adjacency-matrix article, covering the matrix itself, its spectral properties, graph isomorphism, the list alternative, and the spectral gap.",
+  "anchors": [
+    "adjacency-matrix",
+    "graph-spectrum",
+    "graph-isomorphism",
+    "adjacency-list",
+    "spectral-gap"
+  ],
+  "columns": [
+    [
+      "adjacency-matrix",
+      "vertex-adjacency-array",
+      "graph-connection-matrix",
+      "square-edge-indicator-matrix"
+    ],
+    [
+      "graph-spectrum",
+      "eigenvalue-set",
+      "eigen-spectrum",
+      "characteristic-value-set"
+    ],
+    [
+      "graph-isomorphism",
+      "graph-equivalence",
+      "structural-graph-identity",
+      "vertex-relabeling-equivalence"
+    ],
+    [
+      "adjacency-list",
+      "neighbor-list",
+      "vertex-neighbor-list",
+      "linked-neighbor-structure"
+    ],
+    [
+      "spectral-gap",
+      "eigenvalue-gap",
+      "lambda-gap",
+      "expansion-gap"
+    ]
+  ],
+  "sentence_templates": [
+    "how does {0} encode edges, and what does {1} say about the graph given {2}, {3}, and {4}?",
+    "when comparing {0} to {3}, how do {1} and {4} change under {2}?",
+    "if {2} is detected via {0}, what role do {1}, {4}, and {3} each play in that proof?"
+  ]
+}

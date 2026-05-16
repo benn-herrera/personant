@@ -1,0 +1,51 @@
+{
+  "name": "graph-isomorphism-corpus",
+  "topic": "wiki-graph-isomorphism",
+  "mode": "measure-only",
+  "source_article": "Graph isomorphism",
+  "description": "Tests recall of stored graph-isomorphism content using synonym drift across the core bijection concept, the map type, the decision problem, self-isomorphisms, and equivalence classes.",
+  "anchors": [
+    "graph-isomorphism",
+    "vertex-bijection",
+    "graph-isomorphism-problem",
+    "automorphism",
+    "isomorphism-class"
+  ],
+  "columns": [
+    [
+      "graph-isomorphism",
+      "edge-preserving-bijection",
+      "structure-preserving-bijection",
+      "adjacency-preserving-map"
+    ],
+    [
+      "vertex-bijection",
+      "vertex-correspondence",
+      "vertex-mapping",
+      "node-mapping"
+    ],
+    [
+      "graph-isomorphism-problem",
+      "isomorphism-decision-problem",
+      "gi-problem",
+      "graph-equivalence-problem"
+    ],
+    [
+      "automorphism",
+      "self-isomorphism",
+      "graph-self-map",
+      "symmetry-mapping"
+    ],
+    [
+      "isomorphism-class",
+      "equivalence-class",
+      "graph-equivalence-class",
+      "iso-class"
+    ]
+  ],
+  "sentence_templates": [
+    "what is the relationship between {0} and {1}, and how does {2} determine whether {3} or {4} applies to a given graph",
+    "when studying {2}, how does {1} define {0}, and what role do {3} and {4} play in characterizing graph structure",
+    "how does {0} rely on {1} to establish {4}, and what does {2} say about efficiently detecting {3}"
+  ]
+}

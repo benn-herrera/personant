@@ -1,0 +1,20 @@
+{
+  "name": "graph-theory-corpus",
+  "topic": "wiki-graph-theory",
+  "mode": "measure-only",
+  "source_article": "Graph theory",
+  "description": "Tests recall of graph theory concepts using synonym drift across vertex, edge, graph coloring, spanning tree, and adjacency list terminology.",
+  "anchors": ["vertex", "edge", "graph-coloring", "spanning-tree", "adjacency-list"],
+  "columns": [
+    ["vertex", "node", "point", "junction"],
+    ["edge", "arc", "link", "line"],
+    ["graph-coloring", "vertex-coloring", "chromatic-assignment", "color-labeling"],
+    ["spanning-tree", "covering-tree", "tree-subgraph", "connected-spanning-subgraph"],
+    ["adjacency-list", "neighbor-list", "incidence-list", "neighbor-roster"]
+  ],
+  "sentence_templates": [
+    "what role does a {0} play in a {1}, and how does {2} use {3} structures stored in an {4}?",
+    "how is each {0} connected via a {1}, and what do {2}, {3}, and {4} have in common in graph representations?",
+    "when a {0} is incident to a {1}, how does {2} determine the {3} that appears in the {4}?"
+  ]
+}

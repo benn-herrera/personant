@@ -1,0 +1,51 @@
+{
+  "name": "matching-graph-theory-corpus",
+  "topic": "wiki-matching-graph-theory",
+  "mode": "measure-only",
+  "source_article": "Matching (graph theory)",
+  "description": "Tests recall of graph matching concepts by varying synonyms for perfect matching, augmenting path, maximum matching, bipartite graph, and edge cover.",
+  "anchors": [
+    "perfect-matching",
+    "augmenting-path",
+    "maximum-matching",
+    "bipartite-graph",
+    "edge-cover"
+  ],
+  "columns": [
+    [
+      "perfect-matching",
+      "complete-matching",
+      "full-matching",
+      "vertex-saturating-matching"
+    ],
+    [
+      "augmenting-path",
+      "improvement-path",
+      "berge-path",
+      "augmentation-path"
+    ],
+    [
+      "maximum-matching",
+      "maximum-cardinality-matching",
+      "largest-matching",
+      "optimal-matching"
+    ],
+    [
+      "bipartite-graph",
+      "bigraph",
+      "two-partite-graph",
+      "two-colorable-graph"
+    ],
+    [
+      "edge-cover",
+      "vertex-edge-cover",
+      "edge-covering-set",
+      "covering-edge-set"
+    ]
+  ],
+  "sentence_templates": [
+    "what is the relationship between {0} and {1} when searching for a {2} in a {3}, and how does {4} factor in?",
+    "in a {3} does a {1} always lead to a {2}, and when does a {0} minimize the {4}?",
+    "how does {1} help construct a {2} inside a {3}, and what constraint does {4} impose on a {0}?"
+  ]
+}

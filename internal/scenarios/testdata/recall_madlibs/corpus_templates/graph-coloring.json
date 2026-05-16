@@ -1,0 +1,51 @@
+{
+  "name": "graph-coloring-corpus",
+  "topic": "wiki-graph-coloring",
+  "mode": "measure-only",
+  "source_article": "Graph coloring",
+  "description": "Tests recall of graph coloring concepts including chromatic number, the four color theorem, chromatic polynomial, greedy coloring, and the deletion-contraction algorithm.",
+  "anchors": [
+    "chromatic-number",
+    "four-color-theorem",
+    "chromatic-polynomial",
+    "greedy-coloring",
+    "deletion-contraction"
+  ],
+  "columns": [
+    [
+      "chromatic-number",
+      "color-number",
+      "minimum-coloring-number",
+      "vertex-chromatic-number"
+    ],
+    [
+      "four-color-theorem",
+      "four-color-conjecture",
+      "four-color-result",
+      "planar-four-coloring-theorem"
+    ],
+    [
+      "chromatic-polynomial",
+      "color-counting-polynomial",
+      "coloring-enumeration-polynomial",
+      "graph-coloring-polynomial"
+    ],
+    [
+      "greedy-coloring",
+      "sequential-coloring",
+      "first-fit-coloring",
+      "incremental-coloring"
+    ],
+    [
+      "deletion-contraction",
+      "delete-contract-algorithm",
+      "contraction-deletion-recurrence",
+      "edge-deletion-contraction"
+    ]
+  ],
+  "sentence_templates": [
+    "what is the relationship between {0} and {1}, and how does the {2} capture it alongside {3} and {4}?",
+    "how does {1} constrain {0}, and can {2} together with {3} and {4} be used to verify it computationally?",
+    "if {3} is used to approximate {0}, does the {2} provide a tighter bound than {1} allows, and how does {4} factor in?"
+  ]
+}

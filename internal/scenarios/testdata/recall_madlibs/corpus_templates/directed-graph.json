@@ -1,0 +1,26 @@
+{
+  "name": "directed-graph-corpus",
+  "topic": "wiki-directed-graph",
+  "mode": "measure-only",
+  "source_article": "Directed graph",
+  "description": "Tests recall of directed-graph concepts by varying terminology for the graph structure, its edges, indegree, strong connectivity, and acyclicity.",
+  "anchors": [
+    "directed-graph",
+    "directed-edge",
+    "indegree",
+    "strongly-connected",
+    "directed-acyclic-graph"
+  ],
+  "columns": [
+    ["directed-graph", "digraph", "directed-network", "directed-multigraph"],
+    ["directed-edge", "arc", "arrow", "directed-arc"],
+    ["indegree", "in-degree", "in-valence", "incoming-degree"],
+    ["strongly-connected", "strong-connectivity", "strong-connectedness", "mutually-reachable"],
+    ["directed-acyclic-graph", "dag", "acyclic-digraph", "cycle-free-digraph"]
+  ],
+  "sentence_templates": [
+    "in a {0}, what is the relationship between a {1} and the {2} of a vertex, and how does {3} differ from {4}?",
+    "how does {3} of a {0} depend on {1} orientation, and what constraints does {2} place on a {4}?",
+    "when analyzing a {4}, does each {1} contribute equally to the {2} of its target, and can the graph still exhibit {3} within a {0}?"
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "graph-discrete-mathematics-corpus",
+  "topic": "wiki-graph-discrete-mathematics",
+  "mode": "measure-only",
+  "source_article": "Graph (discrete mathematics)",
+  "description": "Tests recall of graph-theory fundamentals by varying synonyms for vertex, edge, digraph, vertex-degree, and weighted-graph across synthetic queries.",
+  "anchors": [
+    "vertex",
+    "edge",
+    "digraph",
+    "vertex-degree",
+    "weighted-graph"
+  ],
+  "columns": [
+    ["vertex", "node", "point", "corner"],
+    ["edge", "link", "arc", "line"],
+    ["digraph", "directed-graph", "oriented-graph", "quiver"],
+    ["vertex-degree", "valency", "incidence-count", "edge-count-per-node"],
+    ["weighted-graph", "network", "cost-graph", "capacitated-graph"]
+  ],
+  "sentence_templates": [
+    "what is the relationship between a {0} and an {1} in a {2}, and how does {3} affect the structure of a {4}?",
+    "in a {2}, how is each {0} connected by an {1}, and what role does {3} play when analyzing a {4}?",
+    "how does {3} determine the connectivity of a {0} reached by an {1} inside a {2} that is also a {4}?"
+  ]
+}

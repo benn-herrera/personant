@@ -1,0 +1,51 @@
+{
+  "name": "shortest-path-problem-corpus",
+  "topic": "wiki-shortest-path-problem",
+  "mode": "measure-only",
+  "source_article": "Shortest path problem",
+  "description": "Tests recall of shortest-path concepts across synonym drift in algorithm names, edge costs, cycle detection, and all-pairs variants.",
+  "anchors": [
+    "shortest-path",
+    "edge-weight",
+    "dijkstras-algorithm",
+    "negative-cycle",
+    "all-pairs-shortest-path"
+  ],
+  "columns": [
+    [
+      "shortest-path",
+      "geodesic",
+      "minimum-cost-path",
+      "least-weight-path"
+    ],
+    [
+      "edge-weight",
+      "arc-cost",
+      "link-weight",
+      "traversal-cost"
+    ],
+    [
+      "dijkstras-algorithm",
+      "shortest-path-first",
+      "dijkstra-search",
+      "label-setting-algorithm"
+    ],
+    [
+      "negative-cycle",
+      "negative-weight-loop",
+      "negative-cost-cycle",
+      "weight-reducing-cycle"
+    ],
+    [
+      "all-pairs-shortest-path",
+      "all-to-all-routing",
+      "complete-distance-matrix",
+      "pairwise-optimal-path"
+    ]
+  ],
+  "sentence_templates": [
+    "what is {0} and how does {1} affect which {2} finds, especially when a {3} exists and the goal is {4}?",
+    "when computing {4} in a graph, does the presence of a {3} invalidate {2} and if so how does {1} factor into finding a valid {0}?",
+    "how does {2} use {1} to find a {0}, and what happens to {4} when a {3} is detected in the input?"
+  ]
+}

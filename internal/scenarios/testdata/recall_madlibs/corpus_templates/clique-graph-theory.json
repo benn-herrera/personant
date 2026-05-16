@@ -1,0 +1,51 @@
+{
+  "name": "clique-graph-theory-corpus",
+  "topic": "wiki-clique-graph-theory",
+  "mode": "measure-only",
+  "source_article": "Clique (graph theory)",
+  "description": "Tests recall of clique-theory concepts by varying phrasing across clique definitions, maximality, clique number, independent sets, and the computational clique problem.",
+  "anchors": [
+    "clique",
+    "maximal-clique",
+    "clique-number",
+    "independent-set",
+    "clique-problem"
+  ],
+  "columns": [
+    [
+      "clique",
+      "complete-subgraph",
+      "fully-connected-subgraph",
+      "mutual-adjacency-set"
+    ],
+    [
+      "maximal-clique",
+      "inclusion-maximal-clique",
+      "non-extendable-clique",
+      "locally-maximum-clique"
+    ],
+    [
+      "clique-number",
+      "maximum-clique-size",
+      "omega-number",
+      "largest-clique-order"
+    ],
+    [
+      "independent-set",
+      "stable-set",
+      "coclique",
+      "anticlique"
+    ],
+    [
+      "clique-problem",
+      "maximum-clique-problem",
+      "clique-finding-problem",
+      "clique-detection-problem"
+    ]
+  ],
+  "sentence_templates": [
+    "what is a {0} and how does a {1} relate to the {2}, given that a {3} appears in the complement graph and the {4} is np-complete?",
+    "how does finding a {1} differ from computing the {2} of a graph, and why does the {4} matter when a {0} corresponds to a {3} in the complement?",
+    "in a graph where every {0} has a dual {3}, how do we determine the {2} efficiently, what makes a {1} hard to enumerate, and what complexity class contains the {4}?"
+  ]
+}
