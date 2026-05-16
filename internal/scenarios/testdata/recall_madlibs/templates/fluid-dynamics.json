@@ -1,0 +1,51 @@
+{
+  "name": "fluid-dynamics-corpus",
+  "topic": "wiki-fluid-dynamics",
+  "mode": "measure-only",
+  "source_article": "Fluid dynamics",
+  "description": "Recall-fidelity template covering five core fluid-dynamics concepts with synonym columns spanning canonical names to descriptive paraphrases.",
+  "anchors": [
+    "reynolds-number",
+    "navier-stokes-equations",
+    "continuity-equation",
+    "mach-number",
+    "boundary-layer"
+  ],
+  "columns": [
+    [
+      "reynolds-number",
+      "inertia-viscosity-ratio",
+      "flow-regime-criterion",
+      "turbulence-onset-parameter"
+    ],
+    [
+      "navier-stokes-equations",
+      "viscous-momentum-pdes",
+      "momentum-transport-equations",
+      "fluid-motion-differential-system"
+    ],
+    [
+      "continuity-equation",
+      "mass-conservation-law",
+      "mass-balance-equation",
+      "conservation-of-mass"
+    ],
+    [
+      "mach-number",
+      "compressibility-ratio",
+      "sonic-speed-fraction",
+      "flow-speed-index"
+    ],
+    [
+      "boundary-layer",
+      "near-wall-viscous-region",
+      "wall-shear-zone",
+      "surface-friction-sublayer"
+    ]
+  ],
+  "sentence_templates": [
+    "what does the {0} tell us about solving the {1} and when does the {2} apply to flows where the {3} is low inside the {4}",
+    "how does the {0} determine whether the {1} can be simplified given that the {2} holds and the {3} stays below 0-3 outside the {4}",
+    "if the {0} is very high why does the {1} still matter near a solid surface where the {2} breaks down relative to the {3} conditions at the edge of the {4}"
+  ]
+}

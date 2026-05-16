@@ -1,0 +1,51 @@
+{
+  "name": "knot-theory-corpus",
+  "topic": "wiki-knot-theory",
+  "mode": "measure-only",
+  "source_article": "Knot theory",
+  "description": "Tests recall of knot-theory concepts when queries use alternative phrasings for diagram representation, deformation equivalence, knot invariants, complement structure, and skein relations.",
+  "anchors": [
+    "knot-diagram",
+    "ambient-isotopy",
+    "knot-invariant",
+    "knot-complement",
+    "skein-relation"
+  ],
+  "columns": [
+    [
+      "knot-diagram",
+      "knot-projection",
+      "crossing-diagram",
+      "shadow-diagram"
+    ],
+    [
+      "ambient-isotopy",
+      "continuous-deformation",
+      "topological-equivalence",
+      "homotopy-equivalence"
+    ],
+    [
+      "knot-invariant",
+      "topological-invariant",
+      "isotopy-invariant",
+      "deformation-invariant"
+    ],
+    [
+      "knot-complement",
+      "knot-exterior",
+      "complement-space",
+      "surrounding-space"
+    ],
+    [
+      "skein-relation",
+      "crossing-change-formula",
+      "strand-exchange-relation",
+      "recursive-crossing-rule"
+    ]
+  ],
+  "sentence_templates": [
+    "how is a {2} computed from a {0} via a {4}, and does {1} preserve it across the {3}?",
+    "when {1} relates two knots, do their {0}, {2}, {3}, and {4} all agree?",
+    "what does a {4} reveal about the {2} of a {0}, and how does {1} act on the {3}?"
+  ]
+}

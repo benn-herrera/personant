@@ -1,0 +1,51 @@
+{
+  "name": "neutrino-corpus",
+  "topic": "wiki-neutrino",
+  "mode": "measure-only",
+  "source_article": "Neutrino",
+  "description": "Covers five central neutrino concepts: flavor oscillation, lepton flavor, inverse beta decay, weak interaction, and beta decay.",
+  "anchors": [
+    "neutrino-oscillation",
+    "lepton-flavor",
+    "inverse-beta-decay",
+    "weak-interaction",
+    "beta-decay"
+  ],
+  "columns": [
+    [
+      "neutrino-oscillation",
+      "flavor-oscillation",
+      "flavor-conversion",
+      "flavor-change-in-flight"
+    ],
+    [
+      "lepton-flavor",
+      "neutrino-flavor",
+      "flavor-eigenstate",
+      "neutrino-type"
+    ],
+    [
+      "inverse-beta-decay",
+      "antineutrino-proton-capture",
+      "proton-antineutrino-scattering",
+      "reines-cowan-reaction"
+    ],
+    [
+      "weak-interaction",
+      "weak-force",
+      "weak-nuclear-force",
+      "weak-coupling"
+    ],
+    [
+      "beta-decay",
+      "beta-radioactivity",
+      "beta-disintegration",
+      "radioactive-beta-emission"
+    ]
+  ],
+  "sentence_templates": [
+    "how does {0} depend on {1} and what does {2} imply for {3} in the context of {4}?",
+    "what is the relationship between {0} and {1} given that {2} is constrained by {3} in experiments involving {4}?",
+    "explain why {0} occurs for each {1} and how {2} is measured through {3} in reactions like {4}"
+  ]
+}

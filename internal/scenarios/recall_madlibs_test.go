@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 
 	"personant/internal/store"
@@ -227,6 +229,64 @@ func runMadlibsMetrics(t *testing.T, doc madlibsDoc, q madlibsQuery) metricsBlob
 		t.Fatalf("parse metrics blob: %v", err)
 	}
 	return blob
+}
+
+// TestRecallMadlibs_CorpusReport prints per-topic recall-fidelity
+// aggregates for the Wikipedia-corpus topics (topic prefix "wiki-").
+// It asserts nothing — corpus templates are measure-only by nature —
+// it is a readout: mean precision / recall / F1 over each topic's
+// vocabulary-drifted query set, the headline number C.6's calibration
+// sweep will later move. Run with -v to see the table.
+func TestRecallMadlibs_CorpusReport(t *testing.T) {
+	doc := loadMadlibsQueries(t)
+
+	byTopic := map[string][]madlibsQuery{}
+	var order []string
+	for _, q := range doc.Queries {
+		if !strings.HasPrefix(q.Topic, "wiki-") {
+			continue
+		}
+		if _, seen := byTopic[q.Topic]; !seen {
+			order = append(order, q.Topic)
+		}
+		byTopic[q.Topic] = append(byTopic[q.Topic], q)
+	}
+	if len(order) == 0 {
+		t.Skip("no wiki-corpus topics in the query set")
+	}
+	sort.Strings(order)
+
+	t.Logf("recall-fidelity over Wikipedia-corpus topics (measure-only):")
+	t.Logf("  %-22s %6s  %4s  %9s %9s %9s", "topic", "n", "fire", "precision", "recall", "f1")
+	for _, topic := range order {
+		qs := byTopic[topic]
+		var sumP, sumR, sumF float64
+		fired := 0
+		for _, q := range qs {
+			blob := runMadlibsMetrics(t, doc, q)
+			p := mean(blob.Histograms["recall_fidelity_adversarial_precision"])
+			r := mean(blob.Histograms["recall_fidelity_adversarial_recall"])
+			f := mean(blob.Histograms["recall_fidelity_adversarial_f1"])
+			sumP, sumR, sumF = sumP+p, sumR+r, sumF+f
+			if r > 0 {
+				fired++
+			}
+		}
+		n := float64(len(qs))
+		t.Logf("  %-22s %6d  %3d/%-2d %9.3f %9.3f %9.3f",
+			topic, len(qs), fired, len(qs), sumP/n, sumR/n, sumF/n)
+	}
+}
+
+func mean(xs []float64) float64 {
+	if len(xs) == 0 {
+		return 0
+	}
+	var s float64
+	for _, x := range xs {
+		s += x
+	}
+	return s / float64(len(xs))
 }
 
 // seedMadlibsThreads returns a Scenario.Setup that writes one seeded
