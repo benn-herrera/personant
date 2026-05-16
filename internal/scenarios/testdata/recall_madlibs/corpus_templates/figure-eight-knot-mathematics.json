@@ -1,0 +1,51 @@
+{
+  "name": "figure-eight-knot-mathematics-corpus",
+  "topic": "wiki-figure-eight-knot-mathematics",
+  "mode": "measure-only",
+  "source_article": "Figure-eight knot (mathematics)",
+  "description": "Synthetic queries probing knowledge of the figure-eight knot including its hyperbolic structure, amphicheirality, alternating and fibered character, and prime nature.",
+  "anchors": [
+    "hyperbolic-knot",
+    "achiral",
+    "alternating-knot",
+    "fibered-knot",
+    "prime-knot"
+  ],
+  "columns": [
+    [
+      "hyperbolic-knot",
+      "hyperbolic-complement-knot",
+      "negatively-curved-knot",
+      "thurston-hyperbolic-knot"
+    ],
+    [
+      "achiral",
+      "amphicheiral",
+      "mirror-symmetric",
+      "mirror-equivalent"
+    ],
+    [
+      "alternating-knot",
+      "crossing-alternating",
+      "alternating-diagram",
+      "over-under-alternating"
+    ],
+    [
+      "fibered-knot",
+      "fiber-bundle-knot",
+      "fibered-complement",
+      "fibration-knot"
+    ],
+    [
+      "prime-knot",
+      "irreducible-knot",
+      "non-composite-knot",
+      "atomic-knot"
+    ]
+  ],
+  "sentence_templates": [
+    "why is the figure-eight knot a {0} and how does its {1} nature relate to being an {2} a {3} and a {4}",
+    "describe what makes the figure-eight knot a {0} and explain why {1} knots that are also {2} and {3} must be {4}",
+    "discuss the {0} property of the figure-eight and compare its {1} symmetry to its character as an {2} a {3} and a {4}"
+  ]
+}

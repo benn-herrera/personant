@@ -1,0 +1,51 @@
+{
+  "name": "muon-corpus",
+  "topic": "wiki-muon",
+  "mode": "measure-only",
+  "source_article": "Muon",
+  "description": "Probes recall of muon concepts including its classification as a lepton, its decay to an electron and neutrinos, the anomalous magnetic moment, muonic atoms, and cosmic-ray origin.",
+  "anchors": [
+    "muon",
+    "weak-decay",
+    "anomalous-magnetic-moment",
+    "muonic-atom",
+    "michel-decay"
+  ],
+  "columns": [
+    [
+      "muon",
+      "mu-lepton",
+      "heavy-electron",
+      "second-generation-lepton"
+    ],
+    [
+      "weak-decay",
+      "weak-interaction-decay",
+      "weak-force-mediated-decay",
+      "weak-mediated-disintegration"
+    ],
+    [
+      "anomalous-magnetic-moment",
+      "magnetic-moment-deviation",
+      "g-minus-2",
+      "gyromagnetic-anomaly"
+    ],
+    [
+      "muonic-atom",
+      "mu-mesic-atom",
+      "muon-substituted-atom",
+      "muon-bound-atomic-state"
+    ],
+    [
+      "michel-decay",
+      "dominant-muon-decay",
+      "three-body-muon-decay",
+      "electron-two-neutrino-decay"
+    ]
+  ],
+  "sentence_templates": [
+    "The {0} undergoes {1} into products described by {4}, a process sensitive to the {2} which can be studied in {3} systems.",
+    "Precision measurements of the {2} for a {0} rely on the same {1} kinematics that govern {4}, and exotic {3} systems provide additional probes.",
+    "Because the {0} is unstable and decays via {1} following {4} kinematics, its {2} probes new physics, while {3} offers a window into nuclear structure."
+  ]
+}

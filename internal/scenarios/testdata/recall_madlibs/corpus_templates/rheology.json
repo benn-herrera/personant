@@ -1,0 +1,51 @@
+{
+  "name": "rheology-corpus",
+  "topic": "wiki-rheology",
+  "mode": "measure-only",
+  "source_article": "Rheology",
+  "description": "Query templates for the study of deformation and flow of matter, including viscoelastic and non-Newtonian behavior.",
+  "anchors": [
+    "rheology",
+    "viscoelasticity",
+    "shear-thinning",
+    "yield-stress",
+    "deborah-number"
+  ],
+  "columns": [
+    [
+      "rheology",
+      "flow-science",
+      "deformation-science",
+      "fluid-deformation-study"
+    ],
+    [
+      "viscoelasticity",
+      "elastic-viscous-behavior",
+      "viscous-elastic-response",
+      "combined-elastic-flow"
+    ],
+    [
+      "shear-thinning",
+      "pseudoplasticity",
+      "shear-rate-viscosity-decrease",
+      "flow-induced-thinning"
+    ],
+    [
+      "yield-stress",
+      "flow-threshold",
+      "critical-stress",
+      "minimum-flow-stress"
+    ],
+    [
+      "deborah-number",
+      "relaxation-observation-ratio",
+      "elasticity-timescale-ratio",
+      "viscoelastic-dimensionless-ratio"
+    ]
+  ],
+  "sentence_templates": [
+    "What does {0} say about {1} in materials that exhibit {2} above their {3} as characterized by the {4}?",
+    "How does {0} use the {4} to classify {1} in fluids showing {2} only after exceeding their {3}?",
+    "In {0}, how does {1} relate to {2} behavior when the applied force exceeds the {3} at a given {4}?"
+  ]
+}

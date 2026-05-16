@@ -1,0 +1,26 @@
+{
+  "name": "translation-biology-corpus",
+  "topic": "wiki-translation-biology",
+  "mode": "measure-only",
+  "source_article": "Translation (biology)",
+  "description": "Tests recall of five core translation concepts: the ribosome, transfer RNA, the start codon, the genetic code, and translation termination.",
+  "anchors": [
+    "ribosome",
+    "transfer-rna",
+    "start-codon",
+    "genetic-code",
+    "translation-termination"
+  ],
+  "columns": [
+    ["ribosome", "protein-synthesis-machine", "mrna-translation-complex", "rna-protein-complex"],
+    ["transfer-rna", "trna", "amino-acid-carrier-rna", "anticodon-bearing-rna"],
+    ["start-codon", "initiation-codon", "aug-codon", "translation-start-signal"],
+    ["genetic-code", "codon-amino-acid-table", "triplet-code", "nucleotide-to-residue-mapping"],
+    ["translation-termination", "stop-codon-recognition", "polypeptide-release", "ribosome-disassembly"]
+  ],
+  "sentence_templates": [
+    "the {0} decodes each codon of the {3} as {1} delivers amino acids matching the {2} until a stop codon triggers {4}",
+    "initiation at the {2} assembles the {0} with {1} in the p-site and the {3} governs elongation until {4} releases the chain",
+    "the universality of the {3} means that the {0} in all organisms reads the {2} with {1} adapters and concludes synthesis via {4}"
+  ]
+}

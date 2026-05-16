@@ -1,0 +1,51 @@
+{
+  "name": "cryptography-corpus",
+  "topic": "wiki-cryptography",
+  "mode": "measure-only",
+  "source_article": "Cryptography",
+  "description": "Tests recall of core cryptography concepts: plaintext/ciphertext transformation, cipher types, authentication, key secrecy, and cryptanalysis.",
+  "anchors": [
+    "plaintext",
+    "ciphertext",
+    "symmetric-key-cryptography",
+    "authentication",
+    "cryptanalysis"
+  ],
+  "columns": [
+    [
+      "plaintext",
+      "cleartext",
+      "unencrypted-message",
+      "readable-data"
+    ],
+    [
+      "ciphertext",
+      "encrypted-text",
+      "enciphered-output",
+      "scrambled-message"
+    ],
+    [
+      "symmetric-key-cryptography",
+      "secret-key-cryptography",
+      "shared-key-encryption",
+      "single-key-cipher"
+    ],
+    [
+      "authentication",
+      "identity-verification",
+      "sender-verification",
+      "origin-validation"
+    ],
+    [
+      "cryptanalysis",
+      "codebreaking",
+      "cipher-attack",
+      "decryption-analysis"
+    ]
+  ],
+  "sentence_templates": [
+    "Converting {0} into {1} using {2} is a foundation of {3}, and resistance to {4} determines overall security.",
+    "In {2}, a shared secret transforms {0} to {1}, and {3} ensures the recipient can trust the source before {4} becomes a concern.",
+    "Robust {3} schemes protect {0} by producing {1} through {2} in a form that resists {4}."
+  ]
+}

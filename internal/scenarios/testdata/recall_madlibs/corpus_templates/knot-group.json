@@ -1,0 +1,51 @@
+{
+  "name": "knot-group-corpus",
+  "topic": "wiki-knot-group",
+  "mode": "measure-only",
+  "source_article": "Knot group",
+  "description": "Synthetic queries probing knowledge of knot groups including the fundamental group of the complement, Wirtinger presentation, abelianization, knot invariant status, and the knot complement.",
+  "anchors": [
+    "knot-group",
+    "wirtinger-presentation",
+    "abelianization",
+    "knot-invariant",
+    "knot-complement"
+  ],
+  "columns": [
+    [
+      "knot-group",
+      "complement-fundamental-group",
+      "knot-complement-group",
+      "fundamental-group-of-complement"
+    ],
+    [
+      "wirtinger-presentation",
+      "wirtinger-algorithm",
+      "knot-group-presentation",
+      "wirtinger-method"
+    ],
+    [
+      "abelianization",
+      "abelian-quotient",
+      "commutator-quotient",
+      "abelianized-form"
+    ],
+    [
+      "knot-invariant",
+      "topological-invariant",
+      "isotopy-invariant",
+      "knot-distinguisher"
+    ],
+    [
+      "knot-complement",
+      "knot-exterior",
+      "complement-space",
+      "complement-of-knot"
+    ]
+  ],
+  "sentence_templates": [
+    "describe how the {0} is computed via {1} and explain why its {2} is always cyclic making it a useful {3} of the {4}",
+    "what is the {0} of a knot and how does {1} extract it and explain why {2} is a useful {3} of the {4}",
+    "explain why the {0} is a {3} of the {4} and describe how {1} computes it and what its {2} reveals"
+  ]
+}

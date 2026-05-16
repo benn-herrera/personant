@@ -1,0 +1,51 @@
+{
+  "name": "elliptic-curve-cryptography-corpus",
+  "topic": "wiki-elliptic-curve-cryptography",
+  "mode": "measure-only",
+  "source_article": "Elliptic-curve cryptography",
+  "description": "Tests recall of ECC concepts: elliptic curve discrete logarithm problem, finite field, key agreement, shorter key advantage, and digital signature application.",
+  "anchors": [
+    "elliptic-curve-discrete-logarithm",
+    "finite-field",
+    "key-agreement",
+    "smaller-key-size",
+    "elliptic-curve-digital-signature"
+  ],
+  "columns": [
+    [
+      "elliptic-curve-discrete-logarithm",
+      "ecdlp",
+      "elliptic-log-problem",
+      "curve-discrete-log-hardness"
+    ],
+    [
+      "finite-field",
+      "galois-field",
+      "prime-field",
+      "modular-arithmetic-field"
+    ],
+    [
+      "key-agreement",
+      "key-exchange-protocol",
+      "shared-key-establishment",
+      "mutual-key-derivation"
+    ],
+    [
+      "smaller-key-size",
+      "shorter-key-length",
+      "compact-key",
+      "reduced-key-bits"
+    ],
+    [
+      "elliptic-curve-digital-signature",
+      "ecdsa",
+      "curve-based-signature",
+      "ec-signature-scheme"
+    ]
+  ],
+  "sentence_templates": [
+    "ECC operates over a {1} and relies on the {0} to achieve {3} while supporting {2} and {4}.",
+    "The {0} over a {1} makes ECC efficient: parties perform {2} with {3} compared to RSA, and authenticate using {4}.",
+    "By grounding security in the {0} within a {1}, ECC enables {4} and {2} at {3} relative to classical systems."
+  ]
+}

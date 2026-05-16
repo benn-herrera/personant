@@ -1,0 +1,51 @@
+{
+  "name": "sterile-neutrino-corpus",
+  "topic": "wiki-sterile-neutrino",
+  "mode": "measure-only",
+  "source_article": "Sterile neutrino",
+  "description": "Probes recall of sterile neutrino concepts including right-handed chirality, the seesaw mechanism, dark matter candidacy, active-sterile mixing, and heavy neutral leptons.",
+  "anchors": [
+    "right-handed-chirality",
+    "seesaw-mechanism",
+    "dark-matter-candidate",
+    "active-sterile-mixing",
+    "heavy-neutral-lepton"
+  ],
+  "columns": [
+    [
+      "right-handed-chirality",
+      "right-chiral-helicity",
+      "right-handed-neutrino-chirality",
+      "sterile-right-handedness"
+    ],
+    [
+      "seesaw-mechanism",
+      "type-1-seesaw",
+      "neutrino-mass-seesaw",
+      "seesaw-mass-suppression"
+    ],
+    [
+      "dark-matter-candidate",
+      "dark-matter-particle-candidate",
+      "potential-dark-matter-constituent",
+      "dark-matter-prospect"
+    ],
+    [
+      "active-sterile-mixing",
+      "active-sterile-oscillation",
+      "sterile-active-neutrino-mixing",
+      "flavor-sterile-mixing"
+    ],
+    [
+      "heavy-neutral-lepton",
+      "neutral-heavy-lepton",
+      "hnl",
+      "nhl"
+    ]
+  ],
+  "sentence_templates": [
+    "A sterile neutrino with {0} could explain active neutrino masses via the {1}, qualify as a {2}, and interact with standard-model neutrinos through {3}, making it a {4}.",
+    "The {1} predicts that a {4} with {0} acquires large mass, suppressing active neutrino masses, with {3} offering the only laboratory window on this {2}.",
+    "Evidence for {3} would confirm the existence of a {4} with {0} that enables the {1} and could account for the {2} inferred from cosmological observations."
+  ]
+}

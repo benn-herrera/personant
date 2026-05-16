@@ -1,0 +1,51 @@
+{
+  "name": "non-newtonian-fluid-corpus",
+  "topic": "wiki-non-newtonian-fluid",
+  "mode": "measure-only",
+  "source_article": "Non-Newtonian fluid",
+  "description": "Query templates for fluids whose viscosity depends on shear rate or history, including shear-thinning, shear-thickening, and thixotropic types.",
+  "anchors": [
+    "non-newtonian-fluid",
+    "shear-thickening",
+    "thixotropy",
+    "bingham-plastic",
+    "rheopexy"
+  ],
+  "columns": [
+    [
+      "non-newtonian-fluid",
+      "variable-viscosity-fluid",
+      "shear-dependent-fluid",
+      "stress-dependent-viscosity-fluid"
+    ],
+    [
+      "shear-thickening",
+      "dilatancy",
+      "viscosity-increase-under-shear",
+      "stress-induced-thickening"
+    ],
+    [
+      "thixotropy",
+      "time-dependent-thinning",
+      "shear-history-thinning",
+      "reversible-viscosity-decrease"
+    ],
+    [
+      "bingham-plastic",
+      "yield-stress-fluid",
+      "viscoplastic-material",
+      "finite-threshold-flow-fluid"
+    ],
+    [
+      "rheopexy",
+      "anti-thixotropy",
+      "time-dependent-thickening",
+      "shear-history-stiffening"
+    ]
+  ],
+  "sentence_templates": [
+    "What distinguishes {1} from {4} in a {0}, and how does a {3} behave relative to time-dependent {2}?",
+    "In a {0} that exhibits {2}, how does {1} at high shear compare to {4} over time, and where does a {3} fit?",
+    "How does a {3} in a {0} differ from a fluid showing {2} under sustained load, and what makes {4} the opposite behavior captured by {1}?"
+  ]
+}

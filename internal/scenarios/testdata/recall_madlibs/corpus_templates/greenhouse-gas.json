@@ -1,0 +1,51 @@
+{
+  "name": "greenhouse-gas-corpus",
+  "topic": "wiki-greenhouse-gas",
+  "mode": "measure-only",
+  "source_article": "Greenhouse gas",
+  "description": "Measures recall of five greenhouse-gas concepts: the gas category, water vapor's amplifying role, global warming potential as a metric, atmospheric lifetime, and the airborne fraction.",
+  "anchors": [
+    "greenhouse-gas",
+    "water-vapor-feedback",
+    "global-warming-potential",
+    "atmospheric-lifetime",
+    "airborne-fraction"
+  ],
+  "columns": [
+    [
+      "greenhouse-gas",
+      "heat-trapping-gas",
+      "infrared-active-gas",
+      "radiatively-active-gas"
+    ],
+    [
+      "water-vapor-feedback",
+      "water-vapour-feedback",
+      "humidity-amplification",
+      "moisture-feedback-loop"
+    ],
+    [
+      "global-warming-potential",
+      "gwp",
+      "warming-equivalence-metric",
+      "radiative-potency-index"
+    ],
+    [
+      "atmospheric-lifetime",
+      "atmospheric-residence-time",
+      "gas-persistence-time",
+      "mean-atmospheric-lifetime"
+    ],
+    [
+      "airborne-fraction",
+      "atmospheric-retention-fraction",
+      "airborne-co2-fraction",
+      "emission-retention-ratio"
+    ]
+  ],
+  "sentence_templates": [
+    "Explain how a {0} contributes to warming, describe {1} as a secondary amplifier, compare gases using {2}, and relate {3} to the {4}.",
+    "How does {0} concentration rise over time, what is {1} and why does it matter, how is {2} calculated, and what determines {3} and {4}?",
+    "Define {0}, explain why {1} matters for long-term projections, describe how {2} allows comparison across gases, and relate {3} to the {4} of emitted CO2."
+  ]
+}

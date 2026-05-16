@@ -1,0 +1,51 @@
+{
+  "name": "interest-rate-corpus",
+  "topic": "wiki-interest-rate",
+  "mode": "measure-only",
+  "source_article": "Interest rate",
+  "description": "Tests recall of interest rate concepts including the nominal interest rate, real interest rate, federal funds rate, risk premium, and liquidity preference.",
+  "anchors": [
+    "nominal-interest-rate",
+    "real-interest-rate",
+    "federal-funds-rate",
+    "risk-premium",
+    "liquidity-preference"
+  ],
+  "columns": [
+    [
+      "nominal-interest-rate",
+      "stated-interest-rate",
+      "headline-rate",
+      "contractual-rate"
+    ],
+    [
+      "real-interest-rate",
+      "inflation-adjusted-rate",
+      "deflated-interest-rate",
+      "purchasing-power-adjusted-rate"
+    ],
+    [
+      "federal-funds-rate",
+      "overnight-policy-rate",
+      "central-bank-policy-rate",
+      "interbank-lending-rate"
+    ],
+    [
+      "risk-premium",
+      "default-spread",
+      "credit-risk-spread",
+      "yield-spread"
+    ],
+    [
+      "liquidity-preference",
+      "cash-preference",
+      "demand-for-money",
+      "money-hoarding-tendency"
+    ]
+  ],
+  "sentence_templates": [
+    "how does the {2} influence the {0} and {1} in a market where {4} shapes demand and {3} reflects borrower creditworthiness",
+    "explain how {4} affects the {1} when the {3} is added to a {0} set near the {2}",
+    "what determines the gap between {0} and {1} and how do {4} and {3} interact with the {2} in setting borrowing costs"
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "climate-corpus",
+  "topic": "wiki-climate",
+  "mode": "measure-only",
+  "source_article": "Climate",
+  "description": "Measures recall of five core climate concepts: the standard averaging period, the dominant classification scheme, paleoclimate proxy evidence, climate variability modes, and the thermohaline circulation.",
+  "anchors": [
+    "climate-normal",
+    "koppen-climate-classification",
+    "climate-proxy",
+    "climate-variability",
+    "thermohaline-circulation"
+  ],
+  "columns": [
+    [
+      "climate-normal",
+      "climatological-normal",
+      "30-year-climate-average",
+      "wmo-climate-normal"
+    ],
+    [
+      "koppen-climate-classification",
+      "koppen-classification",
+      "koppen-system",
+      "koppen-climate-scheme"
+    ],
+    [
+      "climate-proxy",
+      "paleoclimate-proxy",
+      "proxy-climate-indicator",
+      "indirect-climate-record"
+    ],
+    [
+      "climate-variability",
+      "natural-climate-variability",
+      "internal-climate-variation",
+      "climate-fluctuation"
+    ],
+    [
+      "thermohaline-circulation",
+      "ocean-thermohaline-circulation",
+      "deep-ocean-circulation",
+      "thermohaline-overturning"
+    ]
+  ],
+  "sentence_templates": [
+    "How is a {0} defined under the {1}, what {2} records are used before instrumental data, how does {3} interact with the {4}?",
+    "Define {0} and explain how the {1} uses it to categorize regions, describe what a {2} is, distinguish {3} from long-term change, and explain the {4}.",
+    "What is a {0}, how does the {1} apply it to map climate zones, what kinds of {2} inform paleoclimatology, what drives {3}, and how does the {4} redistribute heat?"
+  ]
+}

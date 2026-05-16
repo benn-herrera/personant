@@ -1,0 +1,51 @@
+{
+  "name": "trefoil-knot-corpus",
+  "topic": "wiki-trefoil-knot",
+  "mode": "measure-only",
+  "source_article": "Trefoil knot",
+  "description": "Synthetic queries probing knowledge of the trefoil knot including its chirality, tricolorability, fibered and prime nature, and alternating structure.",
+  "anchors": [
+    "chirality",
+    "tricolorability",
+    "fibered-knot",
+    "prime-knot",
+    "alternating-knot"
+  ],
+  "columns": [
+    [
+      "chirality",
+      "handedness",
+      "mirror-asymmetry",
+      "chiral-nature"
+    ],
+    [
+      "tricolorability",
+      "3-colorability",
+      "three-colorability",
+      "tricolor-property"
+    ],
+    [
+      "fibered-knot",
+      "fiber-bundle-knot",
+      "fibered-complement",
+      "fibration-knot"
+    ],
+    [
+      "prime-knot",
+      "irreducible-knot",
+      "non-composite-knot",
+      "atomic-knot"
+    ],
+    [
+      "alternating-knot",
+      "crossing-alternating-knot",
+      "alternating-diagram",
+      "over-under-alternating"
+    ]
+  ],
+  "sentence_templates": [
+    "explain how {0} of the trefoil is detected by its {1} and why its complement makes it a {2} that is also a {3} and an {4}",
+    "describe {0} in the trefoil using {1} and discuss whether it is a {2} a {3} and an {4}",
+    "what is {0} in knot theory and how does {1} demonstrate it for the trefoil as a {2} prime example of a {3} that is also an {4}"
+  ]
+}

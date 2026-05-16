@@ -1,0 +1,51 @@
+{
+  "name": "diffie-hellman-key-exchange-corpus",
+  "topic": "wiki-diffie-hellman-key-exchange",
+  "mode": "measure-only",
+  "source_article": "Diffie–Hellman key exchange",
+  "description": "Tests recall of Diffie-Hellman key exchange concepts: discrete logarithm problem, shared secret, forward secrecy, ephemeral key, and public channel.",
+  "anchors": [
+    "discrete-logarithm-problem",
+    "shared-secret",
+    "forward-secrecy",
+    "ephemeral-key",
+    "public-channel"
+  ],
+  "columns": [
+    [
+      "discrete-logarithm-problem",
+      "dlog-hardness",
+      "discrete-log-difficulty",
+      "group-logarithm-problem"
+    ],
+    [
+      "shared-secret",
+      "common-secret",
+      "mutual-secret-value",
+      "jointly-derived-key"
+    ],
+    [
+      "forward-secrecy",
+      "perfect-forward-secrecy",
+      "session-key-independence",
+      "past-session-protection"
+    ],
+    [
+      "ephemeral-key",
+      "session-key",
+      "temporary-key",
+      "per-session-keypair"
+    ],
+    [
+      "public-channel",
+      "insecure-channel",
+      "open-communication-medium",
+      "unauthenticated-channel"
+    ]
+  ],
+  "sentence_templates": [
+    "Diffie-Hellman derives a {1} over a {4} by relying on the {0}, and using a {3} achieves {2}.",
+    "The protocol establishes a {1} across a {4}: the {0} makes eavesdropping infeasible, a {3} discarded after use guarantees {2}.",
+    "By exchanging values over a {4} and exploiting the {0}, two parties compute a {1} without prior contact; discarding each {3} after use provides {2}."
+  ]
+}

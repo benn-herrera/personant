@@ -1,0 +1,51 @@
+{
+  "name": "money-supply-corpus",
+  "topic": "wiki-money-supply",
+  "mode": "measure-only",
+  "source_article": "Money supply",
+  "description": "Tests recall of money supply concepts including the monetary base, fractional-reserve banking, the money multiplier, velocity of money, and monetary aggregates.",
+  "anchors": [
+    "monetary-base",
+    "fractional-reserve-banking",
+    "money-multiplier",
+    "velocity-of-money",
+    "monetary-aggregate"
+  ],
+  "columns": [
+    [
+      "monetary-base",
+      "reserve-money",
+      "high-powered-money",
+      "base-money"
+    ],
+    [
+      "fractional-reserve-banking",
+      "partial-reserve-banking",
+      "reserve-ratio-banking",
+      "deposit-lending-system"
+    ],
+    [
+      "money-multiplier",
+      "credit-multiplier",
+      "deposit-expansion-multiplier",
+      "bank-money-multiplier"
+    ],
+    [
+      "velocity-of-money",
+      "money-turnover-rate",
+      "circulation-speed-of-money",
+      "spending-velocity"
+    ],
+    [
+      "monetary-aggregate",
+      "money-stock-measure",
+      "broad-money-measure",
+      "money-supply-indicator"
+    ]
+  ],
+  "sentence_templates": [
+    "how does {2} expand the {0} in a {1} system and what role does {4} play when {3} is assumed stable",
+    "explain how {1} links the {0} to a wider {4} through the {2} and why {3} complicates predictions about prices",
+    "what happens to {4} and the {2} when {0} grows under {1} and the {3} declines during a financial crisis"
+  ]
+}

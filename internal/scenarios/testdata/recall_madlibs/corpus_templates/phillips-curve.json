@@ -1,0 +1,51 @@
+{
+  "name": "phillips-curve-corpus",
+  "topic": "wiki-phillips-curve",
+  "mode": "measure-only",
+  "source_article": "Phillips curve",
+  "description": "Tests recall of the Phillips curve as the empirical relationship between unemployment and inflation, including its short-run tradeoff and long-run breakdown under stagflation.",
+  "anchors": [
+    "phillips-curve",
+    "inflation-unemployment-tradeoff",
+    "nairu",
+    "stagflation",
+    "inflationary-expectations"
+  ],
+  "columns": [
+    [
+      "phillips-curve",
+      "inflation-unemployment-relationship",
+      "price-employment-curve",
+      "wage-inflation-locus"
+    ],
+    [
+      "inflation-unemployment-tradeoff",
+      "price-joblessness-tradeoff",
+      "inflation-employment-tradeoff",
+      "price-stability-jobs-tradeoff"
+    ],
+    [
+      "nairu",
+      "natural-rate-of-unemployment",
+      "non-accelerating-inflation-rate",
+      "inflation-threshold-unemployment"
+    ],
+    [
+      "stagflation",
+      "simultaneous-inflation-and-unemployment",
+      "inflationary-stagnation",
+      "high-inflation-high-unemployment"
+    ],
+    [
+      "inflationary-expectations",
+      "expected-inflation",
+      "price-expectations",
+      "anticipated-inflation-rate"
+    ]
+  ],
+  "sentence_templates": [
+    "The {0} depicts a short-run {1}, but once {4} adjust upward the economy gravitates toward the {2}, producing {3} if policymakers over-stimulate.",
+    "The 1970s episode of {3} refuted the idea that the {0} offers a permanent {1}, demonstrating instead that rising {4} shift the curve toward the {2}.",
+    "Modern versions of the {0} explicitly incorporate {4}, so that exploiting the {1} repeatedly will eventually yield {3} as unemployment approaches the {2}."
+  ]
+}

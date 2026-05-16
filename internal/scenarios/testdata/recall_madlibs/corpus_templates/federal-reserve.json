@@ -1,0 +1,51 @@
+{
+  "name": "federal-reserve-corpus",
+  "topic": "wiki-federal-reserve",
+  "mode": "measure-only",
+  "source_article": "Federal Reserve",
+  "description": "Tests recall of the Federal Reserve as the US central banking system with a dual mandate to maximize employment and stabilize prices via monetary policy tools.",
+  "anchors": [
+    "federal-reserve",
+    "dual-mandate",
+    "federal-funds-rate",
+    "federal-open-market-committee",
+    "lender-of-last-resort"
+  ],
+  "columns": [
+    [
+      "federal-reserve",
+      "us-central-bank",
+      "fed",
+      "federal-reserve-system"
+    ],
+    [
+      "dual-mandate",
+      "price-stability-and-employment-goal",
+      "twin-objectives",
+      "maximum-employment-stable-prices-mandate"
+    ],
+    [
+      "federal-funds-rate",
+      "overnight-interbank-lending-rate",
+      "policy-benchmark-rate",
+      "fed-target-rate"
+    ],
+    [
+      "federal-open-market-committee",
+      "fomc",
+      "monetary-policy-committee",
+      "rate-setting-committee"
+    ],
+    [
+      "lender-of-last-resort",
+      "emergency-liquidity-provider",
+      "backstop-lender",
+      "discount-window-provider"
+    ]
+  ],
+  "sentence_templates": [
+    "The {0} pursues its {1} primarily by having the {3} set the {2}, acting as {4} when banks face funding stress.",
+    "When the {3} votes to lower the {2}, the {0} is easing policy to fulfill its {1}, while also standing ready as {4} to prevent bank runs.",
+    "Congress designed the {0} with a {1} that the {3} operationalizes through the {2}, supplemented by its role as {4} during financial crises."
+  ]
+}

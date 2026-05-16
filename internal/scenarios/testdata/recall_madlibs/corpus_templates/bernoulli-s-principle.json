@@ -1,0 +1,51 @@
+{
+  "name": "bernoulli-s-principle-corpus",
+  "topic": "wiki-bernoulli-s-principle",
+  "mode": "measure-only",
+  "source_article": "Bernoulli's principle",
+  "description": "Query templates for the energy-conservation relationship between fluid speed, pressure, and elevation in steady incompressible flow.",
+  "anchors": [
+    "bernoullis-principle",
+    "stagnation-pressure",
+    "dynamic-pressure",
+    "venturi-effect",
+    "streamline"
+  ],
+  "columns": [
+    [
+      "bernoullis-principle",
+      "bernoulli-effect",
+      "flow-speed-pressure-tradeoff",
+      "energy-conservation-in-flow"
+    ],
+    [
+      "stagnation-pressure",
+      "total-pressure",
+      "pitot-pressure",
+      "impact-pressure"
+    ],
+    [
+      "dynamic-pressure",
+      "velocity-pressure",
+      "kinetic-pressure",
+      "ram-pressure"
+    ],
+    [
+      "venturi-effect",
+      "constriction-induced-pressure-drop",
+      "throat-pressure-drop",
+      "flow-acceleration-in-constriction"
+    ],
+    [
+      "streamline",
+      "flow-path",
+      "fluid-trajectory",
+      "particle-path-line"
+    ]
+  ],
+  "sentence_templates": [
+    "How does {0} explain why {3} causes reduced {2} and elevated {1} at the narrowest point along a {4}?",
+    "Along a {4}, how does {0} relate the rise in {2} to the drop in static pressure, and what sets the {1} at rest points where {3} is strongest?",
+    "What does {0} predict about {2} and {1} along a {4} passing through a constriction where {3} occurs?"
+  ]
+}

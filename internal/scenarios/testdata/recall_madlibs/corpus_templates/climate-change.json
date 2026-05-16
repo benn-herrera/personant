@@ -1,0 +1,51 @@
+{
+  "name": "climate-change-corpus",
+  "topic": "wiki-climate-change",
+  "mode": "measure-only",
+  "source_article": "Climate change",
+  "description": "Measures recall of five core climate-change concepts: the warming trend, its dominant cause, a major feedback process, a physical impact, and the international policy response.",
+  "anchors": [
+    "global-warming",
+    "fossil-fuel-combustion",
+    "ice-albedo-feedback",
+    "sea-level-rise",
+    "paris-agreement"
+  ],
+  "columns": [
+    [
+      "global-warming",
+      "global-temperature-rise",
+      "planetary-heating",
+      "surface-warming-trend"
+    ],
+    [
+      "fossil-fuel-combustion",
+      "fossil-fuel-burning",
+      "hydrocarbon-combustion",
+      "fossil-energy-use"
+    ],
+    [
+      "ice-albedo-feedback",
+      "ice-reflectivity-feedback",
+      "cryosphere-albedo-loop",
+      "melt-reflectance-feedback"
+    ],
+    [
+      "sea-level-rise",
+      "ocean-level-increase",
+      "coastal-inundation-trend",
+      "sea-surface-elevation-gain"
+    ],
+    [
+      "paris-agreement",
+      "paris-accord",
+      "paris-climate-accord",
+      "paris-climate-treaty"
+    ]
+  ],
+  "sentence_templates": [
+    "How does {1} drive {0}, and what role does {2} play in amplifying warming that contributes to {3} under scenarios addressed by the {4}?",
+    "Explain how {0} caused by {1} triggers {2}, leading to {3}, and describe the emissions targets set by the {4}.",
+    "What is the relationship between {0}, {1} as its primary driver, {2} as an amplifying process, {3} as a measured consequence, and the {4} as the global policy framework?"
+  ]
+}

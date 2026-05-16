@@ -1,0 +1,51 @@
+{
+  "name": "mutation-corpus",
+  "topic": "wiki-mutation",
+  "mode": "measure-only",
+  "source_article": "Mutation",
+  "description": "Templates for querying stored knowledge about mutation types, causes, and effects on organisms.",
+  "anchors": [
+    "point-mutation",
+    "frameshift-mutation",
+    "germline-mutation",
+    "natural-selection",
+    "mutagen"
+  ],
+  "columns": [
+    [
+      "point-mutation",
+      "single-nucleotide-change",
+      "base-substitution",
+      "single-base-alteration"
+    ],
+    [
+      "frameshift-mutation",
+      "reading-frame-disruption",
+      "indel-frame-shift",
+      "codon-frame-displacement"
+    ],
+    [
+      "germline-mutation",
+      "heritable-mutation",
+      "inherited-sequence-change",
+      "transmissible-mutation"
+    ],
+    [
+      "natural-selection",
+      "selective-pressure",
+      "fitness-based-filtering",
+      "adaptive-selection"
+    ],
+    [
+      "mutagen",
+      "mutagenic-agent",
+      "mutation-inducer",
+      "dna-damaging-agent"
+    ]
+  ],
+  "sentence_templates": [
+    "How does a {0} differ from a {1} in protein impact when caused by {4} and does the change become a {2} subject to {3}?",
+    "Explain why {4} more often produces a {0} than a {1} and how {3} determines whether the resulting {2} spreads.",
+    "What conditions allow a {2} arising from a {0} caused by {4} to resist {3} more than one caused by a {1}?"
+  ]
+}

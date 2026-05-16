@@ -1,0 +1,51 @@
+{
+  "name": "monetary-policy-corpus",
+  "topic": "wiki-monetary-policy",
+  "mode": "measure-only",
+  "source_article": "Monetary policy",
+  "description": "Tests recall of monetary policy concepts including inflation targeting, open market operations, quantitative easing, forward guidance, and the monetary transmission mechanism.",
+  "anchors": [
+    "inflation-targeting",
+    "open-market-operations",
+    "quantitative-easing",
+    "forward-guidance",
+    "monetary-transmission"
+  ],
+  "columns": [
+    [
+      "inflation-targeting",
+      "price-stability-mandate",
+      "inflation-objective",
+      "cpi-target-regime"
+    ],
+    [
+      "open-market-operations",
+      "central-bank-asset-purchases",
+      "bond-buying-program",
+      "securities-market-intervention"
+    ],
+    [
+      "quantitative-easing",
+      "large-scale-asset-purchases",
+      "balance-sheet-expansion",
+      "unconventional-monetary-easing"
+    ],
+    [
+      "forward-guidance",
+      "policy-communication",
+      "rate-path-signaling",
+      "central-bank-guidance"
+    ],
+    [
+      "monetary-transmission",
+      "interest-rate-channel",
+      "policy-transmission-mechanism",
+      "monetary-policy-channel"
+    ]
+  ],
+  "sentence_templates": [
+    "how does {4} carry the effects of {1} to the real economy under an {0} framework when {2} supplements {3}",
+    "what role does {3} play in reinforcing {0} when a central bank conducts {1} alongside {2} via the {4}",
+    "explain how {2} supplements {1} in transmitting {0} to aggregate demand through the {4} while {3} shapes expectations"
+  ]
+}

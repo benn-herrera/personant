@@ -1,0 +1,51 @@
+{
+  "name": "turbulence-corpus",
+  "topic": "wiki-turbulence",
+  "mode": "measure-only",
+  "source_article": "Turbulence",
+  "description": "Query templates for chaotic fluid flow characterized by eddies, energy cascade, and the Kolmogorov microscales.",
+  "anchors": [
+    "turbulence",
+    "energy-cascade",
+    "kolmogorov-microscales",
+    "vortex-stretching",
+    "turbulent-diffusivity"
+  ],
+  "columns": [
+    [
+      "turbulence",
+      "chaotic-flow",
+      "turbulent-flow",
+      "irregular-fluid-motion"
+    ],
+    [
+      "energy-cascade",
+      "eddy-energy-transfer",
+      "scale-energy-transfer",
+      "inertial-range-transfer"
+    ],
+    [
+      "kolmogorov-microscales",
+      "dissipation-length-scales",
+      "viscous-cutoff-scales",
+      "smallest-turbulent-scales"
+    ],
+    [
+      "vortex-stretching",
+      "vorticity-amplification",
+      "vortex-tube-extension",
+      "rotational-intensification"
+    ],
+    [
+      "turbulent-diffusivity",
+      "eddy-diffusivity",
+      "turbulent-mixing-coefficient",
+      "chaotic-transport-coefficient"
+    ]
+  ],
+  "sentence_templates": [
+    "How does {0} drive the {1} down to {2} through {3}, and how is the resulting transport measured by {4}?",
+    "In {0}, what is the role of {3} in sustaining the {1} that terminates at {2}, and how does {4} quantify mixing?",
+    "Why do {2} set the lower limit of the {1} in {0}, and what does {3} contribute to the {4} at intermediate scales?"
+  ]
+}

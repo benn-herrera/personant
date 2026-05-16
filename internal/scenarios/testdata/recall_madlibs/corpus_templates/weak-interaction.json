@@ -1,0 +1,51 @@
+{
+  "name": "weak-interaction-corpus",
+  "topic": "wiki-weak-interaction",
+  "mode": "measure-only",
+  "source_article": "Weak interaction",
+  "description": "Query templates probing the weak interaction, beta decay, parity violation, the W boson, and CP violation.",
+  "anchors": [
+    "weak-interaction",
+    "beta-decay",
+    "parity-violation",
+    "w-boson",
+    "cp-violation"
+  ],
+  "columns": [
+    [
+      "weak-interaction",
+      "weak-force",
+      "weak-nuclear-force",
+      "fermi-interaction"
+    ],
+    [
+      "beta-decay",
+      "radioactive-beta-decay",
+      "nuclear-beta-decay",
+      "beta-emission"
+    ],
+    [
+      "parity-violation",
+      "p-violation",
+      "mirror-symmetry-breaking",
+      "handedness-violation"
+    ],
+    [
+      "w-boson",
+      "charged-weak-boson",
+      "w-plus-minus",
+      "weak-charged-carrier"
+    ],
+    [
+      "cp-violation",
+      "charge-parity-violation",
+      "cp-symmetry-breaking",
+      "matter-antimatter-asymmetry-source"
+    ]
+  ],
+  "sentence_templates": [
+    "how does {0} cause {1} through emission of a {3} while exhibiting {2} and what rare {4} asymmetry arises in similar decays",
+    "explain {2} in {0} and its connection to {4} given that {1} proceeds via {3} exchange",
+    "what is {0} and how does it mediate {1} via {3} while exhibiting {2} in a way that also produces {4}"
+  ]
+}

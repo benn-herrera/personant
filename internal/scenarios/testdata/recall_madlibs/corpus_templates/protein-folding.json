@@ -1,0 +1,26 @@
+{
+  "name": "protein-folding-corpus",
+  "topic": "wiki-protein-folding",
+  "mode": "measure-only",
+  "source_article": "Protein folding",
+  "description": "Tests recall of protein-folding concepts including the native conformation, hydrophobic burial, chaperone assistance, misfolding consequences, and the funneled energy landscape.",
+  "anchors": [
+    "native-state",
+    "hydrophobic-collapse",
+    "molecular-chaperone",
+    "misfolded-protein",
+    "energy-funnel"
+  ],
+  "columns": [
+    ["native-state", "native-conformation", "folded-state", "native-fold"],
+    ["hydrophobic-collapse", "hydrophobic-core-burial", "hydrophobic-condensation", "nonpolar-core-burial"],
+    ["molecular-chaperone", "chaperone-protein", "folding-helper", "protein-chaperone"],
+    ["misfolded-protein", "aberrant-fold", "misfold", "incorrectly-folded-protein"],
+    ["energy-funnel", "folding-funnel", "free-energy-funnel", "energy-landscape-funnel"]
+  ],
+  "sentence_templates": [
+    "what is the {0} of a protein and how does {1} drive the chain toward it without {2} assistance when a {3} forms and how does the {4} explain why folding is fast",
+    "describe the role of {2} in preventing {3} aggregation and explain how {1} contributes to reaching the {0} as modeled by the {4}",
+    "how does {1} stabilize the {0} in the absence of a {2} and what happens when a {3} escapes the {4} and accumulates"
+  ]
+}

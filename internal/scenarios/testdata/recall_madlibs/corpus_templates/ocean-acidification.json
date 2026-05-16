@@ -1,0 +1,51 @@
+{
+  "name": "ocean-acidification-corpus",
+  "topic": "wiki-ocean-acidification",
+  "mode": "measure-only",
+  "source_article": "Ocean acidification",
+  "description": "Measures recall of five ocean-acidification concepts: the pH decrease process, calcification by marine organisms, carbonate saturation state, the carbonate compensation depth, and ocean alkalinity enhancement.",
+  "anchors": [
+    "ocean-acidification",
+    "calcification",
+    "carbonate-saturation-state",
+    "carbonate-compensation-depth",
+    "ocean-alkalinity-enhancement"
+  ],
+  "columns": [
+    [
+      "ocean-acidification",
+      "seawater-acidification",
+      "ocean-ph-decline",
+      "marine-acidification"
+    ],
+    [
+      "calcification",
+      "biogenic-calcification",
+      "shell-formation",
+      "carbonate-biomineralization"
+    ],
+    [
+      "carbonate-saturation-state",
+      "aragonite-saturation-state",
+      "carbonate-ion-saturation",
+      "omega-saturation-index"
+    ],
+    [
+      "carbonate-compensation-depth",
+      "ccd",
+      "calcite-compensation-depth",
+      "carbonate-dissolution-depth"
+    ],
+    [
+      "ocean-alkalinity-enhancement",
+      "alkalinity-addition",
+      "seawater-alkalinization",
+      "marine-alkalinity-increase"
+    ]
+  ],
+  "sentence_templates": [
+    "How does {0} impair {1}, what does {2} measure, how does lowering pH shift the {3}, and how might {4} help buffer these changes?",
+    "Explain the chemical mechanism of {0}, describe how it disrupts {1}, define {2} and {3}, and evaluate {4} as a mitigation strategy.",
+    "What drives {0}, why does it threaten {1} in marine organisms, how do {2} and {3} help predict impacts, and what is {4}?"
+  ]
+}

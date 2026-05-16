@@ -1,0 +1,20 @@
+{
+  "name": "unknot-corpus",
+  "topic": "wiki-unknot",
+  "mode": "measure-only",
+  "source_article": "Unknot",
+  "description": "Recall test for the unknot as the trivial knot and its characterizing invariants.",
+  "anchors": ["unknot", "trivial-knot", "seifert-genus", "knot-group", "hard-unknot"],
+  "columns": [
+    ["unknot", "trivial-knot", "not-knot", "unlinked-loop"],
+    ["trivial-knot", "unknot", "unknotted-loop", "trivially-embedded-circle"],
+    ["seifert-genus", "knot-genus", "genus-of-knot", "minimal-genus"],
+    ["knot-group", "fundamental-group-of-complement", "knot-fundamental-group", "pi1-of-complement"],
+    ["hard-unknot", "difficult-unknot-diagram", "complex-unknot-diagram", "hard-to-simplify-unknot"]
+  ],
+  "sentence_templates": [
+    "The {0} is the only knot with {2} zero and its {3} is infinite cyclic yet recognizing a {4} as a {1} remains algorithmically challenging.",
+    "How does {2} characterize the {1} and why does the {3} being cyclic confirm that a diagram is a {0} rather than a {4}?",
+    "Explain why the {0} is the identity under knot sum and how {2} and {3} together distinguish it from any {4} that mimics a {1}."
+  ]
+}

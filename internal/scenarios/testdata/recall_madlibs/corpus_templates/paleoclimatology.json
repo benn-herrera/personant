@@ -1,0 +1,51 @@
+{
+  "name": "paleoclimatology-corpus",
+  "topic": "wiki-paleoclimatology",
+  "mode": "measure-only",
+  "source_article": "Paleoclimatology",
+  "description": "Tests recall of paleoclimate reconstruction methods including proxy archives, ice core analysis, tree-ring chronology, and radiometric dating.",
+  "anchors": [
+    "proxy-record",
+    "ice-core",
+    "dendroclimatology",
+    "radiocarbon-dating",
+    "paleoclimate-reconstruction"
+  ],
+  "columns": [
+    [
+      "proxy-record",
+      "climate-proxy",
+      "indirect-climate-archive",
+      "paleoclimate-indicator"
+    ],
+    [
+      "ice-core",
+      "glacial-ice-sample",
+      "polar-ice-drill-core",
+      "ice-sheet-core"
+    ],
+    [
+      "dendroclimatology",
+      "tree-ring-climatology",
+      "growth-ring-climate-analysis",
+      "tree-ring-climate-record"
+    ],
+    [
+      "radiocarbon-dating",
+      "carbon-14-dating",
+      "14c-dating",
+      "radiometric-carbon-dating"
+    ],
+    [
+      "paleoclimate-reconstruction",
+      "ancient-climate-recovery",
+      "past-climate-inference",
+      "historical-climate-rebuilding"
+    ]
+  ],
+  "sentence_templates": [
+    "Scientists combine {0} sources including {1} bubbles and {2} chronologies, then apply {3} for timing to build a {4}.",
+    "A {0} archive such as a {1} yields trapped gases dated by {3}, while {2} extends the record further, refining the {4}.",
+    "The discipline uses {2} ring widths alongside {1} oxygen isotopes as {0} data, verifies ages with {3}, and integrates findings into a {4}."
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "symmetric-key-algorithm-corpus",
+  "topic": "wiki-symmetric-key-algorithm",
+  "mode": "measure-only",
+  "source_article": "Symmetric-key algorithm",
+  "description": "Tests recall of symmetric-key algorithm concepts: shared secret key, stream cipher, block cipher, Feistel network, and key exchange requirement.",
+  "anchors": [
+    "shared-secret-key",
+    "stream-cipher",
+    "block-cipher",
+    "feistel-network",
+    "key-exchange"
+  ],
+  "columns": [
+    [
+      "shared-secret-key",
+      "common-secret",
+      "mutual-secret-key",
+      "pre-shared-key"
+    ],
+    [
+      "stream-cipher",
+      "keystream-cipher",
+      "bit-by-bit-cipher",
+      "continuous-stream-encryptor"
+    ],
+    [
+      "block-cipher",
+      "fixed-block-encryptor",
+      "chunk-cipher",
+      "block-encryption-algorithm"
+    ],
+    [
+      "feistel-network",
+      "feistel-structure",
+      "feistel-construction",
+      "balanced-feistel-scheme"
+    ],
+    [
+      "key-exchange",
+      "key-agreement",
+      "key-establishment",
+      "secret-key-negotiation"
+    ]
+  ],
+  "sentence_templates": [
+    "Both {1} and {2} rely on a {0} that must be distributed via a {4}, with many designs built on a {3}.",
+    "A {2} built on a {3} encrypts fixed-size blocks using a {0} that parties establish through {4}, unlike a {1} which encrypts data continuously.",
+    "Symmetric encryption uses a {0} for both encryption and decryption: a {2} based on a {3} processes data in chunks, a {1} processes it continuously, and both require secure {4} beforehand."
+  ]
+}

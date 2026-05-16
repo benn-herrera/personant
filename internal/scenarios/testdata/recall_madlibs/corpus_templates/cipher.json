@@ -1,0 +1,22 @@
+{
+  "name": "cipher-corpus",
+  "topic": "wiki-cipher",
+  "mode": "measure-only",
+  "source_article": "Cipher",
+  "description": "Tests recall of cipher concepts including ciphertext, plaintext, keys, block ciphers, and substitution ciphers.",
+  "anchors": ["ciphertext", "plaintext", "cryptographic-key", "block-cipher", "substitution-cipher"],
+  "columns": [
+    ["ciphertext", "encrypted-output", "enciphered-text", "cipher-output"],
+    ["plaintext", "cleartext", "unencrypted-text", "original-message"],
+    ["cryptographic-key", "secret-key", "cipher-key", "encryption-key"],
+    ["block-cipher", "fixed-block-cipher", "block-encryption-scheme", "block-based-cipher"],
+    ["substitution-cipher", "letter-substitution-cipher", "monoalphabetic-cipher", "replacement-cipher"]
+  ],
+  "sentence_templates": [
+    "In a {3}, each {1} letter is mapped by a {4} using a {2} to produce {0}.",
+    "The {4} relies on a {2} to transform {1} into {0}, unlike a {3} which operates on fixed-size chunks.",
+    "Decrypting {0} back to {1} requires the {2}, whether the {3} uses a {4} or another method.",
+    "A {2} controls how a {4} or {3} converts each {1} symbol into part of the {0}.",
+    "Recovering {1} from {0} without the {2} is hard even when the {3} employs only a simple {4}."
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "linking-number-corpus",
+  "topic": "wiki-linking-number",
+  "mode": "measure-only",
+  "source_article": "Linking number",
+  "description": "Recall test for the linking number of two closed curves and its computation.",
+  "anchors": ["linking-number", "gauss-linking-integral", "orientation", "signed-crossing", "winding-number"],
+  "columns": [
+    ["linking-number", "link-number", "loop-linking-count", "curve-linking-invariant"],
+    ["gauss-linking-integral", "gauss-integral", "linking-integral", "gauss-double-integral"],
+    ["orientation", "curve-orientation", "loop-orientation", "directed-orientation"],
+    ["signed-crossing", "crossing-sign", "positive-negative-crossing", "oriented-crossing"],
+    ["winding-number", "winding-count", "loop-winding", "rotation-number"]
+  ],
+  "sentence_templates": [
+    "The {0} of two curves is computed via the {1} by summing {3} values and depends on the {2} of each curve similarly to how a {4} depends on axis choice.",
+    "How does reversing {2} affect the {0}, what is the relationship between a {4} and signed curves, and how does {1} tally {3} counts?",
+    "Explain how the {1} computes {0} as a degree using {3} data and how {2} and {4} enter into this topological quantity."
+  ]
+}

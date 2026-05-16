@@ -1,0 +1,51 @@
+{
+  "name": "colloid-corpus",
+  "topic": "wiki-colloid",
+  "mode": "measure-only",
+  "source_article": "Colloid",
+  "description": "Recall template for colloid concepts: colloidal dispersion, Tyndall effect, zeta potential, sedimentation, and electrostatic stabilization.",
+  "anchors": [
+    "colloidal-dispersion",
+    "tyndall-effect",
+    "zeta-potential",
+    "sedimentation",
+    "electrostatic-stabilization"
+  ],
+  "columns": [
+    [
+      "colloidal-dispersion",
+      "colloidal-suspension",
+      "colloid-mixture",
+      "dispersed-colloid-system"
+    ],
+    [
+      "tyndall-effect",
+      "colloidal-light-scattering",
+      "particle-light-scatter",
+      "beam-visibility-in-colloid"
+    ],
+    [
+      "zeta-potential",
+      "electrokinetic-potential",
+      "particle-surface-charge-potential",
+      "double-layer-potential"
+    ],
+    [
+      "sedimentation",
+      "gravitational-settling",
+      "particle-settling",
+      "colloidal-settling"
+    ],
+    [
+      "electrostatic-stabilization",
+      "charge-based-stabilization",
+      "coulombic-repulsion-stabilization",
+      "electric-double-layer-stabilization"
+    ]
+  ],
+  "sentence_templates": [
+    "A {0} scatters light via the {1}, and its long-term stability depends on the {2}, which measures the repulsion that opposes {3} and indicates the degree of {4}.",
+    "The {1} makes a {0} appear turbid; the {2} quantifies particle charge, and {4} prevents {3} by keeping particles suspended.",
+    "In a {0}, the {2} is the key indicator of {4}: high magnitude resists {3} and the colloidal nature is revealed by the {1} when a beam passes through."
+  ]
+}

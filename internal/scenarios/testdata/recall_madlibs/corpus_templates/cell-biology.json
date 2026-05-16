@@ -1,0 +1,52 @@
+{
+  "name": "cell-biology-corpus",
+  "topic": "wiki-cell-biology",
+  "mode": "measure-only",
+  "source_article": "Cell (biology)",
+  "description": "Tests recall of five core cell-biology concepts — the plasma membrane, oxidative phosphorylation, endosymbiosis, apoptosis, and mitosis — using tight synonym columns derived from the Wikipedia Cell article.",
+  "anchors": [
+    "plasma-membrane",
+    "oxidative-phosphorylation",
+    "endosymbiosis",
+    "apoptosis",
+    "mitosis"
+  ],
+  "columns": [
+    [
+      "plasma-membrane",
+      "cell-membrane",
+      "plasmalemma",
+      "lipid-bilayer-membrane"
+    ],
+    [
+      "oxidative-phosphorylation",
+      "aerobic-atp-synthesis",
+      "mitochondrial-energy-production",
+      "respiratory-chain-phosphorylation"
+    ],
+    [
+      "endosymbiosis",
+      "symbiogenesis",
+      "endosymbiotic-origin",
+      "intracellular-symbiosis"
+    ],
+    [
+      "apoptosis",
+      "programmed-cell-death",
+      "regulated-cell-death",
+      "cell-suicide"
+    ],
+    [
+      "mitosis",
+      "karyokinesis",
+      "nuclear-division",
+      "somatic-cell-division"
+    ]
+  ],
+  "sentence_templates": [
+    "what is the role of {0} in enabling {1} and how does {2} explain the origin of the organelle responsible, given that {3} and {4} both depend on proper organelle function",
+    "describe how {0} regulates the transport of molecules needed for {1} in a cell whose mitochondria arose through {2} and which can undergo {3} or {4} depending on internal signals",
+    "explain the relationship between {0} integrity and {1} efficiency in a eukaryote whose ancestors acquired mitochondria by {2} and whose fate is determined by the balance between {3} and {4}",
+    "how does damage to the {0} impair {1} and trigger {2}-derived organelle dysfunction leading ultimately to {3} rather than orderly {4}"
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "couette-flow-corpus",
+  "topic": "wiki-couette-flow",
+  "mode": "measure-only",
+  "source_article": "Couette flow",
+  "description": "Recall template for Couette flow concepts: shear-driven flow, linear velocity profile, wall shear stress, Taylor-Couette flow, and viscous fluid.",
+  "anchors": [
+    "couette-flow",
+    "linear-velocity-profile",
+    "wall-shear-stress",
+    "taylor-couette-flow",
+    "shear-driven-flow"
+  ],
+  "columns": [
+    [
+      "couette-flow",
+      "viscometric-flow",
+      "parallel-plate-viscous-flow",
+      "plane-shear-flow"
+    ],
+    [
+      "linear-velocity-profile",
+      "uniform-velocity-gradient",
+      "constant-shear-velocity-field",
+      "straight-line-velocity-distribution"
+    ],
+    [
+      "wall-shear-stress",
+      "surface-shear-force",
+      "viscous-wall-stress",
+      "boundary-shear-stress"
+    ],
+    [
+      "taylor-couette-flow",
+      "coaxial-cylinder-flow",
+      "rotating-cylinder-flow",
+      "annular-viscous-flow"
+    ],
+    [
+      "shear-driven-flow",
+      "viscosity-induced-flow",
+      "moving-wall-driven-flow",
+      "surface-motion-flow"
+    ]
+  ],
+  "sentence_templates": [
+    "In {0} between parallel plates, the {1} arises from {4} and the constant {2} equals viscosity times the velocity gradient, whereas {3} applies the same physics to rotating coaxial cylinders.",
+    "The {1} of {0} results from {4} and produces a uniform {2} throughout the fluid gap, a geometry extended to {3} by using concentric cylinders.",
+    "The {2} in {0} is constant because the {1} reflects steady {4}, a principle that also underlies {3} where cylindrical geometry complicates the otherwise simple profile."
+  ]
+}

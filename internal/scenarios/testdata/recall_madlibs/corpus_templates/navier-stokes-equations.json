@@ -1,0 +1,51 @@
+{
+  "name": "navier-stokes-equations-corpus",
+  "topic": "wiki-navier-stokes-equations",
+  "mode": "measure-only",
+  "source_article": "Navier–Stokes equations",
+  "description": "Query templates for the partial differential equations governing viscous fluid motion, including incompressibility, momentum balance, and the smoothness problem.",
+  "anchors": [
+    "navier-stokes-equations",
+    "momentum-conservation",
+    "incompressible-flow",
+    "viscous-stress-tensor",
+    "smoothness-problem"
+  ],
+  "columns": [
+    [
+      "navier-stokes-equations",
+      "viscous-flow-equations",
+      "fluid-motion-pdes",
+      "continuum-momentum-equations"
+    ],
+    [
+      "momentum-conservation",
+      "momentum-balance",
+      "newtons-second-law-fluids",
+      "fluid-momentum-principle"
+    ],
+    [
+      "incompressible-flow",
+      "constant-density-flow",
+      "divergence-free-flow",
+      "solenoidal-flow"
+    ],
+    [
+      "viscous-stress-tensor",
+      "deviatoric-stress-tensor",
+      "shear-stress-tensor",
+      "viscosity-stress-term"
+    ],
+    [
+      "smoothness-problem",
+      "regularity-problem",
+      "existence-smoothness-conjecture",
+      "millennium-prize-fluid-problem"
+    ]
+  ],
+  "sentence_templates": [
+    "How do the {0} encode {1} for {2} when the {3} dominates and what makes the {4} so difficult to resolve?",
+    "In the {0}, what role does the {3} play in expressing {1} for {2}, and why does the {4} remain open?",
+    "What simplification to the {3} arises in {2} formulations of the {0}, and how does this relate to the {1} encoded by the {4}?"
+  ]
+}

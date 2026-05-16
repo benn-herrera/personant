@@ -1,0 +1,51 @@
+{
+  "name": "money-corpus",
+  "topic": "wiki-money",
+  "mode": "measure-only",
+  "source_article": "Money",
+  "description": "Tests recall of money's three primary functions — medium of exchange, unit of account, and store of value — and its evolution from commodity to fiat currency.",
+  "anchors": [
+    "medium-of-exchange",
+    "unit-of-account",
+    "store-of-value",
+    "fiat-money",
+    "commodity-money"
+  ],
+  "columns": [
+    [
+      "medium-of-exchange",
+      "payment-intermediary",
+      "transaction-vehicle",
+      "exchange-facilitator"
+    ],
+    [
+      "unit-of-account",
+      "common-measure-of-value",
+      "pricing-standard",
+      "standard-of-value"
+    ],
+    [
+      "store-of-value",
+      "wealth-preservation-instrument",
+      "value-reservoir",
+      "deferred-purchasing-power"
+    ],
+    [
+      "fiat-money",
+      "government-decree-currency",
+      "unbacked-currency",
+      "legal-tender-currency"
+    ],
+    [
+      "commodity-money",
+      "intrinsic-value-money",
+      "specie-money",
+      "gold-or-silver-money"
+    ]
+  ],
+  "sentence_templates": [
+    "Money serves as a {0}, a {1}, and a {2}; modern economies rely on {3} for all three roles rather than {4}.",
+    "The shift from {4} to {3} separated the {2} function from any physical backing, leaving the {0} and {1} roles dependent on institutional trust.",
+    "Economists debate whether {3} fulfills the {0}, {1}, and {2} functions as durably as {4} did before the abandonment of the gold standard."
+  ]
+}

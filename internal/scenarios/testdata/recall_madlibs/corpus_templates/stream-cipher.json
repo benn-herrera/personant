@@ -1,0 +1,22 @@
+{
+  "name": "stream-cipher-corpus",
+  "topic": "wiki-stream-cipher",
+  "mode": "measure-only",
+  "source_article": "Stream cipher",
+  "description": "Tests recall of stream cipher concepts including keystreams, linear feedback shift registers, XOR operations, self-synchronizing ciphers, and seed values.",
+  "anchors": ["keystream", "linear-feedback-shift-register", "xor-operation", "self-synchronizing-stream-cipher", "seed-value"],
+  "columns": [
+    ["keystream", "cipher-stream", "pseudorandom-stream", "key-digit-stream"],
+    ["linear-feedback-shift-register", "lfsr", "feedback-shift-register", "shift-register-sequence"],
+    ["xor-operation", "exclusive-or", "modulo-2-addition", "bitwise-xor"],
+    ["self-synchronizing-stream-cipher", "asynchronous-stream-cipher", "ciphertext-autokey", "ctak-cipher"],
+    ["seed-value", "initial-state", "cipher-seed", "key-seed"]
+  ],
+  "sentence_templates": [
+    "A {1} initialized with a {4} generates a {0} whose bits are combined with plaintext using a {2}, unlike a {3} which derives state from prior ciphertext.",
+    "The {2} combines each plaintext bit with a {0} bit derived from a {1} seeded by the {4}, while a {3} can recover sync automatically.",
+    "In a {3}, losing sync is self-correcting, whereas a synchronous cipher relying on a {1} and {4} must regenerate the entire {0} and reapply the {2}.",
+    "Security of the {0} depends on the {4} remaining secret and the {1} being nonlinear enough that the {2} output cannot be predicted, even by a {3} attacker.",
+    "The {4} initializes the {1}, which produces the {0}, combined via {2} with plaintext; a {3} additionally feeds ciphertext back to maintain synchronization."
+  ]
+}

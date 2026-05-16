@@ -1,0 +1,51 @@
+{
+  "name": "macroeconomics-corpus",
+  "topic": "wiki-macroeconomics",
+  "mode": "measure-only",
+  "source_article": "Macroeconomics",
+  "description": "Tests recall of macroeconomics concepts including aggregate demand, business cycles, GDP, the Phillips curve, and the monetary transmission mechanism.",
+  "anchors": [
+    "aggregate-demand",
+    "business-cycle",
+    "gross-domestic-product",
+    "phillips-curve",
+    "monetary-transmission"
+  ],
+  "columns": [
+    [
+      "aggregate-demand",
+      "total-spending",
+      "effective-demand",
+      "economy-wide-demand"
+    ],
+    [
+      "business-cycle",
+      "economic-cycle",
+      "boom-and-bust-cycle",
+      "trade-cycle"
+    ],
+    [
+      "gross-domestic-product",
+      "gdp",
+      "national-output",
+      "total-economic-output"
+    ],
+    [
+      "phillips-curve",
+      "inflation-unemployment-tradeoff",
+      "wage-price-curve",
+      "unemployment-inflation-curve"
+    ],
+    [
+      "monetary-transmission",
+      "interest-rate-channel",
+      "policy-transmission-mechanism",
+      "monetary-policy-channel"
+    ]
+  ],
+  "sentence_templates": [
+    "what is {0} and how does it relate to {2} over the {1} given the {3} and the {4}",
+    "how does {4} link changes in {0} to fluctuations in {2} during a {1} when the {3} is relevant",
+    "explain the role of {0} in driving {1} fluctuations as measured by {2} through the {4} and reflected in the {3}"
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "effects-of-climate-change-corpus",
+  "topic": "wiki-effects-of-climate-change",
+  "mode": "measure-only",
+  "source_article": "Effects of climate change",
+  "description": "Tests recall of climate change effects including global surface warming, sea level rise, ocean acidification, ice-albedo feedback, and extreme weather intensification.",
+  "anchors": [
+    "global-surface-warming",
+    "sea-level-rise",
+    "ocean-acidification",
+    "ice-albedo-feedback",
+    "extreme-weather"
+  ],
+  "columns": [
+    [
+      "global-surface-warming",
+      "global-mean-temperature-increase",
+      "planetary-surface-heating",
+      "global-temperature-rise"
+    ],
+    [
+      "sea-level-rise",
+      "ocean-level-increase",
+      "coastal-inundation",
+      "marine-transgression"
+    ],
+    [
+      "ocean-acidification",
+      "marine-acidification",
+      "seawater-ph-decline",
+      "ocean-ph-drop"
+    ],
+    [
+      "ice-albedo-feedback",
+      "snow-ice-reflectivity-feedback",
+      "cryosphere-albedo-feedback",
+      "reflectivity-loss-feedback"
+    ],
+    [
+      "extreme-weather",
+      "weather-extremes",
+      "climate-extremes",
+      "severe-weather-events"
+    ]
+  ],
+  "sentence_templates": [
+    "Accelerating {0} drives {1} threatening coastal cities, promotes {3} as ice retreats, and intensifies {4} while {2} harms marine organisms.",
+    "{3} removes reflective ice and amplifies {0}, contributing to {1} and altering precipitation that fuels {4}, as {2} simultaneously damages reef ecosystems.",
+    "The combined evidence for {0} includes melting glaciers adding to {1}, {3} accelerating Arctic warming, {2} lowering ocean pH, and intensifying {4}."
+  ]
+}

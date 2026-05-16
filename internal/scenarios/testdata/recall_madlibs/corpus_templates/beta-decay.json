@@ -1,0 +1,51 @@
+{
+  "name": "beta-decay-corpus",
+  "topic": "wiki-beta-decay",
+  "mode": "measure-only",
+  "source_article": "Beta decay",
+  "description": "Probes recall of beta decay concepts including the weak interaction, nuclear transmutation, neutrino emission, lepton number conservation, and the continuous energy spectrum.",
+  "anchors": [
+    "weak-interaction",
+    "nuclear-transmutation",
+    "electron-antineutrino",
+    "lepton-number-conservation",
+    "continuous-beta-spectrum"
+  ],
+  "columns": [
+    [
+      "weak-interaction",
+      "weak-force",
+      "weak-nuclear-force",
+      "fermi-weak-interaction"
+    ],
+    [
+      "nuclear-transmutation",
+      "nuclear-transformation",
+      "element-transmutation",
+      "isotope-conversion"
+    ],
+    [
+      "electron-antineutrino",
+      "anti-electron-neutrino",
+      "beta-minus-antineutrino",
+      "antineutrino-from-beta-decay"
+    ],
+    [
+      "lepton-number-conservation",
+      "leptonic-number-conservation",
+      "lepton-number-invariance",
+      "leptonic-charge-conservation"
+    ],
+    [
+      "continuous-beta-spectrum",
+      "continuous-energy-spectrum",
+      "beta-particle-energy-distribution",
+      "beta-energy-continuum"
+    ]
+  ],
+  "sentence_templates": [
+    "In beta-minus decay, the {0} mediates {1} and produces a {2} to satisfy {3}, resulting in the observed {4} that first hinted at neutrino existence.",
+    "The {4} observed in beta-minus decay is explained by the {0} producing both an electron and a {2}, consistent with {3} during {1}.",
+    "Pauli proposed the neutrino to explain the {4}, since {3} requires a {2} to be emitted alongside the electron during {1} driven by the {0}."
+  ]
+}

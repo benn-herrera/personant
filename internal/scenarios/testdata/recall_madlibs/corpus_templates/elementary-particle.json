@@ -1,0 +1,51 @@
+{
+  "name": "elementary-particle-corpus",
+  "topic": "wiki-elementary-particle",
+  "mode": "measure-only",
+  "source_article": "Elementary particle",
+  "description": "Query templates probing elementary particles, fermions, the Pauli exclusion principle, antiparticles, and supersymmetry.",
+  "anchors": [
+    "elementary-particle",
+    "fermion",
+    "pauli-exclusion-principle",
+    "antiparticle",
+    "supersymmetry"
+  ],
+  "columns": [
+    [
+      "elementary-particle",
+      "fundamental-particle",
+      "point-particle",
+      "structureless-particle"
+    ],
+    [
+      "fermion",
+      "half-integer-spin-particle",
+      "spin-half-particle",
+      "dirac-particle"
+    ],
+    [
+      "pauli-exclusion-principle",
+      "exclusion-principle",
+      "pauli-principle",
+      "fermi-exclusion-principle"
+    ],
+    [
+      "antiparticle",
+      "antimatter-partner",
+      "charge-conjugate",
+      "antimatter-counterpart"
+    ],
+    [
+      "supersymmetry",
+      "susy",
+      "superpartner-symmetry",
+      "supersymmetric-extension"
+    ]
+  ],
+  "sentence_templates": [
+    "what makes an {0} a {1} subject to the {2} and how does every {3} have opposite charge while {4} predicts a bosonic partner",
+    "explain how the {2} distinguishes a {1} from a boson and why each {3} has opposite charge while {4} doubles the {0} spectrum",
+    "how does {4} extend the {0} spectrum by predicting a bosonic {3} for every {1} that obeys the {2}"
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "inflation-corpus",
+  "topic": "wiki-inflation",
+  "mode": "measure-only",
+  "source_article": "Inflation",
+  "description": "Tests recall of inflation concepts including the consumer price index, purchasing power, the quantity theory of money, the Phillips curve, and hyperinflation.",
+  "anchors": [
+    "consumer-price-index",
+    "purchasing-power",
+    "quantity-theory-of-money",
+    "phillips-curve",
+    "hyperinflation"
+  ],
+  "columns": [
+    [
+      "consumer-price-index",
+      "cpi",
+      "retail-price-index",
+      "cost-of-living-index"
+    ],
+    [
+      "purchasing-power",
+      "real-value-of-money",
+      "money-buying-power",
+      "currency-purchasing-capacity"
+    ],
+    [
+      "quantity-theory-of-money",
+      "qtm",
+      "money-supply-price-theory",
+      "fisher-equation-framework"
+    ],
+    [
+      "phillips-curve",
+      "inflation-unemployment-tradeoff",
+      "wage-price-curve",
+      "unemployment-inflation-curve"
+    ],
+    [
+      "hyperinflation",
+      "runaway-inflation",
+      "extreme-price-surge",
+      "galloping-inflation"
+    ]
+  ],
+  "sentence_templates": [
+    "how does {2} explain the erosion of {1} as measured by the {0} when {4} emerges and what does the {3} predict",
+    "what happens to {1} and {0} during {4} and how do the {3} and {2} together account for this outcome",
+    "explain how the {3} and {2} together describe changes in {0} that reduce {1} and can escalate into {4}"
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "surface-tension-corpus",
+  "topic": "wiki-surface-tension",
+  "mode": "measure-only",
+  "source_article": "Surface tension",
+  "description": "Recall template for surface tension concepts: surface tension itself, capillary action, contact angle, the Young-Laplace equation, and cohesive forces.",
+  "anchors": [
+    "surface-tension",
+    "capillary-action",
+    "contact-angle",
+    "young-laplace-equation",
+    "cohesive-forces"
+  ],
+  "columns": [
+    [
+      "surface-tension",
+      "interfacial-tension",
+      "surface-energy-per-area",
+      "liquid-surface-energy"
+    ],
+    [
+      "capillary-action",
+      "capillarity",
+      "capillary-rise",
+      "wicking-effect"
+    ],
+    [
+      "contact-angle",
+      "wetting-angle",
+      "liquid-solid-interface-angle",
+      "meniscus-angle"
+    ],
+    [
+      "young-laplace-equation",
+      "laplace-pressure-equation",
+      "curvature-pressure-relation",
+      "capillary-pressure-equation"
+    ],
+    [
+      "cohesive-forces",
+      "intermolecular-attraction",
+      "like-molecule-bonding",
+      "self-adhesion-forces"
+    ]
+  ],
+  "sentence_templates": [
+    "The {0} drives {1} in narrow tubes and determines the {2} through a balance captured by the {3}, all arising from {4} among surface molecules.",
+    "Because {4} pull surface molecules inward, the {0} is nonzero and governs both {1} height and the {2} described by the {3}.",
+    "The {3} relates the pressure jump across a curved interface to the {0} and curvature, explaining {1} and the {2} that emerges where the fluid meets a solid, rooted in {4}."
+  ]
+}

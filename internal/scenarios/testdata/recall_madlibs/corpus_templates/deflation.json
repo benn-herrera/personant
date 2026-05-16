@@ -1,0 +1,51 @@
+{
+  "name": "deflation-corpus",
+  "topic": "wiki-deflation",
+  "mode": "measure-only",
+  "source_article": "Deflation",
+  "description": "Tests recall of deflation as a sustained fall in the general price level that raises real debt burdens and can trigger a self-reinforcing deflationary spiral.",
+  "anchors": [
+    "deflation",
+    "price-level-decline",
+    "deflationary-spiral",
+    "real-debt-burden",
+    "money-supply-contraction"
+  ],
+  "columns": [
+    [
+      "deflation",
+      "negative-inflation",
+      "falling-prices",
+      "price-level-decrease"
+    ],
+    [
+      "price-level-decline",
+      "general-price-fall",
+      "consumer-price-decrease",
+      "broad-price-drop"
+    ],
+    [
+      "deflationary-spiral",
+      "price-decline-feedback-loop",
+      "self-reinforcing-price-fall",
+      "debt-deflation-cycle"
+    ],
+    [
+      "real-debt-burden",
+      "inflation-adjusted-debt-cost",
+      "purchasing-power-of-debt",
+      "real-value-of-liabilities"
+    ],
+    [
+      "money-supply-contraction",
+      "credit-contraction",
+      "monetary-base-shrinkage",
+      "money-stock-reduction"
+    ]
+  ],
+  "sentence_templates": [
+    "When {0} produces persistent {1}, the {3} rises for existing borrowers and can initiate a {2} if the {4} continues unchecked.",
+    "The Great Depression showed how {4} amplifies {0} by deepening {1}, raising the {3} on households, and locking in a {2}.",
+    "Policymakers reverse {4} to fight {0}, hoping to arrest {1}, reduce the {3} on borrowers, and prevent a {2} from taking hold."
+  ]
+}

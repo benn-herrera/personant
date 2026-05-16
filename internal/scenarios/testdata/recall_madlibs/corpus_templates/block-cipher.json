@@ -1,0 +1,51 @@
+{
+  "name": "block-cipher-corpus",
+  "topic": "wiki-block-cipher",
+  "mode": "measure-only",
+  "source_article": "Block cipher",
+  "description": "Tests recall of block cipher concepts: mode of operation, pseudorandom permutation, key size, round function, and confusion-diffusion.",
+  "anchors": [
+    "mode-of-operation",
+    "pseudorandom-permutation",
+    "key-size",
+    "round-function",
+    "confusion-diffusion"
+  ],
+  "columns": [
+    [
+      "mode-of-operation",
+      "cipher-mode",
+      "block-chaining-mode",
+      "encryption-mode"
+    ],
+    [
+      "pseudorandom-permutation",
+      "keyed-permutation",
+      "random-looking-permutation",
+      "strong-pseudorandom-permutation"
+    ],
+    [
+      "key-size",
+      "key-length",
+      "secret-key-bitlength",
+      "key-bit-width"
+    ],
+    [
+      "round-function",
+      "cipher-round",
+      "encryption-round-step",
+      "iterated-round-operation"
+    ],
+    [
+      "confusion-diffusion",
+      "substitution-permutation-principle",
+      "diffusion-and-confusion",
+      "shannonss-design-principle"
+    ]
+  ],
+  "sentence_templates": [
+    "A block cipher implements a {1} over a fixed block, applies many iterations of a {3} guided by {4}, and uses a {0} to encrypt streams, with security scaling by {2}.",
+    "Security of a block cipher depends on {2} and the quality of each {3}, and the design follows {4} to make the cipher behave as a {1} usable in any {0}.",
+    "The {4} principle shapes each {3} so the cipher approximates a {1}; choosing sufficient {2} and a suitable {0} completes a secure construction."
+  ]
+}

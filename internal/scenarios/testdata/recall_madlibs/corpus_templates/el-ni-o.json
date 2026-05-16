@@ -1,0 +1,51 @@
+{
+  "name": "el-ni-o-corpus",
+  "topic": "wiki-el-ni-o",
+  "mode": "measure-only",
+  "source_article": "El Niño",
+  "description": "Tests recall of ENSO dynamics including Walker circulation, trade wind changes, sea surface temperature anomalies, and the Southern Oscillation index.",
+  "anchors": [
+    "enso",
+    "walker-circulation",
+    "trade-winds",
+    "sea-surface-temperature",
+    "southern-oscillation"
+  ],
+  "columns": [
+    [
+      "enso",
+      "el-nino-southern-oscillation",
+      "pacific-climate-cycle",
+      "pacific-ocean-oscillation"
+    ],
+    [
+      "walker-circulation",
+      "east-west-atmospheric-cell",
+      "tropical-pacific-overturning",
+      "pacific-zonal-circulation"
+    ],
+    [
+      "trade-winds",
+      "equatorial-easterlies",
+      "tropical-easterly-winds",
+      "pacific-easterly-flow"
+    ],
+    [
+      "sea-surface-temperature",
+      "ocean-surface-warmth",
+      "sst-anomaly",
+      "upper-ocean-temperature"
+    ],
+    [
+      "southern-oscillation",
+      "atmospheric-pressure-seesaw",
+      "darwin-tahiti-pressure-gradient",
+      "tropical-pressure-oscillation"
+    ]
+  ],
+  "sentence_templates": [
+    "During {0}, weakening {2} reduce {1} intensity and raise {3} in the eastern Pacific, shifting the {4} toward its negative phase.",
+    "The {1} depends on the strength of the {2}, and when {0} develops, anomalous {3} in the central Pacific flips the sign of the {4}.",
+    "Researchers measure {0} by tracking {3} in key ocean regions, the strength of the {2}, the {1} response, and the {4} index."
+  ]
+}

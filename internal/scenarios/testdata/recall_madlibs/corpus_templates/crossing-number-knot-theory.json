@@ -1,0 +1,51 @@
+{
+  "name": "crossing-number-knot-theory-corpus",
+  "topic": "wiki-crossing-number-knot-theory",
+  "mode": "measure-only",
+  "source_article": "Crossing number (knot theory)",
+  "description": "Synthetic queries probing knowledge of the crossing number invariant including alternating knots, prime knots, knot tabulation, and knot sums.",
+  "anchors": [
+    "crossing-number",
+    "alternating-knot",
+    "prime-knot",
+    "knot-tabulation",
+    "knot-sum"
+  ],
+  "columns": [
+    [
+      "crossing-number",
+      "minimal-crossing-count",
+      "minimum-crossings",
+      "knot-crossing-minimum"
+    ],
+    [
+      "alternating-knot",
+      "crossing-alternating-knot",
+      "alternating-diagram",
+      "over-under-alternating"
+    ],
+    [
+      "prime-knot",
+      "irreducible-knot",
+      "non-composite-knot",
+      "atomic-knot"
+    ],
+    [
+      "knot-tabulation",
+      "knot-table",
+      "knot-catalog",
+      "knot-enumeration"
+    ],
+    [
+      "knot-sum",
+      "connected-sum-of-knots",
+      "knot-composition",
+      "knot-concatenation"
+    ]
+  ],
+  "sentence_templates": [
+    "explain how {0} is used in {3} and whether it is additive under {4} for an {1} or {2}",
+    "describe the {0} of a {2} and how {3} organizes knots by this value and whether an {1} achieves the minimum under a {4}",
+    "what is the {0} of an {1} and how does {3} order {2} knots and whether additivity holds under {4}"
+  ]
+}

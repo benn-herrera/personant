@@ -1,0 +1,26 @@
+{
+  "name": "molecular-biology-corpus",
+  "topic": "wiki-molecular-biology",
+  "mode": "measure-only",
+  "source_article": "Molecular biology",
+  "description": "Tests recall of five core molecular biology concepts: the central dogma, polymerase chain reaction, molecular cloning, gel electrophoresis, and semiconservative replication.",
+  "anchors": [
+    "central-dogma",
+    "polymerase-chain-reaction",
+    "molecular-cloning",
+    "gel-electrophoresis",
+    "genetic-transformation"
+  ],
+  "columns": [
+    ["central-dogma", "dna-rna-protein-flow", "information-flow-dogma", "sequence-information-transfer"],
+    ["polymerase-chain-reaction", "pcr", "dna-amplification", "in-vitro-dna-copying"],
+    ["molecular-cloning", "gene-cloning", "recombinant-dna-cloning", "dna-sequence-cloning"],
+    ["gel-electrophoresis", "dna-size-separation", "agarose-gel-separation", "electrophoretic-separation"],
+    ["genetic-transformation", "horizontal-gene-transfer", "exogenous-dna-uptake", "dna-incorporation-by-cells"]
+  ],
+  "sentence_templates": [
+    "the {0} describes how genes are read and {1} can amplify specific regions while {2} transfers them into vectors confirmed by {3} with {4} showing bacteria can acquire new dna",
+    "griffith demonstrated {4} before the {0} was articulated and today {1} and {2} are routine tools analyzed by {3}",
+    "after {2} inserts a sequence consistent with the {0} researchers use {1} to verify its presence and {3} to size fragments changed by {4}"
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "lepton-corpus",
+  "topic": "wiki-lepton",
+  "mode": "measure-only",
+  "source_article": "Lepton",
+  "description": "Query templates probing lepton number, lepton flavor, charged leptons, the seesaw mechanism, and lepton universality.",
+  "anchors": [
+    "lepton-number",
+    "lepton-flavor",
+    "charged-lepton",
+    "seesaw-mechanism",
+    "lepton-universality"
+  ],
+  "columns": [
+    [
+      "lepton-number",
+      "leptonic-number",
+      "lepton-quantum-number",
+      "lepton-charge"
+    ],
+    [
+      "lepton-flavor",
+      "lepton-flavour",
+      "lepton-generation",
+      "leptonic-generation"
+    ],
+    [
+      "charged-lepton",
+      "electron-like-lepton",
+      "electron-type-lepton",
+      "electrically-charged-lepton"
+    ],
+    [
+      "seesaw-mechanism",
+      "seesaw",
+      "neutrino-seesaw",
+      "inverse-seesaw"
+    ],
+    [
+      "lepton-universality",
+      "lepton-flavor-universality",
+      "lepton-coupling-universality",
+      "flavor-independent-coupling"
+    ]
+  ],
+  "sentence_templates": [
+    "how is {0} conserved separately for each {1} in decays of a {2} and what does the {3} predict about neutrino masses given {4}",
+    "explain {4} and how precision measurements of {2} decay test it alongside conservation of {0} for each {1} as extended by the {3}",
+    "what violation of {0} occurs in each {1} for a {2} decay and how does the {3} address the mass scale while {4} constrains the coupling"
+  ]
+}

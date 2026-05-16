@@ -1,0 +1,51 @@
+{
+  "name": "boundary-layer-corpus",
+  "topic": "wiki-boundary-layer",
+  "mode": "measure-only",
+  "source_article": "Boundary layer",
+  "description": "Recall template for boundary layer fluid mechanics concepts: the thin viscous region near a surface, transition between flow regimes, and related phenomena.",
+  "anchors": [
+    "boundary-layer",
+    "laminar-flow",
+    "turbulent-flow",
+    "skin-friction-drag",
+    "no-slip-condition"
+  ],
+  "columns": [
+    [
+      "boundary-layer",
+      "viscous-sublayer",
+      "wall-layer",
+      "prandtl-layer"
+    ],
+    [
+      "laminar-flow",
+      "streamlined-flow",
+      "smooth-flow",
+      "viscous-flow-regime"
+    ],
+    [
+      "turbulent-flow",
+      "turbulent-regime",
+      "eddy-flow",
+      "chaotic-flow"
+    ],
+    [
+      "skin-friction-drag",
+      "viscous-friction-drag",
+      "surface-friction-drag",
+      "wall-shear-drag"
+    ],
+    [
+      "no-slip-condition",
+      "zero-velocity-wall-condition",
+      "wall-adhesion-condition",
+      "fluid-wall-boundary-condition"
+    ]
+  ],
+  "sentence_templates": [
+    "The {0} develops where {1} exists near a surface, eventually transitioning to {2}, which increases {3} and is governed by the {4}.",
+    "In the {0}, the shift from {1} to {2} along a wing amplifies {3} while the {4} anchors velocity to zero at the wall.",
+    "Prandtl's concept of the {0} separates {1} near the wall from outer {2}, with {3} determined by the velocity gradient and rooted in the {4}."
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "genetic-code-corpus",
+  "topic": "wiki-genetic-code",
+  "mode": "measure-only",
+  "source_article": "Genetic code",
+  "description": "Recall-fidelity template covering codon degeneracy, transfer RNA, reading frames, stop codons, and the codon table as described in the Wikipedia article on the genetic code.",
+  "anchors": [
+    "codon-degeneracy",
+    "transfer-rna",
+    "reading-frame",
+    "stop-codon",
+    "codon-table"
+  ],
+  "columns": [
+    ["codon-degeneracy", "codon-redundancy", "synonymous-coding", "wobble-degeneracy"],
+    ["transfer-rna", "trna", "adapter-molecule", "amino-acid-adaptor"],
+    ["reading-frame", "translation-frame", "triplet-frame", "codon-frame"],
+    ["stop-codon", "termination-codon", "nonsense-codon", "chain-terminator"],
+    ["codon-table", "genetic-code-table", "rna-codon-table", "codon-assignment-table"]
+  ],
+  "sentence_templates": [
+    "{0} means multiple codons specify the same amino acid, and {1} identifies each one by carrying an anticodon that matches the {2} established at the start codon, ensuring that a {3} halts synthesis at the position shown in the {4}.",
+    "The phenomenon of {0} allows silent mutations to accumulate, while {1} shuttles the correct residue to the ribosome within the {2}, after which a {3} releases the nascent chain according to rules encoded in the {4}.",
+    "Because of {0}, swapping synonymous codons leaves the protein unchanged; {1} enforces fidelity within each {2} by matching anticodon to codon until a {3} is reached, an event whose mapping is recorded in the {4}."
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "genome-corpus",
+  "topic": "wiki-genome",
+  "mode": "measure-only",
+  "source_article": "Genome",
+  "description": "Tests recall of five core genome concepts: genome sequencing, transposable elements, noncoding DNA, ploidy, and the mitochondrial genome.",
+  "anchors": [
+    "genome-sequencing",
+    "transposable-elements",
+    "noncoding-dna",
+    "ploidy",
+    "mitochondrial-genome"
+  ],
+  "columns": [
+    ["genome-sequencing", "whole-genome-sequencing", "genomic-sequencing", "full-genome-determination"],
+    ["transposable-elements", "transposons", "mobile-genetic-elements", "jumping-genes"],
+    ["noncoding-dna", "non-protein-coding-dna", "junk-dna", "intergenic-dna"],
+    ["ploidy", "chromosome-copy-number", "chromosomal-dosage", "haploid-diploid-status"],
+    ["mitochondrial-genome", "mitochondrial-dna", "mtdna", "organellar-genome"]
+  ],
+  "sentence_templates": [
+    "{0} reveals the proportion of {2} and {1} while {3} determines how many copies are present alongside the {4}",
+    "the {4} is separate from the nuclear genome sequenced by {0} and the nuclear sequence contains abundant {2} including {1} whose copy number varies with {3}",
+    "modern {0} methods quantify {1} and {2} content across genomes of varying {3} and can resolve the {4} as a distinct circular sequence"
+  ]
+}

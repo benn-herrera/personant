@@ -1,0 +1,51 @@
+{
+  "name": "radiative-forcing-corpus",
+  "topic": "wiki-radiative-forcing",
+  "mode": "measure-only",
+  "source_article": "Radiative forcing",
+  "description": "Tests recall of radiative forcing concepts including energy imbalance, effective radiative forcing, greenhouse gas drivers, and climate sensitivity.",
+  "anchors": [
+    "radiative-forcing",
+    "energy-imbalance",
+    "effective-radiative-forcing",
+    "greenhouse-gas-concentration",
+    "climate-sensitivity"
+  ],
+  "columns": [
+    [
+      "radiative-forcing",
+      "climate-forcing",
+      "energy-flux-perturbation",
+      "radiative-imbalance-driver"
+    ],
+    [
+      "energy-imbalance",
+      "radiation-budget-deficit",
+      "net-energy-flux-anomaly",
+      "planetary-energy-imbalance"
+    ],
+    [
+      "effective-radiative-forcing",
+      "erf",
+      "adjusted-forcing-with-feedbacks",
+      "troposphere-adjusted-forcing"
+    ],
+    [
+      "greenhouse-gas-concentration",
+      "ghg-burden",
+      "atmospheric-ghg-loading",
+      "trace-gas-accumulation"
+    ],
+    [
+      "climate-sensitivity",
+      "equilibrium-temperature-response",
+      "warming-per-unit-forcing",
+      "ecs"
+    ]
+  ],
+  "sentence_templates": [
+    "Rising {3} creates a positive {0} that drives an {1}, and the resulting warming depends on {4} while {2} accounts for rapid atmospheric adjustments.",
+    "The {0} framework quantifies how {3} perturbs the {1}, with {2} refining the estimate and {4} translating forcing into equilibrium temperature change.",
+    "Researchers compute {2} from changes in {3}, relate it to the observed {1}, and combine it with {4} to predict warming alongside the raw {0} value."
+  ]
+}

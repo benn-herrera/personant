@@ -1,0 +1,51 @@
+{
+  "name": "standard-model-corpus",
+  "topic": "wiki-standard-model",
+  "mode": "measure-only",
+  "source_article": "Standard Model",
+  "description": "Query templates probing the Standard Model framework, electroweak unification, gauge bosons, spontaneous symmetry breaking, and color charge.",
+  "anchors": [
+    "standard-model",
+    "electroweak-unification",
+    "gauge-boson",
+    "spontaneous-symmetry-breaking",
+    "color-charge"
+  ],
+  "columns": [
+    [
+      "standard-model",
+      "sm",
+      "glashow-salam-weinberg-model",
+      "particle-physics-standard-model"
+    ],
+    [
+      "electroweak-unification",
+      "electroweak-theory",
+      "ew-unification",
+      "glashow-salam-weinberg-theory"
+    ],
+    [
+      "gauge-boson",
+      "force-carrier",
+      "vector-boson",
+      "messenger-particle"
+    ],
+    [
+      "spontaneous-symmetry-breaking",
+      "gauge-symmetry-breaking",
+      "electroweak-symmetry-breaking",
+      "vacuum-symmetry-breaking"
+    ],
+    [
+      "color-charge",
+      "colour-charge",
+      "chromodynamic-charge",
+      "qcd-charge"
+    ]
+  ],
+  "sentence_templates": [
+    "how does the {0} use {1} to explain why {2} particles acquire mass via {3} while carrying {4}",
+    "in the {0} what role does {3} play in giving {2} particles mass within the framework of {1} given that quarks carry {4}",
+    "describe the {0} prediction that {1} produces massive {2} particles through {3} and explain how {4} determines quark interactions"
+  ]
+}

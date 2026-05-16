@@ -1,0 +1,51 @@
+{
+  "name": "jones-polynomial-corpus",
+  "topic": "wiki-jones-polynomial",
+  "mode": "measure-only",
+  "source_article": "Jones polynomial",
+  "description": "Synthetic queries probing knowledge of the Jones polynomial including skein relations, writhe, braid representation, the Kauffman bracket, and amphicheiral knots.",
+  "anchors": [
+    "skein-relation",
+    "writhe",
+    "braid-representation",
+    "kauffman-bracket",
+    "amphicheiral-knot"
+  ],
+  "columns": [
+    [
+      "skein-relation",
+      "skein-equation",
+      "crossing-skein",
+      "skein-identity"
+    ],
+    [
+      "writhe",
+      "signed-crossing-count",
+      "crossing-sign-sum",
+      "writhe-number"
+    ],
+    [
+      "braid-representation",
+      "braid-closure",
+      "braid-trace",
+      "braid-form"
+    ],
+    [
+      "kauffman-bracket",
+      "bracket-polynomial",
+      "state-sum-polynomial",
+      "kauffman-state-sum"
+    ],
+    [
+      "amphicheiral-knot",
+      "amphicheiral",
+      "achiral-knot",
+      "mirror-symmetric-knot"
+    ]
+  ],
+  "sentence_templates": [
+    "how does the {0} define the Jones polynomial and why does the {1} of a diagram affect its normalization via a {2} into the {3} for an {4}",
+    "explain the {0} for the Jones polynomial and describe how the {1} correction links a {2} to the {3} in the case of an {4}",
+    "what is the {0} of the Jones polynomial and how do {1} corrections to a {2} preserve the {3} while detecting whether a knot is {4}"
+  ]
+}

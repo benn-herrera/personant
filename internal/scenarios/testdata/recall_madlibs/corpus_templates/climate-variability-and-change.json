@@ -1,0 +1,51 @@
+{
+  "name": "climate-variability-and-change-corpus",
+  "topic": "wiki-climate-variability-and-change",
+  "mode": "measure-only",
+  "source_article": "Climate variability and change",
+  "description": "Tests recall of climate variability concepts including internal variability, external forcing, Milankovitch cycles, thermohaline circulation, and climate feedbacks.",
+  "anchors": [
+    "internal-variability",
+    "external-forcing",
+    "milankovitch-cycles",
+    "thermohaline-circulation",
+    "climate-feedback"
+  ],
+  "columns": [
+    [
+      "internal-variability",
+      "unforced-climate-variability",
+      "internal-climate-fluctuation",
+      "natural-internal-oscillation"
+    ],
+    [
+      "external-forcing",
+      "climate-forcing-mechanism",
+      "external-climate-driver",
+      "exogenous-climate-perturbation"
+    ],
+    [
+      "milankovitch-cycles",
+      "orbital-forcing",
+      "orbital-climate-cycles",
+      "astronomical-climate-forcing"
+    ],
+    [
+      "thermohaline-circulation",
+      "ocean-overturning-circulation",
+      "deep-ocean-conveyor",
+      "meridional-overturning-circulation"
+    ],
+    [
+      "climate-feedback",
+      "climate-amplification",
+      "feedback-mechanism",
+      "self-reinforcing-climate-response"
+    ]
+  ],
+  "sentence_templates": [
+    "{1} like volcanic eruptions contrasts with {0} oscillations such as ENSO, while {2} sets the glacial pace, {3} redistributes heat, and {4} amplifies warming.",
+    "{0} from ocean-atmosphere coupling differs from {1} driven by {2}, and both interact with {3} heat transport modified by {4} loops.",
+    "Understanding how {3} slows under freshwater input helps disentangle {1} triggered by {2} from {0}, and the net effect is shaped by {4}."
+  ]
+}

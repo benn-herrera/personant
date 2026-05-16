@@ -1,0 +1,51 @@
+{
+  "name": "pontecorvo-maki-nakagawa-sakata-matrix-corpus",
+  "topic": "wiki-pontecorvo-maki-nakagawa-sakata-matrix",
+  "mode": "measure-only",
+  "source_article": "Pontecorvo–Maki–Nakagawa–Sakata matrix",
+  "description": "Probes recall of PMNS matrix concepts including lepton mixing, mixing angles, mass eigenstates, flavor eigenstates, and the CP-violating phase.",
+  "anchors": [
+    "pmns-matrix",
+    "neutrino-mixing-angle",
+    "mass-eigenstate",
+    "flavor-eigenstate",
+    "cp-violating-phase"
+  ],
+  "columns": [
+    [
+      "pmns-matrix",
+      "lepton-mixing-matrix",
+      "neutrino-mixing-matrix",
+      "mns-matrix"
+    ],
+    [
+      "neutrino-mixing-angle",
+      "leptonic-mixing-angle",
+      "neutrino-oscillation-angle",
+      "flavor-rotation-angle"
+    ],
+    [
+      "mass-eigenstate",
+      "neutrino-mass-eigenstate",
+      "definite-mass-state",
+      "mass-basis-state"
+    ],
+    [
+      "flavor-eigenstate",
+      "weak-eigenstate",
+      "interaction-eigenstate",
+      "charged-current-eigenstate"
+    ],
+    [
+      "cp-violating-phase",
+      "delta-cp-phase",
+      "leptonic-cp-phase",
+      "charge-parity-phase"
+    ]
+  ],
+  "sentence_templates": [
+    "The {0} encodes each {1} that rotates {3} into superpositions of {2}, with the {4} governing leptonic charge-parity asymmetry.",
+    "Measuring the {4} in the {0} requires knowing each {1} precisely, since {3} states are mixtures of {2} states that oscillate as neutrinos propagate.",
+    "Each {3} is a coherent sum of {2} states weighted by elements of the {0}, with the {1} values and the {4} determining oscillation probabilities."
+  ]
+}

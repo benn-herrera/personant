@@ -1,0 +1,20 @@
+{
+  "name": "borromean-rings-corpus",
+  "topic": "wiki-borromean-rings",
+  "mode": "measure-only",
+  "source_article": "Borromean rings",
+  "description": "Recall test for the Borromean rings as a Brunnian link with special geometric and topological properties.",
+  "anchors": ["borromean-rings", "brunnian-link", "hyperbolic-link", "link-complement", "pairwise-unlinked"],
+  "columns": [
+    ["borromean-rings", "borromean-link", "ballantine-rings", "borromeo-rings"],
+    ["brunnian-link", "brunnian-chain", "brunnian-structure", "brunnian-configuration"],
+    ["hyperbolic-link", "hyperbolic-knot-link", "hyperbolic-3-link", "hyperbolic-link-type"],
+    ["link-complement", "complement-of-link", "link-exterior", "link-space-complement"],
+    ["pairwise-unlinked", "pairwise-unlinking", "mutually-unlinked", "componentwise-unlinked"]
+  ],
+  "sentence_templates": [
+    "The {0} form a {1} because any component removal leaves {4} loops and their {3} is a {2} with finite volume.",
+    "Why are the {0} classified as a {1} and what does {4} mean for their {3} as a {2}?",
+    "Describe how the {0} exemplify a {1} where the rings are {4} in pairs and the {3} admits a {2} metric."
+  ]
+}

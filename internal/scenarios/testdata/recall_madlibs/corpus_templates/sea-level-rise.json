@@ -1,0 +1,51 @@
+{
+  "name": "sea-level-rise-corpus",
+  "topic": "wiki-sea-level-rise",
+  "mode": "measure-only",
+  "source_article": "Sea level rise",
+  "description": "Measures recall of five sea-level-rise concepts: thermal expansion of seawater, ice sheet contribution, the rate of acceleration, coastal flood hazard, and marine ice sheet instability.",
+  "anchors": [
+    "thermal-expansion",
+    "ice-sheet-melt",
+    "sea-level-acceleration",
+    "coastal-flood-hazard",
+    "marine-ice-sheet-instability"
+  ],
+  "columns": [
+    [
+      "thermal-expansion",
+      "thermosteric-expansion",
+      "seawater-thermal-expansion",
+      "ocean-thermal-expansion"
+    ],
+    [
+      "ice-sheet-melt",
+      "ice-sheet-mass-loss",
+      "glacier-and-ice-sheet-melt",
+      "cryosphere-mass-loss"
+    ],
+    [
+      "sea-level-acceleration",
+      "rate-of-sea-level-rise",
+      "sea-level-rise-acceleration",
+      "accelerating-sea-level-trend"
+    ],
+    [
+      "coastal-flood-hazard",
+      "coastal-inundation-risk",
+      "tidal-flood-risk",
+      "storm-surge-flood-risk"
+    ],
+    [
+      "marine-ice-sheet-instability",
+      "west-antarctic-instability",
+      "ice-sheet-collapse-risk",
+      "marine-ice-cliff-instability"
+    ]
+  ],
+  "sentence_templates": [
+    "How do {0} and {1} each contribute to {2}, and how does rising sea level increase {3} given the risk of {4}?",
+    "Describe the relative roles of {0} and {1} in driving {2}, explain how this ongoing rise amplifies {3}, and discuss the potential contribution of {4}.",
+    "What fraction of current sea-level rise comes from {0} versus {1}, how is {2} measured, what is {3}, and what is the significance of {4} for long-term projections?"
+  ]
+}

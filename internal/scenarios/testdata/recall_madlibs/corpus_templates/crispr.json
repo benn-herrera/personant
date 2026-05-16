@@ -1,0 +1,51 @@
+{
+  "name": "crispr-corpus",
+  "topic": "wiki-crispr",
+  "mode": "measure-only",
+  "source_article": "CRISPR",
+  "description": "Five concepts from the CRISPR Wikipedia article — spacer acquisition, protospacer adjacent motif, guide RNA, adaptive immunity, and genome editing — each represented by four genuine synonyms.",
+  "anchors": [
+    "spacer-acquisition",
+    "protospacer-adjacent-motif",
+    "guide-rna",
+    "adaptive-immunity",
+    "genome-editing"
+  ],
+  "columns": [
+    [
+      "spacer-acquisition",
+      "spacer-integration",
+      "spacer-incorporation",
+      "spacer-insertion"
+    ],
+    [
+      "protospacer-adjacent-motif",
+      "pam-sequence",
+      "flanking-recognition-sequence",
+      "target-flanking-motif"
+    ],
+    [
+      "guide-rna",
+      "crrna",
+      "targeting-rna",
+      "spacer-rna"
+    ],
+    [
+      "adaptive-immunity",
+      "acquired-immunity",
+      "heritable-immunity",
+      "adaptive-immune-response"
+    ],
+    [
+      "genome-editing",
+      "gene-editing",
+      "dna-editing",
+      "targeted-gene-modification"
+    ]
+  ],
+  "sentence_templates": [
+    "the mechanism of {0} relies on {1} recognition to load {2} and confer {3} enabling {4}",
+    "bacteria deploy {3} through {0} guided by {1} which generates {2} later applied to {4}",
+    "researchers harnessed {2} and {1} from natural {3} to enable {0} as a platform for {4}"
+  ]
+}

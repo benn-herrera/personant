@@ -1,0 +1,51 @@
+{
+  "name": "carbon-cycle-corpus",
+  "topic": "wiki-carbon-cycle",
+  "mode": "measure-only",
+  "source_article": "Carbon cycle",
+  "description": "Measures recall of five carbon-cycle concepts: the fast biological cycle, the slow geological cycle, the ocean biological pump, carbon sequestration, and the dissolved inorganic carbon pool.",
+  "anchors": [
+    "fast-carbon-cycle",
+    "slow-carbon-cycle",
+    "biological-pump",
+    "carbon-sequestration",
+    "dissolved-inorganic-carbon"
+  ],
+  "columns": [
+    [
+      "fast-carbon-cycle",
+      "biological-carbon-cycle",
+      "short-term-carbon-cycle",
+      "biotic-carbon-cycle"
+    ],
+    [
+      "slow-carbon-cycle",
+      "geological-carbon-cycle",
+      "deep-carbon-cycle",
+      "geologic-carbon-cycle"
+    ],
+    [
+      "biological-pump",
+      "ocean-biological-pump",
+      "marine-biological-pump",
+      "oceanic-carbon-pump"
+    ],
+    [
+      "carbon-sequestration",
+      "carbon-storage",
+      "carbon-capture-and-storage",
+      "carbon-sink-uptake"
+    ],
+    [
+      "dissolved-inorganic-carbon",
+      "dic",
+      "oceanic-inorganic-carbon",
+      "seawater-inorganic-carbon"
+    ]
+  ],
+  "sentence_templates": [
+    "How does the {0} differ from the {1}, what role does the {2} play in {3}, and how does {4} move between ocean layers?",
+    "Describe the timescales of the {0} versus the {1}, explain how the {2} contributes to {3}, and define {4} as a reservoir.",
+    "What processes drive the {0}, which geological processes define the {1}, how does the {2} achieve {3}, and what forms does {4} take in seawater?"
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "public-key-cryptography-corpus",
+  "topic": "wiki-public-key-cryptography",
+  "mode": "measure-only",
+  "source_article": "Public-key cryptography",
+  "description": "Tests recall of asymmetric cryptography concepts: key pairs, one-way functions, key exchange, non-repudiation, and hybrid schemes.",
+  "anchors": [
+    "asymmetric-cryptography",
+    "public-key",
+    "private-key",
+    "one-way-function",
+    "hybrid-cryptosystem"
+  ],
+  "columns": [
+    [
+      "asymmetric-cryptography",
+      "public-key-cryptography",
+      "asymmetric-encryption",
+      "two-key-cryptography"
+    ],
+    [
+      "public-key",
+      "encryption-key",
+      "open-key",
+      "shareable-key"
+    ],
+    [
+      "private-key",
+      "secret-key",
+      "signing-key",
+      "decryption-key"
+    ],
+    [
+      "one-way-function",
+      "trapdoor-function",
+      "irreversible-computation",
+      "hard-to-invert-function"
+    ],
+    [
+      "hybrid-cryptosystem",
+      "combined-encryption-scheme",
+      "mixed-mode-encryption",
+      "asymmetric-symmetric-combination"
+    ]
+  ],
+  "sentence_templates": [
+    "In {0}, the {1} is freely distributed while the {2} remains secret, enabled by a {3} and often wrapped in a {4}.",
+    "A {4} uses {0} to establish a session key via a {3}, then encrypts bulk data using the {1} derived from the {2}.",
+    "The security of {0} rests on a {3}: anyone may use the {1} to encrypt, but only the holder of the {2} can decrypt, and practical deployments combine both in a {4}."
+  ]
+}

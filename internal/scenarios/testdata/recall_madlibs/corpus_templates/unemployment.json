@@ -1,0 +1,51 @@
+{
+  "name": "unemployment-corpus",
+  "topic": "wiki-unemployment",
+  "mode": "measure-only",
+  "source_article": "Unemployment",
+  "description": "Tests recall of unemployment concepts including the unemployment rate, frictional unemployment, structural unemployment, cyclical unemployment, and NAIRU.",
+  "anchors": [
+    "unemployment-rate",
+    "frictional-unemployment",
+    "structural-unemployment",
+    "cyclical-unemployment",
+    "nairu"
+  ],
+  "columns": [
+    [
+      "unemployment-rate",
+      "jobless-rate",
+      "out-of-work-rate",
+      "labor-market-slack-rate"
+    ],
+    [
+      "frictional-unemployment",
+      "search-unemployment",
+      "job-search-unemployment",
+      "transitional-unemployment"
+    ],
+    [
+      "structural-unemployment",
+      "skills-mismatch-unemployment",
+      "technology-displacement-unemployment",
+      "long-run-joblessness"
+    ],
+    [
+      "cyclical-unemployment",
+      "demand-deficient-unemployment",
+      "keynesian-unemployment",
+      "recession-driven-unemployment"
+    ],
+    [
+      "nairu",
+      "natural-rate-of-unemployment",
+      "non-accelerating-inflation-rate",
+      "structural-unemployment-floor"
+    ]
+  ],
+  "sentence_templates": [
+    "how does the {0} combine {1} and {2} with {3} and why does the {4} set a floor below which it cannot sustainably fall",
+    "explain why {4} implies that reducing {3} below the {0} consistent with {2} will not eliminate {1} in the long run",
+    "what distinguishes {3} from {2} and {1} in explaining the {0} and how does the {4} mark the boundary between them"
+  ]
+}

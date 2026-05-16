@@ -1,0 +1,20 @@
+{
+  "name": "torus-knot-corpus",
+  "topic": "wiki-torus-knot",
+  "mode": "measure-only",
+  "source_article": "Torus knot",
+  "description": "Recall test for torus knots and their principal invariants.",
+  "anchors": ["torus-knot", "coprime-integers", "seifert-fibered-manifold", "knot-genus", "closed-braid"],
+  "columns": [
+    ["torus-knot", "torus-curve-knot", "knot-on-torus", "torus-embedded-knot"],
+    ["coprime-integers", "relatively-prime-pair", "coprime-pair", "gcd-one-pair"],
+    ["seifert-fibered-manifold", "seifert-fibration", "fibered-seifert-space", "seifert-fiber-space"],
+    ["knot-genus", "genus-of-knot", "seifert-genus", "minimal-genus"],
+    ["closed-braid", "braid-closure", "closed-braid-form", "braid-knot-closure"]
+  ],
+  "sentence_templates": [
+    "A {0} is parametrized by a {1} and its complement is a {2} with {3} given by a formula involving a {4}.",
+    "How is a {0} specified by a {1}, what is its {3}, and why can it be expressed as a {4} inside a {2}?",
+    "Explain why each {0} defined by a {1} can be written as a {4} and what this implies for its {2} and {3}."
+  ]
+}

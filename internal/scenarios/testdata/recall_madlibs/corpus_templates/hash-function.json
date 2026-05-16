@@ -1,0 +1,22 @@
+{
+  "name": "hash-function-corpus",
+  "topic": "wiki-hash-function",
+  "mode": "measure-only",
+  "source_article": "Hash function",
+  "description": "Tests recall of hash function concepts including hash collisions, hash tables, cryptographic hashes, hash values, and preimage resistance.",
+  "anchors": ["hash-collision", "hash-table", "cryptographic-hash", "hash-value", "preimage-resistance"],
+  "columns": [
+    ["hash-collision", "key-collision", "hash-clash", "digest-collision"],
+    ["hash-table", "hash-map", "scatter-storage", "associative-array"],
+    ["cryptographic-hash", "secure-hash", "one-way-hash", "crypto-digest"],
+    ["hash-value", "hash-code", "message-digest", "fingerprint"],
+    ["preimage-resistance", "one-way-property", "non-invertibility", "hash-irreversibility"]
+  ],
+  "sentence_templates": [
+    "A {2} produces a fixed-length {3} with {4}, so a {0} is computationally hard to find, unlike in a plain {1} where it merely causes slowdown.",
+    "The {4} of a {2} ensures the {3} cannot be inverted, while a {1} tolerates a {0} without any security implication.",
+    "Designing a {2} requires strong {4}: knowing the {3} must not help reconstruct input or engineer a {0} even over a {1}-scale dataset.",
+    "A {0} undermines a {2} by producing two inputs with identical {3}, negating {4} and rendering the {1} that stores these digests unreliable.",
+    "In security applications the {3} output of a {2} relies on {4}, whereas a plain {1} only needs to minimize {0} for performance."
+  ]
+}

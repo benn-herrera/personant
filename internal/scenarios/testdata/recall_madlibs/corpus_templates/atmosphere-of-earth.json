@@ -1,0 +1,52 @@
+{
+  "name": "atmosphere-of-earth-corpus",
+  "topic": "wiki-atmosphere-of-earth",
+  "mode": "measure-only",
+  "source_article": "Atmosphere of Earth",
+  "description": "Tests recall of atmospheric layering, greenhouse retention, ozone shielding, albedo reflection, and gas composition.",
+  "anchors": [
+    "atmospheric-stratification",
+    "greenhouse-effect",
+    "ozone-layer",
+    "albedo",
+    "troposphere"
+  ],
+  "columns": [
+    [
+      "atmospheric-stratification",
+      "layering-of-the-atmosphere",
+      "vertical-atmospheric-structure",
+      "atmospheric-layer-division"
+    ],
+    [
+      "greenhouse-effect",
+      "heat-retention-by-atmosphere",
+      "infrared-trapping",
+      "radiative-blanketing"
+    ],
+    [
+      "ozone-layer",
+      "stratospheric-ozone",
+      "uv-shielding-band",
+      "ozone-shield"
+    ],
+    [
+      "albedo",
+      "surface-reflectivity",
+      "solar-reflectance",
+      "shortwave-reflectance"
+    ],
+    [
+      "troposphere",
+      "lowest-atmospheric-layer",
+      "weather-layer",
+      "boundary-air-layer"
+    ]
+  ],
+  "sentence_templates": [
+    "Earth's {0} separates the {4} from higher regions where the {2} blocks radiation, while {1} and {3} together govern surface temperature.",
+    "The {1} warms the surface by trapping heat; without the {2} shielding ultraviolet light, life in the {0} would be disrupted, and {3} determines how much sunlight reaches the {4}.",
+    "Within the {0}, the {4} hosts most weather while the {2} sits above it, and {1} combined with {3} sets the planet's energy balance.",
+    "Scientists studying {0} note that {1} keeps the {4} warm, the {2} absorbs ultraviolet light, and {3} determines net incoming radiation."
+  ]
+}

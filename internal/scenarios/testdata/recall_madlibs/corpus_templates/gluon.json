@@ -1,0 +1,51 @@
+{
+  "name": "gluon-corpus",
+  "topic": "wiki-gluon",
+  "mode": "measure-only",
+  "source_article": "Gluon",
+  "description": "Probes recall of gluon concepts including color charge, quark confinement, the eight color states, quantum chromodynamics, and gluon self-interaction.",
+  "anchors": [
+    "color-charge",
+    "quark-confinement",
+    "color-octet",
+    "quantum-chromodynamics",
+    "gluon-self-interaction"
+  ],
+  "columns": [
+    [
+      "color-charge",
+      "strong-color-charge",
+      "qcd-color-charge",
+      "chromodynamic-charge"
+    ],
+    [
+      "quark-confinement",
+      "color-confinement",
+      "hadronic-confinement",
+      "quark-trapping"
+    ],
+    [
+      "color-octet",
+      "eight-gluon-states",
+      "gluon-color-octet",
+      "eight-color-types"
+    ],
+    [
+      "quantum-chromodynamics",
+      "qcd",
+      "strong-interaction-field-theory",
+      "chromodynamic-gauge-theory"
+    ],
+    [
+      "gluon-self-interaction",
+      "gluon-gluon-interaction",
+      "non-abelian-self-coupling",
+      "gluon-self-coupling"
+    ]
+  ],
+  "sentence_templates": [
+    "Because the gluon carries {0} itself, {4} is possible within {3}, which requires a {2} structure to describe the {1} that confines quarks.",
+    "The {2} of gluon states in {3} enables {4}, ultimately producing {1} through flux-tube formation mediated by {0}.",
+    "In {3}, the gluon's {0} allows {4} that produces flux tubes, explaining {1} and requiring exactly a {2} of independent states."
+  ]
+}

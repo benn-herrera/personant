@@ -1,0 +1,51 @@
+{
+  "name": "knot-invariant-corpus",
+  "topic": "wiki-knot-invariant",
+  "mode": "measure-only",
+  "source_article": "Knot invariant",
+  "description": "Synthetic queries probing knowledge of knot invariants including tricolorability, crossing number, knot genus, hyperbolic volume, and the role of Reidemeister moves.",
+  "anchors": [
+    "tricolorability",
+    "crossing-number",
+    "knot-genus",
+    "hyperbolic-volume",
+    "reidemeister-move"
+  ],
+  "columns": [
+    [
+      "tricolorability",
+      "3-colorability",
+      "three-colorability",
+      "tricolor-property"
+    ],
+    [
+      "crossing-number",
+      "minimal-crossings",
+      "minimum-crossing-count",
+      "least-crossing-number"
+    ],
+    [
+      "knot-genus",
+      "seifert-genus",
+      "genus-of-knot",
+      "three-genus"
+    ],
+    [
+      "hyperbolic-volume",
+      "complement-volume",
+      "hyperbolic-knot-volume",
+      "volume-invariant"
+    ],
+    [
+      "reidemeister-move",
+      "triangular-move",
+      "diagram-move",
+      "local-diagram-move"
+    ]
+  ],
+  "sentence_templates": [
+    "describe how {0} and {1} are both knot invariants and explain how {2} and {3} behave under a {4}",
+    "explain why {0} is invariant under {4} and how it compares to {1} as a simpler invariant than {2} or {3}",
+    "what does it mean for {0} to be a complete invariant compared to {1} and how do {2} and {3} each remain unchanged under {4}"
+  ]
+}

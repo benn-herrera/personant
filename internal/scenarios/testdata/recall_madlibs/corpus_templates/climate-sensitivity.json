@@ -1,0 +1,51 @@
+{
+  "name": "climate-sensitivity-corpus",
+  "topic": "wiki-climate-sensitivity",
+  "mode": "measure-only",
+  "source_article": "Climate sensitivity",
+  "description": "Measures recall of five climate-sensitivity concepts: equilibrium climate sensitivity, transient climate response, radiative forcing, water vapor feedback, and Earth system sensitivity.",
+  "anchors": [
+    "equilibrium-climate-sensitivity",
+    "transient-climate-response",
+    "radiative-forcing",
+    "water-vapor-feedback",
+    "earth-system-sensitivity"
+  ],
+  "columns": [
+    [
+      "equilibrium-climate-sensitivity",
+      "ecs",
+      "long-term-climate-sensitivity",
+      "equilibrium-warming-response"
+    ],
+    [
+      "transient-climate-response",
+      "tcr",
+      "near-term-warming-response",
+      "transient-temperature-response"
+    ],
+    [
+      "radiative-forcing",
+      "energy-flux-imbalance",
+      "top-of-atmosphere-forcing",
+      "climate-forcing"
+    ],
+    [
+      "water-vapor-feedback",
+      "water-vapour-feedback",
+      "humidity-feedback",
+      "atmospheric-moisture-feedback"
+    ],
+    [
+      "earth-system-sensitivity",
+      "ess",
+      "long-term-earth-sensitivity",
+      "deep-time-climate-sensitivity"
+    ]
+  ],
+  "sentence_templates": [
+    "How does {0} differ from {1}, what is {2} and how does it drive both, what is {3}, and how does {4} extend the concept further?",
+    "Define {0} for a CO2 doubling, contrast it with {1} on shorter timescales, explain the role of {2} as the driving variable, describe {3} as a key amplifier, and define {4}.",
+    "What range does the IPCC give for {0}, how is {1} estimated from model runs, what is {2} measured in, how does {3} amplify the initial warming, and why is {4} larger than ECS?"
+  ]
+}

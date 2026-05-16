@@ -1,0 +1,20 @@
+{
+  "name": "reidemeister-move-corpus",
+  "topic": "wiki-reidemeister-move",
+  "mode": "measure-only",
+  "source_article": "Reidemeister move",
+  "description": "Recall test for the three Reidemeister moves and their role in knot equivalence.",
+  "anchors": ["reidemeister-move", "planar-isotopy", "knot-invariant", "writhe", "crossing-number"],
+  "columns": [
+    ["reidemeister-move", "local-diagram-move", "reidemeister-operation", "link-diagram-move"],
+    ["planar-isotopy", "diagram-isotopy", "plane-deformation", "planar-deformation"],
+    ["knot-invariant", "knot-topological-invariant", "link-invariant", "diagram-invariant"],
+    ["writhe", "signed-crossing-sum", "crossing-sign-sum", "algebraic-crossing-number"],
+    ["crossing-number", "min-crossing-count", "crossing-count", "minimum-crossings"]
+  ],
+  "sentence_templates": [
+    "Applying a {0} up to {1} preserves the {2} but changes the {3} for type-I and does not alter the {4} only for type-III.",
+    "How does a type-I {0} affect the {3} and what does this say about the {2} of a diagram with given {4} under {1}?",
+    "Explain why two diagrams related by {1} and a sequence of each type of {0} share the same {2} even when {3} and {4} differ."
+  ]
+}

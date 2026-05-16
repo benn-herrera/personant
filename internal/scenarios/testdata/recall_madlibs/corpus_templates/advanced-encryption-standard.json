@@ -1,0 +1,51 @@
+{
+  "name": "advanced-encryption-standard-corpus",
+  "topic": "wiki-advanced-encryption-standard",
+  "mode": "measure-only",
+  "source_article": "Advanced Encryption Standard",
+  "description": "Tests recall of AES concepts: substitution-permutation network, block size, key schedule, round function, and the Rijndael origin.",
+  "anchors": [
+    "substitution-permutation-network",
+    "block-size",
+    "key-schedule",
+    "subbytes",
+    "rijndael"
+  ],
+  "columns": [
+    [
+      "substitution-permutation-network",
+      "sp-network",
+      "substitution-and-permutation-design",
+      "sbox-and-permutation-structure"
+    ],
+    [
+      "block-size",
+      "block-length",
+      "data-block-width",
+      "cipher-block-dimension"
+    ],
+    [
+      "key-schedule",
+      "key-expansion",
+      "round-key-derivation",
+      "subkey-generation"
+    ],
+    [
+      "subbytes",
+      "byte-substitution",
+      "sbox-substitution",
+      "nonlinear-substitution-step"
+    ],
+    [
+      "rijndael",
+      "rijndael-cipher",
+      "daemen-rijmen-cipher",
+      "aes-origin-cipher"
+    ]
+  ],
+  "sentence_templates": [
+    "AES is based on {0} derived from {4}, operates on a fixed {1} of 128 bits, applies {3} each round, and derives round keys via a {2}.",
+    "The {4} design uses a {0} where {3} provides nonlinearity, all operating over a fixed {1} with round keys produced by a {2}.",
+    "Each AES round applies {3} for nonlinearity within a {0}, over a fixed {1} of data, using keys produced by the {2}, all rooted in the {4} family."
+  ]
+}

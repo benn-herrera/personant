@@ -1,0 +1,51 @@
+{
+  "name": "aggregate-demand-corpus",
+  "topic": "wiki-aggregate-demand",
+  "mode": "measure-only",
+  "source_article": "Aggregate demand",
+  "description": "Tests recall of aggregate demand as the total demand for final goods and services in an economy, composed of consumption, investment, government spending, and net exports.",
+  "anchors": [
+    "aggregate-demand",
+    "consumer-spending",
+    "government-expenditure",
+    "net-exports",
+    "price-level"
+  ],
+  "columns": [
+    [
+      "aggregate-demand",
+      "total-spending",
+      "effective-demand",
+      "domestic-final-demand"
+    ],
+    [
+      "consumer-spending",
+      "household-consumption",
+      "personal-consumption-expenditure",
+      "consumption-expenditure"
+    ],
+    [
+      "government-expenditure",
+      "public-spending",
+      "fiscal-outlays",
+      "government-outlays"
+    ],
+    [
+      "net-exports",
+      "trade-balance",
+      "exports-minus-imports",
+      "current-account-balance"
+    ],
+    [
+      "price-level",
+      "general-price-index",
+      "average-price-level",
+      "gdp-deflator"
+    ]
+  ],
+  "sentence_templates": [
+    "An increase in {0} driven by higher {1} and {2} raises the {4} as output expands, provided that {3} does not deteriorate.",
+    "Keynesian theory holds that {0} equals {1} plus investment plus {2} plus {3}, and that the {4} adjusts upward when output nears potential.",
+    "A fall in {3} and weak {1} can reduce {0} sharply, pushing the {4} down and triggering recession even when {2} remains stable."
+  ]
+}

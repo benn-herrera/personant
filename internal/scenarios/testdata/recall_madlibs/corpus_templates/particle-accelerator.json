@@ -1,0 +1,51 @@
+{
+  "name": "particle-accelerator-corpus",
+  "topic": "wiki-particle-accelerator",
+  "mode": "measure-only",
+  "source_article": "Particle accelerator",
+  "description": "Probes recall of particle accelerator concepts including synchrotron radiation, the cyclotron, linear accelerators, colliders, and radio-frequency acceleration.",
+  "anchors": [
+    "synchrotron-radiation",
+    "cyclotron",
+    "linear-accelerator",
+    "collider",
+    "radio-frequency-acceleration"
+  ],
+  "columns": [
+    [
+      "synchrotron-radiation",
+      "magnetic-bremsstrahlung",
+      "synchrotron-light",
+      "synchrotron-emission"
+    ],
+    [
+      "cyclotron",
+      "circular-resonance-accelerator",
+      "dee-magnet-accelerator",
+      "lawrence-cyclotron"
+    ],
+    [
+      "linear-accelerator",
+      "linac",
+      "straight-line-accelerator",
+      "drift-tube-linac"
+    ],
+    [
+      "collider",
+      "storage-ring-collider",
+      "particle-collider",
+      "beam-beam-collider"
+    ],
+    [
+      "radio-frequency-acceleration",
+      "rf-acceleration",
+      "resonant-rf-acceleration",
+      "microwave-cavity-acceleration"
+    ]
+  ],
+  "sentence_templates": [
+    "A {1} spirals particles outward using {4}, while a {2} drives them straight, and a {3} recirculates beams that lose energy to {0}.",
+    "High-energy {3} designs avoid the {0} losses that limit circular electron machines by switching to a {2} driven by {4}, unlike the original {1} design.",
+    "The {1} was superseded by the synchrotron for high energies partly because {0} losses increase with energy, motivating {2} designs using {4} that feed into a {3}."
+  ]
+}

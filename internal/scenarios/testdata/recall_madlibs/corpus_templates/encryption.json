@@ -1,0 +1,22 @@
+{
+  "name": "encryption-corpus",
+  "topic": "wiki-encryption",
+  "mode": "measure-only",
+  "source_article": "Encryption",
+  "description": "Tests recall of encryption concepts including plaintext, ciphertext, symmetric keys, public-key cryptography, and brute-force attacks.",
+  "anchors": ["plaintext", "ciphertext", "symmetric-key", "public-key-cryptography", "brute-force-attack"],
+  "columns": [
+    ["plaintext", "cleartext", "unencrypted-text", "original-message"],
+    ["ciphertext", "encrypted-output", "enciphered-text", "scrambled-text"],
+    ["symmetric-key", "shared-key", "single-key", "private-key-encryption"],
+    ["public-key-cryptography", "asymmetric-encryption", "two-key-cryptography", "public-private-key-scheme"],
+    ["brute-force-attack", "exhaustive-key-search", "keyspace-search", "exhaustive-search"]
+  ],
+  "sentence_templates": [
+    "Converting {0} to {1} with {3} avoids the shared-secret problem of {2} but remains vulnerable to {4}.",
+    "In {3}, the public half of the {2}-equivalent encrypts {0} to yield {1}, while {4} remains impractical.",
+    "With a sufficiently long {2}, recovering {0} from {1} via {4} is computationally infeasible even against {3}.",
+    "Both {2} and {3} protect {0} by producing {1} that resists {4} when the key is long enough.",
+    "The choice between {2} and {3} affects how {0} becomes {1} and how resilient the scheme is to {4}."
+  ]
+}

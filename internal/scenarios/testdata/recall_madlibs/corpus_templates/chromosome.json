@@ -1,0 +1,51 @@
+{
+  "name": "chromosome-corpus",
+  "topic": "wiki-chromosome",
+  "mode": "measure-only",
+  "source_article": "Chromosome",
+  "description": "Templates for querying stored knowledge about chromosome structure, packaging, and inheritance.",
+  "anchors": [
+    "chromatin",
+    "centromere",
+    "sister-chromatids",
+    "histone",
+    "karyotype"
+  ],
+  "columns": [
+    [
+      "chromatin",
+      "dna-protein-complex",
+      "nuclear-fiber",
+      "chromosome-material"
+    ],
+    [
+      "centromere",
+      "primary-constriction",
+      "kinetochore-anchor",
+      "chromatid-junction"
+    ],
+    [
+      "sister-chromatids",
+      "duplicated-chromosome-copies",
+      "joined-chromatid-pair",
+      "replicated-chromatid-pair"
+    ],
+    [
+      "histone",
+      "dna-packaging-protein",
+      "nucleosome-core-protein",
+      "chromatin-scaffold-protein"
+    ],
+    [
+      "karyotype",
+      "chromosome-complement",
+      "chromosomal-profile",
+      "chromosome-set"
+    ]
+  ],
+  "sentence_templates": [
+    "How does {0} wrap around {3} and what role does {1} play in aligning {2} so the cell can display a normal {4}?",
+    "During cell division the {0} condenses near the {1} while {2} separate and {3} proteins maintain a stable {4}.",
+    "Describe how disruptions to {3} binding in {0} affect {1} attachment of {2} and alter the organism's {4}."
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "quark-corpus",
+  "topic": "wiki-quark",
+  "mode": "measure-only",
+  "source_article": "Quark",
+  "description": "Query templates probing color confinement, quark flavors, hadrons, asymptotic freedom, and the CKM matrix.",
+  "anchors": [
+    "color-confinement",
+    "quark-flavor",
+    "hadron",
+    "asymptotic-freedom",
+    "ckm-matrix"
+  ],
+  "columns": [
+    [
+      "color-confinement",
+      "quark-confinement",
+      "colour-confinement",
+      "chromodynamic-confinement"
+    ],
+    [
+      "quark-flavor",
+      "quark-flavour",
+      "quark-type",
+      "flavor-quantum-number"
+    ],
+    [
+      "hadron",
+      "quark-composite",
+      "color-neutral-composite",
+      "strongly-bound-composite"
+    ],
+    [
+      "asymptotic-freedom",
+      "qcd-asymptotic-freedom",
+      "short-distance-freedom",
+      "running-coupling-decrease"
+    ],
+    [
+      "ckm-matrix",
+      "cabibbo-kobayashi-maskawa-matrix",
+      "quark-mixing-matrix",
+      "flavor-mixing-matrix"
+    ]
+  ],
+  "sentence_templates": [
+    "explain {0} and how it prevents isolation of a {1} quark inside a {2} even as {3} weakens the force at short range as encoded in the {4}",
+    "how does {3} in qcd relate to {0} given that each {1} quark forms a {2} and how does the {4} describe transitions between quark types",
+    "what is {0} and how does the {4} parameterize {1} changes within a {2} in the regime where {3} applies"
+  ]
+}

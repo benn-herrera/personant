@@ -1,0 +1,51 @@
+{
+  "name": "global-warming-potential-corpus",
+  "topic": "wiki-global-warming-potential",
+  "mode": "measure-only",
+  "source_article": "Global warming potential",
+  "description": "Tests recall of GWP concepts including the CO2-equivalent metric, atmospheric lifetime, radiative efficiency, and the importance of the chosen time horizon.",
+  "anchors": [
+    "global-warming-potential",
+    "carbon-dioxide-equivalent",
+    "atmospheric-lifetime",
+    "radiative-efficiency",
+    "time-horizon"
+  ],
+  "columns": [
+    [
+      "global-warming-potential",
+      "gwp",
+      "heat-trapping-index",
+      "greenhouse-warming-index"
+    ],
+    [
+      "carbon-dioxide-equivalent",
+      "co2-equivalent",
+      "co2e",
+      "co2-eq"
+    ],
+    [
+      "atmospheric-lifetime",
+      "gas-residence-time",
+      "atmospheric-persistence",
+      "decay-time-in-atmosphere"
+    ],
+    [
+      "radiative-efficiency",
+      "infrared-absorbing-ability",
+      "heat-absorbing-capacity",
+      "ir-absorptance-per-molecule"
+    ],
+    [
+      "time-horizon",
+      "integration-period",
+      "gwp-time-window",
+      "assessment-timeframe"
+    ]
+  ],
+  "sentence_templates": [
+    "The {0} of a greenhouse gas combines its {3} with its {2} over a chosen {4} to produce a dimensionless number expressed as {1}.",
+    "Converting emissions to {1} requires knowing the {0} value, which depends on {3} and {2}, and on which {4} is selected for the calculation.",
+    "A gas with high {3} but short {2} may score a large {0} over a short {4} yet a modest one over 100 years, so reports always pair {1} with the chosen time window."
+  ]
+}

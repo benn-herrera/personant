@@ -1,0 +1,52 @@
+{
+  "name": "enzyme-corpus",
+  "topic": "wiki-enzyme",
+  "mode": "measure-only",
+  "source_article": "Enzyme",
+  "description": "Five core enzyme concepts — active site, activation energy, induced fit, turnover number, and feedback inhibition — each represented by tight synonyms drawn from the Wikipedia Enzyme article.",
+  "anchors": [
+    "active-site",
+    "activation-energy",
+    "induced-fit",
+    "turnover-number",
+    "feedback-inhibition"
+  ],
+  "columns": [
+    [
+      "active-site",
+      "binding-pocket",
+      "catalytic-pocket",
+      "catalytic-center"
+    ],
+    [
+      "activation-energy",
+      "energy-barrier",
+      "reaction-barrier",
+      "transition-state-energy"
+    ],
+    [
+      "induced-fit",
+      "conformational-adaptation",
+      "dynamic-active-site",
+      "flexible-binding"
+    ],
+    [
+      "turnover-number",
+      "kcat",
+      "catalytic-rate-constant",
+      "substrate-turnover-rate"
+    ],
+    [
+      "feedback-inhibition",
+      "negative-feedback",
+      "end-product-inhibition",
+      "feedback-regulation"
+    ]
+  ],
+  "sentence_templates": [
+    "the {0} lowers {1} through {2} and the enzyme s {3} determines how quickly {4} slows overproduction",
+    "when {2} reshapes the {0} to reduce {1} the {3} sets reaction speed while {4} prevents excess buildup",
+    "measuring {3} reveals how {2} at the {0} overcomes {1} before {4} downregulates the pathway",
+    "substrate binding at the {0} triggers {2} which reduces {1} so that {3} can sustain flux until {4} intervenes"
+  ]
+}

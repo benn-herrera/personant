@@ -111,7 +111,7 @@ func runMadlibsQuerySet(t *testing.T, doc madlibsDoc) {
 		t.Run(q.ID, func(t *testing.T) {
 			sc := Scenario{
 				Name:  "recall-madlibs-" + q.ID,
-				Setup: seedMadlibsThreads(t, doc),
+				Setup: seedMadlibsThreads(doc),
 				Steps: []Step{
 					{
 						UserInput: q.UserInput,
@@ -219,7 +219,7 @@ func runMadlibsMetrics(t *testing.T, doc madlibsDoc, q madlibsQuery) metricsBlob
 	sc := Scenario{
 		Name:        "recall-madlibs-" + q.ID,
 		MetricsPath: mPath,
-		Setup:       seedMadlibsThreads(t, doc),
+		Setup:       seedMadlibsThreads(doc),
 		Steps: []Step{{
 			UserInput:             q.UserInput,
 			MockResponse:          NewMockResponseWithTag([]string{"*new-topic*"}, q.Tags, "Working from the query terms."),
@@ -246,7 +246,12 @@ func runMadlibsMetrics(t *testing.T, doc madlibsDoc, q madlibsQuery) metricsBlob
 // taken verbatim from the topic. IDs are assigned thr_1, thr_2, … in
 // topic-array order so the caller can resolve a topic name to its
 // thread ID positionally.
-func seedMadlibsThreads(t *testing.T, doc madlibsDoc) func(*Harness) error {
+//
+// The symbol index is rebuilt exactly once, after every thread is
+// written — not once per thread. Per-thread rebuild is O(n²) in topic
+// count, which is tolerable for the handful of hand-crafted topics but
+// catastrophic for the ~150-topic Wikipedia corpus.
+func seedMadlibsThreads(doc madlibsDoc) func(*Harness) error {
 	return func(h *Harness) error {
 		ts := "2026-05-01T12:00:00Z"
 		for i, tp := range doc.Topics {
@@ -261,8 +266,27 @@ func seedMadlibsThreads(t *testing.T, doc madlibsDoc) func(*Harness) error {
 				StateChanged: ts,
 				TurnCount:    1,
 			}
-			seedThread(t, h, rec)
+			if err := store.AppendSpineRecord(h.Paths, rec); err != nil {
+				return fmt.Errorf("seedMadlibsThreads: AppendSpineRecord %s: %w", rec.ID, err)
+			}
+			thr := store.Thread{
+				Frontmatter: store.ThreadFrontmatter{
+					ID:           rec.ID,
+					Project:      rec.Project,
+					Anchors:      append([]string(nil), rec.Anchors...),
+					Summary:      rec.Summary,
+					State:        rec.State,
+					Created:      rec.Created,
+					LastEngaged:  rec.LastEngaged,
+					StateChanged: rec.StateChanged,
+					TurnCount:    rec.TurnCount,
+				},
+				Body: "# seed\n",
+			}
+			if err := store.SaveThread(h.Paths, thr); err != nil {
+				return fmt.Errorf("seedMadlibsThreads: SaveThread %s: %w", rec.ID, err)
+			}
 		}
-		return nil
+		return indexRebuild(h.Paths)
 	}
 }

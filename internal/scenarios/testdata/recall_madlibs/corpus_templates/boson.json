@@ -1,0 +1,51 @@
+{
+  "name": "boson-corpus",
+  "topic": "wiki-boson",
+  "mode": "measure-only",
+  "source_article": "Boson",
+  "description": "Query templates probing bosons, force carriers, Bose-Einstein statistics, integer spin, and Bose-Einstein condensates.",
+  "anchors": [
+    "boson",
+    "force-carrier",
+    "bose-einstein-statistics",
+    "integer-spin",
+    "bose-einstein-condensate"
+  ],
+  "columns": [
+    [
+      "boson",
+      "bose-particle",
+      "bosonic-particle",
+      "integer-spin-particle"
+    ],
+    [
+      "force-carrier",
+      "gauge-boson",
+      "mediating-particle",
+      "interaction-mediator"
+    ],
+    [
+      "bose-einstein-statistics",
+      "bose-statistics",
+      "bosonic-statistics",
+      "bosonic-quantum-statistics"
+    ],
+    [
+      "integer-spin",
+      "whole-number-spin",
+      "bosonic-spin",
+      "spin-integer"
+    ],
+    [
+      "bose-einstein-condensate",
+      "bec",
+      "quantum-condensate",
+      "bosonic-condensate"
+    ]
+  ],
+  "sentence_templates": [
+    "what is a {0} and how does its {3} allow it to act as a {1} obeying {2} and form a {4}",
+    "explain how {2} permits unlimited occupation of quantum states by a {0} with {3} leading to the {4} and the role of a {1}",
+    "describe the {0} as defined by {3} and {2} contrasting its role as a {1} with the conditions needed to observe a {4}"
+  ]
+}

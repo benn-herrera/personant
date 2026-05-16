@@ -1,0 +1,51 @@
+{
+  "name": "ribosome-corpus",
+  "topic": "wiki-ribosome",
+  "mode": "measure-only",
+  "source_article": "Ribosome",
+  "description": "Five synonym columns drawn from ribosome biology: the translation process, the peptidyl-transfer catalytic step, the aminoacyl-tRNA adapter, the polypeptide product, and the ribosomal subunit.",
+  "anchors": [
+    "translation",
+    "peptidyl-transfer",
+    "aminoacyl-trna",
+    "polypeptide",
+    "ribosomal-subunit"
+  ],
+  "columns": [
+    [
+      "translation",
+      "mrna-decoding",
+      "protein-biosynthesis",
+      "protein-synthesis"
+    ],
+    [
+      "peptidyl-transfer",
+      "transpeptidation",
+      "peptide-bond-formation",
+      "aminoacyl-transfer"
+    ],
+    [
+      "aminoacyl-trna",
+      "charged-trna",
+      "aa-trna",
+      "acylated-trna"
+    ],
+    [
+      "polypeptide",
+      "peptide-chain",
+      "amino-acid-chain",
+      "protein-chain"
+    ],
+    [
+      "ribosomal-subunit",
+      "ribosome-unit",
+      "ribosome-component",
+      "ribosomal-particle"
+    ]
+  ],
+  "sentence_templates": [
+    "during {0} the {1} reaction uses {2} to extend the {3} while each {4} contributes to catalysis",
+    "the ribosome performs {0} by catalyzing {1} as each {2} donates its residue to the growing {3} held within the {4}",
+    "each cycle of {0} requires {1} to occur when the {2} enters the a-site and adds to the {3} anchored in the {4}"
+  ]
+}

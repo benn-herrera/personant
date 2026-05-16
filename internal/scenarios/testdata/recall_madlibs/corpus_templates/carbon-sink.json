@@ -1,0 +1,51 @@
+{
+  "name": "carbon-sink-corpus",
+  "topic": "wiki-carbon-sink",
+  "mode": "measure-only",
+  "source_article": "Carbon sink",
+  "description": "Tests recall of carbon sink concepts including carbon sequestration, terrestrial and oceanic uptake, blue carbon ecosystems, and carbon pool accounting.",
+  "anchors": [
+    "carbon-sequestration",
+    "terrestrial-carbon-sink",
+    "oceanic-carbon-uptake",
+    "blue-carbon",
+    "carbon-pool"
+  ],
+  "columns": [
+    [
+      "carbon-sequestration",
+      "carbon-removal",
+      "co2-drawdown",
+      "atmospheric-carbon-capture"
+    ],
+    [
+      "terrestrial-carbon-sink",
+      "land-based-carbon-sink",
+      "forest-carbon-sink",
+      "vegetation-carbon-sink"
+    ],
+    [
+      "oceanic-carbon-uptake",
+      "ocean-carbon-absorption",
+      "marine-co2-uptake",
+      "sea-co2-dissolution"
+    ],
+    [
+      "blue-carbon",
+      "coastal-ecosystem-carbon",
+      "mangrove-saltmarsh-carbon",
+      "tidal-wetland-carbon"
+    ],
+    [
+      "carbon-pool",
+      "carbon-reservoir",
+      "carbon-store",
+      "carbon-stock"
+    ]
+  ],
+  "sentence_templates": [
+    "The {0} process operates through {1} in forests and {2} via dissolution, while {3} in coastal wetlands also contributes to the global {4}.",
+    "To measure global {4} inventory scientists track {0} rates in {1} systems, quantify {2} flux, and account for the specialized {3} stored in mangroves.",
+    "Deforestation reduces {1} capacity, pollution limits {2}, and degraded {3} habitats shrink the global {4} available for atmospheric {0}."
+  ]
+}

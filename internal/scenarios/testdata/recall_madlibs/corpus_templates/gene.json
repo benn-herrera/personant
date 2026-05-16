@@ -1,0 +1,26 @@
+{
+  "name": "gene-corpus",
+  "topic": "wiki-gene",
+  "mode": "measure-only",
+  "source_article": "Gene",
+  "description": "Tests recall of five core gene concepts: gene expression, allele variation, the genetic code, promoter sequence, and alternative splicing.",
+  "anchors": [
+    "gene-expression",
+    "allele",
+    "genetic-code",
+    "promoter",
+    "alternative-splicing"
+  ],
+  "columns": [
+    ["gene-expression", "gene-readout", "transcription-and-translation", "gene-activation"],
+    ["allele", "gene-variant", "sequence-variant", "genetic-variant"],
+    ["genetic-code", "codon-table", "nucleotide-to-amino-acid-mapping", "triplet-code"],
+    ["promoter", "transcription-start-region", "rna-polymerase-binding-site", "upstream-regulatory-sequence"],
+    ["alternative-splicing", "differential-splicing", "splice-variant-production", "exon-skipping"]
+  ],
+  "sentence_templates": [
+    "the {3} controls {0} by recruiting rna polymerase and the {2} determines how each {1} is decoded with {4} generating multiple proteins from one locus",
+    "during {0} the {3} is recognized first then the {2} governs translation of each {1} and {4} can expand the protein repertoire",
+    "a {1} may alter the {3} strength thereby changing {0} outcomes and the {2} together with {4} determines the final protein product"
+  ]
+}

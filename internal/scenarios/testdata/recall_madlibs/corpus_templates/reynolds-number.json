@@ -1,0 +1,51 @@
+{
+  "name": "reynolds-number-corpus",
+  "topic": "wiki-reynolds-number",
+  "mode": "measure-only",
+  "source_article": "Reynolds number",
+  "description": "Query templates for the dimensionless ratio of inertial to viscous forces that predicts laminar-to-turbulent flow transition.",
+  "anchors": [
+    "reynolds-number",
+    "inertial-force",
+    "viscous-force",
+    "dynamic-similitude",
+    "laminar-turbulent-transition"
+  ],
+  "columns": [
+    [
+      "reynolds-number",
+      "inertia-viscosity-ratio",
+      "flow-regime-index",
+      "dimensionless-flow-parameter"
+    ],
+    [
+      "inertial-force",
+      "convective-momentum",
+      "flow-inertia",
+      "advective-force"
+    ],
+    [
+      "viscous-force",
+      "friction-force",
+      "diffusive-momentum",
+      "viscous-damping"
+    ],
+    [
+      "dynamic-similitude",
+      "flow-similarity",
+      "hydrodynamic-equivalence",
+      "scale-model-correspondence"
+    ],
+    [
+      "laminar-turbulent-transition",
+      "flow-regime-change",
+      "onset-of-turbulence",
+      "critical-reynolds-threshold"
+    ]
+  ],
+  "sentence_templates": [
+    "How does the {0} balance {1} against {2} to establish {4} and why is {3} impossible without matching it?",
+    "At what value of the {0} does {1} overcome {2} to trigger {4}, and how does {3} exploit this fact for scale models?",
+    "Why does {3} require equal {0} values, and what does the balance of {1} and {2} reveal about {4}?"
+  ]
+}

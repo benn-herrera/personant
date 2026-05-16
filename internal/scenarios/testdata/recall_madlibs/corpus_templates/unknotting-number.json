@@ -1,0 +1,51 @@
+{
+  "name": "unknotting-number-corpus",
+  "topic": "wiki-unknotting-number",
+  "mode": "measure-only",
+  "source_article": "Unknotting number",
+  "description": "Synthetic queries probing knowledge of the unknotting number including crossing switches, prime knots, knot sums, crossing number bounds, and torus knot formulas.",
+  "anchors": [
+    "unknotting-number",
+    "crossing-switch",
+    "prime-knot",
+    "knot-sum",
+    "crossing-number"
+  ],
+  "columns": [
+    [
+      "unknotting-number",
+      "crossing-switch-number",
+      "minimum-crossing-switches",
+      "unknotting-index"
+    ],
+    [
+      "crossing-switch",
+      "crossing-change",
+      "crossing-flip",
+      "crossing-reversal"
+    ],
+    [
+      "prime-knot",
+      "irreducible-knot",
+      "non-composite-knot",
+      "atomic-knot"
+    ],
+    [
+      "knot-sum",
+      "connected-sum-of-knots",
+      "knot-composition",
+      "knot-concatenation"
+    ],
+    [
+      "crossing-number",
+      "minimal-crossings",
+      "minimum-crossing-count",
+      "least-crossing-number"
+    ]
+  ],
+  "sentence_templates": [
+    "define {0} in terms of a {1} and explain why knots with this minimum value must be a {2} while {3} does not preserve {4}",
+    "how does {0} relate to {4} and what does a {1} do to produce a {2} from a {3}",
+    "explain why {0} is always less than half of {4} and describe how a single {1} on a {2} can dissolve a simple {3}"
+  ]
+}

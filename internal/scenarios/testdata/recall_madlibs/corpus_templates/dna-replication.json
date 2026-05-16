@@ -1,0 +1,26 @@
+{
+  "name": "dna-replication-corpus",
+  "topic": "wiki-dna-replication",
+  "mode": "measure-only",
+  "source_article": "DNA replication",
+  "description": "Tests recall of five core DNA replication concepts: the replication fork, DNA polymerase, Okazaki fragments, helicase, and the origin of replication.",
+  "anchors": [
+    "replication-fork",
+    "dna-polymerase",
+    "okazaki-fragments",
+    "helicase",
+    "origin-of-replication"
+  ],
+  "columns": [
+    ["replication-fork", "replication-junction", "unwinding-fork", "strand-separation-point"],
+    ["dna-polymerase", "replicative-polymerase", "dna-synthesizing-enzyme", "nucleotide-adding-enzyme"],
+    ["okazaki-fragments", "lagging-strand-fragments", "discontinuous-synthesis-segments", "short-lagging-strand-pieces"],
+    ["helicase", "dna-unwinding-enzyme", "strand-separation-enzyme", "duplex-unwinding-protein"],
+    ["origin-of-replication", "replication-origin", "ori-sequence", "replication-start-site"]
+  ],
+  "sentence_templates": [
+    "at the {4} a {3} opens the duplex forming a {0} where {1} extends the leading strand continuously while producing {2} on the lagging strand",
+    "the {3} unwinds dna at the {4} to establish the {0} and {1} synthesizes new strands with {2} later joined by ligase",
+    "{1} cannot start synthesis de novo so primers are laid at the {4} and at each {0} to prime both the continuous strand and the {2} ligated after {3} action"
+  ]
+}

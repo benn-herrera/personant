@@ -1,0 +1,20 @@
+{
+  "name": "bridge-number-corpus",
+  "topic": "wiki-bridge-number",
+  "mode": "measure-only",
+  "source_article": "Bridge number",
+  "description": "Recall test for the bridge number knot invariant and related concepts.",
+  "anchors": ["bridge-number", "bridge-index", "2-bridge-knot", "connected-sum", "local-maxima"],
+  "columns": [
+    ["bridge-number", "bridge-index", "bridge-count", "crossing-bridge-count"],
+    ["bridge-index", "bridge-number", "min-bridge-count", "bridge-invariant"],
+    ["2-bridge-knot", "rational-knot", "two-bridge-knot", "2-bridge-link"],
+    ["connected-sum", "knot-sum", "composition-of-knots", "knot-composition"],
+    ["local-maxima", "local-max-count", "height-maxima", "projection-maxima"]
+  ],
+  "sentence_templates": [
+    "What is the {0} of the trefoil and how does {1} relate to the class of {2} defined under {3} in terms of {4}?",
+    "How does {1} change when forming a {3} and what does this imply for {2} and {0} via counting {4}?",
+    "Explain how {0} is minimized over all projections by counting {4} and why {3} increases {1} by one for any pair of {2} knots."
+  ]
+}

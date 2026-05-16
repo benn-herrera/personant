@@ -1,0 +1,20 @@
+{
+  "name": "writhe-corpus",
+  "topic": "wiki-writhe",
+  "mode": "measure-only",
+  "source_article": "Writhe",
+  "description": "Recall test for writhe as a signed crossing count of link diagrams and a geometric property of space curves.",
+  "anchors": ["writhe", "signed-crossing-count", "reidemeister-type-i", "dna-supercoiling", "calugareanu-theorem"],
+  "columns": [
+    ["writhe", "crossing-sign-sum", "algebraic-crossing-count", "signed-writhe"],
+    ["signed-crossing-count", "algebraic-crossing-number", "signed-crossing-sum", "crossing-sign-total"],
+    ["reidemeister-type-i", "type-i-move", "twist-move", "loop-twist-move"],
+    ["dna-supercoiling", "dna-superhelicity", "superhelical-coiling", "supercoiled-dna"],
+    ["calugareanu-theorem", "white-formula", "lk-tw-wr-theorem", "ribbon-linking-theorem"]
+  ],
+  "sentence_templates": [
+    "The {0} of a link diagram equals the {1} and changes only under {2} while describing {3} in biology via the {4}.",
+    "How does {2} alter the {0}, how does {1} enter the {4}, and what is the connection between {3} and torsional stress?",
+    "Explain why {0} as a {1} is not a topological invariant due to {2} and how {4} applies this quantity to model {3}."
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "stokes-law-corpus",
+  "topic": "wiki-stokes-law",
+  "mode": "measure-only",
+  "source_article": "Stokes' law",
+  "description": "Recall template for Stokes' law concepts: Stokes drag, dynamic viscosity, terminal settling velocity, low Reynolds number flow, and spherical particle.",
+  "anchors": [
+    "stokes-drag",
+    "dynamic-viscosity",
+    "terminal-settling-velocity",
+    "low-reynolds-number",
+    "spherical-particle"
+  ],
+  "columns": [
+    [
+      "stokes-drag",
+      "stokes-friction-force",
+      "viscous-drag-on-sphere",
+      "stokes-frictional-resistance"
+    ],
+    [
+      "dynamic-viscosity",
+      "absolute-viscosity",
+      "fluid-viscosity",
+      "shear-viscosity"
+    ],
+    [
+      "terminal-settling-velocity",
+      "settling-velocity",
+      "sedimentation-velocity",
+      "free-fall-terminal-speed"
+    ],
+    [
+      "low-reynolds-number",
+      "creeping-flow-regime",
+      "viscous-dominated-regime",
+      "stokes-flow-regime"
+    ],
+    [
+      "spherical-particle",
+      "sphere-in-fluid",
+      "round-particle",
+      "ball-shaped-body"
+    ]
+  ],
+  "sentence_templates": [
+    "The {0} on a {4} moving in {3} equals six pi times {1} times radius times velocity, and the {2} is reached when this force balances gravity.",
+    "At {3}, the {0} governs the motion of a {4} through a fluid whose {1} determines the {2} at which drag equals buoyant weight.",
+    "Stokes derived that for a {4} in {3}, the {0} depends linearly on {1} and particle radius, enabling calculation of {2} from observed fall rate."
+  ]
+}

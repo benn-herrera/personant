@@ -1,0 +1,51 @@
+{
+  "name": "antimatter-corpus",
+  "topic": "wiki-antimatter",
+  "mode": "measure-only",
+  "source_article": "Antimatter",
+  "description": "Probes recall of antimatter concepts including matter-antimatter asymmetry, particle annihilation, the positron, baryogenesis, and antihydrogen production.",
+  "anchors": [
+    "baryon-asymmetry",
+    "pair-annihilation",
+    "positron",
+    "baryogenesis",
+    "antihydrogen"
+  ],
+  "columns": [
+    [
+      "baryon-asymmetry",
+      "matter-antimatter-asymmetry",
+      "matter-antimatter-imbalance",
+      "cosmic-matter-excess"
+    ],
+    [
+      "pair-annihilation",
+      "matter-antimatter-annihilation",
+      "particle-antiparticle-annihilation",
+      "annihilation-reaction"
+    ],
+    [
+      "positron",
+      "antielectron",
+      "positive-electron",
+      "beta-plus-particle"
+    ],
+    [
+      "baryogenesis",
+      "baryon-number-generation",
+      "matter-excess-genesis",
+      "primordial-asymmetry-mechanism"
+    ],
+    [
+      "antihydrogen",
+      "anti-hydrogen-atom",
+      "hydrogen-antiparticle-bound-state",
+      "antimatter-hydrogen"
+    ]
+  ],
+  "sentence_templates": [
+    "The {0} of the observable universe may be linked to {1} events in the early cosmos, where each {2} released energy during {3} and no {4} remained stable.",
+    "Experiments trapping {4} test whether {1} releases energy predicted by the {0} framework, probing the role of the {2} and the mechanism of {3}.",
+    "The unsolved puzzle of {0} motivates studying {3} through {1} rates, since a {2} is the simplest antimatter particle detectable before {4} can form."
+  ]
+}

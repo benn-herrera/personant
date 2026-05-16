@@ -1,0 +1,51 @@
+{
+  "name": "rsa-cryptosystem-corpus",
+  "topic": "wiki-rsa-cryptosystem",
+  "mode": "measure-only",
+  "source_article": "RSA (cryptosystem)",
+  "description": "Tests recall of RSA cryptosystem concepts: integer factorization hardness, modular exponentiation, key generation, padding, and prime selection.",
+  "anchors": [
+    "integer-factorization",
+    "modular-exponentiation",
+    "key-generation",
+    "padding-scheme",
+    "prime-number"
+  ],
+  "columns": [
+    [
+      "integer-factorization",
+      "prime-factorization",
+      "number-factoring",
+      "composite-decomposition"
+    ],
+    [
+      "modular-exponentiation",
+      "modular-powering",
+      "exponentiation-mod-n",
+      "power-with-remainder"
+    ],
+    [
+      "key-generation",
+      "key-creation",
+      "keypair-production",
+      "key-derivation"
+    ],
+    [
+      "padding-scheme",
+      "message-padding",
+      "encoding-scheme",
+      "plaintext-padding"
+    ],
+    [
+      "prime-number",
+      "large-prime",
+      "prime-factor",
+      "prime-integer"
+    ]
+  ],
+  "sentence_templates": [
+    "RSA {2} chooses two large {4} values, whose product resists {0}, and uses {1} with a {3} to encrypt messages.",
+    "The security of RSA relies on {0} being hard: {2} produces keys from two secret {4} values, and {1} with a {3} performs encryption.",
+    "During RSA {2}, two secret {4} values are multiplied to form the modulus, {1} implements the cipher operation, and a {3} prepares the message before {0} would be needed to break it."
+  ]
+}

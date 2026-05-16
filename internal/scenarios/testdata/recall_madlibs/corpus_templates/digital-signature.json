@@ -1,0 +1,51 @@
+{
+  "name": "digital-signature-corpus",
+  "topic": "wiki-digital-signature",
+  "mode": "measure-only",
+  "source_article": "Digital signature",
+  "description": "Tests recall of digital signature concepts: signing algorithm, signature verification, non-repudiation, existential unforgeability, and hash-then-sign.",
+  "anchors": [
+    "signing-algorithm",
+    "signature-verification",
+    "non-repudiation",
+    "existential-unforgeability",
+    "hash-then-sign"
+  ],
+  "columns": [
+    [
+      "signing-algorithm",
+      "signature-generation-algorithm",
+      "signing-procedure",
+      "message-signing-step"
+    ],
+    [
+      "signature-verification",
+      "signature-validation",
+      "signature-checking",
+      "authenticity-confirmation"
+    ],
+    [
+      "non-repudiation",
+      "irrefutability",
+      "denial-prevention",
+      "signer-accountability"
+    ],
+    [
+      "existential-unforgeability",
+      "euf-cma-security",
+      "signature-unforgeability",
+      "forgery-resistance"
+    ],
+    [
+      "hash-then-sign",
+      "digest-then-sign",
+      "hash-and-sign-paradigm",
+      "sign-over-hash"
+    ]
+  ],
+  "sentence_templates": [
+    "A secure scheme uses a {0} over a {4} output and guarantees {2} through {3}, while {1} uses the public key to confirm authenticity.",
+    "The {4} approach feeds the document hash to a {0}, achieving {3} and enabling {1}, so the signer cannot later deny the act due to {2}.",
+    "Digital signatures achieve {2} and {3} by having the {0} operate via {4}, after which {1} with the public key confirms the message is genuine."
+  ]
+}

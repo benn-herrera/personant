@@ -1,0 +1,51 @@
+{
+  "name": "laminar-flow-corpus",
+  "topic": "wiki-laminar-flow",
+  "mode": "measure-only",
+  "source_article": "Laminar flow",
+  "description": "Query templates for smooth, layered fluid motion at low Reynolds numbers in contrast to turbulent flow.",
+  "anchors": [
+    "laminar-flow",
+    "streamline",
+    "parabolic-velocity-profile",
+    "stokes-flow",
+    "reynolds-number-threshold"
+  ],
+  "columns": [
+    [
+      "laminar-flow",
+      "streamlined-flow",
+      "sheet-flow",
+      "layered-flow"
+    ],
+    [
+      "streamline",
+      "flow-path",
+      "fluid-trajectory",
+      "particle-path-line"
+    ],
+    [
+      "parabolic-velocity-profile",
+      "hagen-poiseuille-profile",
+      "pipe-flow-velocity-distribution",
+      "quadratic-velocity-distribution"
+    ],
+    [
+      "stokes-flow",
+      "creeping-flow",
+      "viscosity-dominated-flow",
+      "low-reynolds-flow"
+    ],
+    [
+      "reynolds-number-threshold",
+      "critical-reynolds-number",
+      "laminar-stability-limit",
+      "transition-reynolds-value"
+    ]
+  ],
+  "sentence_templates": [
+    "How does {0} maintain orderly {1} with a {2} before breaking down at the {4} into {3}?",
+    "In {0}, how does the {2} relate to {3} at very low velocities, and what {4} determines whether {1} patterns persist?",
+    "What {4} separates {0} from turbulence, and how does {2} in {3} differ from higher-speed flows where {1} lines cross?"
+  ]
+}

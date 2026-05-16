@@ -1,0 +1,26 @@
+{
+  "name": "transcription-biology-corpus",
+  "topic": "wiki-transcription-biology",
+  "mode": "measure-only",
+  "source_article": "Transcription (biology)",
+  "description": "Tests recall of five core transcription concepts: RNA polymerase, the promoter, the transcription bubble, elongation, and transcription termination.",
+  "anchors": [
+    "rna-polymerase",
+    "promoter",
+    "transcription-bubble",
+    "transcription-elongation",
+    "transcription-termination"
+  ],
+  "columns": [
+    ["rna-polymerase", "rnap", "rna-synthesizing-enzyme", "transcriptase"],
+    ["promoter", "transcription-start-region", "upstream-binding-sequence", "core-promoter"],
+    ["transcription-bubble", "open-complex-bubble", "unwound-dna-region", "single-stranded-transcription-zone"],
+    ["transcription-elongation", "rna-chain-extension", "transcript-lengthening", "polymerase-progression"],
+    ["transcription-termination", "transcript-release", "rna-synthesis-stop", "polymerase-disengagement"]
+  ],
+  "sentence_templates": [
+    "after {0} binds the {1} it unwinds dna to form the {2} then proceeds through {3} until signals trigger {4}",
+    "the {2} forms when {0} opens the {1} region allowing {3} to proceed along the template until {4} releases the transcript",
+    "signals embedded in the {1} recruit {0} to initiate the {2} and the transcript grows via {3} until sequence signals induce {4}"
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "fiscal-policy-corpus",
+  "topic": "wiki-fiscal-policy",
+  "mode": "measure-only",
+  "source_article": "Fiscal policy",
+  "description": "Tests recall of fiscal policy concepts including government spending, aggregate demand, crowding out, automatic stabilizers, and the budget deficit.",
+  "anchors": [
+    "government-spending",
+    "aggregate-demand",
+    "crowding-out",
+    "automatic-stabilizers",
+    "budget-deficit"
+  ],
+  "columns": [
+    [
+      "government-spending",
+      "public-expenditure",
+      "fiscal-expenditure",
+      "state-outlays"
+    ],
+    [
+      "aggregate-demand",
+      "total-spending",
+      "effective-demand",
+      "economy-wide-demand"
+    ],
+    [
+      "crowding-out",
+      "private-investment-displacement",
+      "fiscal-displacement-effect",
+      "government-borrowing-crowding"
+    ],
+    [
+      "automatic-stabilizers",
+      "built-in-stabilizers",
+      "automatic-fiscal-stabilizers",
+      "cyclical-budget-mechanisms"
+    ],
+    [
+      "budget-deficit",
+      "fiscal-deficit",
+      "government-shortfall",
+      "public-sector-deficit"
+    ]
+  ],
+  "sentence_templates": [
+    "how does {0} boost {1} during a recession while the {4} grows and {2} reduces private investment as {3} cushion the downturn",
+    "explain the role of {3} in stabilizing {1} without active policy when {0} raises the {4} and risks {2} in credit markets",
+    "what is the tradeoff between using {0} to stimulate {1} and the {2} risk when the resulting {4} crowds out investment despite {3}"
+  ]
+}

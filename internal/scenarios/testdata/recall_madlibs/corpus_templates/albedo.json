@@ -1,0 +1,51 @@
+{
+  "name": "albedo-corpus",
+  "topic": "wiki-albedo",
+  "mode": "measure-only",
+  "source_article": "Albedo",
+  "description": "Measures recall of five albedo concepts: the reflectivity measure itself, ice-albedo feedback, surface reflectance variation, the bidirectional reflectance distribution function, and Earth's average planetary albedo.",
+  "anchors": [
+    "albedo",
+    "ice-albedo-feedback",
+    "surface-reflectance",
+    "bidirectional-reflectance-distribution-function",
+    "planetary-albedo"
+  ],
+  "columns": [
+    [
+      "albedo",
+      "solar-reflectivity",
+      "reflectance-fraction",
+      "shortwave-reflectance"
+    ],
+    [
+      "ice-albedo-feedback",
+      "cryosphere-reflectivity-feedback",
+      "ice-reflectance-feedback",
+      "melt-albedo-feedback"
+    ],
+    [
+      "surface-reflectance",
+      "land-surface-reflectance",
+      "surface-solar-reflectance",
+      "ground-reflectivity"
+    ],
+    [
+      "bidirectional-reflectance-distribution-function",
+      "brdf",
+      "angular-reflectance-function",
+      "directional-reflectance-model"
+    ],
+    [
+      "planetary-albedo",
+      "earth-albedo",
+      "global-mean-albedo",
+      "bond-albedo"
+    ]
+  ],
+  "sentence_templates": [
+    "How is {0} defined, what role does {1} play in climate change, how does {2} vary by land type, why is the {3} needed for satellite estimates, and what is Earth's {4}?",
+    "Define {0} as a physical quantity, describe how {1} amplifies warming, explain variations in {2} across surfaces, describe what the {3} measures, and give the value of Earth's {4}.",
+    "What is {0}, how does {1} create a self-reinforcing warming loop, what factors affect {2}, how is the {3} used in remote sensing, and what is Earth's average {4}?"
+  ]
+}

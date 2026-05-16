@@ -1,0 +1,22 @@
+{
+  "name": "one-time-pad-corpus",
+  "topic": "wiki-one-time-pad",
+  "mode": "measure-only",
+  "source_article": "One-time pad",
+  "description": "Tests recall of one-time pad concepts including the OTP system, perfect secrecy, key reuse, XOR operation, and key distribution.",
+  "anchors": ["one-time-pad", "perfect-secrecy", "key-reuse", "xor-operation", "key-distribution"],
+  "columns": [
+    ["one-time-pad", "otp", "vernam-pad", "single-use-pad"],
+    ["perfect-secrecy", "information-theoretic-security", "unconditional-security", "shannon-secrecy"],
+    ["key-reuse", "pad-reuse", "keystream-reuse", "repeated-key-use"],
+    ["xor-operation", "exclusive-or", "modulo-2-addition", "bitwise-xor"],
+    ["key-distribution", "key-delivery", "key-exchange-problem", "secure-key-transport"]
+  ],
+  "sentence_templates": [
+    "The {0} achieves {1} by applying a {3} to combine plaintext with a key, provided {2} never occurs and {4} is solved.",
+    "Avoiding {2} is essential for the {0} to maintain {1}, since each application of {3} must use a fresh key delivered via {4}.",
+    "The impracticality of {4} limits the {0} despite its {1}, because {2} would destroy security even if {3} is correctly applied.",
+    "Shannon proved that {1} requires key length at least equal to message length, which is why {4} is the central obstacle for the {0} when {3} combines bits and {2} is forbidden.",
+    "A fresh key delivered through {4} ensures {3} yields {1} in the {0}, whereas {2} collapses the security to zero."
+  ]
+}

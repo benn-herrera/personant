@@ -1,0 +1,51 @@
+{
+  "name": "greenhouse-effect-corpus",
+  "topic": "wiki-greenhouse-effect",
+  "mode": "measure-only",
+  "source_article": "Greenhouse effect",
+  "description": "Measures recall of five core greenhouse-effect concepts: the trapping mechanism, the gases responsible, the radiation type absorbed, the baseline temperature contribution, and Earth's energy imbalance.",
+  "anchors": [
+    "greenhouse-effect",
+    "infrared-radiation",
+    "carbon-dioxide",
+    "radiative-forcing",
+    "energy-imbalance"
+  ],
+  "columns": [
+    [
+      "greenhouse-effect",
+      "atmospheric-heat-trapping",
+      "thermal-blanketing",
+      "radiative-insulation"
+    ],
+    [
+      "infrared-radiation",
+      "longwave-radiation",
+      "thermal-radiation",
+      "far-infrared-emission"
+    ],
+    [
+      "carbon-dioxide",
+      "co2",
+      "atmospheric-co2",
+      "carbonic-gas"
+    ],
+    [
+      "radiative-forcing",
+      "radiation-imbalance",
+      "energy-flux-perturbation",
+      "top-of-atmosphere-imbalance"
+    ],
+    [
+      "energy-imbalance",
+      "earth-energy-imbalance",
+      "heat-budget-deficit",
+      "radiative-energy-surplus"
+    ]
+  ],
+  "sentence_templates": [
+    "How does the {0} trap {1}, and what role does {2} play in increasing {3} and driving the {4}?",
+    "Describe the {0} in terms of {1} absorption by {2}, explain how this contributes to {3}, and define the resulting {4}.",
+    "What is the physical basis of the {0}, which wavelengths of {1} are absorbed, how does {2} dominate that absorption, what is {3}, and how does it relate to {4}?"
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "recession-corpus",
+  "topic": "wiki-recession",
+  "mode": "measure-only",
+  "source_article": "Recession",
+  "description": "Tests recall of recession as a business cycle contraction marked by broad decline in economic activity, rising unemployment, and falling GDP.",
+  "anchors": [
+    "recession",
+    "gdp-contraction",
+    "unemployment",
+    "business-cycle",
+    "demand-shock"
+  ],
+  "columns": [
+    [
+      "recession",
+      "economic-downturn",
+      "economic-contraction",
+      "business-cycle-trough"
+    ],
+    [
+      "gdp-contraction",
+      "negative-gdp-growth",
+      "output-decline",
+      "economic-shrinkage"
+    ],
+    [
+      "unemployment",
+      "joblessness",
+      "labor-market-slack",
+      "workforce-idleness"
+    ],
+    [
+      "business-cycle",
+      "economic-cycle",
+      "boom-bust-cycle",
+      "expansion-contraction-cycle"
+    ],
+    [
+      "demand-shock",
+      "spending-collapse",
+      "demand-shortfall",
+      "aggregate-spending-drop"
+    ]
+  ],
+  "sentence_templates": [
+    "A {0} driven by a {4} typically shows up as {1}, rising {2}, and a disruption of the normal {3}.",
+    "When a {4} interrupts the {3}, the resulting {0} is characterized by {1} and surging {2} across most industries.",
+    "Policymakers respond to a {0} triggered by a {4} by expanding spending to reverse {1}, reduce {2}, and stabilize the {3}."
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "central-bank-corpus",
+  "topic": "wiki-central-bank",
+  "mode": "measure-only",
+  "source_article": "Central bank",
+  "description": "Tests recall of central bank concepts including lender of last resort, monetary policy, price stability, open market operations, and central bank independence.",
+  "anchors": [
+    "lender-of-last-resort",
+    "monetary-policy",
+    "price-stability",
+    "open-market-operations",
+    "central-bank-independence"
+  ],
+  "columns": [
+    [
+      "lender-of-last-resort",
+      "emergency-liquidity-provider",
+      "crisis-liquidity-backstop",
+      "bank-bailout-facility"
+    ],
+    [
+      "monetary-policy",
+      "money-supply-management",
+      "interest-rate-policy",
+      "credit-conditions-management"
+    ],
+    [
+      "price-stability",
+      "inflation-control",
+      "stable-price-level",
+      "low-and-stable-inflation"
+    ],
+    [
+      "open-market-operations",
+      "central-bank-asset-purchases",
+      "bond-buying-program",
+      "securities-market-intervention"
+    ],
+    [
+      "central-bank-independence",
+      "monetary-authority-autonomy",
+      "depoliticized-monetary-policy",
+      "insulated-central-bank"
+    ]
+  ],
+  "sentence_templates": [
+    "how does {4} protect {1} decisions so that a central bank can conduct {3} aimed at {2} and fulfil its role as {0}",
+    "what is the relationship between {4} and the ability to use {3} as part of {1} to achieve {2} while acting as {0}",
+    "explain how {0} and {3} are two functions of {1} that maintain {2} and why {4} is necessary for policy credibility"
+  ]
+}

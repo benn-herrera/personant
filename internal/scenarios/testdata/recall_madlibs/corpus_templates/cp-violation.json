@@ -1,0 +1,51 @@
+{
+  "name": "cp-violation-corpus",
+  "topic": "wiki-cp-violation",
+  "mode": "measure-only",
+  "source_article": "CP violation",
+  "description": "Probes recall of CP violation concepts including charge-parity symmetry, the weak interaction, kaon decay, the CKM matrix, and the matter-antimatter asymmetry connection.",
+  "anchors": [
+    "cp-symmetry",
+    "charge-conjugation",
+    "indirect-cp-violation",
+    "ckm-matrix",
+    "matter-antimatter-asymmetry"
+  ],
+  "columns": [
+    [
+      "cp-symmetry",
+      "charge-parity-symmetry",
+      "combined-cp-invariance",
+      "c-times-p-symmetry"
+    ],
+    [
+      "charge-conjugation",
+      "c-symmetry",
+      "particle-antiparticle-swap",
+      "charge-reversal-symmetry"
+    ],
+    [
+      "indirect-cp-violation",
+      "mixing-induced-cp-violation",
+      "cp-violation-via-mixing",
+      "kaon-mixing-cp-violation"
+    ],
+    [
+      "ckm-matrix",
+      "quark-mixing-matrix",
+      "cabibbo-kobayashi-maskawa-matrix",
+      "quark-flavor-mixing-matrix"
+    ],
+    [
+      "matter-antimatter-asymmetry",
+      "baryon-asymmetry",
+      "matter-dominance",
+      "baryonic-matter-excess"
+    ]
+  ],
+  "sentence_templates": [
+    "The {0} is broken when {2} occurs in neutral kaon systems, reflecting a complex phase in the {3} that links {1} violation to the observed {4}.",
+    "Breaking of {0} requires violating {1} invariance, as observed through {2} in kaon decays encoded by the {3}, with implications for {4}.",
+    "The {4} of the universe may require {0} breaking via {2}, driven by the complex phase in the {3} that also implies {1} non-invariance."
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "protein-corpus",
+  "topic": "wiki-protein",
+  "mode": "measure-only",
+  "source_article": "Protein",
+  "description": "Tests recall of five core protein concepts: polypeptide chain, protein folding, active site, post-translational modification, and quaternary structure.",
+  "anchors": [
+    "polypeptide",
+    "protein-folding",
+    "active-site",
+    "post-translational-modification",
+    "quaternary-structure"
+  ],
+  "columns": [
+    ["polypeptide", "amino-acid-chain", "peptide-chain", "residue-chain"],
+    ["protein-folding", "chain-folding", "tertiary-structure-formation", "native-conformation-acquisition"],
+    ["active-site", "catalytic-pocket", "substrate-binding-cleft", "enzyme-binding-site"],
+    ["post-translational-modification", "protein-modification", "residue-chemical-modification", "co-translational-processing"],
+    ["quaternary-structure", "multi-subunit-assembly", "protein-complex-architecture", "oligomeric-structure"]
+  ],
+  "sentence_templates": [
+    "after the {0} is synthesized {1} shapes the {2} geometry and {3} can alter activity before the subunits adopt a {4}",
+    "the {4} of an enzyme depends on {1} of each {0} and {3} can remodel the {2} to regulate catalysis",
+    "the {2} of an enzyme forms only after {1} of its {0} and {3} events may stabilize the final {4}"
+  ]
+}

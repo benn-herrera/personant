@@ -1,0 +1,51 @@
+{
+  "name": "alexander-polynomial-corpus",
+  "topic": "wiki-alexander-polynomial",
+  "mode": "measure-only",
+  "source_article": "Alexander polynomial",
+  "description": "Synthetic queries probing knowledge of the Alexander polynomial including skein relations, knot genus, Seifert surfaces, the Alexander module, and the knot determinant.",
+  "anchors": [
+    "skein-relation",
+    "knot-genus",
+    "seifert-surface",
+    "alexander-module",
+    "knot-determinant"
+  ],
+  "columns": [
+    [
+      "skein-relation",
+      "conway-skein-relation",
+      "crossing-skein",
+      "skein-identity"
+    ],
+    [
+      "knot-genus",
+      "seifert-genus",
+      "genus-of-knot",
+      "three-genus"
+    ],
+    [
+      "seifert-surface",
+      "spanning-surface",
+      "knot-surface",
+      "genus-surface"
+    ],
+    [
+      "alexander-module",
+      "alexander-invariant",
+      "homology-module",
+      "knot-module"
+    ],
+    [
+      "knot-determinant",
+      "determinant-of-knot",
+      "alexander-determinant",
+      "knot-det"
+    ]
+  ],
+  "sentence_templates": [
+    "how does the {0} define the Alexander polynomial and what does {1} say about {2} when computing the {3} to find the {4}",
+    "describe the {0} used for the Alexander polynomial and explain how {1} is bounded by polynomial degree using a {2} to construct the {3} and evaluate the {4}",
+    "explain how the {0} computes the polynomial from a {2} and relates it to the {1} of the knot through the {3} whose evaluation at minus one yields the {4}"
+  ]
+}

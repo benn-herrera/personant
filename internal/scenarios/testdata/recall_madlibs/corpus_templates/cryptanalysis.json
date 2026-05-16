@@ -1,0 +1,22 @@
+{
+  "name": "cryptanalysis-corpus",
+  "topic": "wiki-cryptanalysis",
+  "mode": "measure-only",
+  "source_article": "Cryptanalysis",
+  "description": "Tests recall of cryptanalysis concepts including frequency analysis, known-plaintext attacks, differential cryptanalysis, ciphertext-only attacks, and chosen-plaintext attacks.",
+  "anchors": ["frequency-analysis", "known-plaintext-attack", "differential-cryptanalysis", "ciphertext-only-attack", "chosen-plaintext-attack"],
+  "columns": [
+    ["frequency-analysis", "letter-frequency-attack", "statistical-cryptanalysis", "character-frequency-attack"],
+    ["known-plaintext-attack", "plaintext-pair-attack", "kpa-attack", "matched-plaintext-attack"],
+    ["differential-cryptanalysis", "differential-attack", "difference-propagation-attack", "differential-analysis"],
+    ["ciphertext-only-attack", "coa-attack", "blind-ciphertext-attack", "pure-ciphertext-attack"],
+    ["chosen-plaintext-attack", "selected-plaintext-attack", "oracle-attack", "cpa-attack"]
+  ],
+  "sentence_templates": [
+    "Against classical ciphers {0} is effective under a {3}, while {2} and {1} require more data than a {4}.",
+    "Modern ciphers resist {0} and {3} but are hardened against {2} because a {4} is more powerful than a {1}.",
+    "Al-Kindi pioneered {0} centuries before {2} emerged, and neither assumed a {4} or even a {1}, only a {3}.",
+    "The attacker in a {4} has more leverage than in a {1} or {3}, making {2} more practical and {0} less necessary.",
+    "Cipher designers test resistance to {4}, {1}, and {3} sequentially, applying {2} probes before relying on {0} statistics."
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "quantitative-easing-corpus",
+  "topic": "wiki-quantitative-easing",
+  "mode": "measure-only",
+  "source_article": "Quantitative easing",
+  "description": "Tests recall of quantitative easing as an unconventional monetary policy tool used by central banks to stimulate the economy by purchasing financial assets.",
+  "anchors": [
+    "quantitative-easing",
+    "asset-purchase",
+    "liquidity-trap",
+    "money-supply",
+    "central-bank"
+  ],
+  "columns": [
+    [
+      "quantitative-easing",
+      "large-scale-asset-purchases",
+      "unconventional-monetary-easing",
+      "balance-sheet-expansion"
+    ],
+    [
+      "asset-purchase",
+      "securities-buying",
+      "bond-acquisition",
+      "open-market-buying"
+    ],
+    [
+      "liquidity-trap",
+      "zero-lower-bound",
+      "interest-rate-floor",
+      "near-zero-rate-constraint"
+    ],
+    [
+      "money-supply",
+      "monetary-base",
+      "money-stock",
+      "currency-in-circulation"
+    ],
+    [
+      "central-bank",
+      "monetary-authority",
+      "reserve-bank",
+      "national-bank-issuer"
+    ]
+  ],
+  "sentence_templates": [
+    "When a {4} conducts {0} through large-scale {1}, it aims to escape the {2} by expanding the {3}.",
+    "The {4} resorts to {0} and {1} of government bonds when a {2} prevents normal rate cuts from boosting the {3}.",
+    "Critics argue that {0} and {1} programs by a {4} can inflate the {3} beyond what the {2} situation requires."
+  ]
+}

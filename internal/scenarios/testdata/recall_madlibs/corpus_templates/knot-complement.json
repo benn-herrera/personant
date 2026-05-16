@@ -1,0 +1,20 @@
+{
+  "name": "knot-complement-corpus",
+  "topic": "wiki-knot-complement",
+  "mode": "measure-only",
+  "source_article": "Knot complement",
+  "description": "Recall test for the knot complement and its role in knot theory.",
+  "anchors": ["knot-complement", "tubular-neighborhood", "gordon-luecke-theorem", "3-manifold", "haken-manifold"],
+  "columns": [
+    ["knot-complement", "knot-exterior", "complement-of-knot", "knot-space-complement"],
+    ["tubular-neighborhood", "solid-torus-neighborhood", "regular-neighborhood", "thickened-knot"],
+    ["gordon-luecke-theorem", "knot-complement-theorem", "complement-determines-knot", "luecke-gordon-result"],
+    ["3-manifold", "three-manifold", "compact-3-manifold", "3d-manifold"],
+    ["haken-manifold", "sufficiently-large-manifold", "haken-3-manifold", "irreducible-haken-manifold"]
+  ],
+  "sentence_templates": [
+    "The {0} is obtained by removing a {1} from the ambient {3} and the {2} states that this result is a {4}.",
+    "Why is a {4} produced from a {1} inside a {3} and how does the {2} guarantee that the {0} determines the knot?",
+    "Describe how the {2} uses a {1} inside a {3} to show every {0} is a {4}."
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "drag-physics-corpus",
+  "topic": "wiki-drag-physics",
+  "mode": "measure-only",
+  "source_article": "Drag (physics)",
+  "description": "Recall template for fluid drag concepts: drag force, drag coefficient, terminal velocity, form drag, and the Reynolds number.",
+  "anchors": [
+    "drag-force",
+    "drag-coefficient",
+    "terminal-velocity",
+    "form-drag",
+    "reynolds-number"
+  ],
+  "columns": [
+    [
+      "drag-force",
+      "fluid-resistance-force",
+      "aerodynamic-resistance",
+      "viscous-retarding-force"
+    ],
+    [
+      "drag-coefficient",
+      "resistance-coefficient",
+      "drag-factor",
+      "dimensionless-drag-parameter"
+    ],
+    [
+      "terminal-velocity",
+      "settling-velocity",
+      "free-fall-limiting-speed",
+      "drag-limited-velocity"
+    ],
+    [
+      "form-drag",
+      "pressure-drag",
+      "bluff-body-drag",
+      "profile-drag-component"
+    ],
+    [
+      "reynolds-number",
+      "inertia-viscosity-ratio",
+      "flow-regime-parameter",
+      "re-dimensionless-number"
+    ]
+  ],
+  "sentence_templates": [
+    "At high speed the {0} depends on the {1} and scales with velocity squared, whereas the {2} is reached when it balances gravity; {3} dominates for blunt shapes at large {4}.",
+    "The {1} governs how the {0} varies with the {4}, determining whether {3} or skin friction prevails, and sets the {2} for falling objects.",
+    "For a sphere falling in a viscous medium, the {0} equals half the product of density, area, velocity squared, and the {1}, reaching the {2} where {3} and viscous forces combine at the relevant {4}."
+  ]
+}

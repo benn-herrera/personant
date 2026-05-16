@@ -1,0 +1,51 @@
+{
+  "name": "keynesian-economics-corpus",
+  "topic": "wiki-keynesian-economics",
+  "mode": "measure-only",
+  "source_article": "Keynesian economics",
+  "description": "Tests recall of Keynesian economics as the macroeconomic framework emphasizing aggregate demand, the fiscal multiplier, and active government intervention to stabilize output.",
+  "anchors": [
+    "keynesian-economics",
+    "fiscal-multiplier",
+    "deficit-spending",
+    "liquidity-preference",
+    "involuntary-unemployment"
+  ],
+  "columns": [
+    [
+      "keynesian-economics",
+      "demand-side-economics",
+      "effective-demand-theory",
+      "keynesianism"
+    ],
+    [
+      "fiscal-multiplier",
+      "spending-multiplier",
+      "government-expenditure-multiplier",
+      "keynesian-multiplier"
+    ],
+    [
+      "deficit-spending",
+      "government-borrowing-to-spend",
+      "public-deficit-financing",
+      "expansionary-fiscal-deficit"
+    ],
+    [
+      "liquidity-preference",
+      "money-demand-function",
+      "demand-for-liquidity",
+      "cash-holding-preference"
+    ],
+    [
+      "involuntary-unemployment",
+      "demand-deficient-unemployment",
+      "cyclical-unemployment",
+      "keynesian-unemployment"
+    ]
+  ],
+  "sentence_templates": [
+    "A core insight of {0} is that {3} determines the interest rate, which in turn governs investment and the level of {4} when {2} via the {1} cannot fully restore full employment.",
+    "According to {0}, {2} amplified by the {1} can reduce {4} because higher government outlays raise income, which raises consumption, making {3} more accommodating.",
+    "Critics of {0} argue that {2} crowds out private investment, undermining the {1} mechanism, and that {4} reflects {3} constraints rather than deficient demand."
+  ]
+}

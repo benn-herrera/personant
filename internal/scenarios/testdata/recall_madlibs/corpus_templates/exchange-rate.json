@@ -1,0 +1,51 @@
+{
+  "name": "exchange-rate-corpus",
+  "topic": "wiki-exchange-rate",
+  "mode": "measure-only",
+  "source_article": "Exchange rate",
+  "description": "Tests recall of exchange rate concepts including the floating exchange rate, purchasing power parity, nominal exchange rate, current account, and currency depreciation.",
+  "anchors": [
+    "floating-exchange-rate",
+    "purchasing-power-parity",
+    "nominal-exchange-rate",
+    "current-account",
+    "currency-depreciation"
+  ],
+  "columns": [
+    [
+      "floating-exchange-rate",
+      "market-determined-exchange-rate",
+      "flexible-exchange-rate",
+      "free-floating-rate"
+    ],
+    [
+      "purchasing-power-parity",
+      "ppp",
+      "price-level-equalization-theory",
+      "real-exchange-rate-benchmark"
+    ],
+    [
+      "nominal-exchange-rate",
+      "headline-exchange-rate",
+      "quoted-currency-rate",
+      "stated-forex-rate"
+    ],
+    [
+      "current-account",
+      "trade-balance",
+      "net-exports-account",
+      "external-balance"
+    ],
+    [
+      "currency-depreciation",
+      "exchange-rate-decline",
+      "currency-weakening",
+      "forex-value-drop"
+    ]
+  ],
+  "sentence_templates": [
+    "how does {4} under a {0} affect the {3} and can {1} predict the new equilibrium {2}",
+    "explain how {4} in a {0} regime improves the {3} and how {1} relates the {2} to domestic price levels",
+    "what causes {4} under a {0} and how does {2} diverge from the {1} equilibrium when the {3} is in deficit"
+  ]
+}

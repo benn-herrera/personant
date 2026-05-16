@@ -1,0 +1,22 @@
+{
+  "name": "transport-layer-security-corpus",
+  "topic": "wiki-transport-layer-security",
+  "mode": "measure-only",
+  "source_article": "Transport Layer Security",
+  "description": "Tests recall of TLS concepts including the TLS handshake, digital certificates, forward secrecy, cipher suites, and session keys.",
+  "anchors": ["tls-handshake", "certificate", "forward-secrecy", "cipher-suite", "session-key"],
+  "columns": [
+    ["tls-handshake", "ssl-handshake", "cryptographic-handshake", "key-negotiation-handshake"],
+    ["certificate", "digital-certificate", "tls-certificate", "x509-certificate"],
+    ["forward-secrecy", "perfect-forward-secrecy", "pfs", "forward-security"],
+    ["cipher-suite", "cryptographic-suite", "tls-cipher-suite", "algorithm-suite"],
+    ["session-key", "ephemeral-key", "connection-key", "transient-key"]
+  ],
+  "sentence_templates": [
+    "During the {0}, the server presents its {1} and both sides negotiate a {3} to derive a {4} that provides {2}.",
+    "The {3} selected in the {0} determines whether {2} is available and how the {4} is established after the {1} is verified.",
+    "Achieving {2} means the {4} is discarded after the session so that a later compromise of the {1} cannot decrypt past traffic recorded during the {0} under the chosen {3}.",
+    "A revoked {1} discovered during the {0} prevents negotiation of any {3}, so no {4} is derived and {2} is moot.",
+    "The {0} authenticates via a {1}, negotiates a {3}, and derives a {4} whose ephemerality guarantees {2}."
+  ]
+}

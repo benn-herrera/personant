@@ -1,0 +1,26 @@
+{
+  "name": "rna-corpus",
+  "topic": "wiki-rna",
+  "mode": "measure-only",
+  "source_article": "RNA",
+  "description": "Tests recall of five core RNA concepts: messenger RNA, ribozyme catalytic activity, RNA polymerase, the RNA world hypothesis, and RNA interference.",
+  "anchors": [
+    "messenger-rna",
+    "ribozyme",
+    "rna-polymerase",
+    "rna-world",
+    "rna-interference"
+  ],
+  "columns": [
+    ["messenger-rna", "mrna", "protein-coding-transcript", "translatable-rna"],
+    ["ribozyme", "catalytic-rna", "rna-enzyme", "rna-catalyst"],
+    ["rna-polymerase", "transcriptase", "rna-synthesizing-enzyme", "rnap"],
+    ["rna-world", "rna-world-hypothesis", "primordial-rna-era", "rna-first-scenario"],
+    ["rna-interference", "rnai", "post-transcriptional-silencing", "gene-silencing-by-rna"]
+  ],
+  "sentence_templates": [
+    "the {3} proposes that {2} arose before dna and that {1} molecules carried out catalysis while {0} directed protein synthesis later regulated by {4}",
+    "in modern cells {2} transcribes dna into {0} which can be targeted for degradation by {4} while {1} molecules catalyze reactions consistent with the {3}",
+    "evidence for the {3} includes {1} activity in ribosomes and the ability of {2} to synthesize {0} which is subject to {4} in eukaryotes"
+  ]
+}

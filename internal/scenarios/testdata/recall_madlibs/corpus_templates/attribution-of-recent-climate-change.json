@@ -1,0 +1,51 @@
+{
+  "name": "attribution-of-recent-climate-change-corpus",
+  "topic": "wiki-attribution-of-recent-climate-change",
+  "mode": "measure-only",
+  "source_article": "Attribution of recent climate change",
+  "description": "Tests recall of climate attribution methods including fingerprint analysis, greenhouse gas forcing, aerosol cooling effects, detection and attribution frameworks, and climate model simulation.",
+  "anchors": [
+    "fingerprint-method",
+    "greenhouse-gas-forcing",
+    "aerosol-cooling",
+    "detection-and-attribution",
+    "climate-model-simulation"
+  ],
+  "columns": [
+    [
+      "fingerprint-method",
+      "climate-fingerprinting",
+      "pattern-attribution-analysis",
+      "signature-based-attribution"
+    ],
+    [
+      "greenhouse-gas-forcing",
+      "ghg-radiative-forcing",
+      "co2-driven-warming",
+      "trace-gas-warming-influence"
+    ],
+    [
+      "aerosol-cooling",
+      "sulfate-aerosol-cooling",
+      "aerosol-masking-effect",
+      "particulate-cooling-effect"
+    ],
+    [
+      "detection-and-attribution",
+      "climate-change-attribution",
+      "cause-identification-in-climate",
+      "climate-signal-attribution"
+    ],
+    [
+      "climate-model-simulation",
+      "gcm-run",
+      "climate-model-experiment",
+      "coupled-model-projection"
+    ]
+  ],
+  "sentence_templates": [
+    "The {0} compares modeled {4} patterns against observations to separate {1} from {2} effects and quantify {3}.",
+    "{3} relies on {4} runs with and without {1}, showing that without it the {2} would have produced net cooling detectable by the {0}.",
+    "Scientists use {0} to confirm that {1} dominates the observed warming, that {2} provides partial offset, and that {4} corroborates {3}."
+  ]
+}

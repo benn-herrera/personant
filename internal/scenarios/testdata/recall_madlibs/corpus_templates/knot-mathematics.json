@@ -1,0 +1,51 @@
+{
+  "name": "knot-mathematics-corpus",
+  "topic": "wiki-knot-mathematics",
+  "mode": "measure-only",
+  "source_article": "Knot (mathematics)",
+  "description": "Synthetic queries probing knowledge of fundamental knot theory concepts including ambient isotopy, diagrams, the unknot, the knot complement, and knot sums.",
+  "anchors": [
+    "ambient-isotopy",
+    "knot-diagram",
+    "unknot",
+    "knot-complement",
+    "knot-sum"
+  ],
+  "columns": [
+    [
+      "ambient-isotopy",
+      "continuous-deformation",
+      "isotopic-equivalence",
+      "topological-equivalence"
+    ],
+    [
+      "knot-diagram",
+      "crossing-diagram",
+      "knot-projection",
+      "planar-diagram"
+    ],
+    [
+      "unknot",
+      "trivial-knot",
+      "unknotted-loop",
+      "unlinked-circle"
+    ],
+    [
+      "knot-complement",
+      "knot-exterior",
+      "complement-space",
+      "complement-of-knot"
+    ],
+    [
+      "knot-sum",
+      "connected-sum-of-knots",
+      "knot-composition",
+      "knot-concatenation"
+    ]
+  ],
+  "sentence_templates": [
+    "how does {0} of two knots relate to their {1} representations and what happens to the {2} under {3} after a {4}",
+    "describe {0} in terms of a {1} and explain why the {2} has a trivial {3} unlike the result of a {4}",
+    "what role does {0} play when a {1} is used to show that the {2} differs from every nontrivial knot with a nonempty {3} formed by a {4}"
+  ]
+}

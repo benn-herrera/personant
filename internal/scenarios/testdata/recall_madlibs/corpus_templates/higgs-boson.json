@@ -1,0 +1,51 @@
+{
+  "name": "higgs-boson-corpus",
+  "topic": "wiki-higgs-boson",
+  "mode": "measure-only",
+  "source_article": "Higgs boson",
+  "description": "Query templates probing the Higgs boson, the Higgs mechanism, vacuum expectation value, the Higgs field, and spontaneous symmetry breaking.",
+  "anchors": [
+    "higgs-boson",
+    "higgs-mechanism",
+    "vacuum-expectation-value",
+    "higgs-field",
+    "yukawa-coupling"
+  ],
+  "columns": [
+    [
+      "higgs-boson",
+      "higgs-particle",
+      "god-particle",
+      "h-boson"
+    ],
+    [
+      "higgs-mechanism",
+      "higgs-symmetry-breaking-mechanism",
+      "electroweak-breaking-mechanism",
+      "mass-generation-mechanism"
+    ],
+    [
+      "vacuum-expectation-value",
+      "higgs-vev",
+      "nonzero-vacuum-value",
+      "higgs-ground-state-value"
+    ],
+    [
+      "higgs-field",
+      "scalar-field",
+      "spin-zero-field",
+      "electroweak-scalar-field"
+    ],
+    [
+      "yukawa-coupling",
+      "higgs-yukawa-coupling",
+      "fermion-mass-coupling",
+      "yukawa-interaction"
+    ]
+  ],
+  "sentence_templates": [
+    "how does the {0} arise from the {4} of fermions to the {3} and what {2} drives the {1}",
+    "explain the {1} in terms of the {2} of the {3} and how this gives the {0} its mass via {4}",
+    "what is the {2} of the {3} and how does it enable the {1} that gives the {0} its properties through {4}"
+  ]
+}

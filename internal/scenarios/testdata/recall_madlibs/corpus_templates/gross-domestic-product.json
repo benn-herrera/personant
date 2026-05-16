@@ -1,0 +1,51 @@
+{
+  "name": "gross-domestic-product-corpus",
+  "topic": "wiki-gross-domestic-product",
+  "mode": "measure-only",
+  "source_article": "Gross domestic product",
+  "description": "Tests recall of GDP concepts including the expenditure approach, GDP deflator, real GDP, gross national income, and GDP per capita.",
+  "anchors": [
+    "expenditure-approach",
+    "gdp-deflator",
+    "real-gdp",
+    "gross-national-income",
+    "gdp-per-capita"
+  ],
+  "columns": [
+    [
+      "expenditure-approach",
+      "spending-based-gdp",
+      "demand-side-gdp",
+      "consumption-plus-investment-method"
+    ],
+    [
+      "gdp-deflator",
+      "price-level-index",
+      "output-price-deflator",
+      "nominal-to-real-price-index"
+    ],
+    [
+      "real-gdp",
+      "inflation-adjusted-gdp",
+      "constant-price-gdp",
+      "volume-measure-of-output"
+    ],
+    [
+      "gross-national-income",
+      "gni",
+      "gross-national-product",
+      "national-income-measure"
+    ],
+    [
+      "gdp-per-capita",
+      "output-per-person",
+      "average-national-output",
+      "per-head-gdp"
+    ]
+  ],
+  "sentence_templates": [
+    "how does the {0} calculate {2} by applying the {1} and how does this relate to {3} and {4}",
+    "explain why {2} differs from nominal output when the {1} rises and how this affects comparisons using {3} and {4} under the {0}",
+    "what does {4} reveal about living standards that {3} does not and how are both derived from {2} using the {1} within the {0}"
+  ]
+}

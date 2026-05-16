@@ -1,0 +1,51 @@
+{
+  "name": "quantum-chromodynamics-corpus",
+  "topic": "wiki-quantum-chromodynamics",
+  "mode": "measure-only",
+  "source_article": "Quantum chromodynamics",
+  "description": "Query templates probing QCD, color charge, gluons, asymptotic freedom, and color confinement.",
+  "anchors": [
+    "quantum-chromodynamics",
+    "color-charge",
+    "gluon",
+    "asymptotic-freedom",
+    "color-confinement"
+  ],
+  "columns": [
+    [
+      "quantum-chromodynamics",
+      "qcd",
+      "chromodynamics",
+      "color-force-theory"
+    ],
+    [
+      "color-charge",
+      "colour-charge",
+      "chromodynamic-charge",
+      "qcd-color"
+    ],
+    [
+      "gluon",
+      "color-gauge-boson",
+      "chromodynamic-boson",
+      "color-force-carrier"
+    ],
+    [
+      "asymptotic-freedom",
+      "short-distance-weakening",
+      "uv-freedom",
+      "colour-asymptotic-freedom"
+    ],
+    [
+      "color-confinement",
+      "quark-confinement",
+      "colour-confinement",
+      "chromodynamic-confinement"
+    ]
+  ],
+  "sentence_templates": [
+    "what is {0} and how does {4} prevent isolation of a {1} charge even as {3} allows quarks exchanging a {2} to be treated perturbatively",
+    "in {0} explain how a {2} carries {1} and why {3} at short distances coexists with {4} at large distances",
+    "how does {0} use {1} carried by the {2} to derive {3} and {4} as complementary features of the strong force"
+  ]
+}

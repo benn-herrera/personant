@@ -1,0 +1,51 @@
+{
+  "name": "vorticity-corpus",
+  "topic": "wiki-vorticity",
+  "mode": "measure-only",
+  "source_article": "Vorticity",
+  "description": "Recall template for vorticity concepts: the curl of velocity, vortex tubes, circulation, and the vorticity equation.",
+  "anchors": [
+    "vorticity",
+    "curl-of-velocity",
+    "vortex-tube",
+    "circulation",
+    "vortex-stretching"
+  ],
+  "columns": [
+    [
+      "vorticity",
+      "local-spin-rate",
+      "fluid-rotation-field",
+      "rotational-tendency"
+    ],
+    [
+      "curl-of-velocity",
+      "velocity-curl",
+      "rotational-derivative-of-velocity",
+      "cross-product-nabla-v"
+    ],
+    [
+      "vortex-tube",
+      "vorticity-tube",
+      "flux-tube-of-vorticity",
+      "vortex-filament-bundle"
+    ],
+    [
+      "circulation",
+      "velocity-line-integral",
+      "closed-path-flow-integral",
+      "loop-integral-of-velocity"
+    ],
+    [
+      "vortex-stretching",
+      "vortex-line-extension",
+      "vorticity-intensification",
+      "vortex-tube-elongation"
+    ]
+  ],
+  "sentence_templates": [
+    "The {0}, defined as the {1}, is constant along a {2} because the {3} links vortex strength to area, and {4} can amplify it in three-dimensional flow.",
+    "In a rotating fluid, {0} equals twice the angular velocity and is computed as the {1}; the strength of a {2} relates to the {3} around its cross-section and grows through {4}.",
+    "Helmholtz's theorems state that the {2} preserves its strength, expressed via the {3}, and the {0}—the {1}—can intensify by {4} when vortex lines extend."
+  ]
+}

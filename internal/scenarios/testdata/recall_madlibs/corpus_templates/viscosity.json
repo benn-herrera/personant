@@ -1,0 +1,51 @@
+{
+  "name": "viscosity-corpus",
+  "topic": "wiki-viscosity",
+  "mode": "measure-only",
+  "source_article": "Viscosity",
+  "description": "Query templates for fluid resistance to flow, covering dynamic viscosity, kinematic viscosity, Newtonian fluids, and temperature dependence.",
+  "anchors": [
+    "dynamic-viscosity",
+    "kinematic-viscosity",
+    "newtonian-fluid",
+    "strain-rate",
+    "superfluidity"
+  ],
+  "columns": [
+    [
+      "dynamic-viscosity",
+      "absolute-viscosity",
+      "shear-viscosity",
+      "flow-resistance-coefficient"
+    ],
+    [
+      "kinematic-viscosity",
+      "momentum-diffusivity",
+      "viscosity-density-ratio",
+      "diffusive-viscosity"
+    ],
+    [
+      "newtonian-fluid",
+      "linear-viscosity-fluid",
+      "constant-viscosity-fluid",
+      "viscosity-invariant-fluid"
+    ],
+    [
+      "strain-rate",
+      "shear-rate",
+      "velocity-gradient",
+      "deformation-rate"
+    ],
+    [
+      "superfluidity",
+      "zero-viscosity-flow",
+      "frictionless-quantum-flow",
+      "inviscid-quantum-state"
+    ]
+  ],
+  "sentence_templates": [
+    "How does {0} differ from {1} for a {2} flowing under a high {3} compared to the limiting case of {4}?",
+    "For a {2}, what governs the ratio of {0} to {1} as the {3} changes, and why does {4} mark the absolute lower bound?",
+    "Why does {4} require zero resistance, and how does the {3} dependence distinguish {1} from {0} in a {2}?"
+  ]
+}

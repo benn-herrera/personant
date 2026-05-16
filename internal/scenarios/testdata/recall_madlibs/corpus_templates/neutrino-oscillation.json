@@ -1,0 +1,51 @@
+{
+  "name": "neutrino-oscillation-corpus",
+  "topic": "wiki-neutrino-oscillation",
+  "mode": "measure-only",
+  "source_article": "Neutrino oscillation",
+  "description": "Query templates probing neutrino flavor change, the PMNS mixing matrix, the solar neutrino problem, mixing angles, and mass-squared differences.",
+  "anchors": [
+    "neutrino-oscillation",
+    "pmns-matrix",
+    "solar-neutrino-problem",
+    "mixing-angle",
+    "mass-squared-difference"
+  ],
+  "columns": [
+    [
+      "neutrino-oscillation",
+      "flavor-mixing",
+      "flavor-conversion",
+      "flavor-transition"
+    ],
+    [
+      "pmns-matrix",
+      "lepton-mixing-matrix",
+      "mns-matrix",
+      "neutrino-mixing-matrix"
+    ],
+    [
+      "solar-neutrino-problem",
+      "solar-neutrino-deficit",
+      "solar-neutrino-anomaly",
+      "homestake-deficit"
+    ],
+    [
+      "mixing-angle",
+      "oscillation-parameter",
+      "neutrino-mixing-parameter",
+      "flavor-mixing-angle"
+    ],
+    [
+      "mass-squared-difference",
+      "delta-m-squared",
+      "neutrino-mass-splitting",
+      "oscillation-phase-parameter"
+    ]
+  ],
+  "sentence_templates": [
+    "what is {0} and how does the {1} relate to the {2} through the {3} and {4}",
+    "explain {0} in terms of the {1} encoding {3} values that resolved the {2} given a measured {4}",
+    "how do experiments determine the {4} and {3} that parameterize {0} as described by the {1} after the {2} was identified"
+  ]
+}

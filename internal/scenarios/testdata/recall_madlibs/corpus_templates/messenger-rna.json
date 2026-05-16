@@ -1,0 +1,51 @@
+{
+  "name": "messenger-rna-corpus",
+  "topic": "wiki-messenger-rna",
+  "mode": "measure-only",
+  "source_article": "Messenger RNA",
+  "description": "Covers five core mRNA concepts — transcription, RNA splicing, polyadenylation, nonsense-mediated decay, and untranslated regions — each represented by a column of tight synonyms.",
+  "anchors": [
+    "transcription",
+    "rna-splicing",
+    "polyadenylation",
+    "nonsense-mediated-decay",
+    "untranslated-region"
+  ],
+  "columns": [
+    [
+      "transcription",
+      "dna-transcription",
+      "rna-synthesis",
+      "gene-transcription"
+    ],
+    [
+      "rna-splicing",
+      "pre-mrna-splicing",
+      "intron-removal",
+      "splicing"
+    ],
+    [
+      "polyadenylation",
+      "poly-a-addition",
+      "3-prime-tailing",
+      "poly-a-tailing"
+    ],
+    [
+      "nonsense-mediated-decay",
+      "nmd",
+      "premature-stop-codon-surveillance",
+      "aberrant-mrna-surveillance"
+    ],
+    [
+      "untranslated-region",
+      "utr",
+      "non-coding-flanking-region",
+      "mrna-utr"
+    ]
+  ],
+  "sentence_templates": [
+    "during {0} the pre-mrna undergoes {1} followed by {2} and is later protected from {3} by signals encoded in the {4}",
+    "the product of {0} must complete {1} and {2} before {3} can degrade it if a premature stop codon is detected within the {4}",
+    "researchers studying {0} found that defects in {1} or {2} can expose transcripts to {3} even when the {4} carries stabilizing sequence elements"
+  ]
+}

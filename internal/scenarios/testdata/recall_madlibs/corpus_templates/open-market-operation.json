@@ -1,0 +1,51 @@
+{
+  "name": "open-market-operation-corpus",
+  "topic": "wiki-open-market-operation",
+  "mode": "measure-only",
+  "source_article": "Open market operation",
+  "description": "Tests recall of open market operations as central bank purchases and sales of securities to influence bank reserves, short-term interest rates, and the money supply.",
+  "anchors": [
+    "open-market-operation",
+    "government-securities",
+    "reserve-balances",
+    "federal-funds-rate",
+    "monetary-policy-implementation"
+  ],
+  "columns": [
+    [
+      "open-market-operation",
+      "central-bank-securities-transaction",
+      "repo-or-outright-purchase",
+      "liquidity-injection-operation"
+    ],
+    [
+      "government-securities",
+      "treasury-bonds",
+      "sovereign-debt-instruments",
+      "government-debt-paper"
+    ],
+    [
+      "reserve-balances",
+      "bank-reserves",
+      "central-bank-deposits",
+      "settlement-balances"
+    ],
+    [
+      "federal-funds-rate",
+      "overnight-interbank-rate",
+      "policy-interest-rate",
+      "target-short-term-rate"
+    ],
+    [
+      "monetary-policy-implementation",
+      "policy-rate-steering",
+      "central-bank-rate-management",
+      "interest-rate-targeting"
+    ]
+  ],
+  "sentence_templates": [
+    "Through an {0} the central bank buys {1} to increase {2}, which pushes down the {3} as part of its broader {4}.",
+    "The {4} toolkit relies on {0} in which {1} are sold to drain {2} and raise the {3} when inflation overshoots the target.",
+    "After 2008, the Fed shifted its {4} to an ample-reserves framework where the {3} is set via administered rates rather than fine-tuning {2} through each {0} and sale of {1}."
+  ]
+}

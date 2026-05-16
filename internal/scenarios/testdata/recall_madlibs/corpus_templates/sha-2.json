@@ -1,0 +1,22 @@
+{
+  "name": "sha-2-corpus",
+  "topic": "wiki-sha-2",
+  "mode": "measure-only",
+  "source_article": "SHA-2",
+  "description": "Tests recall of SHA-2 concepts including the Merkle-Damgard construction, collision resistance, preimage attacks, hash digests, and the avalanche effect.",
+  "anchors": ["merkle-damgard-construction", "collision-resistance", "preimage-attack", "hash-digest", "avalanche-effect"],
+  "columns": [
+    ["merkle-damgard-construction", "merkle-damgard", "iterated-hash-construction", "md-construction"],
+    ["collision-resistance", "collision-hardness", "birthday-attack-resistance", "collision-security"],
+    ["preimage-attack", "hash-inversion", "first-preimage-attack", "reverse-hash-attack"],
+    ["hash-digest", "message-digest", "hash-value", "hash-output"],
+    ["avalanche-effect", "bit-diffusion", "hash-sensitivity", "cascade-effect"]
+  ],
+  "sentence_templates": [
+    "SHA-256 uses the {0} to iteratively compress blocks, producing a fixed-length {3} that exhibits the {4} and achieves {1} while resisting a {2}.",
+    "The {4} means a one-bit change in input flips roughly half the bits in the {3}, which strengthens {1} and makes a {2} harder under the {0}.",
+    "Breaking {1} is easier than mounting a {2}, and the {0} provides the structural basis for both properties reflected in the final {3}, amplified by the {4}.",
+    "A successful {2} would allow an attacker to forge a given {3} without knowing the input, undermining {1} and exposing the weakness of the {0} regardless of the {4}.",
+    "The {0} iterates a compression function to build the final {3}, and its {4} property contributes to {1} by making a {2} computationally infeasible."
+  ]
+}

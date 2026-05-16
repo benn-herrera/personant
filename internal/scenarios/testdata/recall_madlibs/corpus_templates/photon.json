@@ -1,0 +1,51 @@
+{
+  "name": "photon-corpus",
+  "topic": "wiki-photon",
+  "mode": "measure-only",
+  "source_article": "Photon",
+  "description": "Probes recall of photon concepts including its role as gauge boson, wave-particle duality, the photoelectric effect, spontaneous emission, and zero rest mass.",
+  "anchors": [
+    "gauge-boson",
+    "wave-particle-duality",
+    "photoelectric-effect",
+    "spontaneous-emission",
+    "zero-rest-mass"
+  ],
+  "columns": [
+    [
+      "gauge-boson",
+      "force-carrier",
+      "interaction-mediator",
+      "field-quantum"
+    ],
+    [
+      "wave-particle-duality",
+      "quantum-wave-particle-nature",
+      "dual-wave-particle-behavior",
+      "wave-corpuscle-duality"
+    ],
+    [
+      "photoelectric-effect",
+      "photoemission",
+      "light-induced-electron-emission",
+      "einstein-photoelectric-phenomenon"
+    ],
+    [
+      "spontaneous-emission",
+      "radiative-transition",
+      "unprompted-photon-emission",
+      "unsolicited-photon-release"
+    ],
+    [
+      "zero-rest-mass",
+      "masslessness",
+      "vanishing-rest-mass",
+      "null-rest-mass"
+    ]
+  ],
+  "sentence_templates": [
+    "As a {0} with {4}, the photon demonstrates {1} and is responsible for the {2}, emitted via {3} during atomic transitions.",
+    "The {2} confirmed that light quanta behave as a {0} exhibiting {1}, with each quantum having {4} and being released through {3}.",
+    "Evidence for {1} comes from the {2} and from {3} rates, consistent with a {0} description of light as carrying {4}."
+  ]
+}

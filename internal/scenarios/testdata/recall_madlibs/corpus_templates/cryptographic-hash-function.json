@@ -1,0 +1,51 @@
+{
+  "name": "cryptographic-hash-function-corpus",
+  "topic": "wiki-cryptographic-hash-function",
+  "mode": "measure-only",
+  "source_article": "Cryptographic hash function",
+  "description": "Tests recall of cryptographic hash function concepts: preimage resistance, collision resistance, message digest, Merkle-Damgard construction, and one-way property.",
+  "anchors": [
+    "preimage-resistance",
+    "collision-resistance",
+    "message-digest",
+    "merkle-damgard-construction",
+    "one-way-function"
+  ],
+  "columns": [
+    [
+      "preimage-resistance",
+      "one-way-hash-property",
+      "hash-irreversibility",
+      "inversion-hardness"
+    ],
+    [
+      "collision-resistance",
+      "collision-avoidance",
+      "collision-hardness",
+      "anti-collision-property"
+    ],
+    [
+      "message-digest",
+      "hash-value",
+      "hash-output",
+      "digest-value"
+    ],
+    [
+      "merkle-damgard-construction",
+      "iterated-hash-construction",
+      "compression-chaining-scheme",
+      "sequential-block-hashing"
+    ],
+    [
+      "one-way-function",
+      "trapdoor-function",
+      "irreversible-function",
+      "hard-to-invert-map"
+    ]
+  ],
+  "sentence_templates": [
+    "A secure hash achieves {0} and {1} by behaving as a {4} that maps any input to a fixed-length {2} via a {3}.",
+    "The {3} chains compression steps to produce a {2} with {0} and {1} because each step acts as a {4}.",
+    "Password storage exploits {0} of the {4} to protect data: the {3} builds the algorithm, {1} prevents forged matches, and the stored {2} cannot be reversed."
+  ]
+}

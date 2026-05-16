@@ -1,0 +1,51 @@
+{
+  "name": "climate-model-corpus",
+  "topic": "wiki-climate-model",
+  "mode": "measure-only",
+  "source_article": "Climate model",
+  "description": "Measures recall of five climate-model concepts: what the models simulate, the class of coupled models, the energy-balance approach, extreme-event attribution, and the role of feedbacks in projections.",
+  "anchors": [
+    "general-circulation-model",
+    "coupled-atmosphere-ocean-model",
+    "energy-balance-model",
+    "extreme-event-attribution",
+    "climate-feedback"
+  ],
+  "columns": [
+    [
+      "general-circulation-model",
+      "gcm",
+      "global-climate-model",
+      "atmospheric-circulation-model"
+    ],
+    [
+      "coupled-atmosphere-ocean-model",
+      "atmosphere-ocean-gcm",
+      "coupled-climate-model",
+      "atmosphere-ocean-coupled-system"
+    ],
+    [
+      "energy-balance-model",
+      "ebm",
+      "radiative-energy-balance-model",
+      "heat-balance-model"
+    ],
+    [
+      "extreme-event-attribution",
+      "climate-attribution-science",
+      "weather-event-attribution",
+      "extreme-weather-attribution"
+    ],
+    [
+      "climate-feedback",
+      "climate-system-feedback",
+      "feedback-process",
+      "amplifying-feedback"
+    ]
+  ],
+  "sentence_templates": [
+    "How does a {0} differ from a {1}, and how does a {2} relate to both, in the context of {3} and the representation of {4}?",
+    "Describe what a {0} simulates, explain how a {1} extends it, contrast with a {2}, and discuss the role of {3} and {4} in model evaluation.",
+    "What equations govern a {0}, how does coupling in a {1} improve realism compared to a {2}, what is {3}, and how do modellers represent {4}?"
+  ]
+}

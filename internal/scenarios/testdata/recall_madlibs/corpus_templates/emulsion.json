@@ -1,0 +1,51 @@
+{
+  "name": "emulsion-corpus",
+  "topic": "wiki-emulsion",
+  "mode": "measure-only",
+  "source_article": "Emulsion",
+  "description": "Recall template for emulsion concepts: emulsification, emulsifier/surfactant, dispersed phase, coalescence, and interfacial tension.",
+  "anchors": [
+    "emulsification",
+    "emulsifier",
+    "dispersed-phase",
+    "coalescence",
+    "interfacial-tension"
+  ],
+  "columns": [
+    [
+      "emulsification",
+      "emulsion-formation",
+      "dispersion-into-droplets",
+      "liquid-liquid-mixing"
+    ],
+    [
+      "emulsifier",
+      "emulsifying-agent",
+      "stabilizing-surfactant",
+      "amphiphilic-stabilizer"
+    ],
+    [
+      "dispersed-phase",
+      "internal-phase",
+      "droplet-phase",
+      "discontinuous-phase"
+    ],
+    [
+      "coalescence",
+      "droplet-merging",
+      "droplet-fusion",
+      "phase-reunion"
+    ],
+    [
+      "interfacial-tension",
+      "oil-water-surface-tension",
+      "phase-boundary-tension",
+      "liquid-liquid-interface-energy"
+    ]
+  ],
+  "sentence_templates": [
+    "The process of {0} requires a {1} to stabilize the {2} against {3} by reducing the {4} between the two liquid phases.",
+    "A {1} adsorbs at the boundary of the {2} and lowers the {4}, making {0} stable and resisting {3} over time.",
+    "Without a {1} to reduce {4}, the {2} formed during {0} rapidly undergoes {3} and the two liquids separate."
+  ]
+}

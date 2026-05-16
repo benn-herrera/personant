@@ -1,0 +1,51 @@
+{
+  "name": "shear-stress-corpus",
+  "topic": "wiki-shear-stress",
+  "mode": "measure-only",
+  "source_article": "Shear stress",
+  "description": "Query templates for the coplanar stress component arising from tangential forces, including wall shear stress and its relation to viscosity and velocity gradient.",
+  "anchors": [
+    "shear-stress",
+    "wall-shear-stress",
+    "shear-modulus",
+    "velocity-gradient",
+    "no-slip-condition"
+  ],
+  "columns": [
+    [
+      "shear-stress",
+      "tangential-stress",
+      "coplanar-stress",
+      "friction-stress"
+    ],
+    [
+      "wall-shear-stress",
+      "boundary-shear-stress",
+      "surface-friction-stress",
+      "near-wall-traction"
+    ],
+    [
+      "shear-modulus",
+      "rigidity-modulus",
+      "elastic-shear-constant",
+      "torsional-stiffness"
+    ],
+    [
+      "velocity-gradient",
+      "shear-rate",
+      "flow-velocity-derivative",
+      "speed-gradient"
+    ],
+    [
+      "no-slip-condition",
+      "zero-velocity-at-wall",
+      "fluid-wall-adhesion",
+      "viscous-boundary-condition"
+    ]
+  ],
+  "sentence_templates": [
+    "How does {0} at a surface become {1} through the {4}, and what role does the {3} play when {2} is negligible?",
+    "Why does the {4} create a nonzero {3} that drives {0} at the wall to become {1}, independent of the {2}?",
+    "What connects {1} to {3} via dynamic viscosity, how does {2} enter for solids, and what enforces {4} at the boundary for all these {0} cases?"
+  ]
+}

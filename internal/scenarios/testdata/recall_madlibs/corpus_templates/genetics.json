@@ -1,0 +1,26 @@
+{
+  "name": "genetics-corpus",
+  "topic": "wiki-genetics",
+  "mode": "measure-only",
+  "source_article": "Genetics",
+  "description": "Tests recall of five core genetics concepts: heredity, genotype, phenotype, natural selection, and genetic drift.",
+  "anchors": [
+    "heredity",
+    "genotype",
+    "phenotype",
+    "natural-selection",
+    "genetic-drift"
+  ],
+  "columns": [
+    ["heredity", "trait-inheritance", "genetic-transmission", "heritable-variation"],
+    ["genotype", "genetic-makeup", "allele-composition", "genomic-constitution"],
+    ["phenotype", "observable-trait", "expressed-characteristic", "outward-trait"],
+    ["natural-selection", "selection-pressure", "adaptive-selection", "differential-reproduction"],
+    ["genetic-drift", "allele-frequency-drift", "random-allele-sampling", "stochastic-gene-frequency-change"]
+  ],
+  "sentence_templates": [
+    "the rules of {0} determine how {1} shapes {2} and over generations {3} and {4} shift allele frequencies in populations",
+    "population genetics links {0} mechanisms to changes in {1} that produce variation in {2} under {3} while {4} acts randomly",
+    "mendel established the principles of {0} without knowing {1} but his laws explain how {2} emerges and how {3} and {4} drive evolution"
+  ]
+}

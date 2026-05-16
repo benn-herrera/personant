@@ -1,0 +1,51 @@
+{
+  "name": "pascal-s-law-corpus",
+  "topic": "wiki-pascal-s-law",
+  "mode": "measure-only",
+  "source_article": "Pascal's law",
+  "description": "Recall template for Pascal's law concepts: pressure transmission, hydraulic press, incompressible fluid, hydrostatic pressure, and force multiplication.",
+  "anchors": [
+    "pressure-transmission",
+    "hydraulic-press",
+    "incompressible-fluid",
+    "hydrostatic-pressure",
+    "force-multiplication"
+  ],
+  "columns": [
+    [
+      "pressure-transmission",
+      "pressure-propagation",
+      "isotropic-pressure-transfer",
+      "equal-pressure-distribution"
+    ],
+    [
+      "hydraulic-press",
+      "hydraulic-machine",
+      "fluid-pressure-machine",
+      "pascal-press"
+    ],
+    [
+      "incompressible-fluid",
+      "non-compressible-liquid",
+      "constant-density-fluid",
+      "volume-conserving-fluid"
+    ],
+    [
+      "hydrostatic-pressure",
+      "fluid-column-pressure",
+      "static-fluid-pressure",
+      "gravitational-fluid-pressure"
+    ],
+    [
+      "force-multiplication",
+      "mechanical-advantage-in-fluid",
+      "hydraulic-force-amplification",
+      "area-ratio-force-gain"
+    ]
+  ],
+  "sentence_templates": [
+    "Pascal's law states that {0} in a confined {2} is uniform, which is the principle behind the {1} where {4} is achieved by exploiting differential piston areas, and {3} adds depth-dependent variation.",
+    "The {1} relies on {0} through a {2} to achieve {4}, while {3} accounts for the additional pressure at depth due to fluid weight.",
+    "In a {2}, {0} means that any applied pressure is felt equally everywhere, enabling {4} in the {1} and adding {3} variation with elevation."
+  ]
+}
