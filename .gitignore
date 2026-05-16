@@ -37,9 +37,11 @@ memory/session-state.md
 mad-review/
 mad-design/
 
-# Phase C recall-fidelity: derived query artifact. Canonical sources
-# are generate.py + templates/; regenerate with `make recall-madlibs`.
+# Phase C recall-fidelity: derived query artifacts. Canonical sources
+# are madlibs_generate.py + the template dirs; regenerate with
+# `make recall-madlibs`.
 internal/scenarios/testdata/recall_madlibs/queries.json
+internal/scenarios/testdata/recall_madlibs/corpus_queries.json
 
 # Mad-libs template authoring staging area — scratch. Approved
 # candidates are promoted into the testdata templates tree, which is

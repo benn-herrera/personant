@@ -1,6 +1,6 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch
+.PHONY: all build test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test
 
 all: build
 
@@ -43,11 +43,27 @@ update-dependencies: update-agents-dependency
 	go get -u ./...
 	go mod tidy
 
-# recall-madlibs regenerates the derived recall-fidelity query set
-# (Phase C.2). The output is .gitignore'd; this target is the only
-# supported way to produce it. Python stdlib only — no venv, no deps.
+# recall-madlibs regenerates the derived recall-fidelity query sets
+# from the committed templates. Two sets: the hand-crafted C.2/C.3
+# templates -> queries.json (consumed by the default `make test`), and
+# the Wikipedia-corpus templates -> corpus_queries.json (consumed only
+# by the build-tagged corpus tests). Both outputs are .gitignore'd;
+# this target is the only supported way to produce them. Python stdlib
+# only — no venv, no deps.
+RECALL_MADLIBS_DATA := internal/scenarios/testdata/recall_madlibs
 recall-madlibs:
 	python3 test/tools/madlibs_generate.py
+	python3 test/tools/madlibs_generate.py \
+	  --templates-dir $(RECALL_MADLIBS_DATA)/corpus_templates \
+	  --out $(RECALL_MADLIBS_DATA)/corpus_queries.json
+
+# recall-corpus-test runs the Wikipedia-corpus recall-fidelity
+# scenarios — HEAVYWEIGHT: one isolated harness scenario per corpus
+# query across the whole corpus. Build-tag isolated (recall_corpus) and
+# deliberately NOT part of `make test`. Run -v to see the per-topic
+# recall-fidelity report.
+recall-corpus-test: build recall-madlibs
+	go test -tags recall_corpus -run Corpus ./internal/scenarios/... --count=1
 
 # recall-corpus-fetch is a HEAVYWEIGHT, NETWORKED mining operation —
 # NOT part of `make test` and NOT a pre-commit step. It fetches ~150

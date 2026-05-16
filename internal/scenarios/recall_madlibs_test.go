@@ -5,17 +5,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 	"testing"
 
 	"personant/internal/store"
 )
 
-// madlibsQueriesPath is the derived query artifact produced by
-// testdata/recall_madlibs/generate.py. It is .gitignore'd; `make
-// recall-madlibs` (a dependency of `make test`) regenerates it.
-var madlibsQueriesPath = filepath.Join("testdata", "recall_madlibs", "queries.json")
+// handcraftedQueriesPath is the derived query artifact for the
+// hand-crafted C.2/C.3 templates, produced by `make recall-madlibs`.
+// It is .gitignore'd; absent → the calling test skips with a
+// regeneration hint rather than hard-failing.
+//
+// The Wikipedia-corpus query set lives in a separate artifact
+// (corpus_queries.json) consumed only by the build-tagged corpus
+// tests — see recall_madlibs_corpus_test.go. The split keeps the
+// heavyweight corpus run out of the default `make test`.
+var handcraftedQueriesPath = filepath.Join("testdata", "recall_madlibs", "queries.json")
 
 type madlibsTopic struct {
 	Name    string   `json:"name"`
@@ -37,33 +41,32 @@ type madlibsDoc struct {
 	Queries []madlibsQuery `json:"queries"`
 }
 
-// loadMadlibsQueries reads the generated query set. When the artifact
-// is absent the calling test is skipped with a regeneration hint —
-// `go test ./...` run without `make` degrades gracefully rather than
-// hard-failing.
-func loadMadlibsQueries(t *testing.T) madlibsDoc {
+// loadMadlibsQueries reads a generated query set from path. When the
+// artifact is absent the calling test is skipped with a regeneration
+// hint — `go test ./...` run without `make` degrades gracefully
+// rather than hard-failing.
+func loadMadlibsQueries(t *testing.T, path string) madlibsDoc {
 	t.Helper()
-	body, err := os.ReadFile(madlibsQueriesPath)
+	body, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		t.Skipf("recall-madlibs artifact %s absent — run `make recall-madlibs`", madlibsQueriesPath)
+		t.Skipf("recall-madlibs artifact %s absent — run `make recall-madlibs`", path)
 	}
 	if err != nil {
-		t.Fatalf("read %s: %v", madlibsQueriesPath, err)
+		t.Fatalf("read %s: %v", path, err)
 	}
 	var doc madlibsDoc
 	if err := json.Unmarshal(body, &doc); err != nil {
-		t.Fatalf("parse %s: %v", madlibsQueriesPath, err)
+		t.Fatalf("parse %s: %v", path, err)
 	}
 	if len(doc.Topics) == 0 || len(doc.Queries) == 0 {
-		t.Fatalf("%s: empty topics or queries", madlibsQueriesPath)
+		t.Fatalf("%s: empty topics or queries", path)
 	}
 	return doc
 }
 
-// TestScenario_RecallMadlibs drives the Phase C.2/C.3 mad-libs query
-// set through the harness end-to-end. Each query becomes its own
-// isolated scenario: a fresh home seeded with one thread per topic,
-// then a single turn carrying the mad-libs query.
+// runMadlibsQuerySet drives every query in doc through the harness as
+// its own isolated scenario: a fresh home seeded with one thread per
+// topic, then a single turn carrying the mad-libs query.
 //
 // Per-query isolation is deliberate. A multi-step scenario would have
 // each query's *new-topic* throwaway thread linger as a confounding
@@ -73,16 +76,15 @@ func loadMadlibsQueries(t *testing.T) madlibsDoc {
 //
 // Two query modes share this driver:
 //
-//   - strict (C.2): every column cell is an anchor of the query's
-//     topic, so each query clears the §3.4 Jaccard threshold for
-//     exactly one topic. The harness fails on any drift.
-//   - measure-only (C.3): adversarial templates — vocabulary drift,
-//     stop-word leak, false friends — whose queries are expected to
-//     under- or mis-fire. ExpectedRecallMatches still names the
-//     ground-truth topic, but the harness only records
+//   - strict: every column cell is an anchor of the query's topic, so
+//     each query clears the §3.4 Jaccard threshold for exactly one
+//     topic. The harness fails on any drift.
+//   - measure-only: adversarial / corpus templates whose queries are
+//     expected to under- or mis-fire. ExpectedRecallMatches still
+//     names the ground-truth topic, but the harness only records
 //     recall_fidelity_adversarial_* and never fails.
-func TestScenario_RecallMadlibs(t *testing.T) {
-	doc := loadMadlibsQueries(t)
+func runMadlibsQuerySet(t *testing.T, doc madlibsDoc) {
+	t.Helper()
 
 	// Threads are seeded in topic-array order → thr_1, thr_2, ...
 	threadID := map[string]string{}
@@ -131,6 +133,14 @@ func TestScenario_RecallMadlibs(t *testing.T) {
 	}
 }
 
+// TestScenario_RecallMadlibs drives the hand-crafted C.2 (strict) and
+// C.3 (adversarial, measure-only) mad-libs query set end-to-end. The
+// Wikipedia-corpus set is exercised separately by the build-tagged
+// TestScenario_RecallMadlibsCorpus.
+func TestScenario_RecallMadlibs(t *testing.T) {
+	runMadlibsQuerySet(t, loadMadlibsQueries(t, handcraftedQueriesPath))
+}
+
 // TestRecallMadlibs_AdversarialBehavior locks in that each C.3
 // adversarial template actually probes the failure mode its
 // description claims — a guard against a template edit silently
@@ -145,7 +155,7 @@ func TestScenario_RecallMadlibs(t *testing.T) {
 //   - false-friend pair → recall 1 (correct topic always fires);
 //                         precision ≤ 1 (spurious twin may fire).
 func TestRecallMadlibs_AdversarialBehavior(t *testing.T) {
-	doc := loadMadlibsQueries(t)
+	doc := loadMadlibsQueries(t, handcraftedQueriesPath)
 
 	want := map[string]struct{ recall, precisionMax float64 }{
 		"emulsion-rheology-drift":     {recall: 0, precisionMax: 1},
@@ -229,64 +239,6 @@ func runMadlibsMetrics(t *testing.T, doc madlibsDoc, q madlibsQuery) metricsBlob
 		t.Fatalf("parse metrics blob: %v", err)
 	}
 	return blob
-}
-
-// TestRecallMadlibs_CorpusReport prints per-topic recall-fidelity
-// aggregates for the Wikipedia-corpus topics (topic prefix "wiki-").
-// It asserts nothing — corpus templates are measure-only by nature —
-// it is a readout: mean precision / recall / F1 over each topic's
-// vocabulary-drifted query set, the headline number C.6's calibration
-// sweep will later move. Run with -v to see the table.
-func TestRecallMadlibs_CorpusReport(t *testing.T) {
-	doc := loadMadlibsQueries(t)
-
-	byTopic := map[string][]madlibsQuery{}
-	var order []string
-	for _, q := range doc.Queries {
-		if !strings.HasPrefix(q.Topic, "wiki-") {
-			continue
-		}
-		if _, seen := byTopic[q.Topic]; !seen {
-			order = append(order, q.Topic)
-		}
-		byTopic[q.Topic] = append(byTopic[q.Topic], q)
-	}
-	if len(order) == 0 {
-		t.Skip("no wiki-corpus topics in the query set")
-	}
-	sort.Strings(order)
-
-	t.Logf("recall-fidelity over Wikipedia-corpus topics (measure-only):")
-	t.Logf("  %-22s %6s  %4s  %9s %9s %9s", "topic", "n", "fire", "precision", "recall", "f1")
-	for _, topic := range order {
-		qs := byTopic[topic]
-		var sumP, sumR, sumF float64
-		fired := 0
-		for _, q := range qs {
-			blob := runMadlibsMetrics(t, doc, q)
-			p := mean(blob.Histograms["recall_fidelity_adversarial_precision"])
-			r := mean(blob.Histograms["recall_fidelity_adversarial_recall"])
-			f := mean(blob.Histograms["recall_fidelity_adversarial_f1"])
-			sumP, sumR, sumF = sumP+p, sumR+r, sumF+f
-			if r > 0 {
-				fired++
-			}
-		}
-		n := float64(len(qs))
-		t.Logf("  %-22s %6d  %3d/%-2d %9.3f %9.3f %9.3f",
-			topic, len(qs), fired, len(qs), sumP/n, sumR/n, sumF/n)
-	}
-}
-
-func mean(xs []float64) float64 {
-	if len(xs) == 0 {
-		return 0
-	}
-	var s float64
-	for _, x := range xs {
-		s += x
-	}
-	return s / float64(len(xs))
 }
 
 // seedMadlibsThreads returns a Scenario.Setup that writes one seeded
