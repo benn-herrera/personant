@@ -42,6 +42,7 @@ mad-design/
 # `make recall-madlibs`.
 internal/scenarios/testdata/recall_madlibs/queries.json
 internal/scenarios/testdata/recall_madlibs/corpus_queries.json
+internal/scenarios/testdata/recall_madlibs/corpus_queries_m*.json
 
 # Mad-libs template authoring staging area — scratch. Approved
 # candidates are promoted into the testdata templates tree, which is

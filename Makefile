@@ -1,6 +1,6 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test
+.PHONY: all build test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data
 
 all: build
 
@@ -57,12 +57,23 @@ recall-madlibs:
 	  --templates-dir $(RECALL_MADLIBS_DATA)/corpus_templates \
 	  --out $(RECALL_MADLIBS_DATA)/corpus_queries.json
 
-# recall-corpus-test runs the Wikipedia-corpus recall-fidelity
-# scenarios — HEAVYWEIGHT: one isolated harness scenario per corpus
-# query across the whole corpus. Build-tag isolated (recall_corpus) and
+# recall-corpus-sweep-data generates the synonym-depth-stratified query
+# sets for the C.6 calibration sweep: corpus_queries_m1..m4.json, each
+# restricting columns to their first M cells (M=1 zero-drift canonical,
+# M=4 full drift). .gitignore'd derived artifacts.
+recall-corpus-sweep-data:
+	@for m in 1 2 3 4; do \
+	  python3 test/tools/madlibs_generate.py \
+	    --templates-dir $(RECALL_MADLIBS_DATA)/corpus_templates \
+	    --synonym-depth $$m \
+	    --out $(RECALL_MADLIBS_DATA)/corpus_queries_m$$m.json ; \
+	done
+
+# recall-corpus-test runs the Wikipedia-corpus recall-fidelity report
+# and the C.6 calibration sweep. Build-tag isolated (recall_corpus) and
 # deliberately NOT part of `make test`. Run -v to see the per-topic
-# recall-fidelity report.
-recall-corpus-test: build recall-madlibs
+# report and the synonym-depth × threshold calibration matrix.
+recall-corpus-test: build recall-madlibs recall-corpus-sweep-data
 	go test -tags recall_corpus -run Corpus ./internal/scenarios/... --count=1
 
 # recall-corpus-fetch is a HEAVYWEIGHT, NETWORKED mining operation —

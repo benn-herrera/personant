@@ -161,12 +161,20 @@ In progress:
     `make recall-corpus-test`) — out of `make test`. Hand-crafted
     C.2/C.3 templates and corpus templates generate separate
     `queries.json` / `corpus_queries.json` derived artifacts.
-  - **C.6 (next):** calibration sweep — synonym-depth M ×
-    `recall.symbolic-threshold`. Open questions surfaced by C.5,
-    to be settled by calibration data: whether to enrich the
-    stored-thread symbol set beyond the 5 anchors, and whether to
-    move recall off symmetric Jaccard to an asymmetric overlap
-    coefficient. Behind the heavyweight build-tagged target.
+  - **C.6 (done — initial sweep):** calibration sweep. The corpus
+    recall measurement was rebuilt to call `recall.ProposeFromIndex`
+    directly (was driving the full scenario harness per query —
+    ~78 min / timeout; now <1 s). The generator gained
+    `--synonym-depth M`; `make recall-corpus-sweep-data` emits
+    `corpus_queries_m1..m4.json`. `TestRecallMadlibs_CorpusCalibration`
+    sweeps M ∈ {1..4} × threshold ∈ {0.2..0.6} into a metrics matrix.
+    Findings: M=1 (zero-drift) recall 1.0 at every threshold; recall
+    collapses with drift and threshold (M=4/T=0.4 → 0.098);
+    thresholds 0.3 and 0.4 are equivalent operating points (discrete
+    Jaccard score gaps); precision stays ≥0.98 for T ≥ 0.3.
+    Still open, deferred until the data demands it: enriching the
+    stored-thread symbol set beyond 5 anchors, and moving recall off
+    symmetric Jaccard to an asymmetric overlap coefficient.
 
 Queued:
 - Phase 4: closure / retirement (curator-drafted summaries; ack flow;

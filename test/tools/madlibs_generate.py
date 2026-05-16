@@ -110,16 +110,24 @@ def load_template(path):
     return tpl
 
 
-def enumerate_queries(tpl):
+def enumerate_queries(tpl, depth):
     """Return every (sentence_index, cell-tuple) pair for a template.
 
     The cell tuple has one entry per column. Sorted so enumeration is
     order-stable before the seeded shuffle.
+
+    `depth` is the synonym-depth knob for the C.6 calibration sweep:
+    each column is restricted to its first `depth` cells. Since cell[0]
+    is the canonical (non-drifted, anchor-matching) term and cells[1:]
+    are increasingly drifted synonyms, depth=1 yields only zero-drift
+    queries and larger depths admit progressively more drift. depth<=0
+    means "all cells" (no restriction).
     """
     columns = tpl["columns"]
     combos = [()]
     for column in columns:
-        combos = [combo + (cell,) for combo in combos for cell in column]
+        cells = column if depth <= 0 else column[:depth]
+        combos = [combo + (cell,) for combo in combos for cell in cells]
     pairs = []
     for sent_idx in range(len(tpl["sentence_templates"])):
         for combo in combos:
@@ -157,11 +165,11 @@ def collect_topics(templates):
     return topics
 
 
-def build(templates, seed, samples):
+def build(templates, seed, samples, depth):
     """Build the queries.json document body."""
     out_queries = []
     for tpl in templates:
-        pairs = enumerate_queries(tpl)
+        pairs = enumerate_queries(tpl, depth)
         # Per-template seeded RNG: adding a template does not perturb the
         # query stream of templates authored before it.
         rng = random.Random(f"{seed}:{tpl['name']}")
@@ -185,6 +193,7 @@ def build(templates, seed, samples):
         "not committed (see .gitignore). Regenerate with `make recall-madlibs`.",
         "seed": seed,
         "samples_per_template": samples,
+        "synonym_depth": depth,
         "topics": collect_topics(templates),
         "queries": out_queries,
     }
@@ -199,6 +208,13 @@ def main(argv):
         default=DEFAULT_SAMPLES,
         help="queries generated per template",
     )
+    parser.add_argument(
+        "--synonym-depth",
+        type=int,
+        default=0,
+        help="C.6 calibration knob: restrict each column to its first N "
+        "cells (cell[0] canonical, deeper = more drift). 0 = all cells.",
+    )
     parser.add_argument("--templates-dir", type=pathlib.Path, default=DEFAULT_TEMPLATES_DIR)
     parser.add_argument("--out", type=pathlib.Path, default=DEFAULT_OUT)
     args = parser.parse_args(argv)
@@ -209,7 +225,7 @@ def main(argv):
         return 1
 
     templates = [load_template(p) for p in template_paths]
-    doc = build(templates, args.seed, args.samples)
+    doc = build(templates, args.seed, args.samples, args.synonym_depth)
 
     # Stable formatting: a re-run with the same inputs is byte-identical.
     text = json.dumps(doc, indent=2, sort_keys=True) + "\n"
