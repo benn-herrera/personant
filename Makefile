@@ -1,6 +1,6 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs
+.PHONY: all build test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch
 
 all: build
 
@@ -48,6 +48,15 @@ update-dependencies: update-agents-dependency
 # supported way to produce it. Python stdlib only — no venv, no deps.
 recall-madlibs:
 	python3 test/tools/madlibs_generate.py
+
+# recall-corpus-fetch is a HEAVYWEIGHT, NETWORKED mining operation —
+# NOT part of `make test` and NOT a pre-commit step. It fetches ~150
+# Wikipedia articles (minutes of wall-clock, polite rate limiting) and
+# rewrites the committed corpus snapshot at
+# internal/scenarios/testdata/corpus/corpus.json. Run it only to
+# refresh or extend the recall-fidelity corpus, then commit the result.
+recall-corpus-fetch:
+	python3 test/tools/wikipedia_corpus.py
 
 test: build recall-madlibs
 	go vet ./...

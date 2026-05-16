@@ -141,10 +141,21 @@ In progress:
     topic pair (`macro-economics` / `monetary-policy`, 4 shared
     anchors). `TestRecallMadlibs_AdversarialBehavior` locks in the
     documented per-probe behavior.
-  - **C.4 (next):** Wikipedia corpus pipeline — download, chunk,
-    label, vendor into `testdata/corpus/`.
-  - C.5 LLM-assisted template authoring; C.6 calibration scenario
-    (synonym-depth × `recall.symbolic-threshold` sweep).
+  - **C.4 (done):** Wikipedia corpus pipeline.
+    `test/tools/wikipedia_corpus.py` (stdlib-only) mines a curated
+    152-article seed list (`wikipedia_corpus_articles.txt`, 8
+    related domains × 19), chunks by section, labels by
+    article/section/domain, and vendors a snapshot to
+    `internal/scenarios/testdata/corpus/corpus.json` (~5 MB, 1090
+    fragments). The snapshot is *committed* — Wikipedia is a
+    non-reproducible source; the mining is a one-off, not a
+    deterministic regen. `make recall-corpus-fetch` is the
+    heavyweight, networked refresh op — NOT part of `make test`.
+  - **C.5 (next):** LLM-assisted mad-libs template authoring from
+    the corpus topic clusters; human-curated, committed.
+  - C.6 calibration scenario (synonym-depth ×
+    `recall.symbolic-threshold` sweep) — behind a heavyweight,
+    build-tag-isolated make target, not `make test`.
 
 Queued:
 - Phase 4: closure / retirement (curator-drafted summaries; ack flow;
