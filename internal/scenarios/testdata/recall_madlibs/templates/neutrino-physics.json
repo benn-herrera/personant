@@ -1,0 +1,25 @@
+{
+  "name": "neutrino-physics",
+  "description": "Neutrino oscillation, mixing, and mass structure.",
+  "anchors": [
+    "neutrino-oscillation",
+    "solar-neutrino",
+    "flavor-mixing",
+    "cp-violation",
+    "pmns-matrix",
+    "mass-eigenstate",
+    "mass-hierarchy",
+    "sterile-neutrino"
+  ],
+  "columns": [
+    ["neutrino-oscillation", "solar-neutrino"],
+    ["flavor-mixing", "cp-violation"],
+    ["pmns-matrix", "mass-eigenstate"],
+    ["mass-hierarchy", "sterile-neutrino"]
+  ],
+  "sentence_templates": [
+    "how does {0} reveal {1} through {2} and {3}?",
+    "what links {0} to {1} given {2} and {3}?",
+    "can {0} be explained by {1}, {2}, and {3}?"
+  ]
+}

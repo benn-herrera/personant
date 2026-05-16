@@ -1,0 +1,25 @@
+{
+  "name": "emulsion-rheology",
+  "description": "Rheological behaviour of emulsions: flow, droplet dynamics, stability.",
+  "anchors": [
+    "shear-thinning",
+    "yield-stress",
+    "droplet-coalescence",
+    "phase-inversion",
+    "emulsion-viscosity",
+    "shear-modulus",
+    "interfacial-tension",
+    "creaming-rate"
+  ],
+  "columns": [
+    ["shear-thinning", "yield-stress"],
+    ["droplet-coalescence", "phase-inversion"],
+    ["emulsion-viscosity", "shear-modulus"],
+    ["interfacial-tension", "creaming-rate"]
+  ],
+  "sentence_templates": [
+    "how does {0} influence {1} given the {2} and {3} of the system?",
+    "what couples {0} to {1} once {2} and {3} are accounted for?",
+    "can {0} be predicted from {1}, {2}, and {3}?"
+  ]
+}

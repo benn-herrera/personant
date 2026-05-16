@@ -1,6 +1,6 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build test integration-test update-dependencies update-agents-dependency clean agents
+.PHONY: all build test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs
 
 all: build
 
@@ -43,7 +43,14 @@ update-dependencies: update-agents-dependency
 	go get -u ./...
 	go mod tidy
 
-test: build
+# recall-madlibs regenerates the derived recall-fidelity query set
+# (Phase C.2). The output is .gitignore'd; this target is the only
+# supported way to produce it. Python stdlib only — no venv, no deps.
+MADLIBS_DIR := internal/scenarios/testdata/recall_madlibs
+recall-madlibs:
+	python3 $(MADLIBS_DIR)/generate.py
+
+test: build recall-madlibs
 	go vet ./...
 	go test ./... --count=1
 

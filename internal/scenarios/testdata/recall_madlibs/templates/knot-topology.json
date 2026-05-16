@@ -1,0 +1,25 @@
+{
+  "name": "knot-topology",
+  "description": "Knot invariants and topological classification of knots.",
+  "anchors": [
+    "trefoil-knot",
+    "knot-group",
+    "bridge-number",
+    "unknotting-number",
+    "crossing-number",
+    "knot-genus",
+    "chirality",
+    "jones-polynomial"
+  ],
+  "columns": [
+    ["trefoil-knot", "knot-group"],
+    ["bridge-number", "unknotting-number"],
+    ["crossing-number", "knot-genus"],
+    ["chirality", "jones-polynomial"]
+  ],
+  "sentence_templates": [
+    "how does {0} constrain {1} alongside {2} and {3}?",
+    "what relates {0} to {1} once {2} and {3} are fixed?",
+    "is {0} determined by {1}, {2}, and {3}?"
+  ]
+}
