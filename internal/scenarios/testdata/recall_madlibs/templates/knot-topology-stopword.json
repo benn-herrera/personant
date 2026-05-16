@@ -1,0 +1,30 @@
+{
+  "name": "knot-topology-stopword",
+  "topic": "knot-topology",
+  "mode": "measure-only",
+  "description": "Adversarial: stop-word leak. Queries carry four genuine knot-topology anchors PLUS three low-information filler tags. The four real anchors alone would score 4/8 = 0.5 and fire; the filler inflates the query union to 11, dropping the score to 4/11 ~= 0.36 below the 0.4 threshold. Demonstrates symbol-extraction noise diluting recall.",
+  "anchors": [
+    "trefoil-knot",
+    "knot-group",
+    "bridge-number",
+    "unknotting-number",
+    "crossing-number",
+    "knot-genus",
+    "chirality",
+    "jones-polynomial"
+  ],
+  "columns": [
+    ["trefoil-knot", "knot-group"],
+    ["bridge-number", "unknotting-number"],
+    ["crossing-number", "knot-genus"],
+    ["chirality", "jones-polynomial"],
+    ["general-case", "basic-property"],
+    ["some-aspect", "an-overview"],
+    ["the-relationship", "a-question"]
+  ],
+  "sentence_templates": [
+    "how do {0} and {1} relate to {2} and {3}, considering {4}, {5}, and {6}?",
+    "as {4} with {5}, what links {0}, {1}, {2}, and {3} under {6}?",
+    "regarding {6}: do {0}, {1}, {2}, and {3} share {4} and {5}?"
+  ]
+}

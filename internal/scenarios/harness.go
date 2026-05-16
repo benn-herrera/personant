@@ -76,13 +76,36 @@ type Step struct {
 	//                     step is measured: emits 1/1/1 on agreement.
 	//   - non-nil set   → exact-set expectation. The harness records
 	//                     per-step precision / recall / F1 into the
-	//                     §9.6 metrics blob and calls t.Errorf when
-	//                     the actual set differs (strict semantics —
-	//                     catches both false positives and false
-	//                     negatives, which is the point of the
-	//                     measurement instrument).
+	//                     §9.6 metrics blob. Whether a mismatch fails
+	//                     the test depends on RecallMode.
 	ExpectedRecallMatches []string
+
+	// RecallMode selects how ExpectedRecallMatches is enforced. The
+	// zero value (RecallStrict) fails the test on any deviation;
+	// RecallMeasureOnly records the metrics without failing. Ignored
+	// when ExpectedRecallMatches is nil.
+	RecallMode RecallFidelityMode
 }
+
+// RecallFidelityMode selects how a Step's ExpectedRecallMatches is
+// enforced against the observed spine.match-fire set.
+type RecallFidelityMode int
+
+const (
+	// RecallStrict treats any deviation from ExpectedRecallMatches as
+	// a test failure (t.Errorf), and records precision/recall/F1 into
+	// the clean recall_fidelity_* metric series. For ground-truth
+	// scenarios where a mismatch is a real recall bug.
+	RecallStrict RecallFidelityMode = iota
+
+	// RecallMeasureOnly records precision/recall/F1 into the
+	// recall_fidelity_adversarial_* series and never fails the test.
+	// For C.3 adversarial probes (vocabulary drift, stop-word leak,
+	// false friends) whose underperformance is the measurement, not a
+	// defect — the §9.9 baseline comparison is where regressions in
+	// these numbers surface.
+	RecallMeasureOnly
+)
 
 // Scenario is a named end-to-end flow. Setup runs once before the
 // steps; FinalInvariants run once after the last step. MetricsPath
@@ -328,7 +351,7 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) {
 	if err != nil {
 		t.Fatalf("scenario step %d (%s): matchFireCounts (post): %v", idx+1, label, err)
 	}
-	recordRecallFidelity(t, h, idx, label, step.ExpectedRecallMatches, diffMatchFireSet(preFires, postFires))
+	recordRecallFidelity(t, h, idx, label, step.RecallMode, step.ExpectedRecallMatches, diffMatchFireSet(preFires, postFires))
 
 	// Per-step metrics.
 	h.Metrics.Counter("turns", 1)

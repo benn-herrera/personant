@@ -1628,9 +1628,21 @@ Metrics worth capturing:
     `recall_fidelity_precision`, `recall_fidelity_recall`,
     `recall_fidelity_f1`. Empty-set conventions: (E=∅, A=∅) → 1/1/1;
     (E=∅, A≠∅) → 0/1/0; (E≠∅, A=∅) → 1/0/0.
-  - Assertion: strict-set comparison; on mismatch the harness calls
-    `t.Errorf` with the false-positive and false-negative sets so
-    both precision and recall regressions surface in test logs.
+  - Mode: `Step.RecallMode` selects enforcement.
+    - `RecallStrict` (default) — clean ground truth. Strict-set
+      comparison; on mismatch the harness calls `t.Errorf` with the
+      false-positive and false-negative sets so both precision and
+      recall regressions surface in test logs. Feeds the
+      `recall_fidelity_*` series above.
+    - `RecallMeasureOnly` — adversarial probes (vocabulary drift,
+      stop-word leak, false-friend pairs) whose under- or
+      mis-firing is the measurement, not a defect. Records
+      `recall_fidelity_adversarial_{precision,recall,f1}` histograms
+      and the `recall_fidelity_adversarial_steps` counter; never
+      fails the test. Regressions in these numbers surface through
+      §9.9 baseline comparison, not a red unit test. Kept in a
+      separate series so adversarial scores never dilute the clean
+      aggregate.
 - **Engagement accuracy.** Were tagged-engaged threads the actual
   active threads? (Compared against canonical-by-construction ground
   truth in synthetic scenarios.)

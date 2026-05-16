@@ -1,0 +1,27 @@
+{
+  "name": "macro-economics-falsefriend",
+  "topic": "macro-economics",
+  "mode": "measure-only",
+  "description": "Adversarial: false-friend pair (A side). macro-economics and monetary-policy genuinely share four anchors (money-supply, interest-rate, inflation-rate, exchange-rate). Each column offers one shared anchor and one macro-specific anchor; a query that happens to sample only shared cells is symbolically ambiguous — it clears the Jaccard threshold for BOTH seeded threads, so monetary-policy fires spuriously and precision drops. Ground truth stays macro-economics.",
+  "anchors": [
+    "money-supply",
+    "interest-rate",
+    "inflation-rate",
+    "exchange-rate",
+    "fiscal-policy",
+    "aggregate-demand",
+    "output-gap",
+    "unemployment-rate"
+  ],
+  "columns": [
+    ["money-supply", "fiscal-policy"],
+    ["interest-rate", "aggregate-demand"],
+    ["inflation-rate", "output-gap"],
+    ["exchange-rate", "unemployment-rate"]
+  ],
+  "sentence_templates": [
+    "how does {0} interact with {1} given {2} and {3}?",
+    "what connects {0}, {1}, {2}, and {3} in this economy?",
+    "can {0} be inferred from {1}, {2}, and {3}?"
+  ]
+}

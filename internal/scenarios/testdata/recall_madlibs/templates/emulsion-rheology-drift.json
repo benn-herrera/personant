@@ -1,0 +1,27 @@
+{
+  "name": "emulsion-rheology-drift",
+  "topic": "emulsion-rheology",
+  "mode": "measure-only",
+  "description": "Adversarial: vocabulary drift. Queries about the emulsion-rheology topic phrased entirely in synonyms and paraphrases that do NOT match the thread's canonical anchors. Exercises the §2.7.2 phrase-normalization hard-failure mode — entity normalization yields long-form composite symbols with zero substring overlap despite identical meaning, so Jaccard scores 0.",
+  "anchors": [
+    "shear-thinning",
+    "yield-stress",
+    "droplet-coalescence",
+    "phase-inversion",
+    "emulsion-viscosity",
+    "shear-modulus",
+    "interfacial-tension",
+    "creaming-rate"
+  ],
+  "columns": [
+    ["pseudoplastic-flow", "rate-dependent-thinning"],
+    ["droplet-merging", "drop-fusion"],
+    ["flow-resistance", "apparent-thickness"],
+    ["surface-energy", "boundary-layer-tension"]
+  ],
+  "sentence_templates": [
+    "how does {0} interact with {1} given {2} and {3}?",
+    "what connects {0}, {1}, {2}, and {3} in this material?",
+    "can {0} be inferred from {1}, {2}, and {3}?"
+  ]
+}

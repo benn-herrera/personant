@@ -1,0 +1,27 @@
+{
+  "name": "monetary-policy-falsefriend",
+  "topic": "monetary-policy",
+  "mode": "measure-only",
+  "description": "Adversarial: false-friend pair (B side). The mirror of macro-economics-falsefriend — monetary-policy shares four anchors with macro-economics. A query sampling only shared cells clears the Jaccard threshold for both seeded threads, so macro-economics fires spuriously and precision drops. Ground truth stays monetary-policy.",
+  "anchors": [
+    "money-supply",
+    "interest-rate",
+    "inflation-rate",
+    "exchange-rate",
+    "central-bank",
+    "open-market-operations",
+    "reserve-requirement",
+    "quantitative-easing"
+  ],
+  "columns": [
+    ["money-supply", "central-bank"],
+    ["interest-rate", "open-market-operations"],
+    ["inflation-rate", "reserve-requirement"],
+    ["exchange-rate", "quantitative-easing"]
+  ],
+  "sentence_templates": [
+    "how does {0} interact with {1} given {2} and {3}?",
+    "what connects {0}, {1}, {2}, and {3} for the central bank?",
+    "can {0} be inferred from {1}, {2}, and {3}?"
+  ]
+}

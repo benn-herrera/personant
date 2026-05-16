@@ -44,14 +44,34 @@ DEFAULT_SAMPLES = 10
 PLACEHOLDER_RE = re.compile(r"\{(\d+)\}")
 
 
+VALID_MODES = ("strict", "measure-only")
+
+
 def load_template(path):
-    """Load and validate one template JSON file."""
+    """Load and validate one template JSON file.
+
+    Optional fields:
+      - ``topic``: the ground-truth topic key (defaults to ``name``).
+        Multiple templates may share a topic — a clean template and
+        its adversarial variants — and the harness seeds one thread
+        per distinct topic.
+      - ``mode``: ``strict`` (default) or ``measure-only``. Strict
+        templates must overlap their topic (every cell is an anchor);
+        measure-only templates may carry non-overlapping drift cells.
+    """
     with path.open(encoding="utf-8") as fh:
         tpl = json.load(fh)
 
     for key in ("name", "anchors", "columns", "sentence_templates"):
         if key not in tpl:
             raise ValueError(f"{path.name}: missing required key {key!r}")
+
+    tpl.setdefault("topic", tpl["name"])
+    tpl.setdefault("mode", "strict")
+    if tpl["mode"] not in VALID_MODES:
+        raise ValueError(
+            f"{path.name}: mode {tpl['mode']!r} not in {VALID_MODES}"
+        )
 
     anchors = set(tpl["anchors"])
     if not 4 <= len(tpl["anchors"]) <= 8:
@@ -60,16 +80,19 @@ def load_template(path):
             f"spec §2.2 range of 4-8"
         )
 
-    # Phase C.2 invariant: every cell is an anchor, so a query built
-    # from one cell per column always overlaps the source thread.
-    for col_idx, column in enumerate(tpl["columns"]):
-        for cell in column:
-            if cell not in anchors:
-                raise ValueError(
-                    f"{path.name}: column {col_idx} cell {cell!r} is not in "
-                    f"the anchor set (C.2 templates must overlap; "
-                    f"non-overlapping drift cells belong to C.3)"
-                )
+    # Strict templates overlap by construction: a query built from one
+    # cell per column always intersects the source thread's anchors.
+    # Measure-only (adversarial) templates intentionally drift, so the
+    # check is relaxed for them — the non-overlap IS the measurement.
+    if tpl["mode"] == "strict":
+        for col_idx, column in enumerate(tpl["columns"]):
+            for cell in column:
+                if cell not in anchors:
+                    raise ValueError(
+                        f"{path.name}: column {col_idx} cell {cell!r} is not "
+                        f"in the anchor set; a strict template must overlap "
+                        f"its topic (use mode=measure-only for drift cells)"
+                    )
 
     n_cols = len(tpl["columns"])
     for sent in tpl["sentence_templates"]:
@@ -106,13 +129,33 @@ def render(tpl, sent_idx, cells):
     return PLACEHOLDER_RE.sub(lambda m: "#" + cells[int(m.group(1))], sentence)
 
 
+def collect_topics(templates):
+    """Return the ordered distinct topics across all templates.
+
+    Templates sharing a topic must declare identical anchor sets — the
+    anchors are the lexically-fixed stored substrate of the seeded
+    thread, and a topic seeds exactly one thread.
+    """
+    topics = []
+    seen = {}
+    for tpl in templates:
+        name = tpl["topic"]
+        if name in seen:
+            if seen[name] != tpl["anchors"]:
+                raise ValueError(
+                    f"templates for topic {name!r} declare conflicting "
+                    f"anchor sets"
+                )
+            continue
+        seen[name] = tpl["anchors"]
+        topics.append({"name": name, "anchors": tpl["anchors"]})
+    return topics
+
+
 def build(templates, seed, samples):
     """Build the queries.json document body."""
-    out_templates = []
     out_queries = []
     for tpl in templates:
-        out_templates.append({"name": tpl["name"], "anchors": tpl["anchors"]})
-
         pairs = enumerate_queries(tpl)
         # Per-template seeded RNG: adding a template does not perturb the
         # query stream of templates authored before it.
@@ -125,6 +168,8 @@ def build(templates, seed, samples):
                 {
                     "id": f"{tpl['name']}-{i:02d}",
                     "template": tpl["name"],
+                    "topic": tpl["topic"],
+                    "mode": tpl["mode"],
                     "tags": list(cells),
                     "user_input": render(tpl, sent_idx, cells),
                 }
@@ -135,7 +180,7 @@ def build(templates, seed, samples):
         "not committed (see .gitignore). Regenerate with `make recall-madlibs`.",
         "seed": seed,
         "samples_per_template": samples,
-        "templates": out_templates,
+        "topics": collect_topics(templates),
         "queries": out_queries,
     }
 

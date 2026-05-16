@@ -121,19 +121,34 @@ func recallFidelity(expected, actual []string) (precision, recall, f1 float64) {
 
 // recordRecallFidelity is the §9.6 metrics-blob writer for one step's
 // recall-fidelity observation. When expected is nil the step is
-// unmeasured (counted but no precision/recall/F1 sample); otherwise
-// the actual set is strict-compared and t.Errorf fires on mismatch
-// alongside the metric samples.
+// unmeasured (counted but no precision/recall/F1 sample).
+//
+// For a measured step, mode selects the metric series and the
+// failure policy:
+//
+//   - RecallStrict     → clean recall_fidelity_* series; t.Errorf on
+//                        any mismatch (false positive or negative).
+//   - RecallMeasureOnly → recall_fidelity_adversarial_* series; the
+//                        score is the deliverable, never a failure.
 //
 // Lives next to its helpers so the harness file stays focused on
 // scenario plumbing.
-func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, expected, actual []string) {
+func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode RecallFidelityMode, expected, actual []string) {
 	t.Helper()
 	if expected == nil {
 		h.Metrics.Counter("recall_fidelity_unmeasured_steps", 1)
 		return
 	}
 	precision, recall, f1 := recallFidelity(expected, actual)
+
+	if mode == RecallMeasureOnly {
+		h.Metrics.Counter("recall_fidelity_adversarial_steps", 1)
+		h.Metrics.Record("recall_fidelity_adversarial_precision", precision)
+		h.Metrics.Record("recall_fidelity_adversarial_recall", recall)
+		h.Metrics.Record("recall_fidelity_adversarial_f1", f1)
+		return
+	}
+
 	h.Metrics.Counter("recall_fidelity_measured_steps", 1)
 	h.Metrics.Record("recall_fidelity_precision", precision)
 	h.Metrics.Record("recall_fidelity_recall", recall)
