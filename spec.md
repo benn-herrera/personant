@@ -55,7 +55,9 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
     YYYY-MM-DD.log                  # plain-text, append-only, daily rotation
     archive/
       YYYY-MM.tar.gz                # rotated logs older than 90 days, gzipped
-  providers.toml                    # LLM provider config (canonical; secret-bearing — see §8.2)
+  providers.toml                    # provider pool — connectivity catalog (canonical; see §8.2.1)
+  config.toml                       # configuration choices drawing from the pool (canonical; see §8.2.2)
+  api_keys/                         # secret-bearing — apiKeyFile targets; never read by the agent
   README.md                         # layout documentation for human inspection
   last-active                       # operational; one line: prj_<n> of most-recently-active project (§4.5.7)
   history                           # operational; REPL line-edit history (§4.3.1); newest last; capped
@@ -69,10 +71,10 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
 
 | Type | Examples | Drift policy |
 |---|---|---|
-| Canonical | `spine.jsonl` rows, `threads/*.md`, `directives/*.md`, `projects/prj_<n>/meta.json`, `logs/*.log`, `providers.toml`, `archive/index.jsonl` | Source of truth. Hand-editable. Other files derive from these. |
+| Canonical | `spine.jsonl` rows, `threads/*.md`, `directives/*.md`, `projects/prj_<n>/meta.json`, `logs/*.log`, `providers.toml`, `config.toml`, `archive/index.jsonl` | Source of truth. Hand-editable. Other files derive from these. |
 | Derived | `symbols.jsonl`, `projects/prj_<n>/digest.json` | Regenerable from canonical. `autogit.CheckDerivedFresh` fails any state-changing git op on stale. Never hand-edited. |
 | Operational | `logs/*.log`, `.git/`, `tmp/`, `last-active`, `history` | System-managed; not subject to drift checking. `tmp/`, `last-active`, and `history` are gitignored. |
-| Secret-bearing | `providers.toml` | Contains API keys. Treated specially by the runtime: never included in any LLM-context artifact, log line, ack prompt, or captured output. See §8.2. |
+| Secret-bearing | `api_keys/*` (apiKeyFile targets); `providers.toml` only if it uses `apiKeyUnsafe` | Contains API keys. Treated specially by the runtime: never included in any LLM-context artifact, log line, ack prompt, or captured output. See §8.2.1. |
 
 **Storage commands** (Go binary subcommands; see §4.1):
 - `personant init` — first-run scaffold, idempotent.
@@ -606,10 +608,10 @@ Three layers, run as **parallel signals**, not a strict cost cascade:
 > similarity must therefore be the primary scan; symbolic Jaccard is a
 > parallel high-precision signal, not a gate.
 
-Embedding recall (layer 2) is **opt-in per provider**: enabled when the
-active provider declares an `embeddingModel` (§8.2.1). With no
-embedding model configured, recall runs symbolic-only — graceful
-degradation, never a hard failure. The thread-embedding index is
+Embedding recall (layer 2) is **opt-in**: enabled when `config.toml`
+pins an `[embedding]` provider/model (§8.2.2). With no embedding model
+configured, recall runs symbolic-only — graceful degradation, never a
+hard failure. The thread-embedding index is
 session-scoped and rebuilt at session start; persistence (a derived
 KV store) is a later increment if rebuild cost warrants it.
 
@@ -1401,45 +1403,75 @@ internal-package map there is the authoritative current shape.
 ### 8.1 First-run scaffolding (`personant init`)
 
 Idempotent. Creates the directory layout from §2.1; runs `git init`;
-writes seed `directives/defaults.md`, `README.md`, and an empty
-`providers.toml` with a commented-out example block.
+writes seed `directives/defaults.md`, `README.md`, and template
+`providers.toml` and `config.toml` files, each with a commented-out
+example block.
 
 ### 8.2 Configuration sources and precedence
 
-The runtime reads configuration from three layers, each with distinct purpose and security posture:
+The runtime reads configuration from four sources, each with distinct purpose and security posture:
 
-#### 8.2.1 Provider configuration: `providers.toml`
+#### 8.2.1 Provider pool: `providers.toml`
 
-LLM provider connectivity lives in `$PERSONANT_HOME/providers.toml`. This file is **canonical, hand-editable, and secret-bearing** — it carries API keys.
+LLM provider connectivity lives in `$PERSONANT_HOME/providers.toml`. This file is **the pool of available providers** — a connectivity catalog only. It pins nothing and expresses no preference; the choices that *draw from* the pool live in `config.toml` (§8.2.2).
 
 Format:
 
 ```toml
 [provider-name]
 baseUrl      = "https://api.example.com/v1"
-apiKey       = "sk-..."
+apiKeyFile   = "api_keys/example.key"
 defaultModel = "gpt-5.4-2026-03-05"
 ```
 
-One TOML table per provider. The provider name is the lookup key used by `/model <provider>:<model>` (or `/model <provider>` to use that provider's `defaultModel`) and by the runtime's outbound LLM-client wiring.
+One TOML table per provider. The provider name is the lookup key used by config references and by the runtime's outbound LLM-client wiring. `defaultModel` is the provider's own fallback model, used when no model is named elsewhere.
+
+**API-key forms.** A provider supplies its key one of two ways:
+
+- `apiKeyFile` — **recommended.** A path (relative to the `providers.toml` directory) to a file containing only the key. The key material lives outside `providers.toml`, so the catalog itself carries no secret.
+- `apiKeyUnsafe` — an inline key string. **Discouraged**, named to make the hazard visible: it embeds a secret directly in `providers.toml`.
 
 **Security boundary (load-bearing):**
 
-- `providers.toml` content is **never** included in any LLM context, log line, ack prompt, or captured shell output. The runtime is the only consumer; it resolves a provider name → `baseUrl`/`apiKey`/`defaultModel` at the moment of an outbound API call and that's where the key material lifecycle ends.
-- The file is not git-committed inside `~/.personant/`'s git tree by default — `.gitignore` in the home tree excludes it. (Optional opt-in for users who want their own private repo containing it; out of scope for v0.1.)
+- Because keys are referenced by file rather than embedded, `providers.toml` using `apiKeyFile` throughout is **safely scannable** — agents and tooling may read and edit it. The **secret-bearing artifacts are the `apiKeyFile` targets**, not the catalog.
+- The runtime resolves a provider name → `baseUrl`/key/`defaultModel` at the moment of an outbound API call; the resolved key material is **never** included in any LLM context, log line, ack prompt, or captured shell output.
+- The refuse-vs-redact policy below applies to the key files (and to any `providers.toml` that still uses `apiKeyUnsafe`), not to an `apiKeyFile`-only `providers.toml`.
 
-**Hybrid redaction policy** (refuse vs. redact, by initiator):
+**Hybrid redaction policy** (refuse vs. redact, by initiator) — for the secret-bearing artifacts (`apiKeyFile` targets; `providers.toml` only when it carries `apiKeyUnsafe`):
 
-- **Agent-initiated reads** (`fs.read`, `fs.grep`, `fs.list` listing the file's parent dir) targeting `providers.toml` (after symlink resolution): the runtime **refuses outright** — the tool returns a deny-error to the model with a message like `permission denied: providers.toml is secret-bearing and cannot be read by the agent`. Logged as `permissions.suspicious-access` (the agent should not be reaching for this file under normal operation; reaching for it at all is signal worth surfacing).
-- **User-initiated captures** (`#`-prefixed shell commands per §4.4 whose output contains content from `providers.toml`): the runtime **redacts before reaching context** — captured output is replaced with `[redacted: providers.toml content]`. The user's terminal still sees the unredacted output (the `$`-prefixed equivalent is unaffected; `$` doesn't capture into context); only the path-into-LLM-context is filtered. Logged as `permissions.redaction-fire`.
+- **Agent-initiated reads** (`fs.read`, `fs.grep`, `fs.list` listing the file's parent dir) targeting a key file (after symlink resolution): the runtime **refuses outright** — the tool returns a deny-error to the model like `permission denied: API-key file is secret-bearing and cannot be read by the agent`. Logged as `permissions.suspicious-access`.
+- **User-initiated captures** (`#`-prefixed shell commands per §4.4 whose output contains key material): the runtime **redacts before reaching context** — captured output is replaced with `[redacted: API-key content]`. The user's terminal still sees the unredacted output; only the path-into-LLM-context is filtered. Logged as `permissions.redaction-fire`.
 
-The split reflects intent: an agent reaching for secrets is suspicious and warrants refusal; a user `#`-grepping their own home dir for context inclusion is reasonable but accidental in this case and just gets quietly cleaned up.
+The split reflects intent: an agent reaching for secrets is suspicious and warrants refusal; a user `#`-grepping their own home dir for context inclusion is reasonable but accidental and just gets quietly cleaned up.
 
-#### 8.2.2 Environment variables
+#### 8.2.2 Configuration choices: `config.toml`
+
+`$PERSONANT_HOME/config.toml` holds the choices that draw from the provider pool. It is canonical, hand-editable, and **not secret-bearing** — it names providers and models, never keys.
+
+Format:
+
+```toml
+[chat]
+defaultModel = "provider/model"
+
+[embedding]
+model        = "provider/model"
+vectorLength = 768
+```
+
+- `[chat] defaultModel` — the default chat provider/model.
+- `[embedding] model` — the embedding provider/model. This pin is **mandatory for embedding recall** and must be explicit: the embedding model defines the vector space, and an inferred or drifting model would silently invalidate the existing embedding cache.
+- `[embedding] vectorLength` — optional; for matryoshka-capable embedding models, requests this truncated dimensionality (passed as the `dimensions` parameter on the embeddings call).
+
+Model references are `"provider/model"`, split on the **first** `/` (the model portion may itself contain slashes, e.g. `openrouter/google/gemma-4-31b-it`). The named provider must exist in `providers.toml`.
+
+**Precedence** (chat model resolution): CLI flag > `config.toml` `[chat]` > the resolved provider's own `defaultModel`.
+
+#### 8.2.3 Environment variables
 
 `PERSONANT_HOME` overrides the home directory (resolved in §2.1's `$PERSONANT_HOME`).
 
-#### 8.2.3 Directive precedence
+#### 8.2.4 Directive precedence
 
 Detailed in §2.6. Briefly: `directives/defaults.md` < `directives/user.md` < `directives/prj_<n>/project.md`. The runtime walks the precedence chain at parameter-read time and returns the first match.
 
