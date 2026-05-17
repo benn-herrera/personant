@@ -185,7 +185,12 @@ In progress:
     the high-recall thresholds (~0.21 at cos 0.45). The two are
     complementary: Jaccard = high-precision/low-recall, embeddings =
     high-recall/lower-precision. Validates the §3.4 layered-recall
-    design.
+    design. `TestRecallMadlibs_EmbedRanking` reframes it as ranking:
+    the true topic is the #1 cosine match ~73% of the time, top-3
+    ~92%, MRR ~0.83 — and drift-INVARIANT (M=1 ≈ M=4). The
+    threshold-matrix "precision problem" was the top-10-above-cutoff
+    candidate policy, not a ranking weakness; a top-1/top-3 recall
+    policy on embeddings is strong.
 
 Queued:
 - Phase 4: closure / retirement (curator-drafted summaries; ack flow;

@@ -159,3 +159,88 @@ func TestRecallMadlibs_EmbedCalibration(t *testing.T) {
 	}
 	t.Logf("metrics blob: %s", mPath)
 }
+
+// TestRecallMadlibs_EmbedRanking measures embedding recall as a
+// ranking problem rather than a threshold problem: of the 152 topics,
+// where does the query's true topic rank by cosine? This is the
+// "surface THE thread" question — the threshold-swept matrix above
+// answers "all candidates above a cutoff", which conflates ranking
+// quality with the cosine floor.
+//
+// Per synonym-depth M it reports top-1 accuracy (true topic is the
+// single best match), top-3 accuracy, and mean reciprocal rank.
+// Asserts nothing — measurement only.
+func TestRecallMadlibs_EmbedRanking(t *testing.T) {
+	emb := loadEmbeddings(t)
+
+	type topicVec struct {
+		name string
+		vec  []float64
+	}
+	topics := make([]topicVec, 0, len(emb.Topics))
+	for name, v := range emb.Topics {
+		topics = append(topics, topicVec{name, v})
+	}
+
+	run := metrics.New(map[string]string{
+		"measurement": "recall-fidelity-embedding-ranking",
+		"model":       emb.Model,
+	})
+
+	t.Logf("embedding ranking — true topic's rank among %d by cosine:", len(topics))
+	t.Logf("  M    top-1   top-3    MRR")
+	for _, m := range calibDepths {
+		path := filepath.Join("testdata", "recall_madlibs",
+			fmt.Sprintf("corpus_queries_m%d.json", m))
+		doc := loadMadlibsQueries(t, path)
+
+		var top1, top3, n int
+		var sumRR float64
+		for _, q := range doc.Queries {
+			qv, ok := emb.Queries[embedQueryKey(q.UserInput)]
+			if !ok {
+				t.Errorf("query %s: no embedding (regenerate embeddings.json)", q.ID)
+				continue
+			}
+			trueVec, ok := emb.Topics[q.Topic]
+			if !ok {
+				t.Errorf("query %s: topic %q has no embedding", q.ID, q.Topic)
+				continue
+			}
+			trueCos := cosine(qv, trueVec)
+			// Rank = 1 + (topics scoring strictly higher than the true one).
+			rank := 1
+			for _, tv := range topics {
+				if tv.name == q.Topic {
+					continue
+				}
+				if cosine(qv, tv.vec) > trueCos {
+					rank++
+				}
+			}
+			n++
+			if rank == 1 {
+				top1++
+			}
+			if rank <= 3 {
+				top3++
+			}
+			sumRR += 1.0 / float64(rank)
+		}
+		if n == 0 {
+			t.Fatalf("depth %d: no queries", m)
+		}
+		fn := float64(n)
+		t1, t3, mrr := float64(top1)/fn, float64(top3)/fn, sumRR/fn
+		t.Logf("  %d   %.3f   %.3f   %.3f", m, t1, t3, mrr)
+		run.Set(fmt.Sprintf("embed_rank_m%d_top1", m), t1)
+		run.Set(fmt.Sprintf("embed_rank_m%d_top3", m), t3)
+		run.Set(fmt.Sprintf("embed_rank_m%d_mrr", m), mrr)
+	}
+
+	mPath := filepath.Join(t.TempDir(), "recall-fidelity-embedding-ranking.metrics.json")
+	if err := run.WriteJSON(mPath); err != nil {
+		t.Errorf("metrics write: %v", err)
+	}
+	t.Logf("metrics blob: %s", mPath)
+}
