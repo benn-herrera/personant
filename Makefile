@@ -97,8 +97,12 @@ test: build recall-madlibs
 	go vet ./...
 	go test ./... --count=1
 
-integration-test:
-	@echo Integration Test TBD
+# integration-test runs the live-inference tests (build tag
+# `integration`) — they require the `reaper` provider reachable.
+# Tests skip cleanly when reaper is unreachable; they fail only on a
+# real defect. Override the endpoint with PERSONANT_REAPER_URL.
+integration-test: build
+	go test -tags integration ./... --count=1
 
 serve-local-api:
 	@llama-server --models-dir ~/projects/JIC/models --port 11117 --ctx-size 16384
