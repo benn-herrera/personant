@@ -586,10 +586,32 @@ Three passes per §3.0.2 step 1, ordered cheapest first:
 
 ### 3.4 Recall matching
 
-Layered by cost:
-1. Symbolic Jaccard over the inverse symbol index (cheap pre-filter).
-2. Embedding similarity on the candidates (mid-cost).
-3. Model judgment on the surviving few (expensive last resort).
+Three layers, run as **parallel signals**, not a strict cost cascade:
+
+1. **Symbolic Jaccard** over the symbol index — high precision, low
+   recall. Cheap.
+2. **Embedding cosine** over an in-memory thread-embedding index — the
+   primary recall scan. Drift-robust. Cheap to match (cosine over a
+   few hundred in-memory vectors); the cost is one embedding call per
+   turn to vectorize the query.
+3. **Model judgment** on surfaced candidates — expensive confirmation,
+   used to cut false positives before a recall is offered to the user.
+
+> **Why parallel, not a cascade.** An earlier draft of this spec ran
+> Jaccard as a *pre-filter* and embedding only on its candidates. The
+> Phase C.6 calibration disproved the assumption that made that
+> ordering safe: symbolic Jaccard recall collapses to ~10% under
+> realistic vocabulary drift. A Jaccard pre-filter would discard ~90%
+> of genuine matches before embedding ever saw them. Embedding
+> similarity must therefore be the primary scan; symbolic Jaccard is a
+> parallel high-precision signal, not a gate.
+
+Embedding recall (layer 2) is **opt-in per provider**: enabled when the
+active provider declares an `embeddingModel` (§8.2.1). With no
+embedding model configured, recall runs symbolic-only — graceful
+degradation, never a hard failure. The thread-embedding index is
+session-scoped and rebuilt at session start; persistence (a derived
+KV store) is a later increment if rebuild cost warrants it.
 
 ### 3.5 Closure flow
 

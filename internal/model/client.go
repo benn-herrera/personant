@@ -31,6 +31,19 @@ type Client interface {
 	ListModels(ctx context.Context) ([]ModelInfo, error)
 }
 
+// Embedder produces embedding vectors for text, against an
+// OpenAI-compatible /embeddings endpoint. It is separate from Client
+// because embedding is a distinct capability — a provider may serve
+// chat, embeddings, or both — and because the runtime uses it for an
+// autonomic role (§3.4 layer-2 recall index), never as an
+// LLM-callable tool.
+//
+// Embed returns one vector per input text, in input order. Implementations
+// may batch internally; callers pass the full slice.
+type Embedder interface {
+	Embed(ctx context.Context, texts []string) ([][]float64, error)
+}
+
 // ModelInfo describes a single model exposed by a provider, mirroring the
 // shape OpenAI-compatible /models endpoints return.
 type ModelInfo struct {

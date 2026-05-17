@@ -117,6 +117,15 @@ Complete:
   on every delta; task-class symbols stage cross-turn instead of
   polluting coalesce; decision-class citation promotes; window-close
   GC evicts uncited entries at turn K+1.
+- §3.4 layer-2 embedding recall (runtime). `model.Embedder` +
+  provider `embeddingModel`; `recall.ProposeEmbedding` cosine
+  matcher; a session-scoped in-memory thread-embedding index
+  (`State.BuildEmbeddingIndex`); turn close logs
+  `spine.embed-match-fire` alongside symbolic `spine.match-fire`.
+  Opt-in per provider, graceful symbolic-only fallback. Motivated
+  by the C.6 finding that symbolic Jaccard recall collapses under
+  vocabulary drift — spec §3.4 was rewritten from a Jaccard-pre-filter
+  cascade to embedding-primary parallel signals.
 
 In progress:
 - Phase C: recall-fidelity test infrastructure. Six-step plan in the

@@ -16,10 +16,16 @@ import (
 // internal/model use the literal string "<redacted>" when an error message
 // might otherwise reveal it.
 type Provider struct {
-	Name         string `toml:"-"`            // table header from TOML; populated post-decode
+	Name         string `toml:"-"` // table header from TOML; populated post-decode
 	BaseURL      string `toml:"baseUrl"`
 	APIKey       string `toml:"apiKey"`
 	DefaultModel string `toml:"defaultModel"`
+
+	// EmbeddingModel is the model id used for §3.4 layer-2 embedding
+	// recall, queried against the provider's OpenAI-compatible
+	// /embeddings endpoint. Optional: when empty, the runtime runs
+	// symbolic recall only — embedding recall is opt-in per provider.
+	EmbeddingModel string `toml:"embeddingModel"`
 }
 
 // Providers is a name-keyed set of providers loaded from providers.toml.

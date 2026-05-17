@@ -16,6 +16,7 @@ import (
 	"personant/internal/memops"
 	"personant/internal/model"
 	"personant/internal/prompt"
+	"personant/internal/recall"
 	"personant/internal/store"
 	"personant/internal/workset"
 )
@@ -28,6 +29,13 @@ type State struct {
 	ActiveProject store.ProjectMeta
 	Provider      store.Provider
 	Client        model.Client
+
+	// Embedder, when non-nil, enables §3.4 layer-2 embedding recall.
+	// Callers set it post-construction (like Client) when the active
+	// provider declares an embeddingModel, then call
+	// BuildEmbeddingIndex. nil → symbolic recall only (graceful
+	// absence — embedding recall is opt-in per provider).
+	Embedder model.Embedder
 
 	// Model overrides the provider's DefaultModel when non-empty.
 	Model string
@@ -77,6 +85,11 @@ type State struct {
 	// instead of coalesce; B.3 cross-references and promotes; B.4 GC's
 	// at window close.
 	staging *stagingBuffer
+
+	// embedIndex is the in-memory §3.4 layer-2 thread-embedding index,
+	// populated by BuildEmbeddingIndex. Session-scoped — rebuilt per
+	// session; nil when no Embedder is configured.
+	embedIndex []recall.ThreadVector
 
 	// nowFn is a clock source used for last_engaged / created timestamps.
 	// Tests inject a deterministic clock; production callers leave it nil
@@ -609,7 +622,7 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 	for _, id := range engaged {
 		engagedSet[id] = struct{}{}
 	}
-	if err := surfaceRecallCandidates(ctx, state, engagedSet); err != nil {
+	if err := surfaceRecallCandidates(ctx, state, userInput, engagedSet); err != nil {
 		_ = state.Ops.Log(ctx, "recall", "error", sanitizeDetail(err.Error()))
 		// Non-fatal: opportunistic recall failure does not abort the turn.
 	}

@@ -148,6 +148,18 @@ func Run(opts Options) error {
 		state.Model = opts.Model
 	}
 
+	// §3.4 layer-2 embedding recall is opt-in per provider: enabled
+	// only when the active provider declares an embeddingModel. Index
+	// build failure (e.g. embedding endpoint unreachable) degrades
+	// gracefully to symbolic-only recall — it never blocks the session.
+	if provider.EmbeddingModel != "" {
+		state.Embedder = model.NewHTTPEmbedder(provider)
+		if err := state.BuildEmbeddingIndex(ctx); err != nil {
+			fmt.Fprintf(opts.Stderr, "warn: embedding recall unavailable: %v\n", err)
+			state.Embedder = nil
+		}
+	}
+
 	banner := opts.Banner
 	if banner == "" {
 		banner = Banner
