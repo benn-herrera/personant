@@ -30,12 +30,13 @@ type State struct {
 	Provider      store.Provider
 	Client        model.Client
 
-	// Embedder, when non-nil, enables §3.4 layer-2 embedding recall.
-	// Callers set it post-construction (like Client) when the active
-	// provider declares an embeddingModel, then call
-	// BuildEmbeddingIndex. nil → symbolic recall only (graceful
-	// absence — embedding recall is opt-in per provider).
-	Embedder model.Embedder
+	// Recaller is the §3.4 recall stack (recall.Recaller). NewState
+	// installs a default symbolic-only Service; callers that have an
+	// embedding provider replace it with an embedding-enabled Service
+	// post-construction, then call Recaller.Prepare. The turn loop and
+	// the recall UI surface depend only on the interface — recall
+	// internals are insulated behind it.
+	Recaller recall.Recaller
 
 	// Model overrides the provider's DefaultModel when non-empty.
 	Model string
@@ -86,11 +87,6 @@ type State struct {
 	// at window close.
 	staging *stagingBuffer
 
-	// embedIndex is the in-memory §3.4 layer-2 thread-embedding index,
-	// populated by BuildEmbeddingIndex. Session-scoped — rebuilt per
-	// session; nil when no Embedder is configured.
-	embedIndex []recall.ThreadVector
-
 	// nowFn is a clock source used for last_engaged / created timestamps.
 	// Tests inject a deterministic clock; production callers leave it nil
 	// and Run substitutes time.Now.
@@ -117,6 +113,9 @@ func NewState(ops memops.MemoryOps, project store.ProjectMeta, provider store.Pr
 		Budget:        workset.DefaultBudget(),
 		coalesce:      newCoalesceBuffer(),
 		staging:       newStagingBuffer(),
+		// Default to symbolic-only recall; callers with an embedding
+		// provider replace this with an embedding-enabled Service.
+		Recaller: recall.NewService(ops, nil),
 	}
 }
 

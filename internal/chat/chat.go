@@ -21,6 +21,7 @@ import (
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
+	"personant/internal/recall"
 	"personant/internal/store"
 	"personant/internal/turn"
 	"personant/internal/workset"
@@ -148,16 +149,19 @@ func Run(opts Options) error {
 		state.Model = opts.Model
 	}
 
-	// §3.4 layer-2 embedding recall is opt-in per provider: enabled
-	// only when the active provider declares an embeddingModel. Index
-	// build failure (e.g. embedding endpoint unreachable) degrades
-	// gracefully to symbolic-only recall — it never blocks the session.
-	if provider.EmbeddingModel != "" {
-		state.Embedder = model.NewHTTPEmbedder(provider)
-		if err := state.BuildEmbeddingIndex(ctx); err != nil {
-			fmt.Fprintf(opts.Stderr, "warn: embedding recall unavailable: %v\n", err)
-			state.Embedder = nil
-		}
+	// §3.4 layer-2 embedding recall. The embedding provider is resolved
+	// independently of the chat provider: embeddings run on whichever
+	// provider declares an embeddingModel — typically a local, unmetered
+	// one — so chat may run on a metered external provider while
+	// embeddings stay local. Index-build failure (e.g. the embedding
+	// endpoint unreachable) degrades gracefully to symbolic-only recall;
+	// it never blocks the session.
+	if embProvider, ok := resolveEmbeddingProvider(providers, provider); ok {
+		state.Recaller = recall.NewService(ops, model.NewHTTPEmbedder(embProvider))
+	}
+	if err := state.Recaller.Prepare(ctx); err != nil {
+		fmt.Fprintf(opts.Stderr, "warn: embedding recall unavailable: %v\n", err)
+		state.Recaller = recall.NewService(ops, nil)
 	}
 
 	banner := opts.Banner
@@ -182,6 +186,29 @@ func resolvePaths(homeOverride string) (store.PersonantPaths, error) {
 		return store.PathsForHome(homeOverride), nil
 	}
 	return store.ResolvePaths()
+}
+
+// resolveEmbeddingProvider picks the provider for §3.4 layer-2
+// embedding recall, independently of the chat provider: the chat
+// provider when it declares an embeddingModel, otherwise the first
+// (name-sorted) provider that does. The second return is false when no
+// provider declares one — embedding recall stays disabled, symbolic
+// recall still runs.
+func resolveEmbeddingProvider(providers map[string]memops.Provider, chat memops.Provider) (memops.Provider, bool) {
+	if chat.EmbeddingModel != "" {
+		return chat, true
+	}
+	names := make([]string, 0, len(providers))
+	for name := range providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if providers[name].EmbeddingModel != "" {
+			return providers[name], true
+		}
+	}
+	return memops.Provider{}, false
 }
 
 func firstProvider(providers map[string]memops.Provider) (memops.Provider, string) {

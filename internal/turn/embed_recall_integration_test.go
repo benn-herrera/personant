@@ -1,11 +1,11 @@
 //go:build integration
 
-// Live integration test for embedding recall through the runtime path.
+// Live integration test for embedding recall through the Recaller.
 // Build-tag isolated (`integration`), run via `make integration-test`;
 // needs the `reaper` provider reachable. It exercises the real
-// HTTPEmbedder end to end — BuildEmbeddingIndex over seeded threads,
-// then a cosine match — confirming the runtime wiring works against an
-// actual embedding model, not just the mock.
+// HTTPEmbedder end to end — recall.Service.Prepare builds the index
+// over seeded threads, then Recall cosine-matches — confirming the
+// runtime path works against an actual embedding model, not the mock.
 
 package turn
 
@@ -46,13 +46,9 @@ func skipIfUnreachable(t *testing.T, err error) {
 	t.Fatalf("embedding recall: %v", err)
 }
 
-// TestEmbeddingRecall_Live builds the embedding index over two
-// disjoint-topic threads with the real embedder, then checks that a
-// knot-theory query ranks the knot thread above the neutrino thread.
-//
-// The assertion is on ranking, not on clearing the cosine threshold —
-// ranking is robust to the absolute-similarity calibration, which the
-// C.6 sweep already covers.
+// TestEmbeddingRecall_Live builds the Recaller's embedding index over
+// two disjoint-topic threads with the real embedder, then checks that
+// a knot-theory query recalls the knot thread as the top candidate.
 func TestEmbeddingRecall_Live(t *testing.T) {
 	provider := reaperProvider()
 	paths, meta := newTestHome(t)
@@ -64,30 +60,25 @@ func TestEmbeddingRecall_Live(t *testing.T) {
 			"changes lepton flavor as it propagates, implying nonzero neutrino mass.")
 	ops := fileadapter.NewFileAdapter(paths)
 
-	state := NewState(ops, meta, provider, model.NewScriptedMock(nil, nil))
-	state.Embedder = model.NewHTTPEmbedder(provider)
-	if err := state.BuildEmbeddingIndex(context.Background()); err != nil {
+	svc := recall.NewService(ops, model.NewHTTPEmbedder(provider))
+	if err := svc.Prepare(context.Background()); err != nil {
 		skipIfUnreachable(t, err)
 		return
 	}
-	if len(state.embedIndex) != 2 {
-		t.Fatalf("embedIndex len %d, want 2", len(state.embedIndex))
-	}
 
-	qvecs, err := state.Embedder.Embed(context.Background(),
-		[]string{"tell me about knots and their crossing number"})
+	results, err := svc.Recall(context.Background(), recall.Request{
+		QueryText: "tell me about knots and their crossing number",
+	})
 	if err != nil {
 		skipIfUnreachable(t, err)
 		return
 	}
-	// Tiny non-zero threshold → rank everything (0 would mean "default").
-	cands := recall.ProposeEmbedding(qvecs[0], state.embedIndex,
-		recall.EmbeddingOptions{Threshold: 1e-6})
-	if len(cands) == 0 {
-		t.Fatal("no candidates ranked")
+	t.Logf("recall results: %+v", results)
+	if len(results) == 0 {
+		t.Fatal("no recall results — knot query matched nothing")
 	}
-	t.Logf("ranked candidates: %+v", cands)
-	if cands[0].ThreadID != "thr_1" {
-		t.Errorf("knot query ranked %s first, want thr_1 (the knot thread)", cands[0].ThreadID)
+	if results[0].ThreadID != "thr_1" || results[0].Embedding == nil {
+		t.Errorf("knot query: top result %s (embedding=%v), want thr_1 with an embedding hit",
+			results[0].ThreadID, results[0].Embedding)
 	}
 }
