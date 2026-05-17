@@ -311,4 +311,9 @@ type MemoryOps interface {
 	// template-only file and a fresh home may not have written one
 	// yet at all.
 	LoadProviders(ctx context.Context) (map[string]Provider, error)
+
+	// LoadConfig reads config.toml — the chat/embedding choices that
+	// draw from the providers.toml pool. Folds in store.LoadConfig. A
+	// nonexistent file yields a zero Config and no error.
+	LoadConfig(ctx context.Context) (Config, error)
 }

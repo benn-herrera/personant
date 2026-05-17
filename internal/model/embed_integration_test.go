@@ -26,12 +26,14 @@ func reaperProvider() store.Provider {
 		url = "http://reaper.local:4000/v1"
 	}
 	return store.Provider{
-		Name:           "reaper",
-		BaseURL:        url,
-		APIKey:         "dummy",
-		EmbeddingModel: "nomicai-embed",
+		Name:    "reaper",
+		BaseURL: url,
+		APIKey:  "dummy",
 	}
 }
+
+// reaperEmbeddingModel is the embedding model id served by reaper.
+const reaperEmbeddingModel = "nomicai-embed"
 
 // skipIfUnreachable skips the test on a network-level failure (reaper
 // not running) and fails on anything else.
@@ -48,7 +50,7 @@ func skipIfUnreachable(t *testing.T, err error) {
 }
 
 func TestHTTPEmbedder_Live(t *testing.T) {
-	emb := NewHTTPEmbedder(reaperProvider())
+	emb := NewHTTPEmbedder(reaperProvider(), reaperEmbeddingModel, 0)
 	vecs, err := emb.Embed(context.Background(), []string{
 		"how does shear thinning affect emulsion viscosity",
 		"rheology of emulsions, pseudoplastic flow and droplet coalescence",

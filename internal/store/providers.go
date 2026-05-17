@@ -4,28 +4,41 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
 
 // Provider describes one LLM provider's connectivity (spec §8.2.1).
+// providers.toml is the provider *pool* — connectivity only; it does
+// not pin or prefer anything. The chat/embedding choices that draw
+// from this pool live in config.toml (see Config).
 //
-// APIKey is secret-bearing. The runtime is the only consumer; per the spec's
-// security boundary, the field must not appear in any log line, error
-// message, or LLM-bound context. Helpers in this package and in
-// internal/model use the literal string "<redacted>" when an error message
-// might otherwise reveal it.
+// The API key is secret-bearing. The recommended form is APIKeyFile (a
+// path to a key file kept out of the scannable config); APIKeyUnsafe
+// is the legacy inline form. Either way the resolved key lands in
+// APIKey, which the runtime is the sole consumer of — it must never
+// appear in a log line, error message, or LLM-bound context.
 type Provider struct {
 	Name         string `toml:"-"` // table header from TOML; populated post-decode
 	BaseURL      string `toml:"baseUrl"`
-	APIKey       string `toml:"apiKey"`
 	DefaultModel string `toml:"defaultModel"`
 
-	// EmbeddingModel is the model id used for §3.4 layer-2 embedding
-	// recall, queried against the provider's OpenAI-compatible
-	// /embeddings endpoint. Optional: when empty, the runtime runs
-	// symbolic recall only — embedding recall is opt-in per provider.
-	EmbeddingModel string `toml:"embeddingModel"`
+	// APIKeyUnsafe is an inline API key. Discouraged — it places a
+	// secret directly in providers.toml, making the file unsafe to
+	// scan. Prefer APIKeyFile.
+	APIKeyUnsafe string `toml:"apiKeyUnsafe"`
+
+	// APIKeyFile is a path to a file holding the API key. Relative
+	// paths resolve against the providers.toml directory. This is the
+	// recommended form: the secret stays out of providers.toml, so the
+	// config file itself is safe to scan and edit.
+	APIKeyFile string `toml:"apiKeyFile"`
+
+	// APIKey is the resolved key — populated by LoadProviders from
+	// APIKeyFile (preferred) or APIKeyUnsafe. Not a TOML field.
+	APIKey string `toml:"-"`
 }
 
 // Providers is a name-keyed set of providers loaded from providers.toml.
@@ -38,18 +51,17 @@ func (p Providers) Get(name string) (Provider, bool) {
 	return v, ok
 }
 
-// LoadProviders reads providers.toml at path and returns a name-keyed map.
+// LoadProviders reads providers.toml at path and returns a name-keyed
+// map. Each provider's API key is resolved: from APIKeyFile when set
+// (read relative to the providers.toml directory), otherwise from
+// APIKeyUnsafe.
 //
-// A nonexistent file or an empty file yields an empty Providers and a nil
-// error — `personant init` writes a template-only providers.toml with all
-// example tables commented out, and a fresh home may not have written one
-// yet at all. Callers that need a specific provider should use Get and
-// surface a useful error themselves.
+// A nonexistent or empty file yields an empty Providers and a nil
+// error — a fresh home may not have a populated providers.toml yet.
 //
-// Malformed TOML or any I/O error other than "not exist" is returned
-// wrapped. The wrapped error never carries TOML content from a successfully
-// parsed table, so an APIKey from one table cannot leak through a parse
-// error in a different table.
+// Errors are wrapped without TOML value content or key material — a
+// parse error references line/column, and a key-file read error
+// references the path, so no secret leaks through an error string.
 func LoadProviders(path string) (Providers, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -59,18 +71,40 @@ func LoadProviders(path string) (Providers, error) {
 		return nil, fmt.Errorf("providers: read %s: %w", path, err)
 	}
 
-	// Decode into a map keyed by table header. BurntSushi/toml errors
-	// reference line/column, not value content, so a parse error in one
-	// table cannot leak an APIKey from a sibling table that parsed cleanly.
 	raw := map[string]Provider{}
 	if _, err := toml.Decode(string(data), &raw); err != nil {
 		return nil, fmt.Errorf("providers: parse %s: %w", path, err)
 	}
 
+	dir := filepath.Dir(path)
 	out := make(Providers, len(raw))
 	for name, p := range raw {
 		p.Name = name
+		key, err := resolveAPIKey(p, dir)
+		if err != nil {
+			return nil, fmt.Errorf("providers: %s: %w", name, err)
+		}
+		p.APIKey = key
 		out[name] = p
 	}
 	return out, nil
+}
+
+// resolveAPIKey returns the provider's API key from APIKeyFile
+// (preferred) or APIKeyUnsafe. The key file's content is trimmed of
+// surrounding whitespace. The returned error never carries key
+// content — only the file path, on an I/O failure.
+func resolveAPIKey(p Provider, dir string) (string, error) {
+	if p.APIKeyFile != "" {
+		keyPath := p.APIKeyFile
+		if !filepath.IsAbs(keyPath) {
+			keyPath = filepath.Join(dir, keyPath)
+		}
+		b, err := os.ReadFile(keyPath)
+		if err != nil {
+			return "", fmt.Errorf("read apiKeyFile: %w", err)
+		}
+		return strings.TrimSpace(string(b)), nil
+	}
+	return p.APIKeyUnsafe, nil
 }

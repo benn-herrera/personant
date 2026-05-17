@@ -1,0 +1,5 @@
+[embedding]
+model = "dummy-emb-provider/dummy-emb-model"
+
+[chat]
+defaultModel = "reaper/gemma-main"

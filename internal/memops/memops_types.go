@@ -38,6 +38,9 @@ type (
 	// Provider is one LLM provider's connectivity record from
 	// providers.toml (spec §8.2.1).
 	Provider = store.Provider
+	// Config is the personant settings file (config.toml) — the
+	// chat/embedding choices drawn from the providers.toml pool.
+	Config = store.Config
 	// ThreadState is the lifecycle state of a thread (spec §2.2.1).
 	ThreadState = store.ThreadState
 	// SymbolSource is the provenance of a symbol emission

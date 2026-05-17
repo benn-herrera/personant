@@ -27,12 +27,14 @@ func reaperProvider() store.Provider {
 		url = "http://reaper.local:4000/v1"
 	}
 	return store.Provider{
-		Name:           "reaper",
-		BaseURL:        url,
-		APIKey:         "dummy",
-		EmbeddingModel: "nomicai-embed",
+		Name:    "reaper",
+		BaseURL: url,
+		APIKey:  "dummy",
 	}
 }
+
+// reaperEmbeddingModel is the embedding model id served by reaper.
+const reaperEmbeddingModel = "nomicai-embed"
 
 func skipIfUnreachable(t *testing.T, err error) {
 	t.Helper()
@@ -60,7 +62,7 @@ func TestEmbeddingRecall_Live(t *testing.T) {
 			"changes lepton flavor as it propagates, implying nonzero neutrino mass.")
 	ops := fileadapter.NewFileAdapter(paths)
 
-	svc := recall.NewService(ops, model.NewHTTPEmbedder(provider))
+	svc := recall.NewService(ops, model.NewHTTPEmbedder(provider, reaperEmbeddingModel, 0))
 	if err := svc.Prepare(context.Background()); err != nil {
 		skipIfUnreachable(t, err)
 		return

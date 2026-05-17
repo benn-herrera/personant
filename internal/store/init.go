@@ -106,15 +106,17 @@ func Init(paths PersonantPaths, opts InitOptions) error {
 		logf("init: wrote %s", s.path)
 	}
 
-	// Accrual files: preserve if present. user.md accumulates ack-prompt
-	// scope grants and decline categorizations; providers.toml holds
-	// hand-entered API keys. Re-init cannot reconstruct either.
+	// Accrual / hand-edited files: preserve if present. user.md
+	// accumulates ack-prompt scope grants and decline categorizations;
+	// providers.toml and config.toml are hand-edited. Re-init cannot
+	// reconstruct any of them.
 	preserveFiles := []struct {
 		path    string
 		content string
 	}{
 		{filepath.Join(paths.DirectivesDir, "user.md"), seedUserMD},
 		{paths.Providers, seedProvidersTOML},
+		{paths.Config, seedConfigTOML},
 	}
 	for _, s := range preserveFiles {
 		created, err := writeIfMissing(s.path, []byte(s.content))
@@ -333,26 +335,45 @@ ones accrued automatically from ack-prompt scope grants and decline
 categorizations. See spec §2.6 for precedence rules.
 `
 
-const seedProvidersTOML = `# personant LLM provider configuration
+const seedProvidersTOML = `# personant LLM provider configuration — the provider POOL.
 #
-# One TOML table per provider. The provider name (header in brackets) is
-# the lookup key used by the runtime and ` + "`/model <provider>:<model>`" + `.
+# One TOML table per provider; the bracket header is the lookup key.
+# This file lists what is AVAILABLE. The chat/embedding CHOICES that
+# draw from this pool live in config.toml. See spec §8.2.1.
 #
-# This file is canonical and secret-bearing. The runtime never includes
-# its content in any LLM context, log line, ack prompt, or captured
-# shell output. See spec §8.2.1.
+# API keys: prefer apiKeyFile — a path to a file holding the key, kept
+# out of this file so providers.toml stays safe to scan and git-track.
+# apiKeyFile paths resolve relative to this file's directory. Keep the
+# key files themselves out of the personant home (or git-ignore them).
+# apiKeyUnsafe is the inline form — discouraged; it places a secret
+# directly in this file.
 #
 # Example:
 #
 # [openai]
 # baseUrl      = "https://api.openai.com/v1"
-# apiKey       = "sk-..."
+# apiKeyFile   = "../.api_keys/openai.txt"
 # defaultModel = "gpt-5.4-2026-03-05"
 #
-# [local]
-# baseUrl      = "http://localhost:11117"
-# apiKey       = "dummy"
-# defaultModel = "gemma-4-26B-A4B-it-MXFP4_MOE"
+# [reaper]
+# baseUrl      = "http://reaper.local:4000/v1"
+# apiKeyFile   = "../.api_keys/reaper.txt"
+# defaultModel = "gemma-4-main"
+`
+
+const seedConfigTOML = `# personant configuration — the chat/embedding CHOICES.
+#
+# These select from the provider POOL in providers.toml, referenced as
+# "<provider>/<model>". See spec §8.2.
+#
+# Example:
+#
+# [chat]
+# defaultModel = "reaper/gemma-4-main"
+#
+# [embedding]
+# model = "reaper/nomicai-embed"
+# # vectorLength = 768   # optional: Matryoshka-truncated dimension
 `
 
 const seedReadmeMD = "# personant home\n" +
@@ -366,7 +387,8 @@ const seedReadmeMD = "# personant home\n" +
 	"- `projects/prj_<n>/` — per-project metadata and digests, keyed by stable handle.\n" +
 	"- `directives/` — tunable behavior (defaults, user-wide, per-project).\n" +
 	"- `logs/` — daily plain-text event logs.\n" +
-	"- `providers.toml` — LLM provider config (secret-bearing; not git-committed).\n" +
+	"- `providers.toml` — LLM provider pool (safe to scan when apiKeyFile is used).\n" +
+	"- `config.toml` — chat/embedding choices drawn from the provider pool.\n" +
 	"- `tmp/` — agent drafting scratch (not git-committed).\n" +
 	"\n" +
 	"Layout details and schemas are in the project's `spec.md` and `outline.md`.\n" +
@@ -375,6 +397,8 @@ const seedReadmeMD = "# personant home\n" +
 
 const seedGitignore = `# personant home gitignore
 tmp/
-providers.toml
 last-active
+# providers.toml and config.toml are safe to git-track when apiKeyFile
+# is used (no inline secrets). Keep the API-key files themselves out of
+# this directory; if you place any here, git-ignore them explicitly.
 `

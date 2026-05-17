@@ -564,3 +564,16 @@ func (a *FileAdapter) LoadProviders(ctx context.Context) (map[string]memops.Prov
 	}
 	return out, nil
 }
+
+// LoadConfig reads config.toml — the chat/embedding choices. A
+// nonexistent file yields a zero Config and no error.
+func (a *FileAdapter) LoadConfig(ctx context.Context) (memops.Config, error) {
+	if err := ctx.Err(); err != nil {
+		return memops.Config{}, err
+	}
+	cfg, err := store.LoadConfig(a.paths.Config)
+	if err != nil {
+		return memops.Config{}, fmt.Errorf("fileadapter: load config: %w", err)
+	}
+	return cfg, nil
+}

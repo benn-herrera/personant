@@ -28,6 +28,11 @@ func projectRoot(t *testing.T) string {
 	}
 }
 
+// TestLoadProvidersFixture loads test/providers.toml and verifies both
+// API-key forms resolve. It deliberately never prints a resolved
+// APIKey — the fixture's apiKeyFile targets hold KEY_SECURITY_TEST_FAIL
+// sentinels, so an assertion message echoing one would itself be the
+// leak the sentinel is there to catch.
 func TestLoadProvidersFixture(t *testing.T) {
 	path := filepath.Join(projectRoot(t), "test", "providers.toml")
 	got, err := LoadProviders(path)
@@ -35,38 +40,34 @@ func TestLoadProvidersFixture(t *testing.T) {
 		t.Fatalf("LoadProviders: %v", err)
 	}
 
-	want := map[string]Provider{
-		"local": {
-			Name:         "local",
-			BaseURL:      "http://localhost:11117",
-			APIKey:       "dummy",
-			DefaultModel: "gemma-4-26B-A4B-it-MXFP4_MOE",
-		},
-		"dummyrouter": {
-			Name:         "dummyrouter",
-			BaseURL:      "https://dummyrouter.ai/api/v1",
-			APIKey:       "sk-or-v1-0123456789abcdefghijklmnopqrstuvwxyz0123457890abcdefghijklmnopqr",
-			DefaultModel: "google/gemma-4-31b-it",
-		},
-		"superinf": {
-			Name:         "superinf",
-			BaseURL:      "https://api.superinf.ai/v1",
-			APIKey:       "supe_01234_56789abcdefghijklmnopqrstuvwxyzABCDEF",
-			DefaultModel: "gpt-5.4-2026-03-05",
-		},
+	for _, name := range []string{"local", "dummyrouter", "superinf", "dummy-emb-provider"} {
+		if _, ok := got.Get(name); !ok {
+			t.Errorf("missing provider %q (got %v)", name, keysOf(got))
+		}
 	}
 
-	if len(got) != len(want) {
-		t.Fatalf("provider count: got %d, want %d (got keys: %v)", len(got), len(want), keysOf(got))
+	// local uses apiKeyUnsafe — the inline form. "somekey" is the
+	// fixture's placeholder, not a secret.
+	if local, ok := got.Get("local"); ok && local.APIKey != "somekey" {
+		t.Errorf("local apiKeyUnsafe: APIKey not resolved to the inline value (len %d)", len(local.APIKey))
 	}
-	for name, w := range want {
-		g, ok := got.Get(name)
+
+	// The remaining providers use apiKeyFile — the loader must resolve
+	// the key from the referenced file (path relative to the
+	// providers.toml directory).
+	for _, name := range []string{"dummyrouter", "superinf", "dummy-emb-provider"} {
+		p, ok := got.Get(name)
 		if !ok {
-			t.Errorf("missing provider %q", name)
 			continue
 		}
-		if g != w {
-			t.Errorf("provider %q mismatch:\n got: %+v\nwant: %+v", name, g, w)
+		if p.APIKey == "" {
+			t.Errorf("%s: apiKeyFile did not resolve to a key", name)
+		}
+		if p.BaseURL == "" {
+			t.Errorf("%s: BaseURL empty", name)
+		}
+		if p.DefaultModel == "" {
+			t.Errorf("%s: DefaultModel empty", name)
 		}
 	}
 }
@@ -152,7 +153,7 @@ func TestLoadProvidersAPIKeyAbsentFromParseError(t *testing.T) {
 	const sentinel = "sk-SECRET-MUST-NOT-LEAK-9f3a0b"
 	body := `[clean]
 baseUrl = "https://api.example.com/v1"
-apiKey = "` + sentinel + `"
+apiKeyUnsafe = "` + sentinel + `"
 defaultModel = "m1"
 
 [broken

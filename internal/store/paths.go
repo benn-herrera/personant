@@ -23,8 +23,9 @@ type PersonantPaths struct {
 	LogsArchive   string // Home/logs/archive/                (rotated tar.gz)
 	TmpDir        string // Home/tmp/                         (agent drafting scratch; not git-committed)
 	Readme        string // Home/README.md                    (layout doc for human inspection)
-	Providers     string // Home/providers.toml               (canonical, secret-bearing)
-	Gitignore     string // Home/.gitignore                   (excludes tmp/, providers.toml)
+	Providers     string // Home/providers.toml               (provider pool; apiKeyFile keeps it scannable)
+	Config        string // Home/config.toml                  (chat/embedding choices drawn from the pool)
+	Gitignore     string // Home/.gitignore                   (excludes tmp/, key files)
 	LastActive    string // Home/last-active                  (operational; one line: prj_<n>; gitignored)
 }
 
@@ -54,6 +55,7 @@ func makePaths(home string) PersonantPaths {
 		TmpDir:        filepath.Join(home, "tmp"),
 		Readme:        filepath.Join(home, "README.md"),
 		Providers:     filepath.Join(home, "providers.toml"),
+		Config:        filepath.Join(home, "config.toml"),
 		Gitignore:     filepath.Join(home, ".gitignore"),
 		LastActive:    filepath.Join(home, "last-active"),
 	}

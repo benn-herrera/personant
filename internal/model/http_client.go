@@ -25,6 +25,13 @@ const userAgent = "personant/0.1"
 type HTTPClient struct {
 	provider store.Provider
 	http     *http.Client
+
+	// embeddingModel / embeddingDimensions are set by NewHTTPEmbedder
+	// and used by Embed. They are not part of the provider config —
+	// the embedding model is a config.toml choice, not a provider
+	// property.
+	embeddingModel      string
+	embeddingDimensions int
 }
 
 // NewHTTPClient constructs an HTTPClient for the given provider. A

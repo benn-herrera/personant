@@ -100,7 +100,33 @@ func Run(opts Options) error {
 		return fmt.Errorf("chat: no providers configured in %s; edit it to add one (see spec §8.2.1)", paths.Providers)
 	}
 
+	cfg, err := ops.LoadConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("chat: load config: %w", err)
+	}
+
+	// Resolve the chat provider and model. Precedence: CLI flag >
+	// config.toml [chat] > the conventional default / provider's own
+	// defaultModel. config.toml's "<provider>/<model>" reference names
+	// both; an invalid reference (or one naming an absent provider) is
+	// a bootstrap error.
 	providerName := opts.ProviderName
+	chatModel := opts.Model
+	if cfg.Chat.DefaultModel != "" {
+		cp, cm, parsed := store.ParseModelRef(cfg.Chat.DefaultModel)
+		if !parsed {
+			return fmt.Errorf("chat: config.toml [chat] defaultModel %q is not a \"provider/model\" reference", cfg.Chat.DefaultModel)
+		}
+		if _, known := providers[cp]; !known {
+			return fmt.Errorf("chat: config.toml [chat] references provider %q, not in %s", cp, paths.Providers)
+		}
+		if providerName == "" {
+			providerName = cp
+		}
+		if chatModel == "" {
+			chatModel = cm
+		}
+	}
 	if providerName == "" {
 		providerName = defaultProviderName
 	}
@@ -145,20 +171,32 @@ func Run(opts Options) error {
 	}
 
 	state := turn.NewState(ops, project, provider, client)
-	if opts.Model != "" {
-		state.Model = opts.Model
+	if chatModel != "" {
+		state.Model = chatModel
 	}
 
-	// §3.4 layer-2 embedding recall. The embedding provider is resolved
-	// independently of the chat provider: embeddings run on whichever
-	// provider declares an embeddingModel — typically a local, unmetered
-	// one — so chat may run on a metered external provider while
-	// embeddings stay local. Index-build failure (e.g. the embedding
-	// endpoint unreachable) degrades gracefully to symbolic-only recall;
-	// it never blocks the session.
-	if embProvider, ok := resolveEmbeddingProvider(providers, provider); ok {
-		state.Recaller = recall.NewService(ops, model.NewHTTPEmbedder(embProvider))
+	// §3.4 layer-2 embedding recall. The embedding provider+model are
+	// pinned explicitly via config.toml [embedding] model — never
+	// inferred from the chat provider. The embedding model defines the
+	// vector space; a model that could drift with the chat provider
+	// would silently corrupt the embedding index. Unset → embedding
+	// recall stays off (symbolic-only). An invalid reference is a
+	// bootstrap error — it fails loud.
+	if cfg.Embedding.Model != "" {
+		ep, em, parsed := store.ParseModelRef(cfg.Embedding.Model)
+		if !parsed {
+			return fmt.Errorf("chat: config.toml [embedding] model %q is not a \"provider/model\" reference", cfg.Embedding.Model)
+		}
+		embProvider, known := providers[ep]
+		if !known {
+			return fmt.Errorf("chat: config.toml [embedding] references provider %q, not in %s", ep, paths.Providers)
+		}
+		embedder := model.NewHTTPEmbedder(embProvider, em, cfg.Embedding.VectorLength)
+		state.Recaller = recall.NewService(ops, embedder)
 	}
+	// Index-build failure (e.g. the embedding endpoint unreachable)
+	// degrades gracefully to symbolic-only recall — never blocks the
+	// session. Prepare on the default symbolic-only Service is a no-op.
 	if err := state.Recaller.Prepare(ctx); err != nil {
 		fmt.Fprintf(opts.Stderr, "warn: embedding recall unavailable: %v\n", err)
 		state.Recaller = recall.NewService(ops, nil)
@@ -186,29 +224,6 @@ func resolvePaths(homeOverride string) (store.PersonantPaths, error) {
 		return store.PathsForHome(homeOverride), nil
 	}
 	return store.ResolvePaths()
-}
-
-// resolveEmbeddingProvider picks the provider for §3.4 layer-2
-// embedding recall, independently of the chat provider: the chat
-// provider when it declares an embeddingModel, otherwise the first
-// (name-sorted) provider that does. The second return is false when no
-// provider declares one — embedding recall stays disabled, symbolic
-// recall still runs.
-func resolveEmbeddingProvider(providers map[string]memops.Provider, chat memops.Provider) (memops.Provider, bool) {
-	if chat.EmbeddingModel != "" {
-		return chat, true
-	}
-	names := make([]string, 0, len(providers))
-	for name := range providers {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		if providers[name].EmbeddingModel != "" {
-			return providers[name], true
-		}
-	}
-	return memops.Provider{}, false
 }
 
 func firstProvider(providers map[string]memops.Provider) (memops.Provider, string) {

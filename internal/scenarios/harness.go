@@ -263,7 +263,7 @@ func newHarness(t *testing.T, sc Scenario) *Harness {
 	// package.
 	providersTOML := `[test]
 baseUrl      = "http://harness.invalid"
-apiKey       = "harness-key"
+apiKeyUnsafe = "harness-key"
 defaultModel = "harness-mock"
 `
 	if err := os.WriteFile(paths.Providers, []byte(providersTOML), 0o644); err != nil {

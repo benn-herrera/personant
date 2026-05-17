@@ -21,22 +21,27 @@ import (
 const embedBatch = 64
 
 // NewHTTPEmbedder constructs an Embedder backed by the provider's
-// OpenAI-compatible /embeddings endpoint. The same *HTTPClient type
-// satisfies both Client and Embedder; this constructor returns the
-// Embedder view for callers that only need embeddings.
-func NewHTTPEmbedder(p store.Provider) Embedder {
-	return NewHTTPClient(p).(*HTTPClient)
+// OpenAI-compatible /embeddings endpoint. The embedding model is a
+// config.toml choice (not a provider property), so it is passed
+// explicitly; dimensions > 0 requests a Matryoshka-truncated vector of
+// that length (0 → the model's native dimension). The same *HTTPClient
+// type satisfies both Client and Embedder.
+func NewHTTPEmbedder(p store.Provider, model string, dimensions int) Embedder {
+	c := NewHTTPClient(p).(*HTTPClient)
+	c.embeddingModel = model
+	c.embeddingDimensions = dimensions
+	return c
 }
 
 // Embed implements Embedder against the provider's /embeddings
-// endpoint, using the provider's EmbeddingModel. Texts are sent in
+// endpoint, using the model set by NewHTTPEmbedder. Texts are sent in
 // batches of embedBatch; the returned vectors are in input order.
 func (c *HTTPClient) Embed(ctx context.Context, texts []string) ([][]float64, error) {
 	if c.provider.BaseURL == "" {
 		return nil, fmt.Errorf("provider BaseURL is empty")
 	}
-	if c.provider.EmbeddingModel == "" {
-		return nil, fmt.Errorf("provider %q has no embeddingModel configured", c.provider.Name)
+	if c.embeddingModel == "" {
+		return nil, fmt.Errorf("no embedding model configured")
 	}
 	out := make([][]float64, 0, len(texts))
 	for start := 0; start < len(texts); start += embedBatch {
@@ -53,6 +58,8 @@ func (c *HTTPClient) Embed(ctx context.Context, texts []string) ([][]float64, er
 type wireEmbedRequest struct {
 	Model string   `json:"model"`
 	Input []string `json:"input"`
+	// Dimensions requests a Matryoshka-truncated vector; omitted when 0.
+	Dimensions int `json:"dimensions,omitempty"`
 }
 
 type wireEmbedResponse struct {
@@ -64,7 +71,11 @@ type wireEmbedResponse struct {
 
 // embedOne performs one /embeddings round-trip for a single batch.
 func (c *HTTPClient) embedOne(ctx context.Context, texts []string) ([][]float64, error) {
-	body, err := json.Marshal(wireEmbedRequest{Model: c.provider.EmbeddingModel, Input: texts})
+	body, err := json.Marshal(wireEmbedRequest{
+		Model:      c.embeddingModel,
+		Input:      texts,
+		Dimensions: c.embeddingDimensions,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("encode embed request: %w", err)
 	}
