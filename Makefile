@@ -1,6 +1,6 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data
+.PHONY: all build test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
 
 all: build
 
@@ -68,6 +68,14 @@ recall-corpus-sweep-data:
 	    --synonym-depth $$m \
 	    --out $(RECALL_MADLIBS_DATA)/corpus_queries_m$$m.json ; \
 	done
+
+# recall-embed-data embeds the corpus topic article-texts and every
+# corpus query string via the `reaper` provider's /v1/embeddings
+# endpoint, writing the .gitignore'd embeddings.json that the
+# embedding-recall test consumes. NETWORKED — needs `reaper` reachable.
+# Depends on the sweep query sets existing.
+recall-embed-data: recall-corpus-sweep-data
+	python3 test/tools/embed_corpus.py
 
 # recall-corpus-test runs the Wikipedia-corpus recall-fidelity report
 # and the C.6 calibration sweep. Build-tag isolated (recall_corpus) and

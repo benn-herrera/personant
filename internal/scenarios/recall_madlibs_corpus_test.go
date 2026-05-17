@@ -225,8 +225,8 @@ func TestRecallMadlibs_CorpusCalibration(t *testing.T) {
 		}
 	}
 
-	logCalibMatrix(t, "RECALL", results, func(c calibCell) float64 { return c.r })
-	logCalibMatrix(t, "PRECISION", results, func(c calibCell) float64 { return c.p })
+	logCalibMatrix(t, "RECALL", calibThresholds, results, func(c calibCell) float64 { return c.r })
+	logCalibMatrix(t, "PRECISION", calibThresholds, results, func(c calibCell) float64 { return c.p })
 
 	mPath := filepath.Join(t.TempDir(), "recall-fidelity-calibration.metrics.json")
 	if err := run.WriteJSON(mPath); err != nil {
@@ -235,17 +235,17 @@ func TestRecallMadlibs_CorpusCalibration(t *testing.T) {
 	t.Logf("metrics blob: %s", mPath)
 }
 
-func logCalibMatrix(t *testing.T, label string, results map[int]map[float64]calibCell, pick func(calibCell) float64) {
+func logCalibMatrix(t *testing.T, label string, thresholds []float64, results map[int]map[float64]calibCell, pick func(calibCell) float64) {
 	t.Helper()
 	hdr := "  M\\T  "
-	for _, th := range calibThresholds {
-		hdr += fmt.Sprintf("   %.1f ", th)
+	for _, th := range thresholds {
+		hdr += fmt.Sprintf("  %.2f ", th)
 	}
-	t.Logf("%s — synonym-depth M (rows) × Jaccard threshold (cols):", label)
+	t.Logf("%s — synonym-depth M (rows) × threshold (cols):", label)
 	t.Logf("%s", hdr)
 	for _, m := range calibDepths {
 		row := fmt.Sprintf("   %d   ", m)
-		for _, th := range calibThresholds {
+		for _, th := range thresholds {
 			row += fmt.Sprintf(" %.3f", pick(results[m][th]))
 		}
 		t.Logf("%s", row)

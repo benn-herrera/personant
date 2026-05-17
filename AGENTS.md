@@ -175,6 +175,17 @@ In progress:
     Still open, deferred until the data demands it: enriching the
     stored-thread symbol set beyond 5 anchors, and moving recall off
     symmetric Jaccard to an asymmetric overlap coefficient.
+  - **C.6 embedding head-to-head (done):** `nomicai-embed` (via the
+    `reaper` provider, non-metered) embedding-recall measured against
+    the same corpus. `test/tools/embed_corpus.py` →
+    `embeddings.json` (gitignored, `make recall-embed-data`);
+    `TestRecallMadlibs_EmbedCalibration` sweeps M × cosine threshold.
+    Finding: embedding recall is drift-ROBUST — ~0.97 recall at M=4
+    where symbolic Jaccard collapses to ~0.10 — but precision-poor at
+    the high-recall thresholds (~0.21 at cos 0.45). The two are
+    complementary: Jaccard = high-precision/low-recall, embeddings =
+    high-recall/lower-precision. Validates the §3.4 layered-recall
+    design.
 
 Queued:
 - Phase 4: closure / retirement (curator-drafted summaries; ack flow;
