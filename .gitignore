@@ -55,4 +55,4 @@ test/tools/madlibs_candidates/
 # (spine, threads, projects, logs, .git, metrics blob) under one
 # subdirectory per scenario. Forensic data — persists after the test
 # for post-run inspection, regenerated on every run, never committed.
-test/rundata/
+test/rundata*/
