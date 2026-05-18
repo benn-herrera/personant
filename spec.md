@@ -1461,6 +1461,8 @@ One TOML table per provider. The provider name is the lookup key used by config 
 
 The split reflects intent: an agent reaching for secrets is suspicious and warrants refusal; a user `#`-grepping their own home dir for context inclusion is reasonable but accidental and just gets quietly cleaned up.
 
+**Load-time key resolution.** Every provider's key is resolved when the pool is loaded — an `apiKeyFile` is read and trimmed. A provider whose `apiKeyFile` cannot be read (missing file, permission error) is **dropped from the pool and reported as a fault**: it does not abort the load, and the remaining providers stay usable. The runtime surfaces each fault as a startup warning. A `providers.toml` that is itself unreadable or malformed is a hard error. (Resolution and fault strings carry only the file path, never key content — see the security boundary above.)
+
 #### 8.2.2 Configuration choices: `config.toml`
 
 `$PERSONANT_HOME/config.toml` holds the choices that draw from the provider pool. It is canonical, hand-editable, and **not secret-bearing** — it names providers and models, never keys.
@@ -1480,7 +1482,15 @@ vectorLength = 768
 - `[embedding] model` — the embedding provider/model. This pin is **mandatory for embedding recall** and must be explicit: the embedding model defines the vector space, and an inferred or drifting model would silently invalidate the existing embedding cache.
 - `[embedding] vectorLength` — optional; for matryoshka-capable embedding models, requests this truncated dimensionality (passed as the `dimensions` parameter on the embeddings call).
 
-Model references are `"provider/model"`, split on the **first** `/` (the model portion may itself contain slashes, e.g. `openrouter/google/gemma-4-31b-it`). The named provider must exist in `providers.toml`.
+Model references are `"provider/model"`, split on the **first** `/` (the model portion may itself contain slashes, e.g. `openrouter/google/gemma-4-31b-it`).
+
+**Cross-file validation.** At bootstrap the runtime validates `config.toml` against the loaded pool:
+
+- Each non-empty `[chat]`/`[embedding]` reference must be a well-formed `provider/model` string, and the named provider must exist in `providers.toml`.
+- The `[embedding]` model id must equal that provider's `defaultModel` **verbatim**. The embedding model is a hard static pin — it defines the vector space — so it is effectively double-declared (the pool entry and the config reference) and cross-checked, catchable at bootstrap with no network call.
+- The `[chat]` model id is **not** statically checked. A chat model is resolved at use time against the provider's `/models` endpoint; a no-such-model condition (or an absent/invalid provider `defaultModel`) surfaces as a runtime error then, with the provider's `defaultModel` used as the fallback. This is checked only when the provider is actually used — the runtime does not probe every provider's `/models` at startup.
+
+Any cross-file validation failure is fatal at bootstrap. (A faulted provider per §8.2.1 is *not* itself fatal — but a `config.toml` reference to a provider that faulted out of the pool fails this check, since it is no longer in the pool.)
 
 **Precedence** (chat model resolution): CLI flag > `config.toml` `[chat]` > the resolved provider's own `defaultModel`.
 
