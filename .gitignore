@@ -50,3 +50,9 @@ internal/scenarios/testdata/recall_madlibs/embeddings.json
 # candidates are promoted into the testdata templates tree, which is
 # the canonical home.
 test/tools/madlibs_candidates/
+
+# Scenario-harness run data: each scenario's $PERSONANT_HOME substrate
+# (spine, threads, projects, logs, .git, metrics blob) under one
+# subdirectory per scenario. Forensic data — persists after the test
+# for post-run inspection, regenerated on every run, never committed.
+test/rundata/

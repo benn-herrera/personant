@@ -152,7 +152,7 @@ func TestRecallMadlibs_CorpusReport(t *testing.T) {
 			topic, a.n, a.fired, a.n, a.sumP/n, a.sumR/n, a.sumF/n)
 	}
 
-	mPath := filepath.Join(t.TempDir(), "recall-fidelity-corpus.metrics.json")
+	mPath := measurementBlobPath(t, "recall-fidelity-corpus.metrics.json")
 	if err := run.WriteJSON(mPath); err != nil {
 		t.Errorf("metrics write: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestRecallMadlibs_CorpusCalibration(t *testing.T) {
 	logCalibMatrix(t, "RECALL", calibThresholds, results, func(c calibCell) float64 { return c.r })
 	logCalibMatrix(t, "PRECISION", calibThresholds, results, func(c calibCell) float64 { return c.p })
 
-	mPath := filepath.Join(t.TempDir(), "recall-fidelity-calibration.metrics.json")
+	mPath := measurementBlobPath(t, "recall-fidelity-calibration.metrics.json")
 	if err := run.WriteJSON(mPath); err != nil {
 		t.Errorf("metrics write: %v", err)
 	}

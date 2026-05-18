@@ -208,19 +208,18 @@ type metricsBlob struct {
 }
 
 // runMadlibsMetrics runs one mad-libs query as an isolated scenario and
-// returns its metrics blob. MetricsPath is pinned so the blob can be
-// read back before t.TempDir is reclaimed.
+// returns its metrics blob. The metrics blob defaults into the
+// persistent test/rundata/<name>/ run home; the returned harness's
+// MetricsPath locates it for read-back.
 func runMadlibsMetrics(t *testing.T, doc madlibsDoc, q madlibsQuery) metricsBlob {
 	t.Helper()
 	threadID := map[string]string{}
 	for i, tp := range doc.Topics {
 		threadID[tp.Name] = fmt.Sprintf("thr_%d", i+1)
 	}
-	mPath := filepath.Join(t.TempDir(), q.ID+".metrics.json")
 	sc := Scenario{
-		Name:        "recall-madlibs-" + q.ID,
-		MetricsPath: mPath,
-		Setup:       seedMadlibsThreads(doc),
+		Name:  "recall-madlibs-" + q.ID,
+		Setup: seedMadlibsThreads(doc),
 		Steps: []Step{{
 			UserInput:             q.UserInput,
 			MockResponse:          NewMockResponseWithTag([]string{"*new-topic*"}, q.Tags, "Working from the query terms."),
@@ -229,11 +228,11 @@ func runMadlibsMetrics(t *testing.T, doc madlibsDoc, q madlibsQuery) metricsBlob
 			RecallMode:            RecallMeasureOnly,
 		}},
 	}
-	RunScenario(t, sc)
+	h := RunScenario(t, sc)
 
-	body, err := os.ReadFile(mPath)
+	body, err := os.ReadFile(h.MetricsPath)
 	if err != nil {
-		t.Fatalf("read metrics blob %s: %v", mPath, err)
+		t.Fatalf("read metrics blob %s: %v", h.MetricsPath, err)
 	}
 	var blob metricsBlob
 	if err := json.Unmarshal(body, &blob); err != nil {

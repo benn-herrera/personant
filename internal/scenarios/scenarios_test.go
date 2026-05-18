@@ -545,21 +545,12 @@ func TestScenarioMetricsBlobShapeIsStable(t *testing.T) {
 			},
 		},
 	}
-	RunScenario(t, sc)
+	h := RunScenario(t, sc)
 
-	// Locate the metrics JSON. RunScenario writes to <t.TempDir>/<name>.metrics.json.
-	// We don't have the harness handle (RunScenario does not return one
-	// by design — scenarios are fire-and-assert), so we walk t.TempDir's
-	// children looking for the .metrics.json file.
-	matches, err := findMetricsBlobs(t)
-	if err != nil {
-		t.Fatalf("locate metrics blob: %v", err)
-	}
-	if len(matches) == 0 {
-		t.Fatalf("no metrics blob found under t.TempDir")
-	}
-
-	body, err := os.ReadFile(matches[0])
+	// RunScenario writes the metrics blob into the persistent
+	// test/rundata/<name>/ run home and returns the harness; h.MetricsPath
+	// locates it directly.
+	body, err := os.ReadFile(h.MetricsPath)
 	if err != nil {
 		t.Fatalf("read metrics blob: %v", err)
 	}
@@ -892,27 +883,6 @@ func TestScenario_TransientDataPollutionPrevention(t *testing.T) {
 //     current Step{UserInput, MockResponse} shape.
 func TestScenario_TransientShellCapture_Stub(t *testing.T) {
 	t.Skip("requires §4.4 shell escape + Phase 2.e budget eviction + v0.2 dedup; activate when those land. See test godoc.")
-}
-
-// findMetricsBlobs walks the test's TempDir-parent recursively and
-// returns paths to any *.metrics.json files. The harness writes its
-// metrics blob to its own t.TempDir() call (different sub-dir than
-// this function's t.TempDir() call, but sharing the same parent —
-// see Go's testing.TempDir docs), so we walk the shared parent.
-func findMetricsBlobs(t *testing.T) ([]string, error) {
-	t.Helper()
-	root := filepath.Dir(t.TempDir())
-	matches := []string{}
-	err := filepath.Walk(root, func(path string, _ os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if strings.HasSuffix(path, ".metrics.json") {
-			matches = append(matches, path)
-		}
-		return nil
-	})
-	return matches, err
 }
 
 // assertLogContains is an InvariantCheck that reads every day-log file

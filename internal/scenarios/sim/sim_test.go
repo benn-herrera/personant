@@ -159,10 +159,10 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 		Corpus:   corpus,
 	})
 
-	// Pin the metrics blob to this test's TempDir so the summary can
-	// read it back. RunScenario writes the blob at scenario completion.
-	sc.MetricsPath = filepath.Join(t.TempDir(), "sim.metrics.json")
-
+	// The metrics blob defaults into the persistent test/rundata/<name>/
+	// run home (forensic data — not auto-deleted temp). RunScenario
+	// writes it at scenario completion and returns the harness so the
+	// summary can read the blob back via h.MetricsPath.
 	turns := len(sc.Steps)
 	t.Logf("generated workload: %d turns over %s simulated", turns, d)
 
@@ -170,7 +170,7 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	h := scenarios.RunScenario(t, sc)
 	wall := time.Since(start)
 
-	m, err := readMetrics(sc.MetricsPath)
+	m, err := readMetrics(h.MetricsPath)
 	if err != nil {
 		t.Fatalf("read metrics blob: %v", err)
 	}

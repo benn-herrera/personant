@@ -153,7 +153,7 @@ func TestRecallMadlibs_EmbedCalibration(t *testing.T) {
 	logCalibMatrix(t, "EMBEDDING PRECISION", embedThresholds, results,
 		func(c calibCell) float64 { return c.p })
 
-	mPath := filepath.Join(t.TempDir(), "recall-fidelity-embedding.metrics.json")
+	mPath := measurementBlobPath(t, "recall-fidelity-embedding.metrics.json")
 	if err := run.WriteJSON(mPath); err != nil {
 		t.Errorf("metrics write: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestRecallMadlibs_EmbedRanking(t *testing.T) {
 		run.Set(fmt.Sprintf("embed_rank_m%d_mrr", m), mrr)
 	}
 
-	mPath := filepath.Join(t.TempDir(), "recall-fidelity-embedding-ranking.metrics.json")
+	mPath := measurementBlobPath(t, "recall-fidelity-embedding-ranking.metrics.json")
 	if err := run.WriteJSON(mPath); err != nil {
 		t.Errorf("metrics write: %v", err)
 	}

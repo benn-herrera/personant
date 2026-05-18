@@ -150,8 +150,9 @@ const (
 // Scenario is a named end-to-end flow. Setup runs once before the
 // steps; FinalInvariants run once after the last step. MetricsPath
 // receives the per-scenario metrics blob when non-empty; otherwise the
-// harness writes <t.TempDir>/<scenario-name>.metrics.json and logs the
-// path via t.Logf so a developer can inspect it post-run.
+// harness writes <home>/<scenario-name>.metrics.json — where <home> is
+// the persistent test/rundata/<name>/ run home — and logs the path via
+// t.Logf so a developer can inspect it post-run.
 type Scenario struct {
 	Name string
 
@@ -169,7 +170,8 @@ type Scenario struct {
 	FinalInvariants []InvariantCheck
 
 	// MetricsPath, if non-empty, overrides the default metrics output
-	// location. Default: <t.TempDir>/<scenario-name>.metrics.json.
+	// location. Default: <home>/<scenario-name>.metrics.json, inside the
+	// persistent test/rundata/<name>/ run home.
 	MetricsPath string
 }
 
@@ -305,12 +307,67 @@ func RunScenario(t *testing.T, sc Scenario) *Harness {
 	return h
 }
 
+// runDataHome resolves and prepares the persistent per-scenario run
+// home: <repo-root>/test/rundata/<scenario-name>/. Run data is forensic
+// data — it deliberately does NOT live under t.TempDir() (which Go
+// auto-deletes) so a developer can inspect spine/threads/logs/metrics
+// after an interesting or failing run. The directory is cleared and
+// recreated at the start of each run so it always holds the latest run
+// of that scenario; no cleanup is registered, so it persists after the
+// test exits. test/rundata/ is gitignored.
+func runDataHome(t *testing.T, name string) string {
+	t.Helper()
+	home := filepath.Join(repoRoot(t), "test", "rundata", name)
+	if err := os.RemoveAll(home); err != nil {
+		t.Fatalf("scenario %s: clear run home %s: %v", name, home, err)
+	}
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatalf("scenario %s: create run home %s: %v", name, home, err)
+	}
+	return home
+}
+
+// measurementBlobPath resolves a persistent path for a standalone
+// measurement's metrics blob (tests that write a metrics blob directly
+// rather than driving the scenario harness). The blob is forensic data:
+// it lives under <repo-root>/test/rundata/ — gitignored, never
+// auto-deleted — alongside the per-scenario run homes. The parent
+// directory is created if absent.
+func measurementBlobPath(t *testing.T, filename string) string {
+	t.Helper()
+	dir := filepath.Join(repoRoot(t), "test", "rundata")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create rundata dir %s: %v", dir, err)
+	}
+	return filepath.Join(dir, filename)
+}
+
+// repoRoot walks up from the test's working directory until it finds a
+// go.mod file, returning that directory.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("repo root (containing go.mod) not found from %s", dir)
+		}
+		dir = parent
+	}
+}
+
 // newHarness builds an isolated home, default project, and starting
 // turn.State for the scenario. Mock is left as nil and is populated by
 // RunScenario after Steps are known so the queue can be sized exactly.
 func newHarness(t *testing.T, sc Scenario) *Harness {
 	t.Helper()
-	tmp := t.TempDir()
+	tmp := runDataHome(t, sc.Name)
 	paths := store.PathsForHome(tmp)
 
 	if err := store.Init(paths, store.InitOptions{Quiet: true}); err != nil {
