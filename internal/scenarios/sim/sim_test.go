@@ -69,18 +69,16 @@ func TestSim_1d(t *testing.T) {
 	t.Logf("threads created:  %d", threadsCreated)
 	t.Logf("turn latency:     P50=%.1fms P95=%.1fms mean=%.2fms", p50, p95, meanMs)
 
-	// Closure: counted from retire.complete log lines. A generated
-	// workload at the 1-day rung is expected to show 0 — the turn path
-	// creates threads in the WIP state, and the §3.5 decay scan only
-	// considers threads in the Active state, so a naturally-created
-	// thread never decay-closes. Exercising closure end-to-end needs
-	// either a runtime WIP→Active promotion or an Active-thread seed;
-	// both are out of scope for this smoke rung. The count is logged
-	// so a future rung (or a runtime change) makes any closure visible.
+	// Closure: counted from retire.complete log lines. The turn path
+	// creates threads in the Active state (spec §2.2.1), and the §3.5
+	// decay scan offers any thread idle past the decay threshold for
+	// closure — the workload scripts ClosureResolved on every step, so
+	// any decayed thread closes. A 1-day workload spans enough idle
+	// turns to decay-close some threads, so a non-zero count is the
+	// expected, healthy signal that the closure flow is live.
+	t.Logf("closures:         %d", closures)
 	if closures == 0 {
-		t.Logf("closures:         0 (expected — generated threads are WIP, not decay-eligible)")
-	} else {
-		t.Logf("closures:         %d", closures)
+		t.Errorf("closures: got 0; the §3.5 closure flow is dead — expected >0 over a 1-day workload")
 	}
 
 	// Recall fidelity is measured (RecallMeasureOnly), never pass/fail

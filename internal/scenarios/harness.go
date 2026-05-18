@@ -247,14 +247,20 @@ func RunScenario(t *testing.T, sc Scenario) {
 	t.Helper()
 	h := newHarness(t, sc)
 
-	// Pre-queue every step's mock response. This works because each
-	// step has exactly one turn and turn.Run consumes exactly one
-	// response per call.
+	// Pre-queue every step's mock response, one per step. A turn
+	// normally consumes exactly one, but a §5.5 mid-turn re-prompt
+	// (topic tag naming a thread not in Layer B — reachable once
+	// closure evicts threads from the active set) issues a second
+	// consult within the same turn. RepeatLast re-serves the step's
+	// response for that re-prompt: the re-prompt re-sends the same
+	// user input, and once the missing thread is fetched the topic
+	// tag drains cleanly. The flat queue is never index-shifted.
 	queue := make([]model.Response, 0, len(sc.Steps))
 	for _, step := range sc.Steps {
 		queue = append(queue, step.MockResponse)
 	}
 	h.Mock = model.NewScriptedMock(queue, nil)
+	h.Mock.SetRepeatLast(true)
 	h.State.Client = h.Mock
 
 	if sc.Setup != nil {

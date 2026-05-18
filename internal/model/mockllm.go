@@ -24,6 +24,18 @@ type MockClient struct {
 	// Scripted mode: pop from queue. nil → not scripted.
 	queue []Response
 
+	// repeatLast, when set in scripted mode, makes a Consult past the
+	// end of the queue re-serve the last response instead of returning
+	// ErrMockExhausted. The scenario harness sets this so a §5.5
+	// mid-turn re-prompt — a second, legitimate model consult within
+	// one turn — is served the same step's response (the re-prompt
+	// re-sends the same user input; once the missing thread is fetched
+	// the re-evaluated topic tag drains cleanly). last holds the most
+	// recent served response.
+	repeatLast bool
+	last       Response
+	served     bool
+
 	// Generated mode: rng + opts. rng is nil → not generated.
 	rng     *rand.Rand
 	genOpts GeneratedMockOpts
@@ -79,8 +91,10 @@ const (
 )
 
 // NewScriptedMock returns a MockClient that pops responses from the given
-// queue, in order. Calling Consult past the end returns ErrMockExhausted.
-// models is returned verbatim from ListModels; nil yields an empty list.
+// queue, in order. Calling Consult past the end returns ErrMockExhausted
+// unless SetRepeatLast(true) has been called, in which case the last
+// served response is re-served. models is returned verbatim from
+// ListModels; nil yields an empty list.
 func NewScriptedMock(responses []Response, models []ModelInfo) *MockClient {
 	q := make([]Response, len(responses))
 	copy(q, responses)
@@ -128,11 +142,16 @@ func (m *MockClient) Consult(ctx context.Context, req Request) (Response, error)
 	case m.rng != nil:
 		resp = m.synthesize()
 	case m.queue != nil:
-		if len(m.queue) == 0 {
-			err = ErrMockExhausted
-		} else {
+		switch {
+		case len(m.queue) > 0:
 			resp = m.queue[0]
 			m.queue = m.queue[1:]
+			m.last = resp
+			m.served = true
+		case m.repeatLast && m.served:
+			resp = m.last
+		default:
+			err = ErrMockExhausted
 		}
 	default:
 		err = fmt.Errorf("model: MockClient constructed without a mode")
@@ -173,6 +192,16 @@ func (m *MockClient) ConsultStream(ctx context.Context, req Request) (StreamRead
 func (m *MockClient) SetMockChunks(n int) {
 	m.mu.Lock()
 	m.chunks = n
+	m.mu.Unlock()
+}
+
+// SetRepeatLast controls scripted-mode exhaustion behavior. When true, a
+// Consult past the end of the queue re-serves the last response instead
+// of returning ErrMockExhausted; when false (the default) it returns
+// ErrMockExhausted. Has no effect on a generated-mode mock.
+func (m *MockClient) SetRepeatLast(v bool) {
+	m.mu.Lock()
+	m.repeatLast = v
 	m.mu.Unlock()
 }
 

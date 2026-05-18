@@ -91,8 +91,8 @@ func TestRunNewTopicCreatesSpineRecord(t *testing.T) {
 	if r.Project != "prj_1" {
 		t.Errorf("project: got %q want prj_1", r.Project)
 	}
-	if r.State != memops.ThreadWIP {
-		t.Errorf("state: got %q want wip", r.State)
+	if r.State != memops.ThreadActive {
+		t.Errorf("state: got %q want active", r.State)
 	}
 	if r.TurnCount != 1 {
 		t.Errorf("turn_count: got %d want 1", r.TurnCount)
@@ -430,8 +430,8 @@ func TestRunNewTopicWritesThreadFile(t *testing.T) {
 	if thr.Frontmatter.Project != meta.ID {
 		t.Errorf("frontmatter project: got %q want %q", thr.Frontmatter.Project, meta.ID)
 	}
-	if thr.Frontmatter.State != memops.ThreadWIP {
-		t.Errorf("frontmatter state: got %q want wip", thr.Frontmatter.State)
+	if thr.Frontmatter.State != memops.ThreadActive {
+		t.Errorf("frontmatter state: got %q want active", thr.Frontmatter.State)
 	}
 	if thr.Frontmatter.TurnCount != 1 {
 		t.Errorf("frontmatter turn_count: got %d want 1", thr.Frontmatter.TurnCount)

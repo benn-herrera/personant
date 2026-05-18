@@ -768,6 +768,14 @@ func updateExistingThread(ctx context.Context, state *State, threadID, userInput
 	thr.Frontmatter.LastEngaged = now
 	thr.Frontmatter.LastEngagedTurn = state.TurnNumber
 	thr.Frontmatter.TurnCount = newTurnCount
+	// Re-engagement resurrects the thread per the §2.2.1 state-transition
+	// table (wip/paused/resolved/decided/abandoned → active). Engagement
+	// promotes to active unconditionally when not already active; an
+	// already-active thread keeps its state_changed timestamp untouched.
+	if rec.State != memops.ThreadActive {
+		rec.State = memops.ThreadActive
+		rec.StateChanged = now
+	}
 	// Mirror the canonical spine fields so the frontmatter stays in
 	// sync. The body of work reads the frontmatter; the spine is the
 	// outer index.
@@ -779,9 +787,10 @@ func updateExistingThread(ctx context.Context, state *State, threadID, userInput
 	if thr.Frontmatter.Created == "" {
 		thr.Frontmatter.Created = rec.Created
 	}
-	if thr.Frontmatter.StateChanged == "" {
-		thr.Frontmatter.StateChanged = rec.StateChanged
-	}
+	// StateChanged is mirrored from the canonical spine unconditionally:
+	// an engagement that resurrects the thread to active bumps the spine
+	// timestamp, and a stale frontmatter value would desync the file.
+	thr.Frontmatter.StateChanged = rec.StateChanged
 	thr.Frontmatter.RecallFires = rec.RecallFires
 
 	thr.Frontmatter.HistorySymbols = mergeHistorySymbols(thr.Frontmatter.HistorySymbols, turnSymbols, newTurnCount)
@@ -824,7 +833,7 @@ func createNewThread(ctx context.Context, state *State, userInput, responseBody,
 		Project:         state.ActiveProject.ID,
 		Anchors:         anchors,
 		Summary:         summary,
-		State:           memops.ThreadWIP,
+		State:           memops.ThreadActive,
 		Created:         now,
 		LastEngaged:     now,
 		StateChanged:    now,
@@ -837,7 +846,7 @@ func createNewThread(ctx context.Context, state *State, userInput, responseBody,
 		Project:         rec.Project,
 		Anchors:         append([]string(nil), anchors...),
 		Summary:         summary,
-		State:           memops.ThreadWIP,
+		State:           memops.ThreadActive,
 		Created:         now,
 		LastEngaged:     now,
 		StateChanged:    now,
