@@ -338,6 +338,8 @@ Consequences, in rough order of when they bite:
 - **Per-session working set.** Each session carries its own active threads (its own Layer B) and must track which is which — "the active thread" becomes session-scoped, not global.
 - **Cross-reference vs. isolation.** Two concurrently-active threads may legitimately want to cross-reference — often desirable. But the user must be able to declare two lines of work **unrelated**: an explicit "do not conflate these; neither thread's context bleeds into the other." Recall and working-set composition would have to honor that boundary.
 
+Concurrency is also a fragmentation *source*: interleaved multitasking touches threads out of order and lets per-session working sets drift apart. That makes the results of concurrent sessions prime material for the **"sleep" cycle** above — the two future mechanisms are coupled, concurrency creates the tangle and offline consolidation clears it.
+
 Future consideration, not v0.1 — and distinct from multi-*user* (v2.0): this is one user, one career, many concurrent conversations.
 
 ---
