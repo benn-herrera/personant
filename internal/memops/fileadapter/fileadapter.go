@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"personant/internal/clock"
@@ -266,6 +267,12 @@ func (a *FileAdapter) ArchiveThread(ctx context.Context, threadID string) error 
 	// Delete the thread file (a missing file is fine — already gone).
 	if err := os.Remove(store.ThreadPath(a.paths, threadID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("fileadapter: archive thread %s: remove file: %w", threadID, err)
+	}
+	// Delete the §3.9 tracked-file sidecar so it is not left orphaned. A
+	// thread with no tracked files never had one — a missing sidecar is
+	// fine, not an error.
+	if err := os.Remove(store.ThreadFilesPath(a.paths, threadID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("fileadapter: archive thread %s: remove file-store sidecar: %w", threadID, err)
 	}
 	if err := store.RemoveSpineRecord(a.paths, threadID); err != nil {
 		return fmt.Errorf("fileadapter: archive thread %s: remove spine: %w", threadID, err)
@@ -590,9 +597,10 @@ func (a *FileAdapter) RecordFileWrite(ctx context.Context, threadID, path, conte
 // git-commit pointer on the path's entry, and saves the sidecar. The
 // commit timestamp is stamped here from clock.Timeline() in RFC3339 form
 // — consistent with how eventlog stamps events — so the port signature
-// carries no timestamp. Surfaces ThreadFiles.RecordCommit's untracked-path
-// error to the caller (a commit with no preceding write).
-func (a *FileAdapter) RecordFileCommit(ctx context.Context, threadID, path, hash string) error {
+// carries no timestamp. committedTurn is recorded for the §3.9
+// git-minimization retention window. Surfaces ThreadFiles.RecordCommit's
+// untracked-path error to the caller (a commit with no preceding write).
+func (a *FileAdapter) RecordFileCommit(ctx context.Context, threadID, path, hash string, committedTurn int) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -601,13 +609,47 @@ func (a *FileAdapter) RecordFileCommit(ctx context.Context, threadID, path, hash
 		return fmt.Errorf("fileadapter: record file commit %s: load: %w", threadID, err)
 	}
 	committedAt := clock.Timeline().Format(time.RFC3339)
-	if err := tf.RecordCommit(path, hash, committedAt); err != nil {
+	if err := tf.RecordCommit(path, hash, committedAt, committedTurn); err != nil {
 		return fmt.Errorf("fileadapter: record file commit %s: %w", threadID, err)
 	}
 	if err := store.SaveThreadFiles(a.paths, tf); err != nil {
 		return fmt.Errorf("fileadapter: record file commit %s: save: %w", threadID, err)
 	}
 	return nil
+}
+
+// AgeFileChains applies the §3.9 git-minimization policy to threadID's
+// tracked-file store via store.ThreadFiles.AgeOut. A thread with no
+// tracked-file sidecar (zero files) is a no-op — no empty sidecar is
+// written. When anything ages, the updated sidecar is saved and one
+// dedup/chain-aged event-log line records the aged paths and bytes freed
+// (the demand-sizing forensic data — kept exact, like the archival byte
+// counts).
+func (a *FileAdapter) AgeFileChains(ctx context.Context, threadID string, currentTurn int) ([]string, int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+	tf, err := store.LoadThreadFiles(a.paths, threadID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("fileadapter: age file chains %s: load: %w", threadID, err)
+	}
+	if len(tf.Files) == 0 {
+		// No sidecar (or an empty one) — nothing to age, and we must not
+		// materialize an empty sidecar where none existed.
+		return nil, 0, nil
+	}
+	agedPaths, bytesFreed := tf.AgeOut(currentTurn, clock.Timeline())
+	if len(agedPaths) == 0 {
+		return nil, 0, nil
+	}
+	if err := store.SaveThreadFiles(a.paths, tf); err != nil {
+		return nil, 0, fmt.Errorf("fileadapter: age file chains %s: save: %w", threadID, err)
+	}
+	if err := eventlog.Log(a.paths, "dedup", "chain-aged",
+		fmt.Sprintf("thr=%s paths=%s bytes=%d", threadID, strings.Join(agedPaths, ","), bytesFreed)); err != nil {
+		return agedPaths, bytesFreed, fmt.Errorf("fileadapter: age file chains %s: log: %w", threadID, err)
+	}
+	return agedPaths, bytesFreed, nil
 }
 
 // ---------- Bootstrap and verification ----------

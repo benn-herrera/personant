@@ -7,8 +7,34 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"time"
 
 	"personant/internal/dedup"
+)
+
+// Retention-window calibration for §3.9 git-minimization chain aging.
+// Names mirror the directive-key convention used by dedup.AnchorCadence /
+// dedup.DiffLiteralThreshold — these are package constants for now;
+// per-project directive plumbing is later work.
+//
+// Once a tracked file is committed to its project git repo, its committed
+// state is recoverable by commit hash, so Personant's own reverse-delta
+// chain of the pre-commit edit history becomes pure duplication of git.
+// After a retention window the chain is dropped, leaving only the hash as
+// a recovery pointer (see ThreadFiles.AgeOut).
+const (
+	// FileChainRetentionTurns is the turn-count side of the retention
+	// window: a committed file's chain is aged out once this many turns
+	// have elapsed since the commit. v0.1 best-guess calibration —
+	// calibratable against six-month-sim demand-sizing data.
+	FileChainRetentionTurns = 100
+
+	// FileChainRetentionDays is the wall-clock side of the retention
+	// window: a committed file's chain is aged out once this many days
+	// have elapsed since the commit timestamp. v0.1 best-guess
+	// calibration — calibratable against six-month-sim demand-sizing data.
+	FileChainRetentionDays = 2
 )
 
 // FileEntry is the §3.9.1 persistent record for one tracked file
@@ -26,6 +52,10 @@ type FileEntry struct {
 	// CommittedAt is the RFC3339 timestamp of that commit (clock.Timeline()
 	// form, supplied by the caller). It is "" iff LastCommit is "".
 	CommittedAt string `json:"committed_at"`
+	// CommittedTurn is the turn number at which the file was committed. It
+	// is 0 iff LastCommit is "". It is the turn-count side of the §3.9
+	// git-minimization retention window (see AgeOut).
+	CommittedTurn int `json:"committed_turn"`
 }
 
 // ThreadFiles is the per-thread tracked-file store, persisted as the JSON
@@ -138,8 +168,7 @@ func (tf *ThreadFiles) RecordWrite(path, content string) {
 		e = &FileEntry{Path: path}
 		tf.Files[path] = e
 		e.Chain.Append(content)
-		e.LastCommit = ""
-		e.CommittedAt = ""
+		e.clearCommit()
 		return
 	}
 	if e.Chain.Current() == content {
@@ -147,14 +176,25 @@ func (tf *ThreadFiles) RecordWrite(path, content string) {
 		return
 	}
 	e.Chain.Append(content)
+	e.clearCommit()
+}
+
+// clearCommit clears all three commit fields together. The commit pointer
+// is a unit: LastCommit, CommittedAt, and CommittedTurn are set together
+// by RecordCommit and cleared together whenever an uncommitted edit lands.
+func (e *FileEntry) clearCommit() {
 	e.LastCommit = ""
 	e.CommittedAt = ""
+	e.CommittedTurn = 0
 }
 
 // RecordCommit sets the git-commit pointer on a tracked file. It returns
 // an error if path is not tracked (a file the store has never seen cannot
 // be committed) or if hash or committedAt is empty.
-func (tf *ThreadFiles) RecordCommit(path, hash, committedAt string) error {
+//
+// committedTurn is the turn number at which the commit happened; it feeds
+// the turn-count side of the §3.9 git-minimization retention window.
+func (tf *ThreadFiles) RecordCommit(path, hash, committedAt string, committedTurn int) error {
 	if hash == "" {
 		return fmt.Errorf("record commit %s: hash is empty", path)
 	}
@@ -167,7 +207,53 @@ func (tf *ThreadFiles) RecordCommit(path, hash, committedAt string) error {
 	}
 	e.LastCommit = hash
 	e.CommittedAt = committedAt
+	e.CommittedTurn = committedTurn
 	return nil
+}
+
+// AgeOut applies the §3.9 git-minimization policy: for every committed
+// file (LastCommit != ""), once the retention window has elapsed the
+// reverse-delta chain — which by the checkpoint-5c invariant is purely
+// the pre-commit edit history, a duplicate of what the project git repo
+// already holds at the commit hash — is dropped.
+//
+// An entry is aged out when EITHER threshold trips first (OR-drop):
+//   - currentTurn - CommittedTurn >= FileChainRetentionTurns, or
+//   - now is >= FileChainRetentionDays days after CommittedAt.
+//
+// CommittedAt is parsed as RFC3339; a parse failure is treated as
+// not-yet-ageable and the entry is skipped — a corrupt timestamp must not
+// silently drop data, only the turn threshold can then age it.
+//
+// Aging replaces the entry's Chain with a fresh empty dedup.Chain (the
+// committed literal is NOT retained — git + the hash recover it) and
+// keeps Path, LastCommit, CommittedAt, CommittedTurn so the hash remains
+// a recovery pointer. Uncommitted entries (LastCommit == "") never age.
+//
+// Returns the sorted list of aged paths and the total bytes freed,
+// measured as the summed length of the dropped chains' live literals
+// (sum of len(Chain.Current())) — a simple proxy that feeds demand-sizing
+// stats alongside the archival byte counts.
+func (tf *ThreadFiles) AgeOut(currentTurn int, now time.Time) (agedPaths []string, bytesFreed int) {
+	cutoff := now.AddDate(0, 0, -FileChainRetentionDays)
+	for path, e := range tf.Files {
+		if e.LastCommit == "" {
+			continue
+		}
+		byTurn := currentTurn-e.CommittedTurn >= FileChainRetentionTurns
+		byDay := false
+		if committedAt, err := time.Parse(time.RFC3339, e.CommittedAt); err == nil {
+			byDay = !committedAt.After(cutoff)
+		}
+		if !byTurn && !byDay {
+			continue
+		}
+		bytesFreed += len(e.Chain.Current())
+		e.Chain = dedup.Chain{}
+		agedPaths = append(agedPaths, path)
+	}
+	sort.Strings(agedPaths)
+	return agedPaths, bytesFreed
 }
 
 // Entry returns the tracked-file entry for path, if present.

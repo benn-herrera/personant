@@ -742,6 +742,16 @@ The full chain is preserved, **anchored on the current state**:
 This keeps the current state fully formed and hot while giving
 forensic-quality history at bounded storage cost.
 
+**Git-minimization bound.** Once a tracked file is committed to the
+project's git repo, its committed state is recoverable by commit hash, so
+Personant's reverse-delta chain of the *pre-commit* edit history is pure
+duplication of what git already holds. After a retention window
+(`FileChainRetentionTurns` turns OR `FileChainRetentionDays` days,
+whichever trips first), the chain is clock-aged out and only the commit
+hash is retained as a recovery pointer. The forensic history of
+*committed* states is therefore bounded by what the project git repo
+already holds; uncommitted edit history is unaffected.
+
 #### 3.9.2 Live context composition (working window)
 
 The working window's representation is more aggressive:

@@ -3,6 +3,7 @@ package store
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 func TestThreadFilesPath(t *testing.T) {
@@ -50,7 +51,7 @@ func TestThreadFilesRoundTrip(t *testing.T) {
 	tf := ThreadFiles{ThreadID: "thr_3", Files: map[string]*FileEntry{}}
 	tf.RecordWrite("src/a.go", "v0")
 	tf.RecordWrite("src/a.go", "v1")
-	if err := tf.RecordCommit("src/a.go", "abc123", "2026-05-18T12:00:00Z"); err != nil {
+	if err := tf.RecordCommit("src/a.go", "abc123", "2026-05-18T12:00:00Z", 7); err != nil {
 		t.Fatalf("RecordCommit: %v", err)
 	}
 
@@ -122,21 +123,21 @@ func TestRecordWriteSeedsThenAppends(t *testing.T) {
 func TestRecordWriteClearsCommitPointer(t *testing.T) {
 	tf := ThreadFiles{ThreadID: "thr_5", Files: map[string]*FileEntry{}}
 	tf.RecordWrite("f.txt", "v0")
-	if err := tf.RecordCommit("f.txt", "h1", "2026-05-18T00:00:00Z"); err != nil {
+	if err := tf.RecordCommit("f.txt", "h1", "2026-05-18T00:00:00Z", 3); err != nil {
 		t.Fatalf("RecordCommit: %v", err)
 	}
 
 	tf.RecordWrite("f.txt", "v1")
 	e, _ := tf.Entry("f.txt")
-	if e.LastCommit != "" || e.CommittedAt != "" {
-		t.Errorf("commit pointer not cleared: (%q,%q)", e.LastCommit, e.CommittedAt)
+	if e.LastCommit != "" || e.CommittedAt != "" || e.CommittedTurn != 0 {
+		t.Errorf("commit pointer not cleared: (%q,%q,%d)", e.LastCommit, e.CommittedAt, e.CommittedTurn)
 	}
 }
 
 func TestRecordWriteUnchangedContentIsNoOp(t *testing.T) {
 	tf := ThreadFiles{ThreadID: "thr_7", Files: map[string]*FileEntry{}}
 	tf.RecordWrite("f.txt", "v0")
-	if err := tf.RecordCommit("f.txt", "h1", "2026-05-18T00:00:00Z"); err != nil {
+	if err := tf.RecordCommit("f.txt", "h1", "2026-05-18T00:00:00Z", 3); err != nil {
 		t.Fatalf("RecordCommit: %v", err)
 	}
 
@@ -165,16 +166,140 @@ func TestRecordCommitErrors(t *testing.T) {
 	tf := ThreadFiles{ThreadID: "thr_6", Files: map[string]*FileEntry{}}
 	tf.RecordWrite("tracked.txt", "x")
 
-	if err := tf.RecordCommit("untracked.txt", "h", "2026-05-18T00:00:00Z"); err == nil {
+	if err := tf.RecordCommit("untracked.txt", "h", "2026-05-18T00:00:00Z", 1); err == nil {
 		t.Error("RecordCommit on untracked path: want error, got nil")
 	}
-	if err := tf.RecordCommit("tracked.txt", "", "2026-05-18T00:00:00Z"); err == nil {
+	if err := tf.RecordCommit("tracked.txt", "", "2026-05-18T00:00:00Z", 1); err == nil {
 		t.Error("RecordCommit with empty hash: want error, got nil")
 	}
-	if err := tf.RecordCommit("tracked.txt", "h", ""); err == nil {
+	if err := tf.RecordCommit("tracked.txt", "h", "", 1); err == nil {
 		t.Error("RecordCommit with empty committedAt: want error, got nil")
 	}
-	if err := tf.RecordCommit("tracked.txt", "h", "2026-05-18T00:00:00Z"); err != nil {
+	if err := tf.RecordCommit("tracked.txt", "h", "2026-05-18T00:00:00Z", 1); err != nil {
 		t.Errorf("RecordCommit on tracked path: unexpected error %v", err)
+	}
+}
+
+// committedAt is a fixed reference timestamp used by the AgeOut tests.
+var ageOutCommitTime = time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+
+// newCommittedEntry builds a ThreadFiles with one committed file whose
+// chain has the given current literal, committed at ageOutCommitTime on
+// committedTurn.
+func newCommittedEntry(t *testing.T, content string, committedTurn int) ThreadFiles {
+	t.Helper()
+	tf := ThreadFiles{ThreadID: "thr_age", Files: map[string]*FileEntry{}}
+	tf.RecordWrite("f.txt", content)
+	if err := tf.RecordCommit("f.txt", "hash-abc", ageOutCommitTime.Format(time.RFC3339), committedTurn); err != nil {
+		t.Fatalf("RecordCommit: %v", err)
+	}
+	return tf
+}
+
+func TestAgeOutTurnThreshold(t *testing.T) {
+	tf := newCommittedEntry(t, "committed-content", 5)
+	// currentTurn - committedTurn = FileChainRetentionTurns exactly → ages.
+	now := ageOutCommitTime // same instant, so the day threshold cannot trip
+	aged, freed := tf.AgeOut(5+FileChainRetentionTurns, now)
+	if len(aged) != 1 || aged[0] != "f.txt" {
+		t.Fatalf("aged = %v, want [f.txt]", aged)
+	}
+	if freed != len("committed-content") {
+		t.Errorf("bytesFreed = %d, want %d", freed, len("committed-content"))
+	}
+	e, _ := tf.Entry("f.txt")
+	if e.Chain.Len() != 0 {
+		t.Errorf("chain not dropped: Len = %d, want 0", e.Chain.Len())
+	}
+}
+
+func TestAgeOutDayThreshold(t *testing.T) {
+	tf := newCommittedEntry(t, "content", 5)
+	// Turn delta is below the turn threshold; only the day threshold trips.
+	now := ageOutCommitTime.AddDate(0, 0, FileChainRetentionDays)
+	aged, freed := tf.AgeOut(6, now)
+	if len(aged) != 1 || aged[0] != "f.txt" {
+		t.Fatalf("aged = %v, want [f.txt]", aged)
+	}
+	if freed != len("content") {
+		t.Errorf("bytesFreed = %d, want %d", freed, len("content"))
+	}
+	e, _ := tf.Entry("f.txt")
+	if e.Chain.Len() != 0 {
+		t.Errorf("chain not dropped: Len = %d, want 0", e.Chain.Len())
+	}
+}
+
+func TestAgeOutUnderBothThresholds(t *testing.T) {
+	tf := newCommittedEntry(t, "content", 5)
+	// Just under the turn threshold and just under the day threshold.
+	now := ageOutCommitTime.AddDate(0, 0, FileChainRetentionDays).Add(-time.Second)
+	aged, freed := tf.AgeOut(5+FileChainRetentionTurns-1, now)
+	if len(aged) != 0 {
+		t.Errorf("aged = %v, want none (under both thresholds)", aged)
+	}
+	if freed != 0 {
+		t.Errorf("bytesFreed = %d, want 0", freed)
+	}
+	e, _ := tf.Entry("f.txt")
+	if e.Chain.Len() != 1 {
+		t.Errorf("chain dropped while under thresholds: Len = %d, want 1", e.Chain.Len())
+	}
+}
+
+func TestAgeOutUncommittedNeverAges(t *testing.T) {
+	tf := ThreadFiles{ThreadID: "thr_age", Files: map[string]*FileEntry{}}
+	tf.RecordWrite("f.txt", "uncommitted")
+	// Far past both thresholds — but the entry was never committed.
+	now := ageOutCommitTime.AddDate(1, 0, 0)
+	aged, freed := tf.AgeOut(100000, now)
+	if len(aged) != 0 || freed != 0 {
+		t.Errorf("uncommitted entry aged: aged=%v freed=%d", aged, freed)
+	}
+	e, _ := tf.Entry("f.txt")
+	if e.Chain.Len() != 1 {
+		t.Errorf("uncommitted chain dropped: Len = %d, want 1", e.Chain.Len())
+	}
+}
+
+func TestAgeOutCorruptCommittedAtSkipped(t *testing.T) {
+	tf := newCommittedEntry(t, "content", 5)
+	e, _ := tf.Entry("f.txt")
+	e.CommittedAt = "not-a-timestamp"
+	// The day threshold cannot be evaluated; the turn delta is below
+	// threshold, so the corrupt entry must be skipped, not dropped.
+	now := ageOutCommitTime.AddDate(0, 0, 365)
+	aged, freed := tf.AgeOut(6, now)
+	if len(aged) != 0 || freed != 0 {
+		t.Errorf("corrupt-timestamp entry aged via day path: aged=%v freed=%d", aged, freed)
+	}
+	if e.Chain.Len() != 1 {
+		t.Errorf("corrupt-timestamp chain dropped: Len = %d, want 1", e.Chain.Len())
+	}
+	// The turn threshold still works independently of the timestamp.
+	aged, _ = tf.AgeOut(5+FileChainRetentionTurns, now)
+	if len(aged) != 1 {
+		t.Errorf("turn-threshold aging blocked by corrupt timestamp: aged=%v", aged)
+	}
+}
+
+func TestAgeOutKeepsHash(t *testing.T) {
+	tf := newCommittedEntry(t, "content", 5)
+	aged, _ := tf.AgeOut(5+FileChainRetentionTurns, ageOutCommitTime)
+	if len(aged) != 1 {
+		t.Fatalf("entry did not age: %v", aged)
+	}
+	e, _ := tf.Entry("f.txt")
+	if e.LastCommit != "hash-abc" {
+		t.Errorf("LastCommit = %q, want hash-abc (recovery pointer must survive)", e.LastCommit)
+	}
+	if e.CommittedAt != ageOutCommitTime.Format(time.RFC3339) {
+		t.Errorf("CommittedAt = %q, want preserved", e.CommittedAt)
+	}
+	if e.CommittedTurn != 5 {
+		t.Errorf("CommittedTurn = %d, want 5 (preserved)", e.CommittedTurn)
+	}
+	if e.Path != "f.txt" {
+		t.Errorf("Path = %q, want f.txt (preserved)", e.Path)
 	}
 }

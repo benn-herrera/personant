@@ -685,6 +685,19 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 		applyFileEdits(ctx, state, engaged[0])
 	}
 
+	// §3.9 git-minimization: age out committed-file reverse-delta chains
+	// on every engaged thread. This runs regardless of whether this turn
+	// touched any file — a long-committed chain on a thread engaged only
+	// for conversation must still age. A non-empty agedPaths result is
+	// expected; an error is non-fatal (logged, consistent with the other
+	// close-time substrate calls).
+	for _, id := range engaged {
+		if _, _, err := state.Ops.AgeFileChains(ctx, id, state.TurnNumber); err != nil {
+			_ = state.Ops.Log(ctx, "dedup", "error",
+				"thr="+id+" chain-age "+sanitizeDetail(err.Error()))
+		}
+	}
+
 	updateLayerLRU(state, engaged)
 
 	engagedSet := make(map[string]struct{}, len(engaged))
@@ -714,7 +727,7 @@ func applyFileEdits(ctx context.Context, state *State, threadID string) {
 					"thr="+threadID+" path="+fe.path+" err="+sanitizeDetail(err.Error()))
 			}
 		case fileEditCommit:
-			if err := state.Ops.RecordFileCommit(ctx, threadID, fe.path, fe.hash); err != nil {
+			if err := state.Ops.RecordFileCommit(ctx, threadID, fe.path, fe.hash, state.TurnNumber); err != nil {
 				_ = state.Ops.Log(ctx, "fs", "commit-untracked",
 					"thr="+threadID+" path="+fe.path+" err="+sanitizeDetail(err.Error()))
 			}

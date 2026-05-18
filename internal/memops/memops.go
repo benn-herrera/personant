@@ -304,15 +304,29 @@ type MemoryOps interface {
 
 	// RecordFileCommit records a git-commit pointer for a tracked file in
 	// the per-thread §3.9 file store: it loads the sidecar, sets the
-	// commit hash + timestamp on the path's entry, and saves it. The
-	// adapter stamps the commit timestamp itself (clock.Timeline()) — the
-	// port carries no timestamp. Folds in store.LoadThreadFiles +
+	// commit hash + timestamp + turn number on the path's entry, and saves
+	// it. The adapter stamps the commit timestamp itself (clock.Timeline())
+	// — the port carries no timestamp; `committedTurn` is the turn at which
+	// the commit happened and feeds the turn-count side of the §3.9
+	// git-minimization retention window. Folds in store.LoadThreadFiles +
 	// ThreadFiles.RecordCommit + store.SaveThreadFiles.
 	//
 	// Returns an error when `path` is not tracked (a file the store has
 	// never seen a write for cannot be committed); callers treat that as
 	// non-fatal.
-	RecordFileCommit(ctx context.Context, threadID, path, hash string) error
+	RecordFileCommit(ctx context.Context, threadID, path, hash string, committedTurn int) error
+
+	// AgeFileChains applies the §3.9 git-minimization policy to threadID's
+	// tracked-file store: a committed file's reverse-delta chain — which is
+	// pure duplication of what the project git repo holds at the commit
+	// hash — is dropped once a retention window has elapsed, leaving only
+	// the hash as a recovery pointer. Folds in store.LoadThreadFiles +
+	// ThreadFiles.AgeOut + store.SaveThreadFiles.
+	//
+	// A thread with no tracked-file sidecar is a no-op: (nil, 0, nil) with
+	// no sidecar written. Returns the sorted aged paths and total bytes
+	// freed (demand-sizing forensic data, also written to the event log).
+	AgeFileChains(ctx context.Context, threadID string, currentTurn int) (agedPaths []string, bytesFreed int, err error)
 
 	// ---------- Bootstrap and verification ----------
 
