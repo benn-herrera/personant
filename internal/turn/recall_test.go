@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -232,6 +233,123 @@ func TestRunNoRecallWhenNoSymbols(t *testing.T) {
 		}
 		if strings.Contains(string(data), "spine.match-fire") {
 			t.Errorf("unexpected spine.match-fire entry:\n%s", string(data))
+		}
+	}
+}
+
+// TestSurfaceRecall_AcceptPromotesToLayerB — with a resolver installed,
+// accepting exactly one of two offered candidates promotes that thread
+// into Layer B (ActiveThreads) and leaves the declined one out. Proves
+// the accept branch of applyRecallResolution wires through to
+// promoteToLayerB and that the offer is logged with its candidate count.
+func TestSurfaceRecall_AcceptPromotesToLayerB(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
+	seedThreadWithAnchors(t, paths, meta.ID, "thr_2", []string{"alpha", "beta", "zeta", "eta"})
+
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, model.NewScriptedMock(nil, nil))
+	state.coalesce.addSymbol("alpha", "alpha", store.SourceUser)
+	state.coalesce.addSymbol("beta", "beta", store.SourceUser)
+
+	// Accept only the candidate whose ThreadID is thr_1 — its index in
+	// offer.Candidates is not assumed, it is located by scanning.
+	state.RecallResolver = func(_ context.Context, offer RecallOffer) (RecallResolution, error) {
+		for i, c := range offer.Candidates {
+			if c.ThreadID == "thr_1" {
+				return RecallResolution{Accept: []int{i}, Reason: DeclineNotRelevant}, nil
+			}
+		}
+		t.Errorf("thr_1 not present in offer.Candidates: %v", offer.Candidates)
+		return RecallResolution{Reason: DeclineNotRelevant}, nil
+	}
+
+	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}); err != nil {
+		t.Fatalf("surfaceRecallCandidates: %v", err)
+	}
+
+	if !slices.Contains(state.ActiveThreads, "thr_1") {
+		t.Errorf("thr_1 accepted but not in ActiveThreads: %v", state.ActiveThreads)
+	}
+	if slices.Contains(state.ActiveThreads, "thr_2") {
+		t.Errorf("thr_2 declined but present in ActiveThreads: %v", state.ActiveThreads)
+	}
+
+	logBody := readDayLog(t, paths)
+	for _, want := range []string{
+		"recall.offer count=2",
+		"recall.accept thr=thr_1",
+		"recall.decline thr=thr_2",
+	} {
+		if !strings.Contains(logBody, want) {
+			t.Errorf("log missing %q\nlog body:\n%s", want, logBody)
+		}
+	}
+}
+
+// TestSurfaceRecall_DeclineAllLogsReason — a resolver that accepts
+// nothing declines every offered candidate, each decline carrying the
+// resolution's Reason. Proves Layer B is untouched on a full decline
+// and that the supplied DeclineReason is recorded verbatim.
+func TestSurfaceRecall_DeclineAllLogsReason(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
+	seedThreadWithAnchors(t, paths, meta.ID, "thr_2", []string{"alpha", "beta", "zeta", "eta"})
+
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, model.NewScriptedMock(nil, nil))
+	state.coalesce.addSymbol("alpha", "alpha", store.SourceUser)
+	state.coalesce.addSymbol("beta", "beta", store.SourceUser)
+
+	state.RecallResolver = func(_ context.Context, _ RecallOffer) (RecallResolution, error) {
+		return RecallResolution{Reason: DeclineWrongProject}, nil
+	}
+
+	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}); err != nil {
+		t.Fatalf("surfaceRecallCandidates: %v", err)
+	}
+
+	if len(state.ActiveThreads) != 0 {
+		t.Errorf("nothing accepted but ActiveThreads non-empty: %v", state.ActiveThreads)
+	}
+
+	logBody := readDayLog(t, paths)
+	for _, want := range []string{
+		"recall.decline thr=thr_1 reason=wrong-project",
+		"recall.decline thr=thr_2 reason=wrong-project",
+	} {
+		if !strings.Contains(logBody, want) {
+			t.Errorf("log missing %q\nlog body:\n%s", want, logBody)
+		}
+	}
+	if strings.Contains(logBody, "recall.accept") {
+		t.Errorf("no candidate accepted but recall.accept logged:\n%s", logBody)
+	}
+}
+
+// TestSurfaceRecall_NoResolverStaysLogOnly — with no RecallResolver
+// installed, recall still runs and logs its per-layer matches, but no
+// offer is surfaced and no accept/decline verdict is recorded. Proves
+// the nil-resolver path is purely observational.
+func TestSurfaceRecall_NoResolverStaysLogOnly(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
+	seedThreadWithAnchors(t, paths, meta.ID, "thr_2", []string{"alpha", "beta", "zeta", "eta"})
+
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, model.NewScriptedMock(nil, nil))
+	state.coalesce.addSymbol("alpha", "alpha", store.SourceUser)
+	state.coalesce.addSymbol("beta", "beta", store.SourceUser)
+	// RecallResolver deliberately left nil.
+
+	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}); err != nil {
+		t.Fatalf("surfaceRecallCandidates: %v", err)
+	}
+
+	logBody := readDayLog(t, paths)
+	if !strings.Contains(logBody, "spine.match-fire") {
+		t.Errorf("recall expected to run and log match-fire:\n%s", logBody)
+	}
+	for _, unwanted := range []string{"recall.offer", "recall.accept", "recall.decline"} {
+		if strings.Contains(logBody, unwanted) {
+			t.Errorf("nil resolver should stay log-only but log contains %q:\n%s", unwanted, logBody)
 		}
 	}
 }

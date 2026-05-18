@@ -85,6 +85,23 @@ type Step struct {
 	// RecallMeasureOnly records the metrics without failing. Ignored
 	// when ExpectedRecallMatches is nil.
 	RecallMode RecallFidelityMode
+
+	// RecallAck scripts how this step resolves a recall offer surfaced
+	// at turn close (Part B). AcceptThreadIDs lists the thread IDs to
+	// accept (pull into Layer B); any offered candidate not listed is
+	// declined with Reason. A nil RecallAck means the step installs no
+	// resolver — recall stays log-only (the pre-Part-B behavior).
+	RecallAck *RecallAck
+}
+
+// RecallAck scripts how a step resolves a recall offer surfaced at
+// turn close (Part B). AcceptThreadIDs lists the thread IDs to
+// accept (pull into Layer B); any offered candidate not listed is
+// declined with Reason. A nil RecallAck means the step installs no
+// resolver — recall stays log-only (the pre-Part-B behavior).
+type RecallAck struct {
+	AcceptThreadIDs []string
+	Reason          turn.DeclineReason
 }
 
 // RecallFidelityMode selects how a Step's ExpectedRecallMatches is
@@ -339,6 +356,8 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) {
 		t.Fatalf("scenario step %d (%s): matchFireCounts (pre): %v", idx+1, label, err)
 	}
 
+	h.State.RecallResolver = recallResolverFor(t, idx, label, step.RecallAck)
+
 	start := time.Now()
 	body, err := turn.RunWithDeltas(context.Background(), h.State, step.PreEvents, step.UserInput, io.Discard)
 	elapsed := time.Since(start)
@@ -382,6 +401,41 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) {
 		invs = DefaultInvariants
 	}
 	runInvariants(t, h, invs, label)
+}
+
+// recallResolverFor builds a turn.RecallResolver from a step's scripted
+// RecallAck. A nil ack yields a nil resolver — recall stays log-only.
+// Otherwise the resolver accepts every offered candidate whose ThreadID
+// is in ack.AcceptThreadIDs and fails the test if a wanted ID never
+// appeared in the offer (a stale or mis-specified scenario).
+func recallResolverFor(t *testing.T, idx int, label string, ack *RecallAck) turn.RecallResolver {
+	if ack == nil {
+		return nil
+	}
+	return func(_ context.Context, offer turn.RecallOffer) (turn.RecallResolution, error) {
+		want := make(map[string]bool, len(ack.AcceptThreadIDs))
+		for _, id := range ack.AcceptThreadIDs {
+			want[id] = false // false = not yet seen in the offer
+		}
+		var accept []int
+		for i, c := range offer.Candidates {
+			if _, ok := want[c.ThreadID]; ok {
+				accept = append(accept, i)
+				want[c.ThreadID] = true
+			}
+		}
+		for id, seen := range want {
+			if !seen {
+				t.Errorf("scenario step %d (%s): RecallAck accepts %s but it was not in the recall offer",
+					idx+1, label, id)
+			}
+		}
+		reason := ack.Reason
+		if reason == "" {
+			reason = turn.DeclineNotRelevant
+		}
+		return turn.RecallResolution{Accept: accept, Reason: reason}, nil
+	}
 }
 
 // runInvariants executes every check, calling t.Errorf on failure.

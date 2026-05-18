@@ -8,11 +8,53 @@ import (
 	"personant/internal/recall"
 )
 
-// surfaceRecallCandidates runs the §3.4 recall stack for this turn and
-// logs the matches. v0.1 only logs; there is no UI surface and no
-// SpineRecord.RecallFires increment (that field reserves "matches that
-// resulted in fetch" per §2.2; until a UI surface lands a match isn't
-// a fetch).
+// recallOfferK is the number of recall candidates surfaced to the user
+// at turn close. C.6 measured top-1 recall ~73%, top-3 ~92%; surface
+// the top 3 and let the user pick rather than forcing a single-candidate
+// guess.
+const recallOfferK = 3
+
+// DeclineReason is the fixed-enum reason captured when a recall
+// candidate is not accepted. Deliberately small for v0.1.
+type DeclineReason string
+
+const (
+	DeclineNotRelevant  DeclineReason = "not-relevant"
+	DeclineWrongProject DeclineReason = "wrong-project"
+	DeclineAlreadyKnown DeclineReason = "already-known"
+)
+
+// RecallOffer is the set of recall candidates surfaced at turn close,
+// ranked best-first and capped at recallOfferK. Indexes into Candidates
+// are stable for a RecallResolution to reference.
+type RecallOffer struct {
+	Candidates []recall.Result
+}
+
+// RecallResolution is the user's (or scripted harness's) verdict on a
+// RecallOffer. Accept holds indexes into RecallOffer.Candidates of
+// threads to pull into Layer B; any candidate not in Accept is declined,
+// and Reason is recorded against the declined remainder.
+type RecallResolution struct {
+	Accept []int
+	Reason DeclineReason
+}
+
+// RecallResolver is the seam between the recall stack and the
+// experience layer. The chat REPL implements it interactively; the
+// scenario harness implements it from a pre-declared script. A nil
+// resolver on State means recall stays log-only — no offer surfaced.
+type RecallResolver func(ctx context.Context, offer RecallOffer) (RecallResolution, error)
+
+// surfaceRecallCandidates runs the §3.4 recall stack for this turn,
+// logs the per-layer matches, and — when a RecallResolver is installed
+// — surfaces the top recallOfferK candidates as an offer the caller
+// resolves into accept/decline decisions. With no resolver it stays
+// log-only (the harness default for unmeasured steps).
+//
+// SpineRecord.RecallFires is still not incremented on accept; that
+// field reserves "matches that resulted in fetch" per §2.2 and wiring
+// the counter through the spine write is a deferred follow-up.
 //
 // Recall runs entirely behind the recall.Recaller interface — this
 // function knows nothing of symbolic Jaccard, embedding cosine, or the
@@ -57,6 +99,51 @@ func surfaceRecallCandidates(ctx context.Context, state *State, userInput string
 			if err := state.Ops.Log(ctx, "spine", "embed-match-fire", details); err != nil {
 				return fmt.Errorf("log spine.embed-match-fire: %w", err)
 			}
+		}
+	}
+
+	if state.RecallResolver == nil || len(results) == 0 {
+		return nil
+	}
+	offer := RecallOffer{Candidates: results[:min(len(results), recallOfferK)]}
+	if err := state.Ops.Log(ctx, "recall", "offer", fmt.Sprintf("count=%d", len(offer.Candidates))); err != nil {
+		return fmt.Errorf("log recall.offer: %w", err)
+	}
+	resolution, err := state.RecallResolver(ctx, offer)
+	if err != nil {
+		return fmt.Errorf("recall: resolve offer: %w", err)
+	}
+	return applyRecallResolution(ctx, state, offer, resolution)
+}
+
+// applyRecallResolution pulls accepted candidates into Layer B and logs
+// an accept/decline verdict against every offered candidate. Declined
+// candidates carry res.Reason (defaulting to DeclineNotRelevant when
+// empty).
+func applyRecallResolution(ctx context.Context, state *State, offer RecallOffer, res RecallResolution) error {
+	accepted := make(map[int]bool, len(res.Accept))
+	for _, i := range res.Accept {
+		if i < 0 || i >= len(offer.Candidates) {
+			return fmt.Errorf("recall: resolution accept index %d out of range [0,%d)", i, len(offer.Candidates))
+		}
+		accepted[i] = true
+	}
+	for i, c := range offer.Candidates {
+		if accepted[i] {
+			promoteToLayerB(state, c.ThreadID)
+			if err := state.Ops.Log(ctx, "recall", "accept",
+				fmt.Sprintf("thr=%s layers=%s", c.ThreadID, strings.Join(c.Layers(), "+"))); err != nil {
+				return fmt.Errorf("log recall.accept: %w", err)
+			}
+			continue
+		}
+		reason := res.Reason
+		if reason == "" {
+			reason = DeclineNotRelevant
+		}
+		if err := state.Ops.Log(ctx, "recall", "decline",
+			fmt.Sprintf("thr=%s reason=%s", c.ThreadID, reason)); err != nil {
+			return fmt.Errorf("log recall.decline: %w", err)
 		}
 	}
 	return nil

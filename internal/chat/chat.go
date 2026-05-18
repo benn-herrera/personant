@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -201,6 +202,10 @@ func Run(opts Options) error {
 		fmt.Fprintf(opts.Stderr, "warn: embedding recall unavailable: %v\n", err)
 		state.Recaller = recall.NewService(ops, nil)
 	}
+
+	// §3.4 recall UI surface (Part B): install an interactive resolver
+	// so recalled threads can be pulled into Layer B at turn close.
+	state.RecallResolver = interactiveRecallResolver(in, opts.Stdout)
 
 	banner := opts.Banner
 	if banner == "" {
@@ -588,4 +593,75 @@ func readLine(r *bufio.Reader) (string, error) {
 		return "", err
 	}
 	return strings.TrimRight(s, "\r\n"), nil
+}
+
+// interactiveRecallResolver returns a turn.RecallResolver that surfaces
+// the §3.4 recall offer at the prompt and reads the user's accept /
+// decline decision. Kept deliberately small — U/X polish is deferred.
+func interactiveRecallResolver(in *bufio.Reader, out io.Writer) turn.RecallResolver {
+	return func(_ context.Context, offer turn.RecallOffer) (turn.RecallResolution, error) {
+		fmt.Fprintln(out, "recalled threads related to this turn:")
+		for i, c := range offer.Candidates {
+			fmt.Fprintf(out, "  [%d] %s  score=%.2f  (%s)\n",
+				i+1, c.ThreadID, c.Score, strings.Join(c.Layers(), "+"))
+		}
+		fmt.Fprint(out, "accept which? [numbers / a=all / n=none]: ")
+		ans, err := readLine(in)
+		if errors.Is(err, io.EOF) {
+			// Session is ending — decline all, no error.
+			return turn.RecallResolution{}, nil
+		}
+		if err != nil {
+			return turn.RecallResolution{}, err
+		}
+
+		var accept []int
+		switch trimmed := strings.ToLower(strings.TrimSpace(ans)); trimmed {
+		case "", "n":
+			// accept nothing
+		case "a":
+			for i := range offer.Candidates {
+				accept = append(accept, i)
+			}
+		default:
+			for _, tok := range strings.Fields(trimmed) {
+				n, perr := strconv.Atoi(tok)
+				if perr != nil || n < 1 || n > len(offer.Candidates) {
+					fmt.Fprintf(out, "ignoring %q\n", tok)
+					continue
+				}
+				accept = append(accept, n-1)
+			}
+		}
+
+		reason := turn.DeclineNotRelevant
+		if len(accept) < len(offer.Candidates) {
+			fmt.Fprint(out, "decline reason [not-relevant / wrong-project / already-known] (default not-relevant): ")
+			rans, rerr := readLine(in)
+			if rerr == nil {
+				if r, ok := matchDeclineReason(rans); ok {
+					reason = r
+				}
+			}
+		}
+		return turn.RecallResolution{Accept: accept, Reason: reason}, nil
+	}
+}
+
+// matchDeclineReason resolves a user-typed token to a turn.DeclineReason
+// by case-insensitive prefix match. Returns ok=false on empty input or
+// no match (the caller defaults to not-relevant).
+func matchDeclineReason(s string) (turn.DeclineReason, bool) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return "", false
+	}
+	for _, r := range []turn.DeclineReason{
+		turn.DeclineNotRelevant, turn.DeclineWrongProject, turn.DeclineAlreadyKnown,
+	} {
+		if strings.HasPrefix(string(r), s) {
+			return r, true
+		}
+	}
+	return "", false
 }

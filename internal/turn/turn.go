@@ -38,6 +38,12 @@ type State struct {
 	// internals are insulated behind it.
 	Recaller recall.Recaller
 
+	// RecallResolver resolves the §3.4 recall offer surfaced at turn
+	// close into accept/decline decisions. nil → recall stays log-only
+	// (no offer surfaced). The chat REPL installs an interactive
+	// resolver; the scenario harness installs a scripted one.
+	RecallResolver RecallResolver
+
 	// Model overrides the provider's DefaultModel when non-empty.
 	Model string
 
@@ -528,7 +534,16 @@ func fetchThreadForReprompt(ctx context.Context, state *State, thrID string) boo
 		return false
 	}
 
-	// Promote into ActiveThreads at the front; demote tail on overflow.
+	promoteToLayerB(state, thrID)
+	return true
+}
+
+// promoteToLayerB promotes thrID into state.ActiveThreads at the front
+// (de-duped, capped by Budget.BTopK), demoting the displaced tail to the
+// head of state.DormantThreads and capping that slice at
+// dormantThreadsCap. Used by the §5.5 mid-turn fetch and by the §3.4
+// recall-accept path (Part B).
+func promoteToLayerB(state *State, thrID string) {
 	bTopK := state.Budget.BTopK
 	if bTopK <= 0 {
 		bTopK = workset.DefaultBTopK
@@ -544,7 +559,6 @@ func fetchThreadForReprompt(ctx context.Context, state *State, thrID string) boo
 	if len(state.DormantThreads) > dormantThreadsCap {
 		state.DormantThreads = state.DormantThreads[:dormantThreadsCap]
 	}
-	return true
 }
 
 // historyCapPerThread is the v0.1 default for `history.cap-per-thread`
