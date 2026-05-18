@@ -46,16 +46,21 @@ func SetTimeline(fn func() time.Time) (restore func()) {
 	return func() { timelineFn = prev }
 }
 
+// ensure that time.Time can't casually/accidentally be used in Since()
+type ProfilingTime struct {
+	t time.Time
+}
+
 // Profiling returns the real wall-clock time. It is never overridable;
 // use it for latency measurement and for timestamps that must stay
 // real-world even while a simulation has overridden Timeline.
-func Profiling() time.Time {
-	return time.Now()
+func Profiling() ProfilingTime {
+	return ProfilingTime{t:time.Now()}
 }
 
 // Since reports the real-clock duration elapsed since t. It is the
 // elapsed-measurement helper, provided here so that banning time.Since
 // elsewhere has no backdoor.
-func Since(t time.Time) time.Duration {
-	return time.Since(t)
+func Since(t ProfilingTime) time.Duration {
+	return time.Since(t.t)
 }
