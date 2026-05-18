@@ -283,7 +283,7 @@ The ack is the **integrity gate** at the highest-leverage moment. The user catch
 
 Triggers:
 
-- Auto-prompt when no engagement for `engagement.decay-turns` AND `engagement.decay-time` wall-clock.
+- Auto-prompt when no engagement for `engagement.decay-turns` OR `engagement.decay-time` wall-clock (either threshold; OR semantics).
 - Explicit `/done` from the user.
 
 Flow: curator drafts retirement summary + anchor symbol set → user acks (single keystroke), edits, or defers → on ack, thread file written, spine entry generated, Layer B/C eviction follows. (Spec §3.5.)
@@ -317,6 +317,16 @@ Behavior tuning lives in inspectable directive files that accrue from feedback s
 - `directives/prj_<n>/*.md` — project-specific tuning.
 
 The directives are *text files*. Inspectable, editable by hand, portable, version-controlled. **This is the property that elevates the system from "smart assistant" to "real research partner": the agent learns how the user works, *and the user can read what it learned and correct it*.** (Spec §2.6.)
+
+### Memory consolidation — the "sleep" cycle (future consideration)
+
+Personant's memory layering is deliberately analogous to organic memory: **working short-term** (the live working set), **consolidated long-term** (the spine + thread bodies, mostly read), **archival deep memory** (off-spine, rarely touched), and a **metadata layer** for operating on active context fast — tapping long-term memory read-only, *activating* it read/write, or unpacking archival entries.
+
+Under sustained working use this organization fragments unavoidably: threads close out of order, the spine accretes, derived structures and archival boundaries drift from their ideal packing. In-turn maintenance keeps the substrate *correct* but not *orderly*.
+
+The intended remedy is an offline **consolidation cycle** — the system's equivalent of organic sleep. During idle time (the day off, or any unused window) the runtime would run larger-scale reorganization it cannot afford mid-turn: re-packing fragmented structures into orderly arrangements, compacting the spine, advancing archival, and making the final keep/toss calls on data the faster in-turn transient-data lifecycle (§3.0) left questionable. Working hours stay responsive; the heavy reorganization happens when nothing is waiting on it.
+
+This is a future consideration, not v0.1 — but the v0.1 six-month simulation already supplies the hook: the day-off is a real idle window in the workload model, and closure (§3.5) / archival (§3.8) are exactly the mechanisms a consolidation pass would tidy.
 
 ---
 
@@ -426,6 +436,7 @@ These are not "v0.2 / v0.3" — they are role-bounded.
 - Phrasal-concept symbol extraction (v0.2)
 - Computational research workflow — Python only (v1.0; *not* polyglot)
 - Deep cold archival via git (v0.2)
+- Offline memory-consolidation cycle — the "sleep" cycle (future; see Mechanisms)
 - Working-set content dedup (v0.2)
 - REPL line editing + history (v0.1 polish)
 - Shell escape (`$`/`#`) implementation with long-lived `$SHELL -i` subprocess (v0.1 polish; PTY mode-handoff for nested apps held until empirical pressure)
