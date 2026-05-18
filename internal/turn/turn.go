@@ -17,7 +17,6 @@ import (
 	"personant/internal/model"
 	"personant/internal/prompt"
 	"personant/internal/recall"
-	"personant/internal/store"
 	"personant/internal/workset"
 )
 
@@ -26,8 +25,8 @@ import (
 // the start of every Run.
 type State struct {
 	Ops           memops.MemoryOps
-	ActiveProject store.ProjectMeta
-	Provider      store.Provider
+	ActiveProject memops.ProjectMeta
+	Provider      memops.Provider
 	Client        model.Client
 
 	// Recaller is the §3.4 recall stack (recall.Recaller). NewState
@@ -110,7 +109,7 @@ const dormantThreadsCap = 20
 // NewState constructs a State for a chat session. The coalesce buffer
 // is initialized empty; Client must be non-nil (the chat REPL passes
 // either an HTTPClient or a MockClient, never nil).
-func NewState(ops memops.MemoryOps, project store.ProjectMeta, provider store.Provider, client model.Client) *State {
+func NewState(ops memops.MemoryOps, project memops.ProjectMeta, provider memops.Provider, client model.Client) *State {
 	return &State{
 		Ops:           ops,
 		ActiveProject: project,
@@ -418,10 +417,10 @@ func streamThroughFilter(sr model.StreamReader, filter io.Writer) error {
 // readPreamble + classifyPreamble are split so the unit tests can
 // exercise the classification in isolation from the StreamReader pump.
 type preambleResult struct {
-	head  []byte         // first line up to and including its trailing \n
-	tail  []byte         // bytes after that \n in the chunk that contained it
+	head  []byte           // first line up to and including its trailing \n
+	tail  []byte           // bytes after that \n in the chunk that contained it
 	tag   *prompt.TopicTag // non-nil iff head parsed as a §5.1.2 topic tag
-	ended bool           // true when EOF arrived before any \n
+	ended bool             // true when EOF arrived before any \n
 }
 
 // readPreamble loops over chunks from sr until either the first newline
@@ -803,7 +802,7 @@ func createNewThread(ctx context.Context, state *State, userInput, responseBody,
 		Project:      state.ActiveProject.ID,
 		Anchors:      anchors,
 		Summary:      summary,
-		State:        store.ThreadWIP,
+		State:        memops.ThreadWIP,
 		Created:      now,
 		LastEngaged:  now,
 		StateChanged: now,
@@ -815,7 +814,7 @@ func createNewThread(ctx context.Context, state *State, userInput, responseBody,
 		Project:        rec.Project,
 		Anchors:        append([]string(nil), anchors...),
 		Summary:        summary,
-		State:          store.ThreadWIP,
+		State:          memops.ThreadWIP,
 		Created:        now,
 		LastEngaged:    now,
 		StateChanged:   now,
@@ -842,7 +841,7 @@ func createNewThread(ctx context.Context, state *State, userInput, responseBody,
 // ThreadFrontmatter is a local alias to avoid a long-form type literal in
 // the createNewThread frontmatter construction. Kept at package scope so
 // the literal in the function body reads naturally.
-type ThreadFrontmatter = store.ThreadFrontmatter
+type ThreadFrontmatter = memops.ThreadFrontmatter
 
 // memopsBudgetFromWorkset projects the local workset.Budget value onto the
 // memops.Budget shape carried across the port. Field-for-field identical;
@@ -865,7 +864,7 @@ func memopsBudgetFromWorkset(b workset.Budget) memops.Budget {
 // a SpineRecord. Used when a thread's on-disk file is missing while its
 // spine entry persists — the engagement update synthesizes a fresh file
 // rather than failing the turn.
-func frontmatterFromSpine(rec store.SpineRecord) ThreadFrontmatter {
+func frontmatterFromSpine(rec memops.SpineRecord) ThreadFrontmatter {
 	return ThreadFrontmatter{
 		ID:           rec.ID,
 		Project:      rec.Project,
@@ -894,10 +893,10 @@ func frontmatterFromSpine(rec store.SpineRecord) ThreadFrontmatter {
 // Spec §2.3 OPEN flags the precise weight formula as deferred to v0.1.1;
 // v0.1 uses count alone. Order of return is stable: existing entries
 // retain insertion order, new entries append in the input order.
-func mergeHistorySymbols(existing []store.HistorySymbol, turnSymbols []coalescedSymbol, currentTurn int) []store.HistorySymbol {
+func mergeHistorySymbols(existing []memops.HistorySymbol, turnSymbols []coalescedSymbol, currentTurn int) []memops.HistorySymbol {
 	// Index existing by normalized for O(1) lookup.
 	idx := make(map[string]int, len(existing))
-	out := make([]store.HistorySymbol, len(existing))
+	out := make([]memops.HistorySymbol, len(existing))
 	copy(out, existing)
 	for i, h := range out {
 		idx[h.Normalized] = i
@@ -920,7 +919,7 @@ func mergeHistorySymbols(existing []store.HistorySymbol, turnSymbols []coalesced
 		if raw == "" {
 			raw = sym.Normalized
 		}
-		out = append(out, store.HistorySymbol{
+		out = append(out, memops.HistorySymbol{
 			Raw:           raw,
 			Normalized:    sym.Normalized,
 			FirstSeenTurn: currentTurn,
@@ -940,23 +939,23 @@ func mergeHistorySymbols(existing []store.HistorySymbol, turnSymbols []coalesced
 // coalesce path — same §2.7.3 precedence rule
 // (curator > user > model > deterministic), applied on cumulative
 // history when merging an incoming observation into an existing
-// HistorySymbol entry. Delegates to store.DominantSource so the rule
+// HistorySymbol entry. Delegates to memops.DominantSource so the rule
 // has exactly one definition site.
-func upgradeSource(existing, incoming store.SymbolSource) store.SymbolSource {
-	return store.DominantSource(existing, incoming)
+func upgradeSource(existing, incoming memops.SymbolSource) memops.SymbolSource {
+	return memops.DominantSource(existing, incoming)
 }
 
 // evictLowestWeight returns out with the lowest-cumulative-weight entries
 // removed until len == cap. Weight = count alone in v0.1; ties broken by
 // lowest first_seen_turn (evict oldest among lowest-count). Stable
 // ordering of the survivors is preserved.
-func evictLowestWeight(out []store.HistorySymbol, cap int) []store.HistorySymbol {
+func evictLowestWeight(out []memops.HistorySymbol, cap int) []memops.HistorySymbol {
 	if len(out) <= cap {
 		return out
 	}
 	type indexed struct {
 		idx int
-		ref *store.HistorySymbol
+		ref *memops.HistorySymbol
 	}
 	scored := make([]indexed, len(out))
 	for i := range out {
@@ -975,7 +974,7 @@ func evictLowestWeight(out []store.HistorySymbol, cap int) []store.HistorySymbol
 	for i := range cap {
 		keepIdx[scored[i].idx] = struct{}{}
 	}
-	survivors := make([]store.HistorySymbol, 0, cap)
+	survivors := make([]memops.HistorySymbol, 0, cap)
 	for i := range out {
 		if _, ok := keepIdx[i]; ok {
 			survivors = append(survivors, out[i])

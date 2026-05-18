@@ -375,4 +375,3 @@ func TestInitDoesNotBlankPopulatedCanonicalFiles(t *testing.T) {
 		t.Errorf("spine.jsonl was overwritten by re-init\nwant: %q\n got: %q", payload, got)
 	}
 }
-

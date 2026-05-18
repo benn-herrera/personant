@@ -22,6 +22,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"personant/internal/memops"
 	"personant/internal/prompt"
 	"personant/internal/store"
 )
@@ -34,7 +35,7 @@ import (
 // ordering it receives.
 type State struct {
 	Paths          store.PersonantPaths
-	ActiveProject  store.ProjectMeta
+	ActiveProject  memops.ProjectMeta
 	ActiveThreads  []string // Layer B membership; most-recently-engaged first
 	DormantThreads []string // Layer C membership; most-recently-engaged first
 	Budget         Budget
@@ -95,7 +96,7 @@ func Compose(state State, opts ComposeOptions) (prompt.SystemPromptElements, err
 // example in §2.2.2. An empty state field renders without the
 // trailing `[...]` so partially-populated records render visibly
 // rather than producing `... [ ]`.
-func RenderSpineDisplay(rec store.SpineRecord) string {
+func RenderSpineDisplay(rec memops.SpineRecord) string {
 	anchors := strings.Join(rec.Anchors, ", ")
 	if rec.State == "" {
 		return fmt.Sprintf("%s [%s] — %s", rec.ID, anchors, rec.Summary)
@@ -291,19 +292,19 @@ func renderLayerA2(state State, budget Budget, logf func(string, ...any)) string
 // loadDigest reads <Home>/projects/<id>/digest.json. A missing digest
 // is a warning, not an error — the project simply contributes no A2
 // line. ok=false signals "skip this project."
-func loadDigest(paths store.PersonantPaths, id string, logf func(string, ...any)) (store.ProjectDigest, bool) {
+func loadDigest(paths store.PersonantPaths, id string, logf func(string, ...any)) (memops.ProjectDigest, bool) {
 	digestPath := filepath.Join(paths.ProjectsDir, id, "digest.json")
 	data, err := os.ReadFile(digestPath)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			logf("workset: layer A2: read %s: %v", digestPath, err)
 		}
-		return store.ProjectDigest{}, false
+		return memops.ProjectDigest{}, false
 	}
-	var d store.ProjectDigest
+	var d memops.ProjectDigest
 	if err := json.Unmarshal(data, &d); err != nil {
 		logf("workset: layer A2: parse %s: %v", digestPath, err)
-		return store.ProjectDigest{}, false
+		return memops.ProjectDigest{}, false
 	}
 	return d, true
 }
@@ -311,7 +312,7 @@ func loadDigest(paths store.PersonantPaths, id string, logf func(string, ...any)
 // renderDigestLine produces the per-project A2 line:
 //
 //	<name> (<id>): <one_line_summary> :: <recent_anchors[:5]>
-func renderDigestLine(meta store.ProjectMeta, d store.ProjectDigest) string {
+func renderDigestLine(meta memops.ProjectMeta, d memops.ProjectDigest) string {
 	name := meta.Name
 	if name == "" {
 		name = d.DisplayName

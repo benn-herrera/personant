@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
 	"personant/internal/recall"
@@ -19,12 +20,12 @@ import (
 // seedThreadWithAnchors injects.
 func seedThreadWithBody(t *testing.T, paths store.PersonantPaths, project, thrID, body string) {
 	t.Helper()
-	rec := store.SpineRecord{
+	rec := memops.SpineRecord{
 		ID:           thrID,
 		Project:      project,
 		Anchors:      []string{thrID},
 		Summary:      thrID,
-		State:        store.ThreadActive,
+		State:        memops.ThreadActive,
 		Created:      "2026-04-01T00:00:00Z",
 		LastEngaged:  "2026-04-01T00:00:00Z",
 		StateChanged: "2026-04-01T00:00:00Z",
@@ -33,8 +34,8 @@ func seedThreadWithBody(t *testing.T, paths store.PersonantPaths, project, thrID
 	if err := store.AppendSpineRecord(paths, rec); err != nil {
 		t.Fatalf("seed spine %s: %v", thrID, err)
 	}
-	thr := store.Thread{
-		Frontmatter: store.ThreadFrontmatter{
+	thr := memops.Thread{
+		Frontmatter: memops.ThreadFrontmatter{
 			ID: rec.ID, Project: rec.Project, Anchors: rec.Anchors,
 			Summary: rec.Summary, State: rec.State, Created: rec.Created,
 			LastEngaged: rec.LastEngaged, StateChanged: rec.StateChanged,
@@ -49,10 +50,10 @@ func seedThreadWithBody(t *testing.T, paths store.PersonantPaths, project, thrID
 
 // embeddingState builds a turn State whose Recaller is embedding-enabled
 // (a recall.Service over a MockEmbedder), with its index prepared.
-func embeddingState(t *testing.T, paths store.PersonantPaths, meta store.ProjectMeta) *State {
+func embeddingState(t *testing.T, paths store.PersonantPaths, meta memops.ProjectMeta) *State {
 	t.Helper()
 	ops := fileadapter.NewFileAdapter(paths)
-	state := NewState(ops, meta, store.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(ops, meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
 	state.Recaller = recall.NewService(ops, model.NewMockEmbedder())
 	if err := state.Recaller.Prepare(context.Background()); err != nil {
 		t.Fatalf("Recaller.Prepare: %v", err)
@@ -94,7 +95,7 @@ func TestSurfaceRecall_NoEmbedder(t *testing.T) {
 	seedThreadWithBody(t, paths, meta.ID, "thr_1", "trefoil knot topology")
 	ops := fileadapter.NewFileAdapter(paths)
 
-	state := NewState(ops, meta, store.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(ops, meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
 	if err := surfaceRecallCandidates(context.Background(), state,
 		"trefoil knot topology", map[string]struct{}{}); err != nil {
 		t.Fatalf("surfaceRecallCandidates: %v", err)

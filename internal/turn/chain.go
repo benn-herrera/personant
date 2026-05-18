@@ -9,7 +9,6 @@ import (
 
 	"personant/internal/memops"
 	"personant/internal/prompt"
-	"personant/internal/store"
 )
 
 // Delta is one context-modification event (spec §3.0.1). Source is the
@@ -32,7 +31,7 @@ type Delta struct {
 
 // userTagRE matches user-emitted hash-tags in a prompt. The character
 // class deliberately excludes uppercase letters — the §2.7.2
-// normalization downcase happens via store.Normalize after extraction,
+// normalization downcase happens via memops.Normalize after extraction,
 // but the surface form for tag-class symbols is conventionally lower
 // already, so the regex stays narrow.
 //
@@ -121,8 +120,8 @@ func extractSymbols(ctx context.Context, state *State, delta Delta) error {
 	case "user.prompt":
 		for _, tag := range userTagRE.FindAllStringSubmatch(delta.Content, -1) {
 			raw := tag[1]
-			normalized := store.Normalize(raw, store.SymbolTag)
-			addExtractedSymbol(ctx, state, delta, raw, normalized, store.SourceUser)
+			normalized := memops.Normalize(raw, memops.SymbolTag)
+			addExtractedSymbol(ctx, state, delta, raw, normalized, memops.SourceUser)
 		}
 		return nil
 
@@ -141,7 +140,7 @@ func extractSymbols(ctx context.Context, state *State, delta Delta) error {
 			// prompt.Parse already normalizes anchors (§2.7.2 entity rules),
 			// so raw == normalized here. A future surface-form pass would
 			// thread the original through.
-			addExtractedSymbol(ctx, state, delta, a, a, store.SourceModel)
+			addExtractedSymbol(ctx, state, delta, a, a, memops.SourceModel)
 		}
 		for _, t := range result.Tag.Threads {
 			state.coalesce.addThread(t)

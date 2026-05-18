@@ -13,22 +13,23 @@
 // For each emitted SymbolRecord (spec §2.4):
 //
 //   - threads:         thread IDs whose anchors OR history_symbols include
-//                      this symbol (deduped union); sorted by descending
-//                      recall_fires of the referenced thread, lexical id
-//                      ties.
+//     this symbol (deduped union); sorted by descending
+//     recall_fires of the referenced thread, lexical id
+//     ties.
 //   - anchor_in:       subset of threads where the symbol is a curator-
-//                      selected anchor; same sort.
+//     selected anchor; same sort.
 //   - source_dominant: the highest-rank source observed across all
-//                      (thread, symbol) emissions, applying §2.7.3
-//                      (curator > user > model > deterministic). Anchors
-//                      contribute SourceCurator; history_symbols
-//                      contribute their stored Source.
+//     (thread, symbol) emissions, applying §2.7.3
+//     (curator > user > model > deterministic). Anchors
+//     contribute SourceCurator; history_symbols
+//     contribute their stored Source.
 package index
 
 import (
 	"fmt"
 	"sort"
 
+	"personant/internal/memops"
 	"personant/internal/store"
 )
 
@@ -45,7 +46,7 @@ import (
 // source seen across its history-symbol emissions. A symbol observed
 // only as an anchor appears with anchor_in == threads and
 // source_dominant == SourceCurator.
-func BuildSymbols(spine []store.SpineRecord, threads []store.ThreadFrontmatter) []store.SymbolRecord {
+func BuildSymbols(spine []memops.SpineRecord, threads []memops.ThreadFrontmatter) []store.SymbolRecord {
 	// recall_fires lookup for ordering threads within a SymbolRecord.
 	// Built from spine records (the canonical source for engagement
 	// counters); thread frontmatter mirrors the same value but spine is
@@ -62,7 +63,7 @@ func BuildSymbols(spine []store.SpineRecord, threads []store.ThreadFrontmatter) 
 	type bucket struct {
 		threads        map[string]struct{}
 		anchorIn       map[string]struct{}
-		sourceDominant store.SymbolSource
+		sourceDominant memops.SymbolSource
 	}
 	get := func(buckets map[string]*bucket, sym string) *bucket {
 		b, ok := buckets[sym]
@@ -86,7 +87,7 @@ func BuildSymbols(spine []store.SpineRecord, threads []store.ThreadFrontmatter) 
 			b := get(buckets, a)
 			b.threads[r.ID] = struct{}{}
 			b.anchorIn[r.ID] = struct{}{}
-			b.sourceDominant = store.DominantSource(b.sourceDominant, store.SourceCurator)
+			b.sourceDominant = memops.DominantSource(b.sourceDominant, memops.SourceCurator)
 		}
 	}
 
@@ -100,7 +101,7 @@ func BuildSymbols(spine []store.SpineRecord, threads []store.ThreadFrontmatter) 
 			}
 			b := get(buckets, h.Normalized)
 			b.threads[t.ID] = struct{}{}
-			b.sourceDominant = store.DominantSource(b.sourceDominant, h.Source)
+			b.sourceDominant = memops.DominantSource(b.sourceDominant, h.Source)
 		}
 	}
 

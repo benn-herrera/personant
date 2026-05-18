@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"personant/internal/store"
+	"personant/internal/memops"
 )
 
-func mkSpineEngaged(id, project, lastEngaged string, anchors ...string) store.SpineRecord {
-	return store.SpineRecord{
+func mkSpineEngaged(id, project, lastEngaged string, anchors ...string) memops.SpineRecord {
+	return memops.SpineRecord{
 		ID: id, Project: project, Anchors: anchors,
-		Summary: "s", State: store.ThreadActive,
+		Summary: "s", State: memops.ThreadActive,
 		Created: "2026-05-01T00:00:00Z", LastEngaged: lastEngaged, StateChanged: lastEngaged,
 		TurnCount: 1, RecallFires: 0,
 	}
@@ -40,7 +40,7 @@ func TestBuildDigestsEmptySpine(t *testing.T) {
 
 func TestBuildDigestsThreeThreadsOneProject(t *testing.T) {
 	dir := t.TempDir()
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		mkSpineEngaged("thr_1", "prj_1", "2026-05-01T00:00:00Z", "alpha", "beta"),
 		mkSpineEngaged("thr_2", "prj_1", "2026-05-02T00:00:00Z", "alpha", "gamma"),
 		mkSpineEngaged("thr_3", "prj_1", "2026-05-03T00:00:00Z", "alpha", "delta"),
@@ -77,7 +77,7 @@ func TestBuildDigestsThreeThreadsOneProject(t *testing.T) {
 
 func TestBuildDigestsOneLineSummaryTruncatedTo80(t *testing.T) {
 	// Ten anchors of length 20 each → joined ~218 chars; must truncate to ≤ 80.
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		mkSpineEngaged("thr_1", "prj_1", "2026-05-01T00:00:00Z",
 			"anchor-aaaaaaaaaaaaa", "anchor-bbbbbbbbbbbbb",
 			"anchor-ccccccccccccc", "anchor-ddddddddddddd",
@@ -96,7 +96,7 @@ func TestBuildDigestsOneLineSummaryTruncatedTo80(t *testing.T) {
 }
 
 func TestBuildDigestsMultipleProjects(t *testing.T) {
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		mkSpineEngaged("thr_1", "prj_1", "2026-05-01T00:00:00Z", "alpha"),
 		mkSpineEngaged("thr_2", "prj_2", "2026-05-02T00:00:00Z", "beta"),
 		mkSpineEngaged("thr_3", "prj_2", "2026-05-03T00:00:00Z", "gamma"),
@@ -115,7 +115,7 @@ func TestBuildDigestsMultipleProjects(t *testing.T) {
 
 func TestBuildDigestsPrjDefault(t *testing.T) {
 	dir := t.TempDir()
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		mkSpineEngaged("thr_1", "prj_default", "2026-05-01T00:00:00Z", "alpha"),
 	}
 	digests, err := BuildDigests(spine, dir, nil)
@@ -133,7 +133,7 @@ func TestBuildDigestsPrjDefault(t *testing.T) {
 
 func TestBuildDigestsMissingMetaWarnsAndFallsBack(t *testing.T) {
 	dir := t.TempDir()
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		mkSpineEngaged("thr_1", "prj_42", "2026-05-01T00:00:00Z", "alpha"),
 	}
 	warner, lines := captureWarnf()
@@ -156,12 +156,12 @@ func TestBuildDigestsReadsMetaName(t *testing.T) {
 	if err := os.MkdirAll(projectDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	meta := store.ProjectMeta{ID: "prj_3", Name: "ave-kb"}
+	meta := memops.ProjectMeta{ID: "prj_3", Name: "ave-kb"}
 	metaBytes, _ := json.Marshal(meta)
 	if err := os.WriteFile(filepath.Join(projectDir, "meta.json"), metaBytes, 0o644); err != nil {
 		t.Fatalf("write meta: %v", err)
 	}
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		mkSpineEngaged("thr_1", "prj_3", "2026-05-01T00:00:00Z", "alpha"),
 	}
 	digests, err := BuildDigests(spine, dir, nil)
@@ -175,7 +175,7 @@ func TestBuildDigestsReadsMetaName(t *testing.T) {
 
 func TestWriteDigestRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	digest := store.ProjectDigest{
+	digest := memops.ProjectDigest{
 		Project: "prj_1", DisplayName: "demo", ThreadCount: 2,
 		RecentAnchors: []string{"alpha", "beta"}, OneLineSummary: "alpha, beta", ByteSize: 0,
 	}
@@ -187,7 +187,7 @@ func TestWriteDigestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	var got store.ProjectDigest
+	var got memops.ProjectDigest
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}

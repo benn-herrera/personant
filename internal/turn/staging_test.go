@@ -90,7 +90,7 @@ func TestStagingBuffer_AddLookupRemove(t *testing.T) {
 	b.add(stagedSymbol{
 		Normalized: "foo.go",
 		Raw:        "foo.go",
-		Source:     store.SourceDeterministic,
+		Source:     memops.SourceDeterministic,
 		StagedAt:   1,
 	})
 	if b.len() != 1 {
@@ -123,8 +123,8 @@ func TestStagingBuffer_AddLookupRemove(t *testing.T) {
 
 func TestStagingBuffer_AddOverwritesAndRefreshes(t *testing.T) {
 	b := newStagingBuffer()
-	b.add(stagedSymbol{Normalized: "foo.go", Raw: "foo.go", Source: store.SourceDeterministic, StagedAt: 1})
-	b.add(stagedSymbol{Normalized: "foo.go", Raw: "foo.go", Source: store.SourceDeterministic, StagedAt: 5})
+	b.add(stagedSymbol{Normalized: "foo.go", Raw: "foo.go", Source: memops.SourceDeterministic, StagedAt: 1})
+	b.add(stagedSymbol{Normalized: "foo.go", Raw: "foo.go", Source: memops.SourceDeterministic, StagedAt: 5})
 
 	if b.len() != 1 {
 		t.Fatalf("len after re-add: got %d want 1", b.len())
@@ -140,9 +140,9 @@ func TestStagingBuffer_AddOverwritesAndRefreshes(t *testing.T) {
 
 func TestStagingBuffer_EvictBefore(t *testing.T) {
 	b := newStagingBuffer()
-	b.add(stagedSymbol{Normalized: "a", Raw: "a", Source: store.SourceDeterministic, StagedAt: 1})
-	b.add(stagedSymbol{Normalized: "b", Raw: "b", Source: store.SourceDeterministic, StagedAt: 3})
-	b.add(stagedSymbol{Normalized: "c", Raw: "c", Source: store.SourceDeterministic, StagedAt: 5})
+	b.add(stagedSymbol{Normalized: "a", Raw: "a", Source: memops.SourceDeterministic, StagedAt: 1})
+	b.add(stagedSymbol{Normalized: "b", Raw: "b", Source: memops.SourceDeterministic, StagedAt: 3})
+	b.add(stagedSymbol{Normalized: "c", Raw: "c", Source: memops.SourceDeterministic, StagedAt: 5})
 
 	n := b.evictBefore(4)
 	if n != 2 {
@@ -184,7 +184,7 @@ func newRecordingState(t *testing.T) (*State, *recordingAdapter) {
 	t.Helper()
 	paths, meta := newChainHome(t)
 	rec := &recordingAdapter{FileAdapter: fileadapter.NewFileAdapter(paths)}
-	state := NewState(rec, meta, store.Provider{}, nil)
+	state := NewState(rec, meta, memops.Provider{}, nil)
 	return state, rec
 }
 
@@ -261,8 +261,8 @@ func TestRouting_TaskClassSymbolsGoToStaging(t *testing.T) {
 			t.Errorf("staging missing %q; staging.len=%d", want, state.staging.len())
 			continue
 		}
-		if staged.Source != store.SourceDeterministic {
-			t.Errorf("staged %q Source: got %q want %q", want, staged.Source, store.SourceDeterministic)
+		if staged.Source != memops.SourceDeterministic {
+			t.Errorf("staged %q Source: got %q want %q", want, staged.Source, memops.SourceDeterministic)
 		}
 		if staged.StagedAt != state.TurnNumber {
 			t.Errorf("staged %q StagedAt: got %d want %d", want, staged.StagedAt, state.TurnNumber)
@@ -286,16 +286,16 @@ func TestRouting_DecisionClassSymbolsGoToCoalesce(t *testing.T) {
 	if !ok {
 		t.Fatalf("coalesce missing internal/foo.go; symbols=%v", state.coalesce.symbols)
 	}
-	if path.Source != store.SourceDeterministic {
-		t.Errorf("path Source: got %q want %q", path.Source, store.SourceDeterministic)
+	if path.Source != memops.SourceDeterministic {
+		t.Errorf("path Source: got %q want %q", path.Source, memops.SourceDeterministic)
 	}
 
 	tag, ok := state.coalesce.symbols["notes"]
 	if !ok {
 		t.Fatalf("coalesce missing #notes; symbols=%v", state.coalesce.symbols)
 	}
-	if tag.Source != store.SourceUser {
-		t.Errorf("tag Source: got %q want %q", tag.Source, store.SourceUser)
+	if tag.Source != memops.SourceUser {
+		t.Errorf("tag Source: got %q want %q", tag.Source, memops.SourceUser)
 	}
 
 	if state.staging.len() != 0 {
@@ -327,13 +327,13 @@ func TestRouting_MixedTurnIsolatesByClass(t *testing.T) {
 	}
 
 	// coalesce: decision-class arrivals.
-	wantCoalesce := map[string]store.SymbolSource{
-		"verify":           store.SourceUser,
-		"alpha":            store.SourceModel,
-		"beta":             store.SourceModel,
-		"gamma":            store.SourceModel,
-		"delta":            store.SourceModel,
-		"internal/bar.go":  store.SourceDeterministic,
+	wantCoalesce := map[string]memops.SymbolSource{
+		"verify":          memops.SourceUser,
+		"alpha":           memops.SourceModel,
+		"beta":            memops.SourceModel,
+		"gamma":           memops.SourceModel,
+		"delta":           memops.SourceModel,
+		"internal/bar.go": memops.SourceDeterministic,
 	}
 	for norm, wantSrc := range wantCoalesce {
 		sym, ok := state.coalesce.symbols[norm]
@@ -357,8 +357,8 @@ func TestRouting_MixedTurnIsolatesByClass(t *testing.T) {
 	if !ok {
 		t.Fatalf("staging missing internal/store/foo.go")
 	}
-	if staged.Source != store.SourceDeterministic {
-		t.Errorf("staged Source: got %q want %q", staged.Source, store.SourceDeterministic)
+	if staged.Source != memops.SourceDeterministic {
+		t.Errorf("staged Source: got %q want %q", staged.Source, memops.SourceDeterministic)
 	}
 	if staged.StagedAt != state.TurnNumber {
 		t.Errorf("staged StagedAt: got %d want %d", staged.StagedAt, state.TurnNumber)
@@ -376,7 +376,7 @@ func TestRouting_MixedTurnIsolatesByClass(t *testing.T) {
 // the day's eventlog records a staging.promoted line.
 func TestPromotion_SameTurn_DecisionCitesStaged(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
 	ctx := context.Background()
 
 	if err := onContextDelta(ctx, state, Delta{
@@ -408,9 +408,9 @@ func TestPromotion_SameTurn_DecisionCitesStaged(t *testing.T) {
 	if !ok {
 		t.Fatalf("post-promotion: coalesce missing symbol; symbols=%v", state.coalesce.symbols)
 	}
-	if sym.Source != store.SourceDeterministic {
+	if sym.Source != memops.SourceDeterministic {
 		t.Errorf("promoted Source: got %q want %q (both sides Deterministic; dominance returns Deterministic)",
-			sym.Source, store.SourceDeterministic)
+			sym.Source, memops.SourceDeterministic)
 	}
 	// Coalesce is a map keyed by normalized form; "exactly once" is
 	// implicit (no duplicate keys). Verify only the cited symbol is
@@ -437,7 +437,7 @@ func TestPromotion_SameTurn_DecisionCitesStaged(t *testing.T) {
 // correctly in the promotion log line.
 func TestPromotion_CrossTurn_DecisionCitesStagedFromEarlierTurn(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
 	ctx := context.Background()
 
 	state.TurnNumber = 1
@@ -492,7 +492,7 @@ func TestPromotion_CrossTurn_DecisionCitesStagedFromEarlierTurn(t *testing.T) {
 // eviction; B.3 only promotes via citation.
 func TestPromotion_NoCrossReference_StagedSymbolPersists(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
 	ctx := context.Background()
 
 	if err := onContextDelta(ctx, state, Delta{
@@ -552,8 +552,8 @@ func TestRouting_ExplicitDecisionOverrideRoutesToCoalesce(t *testing.T) {
 	if !ok {
 		t.Fatalf("coalesce missing url; symbols=%v", state.coalesce.symbols)
 	}
-	if sym.Source != store.SourceDeterministic {
-		t.Errorf("url Source: got %q want %q", sym.Source, store.SourceDeterministic)
+	if sym.Source != memops.SourceDeterministic {
+		t.Errorf("url Source: got %q want %q", sym.Source, memops.SourceDeterministic)
 	}
 	if state.staging.len() != 0 {
 		t.Errorf("staging should be empty under explicit decision override; len=%d", state.staging.len())
@@ -571,7 +571,7 @@ func TestPruneStaging_NoopBeforeFirstTurn(t *testing.T) {
 	state.staging.add(stagedSymbol{
 		Normalized: "before-any-turn",
 		Raw:        "before-any-turn",
-		Source:     store.SourceDeterministic,
+		Source:     memops.SourceDeterministic,
 		StagedAt:   0,
 	})
 	if got := pruneStaging(state); got != 0 {
@@ -591,7 +591,7 @@ func TestPruneStaging_NoopWithinWindow(t *testing.T) {
 		state.staging.add(stagedSymbol{
 			Normalized: "s" + itoa(sa),
 			Raw:        "s" + itoa(sa),
-			Source:     store.SourceDeterministic,
+			Source:     memops.SourceDeterministic,
 			StagedAt:   sa,
 		})
 	}
@@ -612,7 +612,7 @@ func TestPruneStaging_EvictsAtWindowClose(t *testing.T) {
 		state.staging.add(stagedSymbol{
 			Normalized: "s" + itoa(sa),
 			Raw:        "s" + itoa(sa),
-			Source:     store.SourceDeterministic,
+			Source:     memops.SourceDeterministic,
 			StagedAt:   sa,
 		})
 	}
@@ -638,7 +638,7 @@ func TestPruneStaging_EvictsMultiple(t *testing.T) {
 		state.staging.add(stagedSymbol{
 			Normalized: "s" + itoa(sa),
 			Raw:        "s" + itoa(sa),
-			Source:     store.SourceDeterministic,
+			Source:     memops.SourceDeterministic,
 			StagedAt:   sa,
 		})
 	}
@@ -667,14 +667,14 @@ func TestRun_EvictsStaledStagingAtTopOfRun(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 
 	// Pre-seed: a staged entry from turn 1, and three turns already
 	// elapsed. Run will bump TurnNumber 3 -> 4; cutoff = 2; "old" evicts.
 	state.staging.add(stagedSymbol{
 		Normalized: "old",
 		Raw:        "old",
-		Source:     store.SourceDeterministic,
+		Source:     memops.SourceDeterministic,
 		StagedAt:   1,
 	})
 	state.TurnNumber = 3
@@ -706,12 +706,12 @@ func TestRun_DoesNotEvictBeforeWindowClose(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 
 	state.staging.add(stagedSymbol{
 		Normalized: "still-fresh",
 		Raw:        "still-fresh",
-		Source:     store.SourceDeterministic,
+		Source:     memops.SourceDeterministic,
 		StagedAt:   1,
 	})
 	state.TurnNumber = 2

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"personant/internal/memops"
 	"personant/internal/store"
 )
 
@@ -25,9 +26,9 @@ import (
 // Warner is invoked for recoverable issues (missing meta.json on a
 // referenced project, etc.). Defaults to Logger if nil.
 type Options struct {
-	Quiet   bool
-	Logger  func(format string, args ...any)
-	Warner  func(format string, args ...any)
+	Quiet  bool
+	Logger func(format string, args ...any)
+	Warner func(format string, args ...any)
 }
 
 // Drift is one entry in a Check result describing a derived-file
@@ -157,7 +158,7 @@ func Check(paths store.PersonantPaths, opts Options) (CheckResult, error) {
 // plan holds the in-memory result of running the build pipeline.
 type plan struct {
 	symbols []store.SymbolRecord
-	digests map[string]store.ProjectDigest
+	digests map[string]memops.ProjectDigest
 }
 
 func buildPlan(paths store.PersonantPaths, warnf func(format string, args ...any)) (plan, error) {

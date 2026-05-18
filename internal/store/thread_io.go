@@ -11,21 +11,9 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"personant/internal/memops"
 )
-
-// ErrThreadFileNotFound is returned by LoadThread when the canonical
-// thread file does not exist. Callers distinguish "no file yet" (a new
-// thread is about to be created) from a parse failure.
-var ErrThreadFileNotFound = errors.New("store: thread file not found")
-
-// Thread is the in-memory shape of a thread file: frontmatter plus
-// markdown body. The frontmatter is canonical for metadata; the body is
-// operational content (turn excerpts, curator-summarized milestones at
-// retirement). Per spec §2.3.
-type Thread struct {
-	Frontmatter ThreadFrontmatter
-	Body        string // markdown body; trailing newline preserved
-}
 
 // thrFrontmatterDelimiter is the literal `---` line that brackets the
 // YAML frontmatter block at the head of every thread file.
@@ -63,7 +51,7 @@ func ListThreadIDs(paths PersonantPaths) ([]string, error) {
 			continue
 		}
 		id := strings.TrimSuffix(name, ".md")
-		if !ThreadIDPattern.MatchString(id) {
+		if !memops.ThreadIDPattern.MatchString(id) {
 			continue
 		}
 		ids = append(ids, id)
@@ -82,7 +70,7 @@ func ListThreadIDs(paths PersonantPaths) ([]string, error) {
 // A nil logf is silent.
 //
 // A missing ThreadsDir returns (nil, nil) — fresh-init state.
-func LoadAllThreadFrontmatter(paths PersonantPaths, logf func(format string, args ...any)) ([]ThreadFrontmatter, error) {
+func LoadAllThreadFrontmatter(paths PersonantPaths, logf func(format string, args ...any)) ([]memops.ThreadFrontmatter, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -93,7 +81,7 @@ func LoadAllThreadFrontmatter(paths PersonantPaths, logf func(format string, arg
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	out := make([]ThreadFrontmatter, 0, len(ids))
+	out := make([]memops.ThreadFrontmatter, 0, len(ids))
 	for _, id := range ids {
 		thread, err := LoadThread(paths, id)
 		if err != nil {
@@ -114,33 +102,33 @@ func LoadAllThreadFrontmatter(paths PersonantPaths, logf func(format string, arg
 //	---
 //	<markdown body>
 //
-// Returns ErrThreadFileNotFound when the file is absent. Returns a
+// Returns memops.ErrThreadFileNotFound when the file is absent. Returns a
 // wrapped error when the frontmatter delimiters are missing, the YAML
 // fails to parse, or required fields (id/project) are unset.
-func LoadThread(paths PersonantPaths, threadID string) (Thread, error) {
+func LoadThread(paths PersonantPaths, threadID string) (memops.Thread, error) {
 	path := ThreadPath(paths, threadID)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return Thread{}, fmt.Errorf("load thread %s: %w", threadID, ErrThreadFileNotFound)
+			return memops.Thread{}, fmt.Errorf("load thread %s: %w", threadID, memops.ErrThreadFileNotFound)
 		}
-		return Thread{}, fmt.Errorf("load thread %s: read: %w", threadID, err)
+		return memops.Thread{}, fmt.Errorf("load thread %s: read: %w", threadID, err)
 	}
 
 	fm, body, err := splitFrontmatter(data)
 	if err != nil {
-		return Thread{}, fmt.Errorf("load thread %s: %w", threadID, err)
+		return memops.Thread{}, fmt.Errorf("load thread %s: %w", threadID, err)
 	}
 
-	var thread Thread
+	var thread memops.Thread
 	if err := yaml.Unmarshal(fm, &thread.Frontmatter); err != nil {
-		return Thread{}, fmt.Errorf("load thread %s: parse yaml: %w", threadID, err)
+		return memops.Thread{}, fmt.Errorf("load thread %s: parse yaml: %w", threadID, err)
 	}
 	if thread.Frontmatter.ID == "" {
-		return Thread{}, fmt.Errorf("load thread %s: frontmatter missing required field: id", threadID)
+		return memops.Thread{}, fmt.Errorf("load thread %s: frontmatter missing required field: id", threadID)
 	}
 	if thread.Frontmatter.Project == "" {
-		return Thread{}, fmt.Errorf("load thread %s: frontmatter missing required field: project", threadID)
+		return memops.Thread{}, fmt.Errorf("load thread %s: frontmatter missing required field: project", threadID)
 	}
 	thread.Body = body
 	return thread, nil
@@ -148,10 +136,10 @@ func LoadThread(paths PersonantPaths, threadID string) (Thread, error) {
 
 // SaveThread writes a thread file atomically (temp + fsync + rename).
 // Frontmatter is marshaled via yaml.v3 with field order matching the
-// ThreadFrontmatter struct declaration. The body is written verbatim
+// memops.ThreadFrontmatter struct declaration. The body is written verbatim
 // after the closing delimiter, with a single trailing newline ensured
 // (idempotent on repeated saves).
-func SaveThread(paths PersonantPaths, thread Thread) error {
+func SaveThread(paths PersonantPaths, thread memops.Thread) error {
 	if thread.Frontmatter.ID == "" {
 		return fmt.Errorf("save thread: frontmatter id is empty")
 	}
@@ -327,7 +315,7 @@ func lineStartingWith(data []byte, start int, prefix string) int {
 // marshalFrontmatter encodes f as YAML. yaml.v3 honors struct
 // declaration order, so the on-disk field sequence is stable across
 // writes — git diffs stay record-grain.
-func marshalFrontmatter(f ThreadFrontmatter) ([]byte, error) {
+func marshalFrontmatter(f memops.ThreadFrontmatter) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)

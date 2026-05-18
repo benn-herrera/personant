@@ -30,7 +30,7 @@ var ValidLevelNames = []string{"DEBUG", "INFO", "WARN", "ERROR", "NONE"}
 // String returns the display name used in log output, e.g. "INFO".
 func (l Level) String() string {
 	if l > LevelError {
-		return ValidLevelNames[len(ValidLevelNames) - 1]
+		return ValidLevelNames[len(ValidLevelNames)-1]
 	}
 	return ValidLevelNames[l]
 }
@@ -73,12 +73,12 @@ type Logger interface {
 // stderrLevel is accessed via atomic ops so SetLevel/GetLevel are race-free
 // with concurrent emit calls. mu guards only the writer fields.
 type compactLogger struct {
-	stderrLevel atomic.Uint32 // Level stored as uint32; use loadLevel/storeLevel
-	mu          sync.Mutex
-	stderrW     io.Writer
-	fileW       *os.File // nil if no log file
+	stderrLevel   atomic.Uint32 // Level stored as uint32; use loadLevel/storeLevel
+	mu            sync.Mutex
+	stderrW       io.Writer
+	fileW         *os.File // nil if no log file
 	pathPrefixLen int
-	showFileLine bool
+	showFileLine  bool
 }
 
 func (c *compactLogger) emit(level Level, format string, args ...any) {
@@ -106,10 +106,10 @@ func (c *compactLogger) emit(level Level, format string, args ...any) {
 	}
 }
 
-func (c *compactLogger) GetLevel() Level { return Level(c.stderrLevel.Load()) }
-func (c *compactLogger) GetShowFileAndLine() bool { return c.showFileLine }
-func (c *compactLogger) SetLevel(level Level) { c.stderrLevel.Store(uint32(level)) }
-func (c *compactLogger) SetShowFileAndLine(show bool) { c.showFileLine = show }
+func (c *compactLogger) GetLevel() Level                  { return Level(c.stderrLevel.Load()) }
+func (c *compactLogger) GetShowFileAndLine() bool         { return c.showFileLine }
+func (c *compactLogger) SetLevel(level Level)             { c.stderrLevel.Store(uint32(level)) }
+func (c *compactLogger) SetShowFileAndLine(show bool)     { c.showFileLine = show }
 func (c *compactLogger) Debug(format string, args ...any) { c.emit(LevelDebug, format, args...) }
 func (c *compactLogger) Info(format string, args ...any)  { c.emit(LevelInfo, format, args...) }
 func (c *compactLogger) Warn(format string, args ...any)  { c.emit(LevelWarn, format, args...) }
@@ -165,7 +165,7 @@ func Warn(format string, args ...any)  { global.Load().Warn(format, args...) }
 func Error(format string, args ...any) { global.Load().Error(format, args...) }
 func Fatal(format string, args ...any) { global.Load().Fatal(format, args...) }
 
-func SetLevel(level Level) { global.Load().SetLevel(level) }
-func GetLevel() Level      { return global.Load().GetLevel() }
+func SetLevel(level Level)         { global.Load().SetLevel(level) }
+func GetLevel() Level              { return global.Load().GetLevel() }
 func SetShowFileAndLine(show bool) { global.Load().SetShowFileAndLine(show) }
 func GetShowFileAndLine() bool     { return global.Load().GetShowFileAndLine() }

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"personant/internal/memops"
 	"personant/internal/store"
 )
 
@@ -153,7 +154,7 @@ func TestScenario_RecallMadlibs(t *testing.T) {
 //   - vocabulary drift  → recall 0 (no canonical anchor overlap).
 //   - stop-word leak    → recall 0 (union inflated below threshold).
 //   - false-friend pair → recall 1 (correct topic always fires);
-//                         precision ≤ 1 (spurious twin may fire).
+//     precision ≤ 1 (spurious twin may fire).
 func TestRecallMadlibs_AdversarialBehavior(t *testing.T) {
 	doc := loadMadlibsQueries(t, handcraftedQueriesPath)
 
@@ -255,12 +256,12 @@ func seedMadlibsThreads(doc madlibsDoc) func(*Harness) error {
 	return func(h *Harness) error {
 		ts := "2026-05-01T12:00:00Z"
 		for i, tp := range doc.Topics {
-			rec := store.SpineRecord{
+			rec := memops.SpineRecord{
 				ID:           fmt.Sprintf("thr_%d", i+1),
 				Project:      h.Project.ID,
 				Anchors:      append([]string(nil), tp.Anchors...),
 				Summary:      tp.Name + " seed",
-				State:        store.ThreadActive,
+				State:        memops.ThreadActive,
 				Created:      ts,
 				LastEngaged:  ts,
 				StateChanged: ts,
@@ -269,8 +270,8 @@ func seedMadlibsThreads(doc madlibsDoc) func(*Harness) error {
 			if err := store.AppendSpineRecord(h.Paths, rec); err != nil {
 				return fmt.Errorf("seedMadlibsThreads: AppendSpineRecord %s: %w", rec.ID, err)
 			}
-			thr := store.Thread{
-				Frontmatter: store.ThreadFrontmatter{
+			thr := memops.Thread{
+				Frontmatter: memops.ThreadFrontmatter{
 					ID:           rec.ID,
 					Project:      rec.Project,
 					Anchors:      append([]string(nil), rec.Anchors...),

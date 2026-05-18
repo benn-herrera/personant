@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"personant/internal/memops"
 )
 
 // projectRoot walks up from the test's working directory until it finds a
@@ -36,7 +38,7 @@ func projectRoot(t *testing.T) string {
 //
 // The fixture also carries `broken-provider`, whose apiKeyFile points at
 // a file that does not exist: it must be omitted from the map and
-// reported as exactly one ProviderFault, without aborting the load.
+// reported as exactly one memops.ProviderFault, without aborting the load.
 func TestLoadProvidersFixture(t *testing.T) {
 	path := filepath.Join(projectRoot(t), "test", "providers.toml")
 	got, faults, err := LoadProviders(path)
@@ -59,14 +61,14 @@ func TestLoadProvidersFixture(t *testing.T) {
 	// Exactly one fault, naming broken-provider. The Reason references
 	// the key-file path only — it must never carry key material.
 	if len(faults) != 1 {
-		t.Fatalf("expected exactly 1 ProviderFault, got %d: %+v", len(faults), faults)
+		t.Fatalf("expected exactly 1 memops.ProviderFault, got %d: %+v", len(faults), faults)
 	}
 	if faults[0].Name != "broken-provider" {
 		t.Errorf("fault Name = %q, want broken-provider", faults[0].Name)
 	}
 	for _, leak := range []string{"somekey", "KEY_SECURITY_TEST_FAIL"} {
 		if strings.Contains(faults[0].Reason, leak) {
-			t.Errorf("ProviderFault.Reason carries key material (%q)", leak)
+			t.Errorf("memops.ProviderFault.Reason carries key material (%q)", leak)
 		}
 	}
 
@@ -117,7 +119,7 @@ func TestLoadProvidersEmptyFile(t *testing.T) {
 		t.Fatalf("LoadProviders empty: %v", err)
 	}
 	if len(got) != 0 {
-		t.Errorf("expected empty Providers, got %d entries: %v", len(got), keysOf(got))
+		t.Errorf("expected empty memops.Providers, got %d entries: %v", len(got), keysOf(got))
 	}
 	if len(faults) != 0 {
 		t.Errorf("expected no faults from empty file, got %+v", faults)
@@ -144,7 +146,7 @@ func TestLoadProvidersTemplateOnlyFile(t *testing.T) {
 		t.Fatalf("LoadProviders template: %v", err)
 	}
 	if len(got) != 0 {
-		t.Errorf("expected empty Providers from comment-only file, got %d entries", len(got))
+		t.Errorf("expected empty memops.Providers from comment-only file, got %d entries", len(got))
 	}
 	if len(faults) != 0 {
 		t.Errorf("expected no faults from comment-only file, got %+v", faults)
@@ -158,7 +160,7 @@ func TestLoadProvidersMissingFile(t *testing.T) {
 		t.Fatalf("LoadProviders missing: %v", err)
 	}
 	if len(got) != 0 {
-		t.Errorf("expected empty Providers on missing file, got %d entries", len(got))
+		t.Errorf("expected empty memops.Providers on missing file, got %d entries", len(got))
 	}
 	if len(faults) != 0 {
 		t.Errorf("expected no faults from missing file, got %+v", faults)
@@ -205,7 +207,7 @@ this is not valid toml
 	}
 }
 
-func keysOf(p Providers) []string {
+func keysOf(p memops.Providers) []string {
 	out := make([]string, 0, len(p))
 	for k := range p {
 		out = append(out, k)

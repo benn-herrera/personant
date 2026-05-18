@@ -4,14 +4,14 @@ import (
 	"sort"
 	"testing"
 
-	"personant/internal/store"
+	"personant/internal/memops"
 )
 
 func TestCoalesceUnion(t *testing.T) {
 	b := newCoalesceBuffer()
-	b.addSymbol("alpha", "alpha", store.SourceUser)
-	b.addSymbol("alpha", "alpha", store.SourceUser) // dup, same source
-	b.addSymbol("beta", "beta", store.SourceModel)
+	b.addSymbol("alpha", "alpha", memops.SourceUser)
+	b.addSymbol("alpha", "alpha", memops.SourceUser) // dup, same source
+	b.addSymbol("beta", "beta", memops.SourceModel)
 	b.addThread("thr_42")
 	b.addThread("thr_42")
 	b.addThread("thr_99")
@@ -31,7 +31,7 @@ func TestCoalesceUnion(t *testing.T) {
 
 func TestCoalesceReset(t *testing.T) {
 	b := newCoalesceBuffer()
-	b.addSymbol("x", "x", store.SourceModel)
+	b.addSymbol("x", "x", memops.SourceModel)
 	b.addThread("thr_1")
 	b.reset()
 	if len(b.symbols) != 0 || len(b.threads) != 0 {
@@ -41,7 +41,7 @@ func TestCoalesceReset(t *testing.T) {
 
 func TestCoalesceIgnoresEmpty(t *testing.T) {
 	b := newCoalesceBuffer()
-	b.addSymbol("", "", store.SourceModel)
+	b.addSymbol("", "", memops.SourceModel)
 	b.addThread("")
 	if len(b.symbols) != 0 || len(b.threads) != 0 {
 		t.Errorf("empty entries should not be added: %+v", b)
@@ -55,16 +55,16 @@ func TestCoalesceIgnoresEmpty(t *testing.T) {
 func TestCoalesceDominantSource(t *testing.T) {
 	cases := []struct {
 		name   string
-		first  store.SymbolSource
-		second store.SymbolSource
-		want   store.SymbolSource
+		first  memops.SymbolSource
+		second memops.SymbolSource
+		want   memops.SymbolSource
 	}{
-		{"model then user → user", store.SourceModel, store.SourceUser, store.SourceUser},
-		{"user then model → user", store.SourceUser, store.SourceModel, store.SourceUser},
-		{"user then curator → curator", store.SourceUser, store.SourceCurator, store.SourceCurator},
-		{"curator then deterministic → curator", store.SourceCurator, store.SourceDeterministic, store.SourceCurator},
-		{"deterministic then model → model", store.SourceDeterministic, store.SourceModel, store.SourceModel},
-		{"model then model → model", store.SourceModel, store.SourceModel, store.SourceModel},
+		{"model then user → user", memops.SourceModel, memops.SourceUser, memops.SourceUser},
+		{"user then model → user", memops.SourceUser, memops.SourceModel, memops.SourceUser},
+		{"user then curator → curator", memops.SourceUser, memops.SourceCurator, memops.SourceCurator},
+		{"curator then deterministic → curator", memops.SourceCurator, memops.SourceDeterministic, memops.SourceCurator},
+		{"deterministic then model → model", memops.SourceDeterministic, memops.SourceModel, memops.SourceModel},
+		{"model then model → model", memops.SourceModel, memops.SourceModel, memops.SourceModel},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -84,13 +84,13 @@ func TestCoalesceDominantSource(t *testing.T) {
 // overwrite raw.
 func TestCoalesceFirstRawWins(t *testing.T) {
 	b := newCoalesceBuffer()
-	b.addSymbol("First Form", "first-form", store.SourceModel)
-	b.addSymbol("FIRST FORM", "first-form", store.SourceUser) // higher source, different surface
+	b.addSymbol("First Form", "first-form", memops.SourceModel)
+	b.addSymbol("FIRST FORM", "first-form", memops.SourceUser) // higher source, different surface
 	got := b.symbols["first-form"]
 	if got.Raw != "First Form" {
 		t.Errorf("raw: got %q want %q", got.Raw, "First Form")
 	}
-	if got.Source != store.SourceUser {
-		t.Errorf("source should still upgrade: got %q want %q", got.Source, store.SourceUser)
+	if got.Source != memops.SourceUser {
+		t.Errorf("source should still upgrade: got %q want %q", got.Source, memops.SourceUser)
 	}
 }

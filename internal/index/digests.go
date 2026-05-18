@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"personant/internal/memops"
 	"personant/internal/store"
 )
 
@@ -45,23 +46,23 @@ const (
 // is missing or unparseable, display_name falls back to the id (or
 // "default" for prj_default), and the missing-meta warning is reported
 // via warnf if non-nil.
-func BuildDigests(spine []store.SpineRecord, projectsDir string, warnf func(format string, args ...any)) (map[string]store.ProjectDigest, error) {
+func BuildDigests(spine []memops.SpineRecord, projectsDir string, warnf func(format string, args ...any)) (map[string]memops.ProjectDigest, error) {
 	if warnf == nil {
 		warnf = func(string, ...any) {}
 	}
 
-	buckets := make(map[string][]store.SpineRecord)
+	buckets := make(map[string][]memops.SpineRecord)
 	for _, r := range spine {
 		buckets[r.Project] = append(buckets[r.Project], r)
 	}
 
-	out := make(map[string]store.ProjectDigest, len(buckets))
+	out := make(map[string]memops.ProjectDigest, len(buckets))
 	for projectID, records := range buckets {
 		display := readDisplayName(projectsDir, projectID, warnf)
 		recent := selectRecentAnchors(records)
 		summary := truncateUTF8(joinComma(recent), oneLineSummaryMax)
 
-		digest := store.ProjectDigest{
+		digest := memops.ProjectDigest{
 			Project:        projectID,
 			DisplayName:    display,
 			ThreadCount:    len(records),
@@ -100,7 +101,7 @@ func readDisplayName(projectsDir, projectID string, warnf func(format string, ar
 		}
 		return fallback
 	}
-	var meta store.ProjectMeta
+	var meta memops.ProjectMeta
 	if err := json.Unmarshal(data, &meta); err != nil {
 		warnf("index: parse %s: %v; using %q as display_name", metaPath, err, fallback)
 		return fallback
@@ -118,9 +119,9 @@ func readDisplayName(projectsDir, projectID string, warnf func(format string, ar
 //   - count anchor frequency across that subset
 //   - return the top recentAnchorsTopN by frequency, ties by lexical
 //     anchor for determinism.
-func selectRecentAnchors(records []store.SpineRecord) []string {
+func selectRecentAnchors(records []memops.SpineRecord) []string {
 	// Most-recently-engaged threads first.
-	sorted := make([]store.SpineRecord, len(records))
+	sorted := make([]memops.SpineRecord, len(records))
 	copy(sorted, records)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		// String compare on RFC3339 strings is order-preserving for
@@ -207,7 +208,7 @@ func truncateUTF8(s string, max int) string {
 //
 // (For the tiny digests produced from spine alone, the worst case is a
 // few hundred bytes; the integer-width concern is theoretical.)
-func computeDigestByteSize(d store.ProjectDigest) (int, error) {
+func computeDigestByteSize(d memops.ProjectDigest) (int, error) {
 	d.ByteSize = 0
 	encoded, err := json.Marshal(d)
 	if err != nil {
@@ -219,7 +220,7 @@ func computeDigestByteSize(d store.ProjectDigest) (int, error) {
 // WriteDigest writes a single digest atomically to
 // <projectsDir>/<projectID>/digest.json. The project directory is
 // created if missing.
-func WriteDigest(projectsDir, projectID string, digest store.ProjectDigest) error {
+func WriteDigest(projectsDir, projectID string, digest memops.ProjectDigest) error {
 	dir := filepath.Join(projectsDir, projectID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("write digest %s: mkdir: %w", projectID, err)
@@ -237,7 +238,7 @@ func WriteDigest(projectsDir, projectID string, digest store.ProjectDigest) erro
 // newline is appended by json.Encoder. The same byte stream is used by
 // both write and check paths, so byte-for-byte comparison in `check` is
 // faithful to whatever WriteDigest emits.
-func encodeDigestJSON(d store.ProjectDigest) ([]byte, error) {
+func encodeDigestJSON(d memops.ProjectDigest) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetIndent("", "  ")

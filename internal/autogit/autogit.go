@@ -348,4 +348,3 @@ func defaultSignature(repo *git.Repository) *object.Signature {
 		When:  time.Now(),
 	}
 }
-

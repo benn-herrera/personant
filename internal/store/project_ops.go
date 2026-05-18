@@ -11,12 +11,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-)
 
-// ErrProjectNotFound is returned by LoadProjectMeta when the project's
-// directory or meta.json is absent (and the project id is not the
-// always-valid prj_default sentinel).
-var ErrProjectNotFound = errors.New("store: project not found")
+	"personant/internal/memops"
+)
 
 // DefaultProjectID is the reserved id for the no-project escape hatch
 // described in spec §2.1 / §2.5.1.
@@ -26,27 +23,27 @@ const DefaultProjectID = "prj_default"
 // metadata.
 //
 // The prj_default project is special: if its meta.json is absent on disk,
-// LoadProjectMeta returns a synthetic ProjectMeta with Name: "default" and
+// LoadProjectMeta returns a synthetic memops.ProjectMeta with Name: "default" and
 // empty path/remote fields. This mirrors §2.5.1's reservation: prj_default
 // is always available even when no file has been written for it.
 //
 // For any other project, a missing directory or meta.json yields
-// ErrProjectNotFound (wrapped with the project id in the message).
-func LoadProjectMeta(paths PersonantPaths, projectID string) (ProjectMeta, error) {
+// memops.ErrProjectNotFound (wrapped with the project id in the message).
+func LoadProjectMeta(paths PersonantPaths, projectID string) (memops.ProjectMeta, error) {
 	metaPath := filepath.Join(paths.ProjectsDir, projectID, "meta.json")
 	data, err := os.ReadFile(metaPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if projectID == DefaultProjectID {
-				return ProjectMeta{ID: DefaultProjectID, Name: "default"}, nil
+				return memops.ProjectMeta{ID: DefaultProjectID, Name: "default"}, nil
 			}
-			return ProjectMeta{}, fmt.Errorf("load project %s: %w", projectID, ErrProjectNotFound)
+			return memops.ProjectMeta{}, fmt.Errorf("load project %s: %w", projectID, memops.ErrProjectNotFound)
 		}
-		return ProjectMeta{}, fmt.Errorf("load project %s: %w", projectID, err)
+		return memops.ProjectMeta{}, fmt.Errorf("load project %s: %w", projectID, err)
 	}
-	var meta ProjectMeta
+	var meta memops.ProjectMeta
 	if err := json.Unmarshal(data, &meta); err != nil {
-		return ProjectMeta{}, fmt.Errorf("load project %s: parse %s: %w", projectID, metaPath, err)
+		return memops.ProjectMeta{}, fmt.Errorf("load project %s: parse %s: %w", projectID, metaPath, err)
 	}
 	return meta, nil
 }
@@ -54,7 +51,7 @@ func LoadProjectMeta(paths PersonantPaths, projectID string) (ProjectMeta, error
 // SaveProjectMeta writes projects/<id>/meta.json. Creates the project
 // directory if it does not exist. Atomic: encode to a temp file in the
 // project directory, fsync, rename.
-func SaveProjectMeta(paths PersonantPaths, meta ProjectMeta) error {
+func SaveProjectMeta(paths PersonantPaths, meta memops.ProjectMeta) error {
 	if meta.ID == "" {
 		return errors.New("save project meta: ID is empty")
 	}
@@ -101,7 +98,7 @@ func SaveProjectMeta(paths PersonantPaths, meta ProjectMeta) error {
 	return nil
 }
 
-// ListProjects returns every known ProjectMeta on disk, sorted by id.
+// ListProjects returns every known memops.ProjectMeta on disk, sorted by id.
 //
 // Walks paths.ProjectsDir for prj_<n> subdirectories with a present
 // meta.json. The prj_default entry is included only if its meta.json is
@@ -109,7 +106,7 @@ func SaveProjectMeta(paths PersonantPaths, meta ProjectMeta) error {
 // has no on-disk record until something writes one). Subdirectories whose
 // names do not match ProjectIDPattern (and that are not prj_default) are
 // skipped silently.
-func ListProjects(paths PersonantPaths) ([]ProjectMeta, error) {
+func ListProjects(paths PersonantPaths) ([]memops.ProjectMeta, error) {
 	entries, err := os.ReadDir(paths.ProjectsDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -117,13 +114,13 @@ func ListProjects(paths PersonantPaths) ([]ProjectMeta, error) {
 		}
 		return nil, fmt.Errorf("list projects: read %s: %w", paths.ProjectsDir, err)
 	}
-	out := make([]ProjectMeta, 0, len(entries))
+	out := make([]memops.ProjectMeta, 0, len(entries))
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		id := e.Name()
-		if id != DefaultProjectID && !ProjectIDPattern.MatchString(id) {
+		if id != DefaultProjectID && !memops.ProjectIDPattern.MatchString(id) {
 			continue
 		}
 		metaPath := filepath.Join(paths.ProjectsDir, id, "meta.json")
@@ -152,14 +149,14 @@ func ListProjects(paths PersonantPaths) ([]ProjectMeta, error) {
 //
 // Returns (zero, false, nil) if no match is found. Errors only on i/o
 // failures during the project listing.
-func FindProjectByRemote(paths PersonantPaths, remoteURL string) (ProjectMeta, bool, error) {
+func FindProjectByRemote(paths PersonantPaths, remoteURL string) (memops.ProjectMeta, bool, error) {
 	target := NormalizeRemoteURL(remoteURL)
 	if target == "" {
-		return ProjectMeta{}, false, nil
+		return memops.ProjectMeta{}, false, nil
 	}
 	metas, err := ListProjects(paths)
 	if err != nil {
-		return ProjectMeta{}, false, err
+		return memops.ProjectMeta{}, false, err
 	}
 	for _, m := range metas {
 		for _, u := range m.RemoteURLs {
@@ -173,7 +170,7 @@ func FindProjectByRemote(paths PersonantPaths, remoteURL string) (ProjectMeta, b
 			}
 		}
 	}
-	return ProjectMeta{}, false, nil
+	return memops.ProjectMeta{}, false, nil
 }
 
 // FindProjectByPath returns the project whose CurrentRootPath or
@@ -181,14 +178,14 @@ func FindProjectByRemote(paths PersonantPaths, remoteURL string) (ProjectMeta, b
 // after filepath.Clean — symlink resolution is the caller's responsibility.
 //
 // Returns (zero, false, nil) if no match is found.
-func FindProjectByPath(paths PersonantPaths, absPath string) (ProjectMeta, bool, error) {
+func FindProjectByPath(paths PersonantPaths, absPath string) (memops.ProjectMeta, bool, error) {
 	if absPath == "" {
-		return ProjectMeta{}, false, nil
+		return memops.ProjectMeta{}, false, nil
 	}
 	target := filepath.Clean(absPath)
 	metas, err := ListProjects(paths)
 	if err != nil {
-		return ProjectMeta{}, false, err
+		return memops.ProjectMeta{}, false, err
 	}
 	for _, m := range metas {
 		if m.CurrentRootPath != "" && filepath.Clean(m.CurrentRootPath) == target {
@@ -200,13 +197,13 @@ func FindProjectByPath(paths PersonantPaths, absPath string) (ProjectMeta, bool,
 			}
 		}
 	}
-	return ProjectMeta{}, false, nil
+	return memops.ProjectMeta{}, false, nil
 }
 
 // NextProjectID returns the next available prj_<n> id given the current set
-// of ProjectMeta records — max(existing n) + 1, or "prj_1" if metas is
+// of memops.ProjectMeta records — max(existing n) + 1, or "prj_1" if metas is
 // empty. The reserved prj_default id is ignored when computing the maximum.
-func NextProjectID(metas []ProjectMeta) string {
+func NextProjectID(metas []memops.ProjectMeta) string {
 	max := 0
 	for _, m := range metas {
 		n, ok := parseSerialID(m.ID, "prj_")

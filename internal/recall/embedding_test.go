@@ -31,10 +31,10 @@ func TestCosineSimilarity(t *testing.T) {
 
 func TestProposeEmbedding(t *testing.T) {
 	threads := []ThreadVector{
-		{ThreadID: "thr_1", Vector: []float64{1, 0, 0}},      // cos 1.00 to query
-		{ThreadID: "thr_2", Vector: []float64{0, 1, 0}},      // cos 0.00
-		{ThreadID: "thr_3", Vector: []float64{0.8, 0.6, 0}},  // cos 0.80
-		{ThreadID: "thr_4", Vector: []float64{0.6, 0.8, 0}},  // cos 0.60
+		{ThreadID: "thr_1", Vector: []float64{1, 0, 0}},     // cos 1.00 to query
+		{ThreadID: "thr_2", Vector: []float64{0, 1, 0}},     // cos 0.00
+		{ThreadID: "thr_3", Vector: []float64{0.8, 0.6, 0}}, // cos 0.80
+		{ThreadID: "thr_4", Vector: []float64{0.6, 0.8, 0}}, // cos 0.60
 	}
 	query := []float64{1, 0, 0}
 

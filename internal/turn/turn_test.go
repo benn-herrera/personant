@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
 	"personant/internal/store"
@@ -17,7 +18,7 @@ import (
 
 // newTestHome scaffolds the minimum home layout the turn package needs:
 // logs/, projects/<id>/meta.json, and an empty spine file.
-func newTestHome(t *testing.T) (store.PersonantPaths, store.ProjectMeta) {
+func newTestHome(t *testing.T) (store.PersonantPaths, memops.ProjectMeta) {
 	t.Helper()
 	tmp := t.TempDir()
 	paths := store.PathsForHome(tmp)
@@ -29,7 +30,7 @@ func newTestHome(t *testing.T) (store.PersonantPaths, store.ProjectMeta) {
 	if err := store.WriteSpine(paths.Spine, nil); err != nil {
 		t.Fatalf("write spine: %v", err)
 	}
-	meta := store.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: tmp}
+	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: tmp}
 	if err := store.SaveProjectMeta(paths, meta); err != nil {
 		t.Fatalf("save meta: %v", err)
 	}
@@ -49,7 +50,7 @@ func TestRunNewTopicCreatesSpineRecord(t *testing.T) {
 		},
 	}, nil)
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	var out bytes.Buffer
@@ -84,7 +85,7 @@ func TestRunNewTopicCreatesSpineRecord(t *testing.T) {
 	if r.Project != "prj_1" {
 		t.Errorf("project: got %q want prj_1", r.Project)
 	}
-	if r.State != store.ThreadWIP {
+	if r.State != memops.ThreadWIP {
 		t.Errorf("state: got %q want wip", r.State)
 	}
 	if r.TurnCount != 1 {
@@ -98,12 +99,12 @@ func TestRunNewTopicCreatesSpineRecord(t *testing.T) {
 func TestRunUpdatesExistingThread(t *testing.T) {
 	paths, meta := newTestHome(t)
 
-	existing := store.SpineRecord{
+	existing := memops.SpineRecord{
 		ID:           "thr_42",
 		Project:      meta.ID,
 		Anchors:      []string{"trefoil", "unknot", "body-topology", "electron-shape"},
 		Summary:      "topology",
-		State:        store.ThreadActive,
+		State:        memops.ThreadActive,
 		Created:      "2026-04-01T00:00:00Z",
 		LastEngaged:  "2026-04-01T00:00:00Z",
 		StateChanged: "2026-04-01T00:00:00Z",
@@ -119,7 +120,7 @@ func TestRunUpdatesExistingThread(t *testing.T) {
 		},
 	}, nil)
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
 	state.SetClock(fixedClock(now))
 
@@ -146,12 +147,12 @@ func TestRunUpdatesExistingThread(t *testing.T) {
 func TestRunCoalescesEngagement(t *testing.T) {
 	paths, meta := newTestHome(t)
 
-	existing := store.SpineRecord{
+	existing := memops.SpineRecord{
 		ID:        "thr_42",
 		Project:   meta.ID,
 		Anchors:   []string{"alpha", "beta", "gamma", "delta"},
 		Summary:   "test thread",
-		State:     store.ThreadActive,
+		State:     memops.ThreadActive,
 		TurnCount: 0,
 	}
 	if err := store.AppendSpineRecord(paths, existing); err != nil {
@@ -163,7 +164,7 @@ func TestRunCoalescesEngagement(t *testing.T) {
 	// model.response with the topic tag), then close the turn. The
 	// engagement update must fire exactly once.
 	mock := model.NewScriptedMock(nil, nil) // unused
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	if err := onContextDelta(context.Background(), state, Delta{Source: "user.prompt", Content: "asking about #alpha and #beta"}); err != nil {
@@ -191,7 +192,7 @@ func TestRunNoTopicTagIsNonFatal(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "Just a plain response with no topic tag."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	body, err := Run(context.Background(), state, "hello", io.Discard)
@@ -217,7 +218,7 @@ func TestRunNewTopicAnchorCardinalityOutOfRange(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [only-two, anchors]*\nBrief reply."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	if _, err := Run(context.Background(), state, "ping", io.Discard); err != nil {
@@ -242,7 +243,7 @@ func TestRunNewTopicAnchorCardinalityOutOfRange(t *testing.T) {
 
 func TestRunReturnsErrorOnNilClient(t *testing.T) {
 	paths, meta := newTestHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
 	if _, err := Run(context.Background(), state, "x", io.Discard); err == nil {
 		t.Fatalf("expected error for nil client")
 	}
@@ -255,7 +256,7 @@ func TestRunPopulatesActiveThreadsOnNewTopic(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHi."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 	if _, err := Run(context.Background(), state, "hello", io.Discard); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -269,14 +270,14 @@ func TestRunPopulatesActiveThreadsOnNewTopic(t *testing.T) {
 // thr_1 should leave ActiveThreads = [thr_1] (no duplicate; LRU front).
 func TestRunActiveThreadsRefreshOnRepeatEngagement(t *testing.T) {
 	paths, meta := newTestHome(t)
-	if err := store.AppendSpineRecord(paths, store.SpineRecord{
+	if err := store.AppendSpineRecord(paths, memops.SpineRecord{
 		ID: "thr_1", Project: meta.ID,
 		Anchors: []string{"a", "b", "c", "d"},
-		Summary: "thr_1", State: store.ThreadActive,
+		Summary: "thr_1", State: memops.ThreadActive,
 	}); err != nil {
 		t.Fatalf("seed spine: %v", err)
 	}
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
 	state.ActiveThreads = []string{"thr_1"}
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 	state.Client = model.NewScriptedMock([]model.Response{
@@ -295,15 +296,15 @@ func TestRunActiveThreadsRefreshOnRepeatEngagement(t *testing.T) {
 func TestRunActiveThreadsLRUInsert(t *testing.T) {
 	paths, meta := newTestHome(t)
 	for _, id := range []string{"thr_1", "thr_2"} {
-		if err := store.AppendSpineRecord(paths, store.SpineRecord{
+		if err := store.AppendSpineRecord(paths, memops.SpineRecord{
 			ID: id, Project: meta.ID,
 			Anchors: []string{"a", "b", "c", "d"},
-			Summary: id, State: store.ThreadActive,
+			Summary: id, State: memops.ThreadActive,
 		}); err != nil {
 			t.Fatalf("seed spine %s: %v", id, err)
 		}
 	}
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
 	state.ActiveThreads = []string{"thr_1"}
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 	state.Client = model.NewScriptedMock([]model.Response{
@@ -324,15 +325,15 @@ func TestRunActiveThreadsLRUInsert(t *testing.T) {
 func TestRunActiveThreadsBTopKOverflow(t *testing.T) {
 	paths, meta := newTestHome(t)
 	for _, id := range []string{"thr_1", "thr_2", "thr_3", "thr_4"} {
-		if err := store.AppendSpineRecord(paths, store.SpineRecord{
+		if err := store.AppendSpineRecord(paths, memops.SpineRecord{
 			ID: id, Project: meta.ID,
 			Anchors: []string{"a", "b", "c", "d"},
-			Summary: id, State: store.ThreadActive,
+			Summary: id, State: memops.ThreadActive,
 		}); err != nil {
 			t.Fatalf("seed spine %s: %v", id, err)
 		}
 	}
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
 	state.ActiveThreads = []string{"thr_3", "thr_2", "thr_1"} // index 0 = most recent
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 	state.Client = model.NewScriptedMock([]model.Response{
@@ -406,7 +407,7 @@ func TestRunNewTopicWritesThreadFile(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nA brief greeting."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	if _, err := Run(context.Background(), state, "hello", io.Discard); err != nil {
@@ -423,7 +424,7 @@ func TestRunNewTopicWritesThreadFile(t *testing.T) {
 	if thr.Frontmatter.Project != meta.ID {
 		t.Errorf("frontmatter project: got %q want %q", thr.Frontmatter.Project, meta.ID)
 	}
-	if thr.Frontmatter.State != store.ThreadWIP {
+	if thr.Frontmatter.State != memops.ThreadWIP {
 		t.Errorf("frontmatter state: got %q want wip", thr.Frontmatter.State)
 	}
 	if thr.Frontmatter.TurnCount != 1 {
@@ -442,7 +443,7 @@ func TestRunNewTopicWritesThreadFile(t *testing.T) {
 		t.Errorf("topic tag leaked into thread body:\n%s", thr.Body)
 	}
 	// All four anchors should be reflected in history_symbols.
-	gotHist := map[string]store.SymbolSource{}
+	gotHist := map[string]memops.SymbolSource{}
 	for _, h := range thr.Frontmatter.HistorySymbols {
 		gotHist[h.Normalized] = h.Source
 	}
@@ -452,7 +453,7 @@ func TestRunNewTopicWritesThreadFile(t *testing.T) {
 			t.Errorf("history_symbols missing %q: got %v", want, gotHist)
 			continue
 		}
-		if src != store.SourceModel {
+		if src != memops.SourceModel {
 			t.Errorf("history_symbols %q source: got %q want model", want, src)
 		}
 	}
@@ -466,19 +467,19 @@ func TestRunExistingThreadAppendsExcerpt(t *testing.T) {
 	paths, meta := newTestHome(t)
 
 	// Seed: a thread file from a prior turn, plus its spine record.
-	prior := store.Thread{
-		Frontmatter: store.ThreadFrontmatter{
+	prior := memops.Thread{
+		Frontmatter: memops.ThreadFrontmatter{
 			ID:           "thr_42",
 			Project:      meta.ID,
 			Anchors:      []string{"trefoil", "unknot", "body-topology", "electron-shape"},
 			Summary:      "topology",
-			State:        store.ThreadActive,
+			State:        memops.ThreadActive,
 			Created:      "2026-04-01T00:00:00Z",
 			LastEngaged:  "2026-04-01T00:00:00Z",
 			StateChanged: "2026-04-01T00:00:00Z",
 			TurnCount:    7,
-			HistorySymbols: []store.HistorySymbol{
-				{Raw: "trefoil", Normalized: "trefoil", FirstSeenTurn: 1, Count: 5, Source: store.SourceModel},
+			HistorySymbols: []memops.HistorySymbol{
+				{Raw: "trefoil", Normalized: "trefoil", FirstSeenTurn: 1, Count: 5, Source: memops.SourceModel},
 			},
 		},
 		Body: "# trefoil\n\n## Turn 7 · 2026-04-01T00:00:00Z · [trefoil, unknot, body-topology, electron-shape]\n\n**user:** earlier prompt\n\n**agent:** earlier reply\n",
@@ -486,7 +487,7 @@ func TestRunExistingThreadAppendsExcerpt(t *testing.T) {
 	if err := store.SaveThread(paths, prior); err != nil {
 		t.Fatalf("seed save: %v", err)
 	}
-	if err := store.AppendSpineRecord(paths, store.SpineRecord{
+	if err := store.AppendSpineRecord(paths, memops.SpineRecord{
 		ID:           prior.Frontmatter.ID,
 		Project:      prior.Frontmatter.Project,
 		Anchors:      prior.Frontmatter.Anchors,
@@ -503,7 +504,7 @@ func TestRunExistingThreadAppendsExcerpt(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_42 [trefoil, unknot, body-topology, electron-shape]*\nFollow-up reply."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	// Pre-populate ActiveThreads so the §5.5 mid-turn fetch does not
 	// fire — this test is about the close-time engagement-update path,
 	// not the re-prompt path.
@@ -565,7 +566,7 @@ func TestRunHistorySymbolsAccumulation(t *testing.T) {
 	mock1 := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [alpha, beta, gamma, delta]*\nFirst."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock1)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock1)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 	if _, err := Run(context.Background(), state, "first", io.Discard); err != nil {
 		t.Fatalf("turn 1: %v", err)
@@ -584,7 +585,7 @@ func TestRunHistorySymbolsAccumulation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadThread: %v", err)
 	}
-	var alpha *store.HistorySymbol
+	var alpha *memops.HistorySymbol
 	for i := range thr.Frontmatter.HistorySymbols {
 		h := &thr.Frontmatter.HistorySymbols[i]
 		if h.Normalized == "alpha" {
@@ -599,7 +600,7 @@ func TestRunHistorySymbolsAccumulation(t *testing.T) {
 		t.Errorf("alpha count: got %d want 2", alpha.Count)
 	}
 	// User-tag in turn 2 wins the dominance contest (user > model).
-	if alpha.Source != store.SourceUser {
+	if alpha.Source != memops.SourceUser {
 		t.Errorf("alpha source: got %q want user", alpha.Source)
 	}
 	if alpha.FirstSeenTurn != 1 {
@@ -614,14 +615,14 @@ func TestRunHistorySymbolsAccumulation(t *testing.T) {
 func TestMergeHistorySymbolsCapAndEvict(t *testing.T) {
 	// Build a history that already sits at the cap: 40 entries, all
 	// count=1, distinct first_seen_turn from 1..40.
-	existing := make([]store.HistorySymbol, historyCapPerThread)
+	existing := make([]memops.HistorySymbol, historyCapPerThread)
 	for i := range historyCapPerThread {
-		existing[i] = store.HistorySymbol{
+		existing[i] = memops.HistorySymbol{
 			Raw:           "s" + itoa(i+1),
 			Normalized:    "s" + itoa(i+1),
 			FirstSeenTurn: i + 1,
 			Count:         1,
-			Source:        store.SourceModel,
+			Source:        memops.SourceModel,
 		}
 	}
 	// Push two new symbols; they will tip the list to 42 entries, so
@@ -629,8 +630,8 @@ func TestMergeHistorySymbolsCapAndEvict(t *testing.T) {
 	// the tie-break is lowest first_seen_turn — i.e. s1 and s2 should
 	// be evicted.
 	turn := []coalescedSymbol{
-		{Normalized: "new1", Raw: "new1", Source: store.SourceModel},
-		{Normalized: "new2", Raw: "new2", Source: store.SourceModel},
+		{Normalized: "new1", Raw: "new1", Source: memops.SourceModel},
+		{Normalized: "new2", Raw: "new2", Source: memops.SourceModel},
 	}
 	merged := mergeHistorySymbols(existing, turn, 41)
 	if len(merged) != historyCapPerThread {
@@ -657,16 +658,16 @@ func TestMergeHistorySymbolsCapAndEvict(t *testing.T) {
 func TestMergeHistorySymbolsCountWeightedEviction(t *testing.T) {
 	// A high-count old entry must survive against many low-count newer
 	// entries when overflow kicks in.
-	existing := []store.HistorySymbol{
-		{Raw: "old-popular", Normalized: "old-popular", FirstSeenTurn: 1, Count: 50, Source: store.SourceModel},
+	existing := []memops.HistorySymbol{
+		{Raw: "old-popular", Normalized: "old-popular", FirstSeenTurn: 1, Count: 50, Source: memops.SourceModel},
 	}
 	for i := range historyCapPerThread {
-		existing = append(existing, store.HistorySymbol{
+		existing = append(existing, memops.HistorySymbol{
 			Raw:           "young" + itoa(i),
 			Normalized:    "young" + itoa(i),
 			FirstSeenTurn: 100 + i,
 			Count:         1,
-			Source:        store.SourceModel,
+			Source:        memops.SourceModel,
 		})
 	}
 	merged := mergeHistorySymbols(existing, nil, 200)
@@ -690,12 +691,12 @@ func TestMergeHistorySymbolsCountWeightedEviction(t *testing.T) {
 // error so tests fail fast at setup.
 func seedThreadAndSpine(t *testing.T, paths store.PersonantPaths, project, thrID string) {
 	t.Helper()
-	rec := store.SpineRecord{
+	rec := memops.SpineRecord{
 		ID:           thrID,
 		Project:      project,
 		Anchors:      []string{"a", "b", "c", "d"},
 		Summary:      thrID,
-		State:        store.ThreadActive,
+		State:        memops.ThreadActive,
 		Created:      "2026-04-01T00:00:00Z",
 		LastEngaged:  "2026-04-01T00:00:00Z",
 		StateChanged: "2026-04-01T00:00:00Z",
@@ -704,8 +705,8 @@ func seedThreadAndSpine(t *testing.T, paths store.PersonantPaths, project, thrID
 	if err := store.AppendSpineRecord(paths, rec); err != nil {
 		t.Fatalf("seed spine %s: %v", thrID, err)
 	}
-	thr := store.Thread{
-		Frontmatter: store.ThreadFrontmatter{
+	thr := memops.Thread{
+		Frontmatter: memops.ThreadFrontmatter{
 			ID:           rec.ID,
 			Project:      rec.Project,
 			Anchors:      rec.Anchors,
@@ -735,7 +736,7 @@ func TestRunRePromptFiresForMissingThread(t *testing.T) {
 		{Content: "*topic: thr_42 [a, b, c, d]*\nFIRST."},
 		{Content: "*topic: thr_42 [a, b, c, d]*\nSECOND."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	var out bytes.Buffer
@@ -770,10 +771,10 @@ func TestRunRePromptSkippedWhenFetchFails(t *testing.T) {
 	paths, meta := newTestHome(t)
 	// Spine record exists but no thread file — LoadThread returns
 	// ErrThreadFileNotFound.
-	if err := store.AppendSpineRecord(paths, store.SpineRecord{
+	if err := store.AppendSpineRecord(paths, memops.SpineRecord{
 		ID: "thr_99", Project: meta.ID,
 		Anchors: []string{"a", "b", "c", "d"},
-		Summary: "thr_99", State: store.ThreadActive,
+		Summary: "thr_99", State: memops.ThreadActive,
 	}); err != nil {
 		t.Fatalf("seed spine: %v", err)
 	}
@@ -781,7 +782,7 @@ func TestRunRePromptSkippedWhenFetchFails(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_99 [a, b, c, d]*\nFIRST."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	body, err := Run(context.Background(), state, "ask", io.Discard)
@@ -810,7 +811,7 @@ func TestRunRePromptCappedAtOnePerTurn(t *testing.T) {
 		{Content: "*topic: thr_99 [a, b, c, d]*\nFIRST."},
 		{Content: "*topic: thr_88 [a, b, c, d]*\nSECOND."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	body, err := Run(context.Background(), state, "ask", io.Discard)
@@ -840,7 +841,7 @@ func TestRunNoRePromptWhenTagThreadsAlreadyActive(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_42 [a, b, c, d]*\nbody."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	state.ActiveThreads = []string{"thr_42"}
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
@@ -867,7 +868,7 @@ func TestRunRePromptLogsThreadFetchedDelta(t *testing.T) {
 		{Content: "*topic: thr_42 [a, b, c, d]*\nFIRST."},
 		{Content: "*topic: thr_42 [a, b, c, d]*\nSECOND."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
 
 	if _, err := Run(context.Background(), state, "ask", io.Discard); err != nil {

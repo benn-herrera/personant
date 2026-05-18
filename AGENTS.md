@@ -217,12 +217,17 @@ Current top-level shape:
 cmd/                        cobra subcommands (init, index, verify,
                             ping, models, chat — bare `personant`
                             defaults to chat)
-internal/memops/            MemoryOps port (interface + supporting
-                            types) — application layer depends on this
+internal/memops/            MemoryOps port: interface + the domain
+                            types it trades in (SpineRecord, Thread,
+                            ProjectMeta, Provider, Config, the symbol
+                            enums, Normalize/DominantSource) — the
+                            application layer depends only on this;
+                            imports no internal package
 internal/memops/fileadapter/  the v0.1 substrate-backed adapter
-internal/store/             canonical types, paths, JSONL helpers,
+internal/store/             file substrate: paths, JSONL helpers,
                             init, spine ops, project ops, providers,
-                            thread I/O, bootstrap
+                            thread I/O, bootstrap — depends on memops
+                            for the domain types
 internal/autogit/           go-git-backed autonomic git wrapper with
                             bitflag systemic-validation policy
 internal/turn/              §3.0 chain, turn loop, per-turn coalescing,

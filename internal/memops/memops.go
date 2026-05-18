@@ -42,8 +42,9 @@
 //
 //   - The §3.0 hook chain itself (application-layer control flow that
 //     composes primitives from the port).
-//   - store.Normalize / store.DominantSource (pure functions that do
-//     not depend on substrate state).
+//   - Normalize / DominantSource (pure functions that do not depend on
+//     substrate state — they live in package memops alongside the domain
+//     model, not on the MemoryOps port).
 //   - PersonantPaths in any signature (paths are the adapter's secret;
 //     application code does not see them).
 //   - File-format details — no method mentions JSONL, YAML, or
@@ -52,10 +53,10 @@
 // # Data-model types
 //
 // SpineRecord, ThreadFrontmatter, Thread, ProjectMeta, Provider, the
-// thread/symbol enums — these continue to live in internal/store and are
-// referenced through type aliases in memops_types.go. A future refactor
-// could move them into memops; that is larger churn than this step
-// justifies.
+// thread/symbol enums, the sentinel errors — these are real definitions
+// in memops_model.go. The port owns its domain types outright;
+// internal/store and the adapters depend on memops for them, so the
+// dependency arrow runs substrate → port.
 //
 // # Context.Context
 //

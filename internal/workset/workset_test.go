@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"personant/internal/memops"
 	"personant/internal/store"
 )
 
@@ -36,7 +37,7 @@ func defaultCompose(state State) State {
 
 func TestComposeEmptySpine(t *testing.T) {
 	paths := newHome(t)
-	meta := store.ProjectMeta{ID: "prj_1", Name: "alpha"}
+	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
 	if err := store.SaveProjectMeta(paths, meta); err != nil {
 		t.Fatalf("save meta: %v", err)
 	}
@@ -60,34 +61,34 @@ func TestComposeEmptySpine(t *testing.T) {
 
 func TestComposeRendersDisplayLines(t *testing.T) {
 	paths := newHome(t)
-	meta := store.ProjectMeta{ID: "prj_1", Name: "alpha"}
+	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
 	if err := store.SaveProjectMeta(paths, meta); err != nil {
 		t.Fatalf("save meta: %v", err)
 	}
-	otherMeta := store.ProjectMeta{ID: "prj_2", Name: "beta"}
+	otherMeta := memops.ProjectMeta{ID: "prj_2", Name: "beta"}
 	if err := store.SaveProjectMeta(paths, otherMeta); err != nil {
 		t.Fatalf("save other meta: %v", err)
 	}
 
-	recs := []store.SpineRecord{
+	recs := []memops.SpineRecord{
 		{
 			ID: "thr_2", Project: "prj_1",
 			Anchors: []string{"trefoil", "unknot", "body-topology", "electron-shape"},
 			Summary: "topology conflict; awaiting resolution",
-			State:   store.ThreadWIP,
+			State:   memops.ThreadWIP,
 		},
 		{
 			ID: "thr_1", Project: "prj_1",
 			Anchors: []string{"alpha", "beta", "gamma", "delta"},
 			Summary: "first thread",
-			State:   store.ThreadActive,
+			State:   memops.ThreadActive,
 		},
 		{
 			// In a different project; must be filtered out.
 			ID: "thr_99", Project: "prj_2",
 			Anchors: []string{"x", "y", "z", "w"},
 			Summary: "other project",
-			State:   store.ThreadActive,
+			State:   memops.ThreadActive,
 		},
 	}
 	for _, r := range recs {
@@ -123,17 +124,17 @@ func TestComposeRendersDisplayLines(t *testing.T) {
 
 func TestComposeRequiresProjectID(t *testing.T) {
 	paths := newHome(t)
-	if _, err := Compose(State{Paths: paths, ActiveProject: store.ProjectMeta{}}, ComposeOptions{}); err == nil {
+	if _, err := Compose(State{Paths: paths, ActiveProject: memops.ProjectMeta{}}, ComposeOptions{}); err == nil {
 		t.Fatalf("expected error for empty ActiveProject.ID")
 	}
 }
 
 func TestRenderSpineDisplay(t *testing.T) {
-	rec := store.SpineRecord{
+	rec := memops.SpineRecord{
 		ID:      "thr_88",
 		Anchors: []string{"trefoil", "unknot", "body-topology", "electron-shape"},
 		Summary: "electron body-topology conflict",
-		State:   store.ThreadWIP,
+		State:   memops.ThreadWIP,
 	}
 	got := RenderSpineDisplay(rec)
 	want := "thr_88 [trefoil, unknot, body-topology, electron-shape] — electron body-topology conflict [WIP]"
@@ -199,7 +200,7 @@ func TestStripFrontmatter(t *testing.T) {
 // directive, and a ConventionsPaths file; verifies all four contribute.
 func TestLayerEReadsAllSources(t *testing.T) {
 	paths := newHome(t)
-	meta := store.ProjectMeta{
+	meta := memops.ProjectMeta{
 		ID:               "prj_1",
 		Name:             "alpha",
 		ConventionsPaths: nil,
@@ -256,7 +257,7 @@ func TestLayerEReadsAllSources(t *testing.T) {
 
 func TestLayerEMissingConventionsFileLogged(t *testing.T) {
 	paths := newHome(t)
-	meta := store.ProjectMeta{
+	meta := memops.ProjectMeta{
 		ID:               "prj_1",
 		Name:             "alpha",
 		ConventionsPaths: []string{"/nonexistent/path/CONVENTIONS.md"},
@@ -287,24 +288,24 @@ func TestLayerEMissingConventionsFileLogged(t *testing.T) {
 // digests; LayerA2 must list them sorted by LastActive desc.
 func TestLayerA2RendersOtherProjects(t *testing.T) {
 	paths := newHome(t)
-	active := store.ProjectMeta{ID: "prj_1", Name: "active"}
+	active := memops.ProjectMeta{ID: "prj_1", Name: "active"}
 	if err := store.SaveProjectMeta(paths, active); err != nil {
 		t.Fatalf("save active: %v", err)
 	}
-	older := store.ProjectMeta{ID: "prj_2", Name: "older", LastActive: "2026-04-01T00:00:00Z"}
+	older := memops.ProjectMeta{ID: "prj_2", Name: "older", LastActive: "2026-04-01T00:00:00Z"}
 	if err := store.SaveProjectMeta(paths, older); err != nil {
 		t.Fatalf("save older: %v", err)
 	}
-	newer := store.ProjectMeta{ID: "prj_3", Name: "newer", LastActive: "2026-05-01T00:00:00Z"}
+	newer := memops.ProjectMeta{ID: "prj_3", Name: "newer", LastActive: "2026-05-01T00:00:00Z"}
 	if err := store.SaveProjectMeta(paths, newer); err != nil {
 		t.Fatalf("save newer: %v", err)
 	}
-	writeDigest(t, paths, store.ProjectDigest{
+	writeDigest(t, paths, memops.ProjectDigest{
 		Project: "prj_2", DisplayName: "older",
 		ThreadCount: 2, RecentAnchors: []string{"a", "b", "c", "d", "e", "f"},
 		OneLineSummary: "older summary",
 	})
-	writeDigest(t, paths, store.ProjectDigest{
+	writeDigest(t, paths, memops.ProjectDigest{
 		Project: "prj_3", DisplayName: "newer",
 		ThreadCount: 1, RecentAnchors: []string{"x", "y"},
 		OneLineSummary: "newer summary",
@@ -340,7 +341,7 @@ func TestLayerA2RendersOtherProjects(t *testing.T) {
 
 func TestLayerA2EmptyWhenNoOthers(t *testing.T) {
 	paths := newHome(t)
-	active := store.ProjectMeta{ID: "prj_1", Name: "alpha"}
+	active := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
 	if err := store.SaveProjectMeta(paths, active); err != nil {
 		t.Fatalf("save active: %v", err)
 	}
@@ -357,7 +358,7 @@ func TestLayerA2EmptyWhenNoOthers(t *testing.T) {
 // first 3 are rendered.
 func TestLayerBRespectsBTopK(t *testing.T) {
 	paths := newHome(t)
-	meta := store.ProjectMeta{ID: "prj_1", Name: "alpha"}
+	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
 	if err := store.SaveProjectMeta(paths, meta); err != nil {
 		t.Fatalf("save meta: %v", err)
 	}
@@ -391,7 +392,7 @@ func TestLayerBRespectsBTopK(t *testing.T) {
 // than its per-thread share is truncated and tagged with the marker.
 func TestLayerBOversizedThreadTruncates(t *testing.T) {
 	paths := newHome(t)
-	meta := store.ProjectMeta{ID: "prj_1", Name: "alpha"}
+	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
 	if err := store.SaveProjectMeta(paths, meta); err != nil {
 		t.Fatalf("save meta: %v", err)
 	}
@@ -419,7 +420,7 @@ func TestLayerBOversizedThreadTruncates(t *testing.T) {
 
 func TestLayerBMissingThreadFileWarns(t *testing.T) {
 	paths := newHome(t)
-	meta := store.ProjectMeta{ID: "prj_1", Name: "alpha"}
+	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
 	if err := store.SaveProjectMeta(paths, meta); err != nil {
 		t.Fatalf("save meta: %v", err)
 	}
@@ -445,17 +446,17 @@ func TestLayerBMissingThreadFileWarns(t *testing.T) {
 
 func TestLayerCRendersDormantSpineDisplays(t *testing.T) {
 	paths := newHome(t)
-	meta := store.ProjectMeta{ID: "prj_1", Name: "alpha"}
+	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
 	if err := store.SaveProjectMeta(paths, meta); err != nil {
 		t.Fatalf("save meta: %v", err)
 	}
 	for i := 1; i <= 3; i++ {
 		id := fmt.Sprintf("thr_%d", i)
-		if err := store.AppendSpineRecord(paths, store.SpineRecord{
+		if err := store.AppendSpineRecord(paths, memops.SpineRecord{
 			ID: id, Project: meta.ID,
 			Anchors: []string{"a", "b", "c", "d"},
 			Summary: fmt.Sprintf("dormant %d", i),
-			State:   store.ThreadPaused,
+			State:   memops.ThreadPaused,
 		}); err != nil {
 			t.Fatalf("append spine: %v", err)
 		}
@@ -480,7 +481,7 @@ func TestLayerCRendersDormantSpineDisplays(t *testing.T) {
 
 func TestLayerCBudgetTruncates(t *testing.T) {
 	paths := newHome(t)
-	meta := store.ProjectMeta{ID: "prj_1", Name: "alpha"}
+	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
 	if err := store.SaveProjectMeta(paths, meta); err != nil {
 		t.Fatalf("save meta: %v", err)
 	}
@@ -489,11 +490,11 @@ func TestLayerCBudgetTruncates(t *testing.T) {
 	for i := 1; i <= N; i++ {
 		id := fmt.Sprintf("thr_%d", i)
 		dormant = append(dormant, id)
-		if err := store.AppendSpineRecord(paths, store.SpineRecord{
+		if err := store.AppendSpineRecord(paths, memops.SpineRecord{
 			ID: id, Project: meta.ID,
 			Anchors: []string{"a-very-long-anchor-name", "another-long-anchor", "third-anchor", "fourth-anchor"},
 			Summary: strings.Repeat("dormant summary text ", 10),
-			State:   store.ThreadPaused,
+			State:   memops.ThreadPaused,
 		}); err != nil {
 			t.Fatalf("append spine: %v", err)
 		}
@@ -520,18 +521,18 @@ func TestLayerCBudgetTruncates(t *testing.T) {
 // every layer is populated.
 func TestComposeFullIntegration(t *testing.T) {
 	paths := newHome(t)
-	active := store.ProjectMeta{ID: "prj_1", Name: "active"}
+	active := memops.ProjectMeta{ID: "prj_1", Name: "active"}
 	if err := store.SaveProjectMeta(paths, active); err != nil {
 		t.Fatalf("save active: %v", err)
 	}
-	other := store.ProjectMeta{
+	other := memops.ProjectMeta{
 		ID: "prj_2", Name: "other",
 		LastActive: "2026-04-01T00:00:00Z",
 	}
 	if err := store.SaveProjectMeta(paths, other); err != nil {
 		t.Fatalf("save other: %v", err)
 	}
-	writeDigest(t, paths, store.ProjectDigest{
+	writeDigest(t, paths, memops.ProjectDigest{
 		Project: "prj_2", DisplayName: "other",
 		ThreadCount: 1, RecentAnchors: []string{"alpha", "beta"},
 		OneLineSummary: "other-summary",
@@ -557,11 +558,11 @@ func TestComposeFullIntegration(t *testing.T) {
 	// Threads: thr_1..thr_5 in active project. Spine + thread file.
 	for i := 1; i <= 5; i++ {
 		id := fmt.Sprintf("thr_%d", i)
-		if err := store.AppendSpineRecord(paths, store.SpineRecord{
+		if err := store.AppendSpineRecord(paths, memops.SpineRecord{
 			ID: id, Project: active.ID,
 			Anchors: []string{"alpha", "beta", "gamma", "delta"},
 			Summary: fmt.Sprintf("thread %d summary", i),
-			State:   store.ThreadActive,
+			State:   memops.ThreadActive,
 		}); err != nil {
 			t.Fatalf("append %s: %v", id, err)
 		}
@@ -622,7 +623,7 @@ func TestComposeFullIntegration(t *testing.T) {
 
 // ---- helpers ----
 
-func writeDigest(t *testing.T, paths store.PersonantPaths, d store.ProjectDigest) {
+func writeDigest(t *testing.T, paths store.PersonantPaths, d memops.ProjectDigest) {
 	t.Helper()
 	dir := filepath.Join(paths.ProjectsDir, d.Project)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -639,13 +640,13 @@ func writeDigest(t *testing.T, paths store.PersonantPaths, d store.ProjectDigest
 
 func seedThread(t *testing.T, paths store.PersonantPaths, id, projectID, body string) {
 	t.Helper()
-	thr := store.Thread{
-		Frontmatter: store.ThreadFrontmatter{
+	thr := memops.Thread{
+		Frontmatter: memops.ThreadFrontmatter{
 			ID:      id,
 			Project: projectID,
 			Anchors: []string{"alpha", "beta", "gamma", "delta"},
 			Summary: id + " summary",
-			State:   store.ThreadActive,
+			State:   memops.ThreadActive,
 		},
 		Body: body,
 	}

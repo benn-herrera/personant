@@ -295,14 +295,14 @@ func TestScenario_ProjectSwitching(t *testing.T) {
 		Setup: func(h *Harness) error {
 			// Seed prj_2 alongside the harness-default prj_1.
 			now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC).Format(time.RFC3339)
-			meta2 := store.ProjectMeta{
+			meta2 := memops.ProjectMeta{
 				ID:               "prj_2",
 				Name:             "second",
 				CurrentRootPath:  h.Paths.Home + "/p2",
 				Created:          now,
 				LastActive:       now,
 				ConventionsPaths: []string{},
-				SymbolPatterns:   []store.ProjectPattern{},
+				SymbolPatterns:   []memops.ProjectPattern{},
 				IgnoreSymbols:    []string{},
 			}
 			return store.SaveProjectMeta(h.Paths, meta2)

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"personant/internal/memops"
 	"personant/internal/store"
 )
 
@@ -21,14 +22,14 @@ func invariantHarness(t *testing.T) *Harness {
 		t.Fatalf("Init: %v", err)
 	}
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC).Format(time.RFC3339)
-	meta := store.ProjectMeta{
+	meta := memops.ProjectMeta{
 		ID:               "prj_1",
 		Name:             "alpha",
 		CurrentRootPath:  tmp,
 		Created:          now,
 		LastActive:       now,
 		ConventionsPaths: []string{},
-		SymbolPatterns:   []store.ProjectPattern{},
+		SymbolPatterns:   []memops.ProjectPattern{},
 		IgnoreSymbols:    []string{},
 	}
 	if err := store.SaveProjectMeta(paths, meta); err != nil {
@@ -49,13 +50,13 @@ func invariantHarness(t *testing.T) *Harness {
 
 // seedThread writes a paired (spine record, thread file) so tests can
 // exercise the cross-reference invariants without driving the runtime.
-func seedThread(t *testing.T, h *Harness, rec store.SpineRecord) {
+func seedThread(t *testing.T, h *Harness, rec memops.SpineRecord) {
 	t.Helper()
 	if err := store.AppendSpineRecord(h.Paths, rec); err != nil {
 		t.Fatalf("AppendSpineRecord: %v", err)
 	}
-	thr := store.Thread{
-		Frontmatter: store.ThreadFrontmatter{
+	thr := memops.Thread{
+		Frontmatter: memops.ThreadFrontmatter{
 			ID:           rec.ID,
 			Project:      rec.Project,
 			Anchors:      append([]string(nil), rec.Anchors...),
@@ -77,13 +78,13 @@ func seedThread(t *testing.T, h *Harness, rec store.SpineRecord) {
 	}
 }
 
-func validRecord() store.SpineRecord {
-	return store.SpineRecord{
+func validRecord() memops.SpineRecord {
+	return memops.SpineRecord{
 		ID:           "thr_1",
 		Project:      "prj_1",
 		Anchors:      []string{"alpha", "beta", "gamma", "delta"},
 		Summary:      "ok",
-		State:        store.ThreadActive,
+		State:        memops.ThreadActive,
 		Created:      "2026-05-01T12:00:00Z",
 		LastEngaged:  "2026-05-01T12:00:00Z",
 		StateChanged: "2026-05-01T12:00:00Z",
@@ -154,8 +155,8 @@ func TestVerifyProjectReferences_FailsOnUnknownProject(t *testing.T) {
 	if err := store.AppendSpineRecord(h.Paths, rec); err != nil {
 		t.Fatalf("AppendSpineRecord: %v", err)
 	}
-	thr := store.Thread{
-		Frontmatter: store.ThreadFrontmatter{
+	thr := memops.Thread{
+		Frontmatter: memops.ThreadFrontmatter{
 			ID:      rec.ID,
 			Project: rec.Project,
 			Anchors: rec.Anchors, Summary: rec.Summary, State: rec.State,

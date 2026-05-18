@@ -3,6 +3,8 @@ package store
 import (
 	"errors"
 	"testing"
+
+	"personant/internal/memops"
 )
 
 // spineFixturePaths returns a PersonantPaths rooted at t.TempDir() with an
@@ -26,7 +28,7 @@ func touchEmpty(path string) error {
 
 func TestAppendSpineRecordEmpty(t *testing.T) {
 	paths := spineFixturePaths(t)
-	rec := SpineRecord{ID: "thr_1", Project: "prj_1", Summary: "first"}
+	rec := memops.SpineRecord{ID: "thr_1", Project: "prj_1", Summary: "first"}
 	if err := AppendSpineRecord(paths, rec); err != nil {
 		t.Fatalf("AppendSpineRecord: %v", err)
 	}
@@ -41,13 +43,13 @@ func TestAppendSpineRecordEmpty(t *testing.T) {
 
 func TestAppendSpineRecordDuplicate(t *testing.T) {
 	paths := spineFixturePaths(t)
-	rec := SpineRecord{ID: "thr_1", Project: "prj_1", Summary: "first"}
+	rec := memops.SpineRecord{ID: "thr_1", Project: "prj_1", Summary: "first"}
 	if err := AppendSpineRecord(paths, rec); err != nil {
 		t.Fatalf("first append: %v", err)
 	}
 	err := AppendSpineRecord(paths, rec)
-	if !errors.Is(err, ErrDuplicateThreadID) {
-		t.Fatalf("expected ErrDuplicateThreadID, got %v", err)
+	if !errors.Is(err, memops.ErrDuplicateThreadID) {
+		t.Fatalf("expected memops.ErrDuplicateThreadID, got %v", err)
 	}
 	// Spine must still hold exactly one record.
 	got, err := ReadSpine(paths.Spine)
@@ -61,11 +63,11 @@ func TestAppendSpineRecordDuplicate(t *testing.T) {
 
 func TestUpdateSpineRecord(t *testing.T) {
 	paths := spineFixturePaths(t)
-	rec := SpineRecord{ID: "thr_1", Project: "prj_1", Summary: "first", State: ThreadActive}
+	rec := memops.SpineRecord{ID: "thr_1", Project: "prj_1", Summary: "first", State: memops.ThreadActive}
 	if err := AppendSpineRecord(paths, rec); err != nil {
 		t.Fatalf("AppendSpineRecord: %v", err)
 	}
-	rec.State = ThreadResolved
+	rec.State = memops.ThreadResolved
 	rec.Summary = "rewritten"
 	if err := UpdateSpineRecord(paths, rec); err != nil {
 		t.Fatalf("UpdateSpineRecord: %v", err)
@@ -77,23 +79,23 @@ func TestUpdateSpineRecord(t *testing.T) {
 	if !ok {
 		t.Fatal("expected record to exist after update")
 	}
-	if got.State != ThreadResolved || got.Summary != "rewritten" {
+	if got.State != memops.ThreadResolved || got.Summary != "rewritten" {
 		t.Errorf("update did not stick: %+v", got)
 	}
 }
 
 func TestUpdateSpineRecordMissing(t *testing.T) {
 	paths := spineFixturePaths(t)
-	rec := SpineRecord{ID: "thr_99", Project: "prj_1", Summary: "ghost"}
+	rec := memops.SpineRecord{ID: "thr_99", Project: "prj_1", Summary: "ghost"}
 	err := UpdateSpineRecord(paths, rec)
-	if !errors.Is(err, ErrThreadNotFound) {
-		t.Fatalf("expected ErrThreadNotFound, got %v", err)
+	if !errors.Is(err, memops.ErrThreadNotFound) {
+		t.Fatalf("expected memops.ErrThreadNotFound, got %v", err)
 	}
 }
 
 func TestFindSpineRecordPresentAndAbsent(t *testing.T) {
 	paths := spineFixturePaths(t)
-	for _, rec := range []SpineRecord{
+	for _, rec := range []memops.SpineRecord{
 		{ID: "thr_1", Project: "prj_1"},
 		{ID: "thr_2", Project: "prj_2"},
 	} {
@@ -121,7 +123,7 @@ func TestFindSpineRecordPresentAndAbsent(t *testing.T) {
 
 func TestSpineRecordsByProject(t *testing.T) {
 	paths := spineFixturePaths(t)
-	mix := []SpineRecord{
+	mix := []memops.SpineRecord{
 		{ID: "thr_1", Project: "prj_1"},
 		{ID: "thr_2", Project: "prj_2"},
 		{ID: "thr_3", Project: "prj_1"},
@@ -160,28 +162,28 @@ func TestSpineRecordsByProject(t *testing.T) {
 func TestNextThreadID(t *testing.T) {
 	cases := []struct {
 		name    string
-		records []SpineRecord
+		records []memops.SpineRecord
 		want    string
 	}{
 		{name: "empty", records: nil, want: "thr_1"},
-		{name: "single", records: []SpineRecord{{ID: "thr_1"}}, want: "thr_2"},
+		{name: "single", records: []memops.SpineRecord{{ID: "thr_1"}}, want: "thr_2"},
 		{
 			name: "sequential",
-			records: []SpineRecord{
+			records: []memops.SpineRecord{
 				{ID: "thr_1"}, {ID: "thr_2"}, {ID: "thr_3"},
 			},
 			want: "thr_4",
 		},
 		{
 			name: "with gaps",
-			records: []SpineRecord{
+			records: []memops.SpineRecord{
 				{ID: "thr_1"}, {ID: "thr_5"}, {ID: "thr_3"},
 			},
 			want: "thr_6",
 		},
 		{
 			name: "ignores malformed",
-			records: []SpineRecord{
+			records: []memops.SpineRecord{
 				{ID: "thr_1"}, {ID: "garbage"}, {ID: "thr_42"},
 			},
 			want: "thr_43",

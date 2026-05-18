@@ -6,7 +6,6 @@ import (
 
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
-	"personant/internal/store"
 )
 
 // extractCoalesce is a thin helper that drives deterministicExtract on
@@ -17,7 +16,7 @@ import (
 func extractCoalesce(t *testing.T, content string) *coalesceBuffer {
 	t.Helper()
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
 	deterministicExtract(context.Background(), state, Delta{
 		Source:    "user.prompt",
 		Content:   content,
@@ -33,8 +32,8 @@ func TestDeterministicExtractURL(t *testing.T) {
 	if !ok {
 		t.Fatalf("URL not extracted; symbols=%v", buf.symbols)
 	}
-	if sym.Source != store.SourceDeterministic {
-		t.Errorf("source: got %q want %q", sym.Source, store.SourceDeterministic)
+	if sym.Source != memops.SourceDeterministic {
+		t.Errorf("source: got %q want %q", sym.Source, memops.SourceDeterministic)
 	}
 	if sym.Raw != want {
 		t.Errorf("raw: got %q want %q (trailing comma should be stripped)", sym.Raw, want)
@@ -49,8 +48,8 @@ func TestDeterministicExtractFilePath(t *testing.T) {
 			t.Errorf("file path %q not extracted; symbols=%v", want, buf.symbols)
 			continue
 		}
-		if sym.Source != store.SourceDeterministic {
-			t.Errorf("%q source: got %q want %q", want, sym.Source, store.SourceDeterministic)
+		if sym.Source != memops.SourceDeterministic {
+			t.Errorf("%q source: got %q want %q", want, sym.Source, memops.SourceDeterministic)
 		}
 	}
 }
@@ -73,7 +72,7 @@ func TestDeterministicExtractHexID(t *testing.T) {
 
 func TestDeterministicExtractCoalesceWithUserPrompt(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
 
 	if err := onContextDelta(context.Background(), state, Delta{
 		Source:  "user.prompt",
@@ -86,16 +85,16 @@ func TestDeterministicExtractCoalesceWithUserPrompt(t *testing.T) {
 	if !ok {
 		t.Fatalf("user tag missing; symbols=%v", state.coalesce.symbols)
 	}
-	if tag.Source != store.SourceUser {
-		t.Errorf("tag source: got %q want %q", tag.Source, store.SourceUser)
+	if tag.Source != memops.SourceUser {
+		t.Errorf("tag source: got %q want %q", tag.Source, memops.SourceUser)
 	}
 
 	url, ok := state.coalesce.symbols["https://wiki/trefoil"]
 	if !ok {
 		t.Fatalf("URL missing; symbols=%v", state.coalesce.symbols)
 	}
-	if url.Source != store.SourceDeterministic {
-		t.Errorf("URL source: got %q want %q", url.Source, store.SourceDeterministic)
+	if url.Source != memops.SourceDeterministic {
+		t.Errorf("URL source: got %q want %q", url.Source, memops.SourceDeterministic)
 	}
 }
 
@@ -105,7 +104,7 @@ func TestDeterministicExtractCoalesceWithUserPrompt(t *testing.T) {
 // populated coalesce pre-B.2.
 func TestDeterministicExtract_ToolResultStagesNotCoalesces(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
 
 	if err := onContextDelta(context.Background(), state, Delta{
 		Source:  "tool.result",
@@ -121,8 +120,8 @@ func TestDeterministicExtract_ToolResultStagesNotCoalesces(t *testing.T) {
 	if staged.Normalized != "internal/store/foo.go" {
 		t.Errorf("staged Normalized: got %q want %q", staged.Normalized, "internal/store/foo.go")
 	}
-	if staged.Source != store.SourceDeterministic {
-		t.Errorf("staged Source: got %q want %q", staged.Source, store.SourceDeterministic)
+	if staged.Source != memops.SourceDeterministic {
+		t.Errorf("staged Source: got %q want %q", staged.Source, memops.SourceDeterministic)
 	}
 	if staged.StagedAt != state.TurnNumber {
 		t.Errorf("staged StagedAt: got %d want %d (current turn)", staged.StagedAt, state.TurnNumber)

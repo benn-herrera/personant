@@ -17,15 +17,15 @@ import (
 	"strings"
 	"testing"
 
-	"personant/internal/store"
+	"personant/internal/memops"
 )
 
-func reaperProvider() store.Provider {
+func reaperProvider() memops.Provider {
 	url := os.Getenv("PERSONANT_REAPER_URL")
 	if url == "" {
 		url = "http://reaper.local:4000/v1"
 	}
-	return store.Provider{
+	return memops.Provider{
 		Name:    "reaper",
 		BaseURL: url,
 		APIKey:  "dummy",

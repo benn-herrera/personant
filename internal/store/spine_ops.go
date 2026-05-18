@@ -1,33 +1,26 @@
 package store
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+
+	"personant/internal/memops"
 )
 
-// ErrDuplicateThreadID is returned by AppendSpineRecord when the record's id
-// already exists in the spine.
-var ErrDuplicateThreadID = errors.New("store: duplicate thread id in spine")
-
-// ErrThreadNotFound is returned by UpdateSpineRecord when no record with the
-// given id is present in the spine.
-var ErrThreadNotFound = errors.New("store: thread id not found in spine")
-
-// AppendSpineRecord adds a new SpineRecord to the spine.jsonl file. Atomic:
+// AppendSpineRecord adds a new memops.SpineRecord to the spine.jsonl file. Atomic:
 // the file is read, the new record is added in memory, and the full set is
-// rewritten via WriteSpine (temp+rename). Returns ErrDuplicateThreadID if a
+// rewritten via WriteSpine (temp+rename). Returns memops.ErrDuplicateThreadID if a
 // record with the same id is already present.
-func AppendSpineRecord(paths PersonantPaths, rec SpineRecord) error {
+func AppendSpineRecord(paths PersonantPaths, rec memops.SpineRecord) error {
 	records, err := ReadSpine(paths.Spine)
 	if err != nil {
 		return fmt.Errorf("append spine record: %w", err)
 	}
 	for i := range records {
 		if records[i].ID == rec.ID {
-			return fmt.Errorf("append spine record %s: %w", rec.ID, ErrDuplicateThreadID)
+			return fmt.Errorf("append spine record %s: %w", rec.ID, memops.ErrDuplicateThreadID)
 		}
 	}
 	records = append(records, rec)
@@ -38,8 +31,8 @@ func AppendSpineRecord(paths PersonantPaths, rec SpineRecord) error {
 }
 
 // UpdateSpineRecord replaces the existing record whose id matches rec.ID.
-// Returns ErrThreadNotFound if no such record exists. Atomic.
-func UpdateSpineRecord(paths PersonantPaths, rec SpineRecord) error {
+// Returns memops.ErrThreadNotFound if no such record exists. Atomic.
+func UpdateSpineRecord(paths PersonantPaths, rec memops.SpineRecord) error {
 	records, err := ReadSpine(paths.Spine)
 	if err != nil {
 		return fmt.Errorf("update spine record: %w", err)
@@ -52,7 +45,7 @@ func UpdateSpineRecord(paths PersonantPaths, rec SpineRecord) error {
 		}
 	}
 	if idx < 0 {
-		return fmt.Errorf("update spine record %s: %w", rec.ID, ErrThreadNotFound)
+		return fmt.Errorf("update spine record %s: %w", rec.ID, memops.ErrThreadNotFound)
 	}
 	records[idx] = rec
 	if err := WriteSpine(paths.Spine, records); err != nil {
@@ -63,27 +56,27 @@ func UpdateSpineRecord(paths PersonantPaths, rec SpineRecord) error {
 
 // FindSpineRecord returns the spine record with the given id. The second
 // return is false if no such record exists. Errors only on read failures.
-func FindSpineRecord(paths PersonantPaths, id string) (SpineRecord, bool, error) {
+func FindSpineRecord(paths PersonantPaths, id string) (memops.SpineRecord, bool, error) {
 	records, err := ReadSpine(paths.Spine)
 	if err != nil {
-		return SpineRecord{}, false, fmt.Errorf("find spine record: %w", err)
+		return memops.SpineRecord{}, false, fmt.Errorf("find spine record: %w", err)
 	}
 	for i := range records {
 		if records[i].ID == id {
 			return records[i], true, nil
 		}
 	}
-	return SpineRecord{}, false, nil
+	return memops.SpineRecord{}, false, nil
 }
 
 // SpineRecordsByProject returns all records whose Project field matches the
 // given project id, sorted by ID ascending.
-func SpineRecordsByProject(paths PersonantPaths, projectID string) ([]SpineRecord, error) {
+func SpineRecordsByProject(paths PersonantPaths, projectID string) ([]memops.SpineRecord, error) {
 	records, err := ReadSpine(paths.Spine)
 	if err != nil {
 		return nil, fmt.Errorf("spine records by project: %w", err)
 	}
-	out := make([]SpineRecord, 0)
+	out := make([]memops.SpineRecord, 0)
 	for i := range records {
 		if records[i].Project == projectID {
 			out = append(out, records[i])
@@ -98,7 +91,7 @@ func SpineRecordsByProject(paths PersonantPaths, projectID string) ([]SpineRecor
 // whose ID does not match ThreadIDPattern are ignored when computing the
 // maximum; this lets the function tolerate (rare) older or hand-edited
 // states without ever returning an ID that collides with an existing one.
-func NextThreadID(records []SpineRecord) string {
+func NextThreadID(records []memops.SpineRecord) string {
 	max := 0
 	for _, r := range records {
 		n, ok := parseSerialID(r.ID, "thr_")

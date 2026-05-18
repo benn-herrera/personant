@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"sort"
 
+	"personant/internal/memops"
 	"personant/internal/store"
 )
 
@@ -94,7 +95,7 @@ func Propose(paths store.PersonantPaths, query []string, opts Options) ([]Candid
 //  4. Drop scores below opts.Threshold (inclusive >=).
 //  5. Sort: score desc → recall_fires desc → thread ID asc.
 //  6. Apply Limit.
-func ProposeFromIndex(spine []store.SpineRecord, threads []store.ThreadFrontmatter, query []string, opts Options) []Candidate {
+func ProposeFromIndex(spine []memops.SpineRecord, threads []memops.ThreadFrontmatter, query []string, opts Options) []Candidate {
 	threshold := opts.Threshold
 	if threshold == 0 {
 		threshold = DefaultThreshold
@@ -109,7 +110,7 @@ func ProposeFromIndex(spine []store.SpineRecord, threads []store.ThreadFrontmatt
 		return nil
 	}
 
-	fmIndex := make(map[string]store.ThreadFrontmatter, len(threads))
+	fmIndex := make(map[string]memops.ThreadFrontmatter, len(threads))
 	for i := range threads {
 		fmIndex[threads[i].ID] = threads[i]
 	}
@@ -201,7 +202,7 @@ func uniqueNonEmpty(in []string) []string {
 // surface — the spine is canonical for anchors).
 //
 // Returns a sorted, deduplicated slice; empty strings dropped.
-func buildThreadSet(rec store.SpineRecord, fm store.ThreadFrontmatter, haveFM bool) []string {
+func buildThreadSet(rec memops.SpineRecord, fm memops.ThreadFrontmatter, haveFM bool) []string {
 	cap := len(rec.Anchors)
 	if haveFM {
 		cap += len(fm.HistorySymbols)

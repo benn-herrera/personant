@@ -25,9 +25,9 @@ import (
 	"sort"
 	"testing"
 
+	"personant/internal/memops"
 	"personant/internal/metrics"
 	"personant/internal/recall"
-	"personant/internal/store"
 )
 
 // corpusQueriesPath is the derived query artifact for the
@@ -41,21 +41,21 @@ var corpusQueriesPath = filepath.Join("testdata", "recall_madlibs", "corpus_quer
 // lexically-fixed stored substrate the matcher scans. Built once and
 // reused for every query, which is the whole point of the direct-call
 // design.
-func corpusIndex(doc madlibsDoc) (spine []store.SpineRecord, threads []store.ThreadFrontmatter, threadID map[string]string) {
+func corpusIndex(doc madlibsDoc) (spine []memops.SpineRecord, threads []memops.ThreadFrontmatter, threadID map[string]string) {
 	threadID = make(map[string]string, len(doc.Topics))
-	spine = make([]store.SpineRecord, 0, len(doc.Topics))
-	threads = make([]store.ThreadFrontmatter, 0, len(doc.Topics))
+	spine = make([]memops.SpineRecord, 0, len(doc.Topics))
+	threads = make([]memops.ThreadFrontmatter, 0, len(doc.Topics))
 	for i, tp := range doc.Topics {
 		id := fmt.Sprintf("thr_%d", i+1)
 		threadID[tp.Name] = id
 		anchors := append([]string(nil), tp.Anchors...)
-		spine = append(spine, store.SpineRecord{
+		spine = append(spine, memops.SpineRecord{
 			ID:      id,
 			Project: "prj_1",
 			Anchors: anchors,
-			State:   store.ThreadActive,
+			State:   memops.ThreadActive,
 		})
-		threads = append(threads, store.ThreadFrontmatter{
+		threads = append(threads, memops.ThreadFrontmatter{
 			ID:      id,
 			Project: "prj_1",
 			Anchors: anchors,
@@ -71,7 +71,7 @@ func corpusIndex(doc madlibsDoc) (spine []store.SpineRecord, threads []store.Thr
 func corpusQuerySymbols(q madlibsQuery) []string {
 	out := make([]string, 0, len(q.Tags))
 	for _, tag := range q.Tags {
-		out = append(out, store.Normalize(tag, store.SymbolTag))
+		out = append(out, memops.Normalize(tag, memops.SymbolTag))
 	}
 	return out
 }
@@ -89,8 +89,8 @@ func TestRecallMadlibs_CorpusReport(t *testing.T) {
 	run := metrics.New(map[string]string{"measurement": "recall-fidelity-corpus"})
 
 	type agg struct {
-		n, fired             int
-		sumP, sumR, sumF     float64
+		n, fired         int
+		sumP, sumR, sumF float64
 	}
 	byTopic := map[string]*agg{}
 	var order []string

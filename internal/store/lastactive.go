@@ -6,13 +6,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"personant/internal/memops"
 )
 
 // validLastActiveID reports whether s is a project id acceptable in the
 // last-active marker file: either ProjectIDPattern (prj_<n>) or the
 // reserved DefaultProjectID sentinel.
 func validLastActiveID(s string) bool {
-	return s == DefaultProjectID || ProjectIDPattern.MatchString(s)
+	return s == DefaultProjectID || memops.ProjectIDPattern.MatchString(s)
 }
 
 // ReadLastActive reads <Home>/last-active and returns the project id

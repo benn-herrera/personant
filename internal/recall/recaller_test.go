@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
 	"personant/internal/recall"
@@ -27,18 +28,18 @@ func newRecallHome(t *testing.T) (store.PersonantPaths, *fileadapter.FileAdapter
 func seedThread(t *testing.T, paths store.PersonantPaths, id string, anchors []string, body string) {
 	t.Helper()
 	ts := "2026-04-01T00:00:00Z"
-	rec := store.SpineRecord{
+	rec := memops.SpineRecord{
 		ID: id, Project: "prj_1", Anchors: anchors, Summary: id,
-		State: store.ThreadActive, Created: ts, LastEngaged: ts,
+		State: memops.ThreadActive, Created: ts, LastEngaged: ts,
 		StateChanged: ts, TurnCount: 1,
 	}
 	if err := store.AppendSpineRecord(paths, rec); err != nil {
 		t.Fatalf("seed spine %s: %v", id, err)
 	}
-	thr := store.Thread{
-		Frontmatter: store.ThreadFrontmatter{
+	thr := memops.Thread{
+		Frontmatter: memops.ThreadFrontmatter{
 			ID: id, Project: "prj_1", Anchors: anchors, Summary: id,
-			State: store.ThreadActive, Created: ts, LastEngaged: ts,
+			State: memops.ThreadActive, Created: ts, LastEngaged: ts,
 			StateChanged: ts, TurnCount: 1,
 		},
 		Body: body,

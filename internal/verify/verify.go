@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"personant/internal/index"
+	"personant/internal/memops"
 	"personant/internal/store"
 )
 
@@ -118,7 +119,7 @@ func Verify(paths store.PersonantPaths, opts VerifyOptions) (Report, error) {
 
 // checkSpine validates each SpineRecord against the spec §2.2 hard
 // limits and accumulates Findings on report.
-func checkSpine(report *Report, spine []store.SpineRecord, entryMax int, knownProjects map[string]bool) {
+func checkSpine(report *Report, spine []memops.SpineRecord, entryMax int, knownProjects map[string]bool) {
 	seenIDs := make(map[string]int, len(spine)) // id → first line where seen
 	for i, rec := range spine {
 		loc := fmt.Sprintf("spine.jsonl[%d]", i+1)
@@ -127,9 +128,9 @@ func checkSpine(report *Report, spine []store.SpineRecord, entryMax int, knownPr
 		switch {
 		case rec.ID == "":
 			report.Errors = append(report.Errors, Finding{Path: loc, Field: "id", Message: "id is empty"})
-		case !store.ThreadIDPattern.MatchString(rec.ID):
+		case !memops.ThreadIDPattern.MatchString(rec.ID):
 			report.Errors = append(report.Errors, Finding{Path: loc, Field: "id",
-				Message: fmt.Sprintf("id %q does not match %s", rec.ID, store.ThreadIDPattern.String())})
+				Message: fmt.Sprintf("id %q does not match %s", rec.ID, memops.ThreadIDPattern.String())})
 		default:
 			if first, dup := seenIDs[rec.ID]; dup {
 				report.Errors = append(report.Errors, Finding{Path: loc, Field: "id",
@@ -146,9 +147,9 @@ func checkSpine(report *Report, spine []store.SpineRecord, entryMax int, knownPr
 			report.Errors = append(report.Errors, Finding{Path: loc, Field: "project", Message: "project is empty"})
 		case rec.Project == "prj_default":
 			// reserved; always valid as a reference.
-		case !store.ProjectIDPattern.MatchString(rec.Project):
+		case !memops.ProjectIDPattern.MatchString(rec.Project):
 			report.Errors = append(report.Errors, Finding{Path: loc, Field: "project",
-				Message: fmt.Sprintf("project %q does not match %s", rec.Project, store.ProjectIDPattern.String())})
+				Message: fmt.Sprintf("project %q does not match %s", rec.Project, memops.ProjectIDPattern.String())})
 		case !knownProjects[rec.Project]:
 			// Mirror index.Check policy: missing meta.json is a warning, not an error.
 			report.Warnings = append(report.Warnings, Finding{Path: loc, Field: "project",
@@ -231,11 +232,11 @@ func parseRFC3339(v, loc, field string, report *Report) (time.Time, bool) {
 }
 
 // validThreadState reports whether s is one of the spec §2.2.1 enum values.
-func validThreadState(s store.ThreadState) bool {
+func validThreadState(s memops.ThreadState) bool {
 	switch s {
-	case store.ThreadActive, store.ThreadPaused, store.ThreadBlocked,
-		store.ThreadWIP, store.ThreadResolved, store.ThreadDecided,
-		store.ThreadAbandoned:
+	case memops.ThreadActive, memops.ThreadPaused, memops.ThreadBlocked,
+		memops.ThreadWIP, memops.ThreadResolved, memops.ThreadDecided,
+		memops.ThreadAbandoned:
 		return true
 	}
 	return false
@@ -271,7 +272,7 @@ func loadKnownProjects(projectsDir string) map[string]bool {
 // directory under projects/. Accepts both /^prj_\d+$/ and the reserved
 // "prj_default" handle (spec §2.5.1).
 func isProjectDirName(name string) bool {
-	return name == "prj_default" || store.ProjectIDPattern.MatchString(name)
+	return name == "prj_default" || memops.ProjectIDPattern.MatchString(name)
 }
 
 // checkProjectMetas validates each projects/prj_<n>/meta.json in turn.
@@ -301,7 +302,7 @@ func checkProjectMetas(report *Report, projectsDir string) {
 			report.Warnings = append(report.Warnings, Finding{
 				Path:    filepath.Join("projects", name),
 				Field:   "",
-				Message: fmt.Sprintf("directory name %q does not match %s and is not the reserved prj_default", name, store.ProjectIDPattern.String()),
+				Message: fmt.Sprintf("directory name %q does not match %s and is not the reserved prj_default", name, memops.ProjectIDPattern.String()),
 			})
 			continue
 		}
@@ -320,7 +321,7 @@ func checkProjectMetas(report *Report, projectsDir string) {
 			})
 			continue
 		}
-		var meta store.ProjectMeta
+		var meta memops.ProjectMeta
 		if err := json.Unmarshal(data, &meta); err != nil {
 			report.Errors = append(report.Errors, Finding{
 				Path:    filepath.Join("projects", name, "meta.json"),
@@ -333,7 +334,7 @@ func checkProjectMetas(report *Report, projectsDir string) {
 	}
 }
 
-func checkProjectMeta(report *Report, dirName string, meta store.ProjectMeta) {
+func checkProjectMeta(report *Report, dirName string, meta memops.ProjectMeta) {
 	loc := filepath.Join("projects", dirName, "meta.json")
 
 	// id: regex (or reserved handle) + matches directory name.
@@ -342,16 +343,16 @@ func checkProjectMeta(report *Report, dirName string, meta store.ProjectMeta) {
 		report.Errors = append(report.Errors, Finding{Path: loc, Field: "id", Message: "id is empty"})
 	case !isProjectDirName(meta.ID):
 		report.Errors = append(report.Errors, Finding{Path: loc, Field: "id",
-			Message: fmt.Sprintf("id %q does not match %s and is not prj_default", meta.ID, store.ProjectIDPattern.String())})
+			Message: fmt.Sprintf("id %q does not match %s and is not prj_default", meta.ID, memops.ProjectIDPattern.String())})
 	case meta.ID != dirName:
 		report.Errors = append(report.Errors, Finding{Path: loc, Field: "id",
 			Message: fmt.Sprintf("id %q does not match directory name %q", meta.ID, dirName)})
 	}
 
 	// name regex.
-	if !store.ProjectNamePattern.MatchString(meta.Name) {
+	if !memops.ProjectNamePattern.MatchString(meta.Name) {
 		report.Errors = append(report.Errors, Finding{Path: loc, Field: "name",
-			Message: fmt.Sprintf("name %q does not match %s", meta.Name, store.ProjectNamePattern.String())})
+			Message: fmt.Sprintf("name %q does not match %s", meta.Name, memops.ProjectNamePattern.String())})
 	}
 
 	// current_root_path: must be present. We do not check disk existence
@@ -446,4 +447,3 @@ func readEntryMaxChars(directivesDir string) (int, *Finding) {
 		Message: fmt.Sprintf("key not present; falling back to default %d", defaultEntryMaxChars),
 	}
 }
-

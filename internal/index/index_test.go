@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"personant/internal/memops"
 	"personant/internal/store"
 )
 
@@ -32,7 +33,7 @@ func initFreshHome(t *testing.T) store.PersonantPaths {
 }
 
 // writeSpine writes the given spine records via store.WriteSpine.
-func writeSpine(t *testing.T, paths store.PersonantPaths, recs []store.SpineRecord) {
+func writeSpine(t *testing.T, paths store.PersonantPaths, recs []memops.SpineRecord) {
 	t.Helper()
 	if err := store.WriteSpine(paths.Spine, recs); err != nil {
 		t.Fatalf("WriteSpine: %v", err)
@@ -41,18 +42,18 @@ func writeSpine(t *testing.T, paths store.PersonantPaths, recs []store.SpineReco
 
 func TestRebuildEndToEnd(t *testing.T) {
 	paths := initFreshHome(t)
-	writeSpine(t, paths, []store.SpineRecord{
+	writeSpine(t, paths, []memops.SpineRecord{
 		{
 			ID: "thr_1", Project: "prj_default",
 			Anchors: []string{"alpha", "beta", "gamma", "delta"},
-			Summary: "first thread", State: store.ThreadWIP,
+			Summary: "first thread", State: memops.ThreadWIP,
 			Created: "2026-05-09T04:00:00-07:00", LastEngaged: "2026-05-09T04:00:00-07:00", StateChanged: "2026-05-09T04:00:00-07:00",
 			TurnCount: 3, RecallFires: 0,
 		},
 		{
 			ID: "thr_2", Project: "prj_default",
 			Anchors: []string{"alpha", "epsilon", "zeta", "eta"},
-			Summary: "second thread sharing alpha", State: store.ThreadResolved,
+			Summary: "second thread sharing alpha", State: memops.ThreadResolved,
 			Created: "2026-05-09T04:01:00-07:00", LastEngaged: "2026-05-09T04:01:00-07:00", StateChanged: "2026-05-09T04:01:00-07:00",
 			TurnCount: 2, RecallFires: 2,
 		},
@@ -90,11 +91,11 @@ func TestRebuildEndToEnd(t *testing.T) {
 
 func TestCheckCleanAfterRebuild(t *testing.T) {
 	paths := initFreshHome(t)
-	writeSpine(t, paths, []store.SpineRecord{
+	writeSpine(t, paths, []memops.SpineRecord{
 		{
 			ID: "thr_1", Project: "prj_default",
 			Anchors: []string{"alpha", "beta", "gamma", "delta"},
-			Summary: "x", State: store.ThreadActive,
+			Summary: "x", State: memops.ThreadActive,
 			Created: "2026-05-09T04:00:00-07:00", LastEngaged: "2026-05-09T04:00:00-07:00", StateChanged: "2026-05-09T04:00:00-07:00",
 		},
 	})
@@ -125,11 +126,11 @@ func TestCheckCleanOnEmptyHome(t *testing.T) {
 
 func TestCheckDetectsCorruptSymbols(t *testing.T) {
 	paths := initFreshHome(t)
-	writeSpine(t, paths, []store.SpineRecord{
+	writeSpine(t, paths, []memops.SpineRecord{
 		{
 			ID: "thr_1", Project: "prj_default",
 			Anchors: []string{"alpha", "beta", "gamma", "delta"},
-			Summary: "x", State: store.ThreadActive,
+			Summary: "x", State: memops.ThreadActive,
 			Created: "2026-05-09T04:00:00-07:00", LastEngaged: "2026-05-09T04:00:00-07:00", StateChanged: "2026-05-09T04:00:00-07:00",
 		},
 	})
@@ -166,11 +167,11 @@ func TestCheckDetectsCorruptSymbols(t *testing.T) {
 
 func TestCheckDetectsMissingDigest(t *testing.T) {
 	paths := initFreshHome(t)
-	writeSpine(t, paths, []store.SpineRecord{
+	writeSpine(t, paths, []memops.SpineRecord{
 		{
 			ID: "thr_1", Project: "prj_default",
 			Anchors: []string{"alpha", "beta", "gamma", "delta"},
-			Summary: "x", State: store.ThreadActive,
+			Summary: "x", State: memops.ThreadActive,
 			Created: "2026-05-09T04:00:00-07:00", LastEngaged: "2026-05-09T04:00:00-07:00", StateChanged: "2026-05-09T04:00:00-07:00",
 		},
 	})
@@ -201,11 +202,11 @@ func TestCheckDetectsMissingDigest(t *testing.T) {
 
 func TestRebuildIsIdempotent(t *testing.T) {
 	paths := initFreshHome(t)
-	writeSpine(t, paths, []store.SpineRecord{
+	writeSpine(t, paths, []memops.SpineRecord{
 		{
 			ID: "thr_1", Project: "prj_default",
 			Anchors: []string{"alpha", "beta", "gamma", "delta"},
-			Summary: "x", State: store.ThreadActive,
+			Summary: "x", State: memops.ThreadActive,
 			Created: "2026-05-09T04:00:00-07:00", LastEngaged: "2026-05-09T04:00:00-07:00", StateChanged: "2026-05-09T04:00:00-07:00",
 		},
 	})

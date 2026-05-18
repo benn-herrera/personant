@@ -1,82 +1,14 @@
 package memops
 
-import (
-	"personant/internal/store"
-)
-
-// This file holds the supporting types referenced by the MemoryOps
-// interface. The data-model types (SpineRecord, ThreadFrontmatter,
-// Thread, ProjectMeta, Provider, the symbol/state enums) are aliased
-// from internal/store: the port is about *operations*, the data model
-// is shared between application and substrate. A future refactor could
-// move the model types into memops outright; today that is larger churn
-// than this step justifies.
-//
-// Sentinel errors are aliased so callers can use errors.Is against the
-// memops package without needing to import store for the sentinel.
-
-// ---------- Data-model aliases ----------
-
-type (
-	// SpineRecord is one line of the canonical spine (spec §2.2).
-	SpineRecord = store.SpineRecord
-	// ThreadFrontmatter is the YAML frontmatter of a thread file
-	// (spec §2.3).
-	ThreadFrontmatter = store.ThreadFrontmatter
-	// Thread is the in-memory shape of a thread file: frontmatter +
-	// markdown body (spec §2.3).
-	Thread = store.Thread
-	// HistorySymbol is one entry in a thread's frontmatter
-	// history_symbols list (spec §2.3).
-	HistorySymbol = store.HistorySymbol
-	// ProjectMeta is the per-project metadata record
-	// (projects/prj_<n>/meta.json, spec §2.5.1).
-	ProjectMeta = store.ProjectMeta
-	// ProjectDigest is the derived per-project digest content
-	// (projects/prj_<n>/digest.json, spec §2.5.2).
-	ProjectDigest = store.ProjectDigest
-	// Provider is one LLM provider's connectivity record from
-	// providers.toml (spec §8.2.1).
-	Provider = store.Provider
-	// ProviderFault names a provider that parsed but could not be
-	// fully loaded (its apiKeyFile was unreadable); LoadProviders
-	// omits it from the map and reports it as a fault instead.
-	ProviderFault = store.ProviderFault
-	// Config is the personant settings file (config.toml) — the
-	// chat/embedding choices drawn from the providers.toml pool.
-	Config = store.Config
-	// ThreadState is the lifecycle state of a thread (spec §2.2.1).
-	ThreadState = store.ThreadState
-	// SymbolSource is the provenance of a symbol emission
-	// (spec §2.7.3).
-	SymbolSource = store.SymbolSource
-	// SymbolCategory is the classification tier of a symbol
-	// (spec §2.7.1).
-	SymbolCategory = store.SymbolCategory
-)
-
-// ---------- Sentinel error aliases ----------
-//
-// Aliased so callers can errors.Is against memops.<Err> without taking
-// a direct internal/store dependency. The adapter returns the same
-// underlying error values.
-
-var (
-	// ErrThreadNotFound is returned when an operation targets a
-	// thread ID that has no spine record.
-	ErrThreadNotFound = store.ErrThreadNotFound
-	// ErrDuplicateThreadID is returned by CreateThread when its
-	// rec.ID already exists in the spine.
-	ErrDuplicateThreadID = store.ErrDuplicateThreadID
-	// ErrThreadFileNotFound is returned by LoadThread when the
-	// canonical thread file is absent. Callers use it to
-	// distinguish "fresh thread about to be created" from a parse
-	// failure.
-	ErrThreadFileNotFound = store.ErrThreadFileNotFound
-	// ErrProjectNotFound is returned by LoadProject when a
-	// non-default project's meta.json is absent.
-	ErrProjectNotFound = store.ErrProjectNotFound
-)
+// This file holds the operation-supporting types referenced by the
+// MemoryOps interface — filters, options, working-set inputs, bootstrap
+// and verification result shapes. The domain data-model types
+// (SpineRecord, ThreadFrontmatter, Thread, ProjectMeta, Provider, the
+// symbol/state enums, the sentinel errors, ParseModelRef/ValidateConfig)
+// are real definitions in memops_model.go: the port owns its domain
+// types outright. internal/store and the adapters depend on memops for
+// them — the dependency arrow runs substrate → port, the correct
+// direction for ports-and-adapters.
 
 // ---------- RetentionClass ----------
 

@@ -41,14 +41,14 @@ func rfc3339Now() string {
 // minimum schema (4 anchors, RFC3339 timestamps, valid state, present
 // project). The adapter does not enforce these — but a few tests cross
 // into Verify, which does.
-func validSpine(id, project string) store.SpineRecord {
+func validSpine(id, project string) memops.SpineRecord {
 	now := rfc3339Now()
-	return store.SpineRecord{
+	return memops.SpineRecord{
 		ID:           id,
 		Project:      project,
 		Anchors:      []string{"alpha", "beta", "gamma", "delta"},
 		Summary:      "test thread",
-		State:        store.ThreadActive,
+		State:        memops.ThreadActive,
 		Created:      now,
 		LastEngaged:  now,
 		StateChanged: now,
@@ -56,8 +56,8 @@ func validSpine(id, project string) store.SpineRecord {
 	}
 }
 
-func validFrontmatter(rec store.SpineRecord) store.ThreadFrontmatter {
-	return store.ThreadFrontmatter{
+func validFrontmatter(rec memops.SpineRecord) memops.ThreadFrontmatter {
+	return memops.ThreadFrontmatter{
 		ID:           rec.ID,
 		Project:      rec.Project,
 		Anchors:      rec.Anchors,

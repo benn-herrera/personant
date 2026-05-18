@@ -6,13 +6,14 @@ import (
 	"reflect"
 	"testing"
 
+	"personant/internal/memops"
 	"personant/internal/store"
 )
 
 // makeSpine is a helper that constructs a SpineRecord with the fields
 // the recall matcher actually consults; other fields are zeroed.
-func makeSpine(id, project string, anchors []string, recallFires int) store.SpineRecord {
-	return store.SpineRecord{
+func makeSpine(id, project string, anchors []string, recallFires int) memops.SpineRecord {
+	return memops.SpineRecord{
 		ID:          id,
 		Project:     project,
 		Anchors:     anchors,
@@ -22,12 +23,12 @@ func makeSpine(id, project string, anchors []string, recallFires int) store.Spin
 
 // makeFM constructs a ThreadFrontmatter with anchors + history_symbols
 // (normalized form only — that is what the matcher reads).
-func makeFM(id, project string, anchors, historyNorms []string) store.ThreadFrontmatter {
-	hist := make([]store.HistorySymbol, 0, len(historyNorms))
+func makeFM(id, project string, anchors, historyNorms []string) memops.ThreadFrontmatter {
+	hist := make([]memops.HistorySymbol, 0, len(historyNorms))
 	for _, n := range historyNorms {
-		hist = append(hist, store.HistorySymbol{Raw: n, Normalized: n})
+		hist = append(hist, memops.HistorySymbol{Raw: n, Normalized: n})
 	}
-	return store.ThreadFrontmatter{
+	return memops.ThreadFrontmatter{
 		ID:             id,
 		Project:        project,
 		Anchors:        anchors,
@@ -36,10 +37,10 @@ func makeFM(id, project string, anchors, historyNorms []string) store.ThreadFron
 }
 
 func TestProposeFromIndex_AnchorMatch_AboveThreshold(t *testing.T) {
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		makeSpine("thr_1", "prj_1", []string{"alpha", "beta", "gamma", "delta"}, 0),
 	}
-	threads := []store.ThreadFrontmatter{
+	threads := []memops.ThreadFrontmatter{
 		makeFM("thr_1", "prj_1", []string{"alpha", "beta", "gamma", "delta"}, nil),
 	}
 	got := ProposeFromIndex(spine, threads, []string{"alpha", "beta"}, Options{})
@@ -52,10 +53,10 @@ func TestProposeFromIndex_AnchorMatch_AboveThreshold(t *testing.T) {
 }
 
 func TestProposeFromIndex_BelowThresholdDropped(t *testing.T) {
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		makeSpine("thr_1", "prj_1", []string{"alpha", "beta", "gamma", "delta", "epsilon"}, 0),
 	}
-	threads := []store.ThreadFrontmatter{
+	threads := []memops.ThreadFrontmatter{
 		makeFM("thr_1", "prj_1", []string{"alpha", "beta", "gamma", "delta", "epsilon"}, nil),
 	}
 	got := ProposeFromIndex(spine, threads, []string{"alpha"}, Options{})
@@ -65,10 +66,10 @@ func TestProposeFromIndex_BelowThresholdDropped(t *testing.T) {
 }
 
 func TestProposeFromIndex_HistorySymbolsContribute(t *testing.T) {
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		makeSpine("thr_1", "prj_1", []string{"alpha", "beta"}, 0),
 	}
-	threads := []store.ThreadFrontmatter{
+	threads := []memops.ThreadFrontmatter{
 		makeFM("thr_1", "prj_1", []string{"alpha", "beta"}, []string{"gamma"}),
 	}
 
@@ -91,10 +92,10 @@ func TestProposeFromIndex_HistorySymbolsContribute(t *testing.T) {
 }
 
 func TestProposeFromIndex_ExcludeFiltersResult(t *testing.T) {
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		makeSpine("thr_1", "prj_1", []string{"alpha", "beta", "gamma", "delta"}, 0),
 	}
-	threads := []store.ThreadFrontmatter{
+	threads := []memops.ThreadFrontmatter{
 		makeFM("thr_1", "prj_1", []string{"alpha", "beta", "gamma", "delta"}, nil),
 	}
 	opts := Options{Exclude: map[string]struct{}{"thr_1": {}}}
@@ -105,11 +106,11 @@ func TestProposeFromIndex_ExcludeFiltersResult(t *testing.T) {
 }
 
 func TestProposeFromIndex_ProjectFilter(t *testing.T) {
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		makeSpine("thr_1", "prj_1", []string{"alpha", "beta", "gamma", "delta"}, 0),
 		makeSpine("thr_2", "prj_2", []string{"alpha", "beta", "gamma", "delta"}, 0),
 	}
-	threads := []store.ThreadFrontmatter{
+	threads := []memops.ThreadFrontmatter{
 		makeFM("thr_1", "prj_1", []string{"alpha", "beta", "gamma", "delta"}, nil),
 		makeFM("thr_2", "prj_2", []string{"alpha", "beta", "gamma", "delta"}, nil),
 	}
@@ -145,12 +146,12 @@ func TestProposeFromIndex_OrderingByScoreThenRecallFires(t *testing.T) {
 	//     ∪=4+4-3=5, score=0.6.  ✓
 	//   Aim for 0.5 with |Q|=4: ∩=2, ∪=4, anchors size=2:
 	//     anchors {a,b}: ∩=2, ∪=4+2-2=4, score=0.5.  ✓ (twice)
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		makeSpine("thr_a", "prj_1", []string{"a", "b", "c", "x"}, 0),
 		makeSpine("thr_b", "prj_1", []string{"a", "b"}, 7),
 		makeSpine("thr_c", "prj_1", []string{"a", "b"}, 3),
 	}
-	threads := []store.ThreadFrontmatter{
+	threads := []memops.ThreadFrontmatter{
 		makeFM("thr_a", "prj_1", []string{"a", "b", "c", "x"}, nil),
 		makeFM("thr_b", "prj_1", []string{"a", "b"}, nil),
 		makeFM("thr_c", "prj_1", []string{"a", "b"}, nil),
@@ -180,8 +181,8 @@ func TestProposeFromIndex_OrderingByScoreThenRecallFires(t *testing.T) {
 func TestProposeFromIndex_LimitTruncates(t *testing.T) {
 	// Five threads, all with anchors == query → score 1.0 each.
 	query := []string{"alpha", "beta"}
-	spine := make([]store.SpineRecord, 0, 5)
-	threads := make([]store.ThreadFrontmatter, 0, 5)
+	spine := make([]memops.SpineRecord, 0, 5)
+	threads := make([]memops.ThreadFrontmatter, 0, 5)
 	for _, id := range []string{"thr_1", "thr_2", "thr_3", "thr_4", "thr_5"} {
 		spine = append(spine, makeSpine(id, "prj_1", []string{"alpha", "beta"}, 0))
 		threads = append(threads, makeFM(id, "prj_1", []string{"alpha", "beta"}, nil))
@@ -197,10 +198,10 @@ func TestProposeFromIndex_LimitTruncates(t *testing.T) {
 }
 
 func TestProposeFromIndex_EmptyQueryReturnsNothing(t *testing.T) {
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		makeSpine("thr_1", "prj_1", []string{"alpha", "beta"}, 0),
 	}
-	threads := []store.ThreadFrontmatter{
+	threads := []memops.ThreadFrontmatter{
 		makeFM("thr_1", "prj_1", []string{"alpha", "beta"}, nil),
 	}
 	if got := ProposeFromIndex(spine, threads, nil, Options{}); len(got) != 0 {
@@ -217,10 +218,10 @@ func TestProposeFromIndex_EmptyQueryReturnsNothing(t *testing.T) {
 }
 
 func TestProposeFromIndex_MatchedSymbolsSorted(t *testing.T) {
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		makeSpine("thr_1", "prj_1", []string{"alpha", "beta", "zeta", "delta"}, 0),
 	}
-	threads := []store.ThreadFrontmatter{
+	threads := []memops.ThreadFrontmatter{
 		makeFM("thr_1", "prj_1", []string{"alpha", "beta", "zeta", "delta"}, nil),
 	}
 	got := ProposeFromIndex(spine, threads, []string{"zeta", "alpha"}, Options{})
@@ -234,7 +235,7 @@ func TestProposeFromIndex_MatchedSymbolsSorted(t *testing.T) {
 }
 
 func TestProposeFromIndex_FrontmatterMissingFallsBackToAnchors(t *testing.T) {
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		makeSpine("thr_1", "prj_1", []string{"alpha", "beta", "c", "d"}, 0),
 	}
 	// Note: threads slice deliberately omits thr_1.
@@ -248,10 +249,10 @@ func TestProposeFromIndex_FrontmatterMissingFallsBackToAnchors(t *testing.T) {
 }
 
 func TestProposeFromIndex_ZeroIntersectionDropped(t *testing.T) {
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		makeSpine("thr_1", "prj_1", []string{"alpha", "beta"}, 0),
 	}
-	threads := []store.ThreadFrontmatter{
+	threads := []memops.ThreadFrontmatter{
 		makeFM("thr_1", "prj_1", []string{"alpha", "beta"}, nil),
 	}
 	// Even with threshold 0, no overlap → no match.
@@ -268,25 +269,25 @@ func TestPropose_IntegrationLoadsFromDisk(t *testing.T) {
 		t.Fatalf("mkdir threads: %v", err)
 	}
 
-	rec := store.SpineRecord{
+	rec := memops.SpineRecord{
 		ID:          "thr_1",
 		Project:     "prj_1",
 		Anchors:     []string{"alpha", "beta", "gamma", "delta"},
 		Summary:     "test",
-		State:       store.ThreadActive,
+		State:       memops.ThreadActive,
 		Created:     "2026-05-10T00:00:00Z",
 		LastEngaged: "2026-05-10T00:00:00Z",
 	}
-	if err := store.WriteSpine(paths.Spine, []store.SpineRecord{rec}); err != nil {
+	if err := store.WriteSpine(paths.Spine, []memops.SpineRecord{rec}); err != nil {
 		t.Fatalf("write spine: %v", err)
 	}
-	thread := store.Thread{
-		Frontmatter: store.ThreadFrontmatter{
+	thread := memops.Thread{
+		Frontmatter: memops.ThreadFrontmatter{
 			ID:           "thr_1",
 			Project:      "prj_1",
 			Anchors:      []string{"alpha", "beta", "gamma", "delta"},
 			Summary:      "test",
-			State:        store.ThreadActive,
+			State:        memops.ThreadActive,
 			Created:      "2026-05-10T00:00:00Z",
 			LastEngaged:  "2026-05-10T00:00:00Z",
 			StateChanged: "2026-05-10T00:00:00Z",

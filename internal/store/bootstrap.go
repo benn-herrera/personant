@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+
+	"personant/internal/memops"
 )
 
 // BootstrapStep identifies which branch of the waterfall produced a result.
@@ -43,7 +45,7 @@ func (s BootstrapStep) String() string {
 type BootstrapOptions struct {
 	// ExplicitProject, if non-empty, short-circuits the waterfall. The
 	// resolver tries to interpret it first as a prj_<n> id, then as a
-	// ProjectMeta.Name. Returns ErrProjectNotFound on no match.
+	// memops.ProjectMeta.Name. Returns memops.ErrProjectNotFound on no match.
 	ExplicitProject string
 
 	// CWD is the directory used as the basis for the heuristic waterfall
@@ -60,8 +62,8 @@ type BootstrapOptions struct {
 //   - Step == StepNeedsFallback (caller offers create/switch/no-project).
 type BootstrapResult struct {
 	Step      BootstrapStep
-	Resolved  *ProjectMeta
-	Candidate *ProjectMeta
+	Resolved  *memops.ProjectMeta
+	Candidate *memops.ProjectMeta
 }
 
 // ResolveActiveProject runs the bootstrap waterfall described in spec
@@ -146,7 +148,7 @@ func ResolveActiveProject(paths PersonantPaths, opts BootstrapOptions) (Bootstra
 		if err == nil {
 			return BootstrapResult{Step: StepNeedsConfirmation, Candidate: &meta}, nil
 		}
-		if !errors.Is(err, ErrProjectNotFound) {
+		if !errors.Is(err, memops.ErrProjectNotFound) {
 			return BootstrapResult{}, fmt.Errorf("bootstrap: %w", err)
 		}
 		// last-active points at a project whose meta.json was deleted —
@@ -157,32 +159,32 @@ func ResolveActiveProject(paths PersonantPaths, opts BootstrapOptions) (Bootstra
 }
 
 // resolveExplicit looks up a project either by id (matching ProjectIDPattern
-// or DefaultProjectID) or by Name. Returns ErrProjectNotFound when neither
+// or DefaultProjectID) or by Name. Returns memops.ErrProjectNotFound when neither
 // lookup hits.
-func resolveExplicit(paths PersonantPaths, ref string) (ProjectMeta, error) {
+func resolveExplicit(paths PersonantPaths, ref string) (memops.ProjectMeta, error) {
 	// Try as id first. ProjectIDPattern matches prj_<n>; DefaultProjectID
 	// is the documented sentinel.
-	if ref == DefaultProjectID || ProjectIDPattern.MatchString(ref) {
+	if ref == DefaultProjectID || memops.ProjectIDPattern.MatchString(ref) {
 		meta, err := LoadProjectMeta(paths, ref)
 		if err == nil {
 			return meta, nil
 		}
-		if !errors.Is(err, ErrProjectNotFound) {
-			return ProjectMeta{}, fmt.Errorf("bootstrap: %w", err)
+		if !errors.Is(err, memops.ErrProjectNotFound) {
+			return memops.ProjectMeta{}, fmt.Errorf("bootstrap: %w", err)
 		}
 		// Fall through and try by name — an "id-shaped" string that does not
 		// resolve as an id is, on this machine, just a plausible name.
 	}
 	metas, err := ListProjects(paths)
 	if err != nil {
-		return ProjectMeta{}, fmt.Errorf("bootstrap: %w", err)
+		return memops.ProjectMeta{}, fmt.Errorf("bootstrap: %w", err)
 	}
 	for _, m := range metas {
 		if m.Name == ref {
 			return m, nil
 		}
 	}
-	return ProjectMeta{}, fmt.Errorf("bootstrap: project %q: %w", ref, ErrProjectNotFound)
+	return memops.ProjectMeta{}, fmt.Errorf("bootstrap: project %q: %w", ref, memops.ErrProjectNotFound)
 }
 
 // driftUpdatePath rewrites meta.CurrentRootPath to newPath if the two
@@ -192,7 +194,7 @@ func resolveExplicit(paths PersonantPaths, ref string) (ProjectMeta, error) {
 //
 // No-op when the paths already agree (after clean); in that case meta is
 // unchanged and not rewritten.
-func driftUpdatePath(paths PersonantPaths, meta *ProjectMeta, newPath string) error {
+func driftUpdatePath(paths PersonantPaths, meta *memops.ProjectMeta, newPath string) error {
 	if newPath == "" {
 		return nil
 	}

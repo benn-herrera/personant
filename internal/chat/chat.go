@@ -114,7 +114,7 @@ func Run(opts Options) error {
 	// Cross-file validation: every [chat]/[embedding] reference must be
 	// well-formed and name a provider in the pool. Issues here are fatal
 	// — a misconfigured session must fail loud at bootstrap, not midway.
-	if issues := store.ValidateConfig(cfg, providers); len(issues) > 0 {
+	if issues := memops.ValidateConfig(cfg, providers); len(issues) > 0 {
 		var b strings.Builder
 		b.WriteString("chat: config.toml validation failed:")
 		for _, iss := range issues {
@@ -131,7 +131,7 @@ func Run(opts Options) error {
 	providerName := opts.ProviderName
 	chatModel := opts.Model
 	if cfg.Chat.DefaultModel != "" {
-		cp, cm, _ := store.ParseModelRef(cfg.Chat.DefaultModel)
+		cp, cm, _ := memops.ParseModelRef(cfg.Chat.DefaultModel)
 		if providerName == "" {
 			providerName = cp
 		}
@@ -196,7 +196,7 @@ func Run(opts Options) error {
 	// verified the reference is well-formed, names a provider in the
 	// pool, and matches that provider's defaultModel.
 	if cfg.Embedding.Model != "" {
-		ep, em, _ := store.ParseModelRef(cfg.Embedding.Model)
+		ep, em, _ := memops.ParseModelRef(cfg.Embedding.Model)
 		embProvider := providers[ep]
 		embedder := model.NewHTTPEmbedder(embProvider, em, cfg.Embedding.VectorLength)
 		state.Recaller = recall.NewService(ops, embedder)
@@ -374,7 +374,7 @@ shell escape:
   #<cmd>                   shell with capture (not yet implemented)`
 }
 
-func printProjectInfo(w io.Writer, p store.ProjectMeta) {
+func printProjectInfo(w io.Writer, p memops.ProjectMeta) {
 	fmt.Fprintf(w, "id:           %s\n", p.ID)
 	fmt.Fprintf(w, "name:         %s\n", p.Name)
 	if p.CurrentRootPath != "" {
@@ -407,24 +407,24 @@ func printStats(w io.Writer, ops memops.MemoryOps, state *turn.State) {
 //
 // Returns a zero ProjectMeta only if the user cancels at every prompt.
 // The caller treats that as a clean exit.
-func bootstrapProject(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string) (store.ProjectMeta, error) {
+func bootstrapProject(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string) (memops.ProjectMeta, error) {
 	return bootstrapProjectWithExplicit(opts, in, ops, cwd, opts.ExplicitProject)
 }
 
-func bootstrapProjectWithExplicit(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string, explicit string) (store.ProjectMeta, error) {
+func bootstrapProjectWithExplicit(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string, explicit string) (memops.ProjectMeta, error) {
 	ctx := context.Background()
 	result, err := ops.ResolveActiveProject(ctx, memops.BootstrapHints{
 		ExplicitProject: explicit,
 		CWD:             cwd,
 	})
 	if err != nil {
-		return store.ProjectMeta{}, fmt.Errorf("chat: bootstrap: %w", err)
+		return memops.ProjectMeta{}, fmt.Errorf("chat: bootstrap: %w", err)
 	}
 
 	switch result.Step {
 	case memops.StepExplicit, memops.StepRemoteMatch, memops.StepPathMatch:
 		if result.Resolved == nil {
-			return store.ProjectMeta{}, errors.New("chat: bootstrap: resolver returned nil project on success step")
+			return memops.ProjectMeta{}, errors.New("chat: bootstrap: resolver returned nil project on success step")
 		}
 		return *result.Resolved, nil
 
@@ -435,12 +435,12 @@ func bootstrapProjectWithExplicit(opts Options, in *bufio.Reader, ops memops.Mem
 		return promptFallback(opts, in, ops, cwd)
 
 	default:
-		return store.ProjectMeta{}, fmt.Errorf("chat: bootstrap: unrecognized step %v", result.Step)
+		return memops.ProjectMeta{}, fmt.Errorf("chat: bootstrap: unrecognized step %v", result.Step)
 	}
 }
 
 // promptConfirmation surfaces the §4.5.7 last-active resume prompt.
-func promptConfirmation(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string, candidate *store.ProjectMeta) (store.ProjectMeta, error) {
+func promptConfirmation(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string, candidate *memops.ProjectMeta) (memops.ProjectMeta, error) {
 	if candidate == nil {
 		return promptFallback(opts, in, ops, cwd)
 	}
@@ -455,13 +455,13 @@ func promptConfirmation(opts Options, in *bufio.Reader, ops memops.MemoryOps, cw
 		}
 		ans, err := readLine(in)
 		if err != nil {
-			return store.ProjectMeta{}, err
+			return memops.ProjectMeta{}, err
 		}
 		ans = strings.TrimSpace(ans)
 		switch ans {
 		case "", "y", "Y", "yes":
 			if err := ops.SetLastActiveProject(ctx, candidate.ID); err != nil {
-				return store.ProjectMeta{}, fmt.Errorf("chat: write last-active: %w", err)
+				return memops.ProjectMeta{}, fmt.Errorf("chat: write last-active: %w", err)
 			}
 			return *candidate, nil
 		case "n", "N", "no":
@@ -474,7 +474,7 @@ func promptConfirmation(opts Options, in *bufio.Reader, ops memops.MemoryOps, cw
 }
 
 // promptFallback surfaces the §4.5.7 final fallback prompt.
-func promptFallback(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string) (store.ProjectMeta, error) {
+func promptFallback(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string) (memops.ProjectMeta, error) {
 	ctx := context.Background()
 	for {
 		fmt.Fprintln(opts.Stdout, "No active project resolved.")
@@ -484,7 +484,7 @@ func promptFallback(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd st
 		fmt.Fprint(opts.Stdout, "choice: ")
 		ans, err := readLine(in)
 		if err != nil {
-			return store.ProjectMeta{}, err
+			return memops.ProjectMeta{}, err
 		}
 		switch strings.TrimSpace(strings.ToLower(ans)) {
 		case "c":
@@ -497,22 +497,22 @@ func promptFallback(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd st
 		case "s":
 			meta, ok, err := pickExistingProject(opts, in, ops)
 			if err != nil {
-				return store.ProjectMeta{}, err
+				return memops.ProjectMeta{}, err
 			}
 			if !ok {
 				continue
 			}
 			if err := ops.SetLastActiveProject(ctx, meta.ID); err != nil {
-				return store.ProjectMeta{}, fmt.Errorf("chat: write last-active: %w", err)
+				return memops.ProjectMeta{}, fmt.Errorf("chat: write last-active: %w", err)
 			}
 			return meta, nil
 		case "n":
 			meta, err := ops.LoadProject(ctx, store.DefaultProjectID)
 			if err != nil {
-				return store.ProjectMeta{}, fmt.Errorf("chat: load default: %w", err)
+				return memops.ProjectMeta{}, fmt.Errorf("chat: load default: %w", err)
 			}
 			if err := ops.SetLastActiveProject(ctx, store.DefaultProjectID); err != nil {
-				return store.ProjectMeta{}, fmt.Errorf("chat: write last-active: %w", err)
+				return memops.ProjectMeta{}, fmt.Errorf("chat: write last-active: %w", err)
 			}
 			return meta, nil
 		default:
@@ -521,23 +521,23 @@ func promptFallback(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd st
 	}
 }
 
-func createNewProject(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string) (store.ProjectMeta, error) {
+func createNewProject(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string) (memops.ProjectMeta, error) {
 	ctx := context.Background()
 	fmt.Fprint(opts.Stdout, "display name: ")
 	name, err := readLine(in)
 	if err != nil {
-		return store.ProjectMeta{}, err
+		return memops.ProjectMeta{}, err
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return store.ProjectMeta{}, errors.New("chat: empty project name")
+		return memops.ProjectMeta{}, errors.New("chat: empty project name")
 	}
 	id, err := ops.NextProjectID(ctx)
 	if err != nil {
-		return store.ProjectMeta{}, err
+		return memops.ProjectMeta{}, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	meta := store.ProjectMeta{
+	meta := memops.ProjectMeta{
 		ID:              id,
 		Name:            name,
 		CurrentRootPath: cwd,
@@ -545,10 +545,10 @@ func createNewProject(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd 
 		LastActive:      now,
 	}
 	if err := ops.CreateProject(ctx, meta); err != nil {
-		return store.ProjectMeta{}, err
+		return memops.ProjectMeta{}, err
 	}
 	if err := ops.SetLastActiveProject(ctx, id); err != nil {
-		return store.ProjectMeta{}, fmt.Errorf("chat: write last-active: %w", err)
+		return memops.ProjectMeta{}, fmt.Errorf("chat: write last-active: %w", err)
 	}
 	if err := ops.Log(ctx, "project", "created", "id="+id+" name="+name); err != nil {
 		fmt.Fprintf(opts.Stderr, "warn: log project.created: %v\n", err)
@@ -556,14 +556,14 @@ func createNewProject(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd 
 	return meta, nil
 }
 
-func pickExistingProject(opts Options, in *bufio.Reader, ops memops.MemoryOps) (store.ProjectMeta, bool, error) {
+func pickExistingProject(opts Options, in *bufio.Reader, ops memops.MemoryOps) (memops.ProjectMeta, bool, error) {
 	metas, err := ops.ListProjects(context.Background())
 	if err != nil {
-		return store.ProjectMeta{}, false, err
+		return memops.ProjectMeta{}, false, err
 	}
 	if len(metas) == 0 {
 		fmt.Fprintln(opts.Stderr, "no known projects to switch to")
-		return store.ProjectMeta{}, false, nil
+		return memops.ProjectMeta{}, false, nil
 	}
 	fmt.Fprintln(opts.Stdout, "known projects:")
 	for _, m := range metas {
@@ -572,7 +572,7 @@ func pickExistingProject(opts Options, in *bufio.Reader, ops memops.MemoryOps) (
 	fmt.Fprint(opts.Stdout, "id or name: ")
 	ans, err := readLine(in)
 	if err != nil {
-		return store.ProjectMeta{}, false, err
+		return memops.ProjectMeta{}, false, err
 	}
 	ans = strings.TrimSpace(ans)
 	for _, m := range metas {
@@ -581,7 +581,7 @@ func pickExistingProject(opts Options, in *bufio.Reader, ops memops.MemoryOps) (
 		}
 	}
 	fmt.Fprintf(opts.Stderr, "no project matched %q\n", ans)
-	return store.ProjectMeta{}, false, nil
+	return memops.ProjectMeta{}, false, nil
 }
 
 // readLine reads a single line from r, stripping the trailing newline.

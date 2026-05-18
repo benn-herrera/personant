@@ -19,7 +19,6 @@ package fileadapter
 import (
 	"context"
 	"fmt"
-	"maps"
 
 	"personant/internal/eventlog"
 	"personant/internal/index"
@@ -74,7 +73,7 @@ func (a *FileAdapter) CreateThread(ctx context.Context, w memops.ThreadWrite) er
 	} else if found {
 		return fmt.Errorf("fileadapter: create thread %s: %w", w.Spine.ID, memops.ErrDuplicateThreadID)
 	}
-	if err := store.SaveThread(a.paths, store.Thread{Frontmatter: w.Frontmatter, Body: w.Body}); err != nil {
+	if err := store.SaveThread(a.paths, memops.Thread{Frontmatter: w.Frontmatter, Body: w.Body}); err != nil {
 		return fmt.Errorf("fileadapter: save thread file: %w", err)
 	}
 	if err := store.AppendSpineRecord(a.paths, w.Spine); err != nil {
@@ -99,7 +98,7 @@ func (a *FileAdapter) EngageThread(ctx context.Context, w memops.ThreadWrite) er
 	// SaveThread is an unconditional write — it creates the file if
 	// absent. That is the missing-file fallback in one line: no special
 	// case needed.
-	if err := store.SaveThread(a.paths, store.Thread{Frontmatter: w.Frontmatter, Body: w.Body}); err != nil {
+	if err := store.SaveThread(a.paths, memops.Thread{Frontmatter: w.Frontmatter, Body: w.Body}); err != nil {
 		return fmt.Errorf("fileadapter: save thread file: %w", err)
 	}
 	if err := store.UpdateSpineRecord(a.paths, w.Spine); err != nil {
@@ -557,13 +556,10 @@ func (a *FileAdapter) LoadProviders(ctx context.Context) (map[string]memops.Prov
 	if err != nil {
 		return nil, nil, fmt.Errorf("fileadapter: load providers: %w", err)
 	}
-	// store.Providers is map[string]store.Provider; memops.Provider is an
-	// alias for store.Provider, so the assignment is type-compatible
-	// element-by-element. Allocate a fresh map of the named target type
-	// for clarity to callers reading via the port.
-	out := make(map[string]memops.Provider, len(providers))
-	maps.Copy(out, providers)
-	return out, faults, nil
+	// store.LoadProviders returns memops.Providers (map[string]memops.Provider)
+	// and []memops.ProviderFault directly — the domain types are owned by
+	// memops — so no element-by-element bridging is needed.
+	return providers, faults, nil
 }
 
 // LoadConfig reads config.toml — the chat/embedding choices. A

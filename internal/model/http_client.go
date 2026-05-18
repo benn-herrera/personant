@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"personant/internal/store"
+	"personant/internal/memops"
 )
 
 // userAgent is the User-Agent header value sent with every request.
@@ -23,7 +23,7 @@ const userAgent = "personant/0.1"
 // resolved configuration (BaseURL, APIKey, DefaultModel) — APIKey is
 // secret-bearing and is never logged or returned in error strings.
 type HTTPClient struct {
-	provider store.Provider
+	provider memops.Provider
 	http     *http.Client
 
 	// embeddingModel / embeddingDimensions are set by NewHTTPEmbedder
@@ -37,7 +37,7 @@ type HTTPClient struct {
 // NewHTTPClient constructs an HTTPClient for the given provider. A
 // nil-equivalent zero Provider yields a client whose first call will
 // produce a clear error.
-func NewHTTPClient(p store.Provider) Client {
+func NewHTTPClient(p memops.Provider) Client {
 	return &HTTPClient{
 		provider: p,
 		http: &http.Client{

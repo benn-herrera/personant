@@ -9,15 +9,15 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
-	"personant/internal/store"
+	"personant/internal/memops"
+	"time"
 )
 
 const testAPIKey = "sk-TEST-MUST-NOT-LEAK-1234567890abcdef"
 
-func newTestProvider(baseURL string) store.Provider {
-	return store.Provider{
+func newTestProvider(baseURL string) memops.Provider {
+	return memops.Provider{
 		Name:         "test",
 		BaseURL:      baseURL,
 		APIKey:       testAPIKey,
@@ -124,7 +124,7 @@ func TestHTTPClientNoAPIKeyOmitsAuthHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := store.Provider{Name: "nokey", BaseURL: srv.URL, DefaultModel: "m"}
+	p := memops.Provider{Name: "nokey", BaseURL: srv.URL, DefaultModel: "m"}
 	c := NewHTTPClient(p)
 	if _, err := c.Consult(context.Background(), Request{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}}); err != nil {
 		t.Fatalf("Consult: %v", err)
@@ -261,7 +261,7 @@ func TestHTTPClientErrorScrubsAPIKey(t *testing.T) {
 // TestHTTPClientEmptyBaseURLErrors: an empty BaseURL must produce a clear
 // error rather than an HTTP attempt against a malformed URL.
 func TestHTTPClientEmptyBaseURLErrors(t *testing.T) {
-	c := NewHTTPClient(store.Provider{Name: "x"})
+	c := NewHTTPClient(memops.Provider{Name: "x"})
 	_, err := c.Consult(context.Background(), Request{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
 	if err == nil {
 		t.Fatal("expected error on empty BaseURL, got nil")

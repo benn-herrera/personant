@@ -164,8 +164,8 @@ type Harness struct {
 	// are test-side substrate validators and stay on store.* access.
 	Paths    store.PersonantPaths
 	Ops      memops.MemoryOps
-	Project  store.ProjectMeta
-	Provider store.Provider
+	Project  memops.ProjectMeta
+	Provider memops.Provider
 	Mock     *model.MockClient
 	State    *turn.State
 	Metrics  *metrics.Run
@@ -287,7 +287,7 @@ defaultModel = "harness-mock"
 		t.Fatalf("scenario %s: write providers.toml: %v", sc.Name, err)
 	}
 
-	provider := store.Provider{
+	provider := memops.Provider{
 		Name:         "test",
 		BaseURL:      "http://harness.invalid",
 		APIKey:       "harness-key",
@@ -295,14 +295,14 @@ defaultModel = "harness-mock"
 	}
 
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC).Format(time.RFC3339)
-	project := store.ProjectMeta{
+	project := memops.ProjectMeta{
 		ID:               "prj_1",
 		Name:             "harness-default",
 		CurrentRootPath:  tmp,
 		Created:          now,
 		LastActive:       now,
 		ConventionsPaths: []string{},
-		SymbolPatterns:   []store.ProjectPattern{},
+		SymbolPatterns:   []memops.ProjectPattern{},
 		IgnoreSymbols:    []string{},
 	}
 	if err := store.SaveProjectMeta(paths, project); err != nil {

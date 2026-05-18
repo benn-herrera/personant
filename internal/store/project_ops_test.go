@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"personant/internal/memops"
 )
 
 // projectFixturePaths returns a PersonantPaths rooted at t.TempDir() with
@@ -21,7 +23,7 @@ func projectFixturePaths(t *testing.T) PersonantPaths {
 func TestSaveLoadProjectMetaRoundTrip(t *testing.T) {
 	paths := projectFixturePaths(t)
 
-	in := ProjectMeta{
+	in := memops.ProjectMeta{
 		ID:               "prj_1",
 		Name:             "alpha",
 		CurrentRootPath:  "/tmp/alpha",
@@ -54,8 +56,8 @@ func TestSaveLoadProjectMetaRoundTrip(t *testing.T) {
 func TestLoadProjectMetaMissing(t *testing.T) {
 	paths := projectFixturePaths(t)
 	_, err := LoadProjectMeta(paths, "prj_99")
-	if !errors.Is(err, ErrProjectNotFound) {
-		t.Fatalf("expected ErrProjectNotFound, got %v", err)
+	if !errors.Is(err, memops.ErrProjectNotFound) {
+		t.Fatalf("expected memops.ErrProjectNotFound, got %v", err)
 	}
 }
 
@@ -78,7 +80,7 @@ func TestLoadProjectMetaDefaultSynthetic(t *testing.T) {
 
 func TestSaveProjectMetaRejectsEmptyID(t *testing.T) {
 	paths := projectFixturePaths(t)
-	err := SaveProjectMeta(paths, ProjectMeta{Name: "no-id"})
+	err := SaveProjectMeta(paths, memops.ProjectMeta{Name: "no-id"})
 	if err == nil {
 		t.Fatal("expected error for empty ID, got nil")
 	}
@@ -87,7 +89,7 @@ func TestSaveProjectMetaRejectsEmptyID(t *testing.T) {
 func TestListProjectsSortedAndSkipsMissing(t *testing.T) {
 	paths := projectFixturePaths(t)
 
-	for _, m := range []ProjectMeta{
+	for _, m := range []memops.ProjectMeta{
 		{ID: "prj_3", Name: "c"},
 		{ID: "prj_1", Name: "a"},
 		{ID: "prj_2", Name: "b"},
@@ -141,18 +143,18 @@ func TestListProjectsMissingDir(t *testing.T) {
 func TestFindProjectByRemote(t *testing.T) {
 	paths := projectFixturePaths(t)
 
-	current := ProjectMeta{
+	current := memops.ProjectMeta{
 		ID:         "prj_1",
 		Name:       "alpha",
 		RemoteURLs: []string{"https://github.com/foo/alpha"},
 	}
-	historical := ProjectMeta{
+	historical := memops.ProjectMeta{
 		ID:                   "prj_2",
 		Name:                 "beta",
 		RemoteURLs:           []string{"https://github.com/foo/beta-new"},
 		HistoricalRemoteURLs: []string{"https://github.com/foo/beta-old"},
 	}
-	for _, m := range []ProjectMeta{current, historical} {
+	for _, m := range []memops.ProjectMeta{current, historical} {
 		if err := SaveProjectMeta(paths, m); err != nil {
 			t.Fatalf("save %s: %v", m.ID, err)
 		}
@@ -198,7 +200,7 @@ func TestFindProjectByRemote(t *testing.T) {
 func TestFindProjectByPath(t *testing.T) {
 	paths := projectFixturePaths(t)
 
-	if err := SaveProjectMeta(paths, ProjectMeta{
+	if err := SaveProjectMeta(paths, memops.ProjectMeta{
 		ID:                  "prj_1",
 		Name:                "alpha",
 		CurrentRootPath:     "/projects/alpha",
@@ -208,10 +210,10 @@ func TestFindProjectByPath(t *testing.T) {
 	}
 
 	cases := []struct {
-		name     string
-		query    string
-		wantOK   bool
-		wantID   string
+		name   string
+		query  string
+		wantOK bool
+		wantID string
 	}{
 		{name: "current", query: "/projects/alpha", wantOK: true, wantID: "prj_1"},
 		{name: "historical", query: "/old/alpha", wantOK: true, wantID: "prj_1"},
@@ -238,20 +240,20 @@ func TestFindProjectByPath(t *testing.T) {
 func TestNextProjectID(t *testing.T) {
 	cases := []struct {
 		name  string
-		metas []ProjectMeta
+		metas []memops.ProjectMeta
 		want  string
 	}{
 		{name: "empty", metas: nil, want: "prj_1"},
 		{
 			name: "ignores prj_default",
-			metas: []ProjectMeta{
+			metas: []memops.ProjectMeta{
 				{ID: DefaultProjectID},
 			},
 			want: "prj_1",
 		},
 		{
 			name: "with gaps",
-			metas: []ProjectMeta{
+			metas: []memops.ProjectMeta{
 				{ID: "prj_1"}, {ID: "prj_5"}, {ID: "prj_3"},
 			},
 			want: "prj_6",

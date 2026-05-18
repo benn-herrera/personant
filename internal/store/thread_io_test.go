@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"personant/internal/memops"
 )
 
 func newThreadHome(t *testing.T) PersonantPaths {
@@ -19,24 +21,24 @@ func newThreadHome(t *testing.T) PersonantPaths {
 	return paths
 }
 
-func sampleThread() Thread {
-	return Thread{
-		Frontmatter: ThreadFrontmatter{
+func sampleThread() memops.Thread {
+	return memops.Thread{
+		Frontmatter: memops.ThreadFrontmatter{
 			ID:           "thr_42",
 			Project:      "prj_3",
 			Anchors:      []string{"trefoil", "unknot", "body-topology", "electron-shape"},
 			Summary:      "topology investigation; trefoil vs unknot.",
-			State:        ThreadWIP,
+			State:        memops.ThreadWIP,
 			Created:      "2026-05-06T14:23:00-07:00",
 			LastEngaged:  "2026-05-08T03:12:00-07:00",
 			StateChanged: "2026-05-07T19:42:00-07:00",
 			TurnCount:    24,
 			RecallFires:  3,
-			HistorySymbols: []HistorySymbol{
-				{Raw: "trefoil", Normalized: "trefoil", FirstSeenTurn: 142, Count: 17, Source: SourceDeterministic},
-				{Raw: "(3,2)-torus knot", Normalized: "3-2-torus-knot", FirstSeenTurn: 145, Count: 4, Source: SourceModel},
-				{Raw: "Faddeev-Skyrme", Normalized: "faddeev-skyrme", FirstSeenTurn: 148, Count: 2, Source: SourceUser},
-				{Raw: "Curator pick", Normalized: "curator-pick", FirstSeenTurn: 150, Count: 1, Source: SourceCurator},
+			HistorySymbols: []memops.HistorySymbol{
+				{Raw: "trefoil", Normalized: "trefoil", FirstSeenTurn: 142, Count: 17, Source: memops.SourceDeterministic},
+				{Raw: "(3,2)-torus knot", Normalized: "3-2-torus-knot", FirstSeenTurn: 145, Count: 4, Source: memops.SourceModel},
+				{Raw: "Faddeev-Skyrme", Normalized: "faddeev-skyrme", FirstSeenTurn: 148, Count: 2, Source: memops.SourceUser},
+				{Raw: "Curator pick", Normalized: "curator-pick", FirstSeenTurn: 150, Count: 1, Source: memops.SourceCurator},
 			},
 		},
 		Body: "# Body topology — trefoil vs unknot\n\nOperational notes go here.\n",
@@ -65,8 +67,8 @@ func TestThreadRoundTrip(t *testing.T) {
 func TestLoadThreadMissingFile(t *testing.T) {
 	paths := newThreadHome(t)
 	_, err := LoadThread(paths, "thr_999")
-	if !errors.Is(err, ErrThreadFileNotFound) {
-		t.Fatalf("expected ErrThreadFileNotFound; got %v", err)
+	if !errors.Is(err, memops.ErrThreadFileNotFound) {
+		t.Fatalf("expected memops.ErrThreadFileNotFound; got %v", err)
 	}
 }
 
@@ -147,13 +149,13 @@ func TestLoadThreadNoOpeningDelimiter(t *testing.T) {
 
 func TestSaveThreadBodyWithEmbeddedDelimiters(t *testing.T) {
 	paths := newThreadHome(t)
-	thr := Thread{
-		Frontmatter: ThreadFrontmatter{
+	thr := memops.Thread{
+		Frontmatter: memops.ThreadFrontmatter{
 			ID:      "thr_5",
 			Project: "prj_1",
 			Anchors: []string{"a", "b", "c", "d"},
 			Summary: "test",
-			State:   ThreadActive,
+			State:   memops.ThreadActive,
 		},
 		Body: "# title\n\nbefore\n\n```\n---\nembedded yaml in code block\n---\n```\n\nafter\n",
 	}
@@ -220,10 +222,10 @@ func TestSaveThreadStableFieldOrder(t *testing.T) {
 func TestSaveThreadIdempotentBodyTrailingNewline(t *testing.T) {
 	paths := newThreadHome(t)
 	// Body without trailing newline; SaveThread should add exactly one.
-	thr := Thread{
-		Frontmatter: ThreadFrontmatter{
+	thr := memops.Thread{
+		Frontmatter: memops.ThreadFrontmatter{
 			ID: "thr_7", Project: "prj_1",
-			Anchors: []string{"a", "b", "c", "d"}, Summary: "x", State: ThreadActive,
+			Anchors: []string{"a", "b", "c", "d"}, Summary: "x", State: memops.ThreadActive,
 		},
 		Body: "# title\n\nno trailing newline",
 	}
@@ -250,10 +252,10 @@ func TestSaveThreadIdempotentBodyTrailingNewline(t *testing.T) {
 
 func TestSaveThreadRequiresIDAndProject(t *testing.T) {
 	paths := newThreadHome(t)
-	if err := SaveThread(paths, Thread{}); err == nil {
+	if err := SaveThread(paths, memops.Thread{}); err == nil {
 		t.Errorf("expected error for empty frontmatter")
 	}
-	if err := SaveThread(paths, Thread{Frontmatter: ThreadFrontmatter{ID: "thr_1"}}); err == nil {
+	if err := SaveThread(paths, memops.Thread{Frontmatter: memops.ThreadFrontmatter{ID: "thr_1"}}); err == nil {
 		t.Errorf("expected error for missing project")
 	}
 }

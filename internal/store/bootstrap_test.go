@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"personant/internal/memops"
 )
 
 // bootstrapPaths returns a PersonantPaths rooted at t.TempDir() with the
@@ -35,7 +37,7 @@ func pathsEqual(t *testing.T, a, b string) bool {
 
 func TestResolveActiveProject_ExplicitByID(t *testing.T) {
 	paths := bootstrapPaths(t)
-	if err := SaveProjectMeta(paths, ProjectMeta{ID: "prj_1", Name: "alpha"}); err != nil {
+	if err := SaveProjectMeta(paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha"}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
@@ -60,7 +62,7 @@ func TestResolveActiveProject_ExplicitByID(t *testing.T) {
 
 func TestResolveActiveProject_ExplicitByName(t *testing.T) {
 	paths := bootstrapPaths(t)
-	if err := SaveProjectMeta(paths, ProjectMeta{ID: "prj_7", Name: "gamma"}); err != nil {
+	if err := SaveProjectMeta(paths, memops.ProjectMeta{ID: "prj_7", Name: "gamma"}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
@@ -79,8 +81,8 @@ func TestResolveActiveProject_ExplicitByName(t *testing.T) {
 func TestResolveActiveProject_ExplicitUnknown(t *testing.T) {
 	paths := bootstrapPaths(t)
 	_, err := ResolveActiveProject(paths, BootstrapOptions{ExplicitProject: "ghost"})
-	if !errors.Is(err, ErrProjectNotFound) {
-		t.Fatalf("expected ErrProjectNotFound, got %v", err)
+	if !errors.Is(err, memops.ErrProjectNotFound) {
+		t.Fatalf("expected memops.ErrProjectNotFound, got %v", err)
 	}
 	// last-active must remain unwritten on a failed explicit resolution.
 	if _, statErr := os.Stat(paths.LastActive); statErr == nil {
@@ -96,14 +98,14 @@ func TestResolveActiveProject_RemoteMatch(t *testing.T) {
 	gitInit(t, repo)
 	gitRun(t, repo, "remote", "add", "origin", "git@github.com:foo/bar.git")
 
-	// ProjectMeta with the canonical (https) form of the same remote, and a
+	// memops.ProjectMeta with the canonical (https) form of the same remote, and a
 	// stored CurrentRootPath that differs from the test repo to verify the
 	// drift-update.
 	staleRoot := filepath.Join(t.TempDir(), "stale-root")
 	if err := os.MkdirAll(staleRoot, 0o755); err != nil {
 		t.Fatalf("mkdir stale: %v", err)
 	}
-	if err := SaveProjectMeta(paths, ProjectMeta{
+	if err := SaveProjectMeta(paths, memops.ProjectMeta{
 		ID:              "prj_1",
 		Name:            "alpha",
 		CurrentRootPath: staleRoot,
@@ -154,7 +156,7 @@ func TestResolveActiveProject_RemoteMatch_Historical(t *testing.T) {
 	gitInit(t, repo)
 	gitRun(t, repo, "remote", "add", "origin", "https://github.com/foo/bar.git")
 
-	if err := SaveProjectMeta(paths, ProjectMeta{
+	if err := SaveProjectMeta(paths, memops.ProjectMeta{
 		ID:                   "prj_1",
 		Name:                 "alpha",
 		CurrentRootPath:      repo,
@@ -180,7 +182,7 @@ func TestResolveActiveProject_PathMatch_Current(t *testing.T) {
 	paths := bootstrapPaths(t)
 
 	cwd := t.TempDir()
-	if err := SaveProjectMeta(paths, ProjectMeta{
+	if err := SaveProjectMeta(paths, memops.ProjectMeta{
 		ID:              "prj_1",
 		Name:            "alpha",
 		CurrentRootPath: cwd,
@@ -205,7 +207,7 @@ func TestResolveActiveProject_PathMatch_Historical_DriftUpdate(t *testing.T) {
 
 	oldCWD := t.TempDir() // simulates the historical path on disk
 	newCWD := t.TempDir() // simulates "today" — user moved the project here
-	if err := SaveProjectMeta(paths, ProjectMeta{
+	if err := SaveProjectMeta(paths, memops.ProjectMeta{
 		ID:                  "prj_1",
 		Name:                "alpha",
 		CurrentRootPath:     oldCWD,
@@ -246,7 +248,7 @@ func TestResolveActiveProject_PathMatch_Historical_DriftUpdate(t *testing.T) {
 func TestResolveActiveProject_LastActiveConfirmation(t *testing.T) {
 	paths := bootstrapPaths(t)
 
-	if err := SaveProjectMeta(paths, ProjectMeta{ID: "prj_1", Name: "alpha"}); err != nil {
+	if err := SaveProjectMeta(paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha"}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	if err := WriteLastActive(paths, "prj_1"); err != nil {
@@ -261,7 +263,7 @@ func TestResolveActiveProject_LastActiveConfirmation(t *testing.T) {
 	}
 	// On machines whose $TMPDIR ancestors carry .git, FindGitRoot may walk
 	// up and the test could match a project we did not configure with that
-	// remote. We guard by ensuring there is no ProjectMeta with the
+	// remote. We guard by ensuring there is no memops.ProjectMeta with the
 	// developer's project remote — but the cleanest assertion here is that
 	// either NeedsConfirmation fired (the documented branch) or the
 	// remote-match silently passed without any configured remote (which
@@ -311,7 +313,7 @@ func TestResolveActiveProject_FreshHomeNeedsFallback(t *testing.T) {
 func TestResolveActiveProject_ExplicitDoesNotDriftPath(t *testing.T) {
 	paths := bootstrapPaths(t)
 	staleRoot := "/some/stored/path"
-	if err := SaveProjectMeta(paths, ProjectMeta{
+	if err := SaveProjectMeta(paths, memops.ProjectMeta{
 		ID:              "prj_1",
 		Name:            "alpha",
 		CurrentRootPath: staleRoot,

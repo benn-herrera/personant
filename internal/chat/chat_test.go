@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"personant/internal/memops"
 	"personant/internal/model"
 	"personant/internal/store"
 )
@@ -38,7 +39,7 @@ defaultModel = "test-model"
 	return paths
 }
 
-func writeMeta(t *testing.T, paths store.PersonantPaths, m store.ProjectMeta) {
+func writeMeta(t *testing.T, paths store.PersonantPaths, m memops.ProjectMeta) {
 	t.Helper()
 	if err := store.SaveProjectMeta(paths, m); err != nil {
 		t.Fatalf("save meta %s: %v", m.ID, err)
@@ -47,7 +48,7 @@ func writeMeta(t *testing.T, paths store.PersonantPaths, m store.ProjectMeta) {
 
 func TestRunExplicitProjectThenQuit(t *testing.T) {
 	paths := scaffoldHome(t)
-	writeMeta(t, paths, store.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
+	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
 
 	mock := model.NewScriptedMock(nil, nil) // no turns issued
 	var stdout, stderr bytes.Buffer
@@ -106,7 +107,7 @@ func TestRunFallbackChoosesDefault(t *testing.T) {
 
 func TestRunConfirmationYResumes(t *testing.T) {
 	paths := scaffoldHome(t)
-	writeMeta(t, paths, store.ProjectMeta{
+	writeMeta(t, paths, memops.ProjectMeta{
 		ID: "prj_7", Name: "previous-work",
 		CurrentRootPath: filepath.Join(paths.Home, "..", "elsewhere"),
 		LastActive:      "2026-05-01T00:00:00Z",
@@ -138,7 +139,7 @@ func TestRunConfirmationYResumes(t *testing.T) {
 
 func TestRunUnknownSlashContinues(t *testing.T) {
 	paths := scaffoldHome(t)
-	writeMeta(t, paths, store.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
+	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
 	mock := model.NewScriptedMock(nil, nil)
 	var stdout, stderr bytes.Buffer
 	in := strings.NewReader("/bogus\n/quit\n")
@@ -159,7 +160,7 @@ func TestRunUnknownSlashContinues(t *testing.T) {
 
 func TestRunShellEscapeStubbed(t *testing.T) {
 	paths := scaffoldHome(t)
-	writeMeta(t, paths, store.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
+	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
 	mock := model.NewScriptedMock(nil, nil)
 	var stdout, stderr bytes.Buffer
 	in := strings.NewReader("$ ls\n# pwd\n/quit\n")
@@ -181,7 +182,7 @@ func TestRunShellEscapeStubbed(t *testing.T) {
 
 func TestRunEmptyInputBenign(t *testing.T) {
 	paths := scaffoldHome(t)
-	writeMeta(t, paths, store.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
+	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
 	mock := model.NewScriptedMock(nil, nil)
 	var stdout, stderr bytes.Buffer
 	in := strings.NewReader("\n   \n/quit\n")
@@ -204,7 +205,7 @@ func TestRunEmptyInputBenign(t *testing.T) {
 
 func TestRunOneTurnPrintsBody(t *testing.T) {
 	paths := scaffoldHome(t)
-	writeMeta(t, paths, store.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
+	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
 
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHi there."},

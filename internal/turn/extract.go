@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"personant/internal/memops"
-	"personant/internal/store"
 )
 
 // urlRE matches an http(s) URL. The terminating character class is
@@ -93,13 +92,13 @@ func deterministicExtract(ctx context.Context, state *State, delta Delta) {
 
 // emitIdentifier records one identifier-category symbol with
 // SourceDeterministic provenance. Identifier normalization is identity
-// (§2.7.2), so raw == normalized; we still route through store.Normalize
+// (§2.7.2), so raw == normalized; we still route through memops.Normalize
 // for symmetry with the other extractors and to centralize any future
 // identifier rules. The actual buffer choice (staging vs coalesce) is
 // made by addExtractedSymbol based on delta.Retention.
 func emitIdentifier(ctx context.Context, state *State, delta Delta, raw string) {
-	normalized := store.Normalize(raw, store.SymbolIdentifier)
-	addExtractedSymbol(ctx, state, delta, raw, normalized, store.SourceDeterministic)
+	normalized := memops.Normalize(raw, memops.SymbolIdentifier)
+	addExtractedSymbol(ctx, state, delta, raw, normalized, memops.SourceDeterministic)
 }
 
 // addExtractedSymbol is the canonical write path for extracted symbols
@@ -118,7 +117,7 @@ func emitIdentifier(ctx context.Context, state *State, delta Delta, raw string) 
 //
 // Empty normalized is silently dropped — same convention as the
 // underlying buffers.
-func addExtractedSymbol(ctx context.Context, state *State, delta Delta, raw, normalized string, source store.SymbolSource) {
+func addExtractedSymbol(ctx context.Context, state *State, delta Delta, raw, normalized string, source memops.SymbolSource) {
 	if normalized == "" {
 		return
 	}

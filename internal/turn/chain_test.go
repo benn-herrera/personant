@@ -6,11 +6,12 @@ import (
 	"strings"
 	"testing"
 
+	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/store"
 )
 
-func newChainHome(t *testing.T) (store.PersonantPaths, store.ProjectMeta) {
+func newChainHome(t *testing.T) (store.PersonantPaths, memops.ProjectMeta) {
 	t.Helper()
 	tmp := t.TempDir()
 	paths := store.PathsForHome(tmp)
@@ -22,7 +23,7 @@ func newChainHome(t *testing.T) (store.PersonantPaths, store.ProjectMeta) {
 	if err := store.WriteSpine(paths.Spine, nil); err != nil {
 		t.Fatalf("write spine: %v", err)
 	}
-	meta := store.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: tmp}
+	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: tmp}
 	if err := store.SaveProjectMeta(paths, meta); err != nil {
 		t.Fatalf("save meta: %v", err)
 	}
@@ -31,7 +32,7 @@ func newChainHome(t *testing.T) (store.PersonantPaths, store.ProjectMeta) {
 
 func TestChainExtractsUserHashTags(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
 
 	if err := onContextDelta(context.Background(), state, Delta{
 		Source:  "user.prompt",
@@ -55,7 +56,7 @@ func TestChainExtractsUserHashTags(t *testing.T) {
 
 func TestChainExtractsModelTopicTag(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
 
 	if err := onContextDelta(context.Background(), state, Delta{
 		Source:  "model.response",
@@ -77,7 +78,7 @@ func TestChainExtractsModelTopicTag(t *testing.T) {
 
 func TestChainTopicTagAbsentIsNonFatal(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
 	if err := onContextDelta(context.Background(), state, Delta{
 		Source:  "model.response",
 		Content: "no topic tag here",
@@ -92,7 +93,7 @@ func TestChainTopicTagAbsentIsNonFatal(t *testing.T) {
 
 func TestChainLogsContextModified(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, store.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
 	if err := onContextDelta(context.Background(), state, Delta{Source: "user.prompt", Content: "hello"}); err != nil {
 		t.Fatalf("onContextDelta: %v", err)
 	}

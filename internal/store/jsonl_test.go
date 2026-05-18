@@ -8,21 +8,23 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"personant/internal/memops"
 )
 
-func sampleSpine() []SpineRecord {
-	return []SpineRecord{
+func sampleSpine() []memops.SpineRecord {
+	return []memops.SpineRecord{
 		{
 			ID: "thr_1", Project: "prj_1",
 			Anchors: []string{"alpha", "beta", "gamma", "delta"},
-			Summary: "first thread", State: ThreadActive,
+			Summary: "first thread", State: memops.ThreadActive,
 			Created: "2026-05-01T00:00:00Z", LastEngaged: "2026-05-01T00:00:00Z", StateChanged: "2026-05-01T00:00:00Z",
 			TurnCount: 1, RecallFires: 0,
 		},
 		{
 			ID: "thr_2", Project: "prj_1",
 			Anchors: []string{"epsilon", "zeta", "eta", "theta"},
-			Summary: "second thread", State: ThreadWIP,
+			Summary: "second thread", State: memops.ThreadWIP,
 			Created: "2026-05-02T00:00:00Z", LastEngaged: "2026-05-02T00:00:00Z", StateChanged: "2026-05-02T00:00:00Z",
 			TurnCount: 5, RecallFires: 2,
 		},
@@ -51,7 +53,7 @@ func TestWriteSortsByID(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "spine.jsonl")
 
-	unsorted := []SpineRecord{
+	unsorted := []memops.SpineRecord{
 		{ID: "thr_3", Project: "prj_1", Summary: "c"},
 		{ID: "thr_1", Project: "prj_1", Summary: "a"},
 		{ID: "thr_2", Project: "prj_1", Summary: "b"},
@@ -71,7 +73,7 @@ func TestWriteSortsByID(t *testing.T) {
 	}
 }
 
-func idsOf(rs []SpineRecord) []string {
+func idsOf(rs []memops.SpineRecord) []string {
 	ids := make([]string, len(rs))
 	for i, r := range rs {
 		ids[i] = r.ID
@@ -93,7 +95,7 @@ func TestReadEmptyAndMissing(t *testing.T) {
 	}
 	// Generic ReadJSONL (non-canonical typed wrappers) is still strict —
 	// missing file errors so other callers aren't surprised.
-	if _, err := ReadJSONL[SpineRecord](missing); err == nil {
+	if _, err := ReadJSONL[memops.SpineRecord](missing); err == nil {
 		t.Fatal("ReadJSONL on missing path: expected error, got nil")
 	}
 
@@ -126,9 +128,9 @@ func TestReadEmptyAndMissing(t *testing.T) {
 func TestReadMalformedLine(t *testing.T) {
 	dir := t.TempDir()
 	cases := []struct {
-		name      string
-		content   string
-		wantLine  string
+		name     string
+		content  string
+		wantLine string
 	}{
 		{
 			name:     "garbage on second line",
@@ -161,7 +163,7 @@ func TestReadMalformedLine(t *testing.T) {
 func TestWriteDuplicateID(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "spine.jsonl")
-	dup := []SpineRecord{
+	dup := []memops.SpineRecord{
 		{ID: "thr_1", Project: "prj_1", Summary: "first"},
 		{ID: "thr_1", Project: "prj_1", Summary: "second"},
 	}

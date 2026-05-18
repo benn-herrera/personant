@@ -35,9 +35,9 @@ func TestRecallFidelity_EdgeCases(t *testing.T) {
 
 func TestRecallFidelity_Mismatch(t *testing.T) {
 	cases := []struct {
-		name                 string
-		expected, actual     []string
-		wantUnexp, wantMiss  []string
+		name                string
+		expected, actual    []string
+		wantUnexp, wantMiss []string
 	}{
 		{"exact-match", []string{"thr_1", "thr_2"}, []string{"thr_2", "thr_1"}, nil, nil},
 		{"false-positive", []string{"thr_1"}, []string{"thr_1", "thr_9"}, []string{"thr_9"}, nil},

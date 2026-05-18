@@ -14,7 +14,7 @@ import (
 	"regexp"
 	"strings"
 
-	"personant/internal/store"
+	"personant/internal/memops"
 )
 
 // ErrNoTopicTag is returned by Parse when no valid topic tag is present in
@@ -33,9 +33,9 @@ var topicTagRE = regexp.MustCompile(`(?m)^\s*\*topic:\s*([^\[]+?)\s*\[([^\]]*)\]
 const newTopicLiteral = "*new-topic*"
 
 // TopicTag is the parsed form of a single topic-tag line. Threads contains
-// either canonical "thr_<n>" identifiers (matching store.ThreadIDPattern)
+// either canonical "thr_<n>" identifiers (matching memops.ThreadIDPattern)
 // or the literal "*new-topic*". Anchors are normalized via
-// store.Normalize(_, store.SymbolEntity).
+// memops.Normalize(_, memops.SymbolEntity).
 type TopicTag struct {
 	Threads []string
 	Anchors []string
@@ -55,7 +55,7 @@ type ParseResult struct {
 //
 //   - The first fully valid tag in document order wins.
 //   - A "valid" tag has a non-empty thread list (each entry either matching
-//     store.ThreadIDPattern or equal to "*new-topic*") and a non-empty
+//     memops.ThreadIDPattern or equal to "*new-topic*") and a non-empty
 //     anchor list (after normalization, with empty entries dropped).
 //   - Subsequent valid tags become a warning naming the count of extras;
 //     they are not stripped from the body.
@@ -73,10 +73,10 @@ func Parse(response string) (ParseResult, error) {
 	}
 
 	var (
-		chosen      TopicTag
-		chosenIdx   = -1
-		validCount  int
-		warnings    []string
+		chosen     TopicTag
+		chosenIdx  = -1
+		validCount int
+		warnings   []string
 	)
 
 	for i, m := range matches {
@@ -134,7 +134,7 @@ func parseThreadList(raw string) ([]string, bool) {
 			// An empty entry (e.g. trailing comma) fails the §5.1.2 alternation.
 			return nil, false
 		}
-		if t == newTopicLiteral || store.ThreadIDPattern.MatchString(t) {
+		if t == newTopicLiteral || memops.ThreadIDPattern.MatchString(t) {
 			out = append(out, t)
 			continue
 		}
@@ -158,7 +158,7 @@ func parseAnchorList(raw string) []string {
 		if t == "" {
 			continue
 		}
-		n := store.Normalize(t, store.SymbolEntity)
+		n := memops.Normalize(t, memops.SymbolEntity)
 		if n == "" {
 			continue
 		}

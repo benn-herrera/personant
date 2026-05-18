@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"personant/internal/memops"
 	"personant/internal/store"
 	"personant/internal/verify"
 )
@@ -128,7 +129,7 @@ func VerifyThreadFrontmatterMatchesSpine(h *Harness) error {
 	for i, r := range recs {
 		thr, err := store.LoadThread(h.Paths, r.ID)
 		if err != nil {
-			if errors.Is(err, store.ErrThreadFileNotFound) {
+			if errors.Is(err, memops.ErrThreadFileNotFound) {
 				h.T.Logf("VerifyThreadFrontmatterMatchesSpine: spine[%d] %s has no thread file (suspicious in v0.1)", i+1, r.ID)
 				continue
 			}
@@ -188,7 +189,7 @@ func VerifyEngagementConsistency(h *Harness) error {
 	for _, r := range recs {
 		thr, err := store.LoadThread(h.Paths, r.ID)
 		if err != nil {
-			if errors.Is(err, store.ErrThreadFileNotFound) {
+			if errors.Is(err, memops.ErrThreadFileNotFound) {
 				continue
 			}
 			return fmt.Errorf("VerifyEngagementConsistency: load %s: %w", r.ID, err)

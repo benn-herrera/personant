@@ -127,9 +127,9 @@ func recallFidelity(expected, actual []string) (precision, recall, f1 float64) {
 // failure policy:
 //
 //   - RecallStrict     → clean recall_fidelity_* series; t.Errorf on
-//                        any mismatch (false positive or negative).
+//     any mismatch (false positive or negative).
 //   - RecallMeasureOnly → recall_fidelity_adversarial_* series; the
-//                        score is the deliverable, never a failure.
+//     score is the deliverable, never a failure.
 //
 // Lives next to its helpers so the harness file stays focused on
 // scenario plumbing.

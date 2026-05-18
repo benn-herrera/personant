@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"personant/internal/memops"
 )
 
 // ReadJSONL reads a JSONL file into a slice of T. One JSON object per line;
@@ -122,8 +124,8 @@ func WriteJSONL[T any](path string, records []T, keyFn func(T) string) error {
 // ReadSpine reads a spine.jsonl file. A missing file is treated as an
 // empty spine — the canonical "no records yet" state, semantically
 // equivalent to an empty file. Other read errors propagate.
-func ReadSpine(path string) ([]SpineRecord, error) {
-	records, err := ReadJSONL[SpineRecord](path)
+func ReadSpine(path string) ([]memops.SpineRecord, error) {
+	records, err := ReadJSONL[memops.SpineRecord](path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -131,8 +133,8 @@ func ReadSpine(path string) ([]SpineRecord, error) {
 }
 
 // WriteSpine writes a spine.jsonl file, sorted by thread ID.
-func WriteSpine(path string, records []SpineRecord) error {
-	return WriteJSONL(path, records, func(r SpineRecord) string { return r.ID })
+func WriteSpine(path string, records []memops.SpineRecord) error {
+	return WriteJSONL(path, records, func(r memops.SpineRecord) string { return r.ID })
 }
 
 // ReadSymbols reads a symbols.jsonl file. Missing-file semantics match

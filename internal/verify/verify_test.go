@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"personant/internal/index"
+	"personant/internal/memops"
 	"personant/internal/store"
 )
 
@@ -37,13 +38,13 @@ func initFreshHome(t *testing.T) store.PersonantPaths {
 // validRecord returns a SpineRecord that passes every hard-limit
 // check; tests that exercise a single failure mode mutate one field
 // off this baseline so the rest of the schema does not drift in.
-func validRecord(id string) store.SpineRecord {
-	return store.SpineRecord{
+func validRecord(id string) memops.SpineRecord {
+	return memops.SpineRecord{
 		ID:           id,
 		Project:      "prj_default",
 		Anchors:      []string{"alpha", "beta", "gamma", "delta"},
 		Summary:      "ok",
-		State:        store.ThreadWIP,
+		State:        memops.ThreadWIP,
 		Created:      "2026-05-09T04:00:00-07:00",
 		LastEngaged:  "2026-05-09T04:01:00-07:00",
 		StateChanged: "2026-05-09T04:00:00-07:00",
@@ -53,7 +54,7 @@ func validRecord(id string) store.SpineRecord {
 }
 
 // writeSpine writes records via store.WriteSpine.
-func writeSpine(t *testing.T, paths store.PersonantPaths, recs []store.SpineRecord) {
+func writeSpine(t *testing.T, paths store.PersonantPaths, recs []memops.SpineRecord) {
 	t.Helper()
 	if err := store.WriteSpine(paths.Spine, recs); err != nil {
 		t.Fatalf("WriteSpine: %v", err)
@@ -114,7 +115,7 @@ func TestVerifyEmptyHome(t *testing.T) {
 
 func TestVerifyValidSpine(t *testing.T) {
 	paths := initFreshHome(t)
-	writeSpine(t, paths, []store.SpineRecord{validRecord("thr_1")})
+	writeSpine(t, paths, []memops.SpineRecord{validRecord("thr_1")})
 	rebuild(t, paths)
 	r := run(t, paths)
 	if r.HasErrors() {
@@ -131,7 +132,7 @@ func TestVerifyInvalidThreadID(t *testing.T) {
 	// store.WriteSpine sorts by ID, so a single record with a malformed
 	// id is fine to write directly.
 	rec.ID = "thr_bogus"
-	writeSpine(t, paths, []store.SpineRecord{rec})
+	writeSpine(t, paths, []memops.SpineRecord{rec})
 	rebuild(t, paths)
 	r := run(t, paths)
 	if !errorsContain(r, "does not match") {
@@ -170,7 +171,7 @@ func TestVerifyAnchorsCardinality(t *testing.T) {
 			paths := initFreshHome(t)
 			rec := validRecord("thr_1")
 			rec.Anchors = tc.anchors
-			writeSpine(t, paths, []store.SpineRecord{rec})
+			writeSpine(t, paths, []memops.SpineRecord{rec})
 			rebuild(t, paths)
 			r := run(t, paths)
 			gotErr := errorsContain(r, "anchors length")
@@ -185,7 +186,7 @@ func TestVerifyDuplicateAnchors(t *testing.T) {
 	paths := initFreshHome(t)
 	rec := validRecord("thr_1")
 	rec.Anchors = []string{"alpha", "alpha", "beta", "gamma"}
-	writeSpine(t, paths, []store.SpineRecord{rec})
+	writeSpine(t, paths, []memops.SpineRecord{rec})
 	rebuild(t, paths)
 	r := run(t, paths)
 	if !errorsContain(r, "duplicate anchor") {
@@ -209,7 +210,7 @@ func TestVerifyAnchorLength(t *testing.T) {
 			paths := initFreshHome(t)
 			rec := validRecord("thr_1")
 			rec.Anchors = []string{tc.anchor, "alpha", "beta", "gamma"}
-			writeSpine(t, paths, []store.SpineRecord{rec})
+			writeSpine(t, paths, []memops.SpineRecord{rec})
 			rebuild(t, paths)
 			r := run(t, paths)
 			gotErr := errorsContain(r, "outside [3,50]")
@@ -225,7 +226,7 @@ func TestVerifySummaryTooLong(t *testing.T) {
 	rec := validRecord("thr_1")
 	// 201 chars > default 200.
 	rec.Summary = strings.Repeat("x", 201)
-	writeSpine(t, paths, []store.SpineRecord{rec})
+	writeSpine(t, paths, []memops.SpineRecord{rec})
 	rebuild(t, paths)
 	r := run(t, paths)
 	if !errorsContain(r, "spine.entry-max-chars") {
@@ -237,7 +238,7 @@ func TestVerifyInvalidState(t *testing.T) {
 	paths := initFreshHome(t)
 	rec := validRecord("thr_1")
 	rec.State = "fictional"
-	writeSpine(t, paths, []store.SpineRecord{rec})
+	writeSpine(t, paths, []memops.SpineRecord{rec})
 	rebuild(t, paths)
 	r := run(t, paths)
 	if !errorsContain(r, "valid ThreadState") {
@@ -251,7 +252,7 @@ func TestVerifyTimestampOrder(t *testing.T) {
 	// created > last_engaged.
 	rec.Created = "2026-05-09T05:00:00-07:00"
 	rec.LastEngaged = "2026-05-09T04:00:00-07:00"
-	writeSpine(t, paths, []store.SpineRecord{rec})
+	writeSpine(t, paths, []memops.SpineRecord{rec})
 	rebuild(t, paths)
 	r := run(t, paths)
 	if !errorsContain(r, "after last_engaged") {
@@ -264,7 +265,7 @@ func TestVerifyProjectReference(t *testing.T) {
 		paths := initFreshHome(t)
 		rec := validRecord("thr_1")
 		rec.Project = "prj_5"
-		writeSpine(t, paths, []store.SpineRecord{rec})
+		writeSpine(t, paths, []memops.SpineRecord{rec})
 		// index.Rebuild auto-creates projects/prj_5/digest.json (it
 		// groups by project), but does not create a meta.json. That's
 		// the scenario this test targets.
@@ -281,7 +282,7 @@ func TestVerifyProjectReference(t *testing.T) {
 	t.Run("prj-default-no-warn", func(t *testing.T) {
 		paths := initFreshHome(t)
 		rec := validRecord("thr_1") // already prj_default
-		writeSpine(t, paths, []store.SpineRecord{rec})
+		writeSpine(t, paths, []memops.SpineRecord{rec})
 		rebuild(t, paths)
 		r := run(t, paths)
 		if warningsContain(r, "prj_default") {
@@ -293,7 +294,7 @@ func TestVerifyProjectReference(t *testing.T) {
 // writeMeta writes a ProjectMeta to projects/<dir>/meta.json. Caller
 // supplies the directory name; meta.ID is what the file says about
 // itself, which may diverge from dir for the mismatch test.
-func writeMeta(t *testing.T, paths store.PersonantPaths, dir string, meta store.ProjectMeta) {
+func writeMeta(t *testing.T, paths store.PersonantPaths, dir string, meta memops.ProjectMeta) {
 	t.Helper()
 	d := filepath.Join(paths.ProjectsDir, dir)
 	if err := os.MkdirAll(d, 0o755); err != nil {
@@ -308,8 +309,8 @@ func writeMeta(t *testing.T, paths store.PersonantPaths, dir string, meta store.
 	}
 }
 
-func validMeta(id, name string) store.ProjectMeta {
-	return store.ProjectMeta{
+func validMeta(id, name string) memops.ProjectMeta {
+	return memops.ProjectMeta{
 		ID:               id,
 		Name:             name,
 		CurrentRootPath:  "/tmp/" + name,
@@ -317,7 +318,7 @@ func validMeta(id, name string) store.ProjectMeta {
 		LastActive:       "2026-05-09T04:01:00-07:00",
 		ThreadCount:      0,
 		ConventionsPaths: []string{},
-		SymbolPatterns:   []store.ProjectPattern{},
+		SymbolPatterns:   []memops.ProjectPattern{},
 		IgnoreSymbols:    []string{},
 	}
 }
@@ -331,7 +332,7 @@ func TestVerifyProjectMetaIDMismatch(t *testing.T) {
 	// so add a record.
 	rec := validRecord("thr_1")
 	rec.Project = "prj_3"
-	writeSpine(t, paths, []store.SpineRecord{rec})
+	writeSpine(t, paths, []memops.SpineRecord{rec})
 	rebuild(t, paths)
 	r := run(t, paths)
 	if !errorsContain(r, "does not match directory name") {
@@ -344,7 +345,7 @@ func TestVerifyProjectMetaName(t *testing.T) {
 	writeMeta(t, paths, "prj_3", validMeta("prj_3", "Bad Name With Spaces"))
 	rec := validRecord("thr_1")
 	rec.Project = "prj_3"
-	writeSpine(t, paths, []store.SpineRecord{rec})
+	writeSpine(t, paths, []memops.SpineRecord{rec})
 	rebuild(t, paths)
 	r := run(t, paths)
 	if !errorsContain(r, "name") {
@@ -354,7 +355,7 @@ func TestVerifyProjectMetaName(t *testing.T) {
 
 func TestVerifyDriftDetection(t *testing.T) {
 	paths := initFreshHome(t)
-	writeSpine(t, paths, []store.SpineRecord{validRecord("thr_1")})
+	writeSpine(t, paths, []memops.SpineRecord{validRecord("thr_1")})
 	rebuild(t, paths)
 	// Append a bogus line to symbols.jsonl post-rebuild.
 	f, err := os.OpenFile(paths.Symbols, os.O_APPEND|os.O_WRONLY, 0o644)
@@ -382,7 +383,7 @@ func TestVerifyDirectivesMissing(t *testing.T) {
 	if err := os.Remove(defaultsPath); err != nil {
 		t.Fatalf("remove defaults.md: %v", err)
 	}
-	writeSpine(t, paths, []store.SpineRecord{validRecord("thr_1")})
+	writeSpine(t, paths, []memops.SpineRecord{validRecord("thr_1")})
 	rebuild(t, paths)
 	r := run(t, paths)
 	// Verify must still complete without errors and emit a warning
@@ -397,7 +398,7 @@ func TestVerifyDirectivesMissing(t *testing.T) {
 	// must still error on a separate run.
 	rec := validRecord("thr_2")
 	rec.Summary = strings.Repeat("y", 201)
-	writeSpine(t, paths, []store.SpineRecord{validRecord("thr_1"), rec})
+	writeSpine(t, paths, []memops.SpineRecord{validRecord("thr_1"), rec})
 	rebuild(t, paths)
 	r = run(t, paths)
 	if !errorsContain(r, "spine.entry-max-chars 200") {

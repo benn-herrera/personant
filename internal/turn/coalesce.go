@@ -1,6 +1,6 @@
 package turn
 
-import "personant/internal/store"
+import "personant/internal/memops"
 
 // coalescedSymbol carries the per-turn record for one normalized symbol:
 // the surface form first observed, the dominant source per spec §2.7.3
@@ -10,7 +10,7 @@ import "personant/internal/store"
 type coalescedSymbol struct {
 	Normalized string
 	Raw        string
-	Source     store.SymbolSource
+	Source     memops.SymbolSource
 }
 
 // coalesceBuffer is a per-turn accumulator for symbols and thread-IDs
@@ -45,13 +45,13 @@ func newCoalesceBuffer() *coalesceBuffer {
 // the dominant source wins; raw is preserved from the first sighting so
 // downstream HistorySymbol entries reflect the original surface form
 // rather than a later, possibly less-faithful one.
-func (b *coalesceBuffer) addSymbol(raw, normalized string, source store.SymbolSource) {
+func (b *coalesceBuffer) addSymbol(raw, normalized string, source memops.SymbolSource) {
 	if normalized == "" {
 		return
 	}
 	if existing, ok := b.symbols[normalized]; ok {
 		// Dominant-source merge per §2.7.3.
-		existing.Source = store.DominantSource(existing.Source, source)
+		existing.Source = memops.DominantSource(existing.Source, source)
 		b.symbols[normalized] = existing
 		return
 	}

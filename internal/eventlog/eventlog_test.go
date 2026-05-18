@@ -136,8 +136,8 @@ func TestLogRejectsBadInput(t *testing.T) {
 	tmp := t.TempDir()
 	paths := store.PathsForHome(tmp)
 	cases := []struct {
-		name              string
-		category, action  string
+		name             string
+		category, action string
 	}{
 		{"empty category", "", "x"},
 		{"empty action", "x", ""},

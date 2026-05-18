@@ -1,7 +1,7 @@
 package turn
 
 import (
-	"personant/internal/store"
+	"personant/internal/memops"
 )
 
 // stagedSymbol is one entry in the per-State staging buffer. Bytes
@@ -23,7 +23,7 @@ type stagedSymbol struct {
 	Raw string
 
 	// Source is the provenance (§2.7.3).
-	Source store.SymbolSource
+	Source memops.SymbolSource
 
 	// StagedAt is the State.TurnNumber when this symbol entered
 	// staging. Window-close GC evicts entries where

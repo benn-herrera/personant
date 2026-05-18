@@ -7,13 +7,14 @@ import (
 	"sort"
 	"testing"
 
+	"personant/internal/memops"
 	"personant/internal/store"
 )
 
-func mkSpine(id, project string, recallFires int, anchors ...string) store.SpineRecord {
-	return store.SpineRecord{
+func mkSpine(id, project string, recallFires int, anchors ...string) memops.SpineRecord {
+	return memops.SpineRecord{
 		ID: id, Project: project, Anchors: anchors,
-		Summary: "s", State: store.ThreadActive,
+		Summary: "s", State: memops.ThreadActive,
 		Created: "2026-05-01T00:00:00Z", LastEngaged: "2026-05-01T00:00:00Z", StateChanged: "2026-05-01T00:00:00Z",
 		TurnCount: 1, RecallFires: recallFires,
 	}
@@ -22,18 +23,18 @@ func mkSpine(id, project string, recallFires int, anchors ...string) store.Spine
 // mkThread builds a minimal ThreadFrontmatter with the given ID and
 // history_symbols. Other required fields are stubbed; tests that
 // exercise spine ordering provide the matching SpineRecord separately.
-func mkThread(id, project string, history ...store.HistorySymbol) store.ThreadFrontmatter {
-	return store.ThreadFrontmatter{
+func mkThread(id, project string, history ...memops.HistorySymbol) memops.ThreadFrontmatter {
+	return memops.ThreadFrontmatter{
 		ID: id, Project: project,
-		Summary: "s", State: store.ThreadActive,
+		Summary: "s", State: memops.ThreadActive,
 		Created: "2026-05-01T00:00:00Z", LastEngaged: "2026-05-01T00:00:00Z", StateChanged: "2026-05-01T00:00:00Z",
 		TurnCount: 1, RecallFires: 0,
 		HistorySymbols: history,
 	}
 }
 
-func mkHistorySym(normalized string, source store.SymbolSource) store.HistorySymbol {
-	return store.HistorySymbol{
+func mkHistorySym(normalized string, source memops.SymbolSource) memops.HistorySymbol {
+	return memops.HistorySymbol{
 		Raw:           normalized,
 		Normalized:    normalized,
 		FirstSeenTurn: 1,
@@ -50,7 +51,7 @@ func TestBuildSymbolsEmpty(t *testing.T) {
 }
 
 func TestBuildSymbolsSingleThreadFourAnchors(t *testing.T) {
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		mkSpine("thr_1", "prj_1", 0, "alpha", "beta", "gamma", "delta"),
 	}
 	got := BuildSymbols(spine, nil)
@@ -68,14 +69,14 @@ func TestBuildSymbolsSingleThreadFourAnchors(t *testing.T) {
 		if !reflect.DeepEqual(r.AnchorIn, []string{"thr_1"}) {
 			t.Errorf("symbol %q: anchor_in %v, want [thr_1]", r.Symbol, r.AnchorIn)
 		}
-		if r.SourceDominant != store.SourceCurator {
+		if r.SourceDominant != memops.SourceCurator {
 			t.Errorf("symbol %q: source_dominant %q, want curator", r.Symbol, r.SourceDominant)
 		}
 	}
 }
 
 func TestBuildSymbolsSharedAnchorAcrossThreads(t *testing.T) {
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		mkSpine("thr_1", "prj_1", 0, "alpha", "beta"),
 		mkSpine("thr_2", "prj_1", 0, "alpha", "gamma"),
 	}
@@ -98,7 +99,7 @@ func TestBuildSymbolsSharedAnchorAcrossThreads(t *testing.T) {
 }
 
 func TestBuildSymbolsThreadsSortedByRecallFires(t *testing.T) {
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		mkSpine("thr_1", "prj_1", 1, "alpha"),
 		mkSpine("thr_2", "prj_1", 5, "alpha"),
 		mkSpine("thr_3", "prj_1", 5, "alpha"), // tie with thr_2
@@ -118,7 +119,7 @@ func TestBuildSymbolsThreadsSortedByRecallFires(t *testing.T) {
 // mutating Threads through one alias must not be visible through
 // AnchorIn (or vice versa).
 func TestBuildSymbolsAnchorInIsAnIndependentSlice(t *testing.T) {
-	spine := []store.SpineRecord{mkSpine("thr_1", "prj_1", 0, "alpha")}
+	spine := []memops.SpineRecord{mkSpine("thr_1", "prj_1", 0, "alpha")}
 	got := BuildSymbols(spine, nil)
 	if len(got) != 1 {
 		t.Fatalf("got %d records, want 1", len(got))
@@ -134,11 +135,11 @@ func TestBuildSymbolsAnchorInIsAnIndependentSlice(t *testing.T) {
 // anchor_in membership; history_symbols contribute thread membership
 // only (never anchor_in) with their stored source.
 func TestBuildSymbolsCombinesAnchorsAndHistory(t *testing.T) {
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		mkSpine("thr_1", "prj_1", 0, "alpha", "beta"),
 	}
-	threads := []store.ThreadFrontmatter{
-		mkThread("thr_1", "prj_1", mkHistorySym("gamma", store.SourceModel)),
+	threads := []memops.ThreadFrontmatter{
+		mkThread("thr_1", "prj_1", mkHistorySym("gamma", memops.SourceModel)),
 	}
 	got := BuildSymbols(spine, threads)
 	if len(got) != 3 {
@@ -160,7 +161,7 @@ func TestBuildSymbolsCombinesAnchorsAndHistory(t *testing.T) {
 		if !reflect.DeepEqual(r.AnchorIn, []string{"thr_1"}) {
 			t.Errorf("%s.anchor_in = %v, want [thr_1]", sym, r.AnchorIn)
 		}
-		if r.SourceDominant != store.SourceCurator {
+		if r.SourceDominant != memops.SourceCurator {
 			t.Errorf("%s.source_dominant = %q, want curator", sym, r.SourceDominant)
 		}
 	}
@@ -175,7 +176,7 @@ func TestBuildSymbolsCombinesAnchorsAndHistory(t *testing.T) {
 	if len(gamma.AnchorIn) != 0 {
 		t.Errorf("gamma.anchor_in = %v, want empty (history-only)", gamma.AnchorIn)
 	}
-	if gamma.SourceDominant != store.SourceModel {
+	if gamma.SourceDominant != memops.SourceModel {
 		t.Errorf("gamma.source_dominant = %q, want model", gamma.SourceDominant)
 	}
 }
@@ -186,12 +187,12 @@ func TestBuildSymbolsCombinesAnchorsAndHistory(t *testing.T) {
 // curator > user → SourceCurator wins, threads is the union, anchor_in
 // is just the anchor side.
 func TestBuildSymbolsDominantSourceAggregation(t *testing.T) {
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		mkSpine("thr_1", "prj_1", 5, "alpha"),
 		mkSpine("thr_2", "prj_1", 1), // no anchors, just engagement bookkeeping
 	}
-	threads := []store.ThreadFrontmatter{
-		mkThread("thr_2", "prj_1", mkHistorySym("alpha", store.SourceUser)),
+	threads := []memops.ThreadFrontmatter{
+		mkThread("thr_2", "prj_1", mkHistorySym("alpha", memops.SourceUser)),
 	}
 	got := BuildSymbols(spine, threads)
 	if len(got) != 1 {
@@ -201,7 +202,7 @@ func TestBuildSymbolsDominantSourceAggregation(t *testing.T) {
 	if r.Symbol != "alpha" {
 		t.Fatalf("symbol = %q, want alpha", r.Symbol)
 	}
-	if r.SourceDominant != store.SourceCurator {
+	if r.SourceDominant != memops.SourceCurator {
 		t.Errorf("source_dominant = %q, want curator (curator > user)", r.SourceDominant)
 	}
 	// thr_1 has recall_fires=5, thr_2 has 1 → thr_1 first.
@@ -219,20 +220,20 @@ func TestBuildSymbolsDominantSourceAggregation(t *testing.T) {
 // sources; the dominant source wins, anchor_in stays empty, threads
 // follows recall_fires ordering.
 func TestBuildSymbolsHistoryOnlyMultiThread(t *testing.T) {
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		mkSpine("thr_1", "prj_1", 2),
 		mkSpine("thr_2", "prj_1", 9),
 	}
-	threads := []store.ThreadFrontmatter{
-		mkThread("thr_1", "prj_1", mkHistorySym("zeta", store.SourceDeterministic)),
-		mkThread("thr_2", "prj_1", mkHistorySym("zeta", store.SourceModel)),
+	threads := []memops.ThreadFrontmatter{
+		mkThread("thr_1", "prj_1", mkHistorySym("zeta", memops.SourceDeterministic)),
+		mkThread("thr_2", "prj_1", mkHistorySym("zeta", memops.SourceModel)),
 	}
 	got := BuildSymbols(spine, threads)
 	if len(got) != 1 {
 		t.Fatalf("got %d records, want 1", len(got))
 	}
 	r := got[0]
-	if r.SourceDominant != store.SourceModel {
+	if r.SourceDominant != memops.SourceModel {
 		t.Errorf("source_dominant = %q, want model (model > deterministic)", r.SourceDominant)
 	}
 	wantThreads := []string{"thr_2", "thr_1"} // recall 9 > 2
@@ -249,10 +250,10 @@ func TestBuildSymbolsHistoryOnlyMultiThread(t *testing.T) {
 // Normalized key. Such an entry would otherwise create a "" symbol
 // bucket; index building tolerates it by skipping.
 func TestBuildSymbolsHistorySymbolWithEmptyNormalizedIsIgnored(t *testing.T) {
-	spine := []store.SpineRecord{mkSpine("thr_1", "prj_1", 0)}
-	threads := []store.ThreadFrontmatter{
+	spine := []memops.SpineRecord{mkSpine("thr_1", "prj_1", 0)}
+	threads := []memops.ThreadFrontmatter{
 		mkThread("thr_1", "prj_1",
-			store.HistorySymbol{Raw: "junk", Normalized: "", Source: store.SourceModel}),
+			memops.HistorySymbol{Raw: "junk", Normalized: "", Source: memops.SourceModel}),
 	}
 	got := BuildSymbols(spine, threads)
 	if len(got) != 0 {
@@ -270,7 +271,7 @@ func TestRebuildSymbolsRoundtrips(t *testing.T) {
 		t.Fatalf("mkdir threads: %v", err)
 	}
 
-	spine := []store.SpineRecord{
+	spine := []memops.SpineRecord{
 		mkSpine("thr_1", "prj_1", 5, "alpha", "beta"),
 		mkSpine("thr_2", "prj_1", 2, "gamma"),
 	}
@@ -278,30 +279,30 @@ func TestRebuildSymbolsRoundtrips(t *testing.T) {
 		t.Fatalf("WriteSpine: %v", err)
 	}
 
-	thr1 := store.Thread{
-		Frontmatter: store.ThreadFrontmatter{
+	thr1 := memops.Thread{
+		Frontmatter: memops.ThreadFrontmatter{
 			ID: "thr_1", Project: "prj_1",
 			Anchors: []string{"alpha", "beta"},
-			Summary: "s", State: store.ThreadActive,
+			Summary: "s", State: memops.ThreadActive,
 			Created: "2026-05-01T00:00:00Z", LastEngaged: "2026-05-01T00:00:00Z", StateChanged: "2026-05-01T00:00:00Z",
 			TurnCount: 1, RecallFires: 5,
-			HistorySymbols: []store.HistorySymbol{
-				mkHistorySym("alpha", store.SourceCurator),
-				mkHistorySym("delta", store.SourceUser),
+			HistorySymbols: []memops.HistorySymbol{
+				mkHistorySym("alpha", memops.SourceCurator),
+				mkHistorySym("delta", memops.SourceUser),
 			},
 		},
 		Body: "body\n",
 	}
-	thr2 := store.Thread{
-		Frontmatter: store.ThreadFrontmatter{
+	thr2 := memops.Thread{
+		Frontmatter: memops.ThreadFrontmatter{
 			ID: "thr_2", Project: "prj_1",
 			Anchors: []string{"gamma"},
-			Summary: "s", State: store.ThreadActive,
+			Summary: "s", State: memops.ThreadActive,
 			Created: "2026-05-01T00:00:00Z", LastEngaged: "2026-05-01T00:00:00Z", StateChanged: "2026-05-01T00:00:00Z",
 			TurnCount: 1, RecallFires: 2,
-			HistorySymbols: []store.HistorySymbol{
-				mkHistorySym("gamma", store.SourceCurator),
-				mkHistorySym("delta", store.SourceModel),
+			HistorySymbols: []memops.HistorySymbol{
+				mkHistorySym("gamma", memops.SourceCurator),
+				mkHistorySym("delta", memops.SourceModel),
 			},
 		},
 		Body: "body\n",
@@ -339,7 +340,7 @@ func TestRebuildSymbolsRoundtrips(t *testing.T) {
 		t.Errorf("delta.anchor_in = %v, want empty", delta.AnchorIn)
 	}
 	// delta sources: user (thr_1) and model (thr_2) → user wins.
-	if delta.SourceDominant != store.SourceUser {
+	if delta.SourceDominant != memops.SourceUser {
 		t.Errorf("delta.source_dominant = %q, want user", delta.SourceDominant)
 	}
 	// delta threads: thr_1 (recall 5) before thr_2 (recall 2).
@@ -357,7 +358,7 @@ func TestRebuildSymbolsRoundtrips(t *testing.T) {
 	if !reflect.DeepEqual(alpha.Threads, []string{"thr_1"}) {
 		t.Errorf("alpha.threads = %v, want [thr_1]", alpha.Threads)
 	}
-	if alpha.SourceDominant != store.SourceCurator {
+	if alpha.SourceDominant != memops.SourceCurator {
 		t.Errorf("alpha.source_dominant = %q, want curator", alpha.SourceDominant)
 	}
 }
@@ -376,10 +377,10 @@ func TestLoadAllThreadFrontmatterTolerantOnParseError(t *testing.T) {
 
 	// Two well-formed threads.
 	for _, id := range []string{"thr_1", "thr_2"} {
-		th := store.Thread{
-			Frontmatter: store.ThreadFrontmatter{
+		th := memops.Thread{
+			Frontmatter: memops.ThreadFrontmatter{
 				ID: id, Project: "prj_1",
-				Summary: "s", State: store.ThreadActive,
+				Summary: "s", State: memops.ThreadActive,
 				Created: "2026-05-01T00:00:00Z", LastEngaged: "2026-05-01T00:00:00Z", StateChanged: "2026-05-01T00:00:00Z",
 			},
 			Body: "b\n",

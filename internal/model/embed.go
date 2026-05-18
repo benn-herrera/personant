@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"personant/internal/store"
+	"personant/internal/memops"
 )
 
 // embedBatch caps how many texts go in one /embeddings request.
@@ -26,7 +26,7 @@ const embedBatch = 64
 // explicitly; dimensions > 0 requests a Matryoshka-truncated vector of
 // that length (0 → the model's native dimension). The same *HTTPClient
 // type satisfies both Client and Embedder.
-func NewHTTPEmbedder(p store.Provider, model string, dimensions int) Embedder {
+func NewHTTPEmbedder(p memops.Provider, model string, dimensions int) Embedder {
 	c := NewHTTPClient(p).(*HTTPClient)
 	c.embeddingModel = model
 	c.embeddingDimensions = dimensions
