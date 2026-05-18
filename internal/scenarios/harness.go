@@ -341,25 +341,9 @@ func measurementBlobPath(t *testing.T, filename string) string {
 	return filepath.Join(dir, filename)
 }
 
-// ClearRunData removes the entire <repo-root>/test/rundata tree. Run
-// data is forensic data — gitignored, never auto-deleted — so it
-// accumulates across runs: each distinct (seed, duration) produces a
-// differently named per-scenario subdirectory, and stale subdirectories
-// from prior runs are left in place. Callers that want a clean
-// forensic-data directory (e.g. the -sim.clean flag) call this before
-// a run. A missing directory is not an error; a real removal failure is
-// fatal, matching runDataHome's error handling.
-func ClearRunData(t testing.TB) {
-	t.Helper()
-	dir := filepath.Join(repoRoot(t), "test", "rundata")
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatalf("clear run data %s: %v", dir, err)
-	}
-}
-
 // repoRoot walks up from the test's working directory until it finds a
 // go.mod file, returning that directory.
-func repoRoot(t testing.TB) string {
+func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
 	if err != nil {

@@ -120,14 +120,9 @@ cover: build recall-madlibs
 # run for minutes to (at 6m) an hour; this is a deliberate, watched
 # invocation, so a runaway is the user's to Ctrl-C.
 #   make sim DURATION=1w   (1d|1w|1m|2m|6m or a Go duration like 168h)
-# Set CLEAN=1 to wipe the whole test/rundata/ forensic-data tree before
-# the run, so it begins from an empty directory; otherwise rundata
-# accumulates a subdirectory per distinct (seed, duration) across runs.
-#   make sim DURATION=1m CLEAN=1
 DURATION ?= 1w
-CLEAN ?=
 sim: build recall-madlibs
-	go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 -sim.duration=$(DURATION) $(if $(CLEAN),-sim.clean=true)
+	go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 -sim.duration=$(DURATION)
 
 # integration-test runs the live-inference tests (build tag
 # `integration`) — they require the `reaper` provider reachable.

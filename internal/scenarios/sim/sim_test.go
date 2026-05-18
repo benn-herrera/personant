@@ -82,15 +82,6 @@ const simSeed = 0x5e1f
 var simDuration = flag.String("sim.duration", "1d",
 	"simulation span: 1d|1w|1m|2m|6m, or a Go duration like 168h")
 
-// simClean, when set, removes the entire test/rundata/ forensic-data
-// tree before the run starts. Each distinct (seed, duration) writes a
-// differently named subdirectory, so test/rundata/ otherwise
-// accumulates stale subdirectories across runs; -sim.clean=true starts
-// the run from an empty forensic-data directory. Default false
-// preserves the accumulating behavior.
-var simClean = flag.Bool("sim.clean", false,
-	"remove the entire test/rundata/ tree before the run starts")
-
 // parseSimDuration maps the -sim.duration flag value to a span. The
 // named rungs (1d/1w/1m/2m/6m) are the six-month rung walk; any other
 // value falls through to time.ParseDuration so an ad-hoc span like
@@ -138,10 +129,6 @@ func TestSim(t *testing.T) {
 	// not this turn-count band. GenerateWorkload is deterministic for a
 	// fixed (Seed, Duration), so counting turns here and again inside
 	// runSimRung yields the identical workload.
-	if *simClean {
-		scenarios.ClearRunData(t)
-	}
-
 	corpus := loadCorpusSlots(t)
 	if d == simDayDuration {
 		turns := len(GenerateWorkload(WorkloadConfig{
@@ -171,6 +158,16 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 		Duration: d,
 		Corpus:   corpus,
 	})
+
+	// Append a wall-clock timestamp suffix so each sim run gets its own
+	// forensic-data directory. GenerateWorkload keys sc.Name on
+	// (seed, duration) only, so two runs of the same duration would
+	// otherwise reuse one test/rundata/<name>/ directory and the
+	// harness's runDataHome RemoveAll would destroy the prior run's data.
+	// Real wall-clock time (time.Now), NOT internal/clock: the harness
+	// overrides clock.Timeline() to the simulated clock during a run, so
+	// clock would yield simulated, not real start, time.
+	sc.Name += "." + time.Now().Format("060102150405")
 
 	// The metrics blob defaults into the persistent test/rundata/<name>/
 	// run home (forensic data — not auto-deleted temp). RunScenario
