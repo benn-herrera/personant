@@ -720,20 +720,27 @@ identifiers, diffs, anchor literals.
 
 #### 3.9.1 Persistent storage (thread file body, log)
 
-The full chain is preserved:
+The full chain is preserved, **anchored on the current state**:
 
-- Initial content read → stored as literal.
-- Subsequent change → stored as a unified diff against the previous
-  state.
-- Periodic anchor literals every K-th change (default K = 10) — full
-  literal stored to prevent cumulative drift through long diff chains.
-  Same trick I-frames in video compression use. Configurable via the
-  directive `dedup.anchor-cadence`.
-- A diff that is ≥ `dedup.diff-literal-threshold` (default 0.7) of the
-  literal size is stored as a literal instead — the diff isn't earning
-  its keep. Same heuristic as lzma's literal-vs-match decision.
+- The current content is stored as a **literal** — fully formed and
+  hot, since it is what active cognition works on.
+- Each prior version is stored as a **reverse-delta**: the unified diff
+  that transforms the newer state back into it. History reconstructs
+  *backward* from the live literal; old states stay recoverable and
+  their differences are explicitly enumerated. (When a new version
+  arrives, the outgoing literal is re-encoded as a reverse-delta and
+  the new content becomes the literal.)
+- Periodic anchor literals every K-th version back through history
+  (default K = 10) — a full literal that bounds reverse-delta chain
+  length and prevents cumulative drift. Same trick I-frames in video
+  compression use. Configurable via the directive `dedup.anchor-cadence`.
+- A reverse-delta that is ≥ `dedup.diff-literal-threshold` (default
+  0.7) of the literal size is stored as a literal instead — the delta
+  isn't earning its keep. Same heuristic as lzma's literal-vs-match
+  decision.
 
-This gives forensic-quality history with bounded storage cost.
+This keeps the current state fully formed and hot while giving
+forensic-quality history at bounded storage cost.
 
 #### 3.9.2 Live context composition (working window)
 
