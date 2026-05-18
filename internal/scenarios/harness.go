@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"personant/internal/clock"
 	"personant/internal/curator"
 	"personant/internal/index"
 	"personant/internal/memops"
@@ -360,7 +361,7 @@ defaultModel = "harness-mock"
 		Metrics:     run,
 		T:           t,
 		MetricsPath: mPath,
-		startedAt:   time.Now(),
+		startedAt:   clock.Profiling(),
 		pinnedClock: time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC),
 	}
 
@@ -368,8 +369,10 @@ defaultModel = "harness-mock"
 	// (created ≤ last_engaged) are timestamp-sensitive, and a
 	// scenario's metrics blob is more readable with stable timestamps.
 	// A Step.TimeDelta advances h.pinnedClock; the closure reads it
-	// live so the advance takes effect on the next turn.
-	state.SetClock(func() time.Time { return h.pinnedClock })
+	// live so the advance takes effect on the next turn. The override is
+	// process-global, so restore it at test end to isolate runs.
+	restore := clock.SetTimeline(func() time.Time { return h.pinnedClock })
+	t.Cleanup(restore)
 
 	// Install a deterministic scripted curator so closure scenarios
 	// never need a live model. The closure scan only runs when both a
@@ -416,9 +419,9 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) {
 		h.pinnedClock = h.pinnedClock.Add(step.TimeDelta)
 	}
 
-	start := time.Now()
+	start := clock.Profiling()
 	body, err := turn.RunWithDeltas(context.Background(), h.State, step.PreEvents, step.UserInput, io.Discard)
-	elapsed := time.Since(start)
+	elapsed := clock.Since(start)
 	if err != nil {
 		t.Fatalf("scenario step %d (%s): turn.Run: %v", idx+1, label, err)
 	}

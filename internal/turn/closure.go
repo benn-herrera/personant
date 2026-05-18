@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"personant/internal/clock"
 	"personant/internal/curator"
 	"personant/internal/memops"
 )
@@ -151,7 +152,7 @@ func surfaceClosureCandidates(ctx context.Context, state *State) error {
 		return fmt.Errorf("closure: list threads: %w", err)
 	}
 
-	now := state.now()
+	now := clock.Timeline()
 	type candidate struct {
 		rec    memops.SpineRecord
 		detail string
@@ -244,7 +245,7 @@ func applyClosureResolution(ctx context.Context, state *State, threadID string, 
 		return fmt.Errorf("closure: load thread %s: %w", threadID, err)
 	}
 
-	now := state.now().Format(time.RFC3339)
+	now := clock.Timeline().Format(time.RFC3339)
 
 	var newState memops.ThreadState
 	switch res.Outcome {

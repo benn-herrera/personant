@@ -243,7 +243,7 @@ internal/model/             OpenAI-compatible HTTP client + scripted/
                             generated mock + SSE streaming
 internal/scenarios/         scenario harness, invariants, metrics
 internal/{eventlog,metrics,
-  index,verify,
+  index,verify,clock,
   ping,modellist,log}/      supporting subsystems
 ARCHITECTURE.md             orientation (read first)
 spec.md                     operational spec
@@ -287,6 +287,11 @@ Go 1.26.1+.
   aliases stay direct because they're not substrate operations. Tests
   inspect the substrate directly via `h.Paths` in invariants — that's the
   test-side substrate validator pattern; it's the right access.
+- **All clock reads go through `internal/clock`.** Direct reads of the
+  `time` package clock (`time.Now`, `time.Since`) are forbidden outside
+  `internal/clock`. Use `clock.Timeline()` for simulated-world timestamps
+  (overridable by the six-month simulation) and `clock.Profiling()` /
+  `clock.Since()` for real-time and latency measurement.
 - **Match the spec's data model.** Spine records, thread frontmatter, and the
   symbol index have field-level schemas in §2. Don't invent your own.
 - **Verify with the canonical docs.** Before assuming a behavior, grep

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"personant/internal/clock"
 	"personant/internal/store"
 )
 
@@ -16,7 +17,7 @@ func TestLogWritesLine(t *testing.T) {
 	paths := store.PathsForHome(tmp)
 
 	fixed := time.Date(2026, 5, 9, 14, 23, 5, 0, time.FixedZone("PST", -8*3600))
-	restore := SetClock(func() time.Time { return fixed })
+	restore := clock.SetTimeline(func() time.Time { return fixed })
 	defer restore()
 
 	if err := Log(paths, "session", "started", "version=0.1.0"); err != nil {
@@ -42,7 +43,7 @@ func TestLogRotatesAcrossDays(t *testing.T) {
 	day1 := time.Date(2026, 5, 9, 23, 59, 30, 0, time.UTC)
 	day2 := time.Date(2026, 5, 10, 0, 0, 30, 0, time.UTC)
 	current := day1
-	restore := SetClock(func() time.Time { return current })
+	restore := clock.SetTimeline(func() time.Time { return current })
 	defer restore()
 
 	if err := Log(paths, "system", "bootstrap", "n=1"); err != nil {
@@ -75,7 +76,7 @@ func TestLogConcurrentWritersDoNotTear(t *testing.T) {
 	paths := store.PathsForHome(tmp)
 
 	fixed := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
-	restore := SetClock(func() time.Time { return fixed })
+	restore := clock.SetTimeline(func() time.Time { return fixed })
 	defer restore()
 
 	const writers = 8
@@ -116,7 +117,7 @@ func TestLogContextModified(t *testing.T) {
 	tmp := t.TempDir()
 	paths := store.PathsForHome(tmp)
 	fixed := time.Date(2026, 5, 9, 9, 0, 0, 0, time.UTC)
-	restore := SetClock(func() time.Time { return fixed })
+	restore := clock.SetTimeline(func() time.Time { return fixed })
 	defer restore()
 
 	if err := LogContextModified(paths, "user.prompt", 137); err != nil {

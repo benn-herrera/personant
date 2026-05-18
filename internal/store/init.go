@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+
+	"personant/internal/clock"
 )
 
 // InitOptions controls the behavior of Init.
@@ -270,13 +271,13 @@ func commitSignature(repo *git.Repository) *object.Signature {
 		return &object.Signature{
 			Name:  cfg.User.Name,
 			Email: cfg.User.Email,
-			When:  time.Now(),
+			When:  clock.Timeline(),
 		}
 	}
 	return &object.Signature{
 		Name:  "personant",
 		Email: "personant@localhost",
-		When:  time.Now(),
+		When:  clock.Timeline(),
 	}
 }
 

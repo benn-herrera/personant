@@ -10,7 +10,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
+
+	"personant/internal/clock"
 )
 
 // Level controls log verbosity.
@@ -95,7 +96,7 @@ func (c *compactLogger) emit(level Level, format string, args ...any) {
 		fileLine = fmt.Sprintf("%s(%d): %s() ", fileName, lineNum, funcName)
 	}
 	msg := fmt.Sprintf(format, args...)
-	line := fmt.Sprintf("<%s>[%s] %s%s\n", time.Now().Format("15:04:05"), level.String(), fileLine, msg)
+	line := fmt.Sprintf("<%s>[%s] %s%s\n", clock.Profiling().Format("15:04:05"), level.String(), fileLine, msg)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if toStderr {
@@ -150,7 +151,7 @@ func InitLogger(logPath string, stderrLevel Level, logFileLine bool) error {
 				return
 			}
 			// Session boundary marker — useful when the file is reused across restarts.
-			fmt.Fprintf(f, "new log opened: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+			fmt.Fprintf(f, "new log opened: %s\n", clock.Profiling().Format("2006-01-02 15:04:05"))
 			cl.fileW = f
 		}
 		global.Store(cl)

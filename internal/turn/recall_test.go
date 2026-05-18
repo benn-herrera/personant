@@ -179,7 +179,7 @@ func TestRunFiresRecallAtTurnClose(t *testing.T) {
 		{Content: "*topic: *new-topic* [alpha, beta, gamma, delta]*\nNew thread."},
 	}, nil)
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
-	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
+	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
 	var out bytes.Buffer
 	if _, err := Run(context.Background(), state, "talking about #alpha and #beta", &out); err != nil {
@@ -217,7 +217,7 @@ func TestRunNoRecallWhenNoSymbols(t *testing.T) {
 		{Content: "Just a plain reply, nothing to see."},
 	}, nil)
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
-	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
+	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
 	if _, err := Run(context.Background(), state, "hey there", io.Discard); err != nil {
 		t.Fatalf("Run: %v", err)

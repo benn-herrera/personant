@@ -18,37 +18,9 @@ import (
 	"sync"
 	"time"
 
+	"personant/internal/clock"
 	"personant/internal/store"
 )
-
-// nowFn is the time source used to timestamp events and pick the day's
-// file. Overridable from tests via SetClock; production callers should
-// leave it alone.
-var (
-	clockMu sync.Mutex
-	nowFn   = time.Now
-)
-
-// SetClock replaces the time source used for timestamps and file
-// rotation. Returns a restore function that reinstalls the previous
-// source. For test use only.
-func SetClock(fn func() time.Time) func() {
-	clockMu.Lock()
-	defer clockMu.Unlock()
-	prev := nowFn
-	nowFn = fn
-	return func() {
-		clockMu.Lock()
-		defer clockMu.Unlock()
-		nowFn = prev
-	}
-}
-
-func currentTime() time.Time {
-	clockMu.Lock()
-	defer clockMu.Unlock()
-	return nowFn()
-}
 
 // writeMu serializes the open-append-close cycle so concurrent writers
 // from the same process do not interleave their bytes mid-line.
@@ -72,7 +44,7 @@ func Log(paths store.PersonantPaths, category, action, details string) error {
 		return fmt.Errorf("eventlog: PersonantPaths.LogsDir is empty")
 	}
 
-	now := currentTime()
+	now := clock.Timeline()
 	line := fmt.Sprintf("%s %s.%s %s\n",
 		now.Format(time.RFC3339),
 		category, action,

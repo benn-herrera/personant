@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	"personant/internal/clock"
 	"personant/internal/memops"
 	"personant/internal/model"
 )
@@ -52,9 +53,9 @@ func Run(ops memops.MemoryOps, opts Options) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	start := time.Now()
+	start := clock.Profiling()
 	infos, err := client.ListModels(ctx)
-	elapsed := time.Since(start)
+	elapsed := clock.Since(start)
 	if err != nil {
 		return fmt.Errorf("models: list: %w", err)
 	}

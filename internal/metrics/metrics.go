@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"personant/internal/clock"
 )
 
 // Run is one measurement session: a set of named counters, histograms
@@ -39,7 +41,7 @@ func New(labels map[string]string) *Run {
 		clone[k] = v
 	}
 	return &Run{
-		startedAt:  time.Now().UTC(),
+		startedAt:  clock.Profiling().UTC(),
 		labels:     clone,
 		counters:   map[string]int64{},
 		histograms: map[string][]float64{},
@@ -93,7 +95,7 @@ func (r *Run) WriteJSON(path string) error {
 	r.mu.Lock()
 	doc := runJSON{
 		StartedAt:  r.startedAt.Format(time.RFC3339Nano),
-		EndedAt:    time.Now().UTC().Format(time.RFC3339Nano),
+		EndedAt:    clock.Profiling().UTC().Format(time.RFC3339Nano),
 		Labels:     copyStringMap(r.labels),
 		Counters:   copyInt64Map(r.counters),
 		Histograms: copyHistogramMap(r.histograms),

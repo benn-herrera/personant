@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"personant/internal/clock"
 	"personant/internal/curator"
 	"personant/internal/memops"
 	"personant/internal/model"
@@ -107,11 +108,6 @@ type State struct {
 	// at window close.
 	staging *stagingBuffer
 
-	// nowFn is a clock source used for last_engaged / created timestamps.
-	// Tests inject a deterministic clock; production callers leave it nil
-	// and Run substitutes time.Now.
-	nowFn func() time.Time
-
 	// closureDeferUntil maps a thread ID to the turn index until which a
 	// §3.5 closure re-prompt is suppressed. Populated when the user
 	// defers a closure offer; not persisted (session-scoped).
@@ -143,17 +139,6 @@ func NewState(ops memops.MemoryOps, project memops.ProjectMeta, provider memops.
 		// provider replace this with an embedding-enabled Service.
 		Recaller: recall.NewService(ops, nil),
 	}
-}
-
-// SetClock pins the time source for tests. Production callers leave it
-// alone and time.Now is used.
-func (s *State) SetClock(fn func() time.Time) { s.nowFn = fn }
-
-func (s *State) now() time.Time {
-	if s.nowFn != nil {
-		return s.nowFn()
-	}
-	return time.Now()
 }
 
 // maxRePromptsPerTurn caps the §5.5 system-injected mid-turn re-prompt at
@@ -635,7 +620,7 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 		return nil
 	}
 
-	now := state.now().Format(time.RFC3339)
+	now := clock.Timeline().Format(time.RFC3339)
 	turnSymbols := state.coalesce.coalescedList()
 	turnAnchors := turnAnchorList(responseBody, state.coalesce.symbolList())
 

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"personant/internal/clock"
 	"personant/internal/memops"
 	"personant/internal/store"
 )
@@ -31,10 +32,10 @@ func newAdapter(t *testing.T) *FileAdapter {
 }
 
 // rfc3339Now returns a stable RFC3339 timestamp string. SpineRecord
-// validation expects RFC3339; using time.Now keeps the value real
+// validation expects RFC3339; using clock.Timeline keeps the value real
 // without test flake (no parsing constraints other than RFC3339).
 func rfc3339Now() string {
-	return time.Now().UTC().Format(time.RFC3339)
+	return clock.Timeline().UTC().Format(time.RFC3339)
 }
 
 // validSpine returns a SpineRecord that satisfies verify.Verify's

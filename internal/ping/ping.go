@@ -10,6 +10,7 @@ import (
 	"io"
 	"time"
 
+	"personant/internal/clock"
 	"personant/internal/memops"
 	"personant/internal/model"
 )
@@ -77,7 +78,7 @@ func runWithClient(client model.Client, opts Options, chosenModel string, timeou
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	start := time.Now()
+	start := clock.Profiling()
 	sr, err := client.ConsultStream(ctx, req)
 	if err != nil {
 		return fmt.Errorf("ping: consult: %w", err)
@@ -102,7 +103,7 @@ func runWithClient(client model.Client, opts Options, chosenModel string, timeou
 		}
 	}
 	final := sr.Final()
-	elapsed := time.Since(start)
+	elapsed := clock.Since(start)
 
 	// Cap with a newline so the summary on stderr lands on a fresh line.
 	if final.Content == "" || final.Content[len(final.Content)-1] != '\n' {

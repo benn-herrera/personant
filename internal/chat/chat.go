@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"personant/internal/clock"
 	"personant/internal/curator"
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
@@ -620,7 +621,7 @@ func createNewProject(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd 
 	if err != nil {
 		return memops.ProjectMeta{}, err
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := clock.Timeline().UTC().Format(time.RFC3339)
 	meta := memops.ProjectMeta{
 		ID:              id,
 		Name:            name,

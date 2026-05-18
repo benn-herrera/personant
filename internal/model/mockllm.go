@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"personant/internal/clock"
 )
 
 // MockClient implements Client without crossing the network. Two backing
@@ -140,7 +142,7 @@ func (m *MockClient) Consult(ctx context.Context, req Request) (Response, error)
 		Request:  req,
 		Response: resp,
 		Err:      err,
-		At:       time.Now(),
+		At:       clock.Timeline(),
 	})
 	return resp, err
 }

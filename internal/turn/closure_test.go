@@ -170,7 +170,7 @@ func TestSurfaceClosure_RetireWritesStateAndEvicts(t *testing.T) {
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
 
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
-	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
+	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.TurnNumber = 1 + decayTurns
 	state.ActiveThreads = []string{"thr_1"}
 	state.DormantThreads = []string{"thr_1"}
@@ -216,7 +216,7 @@ func TestSurfaceClosure_WIPDemotes(t *testing.T) {
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
 
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
-	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
+	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.TurnNumber = 1 + decayTurns
 	state.ActiveThreads = []string{"thr_1"}
 	state.Curator = stubCurator{}
@@ -249,7 +249,7 @@ func TestSurfaceClosure_DeferReArms(t *testing.T) {
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
 
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
-	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
+	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.TurnNumber = 1 + decayTurns
 	state.Curator = stubCurator{}
 
@@ -316,7 +316,7 @@ func TestSurfaceClosure_CrossProjectScanLeavesSiblingUntouched(t *testing.T) {
 	seedClosureThread(t, paths, other.ID, "thr_2", memops.ThreadActive, 1, "")
 
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
-	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
+	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.TurnNumber = 1 + decayTurns
 	state.Curator = stubCurator{}
 	state.ClosureResolver = fixedOutcomeResolver(ClosureResolved)
@@ -378,7 +378,7 @@ func TestSurfaceClosure_CuratorErrorSwallowed(t *testing.T) {
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
 
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
-	state.SetClock(fixedClock(time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)))
+	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.TurnNumber = 1 + decayTurns
 	state.Curator = errCurator{}
 	state.ClosureResolver = fixedOutcomeResolver(ClosureResolved)
