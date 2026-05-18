@@ -419,7 +419,7 @@ No JSON schema in v0.1. Promote individual event types to structured form when q
 | `system` | `bootstrap`, `shutdown`, `error`, `config-reload` |
 | `thread` | `engaged`, `created`, `state-change`, `summary-generated` |
 | `spine` | `match-fire`, `match-miss`, `entry-updated` |
-| `recall` | `surface-prompt`, `surface-ack`, `surface-decline-not-relevant`, `surface-decline-not-now`, `surface-decline-stop-offering`, `cross-project-fire` |
+| `recall` | `offer` (with `count=N`), `accept` (with `thr=`, `layers=`), `decline` (with `thr=`, `reason=not-relevant\|wrong-project\|already-known`), `embed-error`, `cross-project-fire` |
 | `retire` | `prompt`, `ack`, `defer`, `complete` |
 | `dissect` | `fire`, `cluster-proposed`, `complete` |
 | `directive` | `accrual-update`, `parameter-read` (sampled) |
@@ -614,6 +614,19 @@ configured, recall runs symbolic-only — graceful degradation, never a
 hard failure. The thread-embedding index is
 session-scoped and rebuilt at session start; persistence (a derived
 KV store) is a later increment if rebuild cost warrants it.
+
+**Recall surface.** At turn close the merged candidates are logged
+per-layer (`spine.match-fire` / `spine.embed-match-fire`) and, when an
+experience-layer resolver is installed, the top 3 are surfaced as an
+*offer*. C.6 measured top-1 recall ~73% vs. top-3 ~92%; surfacing
+three and letting the user pick beats forcing a single-candidate
+guess. The resolver is the seam between the recall stack and the
+experience layer — the chat REPL resolves it interactively, the
+scenario harness from a scripted decision — so recall internals stay
+insulated from caller code. Accepted candidates are promoted into
+Layer B; every offered candidate is logged `recall.accept` or
+`recall.decline` (the latter with a §4.3 reason). With no resolver
+installed, recall stays log-only.
 
 ### 3.5 Closure flow
 
@@ -817,8 +830,12 @@ surface entirely.
 
 ### 4.3 Decline categorization UI
 
-Three-button surface on a recall offer: not-relevant / not-now /
-stop-offering. See §3.4 for the accrual semantics.
+When a recall offer is declined, the user picks a reason from a fixed
+enum: `not-relevant` / `wrong-project` / `already-known`. v0.1
+deliberately favors reasons that yield useful recall-tuning signal
+(why a candidate missed) over U/X-oriented actions like defer or
+suppress-offers; the latter return when the recall accrual loop is
+actually built. The enum is expected to be tuned then.
 
 ### 4.3.1 REPL line editing and history
 
