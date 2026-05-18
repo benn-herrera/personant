@@ -264,6 +264,34 @@ type MemoryOps interface {
 	// and the prompt is malformed.
 	ComposeWorkingSet(ctx context.Context, in WorksetInput) (WorksetLayers, error)
 
+	// ---------- Session working set ----------
+
+	// SaveWorkingSet persists the session working-set membership — the
+	// Layer B (activeThreads) and Layer C (dormantThreads) ordered ID
+	// lists — so a clean shutdown→relaunch cycle resumes the working set
+	// instead of cold-starting it empty. Both lists are most-recently-
+	// engaged-first; the adapter persists them verbatim, order included.
+	//
+	// Only these two lists are persisted. Session-volatile state
+	// (turn counter, coalesce/staging buffers, closure-defer grace) is
+	// deliberately not persisted — it correctly resets on restart. The
+	// active project is persisted separately via SetLastActiveProject.
+	//
+	// The artifact is volatile session state, rewritten every turn; the
+	// adapter keeps it out of any substrate version control so per-turn
+	// LRU churn does not dirty the substrate's git tree.
+	SaveWorkingSet(ctx context.Context, activeThreads, dormantThreads []string) error
+
+	// LoadWorkingSet returns the persisted session working-set membership
+	// — the Layer B (activeThreads) and Layer C (dormantThreads) ordered
+	// ID lists, in most-recently-engaged-first order.
+	//
+	// A missing artifact returns (nil, nil, nil): the fresh-launch state,
+	// not an error — mirroring how GetLastActiveProject treats an absent
+	// last-active marker. The error return is reserved for a present but
+	// unreadable or malformed artifact.
+	LoadWorkingSet(ctx context.Context) (activeThreads, dormantThreads []string, err error)
+
 	// ---------- Context-modification event logging ----------
 
 	// EmitDelta records one context-modification event on the

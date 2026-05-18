@@ -157,6 +157,31 @@ func NewState(ops memops.MemoryOps, project memops.ProjectMeta, provider memops.
 	}
 }
 
+// LoadSession constructs a State for a chat session and reloads the
+// persisted Layer B/C working-set membership from the substrate, so a
+// clean shutdown→relaunch cycle resumes the working set instead of
+// cold-starting it empty.
+//
+// It is the launch-path counterpart to NewState: NewState is kept a pure
+// constructor (no I/O), and LoadSession layers the one launch-time read
+// on top. A missing working-set artifact (fresh install, or a home that
+// never completed a turn) leaves ActiveThreads/DormantThreads nil — the
+// same state NewState produces — and is not an error.
+//
+// Only the working-set membership is reloaded. TurnNumber, the
+// coalesce/staging buffers, and closureDeferUntil are session-volatile
+// and correctly start fresh.
+func LoadSession(ctx context.Context, ops memops.MemoryOps, project memops.ProjectMeta, provider memops.Provider, client model.Client) (*State, error) {
+	state := NewState(ops, project, provider, client)
+	active, dormant, err := ops.LoadWorkingSet(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("turn: load session working set: %w", err)
+	}
+	state.ActiveThreads = active
+	state.DormantThreads = dormant
+	return state, nil
+}
+
 // maxRePromptsPerTurn caps the §5.5 system-injected mid-turn re-prompt at
 // 1 per turn. Total LLM stream attempts within a turn ≤ 1 +
 // maxRePromptsPerTurn = 2. The constant exists for symmetry with future
@@ -699,6 +724,14 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 	}
 
 	updateLayerLRU(state, engaged)
+
+	// Persist the updated Layer B/C membership so a clean
+	// shutdown→relaunch resumes the working set instead of cold-starting
+	// it empty. A save failure is non-fatal: log and continue, consistent
+	// with the other close-time substrate calls (AgeFileChains, recall).
+	if err := state.Ops.SaveWorkingSet(ctx, state.ActiveThreads, state.DormantThreads); err != nil {
+		_ = state.Ops.Log(ctx, "session", "working-set-save-error", sanitizeDetail(err.Error()))
+	}
 
 	engagedSet := make(map[string]struct{}, len(engaged))
 	for _, id := range engaged {

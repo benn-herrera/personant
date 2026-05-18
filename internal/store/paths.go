@@ -27,6 +27,7 @@ type PersonantPaths struct {
 	Config        string // Home/config.toml                  (chat/embedding choices drawn from the pool)
 	Gitignore     string // Home/.gitignore                   (excludes tmp/, key files)
 	LastActive    string // Home/last-active                  (operational; one line: prj_<n>; gitignored)
+	WorkingSet    string // Home/working-set.json             (operational; Layer B/C membership; rewritten per turn; gitignored)
 }
 
 // EnvHome is the environment variable that overrides the default home.
@@ -58,6 +59,7 @@ func makePaths(home string) PersonantPaths {
 		Config:        filepath.Join(home, "config.toml"),
 		Gitignore:     filepath.Join(home, ".gitignore"),
 		LastActive:    filepath.Join(home, "last-active"),
+		WorkingSet:    filepath.Join(home, "working-set.json"),
 	}
 }
 

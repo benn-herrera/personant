@@ -194,7 +194,14 @@ func Run(opts Options) error {
 		fmt.Fprintf(opts.Stderr, "warn: log session.start: %v\n", err)
 	}
 
-	state := turn.NewState(ops, project, provider, client)
+	// LoadSession (not NewState): reload the persisted Layer B/C working
+	// set so a clean shutdown→relaunch resumes the working set instead of
+	// cold-starting it empty. A missing artifact (fresh install) yields an
+	// empty working set — identical to NewState.
+	state, err := turn.LoadSession(ctx, ops, project, provider, client)
+	if err != nil {
+		return fmt.Errorf("chat: load session: %w", err)
+	}
 	if effectiveModel != "" {
 		state.Model = effectiveModel
 	}

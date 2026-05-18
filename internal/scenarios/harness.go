@@ -107,6 +107,15 @@ type Step struct {
 	// by default; a non-zero TimeDelta lets a scenario cross the §3.5
 	// wall-clock decay threshold deterministically.
 	TimeDelta time.Duration
+
+	// RestartSession, when true, simulates an application shutdown+relaunch
+	// before running this step: the in-memory turn.State is discarded and
+	// rebuilt from the substrate (turn.LoadSession), exactly as a fresh
+	// process launch would. The harness then asserts via AssertSessionRestored
+	// that the should-survive subset (Layer B/C membership, active project)
+	// was reconstructed correctly. The step's turn then runs against the
+	// rebuilt State. This exercises a *clean* lifecycle, not crash recovery.
+	RestartSession bool
 }
 
 // ClosureAck scripts how a step resolves a §3.5 closure offer surfaced
@@ -479,6 +488,15 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) {
 		t.Fatalf("scenario step %d (%s): matchFireCounts (pre): %v", idx+1, label, err)
 	}
 
+	// Simulated clean shutdown→relaunch. BEFORE running this step's turn,
+	// discard the in-memory turn.State and rebuild it from the substrate
+	// exactly as a fresh process launch would (turn.LoadSession), then
+	// assert the should-survive subset was reconstructed. The step's turn
+	// then runs against the rebuilt State.
+	if step.RestartSession {
+		restartSession(t, h, idx, label)
+	}
+
 	// Select this step's mock response. Every consult during the turn —
 	// including a §5.5 mid-turn re-prompt — serves queue[idx].
 	h.Mock.SetScriptedStep(idx)
@@ -535,6 +553,36 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) {
 		invs = DefaultInvariants
 	}
 	runInvariants(t, h, invs, label)
+}
+
+// restartSession simulates a clean application shutdown→relaunch: it
+// pointer-caches the pre-shutdown turn.State as a full snapshot (nothing
+// mutates it after replacement), rebuilds a fresh State from the
+// substrate via turn.LoadSession exactly as a real process launch would,
+// re-installs the harness's scripted Curator (newHarness installs it on
+// the original State; the rebuild needs the same), swaps it into the
+// harness, and asserts the should-survive subset was reconstructed via
+// the canonical AssertSessionRestored comparator. Mismatches are reported
+// via t.Errorf so the run collects every problem.
+func restartSession(t *testing.T, h *Harness, idx int, label string) {
+	t.Helper()
+	before := h.State
+
+	rebuilt, err := turn.LoadSession(context.Background(), h.Ops, h.Project, h.Provider, h.Mock)
+	if err != nil {
+		t.Fatalf("scenario step %d (%s): simulated relaunch: turn.LoadSession: %v", idx+1, label, err)
+	}
+	// Re-install the deterministic scripted curator — newHarness installs
+	// it on the original State, and a relaunched runtime would re-install
+	// its curator too. The per-step RecallResolver/ClosureResolver are
+	// installed by runStep below, so they need no handling here.
+	rebuilt.Curator = scriptedCurator{}
+
+	h.State = rebuilt
+
+	if err := AssertSessionRestored(before, rebuilt); err != nil {
+		t.Errorf("scenario step %d (%s): simulated relaunch: %v", idx+1, label, err)
+	}
 }
 
 // recallResolverFor builds a turn.RecallResolver from a step's scripted

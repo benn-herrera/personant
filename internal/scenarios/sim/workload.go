@@ -406,9 +406,42 @@ func GenerateWorkload(cfg WorkloadConfig) scenarios.Scenario {
 		}
 	}
 
+	g.markRestartSteps()
+
 	return scenarios.Scenario{
 		Name:  fmt.Sprintf("sim-workload-seed%d-dur%s", cfg.Seed, cfg.Duration),
 		Steps: g.steps,
+	}
+}
+
+// markRestartSteps flags two steps with RestartSession so the workload
+// exercises a clean shutdown→relaunch at minimum and maximum history
+// load. The first mark is the start of the SECOND session (a restart
+// after the first session has completed — near the run start, minimum
+// persisted history); the second mark is the start of the FINAL session
+// (near the run end, maximum history).
+//
+// Constraints honored: never the very first step of the run (step 0 — a
+// restart before any turn has run is meaningless, the working set would
+// be trivially empty on both sides), and never the same step twice (a
+// very short run whose two boundaries collide marks at most one step).
+func (g *generator) markRestartSteps() {
+	mark := map[int]bool{}
+	// Near run start: the start of the second session. sessionStarts[0]
+	// is step 0 (skipped by the never-step-0 rule); sessionStarts[1] is
+	// the first post-first-session boundary.
+	if len(g.sessionStarts) >= 2 && g.sessionStarts[1] != 0 {
+		mark[g.sessionStarts[1]] = true
+	}
+	// Near run end: the start of the final session.
+	if len(g.sessionStarts) >= 1 {
+		last := g.sessionStarts[len(g.sessionStarts)-1]
+		if last != 0 {
+			mark[last] = true
+		}
+	}
+	for idx := range mark {
+		g.steps[idx].RestartSession = true
 	}
 }
 
@@ -495,6 +528,13 @@ type generator struct {
 	steps      []scenarios.Step
 	simNow     time.Duration
 	pendingGap time.Duration // gap to apply as the next step's TimeDelta
+
+	// sessionStarts records the 0-based step index that begins each
+	// session (each runSession call that emitted at least one turn). The
+	// shutdown/restart marking (markRestartSteps) uses this to locate two
+	// distinct session boundaries — one near the run start (minimum
+	// history) and one near the run end (maximum history).
+	sessionStarts []int
 }
 
 // engage records thread index idx as the most-recently-engaged thread,
@@ -557,6 +597,8 @@ func (g *generator) inLayerB(idx int) bool {
 // TimeDelta (the first step of the run carries a zero TimeDelta,
 // matching the harness's pinned-clock start).
 func (g *generator) runSession(active time.Duration) {
+	sessionStart := len(g.steps)
+	emitted := false
 	var spent time.Duration
 	for spent < active {
 		tt := g.sampleTurnType()
@@ -572,6 +614,7 @@ func (g *generator) runSession(active time.Duration) {
 		step := g.buildStep(tt, act)
 		step.TimeDelta = td
 		g.steps = append(g.steps, step)
+		emitted = true
 
 		// Advance the clock by this turn's gap; it becomes the next
 		// step's TimeDelta. `spent` tracks only this session's
@@ -580,6 +623,9 @@ func (g *generator) runSession(active time.Duration) {
 		g.simNow += gap
 		g.pendingGap = gap
 		spent += gap
+	}
+	if emitted {
+		g.sessionStarts = append(g.sessionStarts, sessionStart)
 	}
 }
 

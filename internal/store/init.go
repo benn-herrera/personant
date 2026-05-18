@@ -399,6 +399,10 @@ const seedReadmeMD = "# personant home\n" +
 const seedGitignore = `# personant home gitignore
 tmp/
 last-active
+# working-set.json is volatile session state — Layer B/C membership
+# rewritten on every turn. Git-tracking it would dirty the home tree
+# with LRU churn every turn; it is operational state, not canonical.
+working-set.json
 # providers.toml and config.toml are safe to git-track when apiKeyFile
 # is used (no inline secrets). Keep the API-key files themselves out of
 # this directory; if you place any here, git-ignore them explicitly.

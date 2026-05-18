@@ -17,10 +17,13 @@
 package fileadapter
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -405,6 +408,91 @@ func (a *FileAdapter) GetLastActiveProject(ctx context.Context) (string, error) 
 		return "", fmt.Errorf("fileadapter: get last active: %w", err)
 	}
 	return id, nil
+}
+
+// ---------- Session working set ----------
+
+// workingSetFile is the on-disk shape of the persisted session
+// working-set artifact (<Home>/working-set.json). Only the two ordered
+// ID lists are stored; session-volatile state is deliberately omitted.
+type workingSetFile struct {
+	ActiveThreads  []string `json:"active_threads"`
+	DormantThreads []string `json:"dormant_threads"`
+}
+
+// SaveWorkingSet persists Layer B/C membership to <Home>/working-set.json.
+// The artifact is volatile session state — it is gitignored in the home
+// tree (see store.Init's seedGitignore), so the per-turn rewrite does not
+// dirty the substrate's git repo. Atomic: encode to a temp file in the
+// home directory, fsync, rename — the same pattern as SaveProjectMeta.
+func (a *FileAdapter) SaveWorkingSet(ctx context.Context, activeThreads, dormantThreads []string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if a.paths.Home == "" {
+		return errors.New("fileadapter: save working set: PersonantPaths.Home is empty")
+	}
+
+	tmp, err := os.CreateTemp(a.paths.Home, ".working-set-*.tmp")
+	if err != nil {
+		return fmt.Errorf("fileadapter: save working set: create temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	w := bufio.NewWriter(tmp)
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(workingSetFile{
+		ActiveThreads:  activeThreads,
+		DormantThreads: dormantThreads,
+	}); err != nil {
+		tmp.Close()
+		return fmt.Errorf("fileadapter: save working set: encode: %w", err)
+	}
+	if err := w.Flush(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("fileadapter: save working set: flush: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("fileadapter: save working set: fsync: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("fileadapter: save working set: close temp: %w", err)
+	}
+	if err := os.Rename(tmpPath, a.paths.WorkingSet); err != nil {
+		return fmt.Errorf("fileadapter: save working set: rename %s: %w", filepath.Base(a.paths.WorkingSet), err)
+	}
+	cleanup = false
+	return nil
+}
+
+// LoadWorkingSet reads <Home>/working-set.json. A nonexistent file
+// yields (nil, nil, nil) — the fresh-launch state — mirroring how
+// GetLastActiveProject treats an absent marker. A present but malformed
+// file yields an error.
+func (a *FileAdapter) LoadWorkingSet(ctx context.Context) ([]string, []string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	data, err := os.ReadFile(a.paths.WorkingSet)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("fileadapter: load working set: %w", err)
+	}
+	var ws workingSetFile
+	if err := json.Unmarshal(data, &ws); err != nil {
+		return nil, nil, fmt.Errorf("fileadapter: load working set: parse %s: %w", a.paths.WorkingSet, err)
+	}
+	return ws.ActiveThreads, ws.DormantThreads, nil
 }
 
 // ---------- Symbol index / recall ----------
