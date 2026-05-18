@@ -1,6 +1,6 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
+.PHONY: all build test sim integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
 
 all: build
 
@@ -98,6 +98,16 @@ recall-corpus-fetch:
 test: build recall-madlibs
 	go vet ./...
 	go test ./... --count=1
+
+# sim runs the six-month simulation rung walk at a given span — TestSim
+# in internal/scenarios/sim/ reads the span from -sim.duration. Span is
+# a runtime parameter, no build tags. Deliberately NOT part of `make
+# test`: the default test run passes no flag, so TestSim there runs the
+# 1-day smoke rung. Run -v to see the logged metrics summary.
+#   make sim DURATION=1w   (1d|1w|1m|2m|6m or a Go duration like 168h)
+DURATION ?= 1w
+sim: build recall-madlibs
+	go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -sim.duration=$(DURATION)
 
 # integration-test runs the live-inference tests (build tag
 # `integration`) — they require the `reaper` provider reachable.

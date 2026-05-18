@@ -2,6 +2,7 @@ package sim
 
 import (
 	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -27,24 +28,46 @@ const simDayDuration = 24 * time.Hour
 // generated Scenario — and therefore the run — reproducible.
 const simSeed = 0x5e1f
 
-// TestSim_1d is the 1-simulated-day rung: it generates a deterministic
-// workload, drives it through the existing scenario harness, and logs
-// a summary plus the extrapolated 6-month runtime. RunScenario already
+// simDuration selects the simulation span at run time. The default
+// `1d` keeps `make test` (which passes no flag) on the ~27 s 1-day
+// smoke rung; longer rungs are run via `make sim DURATION=…`.
+var simDuration = flag.String("sim.duration", "1d",
+	"simulation span: 1d|1w|1m|2m|6m, or a Go duration like 168h")
+
+// parseSimDuration maps the -sim.duration flag value to a span. The
+// named rungs (1d/1w/1m/2m/6m) are the six-month rung walk; any other
+// value falls through to time.ParseDuration so an ad-hoc span like
+// `72h` still works.
+func parseSimDuration(s string) (time.Duration, error) {
+	switch s {
+	case "1d":
+		return 24 * time.Hour, nil
+	case "1w":
+		return 7 * 24 * time.Hour, nil
+	case "1m":
+		return 30 * 24 * time.Hour, nil
+	case "2m":
+		return 60 * 24 * time.Hour, nil
+	case "6m":
+		return 180 * 24 * time.Hour, nil
+	default:
+		return time.ParseDuration(s)
+	}
+}
+
+// TestSim is the six-month simulation rung: it generates a
+// deterministic workload of the span chosen by -sim.duration (default
+// 1d), drives it through the existing scenario harness, and logs a
+// summary plus the extrapolated 6-month runtime. RunScenario already
 // asserts no turn.Run error and runs DefaultInvariants per step, so
 // "completes clean, invariants hold" comes for free; the assertions
 // here are a light smoke check only.
-func TestSim_1d(t *testing.T) {
-	sc := GenerateWorkload(WorkloadConfig{
-		Seed:     simSeed,
-		Duration: simDayDuration,
-	})
-
-	// Pin the metrics blob to this test's TempDir so the summary can
-	// read it back. RunScenario writes the blob at scenario completion.
-	sc.MetricsPath = filepath.Join(t.TempDir(), "sim-1d.metrics.json")
-
-	turns := len(sc.Steps)
-	t.Logf("generated workload: %d turns over %s simulated", turns, simDayDuration)
+func TestSim(t *testing.T) {
+	d, err := parseSimDuration(*simDuration)
+	if err != nil {
+		t.Fatalf("invalid -sim.duration %q: %v (use 1d|1w|1m|2m|6m or a Go duration like 168h)",
+			*simDuration, err)
+	}
 
 	// Light sanity band — a smoke rung, not a tuning gate. Derivation:
 	// a work day is 2 sessions of 6 h turn-active time = 12 h of
@@ -52,12 +75,48 @@ func TestSim_1d(t *testing.T) {
 	// ~(6*RapidGap + 1*WorkGap)/7 ≈ (6*1m + 6m)/7 ≈ 1.7m, so 12 h / 1.7m
 	// ≈ 420 turns; ±30% jitter and weighting variance widen that to a
 	// [250, 600] band. Re-derive this if RapidGap/WorkGap or the
-	// rapid:work weights change.
-	if turns < 250 || turns > 600 {
-		t.Errorf("turn count %d outside plausible band [250, 600]", turns)
+	// rapid:work weights change. The band is 1-day-specific, so it
+	// applies only when the span is exactly 24 h — longer rungs still
+	// get runSimRung's clean-completion + contiguity assertions, just
+	// not this turn-count band. GenerateWorkload is deterministic for a
+	// fixed (Seed, Duration), so counting turns here and again inside
+	// runSimRung yields the identical workload.
+	if d == simDayDuration {
+		turns := len(GenerateWorkload(WorkloadConfig{Seed: simSeed, Duration: d}).Steps)
+		if turns < 250 || turns > 600 {
+			t.Errorf("turn count %d outside plausible band [250, 600]", turns)
+		}
 	}
 
+	runSimRung(t, "sim-"+*simDuration, d)
+}
+
+// runSimRung is the shared run-and-report logic for every rung of the
+// six-month simulation rung walk. It generates a deterministic workload
+// of simulated span d, drives it through the scenario harness, asserts
+// clean completion (RunScenario does the per-step invariant + turn.Run
+// error checks) plus thread-id contiguity, and logs the summary the
+// rung walk tracks. It is untagged so it compiles into every test
+// build, and returns the post-run *Harness for any rung-specific
+// follow-up assertions.
+func runSimRung(t *testing.T, label string, d time.Duration) *scenarios.Harness {
+	t.Helper()
+
+	sc := GenerateWorkload(WorkloadConfig{
+		Seed:     simSeed,
+		Duration: d,
+	})
+
+	// Pin the metrics blob to this test's TempDir so the summary can
+	// read it back. RunScenario writes the blob at scenario completion.
+	sc.MetricsPath = filepath.Join(t.TempDir(), "sim.metrics.json")
+
+	turns := len(sc.Steps)
+	t.Logf("generated workload: %d turns over %s simulated", turns, d)
+
+	start := time.Now()
 	h := scenarios.RunScenario(t, sc)
+	wall := time.Since(start)
 
 	m, err := readMetrics(sc.MetricsPath)
 	if err != nil {
@@ -79,22 +138,24 @@ func TestSim_1d(t *testing.T) {
 	// append-only and no spine record is deleted (see threadID()'s
 	// precondition); archival will break it.
 	assertThreadIDsContiguous(t, h)
+	finalPopulation := finalThreadPopulation(t, h)
 
-	t.Logf("=== TestSim_1d summary ===")
+	t.Logf("=== %s summary ===", label)
 	t.Logf("turns:            %d", turns)
 	t.Logf("threads created:  %d", threadsCreated)
+	t.Logf("closures:         %d", closures)
+	t.Logf("final thread pop: %d (final spine size)", finalPopulation)
 	t.Logf("turn latency:     P50=%.1fms P95=%.1fms mean=%.2fms", p50, p95, meanMs)
 
 	// Closure: counted from retire.complete log lines. The turn path
 	// creates threads in the Active state (spec §2.2.1), and the §3.5
 	// decay scan offers any thread idle past the decay threshold for
 	// closure — the workload scripts ClosureResolved on every step, so
-	// any decayed thread closes. A 1-day workload spans enough idle
+	// any decayed thread closes. A multi-turn workload spans enough idle
 	// turns to decay-close some threads, so a non-zero count is the
 	// expected, healthy signal that the closure flow is live.
-	t.Logf("closures:         %d", closures)
 	if closures == 0 {
-		t.Errorf("closures: got 0; the §3.5 closure flow is dead — expected >0 over a 1-day workload")
+		t.Errorf("closures: got 0; the §3.5 closure flow is dead — expected >0 over the %s workload", label)
 	}
 
 	// Recall fidelity is measured (RecallMeasureOnly), never pass/fail
@@ -109,21 +170,23 @@ func TestSim_1d(t *testing.T) {
 		t.Logf("recall fidelity:  no measured steps this run")
 	}
 
+	t.Logf("wall-clock runtime: %s", wall.Round(time.Millisecond))
+
 	// Headline output: a LOWER BOUND on the six-month simulation
 	// runtime. 62400 is the approximate turn count of the six-month
-	// acceptance run (spec §9.1). Scaling the 1-day mean per-turn wall
+	// acceptance run (spec §9.1). Scaling the rung's mean per-turn wall
 	// cost by it is only a floor: per-turn cost grows with spine size
 	// (recall scans, closeTurnAndUpdateEngagement, ReadSpine all scale
-	// with the thread population), and at 1 day the population is tiny.
-	// The real 6 m run will exceed this number. A growth slope —
-	// needed for an honest estimate — comes once the 1-week rung lands.
+	// with the thread population), and at short rungs the population is
+	// still small. The real 6 m run will exceed this number.
 	const sixMonthTurns = 62400
 	perTurnMs := meanMs
 	floor := time.Duration(sixMonthTurns*perTurnMs) * time.Millisecond
-	t.Logf("per-turn cost:    %.2fms (mean wall, 1-day spine — small)", perTurnMs)
+	t.Logf("per-turn cost:    %.2fms (mean wall)", perTurnMs)
 	t.Logf("extrapolated 6 m runtime ≥ %s (floor; real per-turn cost grows "+
-		"with spine size, so the actual run will exceed this — refine once "+
-		"the 1-week rung gives a growth slope)", floor.Round(time.Second))
+		"with spine size, so the actual run will exceed this)", floor.Round(time.Second))
+
+	return h
 }
 
 // TestGenerateWorkload_Deterministic verifies the core contract: a
@@ -219,6 +282,18 @@ func closureCount(t *testing.T, h *scenarios.Harness) int {
 		count += strings.Count(string(body), "retire.complete ")
 	}
 	return count
+}
+
+// finalThreadPopulation returns the post-run spine record count — the
+// final thread population. ReadSpine is the authoritative source: the
+// harness exposes the substrate path it actually wrote to.
+func finalThreadPopulation(t *testing.T, h *scenarios.Harness) int {
+	t.Helper()
+	recs, err := store.ReadSpine(h.Paths.Spine)
+	if err != nil {
+		t.Fatalf("finalThreadPopulation: ReadSpine: %v", err)
+	}
+	return len(recs)
 }
 
 // assertThreadIDsContiguous reads the post-run spine and verifies its

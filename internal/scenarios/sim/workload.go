@@ -8,9 +8,8 @@
 // source seeded by WorkloadConfig.Seed.
 //
 // This package feeds the rung walk toward the six-month acceptance
-// simulation. The 1-day rung (TestSim_1d) drives the generated
-// Scenario through scenarios.RunScenario unchanged; no new runner is
-// needed. Rate parameters here are seed values meant to be tuned as
+// simulation. TestSim drives the generated Scenario through
+// scenarios.RunScenario unchanged; no new runner is needed. Rate parameters here are seed values meant to be tuned as
 // the rung walk climbs — Duration is the only knob that must change to
 // lengthen a run.
 //
