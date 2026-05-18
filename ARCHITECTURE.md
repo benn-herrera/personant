@@ -328,6 +328,18 @@ The intended remedy is an offline **consolidation cycle** — the system's equiv
 
 This is a future consideration, not v0.1 — but the v0.1 six-month simulation already supplies the hook: the day-off is a real idle window in the workload model, and closure (§3.5) / archival (§3.8) are exactly the mechanisms a consolidation pass would tidy.
 
+### Concurrent sessions — multitasking one career (future consideration)
+
+A user routinely interleaves work — two tasks open at once, attention alternating. CWD-scoped agents (Claude Code, opencode, …) get this for free: each working directory is its own isolated context. Personant cannot take that shortcut — its premise is a **single unified awareness and career**, so a separate context per directory would fragment the very thing the system exists to keep whole. Personant must instead genuinely **multitask**: multiple live conversations open against one shared memory.
+
+Consequences, in rough order of when they bite:
+
+- **Thread safety.** Concurrent sessions read and mutate shared canonical state (spine, thread files, the §3.0 chain). The runtime is currently single-session; concurrent sessions need real synchronization at the substrate boundary.
+- **Per-session working set.** Each session carries its own active threads (its own Layer B) and must track which is which — "the active thread" becomes session-scoped, not global.
+- **Cross-reference vs. isolation.** Two concurrently-active threads may legitimately want to cross-reference — often desirable. But the user must be able to declare two lines of work **unrelated**: an explicit "do not conflate these; neither thread's context bleeds into the other." Recall and working-set composition would have to honor that boundary.
+
+Future consideration, not v0.1 — and distinct from multi-*user* (v2.0): this is one user, one career, many concurrent conversations.
+
 ---
 
 ## Tool surface (bounded, role-shaped)
@@ -437,6 +449,7 @@ These are not "v0.2 / v0.3" — they are role-bounded.
 - Computational research workflow — Python only (v1.0; *not* polyglot)
 - Deep cold archival via git (v0.2)
 - Offline memory-consolidation cycle — the "sleep" cycle (future; see Mechanisms)
+- Concurrent sessions — one user multitasking across multiple live conversations (future; see Mechanisms)
 - Working-set content dedup (v0.2)
 - REPL line editing + history (v0.1 polish)
 - Shell escape (`$`/`#`) implementation with long-lived `$SHELL -i` subprocess (v0.1 polish; PTY mode-handoff for nested apps held until empirical pressure)
