@@ -371,18 +371,23 @@ var runTimestampSuffixRE = regexp.MustCompile(`\.\d{12}$`)
 // of that scenario; no cleanup is registered, so it persists after the
 // test exits. test/rundata/ is gitignored.
 //
-// Every run home carries a consistent `<name>.<12-digit-suffix>` shape.
-// runSimRung stamps a real wall-clock timestamp suffix so each sim run
-// gets a unique directory; every other scenario arrives un-suffixed and
-// is given the all-zeros sentinel `.000000000000`. The sentinel is
-// deliberate: it marks a directory whose run was NOT stamped with a real
-// timestamp, and because it is constant the directory name is stable
-// across runs, so those scenarios overwrite in place (no accumulation).
-// Scenario names in this suite never legitimately end in `.<12 digits>`,
-// so detecting an existing suffix is safe and avoids double-suffixing.
+// The `<name>.<12-digit-suffix>` shape applies ONLY to simulation-run
+// directories — the ones named `sim-workload-...` (produced by
+// GenerateWorkload). runSimRung stamps a real wall-clock timestamp suffix
+// so each sim run gets a unique directory; a sim-workload run that
+// arrives un-suffixed (e.g. TestSim_DormantResumptionDrivesMidTurnFetch,
+// which calls RunScenario directly) is given the all-zeros sentinel
+// `.000000000000`. The sentinel is deliberate: it marks a sim directory
+// whose run was NOT stamped with a real timestamp, and because it is
+// constant the directory name is stable across runs, so that scenario
+// overwrites in place (no accumulation). Non-sim scenario directories
+// (decay-triggered-closure, recall-madlibs-*, project-switching, etc.)
+// get NO suffix at all — bare names. Sim scenario names never
+// legitimately end in `.<12 digits>`, so detecting an existing suffix is
+// safe and avoids double-suffixing.
 func runDataHome(t *testing.T, name string) string {
 	t.Helper()
-	if !runTimestampSuffixRE.MatchString(name) {
+	if strings.HasPrefix(name, "sim-workload-") && !runTimestampSuffixRE.MatchString(name) {
 		name += ".000000000000"
 	}
 	home := filepath.Join(repoRoot(t), "test", "rundata", name)
