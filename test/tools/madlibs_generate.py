@@ -51,6 +51,12 @@ PLACEHOLDER_RE = re.compile(r"\{(\d+)\}")
 
 VALID_MODES = ("strict", "measure-only")
 
+# spec §2.2: a thread anchor must be 3-50 characters. Every column cell
+# (synonym/tag) can be bound as a thread anchor by the simulation
+# workload generator, so each must satisfy the same length constraint.
+ANCHOR_MIN_LEN = 3
+ANCHOR_MAX_LEN = 50
+
 
 def load_template(path):
     """Load and validate one template JSON file.
@@ -77,6 +83,19 @@ def load_template(path):
         raise ValueError(
             f"{path.name}: mode {tpl['mode']!r} not in {VALID_MODES}"
         )
+
+    # Every column cell may be bound as a thread anchor downstream, so
+    # each must clear the spec §2.2 anchor-length constraint here — at
+    # generation time. A bad cell otherwise stays silent until a thread
+    # binds to it mid-simulation and trips VerifySpineIntegrity.
+    for col_idx, column in enumerate(tpl["columns"]):
+        for cell in column:
+            if not ANCHOR_MIN_LEN <= len(cell) <= ANCHOR_MAX_LEN:
+                raise ValueError(
+                    f"{path.name}: column {col_idx} cell {cell!r} has length "
+                    f"{len(cell)}, outside the spec §2.2 anchor range of "
+                    f"{ANCHOR_MIN_LEN}-{ANCHOR_MAX_LEN} characters"
+                )
 
     anchors = set(tpl["anchors"])
     if not 4 <= len(tpl["anchors"]) <= 8:
