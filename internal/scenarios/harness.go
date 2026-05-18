@@ -243,7 +243,12 @@ func NewMockResponseWithTag(threads []string, anchors []string, body string) mod
 //
 // On any failure the metrics-blob path is logged via t.Logf so the
 // developer can inspect it for forensics.
-func RunScenario(t *testing.T, sc Scenario) {
+//
+// Returns the *Harness it constructed so callers can inspect post-run
+// state — final spine, metrics, the LogsDir event log — without
+// reconstructing paths from TempDir topology. Existing callers that
+// ignore the return value continue to compile unchanged.
+func RunScenario(t *testing.T, sc Scenario) *Harness {
 	t.Helper()
 	h := newHarness(t, sc)
 
@@ -296,6 +301,8 @@ func RunScenario(t *testing.T, sc Scenario) {
 		// line in a long test log.
 		t.Logf("scenario %s FAILED — metrics blob: %s", sc.Name, h.MetricsPath)
 	}
+
+	return h
 }
 
 // newHarness builds an isolated home, default project, and starting

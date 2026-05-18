@@ -6,20 +6,22 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"personant/internal/scenarios"
+	"personant/internal/store"
 )
 
-// simDayDuration is the simulated span the 1-day rung generates.
-//
-// "1 day" here means one 12 h work day: the generator structures a day
-// as two ~6 h sessions separated by one larger inter-session gap, and
-// stops at cumulative simulated time == Duration. 12 h yields exactly
-// that two-session shape. (24 h would produce two work days.)
-const simDayDuration = 12 * time.Hour
+// simDayDuration is the simulated wall span the 1-day rung covers — one
+// calendar day. Duration is total simulated wall time (inter-turn,
+// inter-session, and overnight gaps all count toward it), so 24 h is
+// exactly one work day: two ~6 h sessions split by an inter-session
+// gap, then the overnight gap that carries the clock past 24 h and ends
+// the day loop.
+const simDayDuration = 24 * time.Hour
 
 // simSeed is the fixed seed for the rung. A fixed seed makes the
 // generated Scenario — and therefore the run — reproducible.
@@ -44,12 +46,18 @@ func TestSim_1d(t *testing.T) {
 	turns := len(sc.Steps)
 	t.Logf("generated workload: %d turns over %s simulated", turns, simDayDuration)
 
-	// Light sanity band — this is a smoke rung, not a tuning gate.
+	// Light sanity band — a smoke rung, not a tuning gate. Derivation:
+	// a work day is 2 sessions of 6 h turn-active time = 12 h of
+	// inter-turn gaps. With the 6:1 rapid:work weighting the mean gap is
+	// ~(6*RapidGap + 1*WorkGap)/7 ≈ (6*1m + 6m)/7 ≈ 1.7m, so 12 h / 1.7m
+	// ≈ 420 turns; ±30% jitter and weighting variance widen that to a
+	// [250, 600] band. Re-derive this if RapidGap/WorkGap or the
+	// rapid:work weights change.
 	if turns < 250 || turns > 600 {
 		t.Errorf("turn count %d outside plausible band [250, 600]", turns)
 	}
 
-	scenarios.RunScenario(t, sc)
+	h := scenarios.RunScenario(t, sc)
 
 	m, err := readMetrics(sc.MetricsPath)
 	if err != nil {
@@ -62,7 +70,15 @@ func TestSim_1d(t *testing.T) {
 	meanMs := mean(durations)
 
 	threadsCreated := m.Counters["threads_created"]
-	closures := closureCount(t)
+	closures := closureCount(t, h)
+
+	// Thread-id contiguity: the generator maps creation order →
+	// thr_1, thr_2, …, and every downstream assumption (recall oracle,
+	// threadID()) depends on that. Assert the spine's thread IDs are
+	// exactly thr_1 .. thr_N with no gaps. This holds while threads are
+	// append-only and no spine record is deleted (see threadID()'s
+	// precondition); archival will break it.
+	assertThreadIDsContiguous(t, h)
 
 	t.Logf("=== TestSim_1d summary ===")
 	t.Logf("turns:            %d", turns)
@@ -93,16 +109,21 @@ func TestSim_1d(t *testing.T) {
 		t.Logf("recall fidelity:  no measured steps this run")
 	}
 
-	// Headline output: extrapolate the six-month simulation runtime.
-	// 62400 is the approximate turn count of the six-month acceptance
-	// run (spec §9.1) — scaling the measured per-turn wall cost by it
-	// tells us, before climbing, whether the 6 m run is minutes or an
-	// hour.
+	// Headline output: a LOWER BOUND on the six-month simulation
+	// runtime. 62400 is the approximate turn count of the six-month
+	// acceptance run (spec §9.1). Scaling the 1-day mean per-turn wall
+	// cost by it is only a floor: per-turn cost grows with spine size
+	// (recall scans, closeTurnAndUpdateEngagement, ReadSpine all scale
+	// with the thread population), and at 1 day the population is tiny.
+	// The real 6 m run will exceed this number. A growth slope —
+	// needed for an honest estimate — comes once the 1-week rung lands.
 	const sixMonthTurns = 62400
 	perTurnMs := meanMs
-	extrapolated := time.Duration(sixMonthTurns*perTurnMs) * time.Millisecond
-	t.Logf("per-turn cost:    %.2fms (mean wall)", perTurnMs)
-	t.Logf("extrapolated 6 m runtime (62400 turns): %s", extrapolated.Round(time.Second))
+	floor := time.Duration(sixMonthTurns*perTurnMs) * time.Millisecond
+	t.Logf("per-turn cost:    %.2fms (mean wall, 1-day spine — small)", perTurnMs)
+	t.Logf("extrapolated 6 m runtime ≥ %s (floor; real per-turn cost grows "+
+		"with spine size, so the actual run will exceed this — refine once "+
+		"the 1-week rung gives a growth slope)", floor.Round(time.Second))
 }
 
 // TestGenerateWorkload_Deterministic verifies the core contract: a
@@ -173,27 +194,60 @@ func mean(xs []float64) float64 {
 	return sum / float64(len(xs))
 }
 
-// closureCount walks the day-log files the harness wrote (under its
-// own TempDir, which shares a parent with this test's TempDir per Go's
-// testing.TempDir layout) and counts `retire.complete` lines — one per
-// thread closed during the run.
-func closureCount(t *testing.T) int {
+// closureCount counts `retire.complete` events in the harness's event
+// log — one per thread closed during the run. It reads h.Paths.LogsDir
+// directly: the harness exposes the substrate paths it actually wrote
+// to, so there is no reliance on undocumented testing.TempDir
+// sibling-directory topology.
+func closureCount(t *testing.T, h *scenarios.Harness) int {
 	t.Helper()
-	root := filepath.Dir(t.TempDir())
+	entries, err := os.ReadDir(h.Paths.LogsDir)
+	if err != nil {
+		t.Logf("closureCount: read %s: %v (reporting 0)", h.Paths.LogsDir, err)
+		return 0
+	}
 	count := 0
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".log") {
-			return nil //nolint:nilerr // skip unreadable entries; this is best-effort diagnostics
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
+			continue
 		}
-		body, rerr := os.ReadFile(path)
+		body, rerr := os.ReadFile(filepath.Join(h.Paths.LogsDir, e.Name()))
 		if rerr != nil {
-			return nil
+			t.Logf("closureCount: read %s: %v (skipping)", e.Name(), rerr)
+			continue
 		}
 		count += strings.Count(string(body), "retire.complete ")
-		return nil
-	})
-	if err != nil {
-		t.Logf("closureCount: walk %s: %v (reporting partial count)", root, err)
 	}
 	return count
+}
+
+// assertThreadIDsContiguous reads the post-run spine and verifies its
+// thread IDs are exactly thr_1 .. thr_N with no gaps — the contract
+// the generator's creation-order → thr_N mapping depends on.
+func assertThreadIDsContiguous(t *testing.T, h *scenarios.Harness) {
+	t.Helper()
+	recs, err := store.ReadSpine(h.Paths.Spine)
+	if err != nil {
+		t.Fatalf("assertThreadIDsContiguous: ReadSpine: %v", err)
+	}
+	// Parse the numeric suffix of each thr_N id and check the set is
+	// exactly {1 .. N}. A string sort would mis-order thr_2 vs thr_10,
+	// so sort numerically.
+	nums := make([]int, 0, len(recs))
+	for _, r := range recs {
+		n, err := strconv.Atoi(strings.TrimPrefix(r.ID, "thr_"))
+		if err != nil || !strings.HasPrefix(r.ID, "thr_") {
+			t.Errorf("spine thread ID %q is not of the form thr_N", r.ID)
+			return
+		}
+		nums = append(nums, n)
+	}
+	sort.Ints(nums)
+	for i, n := range nums {
+		if n != i+1 {
+			t.Errorf("spine thread IDs not contiguous: position %d is thr_%d, want thr_%d (sorted: %v)",
+				i, n, i+1, nums)
+			return
+		}
+	}
 }

@@ -13,6 +13,18 @@
 // needed. Rate parameters here are seed values meant to be tuned as
 // the rung walk climbs — Duration is the only knob that must change to
 // lengthen a run.
+//
+// Coverage gap — cold-thread re-engagement is out of scope. The
+// generator deliberately constrains `switch` actions to threads still
+// resident in Layer B (see layerBCap). RunScenario pre-queues exactly
+// one mock response per step, and a §5.5 mid-turn fetch — re-engaging a
+// thread that has fallen out of the working set — would need a second
+// response within the same turn. As a consequence cold-thread
+// re-engagement / mid-turn thread fetch is never exercised by this
+// generator. Closing that gap (the generator scheduling cold
+// re-engagements, and the harness supporting steps that queue two
+// responses) is required before the six-month run can be claimed as
+// full acceptance coverage.
 package sim
 
 import (
@@ -34,9 +46,12 @@ type WorkloadConfig struct {
 	// Scenario.
 	Seed int64
 
-	// Duration is the simulated span to generate. The generator emits
-	// turns until cumulative simulated time reaches Duration. For the
-	// 1-day rung this is one 12 h work day (see TestSim_1d).
+	// Duration is the total simulated wall span the workload covers —
+	// the simulated clock advances by this much across the whole run,
+	// counting inter-turn gaps, the inter-session gap, the overnight
+	// gap, and the weekly day-off gap alike. The generator emits whole
+	// calendar days until the simulated clock has advanced by Duration.
+	// A 1-day run passes 24*time.Hour; a 1-week run passes 7*24*time.Hour.
 	Duration time.Duration
 
 	// RapidGap and WorkGap are the mean inter-turn gaps for the two
@@ -45,9 +60,18 @@ type WorkloadConfig struct {
 	RapidGap time.Duration
 	WorkGap  time.Duration
 
-	// InterSessionGap is the larger gap inserted once, between the two
-	// sessions of the day.
+	// InterSessionGap is the larger gap inserted once per work day,
+	// between that day's two sessions.
 	InterSessionGap time.Duration
+
+	// OvernightGap is the idle span from the end of one work day to the
+	// start of the next (~12 h, jittered at use).
+	OvernightGap time.Duration
+
+	// DayOffGap is the idle span a weekly day off advances the clock by
+	// (~24–36 h). A day off emits no turns; the long gap is deliberate —
+	// it exercises the §3.5 wall-clock decay path.
+	DayOffGap time.Duration
 
 	// RapidWeight / WorkWeight bias turn-type selection by count. The
 	// default 6:1 yields a roughly 50/50 split by *simulated time*,
@@ -79,6 +103,14 @@ func (cfg WorkloadConfig) withDefaults() WorkloadConfig {
 	if cfg.InterSessionGap == 0 {
 		// ~3.5 h between the day's two sessions (jittered at use).
 		cfg.InterSessionGap = 3*time.Hour + 30*time.Minute
+	}
+	if cfg.OvernightGap == 0 {
+		// ~12 h from one work day's end to the next day's start.
+		cfg.OvernightGap = 12 * time.Hour
+	}
+	if cfg.DayOffGap == 0 {
+		// ~30 h idle for a weekly day off (jittered at use).
+		cfg.DayOffGap = 30 * time.Hour
 	}
 	if cfg.RapidWeight == 0 {
 		cfg.RapidWeight = 6
@@ -146,7 +178,15 @@ type thread struct {
 
 // threadID returns the thr_N id the runtime assigns to a thread by
 // creation order. Threads are numbered thr_1, thr_2, … in the order
-// they are created (harness/runtime guarantee).
+// they are created.
+//
+// Precondition: this mapping holds only while threads are append-only
+// and no spine record is ever deleted. The runtime assigns thr_{max+1}
+// and closure merely marks a thread retired (keeping its spine record
+// and id), so creation order N maps cleanly to thr_{N+1} today. Note:
+// archival — a future work item — will delete spine records and break
+// this contiguity; the thread-id model here must be revisited when
+// archival lands.
 func (t thread) threadID() string {
 	return fmt.Sprintf("thr_%d", t.order+1)
 }
@@ -169,10 +209,22 @@ const (
 	actNew
 )
 
+// sessionActive is the turn-active simulated span of one session — the
+// total of its inter-turn gaps. Two of these plus the inter-session and
+// overnight gaps make up a work day.
+const sessionActive = 6 * time.Hour
+
 // GenerateWorkload is a pure function: same WorkloadConfig → identical
 // scenarios.Scenario. It models the simulated user as a thread
-// population evolving over two sessions of a day, emitting one
-// scenarios.Step per turn.
+// population evolving across calendar days, emitting one scenarios.Step
+// per turn.
+//
+// The day is the repeating primitive. The generator emits calendar
+// days until the simulated clock has advanced by cfg.Duration. A week
+// is 6 work days plus 1 day off: a work day is two ~6 h sessions split
+// by an inter-session gap, followed by an overnight gap; a day off
+// emits no turns and simply advances the clock by DayOffGap, deliberately
+// exercising the §3.5 wall-clock decay path.
 func GenerateWorkload(cfg WorkloadConfig) scenarios.Scenario {
 	cfg = cfg.withDefaults()
 	rng := rand.New(rand.NewSource(cfg.Seed))
@@ -183,19 +235,63 @@ func GenerateWorkload(cfg WorkloadConfig) scenarios.Scenario {
 		topics: makeTopics(rng, cfg.TopicCount),
 	}
 
-	// A day is two sessions of ~half the duration each, separated by
-	// one larger gap. Session 1 runs until simNow reaches Duration/2;
-	// the inter-session gap is then inserted and carried as the next
-	// step's TimeDelta; session 2 runs until simNow reaches Duration.
-	half := cfg.Duration / 2
-	g.runSession(half)
-	g.pendingGap = jitter(rng, cfg.InterSessionGap)
-	g.runSession(cfg.Duration)
+	// Emit calendar days until the simulated clock has advanced by
+	// Duration. dayIndex 0-based; every 7th day (index 6, 13, …) is the
+	// week's day off.
+	for dayIndex := 0; g.simNow < cfg.Duration; dayIndex++ {
+		if dayIndex%7 == 6 {
+			g.runDayOff()
+		} else {
+			g.runWorkDay()
+		}
+	}
 
 	return scenarios.Scenario{
 		Name:  fmt.Sprintf("sim-workload-seed%d-dur%s", cfg.Seed, cfg.Duration),
 		Steps: g.steps,
 	}
+}
+
+// runWorkDay emits one work day: two ~6 h sessions separated by an
+// inter-session gap, then an overnight gap to the next day. The
+// inter-session and overnight gaps are folded into the cumulative
+// simulated clock (via pendingGap) so they count toward the Duration
+// budget — Duration spans real idle time, not just turn-active time.
+func (g *generator) runWorkDay() {
+	g.runSession(sessionActive)
+
+	// Inter-session gap. This overwrites pendingGap, intentionally
+	// discarding the trailing intra-session gap session 1's last turn
+	// sampled: the next step is the first of session 2, and the gap
+	// before it is the inter-session gap, not a normal inter-turn gap.
+	// runSession already advanced simNow by that discarded gap, so the
+	// clock subtracts it back here before adding the inter-session gap.
+	g.simNow -= g.pendingGap
+	isg := jitter(g.rng, g.cfg.InterSessionGap)
+	g.simNow += isg
+	g.pendingGap = isg
+
+	g.runSession(sessionActive)
+
+	// Overnight gap to the next day. Same discard-and-replace as the
+	// inter-session gap: drop session 2's trailing intra-session gap,
+	// substitute the overnight gap. The overnight gap is carried as the
+	// next day's first step's TimeDelta and counts toward Duration.
+	g.simNow -= g.pendingGap
+	overnight := jitter(g.rng, g.cfg.OvernightGap)
+	g.simNow += overnight
+	g.pendingGap = overnight
+}
+
+// runDayOff emits no turns; it advances the simulated clock by a
+// jittered ~24–36 h day-off gap, carried as the next day's first step's
+// TimeDelta. The long recurring gap is deliberate — it crosses the §3.5
+// wall-clock decay threshold so the longer rungs exercise decay/closure.
+func (g *generator) runDayOff() {
+	g.simNow -= g.pendingGap // discard any pending intra-day gap
+	off := jitter(g.rng, g.cfg.DayOffGap)
+	g.simNow += off
+	g.pendingGap = off
 }
 
 // layerBCap mirrors workset.DefaultBTopK (spec §2.6.1 layer.b-top-k):
@@ -257,19 +353,27 @@ func (g *generator) inLayerB(idx int) bool {
 	return false
 }
 
-// runSession emits turns until the simulated clock reaches untilSim.
+// runSession emits turns until it has consumed `active` worth of
+// inter-turn gaps — i.e. the session covers `active` of turn-active
+// simulated time. The session's own intra-turn gaps advance simNow;
+// the larger inter-session/overnight/day-off gaps are folded in
+// separately by the day primitives, so session length stays decoupled
+// from those inserted gaps.
+//
 // Each turn samples a type, an action, and an inter-turn gap; the gap
 // is accumulated into simNow and emitted as the *next* step's
 // TimeDelta (the first step of the run carries a zero TimeDelta,
 // matching the harness's pinned-clock start).
-func (g *generator) runSession(untilSim time.Duration) {
-	for g.simNow < untilSim {
+func (g *generator) runSession(active time.Duration) {
+	var spent time.Duration
+	for spent < active {
 		tt := g.sampleTurnType()
 		act := g.sampleAction()
 
 		// The TimeDelta for this step is whatever gap accumulated
-		// before it: the inter-session gap (pendingGap) on the first
-		// turn of session 2, or the previous turn's sampled gap.
+		// before it: the inter-session/overnight/day-off gap (pendingGap)
+		// on the first turn after one of those, or the previous turn's
+		// sampled intra-turn gap.
 		td := g.pendingGap
 		g.pendingGap = 0
 
@@ -278,10 +382,12 @@ func (g *generator) runSession(untilSim time.Duration) {
 		g.steps = append(g.steps, step)
 
 		// Advance the clock by this turn's gap; it becomes the next
-		// step's TimeDelta.
+		// step's TimeDelta. `spent` tracks only this session's
+		// intra-turn gaps so the session ends after `active` of them.
 		gap := g.sampleGap(tt)
 		g.simNow += gap
 		g.pendingGap = gap
+		spent += gap
 	}
 }
 
@@ -348,9 +454,18 @@ func (g *generator) buildStep(tt turnType, act action) scenarios.Step {
 	switch act {
 	case actNew:
 		idx = len(g.threads)
+		// Topic binding is deterministic by creation order: thread k →
+		// topic k mod TopicCount. This is NOT a uniform random pick. A
+		// random pick would make the recall oracle (which fires only
+		// when a dormant thread shares the engaged thread's topic) fire
+		// at a birthday-paradox rate that varies with thread count —
+		// and thread count varies with Duration, so each rung would
+		// measure a different thing. Round-robin guarantees every
+		// TopicCount-th thread shares a topic: a controlled,
+		// duration-independent recall-oracle fire rate.
 		g.threads = append(g.threads, thread{
 			order:    idx,
-			topicIdx: g.rng.Intn(len(g.topics)),
+			topicIdx: idx % len(g.topics),
 		})
 		isNew = true
 
