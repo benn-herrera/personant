@@ -1,0 +1,5 @@
+[embedding]
+model = "dummy-emb-provider/dummy-emb-model-not-default"
+
+[chat]
+defaultModel = "no-such-provider/gemma-main"

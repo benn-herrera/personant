@@ -1,7 +1,10 @@
 [local]
-baseurl = "http:127.0.0.1/v1"
+baseurl = "http:127.0.0.1:4000/v1"
 # do not use for actual paid service keys or any services exposed to the WAN!
 apiKeyUnsafe = "somekey"
+# not actually required - models/ endpoint will be used to populate list
+# but allows for user specification
+defaultModel = "small-local-model"
 
 [dummyrouter]
 baseUrl = "https://dummyrouter.ai/api/v1"
@@ -19,3 +22,8 @@ defaultModel = "gpt-5.4-2026-03-05"
 baseUrl = "https://dummy-emb-provider.com/api/v1"
 apiKeyFile = "api_keys/dummy-emb.key"
 defaultModel = "dummy-creator/dummy-emb-model"
+
+[broken-provider]
+baseUrl = "https://broken-provider.com/api/v1"
+apiKeyFile = "api_keys/non-existent.key"
+defaultModel = "broken-maker/broken-model"
