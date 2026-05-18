@@ -162,7 +162,7 @@ func Run(opts Options) error {
 	// stage when stdin is a pipe.
 	in := bufio.NewReader(opts.Stdin)
 
-	project, err := bootstrapProject(opts, in, ops, paths, cwd)
+	project, err := bootstrapProject(opts, in, ops, cwd)
 	if err != nil {
 		return err
 	}
@@ -407,11 +407,11 @@ func printStats(w io.Writer, ops memops.MemoryOps, state *turn.State) {
 //
 // Returns a zero ProjectMeta only if the user cancels at every prompt.
 // The caller treats that as a clean exit.
-func bootstrapProject(opts Options, in *bufio.Reader, ops memops.MemoryOps, paths store.PersonantPaths, cwd string) (store.ProjectMeta, error) {
-	return bootstrapProjectWithExplicit(opts, in, ops, paths, cwd, opts.ExplicitProject)
+func bootstrapProject(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string) (store.ProjectMeta, error) {
+	return bootstrapProjectWithExplicit(opts, in, ops, cwd, opts.ExplicitProject)
 }
 
-func bootstrapProjectWithExplicit(opts Options, in *bufio.Reader, ops memops.MemoryOps, paths store.PersonantPaths, cwd string, explicit string) (store.ProjectMeta, error) {
+func bootstrapProjectWithExplicit(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string, explicit string) (store.ProjectMeta, error) {
 	ctx := context.Background()
 	result, err := ops.ResolveActiveProject(ctx, memops.BootstrapHints{
 		ExplicitProject: explicit,
@@ -429,10 +429,10 @@ func bootstrapProjectWithExplicit(opts Options, in *bufio.Reader, ops memops.Mem
 		return *result.Resolved, nil
 
 	case memops.StepNeedsConfirmation:
-		return promptConfirmation(opts, in, ops, paths, cwd, result.Candidate)
+		return promptConfirmation(opts, in, ops, cwd, result.Candidate)
 
 	case memops.StepNeedsFallback:
-		return promptFallback(opts, in, ops, paths, cwd)
+		return promptFallback(opts, in, ops, cwd)
 
 	default:
 		return store.ProjectMeta{}, fmt.Errorf("chat: bootstrap: unrecognized step %v", result.Step)
@@ -440,9 +440,9 @@ func bootstrapProjectWithExplicit(opts Options, in *bufio.Reader, ops memops.Mem
 }
 
 // promptConfirmation surfaces the §4.5.7 last-active resume prompt.
-func promptConfirmation(opts Options, in *bufio.Reader, ops memops.MemoryOps, paths store.PersonantPaths, cwd string, candidate *store.ProjectMeta) (store.ProjectMeta, error) {
+func promptConfirmation(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string, candidate *store.ProjectMeta) (store.ProjectMeta, error) {
 	if candidate == nil {
-		return promptFallback(opts, in, ops, paths, cwd)
+		return promptFallback(opts, in, ops, cwd)
 	}
 	ctx := context.Background()
 	for {
@@ -465,16 +465,16 @@ func promptConfirmation(opts Options, in *bufio.Reader, ops memops.MemoryOps, pa
 			}
 			return *candidate, nil
 		case "n", "N", "no":
-			return promptFallback(opts, in, ops, paths, cwd)
+			return promptFallback(opts, in, ops, cwd)
 		default:
 			// Treat as <other-name-or-id> — re-resolve with explicit override.
-			return bootstrapProjectWithExplicit(opts, in, ops, paths, cwd, ans)
+			return bootstrapProjectWithExplicit(opts, in, ops, cwd, ans)
 		}
 	}
 }
 
 // promptFallback surfaces the §4.5.7 final fallback prompt.
-func promptFallback(opts Options, in *bufio.Reader, ops memops.MemoryOps, paths store.PersonantPaths, cwd string) (store.ProjectMeta, error) {
+func promptFallback(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string) (store.ProjectMeta, error) {
 	ctx := context.Background()
 	for {
 		fmt.Fprintln(opts.Stdout, "No active project resolved.")
