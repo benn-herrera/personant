@@ -32,40 +32,101 @@ func sortedKeys(m map[string]struct{}) []string {
 	return out
 }
 
-func TestLogEventThreadSet(t *testing.T) {
+func TestFoldEventLines(t *testing.T) {
 	h := invariantHarness(t)
-	writeLogFile(t, h, "ts thread.created thr_1 anchors=4 project=prj_1\n"+
-		"ts thread.created thr_2 anchors=4 project=prj_1\n"+
-		"ts archive.simulated-delete thr=thr_2 project=prj_1 bytes=512\n"+
-		"ts spine.match-fire thr_1 score=0.5\n"+
-		"\n")
-
-	created, err := createdThreads(h.Paths)
-	if err != nil {
-		t.Fatalf("createdThreads: %v", err)
+	h.foldEventLines([]string{
+		"ts thread.created thr_1 anchors=4 project=prj_1",
+		"ts thread.created thr_2 anchors=4 project=prj_1",
+		"ts archive.simulated-delete thr=thr_2 project=prj_1 bytes=512",
+		"ts spine.match-fire thr_1 score=0.5",
+		"",
+	})
+	if got, want := sortedKeys(h.createdThreadIDs), []string{"thr_1", "thr_2"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("createdThreadIDs: got %v want %v", got, want)
 	}
-	if got, want := sortedKeys(created), []string{"thr_1", "thr_2"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("createdThreads: got %v want %v", got, want)
-	}
-
-	archived, err := archiveDeletedThreads(h.Paths)
-	if err != nil {
-		t.Fatalf("archiveDeletedThreads: %v", err)
-	}
-	if got, want := sortedKeys(archived), []string{"thr_2"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("archiveDeletedThreads: got %v want %v", got, want)
+	if got, want := sortedKeys(h.archivedThreadIDs), []string{"thr_2"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("archivedThreadIDs: got %v want %v", got, want)
 	}
 }
 
-func TestLogEventThreadSet_MissingLogsDir(t *testing.T) {
+// TestLogTailer_MissingLogsDir confirms a tailer over a non-existent
+// logs directory returns nothing and no error — "no directory" and
+// "no events" are the same observation.
+func TestLogTailer_MissingLogsDir(t *testing.T) {
 	h := invariantHarness(t)
 	// invariantHarness does not write any log file; LogsDir may not exist.
-	got, err := archiveDeletedThreads(h.Paths)
+	lines, err := h.tailer.poll()
 	if err != nil {
 		t.Fatalf("expected nil error for missing logs dir, got %v", err)
 	}
-	if len(got) != 0 {
-		t.Errorf("expected empty set, got %v", got)
+	if len(lines) != 0 {
+		t.Errorf("expected no lines, got %v", lines)
+	}
+}
+
+// TestLogTailer_Incremental is the focused correctness test for the
+// O(N²) fix: it appends lines across two day-files between polls and
+// asserts each poll returns exactly the lines appended since the
+// previous one — including a fresh day-file appearing mid-run.
+func TestLogTailer_Incremental(t *testing.T) {
+	h := invariantHarness(t)
+	if err := os.MkdirAll(h.Paths.LogsDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+	dayA := filepath.Join(h.Paths.LogsDir, "2026-05-18.log")
+	dayB := filepath.Join(h.Paths.LogsDir, "2026-05-19.log")
+
+	append := func(t *testing.T, path, body string) {
+		t.Helper()
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			t.Fatalf("open %s: %v", path, err)
+		}
+		if _, err := f.WriteString(body); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+		f.Close()
+	}
+	poll := func(t *testing.T) []string {
+		t.Helper()
+		lines, err := h.tailer.poll()
+		if err != nil {
+			t.Fatalf("poll: %v", err)
+		}
+		return lines
+	}
+
+	// Poll 1: one file, two lines.
+	append(t, dayA, "l1\nl2\n")
+	if got, want := poll(t), []string{"l1", "l2"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("poll 1: got %v want %v", got, want)
+	}
+
+	// Poll 2: same file grew by one line — only the new line returns.
+	append(t, dayA, "l3\n")
+	if got, want := poll(t), []string{"l3"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("poll 2: got %v want %v", got, want)
+	}
+
+	// Poll 3: nothing appended anywhere.
+	if got := poll(t); len(got) != 0 {
+		t.Fatalf("poll 3: expected no lines, got %v", got)
+	}
+
+	// Poll 4: a fresh day-file appears mid-run (simulated midnight) and
+	// the old file also grows — both deltas come back, old day first.
+	append(t, dayA, "l4\n")
+	append(t, dayB, "m1\nm2\n")
+	if got, want := poll(t), []string{"l4", "m1", "m2"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("poll 4: got %v want %v", got, want)
+	}
+
+	// Poll 5: a shrinking file is append-only corruption — must error.
+	if err := os.WriteFile(dayA, []byte("short\n"), 0o644); err != nil {
+		t.Fatalf("truncate dayA: %v", err)
+	}
+	if _, err := h.tailer.poll(); err == nil {
+		t.Fatal("poll 5: expected corruption error on shrunk file, got nil")
 	}
 }
 
@@ -120,13 +181,20 @@ func TestRecallFidelity_Mismatch(t *testing.T) {
 	}
 }
 
-func TestDiffMatchFireSet(t *testing.T) {
-	pre := map[string]int{"thr_1": 2, "thr_2": 1}
-	post := map[string]int{"thr_1": 3, "thr_2": 1, "thr_5": 1}
-	got := diffMatchFireSet(pre, post)
+func TestMatchFireSet(t *testing.T) {
+	// One step's worth of tailed lines: two distinct threads fire (one
+	// twice — set semantics dedup it), plus unrelated non-match lines.
+	lines := []string{
+		"ts thread.created thr_1 anchors=4 project=prj_1",
+		"ts spine.match-fire thr_1 score=0.5",
+		"ts spine.match-fire thr_5 score=0.6",
+		"ts spine.match-fire thr_1 score=0.7",
+		"ts archive.simulated-delete thr=thr_9 project=prj_1 bytes=1",
+	}
+	got := matchFireSet(lines)
 	want := []string{"thr_1", "thr_5"}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("diffMatchFireSet: got %v want %v", got, want)
+		t.Errorf("matchFireSet: got %v want %v", got, want)
 	}
 }
 

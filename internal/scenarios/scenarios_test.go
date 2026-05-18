@@ -445,6 +445,15 @@ func runProjectSwitchScenario(t *testing.T, sc Scenario) {
 			return nil
 		},
 	)
+	// Final poll so the cumulative created/archived sets reflect every
+	// event before the final invariants (incl. VerifyThreadAccounting)
+	// read them. Each runStep already polls; this is the safety catch.
+	if lines, err := h.tailer.poll(); err != nil {
+		t.Fatalf("project-switching: final tailer.poll: %v", err)
+	} else {
+		h.foldEventLines(lines)
+	}
+
 	runInvariants(t, h, finals, "final[project-switching]")
 
 	if err := h.Metrics.WriteJSON(h.MetricsPath); err != nil {

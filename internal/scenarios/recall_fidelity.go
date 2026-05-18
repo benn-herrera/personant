@@ -11,109 +11,114 @@ import (
 	"personant/internal/store"
 )
 
-// matchFireCounts walks every <YYYY-MM-DD>.log under paths.LogsDir and
-// returns the per-thread total of `spine.match-fire` events. Used by
-// the harness to capture pre/post snapshots around a Step so per-step
-// recall-fidelity numbers can be computed without instrumenting the
-// turn-package surface.
+// logTailer is the harness's stateful, incremental reader of the
+// <home>/logs/ event-log directory. It tracks a per-file byte offset
+// and, on each poll(), returns only the lines appended since the
+// previous poll. This replaces the old full-directory walks that ran
+// once per step — re-reading all of run-so-far on every step was
+// O(N²) in turn count and dominated long-simulation wall time.
 //
-// A missing LogsDir returns an empty map and nil error: the eventlog
-// only materializes the day file when something is written, so "no
-// directory" and "no events" are the same observation.
-func matchFireCounts(paths store.PersonantPaths) (map[string]int, error) {
-	out := map[string]int{}
-	entries, err := os.ReadDir(paths.LogsDir)
+// The event log is append-only and daily-rotated (<YYYY-MM-DD>.log):
+// an existing file only ever grows, and a new day-file may appear
+// mid-run when the simulated clock crosses midnight. The tailer
+// handles both: a file not yet seen starts at offset 0, and a file
+// that has shrunk is treated as corruption (an error, not silent
+// mis-parse).
+type logTailer struct {
+	dir     string
+	offsets map[string]int64
+}
+
+// newLogTailer builds a tailer over the given logs directory. The
+// directory need not exist yet — the eventlog only materializes a day
+// file when something is first written.
+func newLogTailer(dir string) *logTailer {
+	return &logTailer{dir: dir, offsets: map[string]int64{}}
+}
+
+// poll reads every <YYYY-MM-DD>.log under the logs directory from its
+// stored offset to EOF, advances the offset, and returns the complete
+// lines appended since the previous poll (across all files, in
+// directory order). A trailing partial line is not expected — poll is
+// called between turns when no write is in flight — but a trailing
+// empty fragment from a final newline is dropped.
+//
+// A missing logs directory returns nil, nil: "no directory" and "no
+// new events" are the same observation, matching the pre-refactor
+// full-walk helpers.
+func (lt *logTailer) poll() ([]string, error) {
+	entries, err := os.ReadDir(lt.dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return out, nil
+			return nil, nil
 		}
-		return nil, fmt.Errorf("matchFireCounts: read logs dir: %w", err)
+		return nil, fmt.Errorf("logTailer.poll: read logs dir: %w", err)
 	}
+	var lines []string
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
 			continue
 		}
-		body, err := os.ReadFile(filepath.Join(paths.LogsDir, e.Name()))
+		name := e.Name()
+		info, err := e.Info()
 		if err != nil {
-			return nil, fmt.Errorf("matchFireCounts: read %s: %w", e.Name(), err)
+			return nil, fmt.Errorf("logTailer.poll: stat %s: %w", name, err)
 		}
-		for line := range strings.SplitSeq(string(body), "\n") {
-			_, rest, ok := strings.Cut(line, "spine.match-fire ")
-			if !ok {
+		off := lt.offsets[name]
+		size := info.Size()
+		if size < off {
+			return nil, fmt.Errorf("logTailer.poll: %s shrank (%d < %d) — append-only log corruption",
+				name, size, off)
+		}
+		if size == off {
+			continue
+		}
+		f, err := os.Open(filepath.Join(lt.dir, name))
+		if err != nil {
+			return nil, fmt.Errorf("logTailer.poll: open %s: %w", name, err)
+		}
+		buf := make([]byte, size-off)
+		n, err := f.ReadAt(buf, off)
+		f.Close()
+		if err != nil && n != len(buf) {
+			return nil, fmt.Errorf("logTailer.poll: read %s: %w", name, err)
+		}
+		lt.offsets[name] = size
+		for _, line := range strings.Split(string(buf[:n]), "\n") {
+			if line == "" {
 				continue
 			}
-			thrID, _, _ := strings.Cut(rest, " ")
-			if thrID == "" {
-				continue
-			}
-			out[thrID]++
+			lines = append(lines, line)
 		}
 	}
-	return out, nil
+	return lines, nil
 }
 
-// logEventThreadSet walks every <YYYY-MM-DD>.log under paths.LogsDir
-// and returns the set of thread IDs that appear in lines containing the
-// given `<category>.<action> ` marker. The thread ID is taken from the
+// eventThreadID extracts a thread ID from a log line whose content
+// contains the given `<category>.<action> ` marker. The ID is the
 // first whitespace token after the marker; if idPrefix is non-empty it
-// is stripped from that token (e.g. "thr=" → ""). This is the shared
-// log-walk used by both the recall-fidelity archival-forgiveness filter
-// and the VerifyThreadAccounting invariant.
-//
-// A missing LogsDir returns an empty set and nil error, matching
-// matchFireCounts: the eventlog only materializes a day file when
-// something is written.
-func logEventThreadSet(paths store.PersonantPaths, marker, idPrefix string) (map[string]struct{}, error) {
-	out := map[string]struct{}{}
-	entries, err := os.ReadDir(paths.LogsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return out, nil
-		}
-		return nil, fmt.Errorf("logEventThreadSet: read logs dir: %w", err)
+// is stripped from that token (e.g. "thr=" → ""). Returns "", false
+// when the line does not carry the marker, the prefix is absent, or
+// the token is empty. This is the shared line-parsing primitive used
+// by both the per-step match-fire extraction and the cumulative
+// created/archived folds.
+func eventThreadID(line, marker, idPrefix string) (string, bool) {
+	_, rest, ok := strings.Cut(line, marker)
+	if !ok {
+		return "", false
 	}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
-			continue
+	tok, _, _ := strings.Cut(rest, " ")
+	if idPrefix != "" {
+		stripped, found := strings.CutPrefix(tok, idPrefix)
+		if !found {
+			return "", false
 		}
-		body, err := os.ReadFile(filepath.Join(paths.LogsDir, e.Name()))
-		if err != nil {
-			return nil, fmt.Errorf("logEventThreadSet: read %s: %w", e.Name(), err)
-		}
-		for line := range strings.SplitSeq(string(body), "\n") {
-			_, rest, ok := strings.Cut(line, marker)
-			if !ok {
-				continue
-			}
-			tok, _, _ := strings.Cut(rest, " ")
-			if idPrefix != "" {
-				stripped, found := strings.CutPrefix(tok, idPrefix)
-				if !found {
-					continue
-				}
-				tok = stripped
-			}
-			if tok == "" {
-				continue
-			}
-			out[tok] = struct{}{}
-		}
+		tok = stripped
 	}
-	return out, nil
-}
-
-// archiveDeletedThreads returns the set of thread IDs that appear in
-// `archive.simulated-delete thr=<id> ...` log lines — threads removed
-// by the v0.1 deletion-stub archival path and therefore genuinely
-// unrecallable.
-func archiveDeletedThreads(paths store.PersonantPaths) (map[string]struct{}, error) {
-	return logEventThreadSet(paths, "archive.simulated-delete ", "thr=")
-}
-
-// createdThreads returns the set of thread IDs that appear in
-// `thread.created <id> ...` log lines.
-func createdThreads(paths store.PersonantPaths) (map[string]struct{}, error) {
-	return logEventThreadSet(paths, "thread.created ", "")
+	if tok == "" {
+		return "", false
+	}
+	return tok, true
 }
 
 // liveSpineThreadSet returns the set of thread IDs currently present on
@@ -130,15 +135,16 @@ func liveSpineThreadSet(paths store.PersonantPaths) (map[string]struct{}, error)
 	return out, nil
 }
 
-// diffMatchFireSet returns the sorted set of thread IDs whose
-// match-fire count increased between pre and post. The set semantics
-// (one entry per thread regardless of multiple fires within the same
-// step) is what recall-fidelity precision/recall is measured against:
-// the question is *which threads* were surfaced, not *how many times*.
-func diffMatchFireSet(pre, post map[string]int) []string {
+// matchFireSet returns the sorted set of thread IDs that have a
+// `spine.match-fire` event among the given log lines (typically one
+// step's worth, freshly tailed). The set semantics — one entry per
+// thread regardless of multiple fires within the same step — is what
+// recall-fidelity precision/recall is measured against: the question
+// is *which threads* were surfaced, not *how many times*.
+func matchFireSet(lines []string) []string {
 	seen := map[string]struct{}{}
-	for id, n := range post {
-		if n > pre[id] {
+	for _, line := range lines {
+		if id, ok := eventThreadID(line, "spine.match-fire ", ""); ok {
 			seen[id] = struct{}{}
 		}
 	}
@@ -229,10 +235,7 @@ func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode 
 	if err != nil {
 		t.Fatalf("scenario step %d (%s): recall-fidelity: live spine: %v", idx+1, label, err)
 	}
-	archived, err := archiveDeletedThreads(h.Paths)
-	if err != nil {
-		t.Fatalf("scenario step %d (%s): recall-fidelity: archive-delete log: %v", idx+1, label, err)
-	}
+	archived := h.archivedThreadIDs
 	var forgiven int64
 	kept := make([]string, 0, len(expected))
 	for _, id := range expected {

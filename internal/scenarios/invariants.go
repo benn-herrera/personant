@@ -263,10 +263,17 @@ func VerifyClosedThreadConsistency(h *Harness) error {
 // union  created = on-spine ⊎ archived.
 //
 // The three sets are reconstructed from durable evidence:
-//   - created  — `thread.created` log lines.
-//   - archived — `archive.simulated-delete` log lines (the v0.1
-//     deletion-stub archival path).
+//   - created  — `thread.created` log lines, folded incrementally into
+//     h.createdThreadIDs by the harness's per-step log tailer.
+//   - archived — `archive.simulated-delete` log lines, folded into
+//     h.archivedThreadIDs the same way (the v0.1 deletion-stub
+//     archival path).
 //   - onSpine  — thread IDs currently on the spine.
+//
+// The created/archived sets come off the Harness rather than a fresh
+// log walk: re-reading all of run-so-far on every step was O(N²) in a
+// long simulation. The harness tails the event log once per turn and
+// these cumulative sets only grow.
 //
 // For every created ID exactly one of {on-spine, archived} must hold:
 //   - Neither → unexplained loss: the substrate silently dropped a
@@ -276,14 +283,8 @@ func VerifyClosedThreadConsistency(h *Harness) error {
 //
 // All violations are collected, sorted, and reported in one error.
 func VerifyThreadAccounting(h *Harness) error {
-	created, err := createdThreads(h.Paths)
-	if err != nil {
-		return fmt.Errorf("VerifyThreadAccounting: %w", err)
-	}
-	archived, err := archiveDeletedThreads(h.Paths)
-	if err != nil {
-		return fmt.Errorf("VerifyThreadAccounting: %w", err)
-	}
+	created := h.createdThreadIDs
+	archived := h.archivedThreadIDs
 	onSpine, err := liveSpineThreadSet(h.Paths)
 	if err != nil {
 		return fmt.Errorf("VerifyThreadAccounting: %w", err)

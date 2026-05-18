@@ -45,7 +45,14 @@ func invariantHarness(t *testing.T) *Harness {
 	if err := indexRebuild(paths); err != nil {
 		t.Fatalf("indexRebuild: %v", err)
 	}
-	return &Harness{Paths: paths, Project: meta, T: t}
+	return &Harness{
+		Paths:             paths,
+		Project:           meta,
+		T:                 t,
+		tailer:            newLogTailer(paths.LogsDir),
+		createdThreadIDs:  map[string]struct{}{},
+		archivedThreadIDs: map[string]struct{}{},
+	}
 }
 
 // seedThread writes a paired (spine record, thread file) so tests can
@@ -280,11 +287,26 @@ func TestVerifyDedupConsistency_Skipped(t *testing.T) {
 	}
 }
 
+// seedEventLog writes a day-log file and tails+folds it into the
+// harness's cumulative created/archived sets — the same sequence
+// runStep performs after each turn. Lets the accounting tests exercise
+// VerifyThreadAccounting (which now reads the cumulative sets off the
+// Harness) without driving a full scenario.
+func seedEventLog(t *testing.T, h *Harness, body string) {
+	t.Helper()
+	writeLogFile(t, h, body)
+	lines, err := h.tailer.poll()
+	if err != nil {
+		t.Fatalf("seedEventLog: tailer.poll: %v", err)
+	}
+	h.foldEventLines(lines)
+}
+
 func TestVerifyThreadAccounting_Pass(t *testing.T) {
 	// thr_1 on the spine, thr_2 created then archived → disjoint union holds.
 	h := invariantHarness(t)
 	seedThread(t, h, validRecord())
-	writeLogFile(t, h, "ts thread.created thr_1 anchors=4 project=prj_1\n"+
+	seedEventLog(t, h, "ts thread.created thr_1 anchors=4 project=prj_1\n"+
 		"ts thread.created thr_2 anchors=4 project=prj_1\n"+
 		"ts archive.simulated-delete thr=thr_2 project=prj_1 bytes=512\n")
 	if err := VerifyThreadAccounting(h); err != nil {
@@ -296,7 +318,7 @@ func TestVerifyThreadAccounting_FailsOnUnexplainedLoss(t *testing.T) {
 	// thr_2 was created but is neither on the spine nor archived.
 	h := invariantHarness(t)
 	seedThread(t, h, validRecord())
-	writeLogFile(t, h, "ts thread.created thr_1 anchors=4 project=prj_1\n"+
+	seedEventLog(t, h, "ts thread.created thr_1 anchors=4 project=prj_1\n"+
 		"ts thread.created thr_2 anchors=4 project=prj_1\n")
 	if err := VerifyThreadAccounting(h); err == nil {
 		t.Fatalf("expected fail on unexplained loss; passed")
@@ -307,7 +329,7 @@ func TestVerifyThreadAccounting_FailsOnSpineAndArchived(t *testing.T) {
 	// thr_1 is on the spine yet also recorded as archived.
 	h := invariantHarness(t)
 	seedThread(t, h, validRecord())
-	writeLogFile(t, h, "ts thread.created thr_1 anchors=4 project=prj_1\n"+
+	seedEventLog(t, h, "ts thread.created thr_1 anchors=4 project=prj_1\n"+
 		"ts archive.simulated-delete thr=thr_1 project=prj_1 bytes=512\n")
 	if err := VerifyThreadAccounting(h); err == nil {
 		t.Fatalf("expected fail on simultaneous spine+archived; passed")

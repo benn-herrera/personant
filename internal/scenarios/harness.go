@@ -222,6 +222,37 @@ type Harness struct {
 	// exercised. runStep is single-goroutine, so no synchronization is
 	// needed.
 	pinnedClock time.Time
+
+	// tailer is the incremental event-log reader. runStep calls
+	// tailer.poll() exactly once after each turn to obtain that turn's
+	// newly-appended log lines, instead of re-reading all of run-so-far.
+	// This is what keeps a long simulation O(N) rather than O(N²).
+	tailer *logTailer
+
+	// createdThreadIDs and archivedThreadIDs are the cumulative sets
+	// folded incrementally from each step's tailed log lines:
+	// `thread.created` IDs and `archive.simulated-delete` IDs
+	// respectively. They replace the per-call full log walks the
+	// VerifyThreadAccounting invariant and the recall-fidelity
+	// archival-forgiveness filter used to perform. Both sets only ever
+	// grow, so they are insensitive to which poll window an event lands
+	// in — only the per-step match-fire set is window-sensitive.
+	createdThreadIDs  map[string]struct{}
+	archivedThreadIDs map[string]struct{}
+}
+
+// foldEventLines folds a batch of tailed log lines into the harness's
+// cumulative created/archived thread-ID sets. Called by runStep after
+// each turn's poll and by tests that seed log lines directly.
+func (h *Harness) foldEventLines(lines []string) {
+	for _, line := range lines {
+		if id, ok := eventThreadID(line, "thread.created ", ""); ok {
+			h.createdThreadIDs[id] = struct{}{}
+		}
+		if id, ok := eventThreadID(line, "archive.simulated-delete ", "thr="); ok {
+			h.archivedThreadIDs[id] = struct{}{}
+		}
+	}
 }
 
 // NewMockResponseWithTag is the common-case constructor for a Step's
@@ -289,6 +320,16 @@ func RunScenario(t *testing.T, sc Scenario) *Harness {
 
 	for i, step := range sc.Steps {
 		runStep(t, h, i, step)
+	}
+
+	// Final poll before the final invariant run: each runStep already
+	// polls after its turn, so this normally returns nothing, but it
+	// guarantees the cumulative sets reflect every event the run
+	// emitted before VerifyThreadAccounting reads them.
+	if lines, err := h.tailer.poll(); err != nil {
+		t.Fatalf("scenario %s: final tailer.poll: %v", sc.Name, err)
+	} else {
+		h.foldEventLines(lines)
 	}
 
 	finalInvs := sc.FinalInvariants
@@ -450,16 +491,19 @@ defaultModel = "harness-mock"
 	run := metrics.New(map[string]string{"scenario": sc.Name})
 
 	h := &Harness{
-		Paths:       paths,
-		Ops:         ops,
-		Project:     project,
-		Provider:    provider,
-		State:       state,
-		Metrics:     run,
-		T:           t,
-		MetricsPath: mPath,
-		startedAt:   clock.Profiling(),
-		pinnedClock: time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC),
+		Paths:             paths,
+		Ops:               ops,
+		Project:           project,
+		Provider:          provider,
+		State:             state,
+		Metrics:           run,
+		T:                 t,
+		MetricsPath:       mPath,
+		startedAt:         clock.Profiling(),
+		pinnedClock:       time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC),
+		tailer:            newLogTailer(paths.LogsDir),
+		createdThreadIDs:  map[string]struct{}{},
+		archivedThreadIDs: map[string]struct{}{},
 	}
 
 	// Pin the clock so timestamps are deterministic — invariant checks
@@ -502,10 +546,6 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) {
 	}
 
 	preSpine, _ := store.ReadSpine(h.Paths.Spine)
-	preFires, err := matchFireCounts(h.Paths)
-	if err != nil {
-		t.Fatalf("scenario step %d (%s): matchFireCounts (pre): %v", idx+1, label, err)
-	}
 
 	// Simulated clean shutdown→relaunch. BEFORE running this step's turn,
 	// discard the in-memory turn.State and rebuild it from the substrate
@@ -537,11 +577,19 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) {
 	}
 
 	postSpine, _ := store.ReadSpine(h.Paths.Spine)
-	postFires, err := matchFireCounts(h.Paths)
+
+	// One incremental poll captures exactly this turn's appended log
+	// lines: the turn just completed and the next turn has not started.
+	// From those lines extract this step's match-fire set and fold any
+	// thread.created / archive.simulated-delete IDs into the cumulative
+	// sets. Invariant checks between turns do not write to logs/, so
+	// they cannot pollute the next step's window.
+	stepLines, err := h.tailer.poll()
 	if err != nil {
-		t.Fatalf("scenario step %d (%s): matchFireCounts (post): %v", idx+1, label, err)
+		t.Fatalf("scenario step %d (%s): tailer.poll: %v", idx+1, label, err)
 	}
-	recordRecallFidelity(t, h, idx, label, step.RecallMode, step.ExpectedRecallMatches, diffMatchFireSet(preFires, postFires))
+	h.foldEventLines(stepLines)
+	recordRecallFidelity(t, h, idx, label, step.RecallMode, step.ExpectedRecallMatches, matchFireSet(stepLines))
 
 	// Per-step metrics.
 	h.Metrics.Counter("turns", 1)
