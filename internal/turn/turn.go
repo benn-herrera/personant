@@ -435,6 +435,20 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 		_ = state.Ops.Log(ctx, "archive", "error", sanitizeDetail(err.Error()))
 	}
 
+	// Step 5d: persist the updated Layer B/C working-set membership so a
+	// clean shutdown→relaunch resumes the working set instead of
+	// cold-starting it empty. This MUST run after steps 5b/5c: closure
+	// retirement and archival both evict threads from ActiveThreads /
+	// DormantThreads, so saving any earlier would persist a stale set
+	// (a thread the same turn went on to evict). It also runs on
+	// no-engagement turns — closeTurnAndUpdateEngagement returns early
+	// then, but closure/archival can still have evicted something. A save
+	// failure is non-fatal: log and continue, consistent with the other
+	// close-time substrate calls (AgeFileChains, recall).
+	if err := state.Ops.SaveWorkingSet(ctx, state.ActiveThreads, state.DormantThreads); err != nil {
+		_ = state.Ops.Log(ctx, "session", "working-set-save-error", sanitizeDetail(err.Error()))
+	}
+
 	// Step 6: derive the topic-tag-stripped body for the return value.
 	// (out has already received the same content in chunks.)
 	body := full.Content
@@ -724,14 +738,6 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 	}
 
 	updateLayerLRU(state, engaged)
-
-	// Persist the updated Layer B/C membership so a clean
-	// shutdown→relaunch resumes the working set instead of cold-starting
-	// it empty. A save failure is non-fatal: log and continue, consistent
-	// with the other close-time substrate calls (AgeFileChains, recall).
-	if err := state.Ops.SaveWorkingSet(ctx, state.ActiveThreads, state.DormantThreads); err != nil {
-		_ = state.Ops.Log(ctx, "session", "working-set-save-error", sanitizeDetail(err.Error()))
-	}
 
 	engagedSet := make(map[string]struct{}, len(engaged))
 	for _, id := range engaged {
