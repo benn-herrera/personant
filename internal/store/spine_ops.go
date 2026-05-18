@@ -54,6 +54,30 @@ func UpdateSpineRecord(paths PersonantPaths, rec memops.SpineRecord) error {
 	return nil
 }
 
+// RemoveSpineRecord deletes the record whose id matches the given id,
+// rewriting spine.jsonl with the remaining records (order preserved).
+// Returns memops.ErrThreadNotFound if no such record exists. Atomic.
+func RemoveSpineRecord(paths PersonantPaths, id string) error {
+	records, err := ReadSpine(paths.Spine)
+	if err != nil {
+		return fmt.Errorf("remove spine record: %w", err)
+	}
+	out := make([]memops.SpineRecord, 0, len(records))
+	for i := range records {
+		if records[i].ID == id {
+			continue
+		}
+		out = append(out, records[i])
+	}
+	if len(out) == len(records) {
+		return fmt.Errorf("remove spine record %s: %w", id, memops.ErrThreadNotFound)
+	}
+	if err := WriteSpine(paths.Spine, out); err != nil {
+		return fmt.Errorf("remove spine record: %w", err)
+	}
+	return nil
+}
+
 // FindSpineRecord returns the spine record with the given id. The second
 // return is false if no such record exists. Errors only on read failures.
 func FindSpineRecord(paths PersonantPaths, id string) (memops.SpineRecord, bool, error) {

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -334,6 +335,102 @@ func TestInit_Idempotent(t *testing.T) {
 	// Substrate should be usable after a second init.
 	if _, err := store.ReadSpine(paths.Spine); err != nil {
 		t.Fatalf("spine read after re-init: %v", err)
+	}
+}
+
+// readEventLog returns the concatenated contents of every *.log file
+// under the adapter's LogsDir.
+func readEventLog(t *testing.T, a *FileAdapter) string {
+	t.Helper()
+	entries, err := os.ReadDir(a.paths.LogsDir)
+	if err != nil {
+		t.Fatalf("read logs dir: %v", err)
+	}
+	var b strings.Builder
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(a.paths.LogsDir, e.Name()))
+		if err != nil {
+			t.Fatalf("read log %s: %v", e.Name(), err)
+		}
+		b.Write(data)
+	}
+	return b.String()
+}
+
+// TestArchiveThread_DeletesSpineAndFileAndLogs — archival removes the
+// spine record and thread file and logs archive.simulated-delete with the
+// exact body byte count.
+func TestArchiveThread_DeletesSpineAndFileAndLogs(t *testing.T) {
+	a := newAdapter(t)
+	ctx := context.Background()
+
+	rec := validSpine("thr_1", "prj_1")
+	body := "the thread body\n"
+	w := memops.ThreadWrite{
+		Spine:       rec,
+		Frontmatter: validFrontmatter(rec),
+		Body:        body,
+	}
+	if err := a.CreateThread(ctx, w); err != nil {
+		t.Fatalf("seed CreateThread: %v", err)
+	}
+
+	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
+		t.Fatalf("ArchiveThread: %v", err)
+	}
+
+	if _, found, err := store.FindSpineRecord(a.paths, "thr_1"); err != nil {
+		t.Fatalf("FindSpineRecord: %v", err)
+	} else if found {
+		t.Error("spine record still present after archival")
+	}
+	if _, err := os.Stat(store.ThreadPath(a.paths, "thr_1")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("thread file still present after archival: err=%v", err)
+	}
+
+	log := readEventLog(t, a)
+	wantLine := "archive.simulated-delete thr=thr_1 bytes=" + strconv.Itoa(len(body))
+	if !strings.Contains(log, wantLine) {
+		t.Errorf("event log missing %q\n%s", wantLine, log)
+	}
+	if !strings.Contains(log, "archive.warning") {
+		t.Errorf("event log missing archive.warning stub line\n%s", log)
+	}
+}
+
+// TestArchiveThread_MissingFileSizeZero — a spine record whose thread
+// file is absent archives cleanly and logs bytes=0.
+func TestArchiveThread_MissingFileSizeZero(t *testing.T) {
+	a := newAdapter(t)
+	ctx := context.Background()
+
+	rec := validSpine("thr_1", "prj_1")
+	w := memops.ThreadWrite{Spine: rec, Frontmatter: validFrontmatter(rec), Body: "x\n"}
+	if err := a.CreateThread(ctx, w); err != nil {
+		t.Fatalf("seed CreateThread: %v", err)
+	}
+	if err := os.Remove(store.ThreadPath(a.paths, "thr_1")); err != nil {
+		t.Fatalf("remove thread file: %v", err)
+	}
+
+	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
+		t.Fatalf("ArchiveThread with missing file: %v", err)
+	}
+	if !strings.Contains(readEventLog(t, a), "archive.simulated-delete thr=thr_1 bytes=0") {
+		t.Errorf("expected bytes=0 for missing thread file\n%s", readEventLog(t, a))
+	}
+}
+
+// TestArchiveThread_UnknownIDReturnsNotFound — archiving a thread with no
+// spine record returns ErrThreadNotFound.
+func TestArchiveThread_UnknownIDReturnsNotFound(t *testing.T) {
+	a := newAdapter(t)
+	err := a.ArchiveThread(context.Background(), "thr_999")
+	if !errors.Is(err, memops.ErrThreadNotFound) {
+		t.Fatalf("ArchiveThread unknown id: got %v, want ErrThreadNotFound", err)
 	}
 }
 

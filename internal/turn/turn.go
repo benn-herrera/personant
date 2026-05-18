@@ -383,6 +383,14 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 		_ = state.Ops.Log(ctx, "retire", "error", sanitizeDetail(err.Error()))
 	}
 
+	// Step 5c: §3.8 cardinality-pressure archival scan. Like closure, it
+	// runs on EVERY turn (a spine grows past the watermark regardless of
+	// this turn's activity) and is opportunistic — a failure is logged and
+	// swallowed, never aborting the turn.
+	if err := surfaceArchivalCandidates(ctx, state); err != nil {
+		_ = state.Ops.Log(ctx, "archive", "error", sanitizeDetail(err.Error()))
+	}
+
 	// Step 6: derive the topic-tag-stripped body for the return value.
 	// (out has already received the same content in chunks.)
 	body := full.Content

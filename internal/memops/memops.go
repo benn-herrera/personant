@@ -157,6 +157,13 @@ type MemoryOps interface {
 	// spine record exists for threadID.
 	RecordRecallFire(ctx context.Context, threadID string) error
 
+	// ArchiveThread removes a retired thread from the active spine. v0.1
+	// implements this as a deletion STUB — the thread's spine record and
+	// file are deleted outright. Real §3.8 git-based archival with a
+	// recovery path is v0.2; this port method is the stable seam across
+	// both. Returns ErrThreadNotFound if no spine record exists.
+	ArchiveThread(ctx context.Context, threadID string) error
+
 	// ---------- Project operations ----------
 
 	// CreateProject persists a new ProjectMeta. The caller is

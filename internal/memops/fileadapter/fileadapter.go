@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	"personant/internal/eventlog"
 	"personant/internal/index"
@@ -218,6 +219,59 @@ func (a *FileAdapter) RecordRecallFire(ctx context.Context, threadID string) err
 	thr.Frontmatter.RecallFires = newCount
 	if err := store.SaveThread(a.paths, thr); err != nil {
 		return fmt.Errorf("fileadapter: save thread file: %w", err)
+	}
+	return nil
+}
+
+// ArchiveThread removes a retired thread from the active spine. v0.1 is a
+// deletion STUB: the thread file and its spine record are deleted outright.
+// Real §3.8 git-based archival with a recovery path is v0.2; this method
+// is the stable seam across both implementations.
+//
+// Before deleting, the thread body's byte size is measured and logged on
+// the archive.simulated-delete event line. That byte count, paired with
+// the event log's clock.Timeline() stamp, is the deliberate demand-sizing
+// data for designing v0.2 archival — it must stay exact.
+//
+// The derived index (symbols.jsonl) is intentionally NOT regenerated here.
+// The cardinality-pressure trigger batches archival and regenerates once
+// after the batch, so a per-call rebuild would be wasted work.
+func (a *FileAdapter) ArchiveThread(ctx context.Context, threadID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if _, found, err := store.FindSpineRecord(a.paths, threadID); err != nil {
+		return fmt.Errorf("fileadapter: archive thread %s: %w", threadID, err)
+	} else if !found {
+		return fmt.Errorf("fileadapter: archive thread %s: %w", threadID, memops.ErrThreadNotFound)
+	}
+
+	// Measure the body byte size before deletion. A missing thread file is
+	// size 0, not an error — the spine record alone is enough to archive.
+	bodySize := 0
+	if thr, err := store.LoadThread(a.paths, threadID); err == nil {
+		bodySize = len(thr.Body)
+	} else if !errors.Is(err, memops.ErrThreadFileNotFound) {
+		return fmt.Errorf("fileadapter: archive thread %s: load: %w", threadID, err)
+	}
+
+	// Delete the thread file (a missing file is fine — already gone).
+	if err := os.Remove(store.ThreadPath(a.paths, threadID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("fileadapter: archive thread %s: remove file: %w", threadID, err)
+	}
+	if err := store.RemoveSpineRecord(a.paths, threadID); err != nil {
+		return fmt.Errorf("fileadapter: archive thread %s: remove spine: %w", threadID, err)
+	}
+
+	if err := eventlog.Log(a.paths, "archive", "simulated-delete",
+		fmt.Sprintf("thr=%s bytes=%d", threadID, bodySize)); err != nil {
+		return fmt.Errorf("fileadapter: archive thread %s: log: %w", threadID, err)
+	}
+	// One loud warning per archival: v0.1 deletes outright — there is no
+	// recovery path. Real recovery-capable archival lands in v0.2.
+	if err := eventlog.Log(a.paths, "archive", "warning",
+		"thr="+threadID+" v0.1 deletion stub — thread deleted with NO recovery path; recovery-capable archival is v0.2"); err != nil {
+		return fmt.Errorf("fileadapter: archive thread %s: log warning: %w", threadID, err)
 	}
 	return nil
 }
