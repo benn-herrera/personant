@@ -2,9 +2,72 @@ package scenarios
 
 import (
 	"math"
+	"os"
+	"path/filepath"
 	"reflect"
+	"sort"
 	"testing"
 )
+
+// writeLogFile drops a day-log file with the given body under
+// paths.LogsDir so the log-walk helpers can be exercised without
+// driving the eventlog.
+func writeLogFile(t *testing.T, h *Harness, body string) {
+	t.Helper()
+	if err := os.MkdirAll(h.Paths.LogsDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+	p := filepath.Join(h.Paths.LogsDir, "2026-05-18.log")
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+}
+
+func sortedKeys(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func TestLogEventThreadSet(t *testing.T) {
+	h := invariantHarness(t)
+	writeLogFile(t, h, "ts thread.created thr_1 anchors=4 project=prj_1\n"+
+		"ts thread.created thr_2 anchors=4 project=prj_1\n"+
+		"ts archive.simulated-delete thr=thr_2 project=prj_1 bytes=512\n"+
+		"ts spine.match-fire thr_1 score=0.5\n"+
+		"\n")
+
+	created, err := createdThreads(h.Paths)
+	if err != nil {
+		t.Fatalf("createdThreads: %v", err)
+	}
+	if got, want := sortedKeys(created), []string{"thr_1", "thr_2"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("createdThreads: got %v want %v", got, want)
+	}
+
+	archived, err := archiveDeletedThreads(h.Paths)
+	if err != nil {
+		t.Fatalf("archiveDeletedThreads: %v", err)
+	}
+	if got, want := sortedKeys(archived), []string{"thr_2"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("archiveDeletedThreads: got %v want %v", got, want)
+	}
+}
+
+func TestLogEventThreadSet_MissingLogsDir(t *testing.T) {
+	h := invariantHarness(t)
+	// invariantHarness does not write any log file; LogsDir may not exist.
+	got, err := archiveDeletedThreads(h.Paths)
+	if err != nil {
+		t.Fatalf("expected nil error for missing logs dir, got %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected empty set, got %v", got)
+	}
+}
 
 func TestRecallFidelity_EdgeCases(t *testing.T) {
 	cases := []struct {

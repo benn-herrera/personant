@@ -280,6 +280,40 @@ func TestVerifyDedupConsistency_Skipped(t *testing.T) {
 	}
 }
 
+func TestVerifyThreadAccounting_Pass(t *testing.T) {
+	// thr_1 on the spine, thr_2 created then archived → disjoint union holds.
+	h := invariantHarness(t)
+	seedThread(t, h, validRecord())
+	writeLogFile(t, h, "ts thread.created thr_1 anchors=4 project=prj_1\n"+
+		"ts thread.created thr_2 anchors=4 project=prj_1\n"+
+		"ts archive.simulated-delete thr=thr_2 project=prj_1 bytes=512\n")
+	if err := VerifyThreadAccounting(h); err != nil {
+		t.Fatalf("expected pass, got %v", err)
+	}
+}
+
+func TestVerifyThreadAccounting_FailsOnUnexplainedLoss(t *testing.T) {
+	// thr_2 was created but is neither on the spine nor archived.
+	h := invariantHarness(t)
+	seedThread(t, h, validRecord())
+	writeLogFile(t, h, "ts thread.created thr_1 anchors=4 project=prj_1\n"+
+		"ts thread.created thr_2 anchors=4 project=prj_1\n")
+	if err := VerifyThreadAccounting(h); err == nil {
+		t.Fatalf("expected fail on unexplained loss; passed")
+	}
+}
+
+func TestVerifyThreadAccounting_FailsOnSpineAndArchived(t *testing.T) {
+	// thr_1 is on the spine yet also recorded as archived.
+	h := invariantHarness(t)
+	seedThread(t, h, validRecord())
+	writeLogFile(t, h, "ts thread.created thr_1 anchors=4 project=prj_1\n"+
+		"ts archive.simulated-delete thr=thr_1 project=prj_1 bytes=512\n")
+	if err := VerifyThreadAccounting(h); err == nil {
+		t.Fatalf("expected fail on simultaneous spine+archived; passed")
+	}
+}
+
 // TestDefaultInvariantsPassOnFreshHome confirms the entire default
 // suite is satisfied by an empty-but-initialized home — the starting
 // state for every scenario.

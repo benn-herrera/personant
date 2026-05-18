@@ -52,6 +52,84 @@ func matchFireCounts(paths store.PersonantPaths) (map[string]int, error) {
 	return out, nil
 }
 
+// logEventThreadSet walks every <YYYY-MM-DD>.log under paths.LogsDir
+// and returns the set of thread IDs that appear in lines containing the
+// given `<category>.<action> ` marker. The thread ID is taken from the
+// first whitespace token after the marker; if idPrefix is non-empty it
+// is stripped from that token (e.g. "thr=" → ""). This is the shared
+// log-walk used by both the recall-fidelity archival-forgiveness filter
+// and the VerifyThreadAccounting invariant.
+//
+// A missing LogsDir returns an empty set and nil error, matching
+// matchFireCounts: the eventlog only materializes a day file when
+// something is written.
+func logEventThreadSet(paths store.PersonantPaths, marker, idPrefix string) (map[string]struct{}, error) {
+	out := map[string]struct{}{}
+	entries, err := os.ReadDir(paths.LogsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return out, nil
+		}
+		return nil, fmt.Errorf("logEventThreadSet: read logs dir: %w", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(paths.LogsDir, e.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("logEventThreadSet: read %s: %w", e.Name(), err)
+		}
+		for line := range strings.SplitSeq(string(body), "\n") {
+			_, rest, ok := strings.Cut(line, marker)
+			if !ok {
+				continue
+			}
+			tok, _, _ := strings.Cut(rest, " ")
+			if idPrefix != "" {
+				stripped, found := strings.CutPrefix(tok, idPrefix)
+				if !found {
+					continue
+				}
+				tok = stripped
+			}
+			if tok == "" {
+				continue
+			}
+			out[tok] = struct{}{}
+		}
+	}
+	return out, nil
+}
+
+// archiveDeletedThreads returns the set of thread IDs that appear in
+// `archive.simulated-delete thr=<id> ...` log lines — threads removed
+// by the v0.1 deletion-stub archival path and therefore genuinely
+// unrecallable.
+func archiveDeletedThreads(paths store.PersonantPaths) (map[string]struct{}, error) {
+	return logEventThreadSet(paths, "archive.simulated-delete ", "thr=")
+}
+
+// createdThreads returns the set of thread IDs that appear in
+// `thread.created <id> ...` log lines.
+func createdThreads(paths store.PersonantPaths) (map[string]struct{}, error) {
+	return logEventThreadSet(paths, "thread.created ", "")
+}
+
+// liveSpineThreadSet returns the set of thread IDs currently present on
+// the spine.
+func liveSpineThreadSet(paths store.PersonantPaths) (map[string]struct{}, error) {
+	recs, err := store.ReadSpine(paths.Spine)
+	if err != nil {
+		return nil, fmt.Errorf("liveSpineThreadSet: read spine: %w", err)
+	}
+	out := make(map[string]struct{}, len(recs))
+	for _, r := range recs {
+		out[r.ID] = struct{}{}
+	}
+	return out, nil
+}
+
 // diffMatchFireSet returns the sorted set of thread IDs whose
 // match-fire count increased between pre and post. The set semantics
 // (one entry per thread regardless of multiple fires within the same
@@ -139,6 +217,40 @@ func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode 
 		h.Metrics.Counter("recall_fidelity_unmeasured_steps", 1)
 		return
 	}
+
+	// Archival-forgiveness filter: a step's expected set may name a
+	// thread that has since been archived (the v0.1 deletion stub),
+	// which makes it genuinely unrecallable. Counting such a thread as a
+	// recall miss understates the §3.4 algorithm's true performance, so
+	// drop it from the expected set before scoring. An expected thread
+	// that is off the spine but NOT in the archive-delete log is an
+	// unexplained absence — kept as a real miss.
+	live, err := liveSpineThreadSet(h.Paths)
+	if err != nil {
+		t.Fatalf("scenario step %d (%s): recall-fidelity: live spine: %v", idx+1, label, err)
+	}
+	archived, err := archiveDeletedThreads(h.Paths)
+	if err != nil {
+		t.Fatalf("scenario step %d (%s): recall-fidelity: archive-delete log: %v", idx+1, label, err)
+	}
+	var forgiven int64
+	kept := make([]string, 0, len(expected))
+	for _, id := range expected {
+		if _, onSpine := live[id]; onSpine {
+			kept = append(kept, id)
+			continue
+		}
+		if _, wasArchived := archived[id]; wasArchived {
+			forgiven++
+			continue
+		}
+		kept = append(kept, id)
+	}
+	if forgiven > 0 {
+		h.Metrics.Counter("recall_fidelity_archival_forgiven", forgiven)
+	}
+	expected = kept
+
 	precision, recall, f1 := recallFidelity(expected, actual)
 
 	if mode == RecallMeasureOnly {

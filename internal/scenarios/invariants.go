@@ -3,6 +3,8 @@ package scenarios
 import (
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 
 	"personant/internal/memops"
 	"personant/internal/store"
@@ -31,6 +33,7 @@ var DefaultInvariants = []InvariantCheck{
 	VerifyProjectReferences,
 	VerifyLastActiveValid,
 	VerifyThreadFrontmatterMatchesSpine,
+	VerifyThreadAccounting,
 }
 
 // VerifySpineIntegrity wraps verify.Verify and surfaces any errors.
@@ -252,6 +255,66 @@ func VerifyClosedThreadConsistency(h *Harness) error {
 		}
 	}
 	return nil
+}
+
+// VerifyThreadAccounting asserts the substrate never drops or
+// double-counts a thread: every thread that was ever created must end
+// up in exactly one of {on the spine, archived}. It is the disjoint
+// union  created = on-spine ⊎ archived.
+//
+// The three sets are reconstructed from durable evidence:
+//   - created  — `thread.created` log lines.
+//   - archived — `archive.simulated-delete` log lines (the v0.1
+//     deletion-stub archival path).
+//   - onSpine  — thread IDs currently on the spine.
+//
+// For every created ID exactly one of {on-spine, archived} must hold:
+//   - Neither → unexplained loss: the substrate silently dropped a
+//     thread (a real bug).
+//   - Both → the thread is on the spine yet recorded as archived — ID
+//     reuse or archival corruption.
+//
+// All violations are collected, sorted, and reported in one error.
+func VerifyThreadAccounting(h *Harness) error {
+	created, err := createdThreads(h.Paths)
+	if err != nil {
+		return fmt.Errorf("VerifyThreadAccounting: %w", err)
+	}
+	archived, err := archiveDeletedThreads(h.Paths)
+	if err != nil {
+		return fmt.Errorf("VerifyThreadAccounting: %w", err)
+	}
+	onSpine, err := liveSpineThreadSet(h.Paths)
+	if err != nil {
+		return fmt.Errorf("VerifyThreadAccounting: %w", err)
+	}
+
+	var lost, both []string
+	for id := range created {
+		_, isSpine := onSpine[id]
+		_, isArchived := archived[id]
+		switch {
+		case !isSpine && !isArchived:
+			lost = append(lost, id)
+		case isSpine && isArchived:
+			both = append(both, id)
+		}
+	}
+	if len(lost) == 0 && len(both) == 0 {
+		return nil
+	}
+	sort.Strings(lost)
+	sort.Strings(both)
+	var parts []string
+	if len(lost) > 0 {
+		parts = append(parts, fmt.Sprintf("unexplained loss (created but neither on-spine nor archived): %s",
+			strings.Join(lost, ", ")))
+	}
+	if len(both) > 0 {
+		parts = append(parts, fmt.Sprintf("on-spine and archived simultaneously (ID reuse or archival corruption): %s",
+			strings.Join(both, ", ")))
+	}
+	return fmt.Errorf("VerifyThreadAccounting: %s", strings.Join(parts, "; "))
 }
 
 // VerifyArchiveResolvable is reserved for v0.2 deep-cold archival
