@@ -379,10 +379,9 @@ func runProjectSwitchScenario(t *testing.T, sc Scenario) {
 		respQueue = append(respQueue, s.MockResponse)
 	}
 	h.Mock = model.NewScriptedMock(respQueue, nil)
-	// A §5.5 mid-turn re-prompt issues a second consult within one
-	// turn; RepeatLast re-serves the step's response for it (see the
-	// matching note in RunScenario).
-	h.Mock.SetRepeatLast(true)
+	// The mock serves by step index (see RunScenario): runStep calls
+	// SetScriptedStep before each turn, so a §5.5 mid-turn re-prompt —
+	// a second consult within one turn — re-serves that step's response.
 	h.State.Client = h.Mock
 
 	if sc.Setup != nil {

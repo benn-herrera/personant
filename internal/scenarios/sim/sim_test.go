@@ -270,6 +270,68 @@ func TestGenerateWorkload_Deterministic(t *testing.T) {
 	}
 }
 
+// TestSim_DormantResumptionDrivesMidTurnFetch proves the coverage gap
+// the package doc used to flag as untested is now exercised: a
+// generated workload schedules `resume` actions onto recently-dormant
+// threads, each naming a thr_<n> that has fallen out of Layer B. That
+// triggers the §5.5 mid-turn fetch — the runtime aborts the in-flight
+// stream, fetches the thread, and re-prompts — a second model consult
+// within one turn. The step-indexed mock re-serves the step's response
+// for the re-prompt, so the run completes with no queue desync.
+//
+// The proof is the `topic.re-prompt` log line: it is emitted exactly
+// when the §5.5 fetch fires. A non-zero count over a generated workload
+// confirms resumption reached the runtime AND that RunScenario drove
+// the two-consult turn cleanly (RunScenario t.Fatalf's on any turn.Run
+// error, so reaching the assertion at all means no desync).
+func TestSim_DormantResumptionDrivesMidTurnFetch(t *testing.T) {
+	corpus := loadCorpusSlots(t)
+	sc := GenerateWorkload(WorkloadConfig{
+		Seed:     simSeed,
+		Duration: simDayDuration,
+		Corpus:   corpus,
+	})
+
+	h := scenarios.RunScenario(t, sc)
+
+	reprompts := logEventCount(t, h, "topic.re-prompt")
+	if reprompts == 0 {
+		t.Fatalf("no §5.5 mid-turn fetch observed: the generated workload "+
+			"scheduled no resumption that reached the runtime "+
+			"(turns=%d)", len(sc.Steps))
+	}
+	t.Logf("§5.5 mid-turn fetches driven by dormant-thread resumption: %d", reprompts)
+
+	// The fetch fires a thread.fetched context delta per resumed thread;
+	// it must be at least the re-prompt count (one re-prompt may fetch
+	// ≥1 thread).
+	if fetched := logEventCount(t, h, "source=thread.fetched"); fetched < reprompts {
+		t.Errorf("thread.fetched count %d < re-prompt count %d", fetched, reprompts)
+	}
+}
+
+// logEventCount counts occurrences of substr across every day-log file
+// under the harness's LogsDir.
+func logEventCount(t *testing.T, h *scenarios.Harness, substr string) int {
+	t.Helper()
+	entries, err := os.ReadDir(h.Paths.LogsDir)
+	if err != nil {
+		t.Fatalf("logEventCount: read %s: %v", h.Paths.LogsDir, err)
+	}
+	count := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(h.Paths.LogsDir, e.Name()))
+		if err != nil {
+			t.Fatalf("logEventCount: read %s: %v", e.Name(), err)
+		}
+		count += strings.Count(string(body), substr)
+	}
+	return count
+}
+
 // metricsBlob mirrors the stable §11.6 metrics-blob schema for the
 // fields the rung summary consumes.
 type metricsBlob struct {

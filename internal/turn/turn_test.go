@@ -732,15 +732,17 @@ func seedThreadAndSpine(t *testing.T, paths store.PersonantPaths, project, thrID
 
 // TestRunRePromptFiresForMissingThread — when the model's first-stream
 // topic tag references a thread not in Layer B but loadable from disk,
-// the runtime aborts the stream, fetches the thread, re-issues the
-// request, and the user sees only the second response.
+// the runtime aborts the stream, fetches the thread, and re-issues the
+// request. The scripted mock serves the same response per turn (the
+// §5.5 re-prompt re-issues the same request, so the model emits the
+// same tag + body), so the assertion is that the body appears exactly
+// once — the aborted first stream must not leak a duplicate.
 func TestRunRePromptFiresForMissingThread(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedThreadAndSpine(t, paths, meta.ID, "thr_42")
 
 	mock := model.NewScriptedMock([]model.Response{
-		{Content: "*topic: thr_42 [a, b, c, d]*\nFIRST."},
-		{Content: "*topic: thr_42 [a, b, c, d]*\nSECOND."},
+		{Content: "*topic: thr_42 [a, b, c, d]*\nBODY."},
 	}, nil)
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
@@ -751,19 +753,15 @@ func TestRunRePromptFiresForMissingThread(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := len(mock.Calls()); got != 2 {
-		t.Fatalf("mock call count: got %d want 2", got)
+		t.Fatalf("mock call count: got %d want 2 (first stream + re-prompt)", got)
 	}
-	if !strings.Contains(body, "SECOND") {
-		t.Errorf("body missing SECOND: %q", body)
+	// The re-prompt re-issues the request; the aborted first stream must
+	// not leak, so the body appears exactly once.
+	if n := strings.Count(body, "BODY."); n != 1 {
+		t.Errorf("body should contain BODY. exactly once (aborted stream leaked?): got %d in %q", n, body)
 	}
-	if strings.Contains(body, "FIRST") {
-		t.Errorf("body unexpectedly contains FIRST: %q", body)
-	}
-	if !strings.Contains(out.String(), "SECOND") {
-		t.Errorf("streamed out missing SECOND: %q", out.String())
-	}
-	if strings.Contains(out.String(), "FIRST") {
-		t.Errorf("streamed out leaked aborted FIRST: %q", out.String())
+	if n := strings.Count(out.String(), "BODY."); n != 1 {
+		t.Errorf("streamed out should contain BODY. exactly once: got %d in %q", n, out.String())
 	}
 	if len(state.ActiveThreads) == 0 || state.ActiveThreads[0] != "thr_42" {
 		t.Errorf("ActiveThreads: got %v want [thr_42, ...]", state.ActiveThreads)
@@ -813,10 +811,13 @@ func TestRunRePromptCappedAtOnePerTurn(t *testing.T) {
 	seedThreadAndSpine(t, paths, meta.ID, "thr_99")
 	seedThreadAndSpine(t, paths, meta.ID, "thr_88")
 
-	mock := model.NewScriptedMock([]model.Response{
+	// Per-consult mock: the cap test needs the re-prompt to see a
+	// DIFFERENT response than the aborted first stream — response 2's
+	// tag names yet another missing thread, and the cap must still hold.
+	mock := model.NewScriptedMockPerConsult([]model.Response{
 		{Content: "*topic: thr_99 [a, b, c, d]*\nFIRST."},
 		{Content: "*topic: thr_88 [a, b, c, d]*\nSECOND."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 

@@ -254,20 +254,19 @@ func RunScenario(t *testing.T, sc Scenario) *Harness {
 	t.Helper()
 	h := newHarness(t, sc)
 
-	// Pre-queue every step's mock response, one per step. A turn
-	// normally consumes exactly one, but a §5.5 mid-turn re-prompt
-	// (topic tag naming a thread not in Layer B — reachable once
-	// closure evicts threads from the active set) issues a second
-	// consult within the same turn. RepeatLast re-serves the step's
-	// response for that re-prompt: the re-prompt re-sends the same
-	// user input, and once the missing thread is fetched the topic
-	// tag drains cleanly. The flat queue is never index-shifted.
+	// Pre-queue every step's mock response, one per step. The mock
+	// serves by step index, not per consult: runStep calls
+	// SetScriptedStep before each turn, so every consult within that
+	// turn — including a §5.5 mid-turn re-prompt (a second, legitimate
+	// consult triggered when a topic tag names a thread not in Layer B)
+	// — returns that step's one response. The re-prompt re-issues the
+	// same request; once the missing thread is fetched the topic tag
+	// drains cleanly. No queue index-shifting, no fetch prediction.
 	queue := make([]model.Response, 0, len(sc.Steps))
 	for _, step := range sc.Steps {
 		queue = append(queue, step.MockResponse)
 	}
 	h.Mock = model.NewScriptedMock(queue, nil)
-	h.Mock.SetRepeatLast(true)
 	h.State.Client = h.Mock
 
 	if sc.Setup != nil {
@@ -479,6 +478,10 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) {
 	if err != nil {
 		t.Fatalf("scenario step %d (%s): matchFireCounts (pre): %v", idx+1, label, err)
 	}
+
+	// Select this step's mock response. Every consult during the turn —
+	// including a §5.5 mid-turn re-prompt — serves queue[idx].
+	h.Mock.SetScriptedStep(idx)
 
 	h.State.RecallResolver = recallResolverFor(t, idx, label, step.RecallAck)
 	h.State.ClosureResolver = closureResolverFor(step.ClosureAck)

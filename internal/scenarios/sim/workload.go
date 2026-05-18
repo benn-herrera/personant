@@ -25,17 +25,27 @@
 // the rung walk climbs — Duration is the only knob that must change to
 // lengthen a run.
 //
-// Coverage gap — cold-thread re-engagement is out of scope. The
-// generator deliberately constrains `switch` actions to threads still
-// resident in Layer B (see layerBCap). RunScenario pre-queues exactly
-// one mock response per step, and a §5.5 mid-turn fetch — re-engaging a
-// thread that has fallen out of the working set — would need a second
-// response within the same turn. As a consequence cold-thread
-// re-engagement / mid-turn thread fetch is never exercised by this
-// generator. Closing that gap (the generator scheduling cold
-// re-engagements, and the harness supporting steps that queue two
-// responses) is required before the six-month run can be claimed as
-// full acceptance coverage.
+// Dormant-thread resumption is exercised. Alongside `continue`
+// (re-engage the active thread), `switch` (re-engage a warm,
+// non-active Layer-B thread) and `new` (spawn a fresh thread), the
+// generator schedules a `resume` action: it re-engages a thread that
+// has fallen out of Layer B — a dormant thread still on the spine.
+// Naming a dormant thr_N in the topic tag triggers the §5.5 mid-turn
+// fetch (the runtime aborts the in-flight stream, fetches the thread,
+// re-prompts), the realistic "pick up earlier work" pattern.
+//
+// Resume only targets a *recently* dormant thread (resumeWindowTurns):
+// archival deletes the coldest retired threads and the generator
+// cannot perfectly predict runtime archival, but a recently-dormant
+// thread is very unlikely to have been archived yet. An occasional
+// resume that hits an already-archived thread is harmless — the §5.5
+// fetch logs thread.fetch-miss and the turn proceeds.
+//
+// The mock serves responses by scenario step, not per consult (see
+// model.MockClient): the harness selects the step's one response, and
+// every consult during the step — including the §5.5 re-prompt —
+// re-serves it. So a turn that triggers a mid-turn fetch needs no
+// fetch prediction from the generator and no second queued response.
 package sim
 
 import (
@@ -116,11 +126,23 @@ type WorkloadConfig struct {
 	RapidWeight int
 	WorkWeight  int
 
-	// ContinueWeight / SwitchWeight / NewWeight bias the per-turn
-	// action selection. They need not sum to anything in particular.
+	// ContinueWeight / SwitchWeight / ResumeWeight / NewWeight bias the
+	// per-turn action selection. They need not sum to anything in
+	// particular. ResumeWeight drives dormant-thread resumption — a
+	// realistic user resumes earlier work far more often than starting
+	// fresh, so the seed weights make NewWeight a minority. These are
+	// seed values, to be tuned on the rung walk.
 	ContinueWeight int
 	SwitchWeight   int
+	ResumeWeight   int
 	NewWeight      int
+
+	// ResumeWindowTurns bounds how far back a `resume` action may reach:
+	// only a thread that went dormant within the last ResumeWindowTurns
+	// turns is a resume candidate. A recently-dormant thread is very
+	// unlikely to have been archived (archival hits the coldest), so the
+	// window keeps resume-onto-archived rare. 0 → default.
+	ResumeWindowTurns int
 
 	// FamilySize is the number of threads bound to the same corpus
 	// slot — a small bounded "family" sharing one topic. A family of 2
@@ -161,13 +183,19 @@ func (cfg WorkloadConfig) withDefaults() WorkloadConfig {
 		cfg.WorkWeight = 1
 	}
 	if cfg.ContinueWeight == 0 {
-		cfg.ContinueWeight = 55
+		cfg.ContinueWeight = 50
 	}
 	if cfg.SwitchWeight == 0 {
-		cfg.SwitchWeight = 25
+		cfg.SwitchWeight = 20
+	}
+	if cfg.ResumeWeight == 0 {
+		cfg.ResumeWeight = 25
 	}
 	if cfg.NewWeight == 0 {
-		cfg.NewWeight = 20
+		cfg.NewWeight = 5
+	}
+	if cfg.ResumeWindowTurns == 0 {
+		cfg.ResumeWindowTurns = 40
 	}
 	if cfg.FamilySize == 0 {
 		cfg.FamilySize = 2
@@ -214,11 +242,13 @@ func (m corpusModel) slotFor(order int) int {
 // know the runtime's thr_N ids at construction time; threadID() maps
 // creation order to the id the runtime is guaranteed to assign.
 //
-// Per-thread engagement timing and lifecycle intent are deliberately
-// not modelled here — the runtime owns thread decay/closure, and the
-// generator drives that purely by emitting idle turns and advancing
-// the clock. Layer-B membership (generator.layerB) is the only thread
-// state the generator must track to stay faithful to the runtime.
+// Per-thread lifecycle intent (decay/closure) is deliberately not
+// modelled here — the runtime owns that, and the generator drives it
+// purely by emitting idle turns and advancing the clock. The generator
+// tracks two pieces of thread state: Layer-B membership
+// (generator.layerB) and the last-engaged turn index
+// (generator.lastEngagedTurn), the latter so a `resume` action can
+// pick a recently-dormant thread.
 type thread struct {
 	order   int // 0-based creation order
 	slotIdx int // index into the corpus slot pool
@@ -233,9 +263,10 @@ type thread struct {
 // may DELETE retired spine records, leaving gaps in the live id set —
 // that is fine: creation order N still maps to thr_{N+1}, the
 // generator just may name a thr_N whose record has since been
-// archived. The generator only ever names threads still in Layer B
-// (warm, recently engaged, never archived), so a named id is always
-// live.
+// archived. A `resume` action names a recently-dormant thread; the
+// resume window keeps it very unlikely to have been archived (archival
+// hits the coldest threads). If a resume does name an archived id, the
+// §5.5 fetch logs thread.fetch-miss and the turn proceeds — harmless.
 func (t thread) threadID() string {
 	return fmt.Sprintf("thr_%d", t.order+1)
 }
@@ -253,8 +284,15 @@ const (
 type action int
 
 const (
+	// actContinue re-engages the active thread (Layer B head).
 	actContinue action = iota
+	// actSwitch re-engages a warm, non-active Layer-B thread.
 	actSwitch
+	// actResume re-engages a recently-dormant thread — one that has
+	// fallen out of Layer B but is still on the spine. Naming it in the
+	// topic tag triggers the §5.5 mid-turn fetch.
+	actResume
+	// actNew spawns a brand-new thread.
 	actNew
 )
 
@@ -355,16 +393,16 @@ func (g *generator) runDayOff() {
 // layerBCap mirrors workset.DefaultBTopK (spec §2.6.1 layer.b-top-k):
 // the runtime keeps the 3 most-recently-engaged threads in Layer B,
 // fully present in the working set. A topic tag naming a thr_N NOT in
-// Layer B triggers the §5.5 mid-turn fetch + re-prompt, which consumes
-// a second mock response — and RunScenario pre-queues exactly one
-// response per step. So the generator must only ever name a thread
-// that is still in Layer B; it models Layer B here to honour that.
+// Layer B triggers the §5.5 mid-turn fetch + re-prompt. The generator
+// models Layer B so it can distinguish a `switch` (warm, in-Layer-B,
+// no fetch) from a `resume` (dormant, out of Layer B, triggers the
+// fetch) — and so the recall oracle can exclude resident threads.
 const layerBCap = 3
 
 // generator carries the mutable state threaded through workload
 // construction: the rng, the corpus binding model, the live thread
-// model (including a faithful Layer-B LRU), the accumulating step list,
-// and the simulated clock.
+// model (Layer-B LRU + per-thread last-engaged turn), the accumulating
+// step list, and the simulated clock.
 type generator struct {
 	cfg   WorkloadConfig
 	rng   *rand.Rand
@@ -375,9 +413,14 @@ type generator struct {
 	// layerB is the generator's model of the runtime's Layer B: thread
 	// indices, most-recently-engaged first, capped at layerBCap. The
 	// active thread is layerB[0]. A `continue` re-engages layerB[0]; a
-	// `switch` targets one of layerB[1:] (warm but not active) so the
-	// resulting topic tag never triggers a mid-turn fetch.
+	// `switch` targets one of layerB[1:] (warm but not active).
 	layerB []int
+
+	// lastEngagedTurn[idx] is the 0-based step index at which thread idx
+	// was last engaged. A thread is "recently dormant" — a resume
+	// candidate — when it is no longer in Layer B but was engaged within
+	// the last ResumeWindowTurns turns.
+	lastEngagedTurn []int
 
 	steps      []scenarios.Step
 	simNow     time.Duration
@@ -387,8 +430,8 @@ type generator struct {
 // engage records thread index idx as the most-recently-engaged thread,
 // updating the Layer-B LRU exactly as the runtime's updateLayerLRU
 // does: move-to-front if present, else prepend; evict the tail past
-// layerBCap.
-func (g *generator) engage(idx int) {
+// layerBCap. turn is the 0-based step index of the engaging turn.
+func (g *generator) engage(idx, turn int) {
 	for i, id := range g.layerB {
 		if id == idx {
 			g.layerB = append(g.layerB[:i], g.layerB[i+1:]...)
@@ -399,6 +442,27 @@ func (g *generator) engage(idx int) {
 	if len(g.layerB) > layerBCap {
 		g.layerB = g.layerB[:layerBCap]
 	}
+	for idx >= len(g.lastEngagedTurn) {
+		g.lastEngagedTurn = append(g.lastEngagedTurn, 0)
+	}
+	g.lastEngagedTurn[idx] = turn
+}
+
+// resumeCandidates returns the thread indices eligible for a `resume`
+// at the given 0-based turn: threads not currently in Layer B that were
+// last engaged within ResumeWindowTurns turns. The result is in
+// ascending creation order for determinism.
+func (g *generator) resumeCandidates(turn int) []int {
+	var out []int
+	for idx := range g.threads {
+		if g.inLayerB(idx) {
+			continue
+		}
+		if turn-g.lastEngagedTurn[idx] <= g.cfg.ResumeWindowTurns {
+			out = append(out, idx)
+		}
+	}
+	return out
 }
 
 // inLayerB reports whether thread index idx is currently in Layer B.
@@ -426,7 +490,7 @@ func (g *generator) runSession(active time.Duration) {
 	var spent time.Duration
 	for spent < active {
 		tt := g.sampleTurnType()
-		act := g.sampleAction()
+		act := g.sampleAction(len(g.steps))
 
 		// The TimeDelta for this step is whatever gap accumulated
 		// before it: the inter-session/overnight/day-off gap (pendingGap)
@@ -457,31 +521,49 @@ func (g *generator) sampleTurnType() turnType {
 	return turnWork
 }
 
-// sampleAction picks continue/switch/new weighted. switch is only
-// offered when Layer B holds a warm non-active thread to switch to
-// (len(layerB) >= 2); with no active thread at all the choice is
-// forced to new.
-func (g *generator) sampleAction() action {
-	if len(g.layerB) == 0 {
-		return actNew // no thread to continue or switch to
+// sampleAction picks continue/switch/resume/new weighted by the config
+// weights, with the candidate-dependent actions masked out when they
+// have no valid target:
+//
+//   - continue needs an active thread (Layer B non-empty);
+//   - switch needs a warm non-active thread (len(layerB) >= 2);
+//   - resume needs at least one recently-dormant thread.
+//
+// A masked action contributes zero weight; the choice is drawn from
+// whatever remains. With no thread at all, the choice is forced to new.
+// `turn` is the 0-based index of the turn being sampled.
+func (g *generator) sampleAction(turn int) action {
+	type opt struct {
+		act    action
+		weight int
 	}
-	if len(g.layerB) < 2 {
-		// Only the active thread is warm: switch has no in-Layer-B
-		// target. Re-roll continue vs new from their relative weights.
-		if g.rng.Intn(g.cfg.ContinueWeight+g.cfg.NewWeight) < g.cfg.ContinueWeight {
-			return actContinue
+	var opts []opt
+	if len(g.layerB) >= 1 {
+		opts = append(opts, opt{actContinue, g.cfg.ContinueWeight})
+	}
+	if len(g.layerB) >= 2 {
+		opts = append(opts, opt{actSwitch, g.cfg.SwitchWeight})
+	}
+	if len(g.resumeCandidates(turn)) > 0 {
+		opts = append(opts, opt{actResume, g.cfg.ResumeWeight})
+	}
+	opts = append(opts, opt{actNew, g.cfg.NewWeight})
+
+	total := 0
+	for _, o := range opts {
+		total += o.weight
+	}
+	if total == 0 {
+		return actNew
+	}
+	r := g.rng.Intn(total)
+	for _, o := range opts {
+		if r < o.weight {
+			return o.act
 		}
-		return actNew
+		r -= o.weight
 	}
-	r := g.rng.Intn(g.cfg.ContinueWeight + g.cfg.SwitchWeight + g.cfg.NewWeight)
-	switch {
-	case r < g.cfg.ContinueWeight:
-		return actContinue
-	case r < g.cfg.ContinueWeight+g.cfg.SwitchWeight:
-		return actSwitch
-	default:
-		return actNew
-	}
+	return actNew
 }
 
 // sampleGap returns a jittered inter-turn gap for the turn type.
@@ -528,11 +610,22 @@ func (g *generator) buildStep(tt turnType, act action) scenarios.Step {
 
 	case actSwitch:
 		// Switch targets a warm-but-not-active thread: one of
-		// layerB[1:]. Staying inside Layer B guarantees the topic tag
-		// names a thread the runtime already has, so no §5.5 mid-turn
-		// fetch (and no second mock response) is triggered.
+		// layerB[1:]. Staying inside Layer B means the topic tag names a
+		// thread the runtime already has resident, so no §5.5 mid-turn
+		// fetch is triggered.
 		warm := g.layerB[1:]
 		idx = warm[g.rng.Intn(len(warm))]
+
+	case actResume:
+		// Resume targets a recently-dormant thread — one no longer in
+		// Layer B but engaged within ResumeWindowTurns. Naming it in the
+		// topic tag triggers the §5.5 mid-turn fetch: the runtime aborts
+		// the in-flight stream, fetches the thread, and re-prompts. The
+		// step-indexed mock re-serves this step's response for the
+		// re-prompt, so the turn runs clean with no second queued
+		// response.
+		cands := g.resumeCandidates(len(g.steps))
+		idx = cands[g.rng.Intn(len(cands))]
 	}
 
 	thr := g.threads[idx]
@@ -630,8 +723,9 @@ func (g *generator) buildStep(tt turnType, act action) scenarios.Step {
 		step.RecallMode = scenarios.RecallMeasureOnly
 	}
 
-	// Update the Layer-B LRU to reflect this turn's engagement.
-	g.engage(idx)
+	// Update the Layer-B LRU and last-engaged bookkeeping to reflect
+	// this turn's engagement. len(g.steps) is this turn's 0-based index.
+	g.engage(idx, len(g.steps))
 	return step
 }
 
@@ -648,6 +742,8 @@ func actionName(a action) string {
 		return "continue"
 	case actSwitch:
 		return "switch"
+	case actResume:
+		return "resume"
 	default:
 		return "new"
 	}

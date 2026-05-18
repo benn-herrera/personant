@@ -21,20 +21,26 @@ import (
 type MockClient struct {
 	mu sync.Mutex
 
-	// Scripted mode: pop from queue. nil → not scripted.
-	queue []Response
-
-	// repeatLast, when set in scripted mode, makes a Consult past the
-	// end of the queue re-serve the last response instead of returning
-	// ErrMockExhausted. The scenario harness sets this so a §5.5
-	// mid-turn re-prompt — a second, legitimate model consult within
-	// one turn — is served the same step's response (the re-prompt
-	// re-sends the same user input; once the missing thread is fetched
-	// the re-evaluated topic tag drains cleanly). last holds the most
-	// recent served response.
-	repeatLast bool
-	last       Response
-	served     bool
+	// Scripted mode: serve queue[step]. nil queue → not scripted.
+	//
+	// The queue holds exactly one Response per scenario Step. Serving is
+	// step-indexed, not per-consult: the harness advances `step` before
+	// each turn (SetScriptedStep), and every Consult during that step —
+	// including a §5.5 mid-turn re-prompt, a legitimate second consult
+	// within one turn — returns queue[step]. Re-serving the same
+	// response for a re-prompt is correct: the re-prompt re-issues the
+	// same request, and once the missing thread is fetched the
+	// re-evaluated topic tag drains cleanly. A step index past the end
+	// of the queue returns ErrMockExhausted.
+	//
+	// perConsult flips serving to advance `step` after every Consult:
+	// queue[0], queue[1], … one per consult. This is for runtime unit
+	// tests (NewScriptedMockPerConsult) that drive a single turn and
+	// must observe two *distinct* consults — e.g. testing the §5.5
+	// re-prompt cap. It is NOT the scenario-harness path.
+	queue      []Response
+	step       int
+	perConsult bool
 
 	// Generated mode: rng + opts. rng is nil → not generated.
 	rng     *rand.Rand
@@ -90,11 +96,12 @@ const (
 	defaultBodyWords     = 50
 )
 
-// NewScriptedMock returns a MockClient that pops responses from the given
-// queue, in order. Calling Consult past the end returns ErrMockExhausted
-// unless SetRepeatLast(true) has been called, in which case the last
-// served response is re-served. models is returned verbatim from
-// ListModels; nil yields an empty list.
+// NewScriptedMock returns a MockClient that serves one response per
+// scenario step. The queue holds exactly one Response per step; the
+// harness selects the current step with SetScriptedStep, and every
+// Consult during that step serves queue[step]. A step index past the
+// end of the queue yields ErrMockExhausted. models is returned verbatim
+// from ListModels; nil yields an empty list.
 func NewScriptedMock(responses []Response, models []ModelInfo) *MockClient {
 	q := make([]Response, len(responses))
 	copy(q, responses)
@@ -104,6 +111,19 @@ func NewScriptedMock(responses []Response, models []ModelInfo) *MockClient {
 		copy(m.Models, models)
 	}
 	return m
+}
+
+// NewScriptedMockPerConsult returns a scripted MockClient that advances
+// through the queue one entry per Consult: queue[0], queue[1], … This
+// is for runtime unit tests that drive a single turn and must observe
+// two distinct consults — e.g. exercising the §5.5 mid-turn re-prompt
+// cap, where the re-prompt must see a different response than the
+// aborted first stream. The scenario harness uses NewScriptedMock
+// (step-indexed) instead. A Consult past the end yields ErrMockExhausted.
+func NewScriptedMockPerConsult(responses []Response) *MockClient {
+	q := make([]Response, len(responses))
+	copy(q, responses)
+	return &MockClient{queue: q, perConsult: true}
 }
 
 // NewGeneratedMock returns a MockClient that synthesizes responses from a
@@ -142,16 +162,13 @@ func (m *MockClient) Consult(ctx context.Context, req Request) (Response, error)
 	case m.rng != nil:
 		resp = m.synthesize()
 	case m.queue != nil:
-		switch {
-		case len(m.queue) > 0:
-			resp = m.queue[0]
-			m.queue = m.queue[1:]
-			m.last = resp
-			m.served = true
-		case m.repeatLast && m.served:
-			resp = m.last
-		default:
+		if m.step >= 0 && m.step < len(m.queue) {
+			resp = m.queue[m.step]
+		} else {
 			err = ErrMockExhausted
+		}
+		if m.perConsult {
+			m.step++
 		}
 	default:
 		err = fmt.Errorf("model: MockClient constructed without a mode")
@@ -195,13 +212,13 @@ func (m *MockClient) SetMockChunks(n int) {
 	m.mu.Unlock()
 }
 
-// SetRepeatLast controls scripted-mode exhaustion behavior. When true, a
-// Consult past the end of the queue re-serves the last response instead
-// of returning ErrMockExhausted; when false (the default) it returns
-// ErrMockExhausted. Has no effect on a generated-mode mock.
-func (m *MockClient) SetRepeatLast(v bool) {
+// SetScriptedStep selects which step's response a scripted mock serves.
+// The harness calls this before each turn; every Consult during the
+// turn — including a §5.5 mid-turn re-prompt — then returns queue[step].
+// Has no effect on a generated-mode mock.
+func (m *MockClient) SetScriptedStep(step int) {
 	m.mu.Lock()
-	m.repeatLast = v
+	m.step = step
 	m.mu.Unlock()
 }
 

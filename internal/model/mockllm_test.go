@@ -14,7 +14,10 @@ import (
 // will eventually use.
 var topicTagRe = regexp.MustCompile(`^\s*\*topic:\s*([^\[]+?)\s*\[([^\]]*)\]\s*\*\s*$`)
 
-func TestMockScriptedDeliversInOrder(t *testing.T) {
+// TestMockScriptedServesCurrentStep: a scripted mock serves queue[step],
+// where the harness advances step via SetScriptedStep. The default step
+// is 0; advancing it walks the queue.
+func TestMockScriptedServesCurrentStep(t *testing.T) {
 	scripted := []Response{
 		{Content: "first", FinishReason: "stop"},
 		{Content: "second", FinishReason: "stop"},
@@ -23,24 +26,46 @@ func TestMockScriptedDeliversInOrder(t *testing.T) {
 	m := NewScriptedMock(scripted, nil)
 
 	for i, want := range scripted {
+		m.SetScriptedStep(i)
 		got, err := m.Consult(context.Background(), Request{})
 		if err != nil {
-			t.Fatalf("call %d: %v", i, err)
+			t.Fatalf("step %d: %v", i, err)
 		}
 		if got.Content != want.Content {
-			t.Errorf("call %d: got %q, want %q", i, got.Content, want.Content)
+			t.Errorf("step %d: got %q, want %q", i, got.Content, want.Content)
+		}
+	}
+}
+
+// TestMockScriptedReServesWithinStep: every consult during one step —
+// the §5.5 mid-turn re-prompt case — serves that step's one response.
+func TestMockScriptedReServesWithinStep(t *testing.T) {
+	m := NewScriptedMock([]Response{
+		{Content: "step0"},
+		{Content: "step1"},
+	}, nil)
+	m.SetScriptedStep(1)
+	for c := 0; c < 3; c++ {
+		got, err := m.Consult(context.Background(), Request{})
+		if err != nil {
+			t.Fatalf("consult %d: %v", c, err)
+		}
+		if got.Content != "step1" {
+			t.Errorf("consult %d: got %q, want step1", c, got.Content)
 		}
 	}
 }
 
 func TestMockScriptedExhausted(t *testing.T) {
 	m := NewScriptedMock([]Response{{Content: "only one"}}, nil)
+	m.SetScriptedStep(0)
 	if _, err := m.Consult(context.Background(), Request{}); err != nil {
-		t.Fatalf("first call: %v", err)
+		t.Fatalf("step 0: %v", err)
 	}
+	m.SetScriptedStep(1)
 	_, err := m.Consult(context.Background(), Request{})
 	if !errors.Is(err, ErrMockExhausted) {
-		t.Fatalf("expected ErrMockExhausted, got %v", err)
+		t.Fatalf("expected ErrMockExhausted past queue end, got %v", err)
 	}
 }
 
@@ -184,6 +209,7 @@ func TestMockCallsAccumulates(t *testing.T) {
 		{Content: "c"},
 	}, nil)
 	for i := 0; i < 4; i++ {
+		m.SetScriptedStep(i)
 		_, _ = m.Consult(context.Background(), Request{Model: "test"})
 	}
 	calls := m.Calls()
