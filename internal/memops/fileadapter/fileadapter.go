@@ -240,14 +240,20 @@ func (a *FileAdapter) ArchiveThread(ctx context.Context, threadID string) error 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if _, found, err := store.FindSpineRecord(a.paths, threadID); err != nil {
+	rec, found, err := store.FindSpineRecord(a.paths, threadID)
+	if err != nil {
 		return fmt.Errorf("fileadapter: archive thread %s: %w", threadID, err)
-	} else if !found {
+	}
+	if !found {
 		return fmt.Errorf("fileadapter: archive thread %s: %w", threadID, memops.ErrThreadNotFound)
 	}
 
 	// Measure the body byte size before deletion. A missing thread file is
 	// size 0, not an error — the spine record alone is enough to archive.
+	// NOTE: bodySize is the thread BODY size only — it excludes the YAML
+	// frontmatter and the spine.jsonl line. v0.2 archival sizing against
+	// this stat must account for that: real on-disk cost is body +
+	// frontmatter + one spine line.
 	bodySize := 0
 	if thr, err := store.LoadThread(a.paths, threadID); err == nil {
 		bodySize = len(thr.Body)
@@ -263,8 +269,11 @@ func (a *FileAdapter) ArchiveThread(ctx context.Context, threadID string) error 
 		return fmt.Errorf("fileadapter: archive thread %s: remove spine: %w", threadID, err)
 	}
 
+	// project= attributes the delete per project so v0.2 archival
+	// demand-sizing can size pressure per project even though the archival
+	// drain itself is substrate-global.
 	if err := eventlog.Log(a.paths, "archive", "simulated-delete",
-		fmt.Sprintf("thr=%s bytes=%d", threadID, bodySize)); err != nil {
+		fmt.Sprintf("thr=%s project=%s bytes=%d", threadID, rec.Project, bodySize)); err != nil {
 		return fmt.Errorf("fileadapter: archive thread %s: log: %w", threadID, err)
 	}
 	// One loud warning per archival: v0.1 deletes outright — there is no

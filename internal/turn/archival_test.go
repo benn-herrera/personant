@@ -3,13 +3,40 @@ package turn
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
 	"personant/internal/store"
 )
+
+// readArchivalEventLog returns the concatenated contents of every *.log
+// file under the home's LogsDir.
+func readArchivalEventLog(t *testing.T, paths store.PersonantPaths) string {
+	t.Helper()
+	entries, err := os.ReadDir(paths.LogsDir)
+	if err != nil {
+		t.Fatalf("read logs dir: %v", err)
+	}
+	var b strings.Builder
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(paths.LogsDir, e.Name()))
+		if err != nil {
+			t.Fatalf("read log %s: %v", e.Name(), err)
+		}
+		b.Write(data)
+	}
+	return b.String()
+}
 
 // seedArchivalThread writes a thread + spine record with an explicit
 // state and a state_changed timestamp used to order coldest-first. IDs
@@ -171,5 +198,97 @@ func TestSurfaceArchival_NoOpBelowHighWater(t *testing.T) {
 	}
 	if len(recs) != 50 {
 		t.Errorf("spine count = %d, want 50 (no archival below high-water)", len(recs))
+	}
+}
+
+// TestSurfaceArchival_FiresAtTurnClose drives the trigger through a real
+// turn via RunWithDeltas — not by calling surfaceArchivalCandidates
+// directly — proving the §3.8 archival scan genuinely fires at turn close
+// (step 5c) even on a no-engagement turn (no topic tag → closeTurn early
+// returns), so the trigger placement outside that early return is locked
+// against regression.
+func TestSurfaceArchival_FiresAtTurnClose(t *testing.T) {
+	paths, meta := newTestHome(t)
+
+	// Seed a spine over the high-water mark, all retired so the whole
+	// over-budget surplus is archival-eligible.
+	const total = archiveHighWater + 30
+	for rank := 0; rank < total; rank++ {
+		seedArchivalThread(t, paths, meta.ID, fmt.Sprintf("thr_%d", rank+1),
+			memops.ThreadResolved, monotonicTS(rank))
+	}
+
+	// A response with NO topic tag: closeTurnAndUpdateEngagement sees an
+	// empty coalesce buffer and early-returns. Archival (step 5c) must
+	// still fire because it sits outside that early return.
+	mock := model.NewScriptedMock([]model.Response{
+		{Content: "A plain reply with no topic tag."},
+	}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
+
+	if _, err := RunWithDeltas(context.Background(), state, nil, "hello", io.Discard); err != nil {
+		t.Fatalf("RunWithDeltas: %v", err)
+	}
+
+	recs, err := store.ReadSpine(paths.Spine)
+	if err != nil {
+		t.Fatalf("read spine after turn: %v", err)
+	}
+	if len(recs) != archiveLowWater {
+		t.Errorf("spine count after turn = %d, want %d (archival fired at turn close)",
+			len(recs), archiveLowWater)
+	}
+}
+
+// TestSurfaceArchival_UnderDrain seeds a spine over the high-water mark
+// whose retired threads are fewer than the drain target. Archival cannot
+// reach low-water — it settles ABOVE archiveLowWater — and emits an
+// archive.under-drain log line carrying the standing-pressure detail.
+func TestSurfaceArchival_UnderDrain(t *testing.T) {
+	paths, meta := newTestHome(t)
+
+	// Over high-water, but mostly live threads. target = total -
+	// archiveLowWater; retiredCount is deliberately smaller than target.
+	const total = archiveHighWater + 40    // target = 90
+	const retiredCount = 20                // < target
+	const liveCount = total - retiredCount // 220
+
+	liveStates := []memops.ThreadState{memops.ThreadActive, memops.ThreadWIP}
+	for i := 0; i < liveCount; i++ {
+		seedArchivalThread(t, paths, meta.ID, fmt.Sprintf("thr_%d", i+1),
+			liveStates[i%2], "2026-01-15T00:00:00Z")
+	}
+	for j := 0; j < retiredCount; j++ {
+		seedArchivalThread(t, paths, meta.ID, fmt.Sprintf("thr_%d", liveCount+1+j),
+			memops.ThreadResolved, monotonicTS(j))
+	}
+
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	if err := state.Ops.RegenerateDerivedState(context.Background(), memops.IndexBuildOptions{Quiet: true}); err != nil {
+		t.Fatalf("seed RegenerateDerivedState: %v", err)
+	}
+
+	if err := surfaceArchivalCandidates(context.Background(), state); err != nil {
+		t.Fatalf("surfaceArchivalCandidates: %v", err)
+	}
+
+	recs, err := store.ReadSpine(paths.Spine)
+	if err != nil {
+		t.Fatalf("read spine after archival: %v", err)
+	}
+	// All retired threads archived; the spine settles above low-water.
+	wantSpine := total - retiredCount
+	if len(recs) != wantSpine {
+		t.Errorf("spine count after under-drain = %d, want %d", len(recs), wantSpine)
+	}
+	if len(recs) <= archiveLowWater {
+		t.Errorf("spine drained to %d <= low-water %d; under-drain expected to settle ABOVE low-water",
+			len(recs), archiveLowWater)
+	}
+
+	log := readArchivalEventLog(t, paths)
+	if !strings.Contains(log, "archive.under-drain") {
+		t.Errorf("event log missing archive.under-drain line\n%s", log)
 	}
 }

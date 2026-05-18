@@ -392,7 +392,7 @@ func TestArchiveThread_DeletesSpineAndFileAndLogs(t *testing.T) {
 	}
 
 	log := readEventLog(t, a)
-	wantLine := "archive.simulated-delete thr=thr_1 bytes=" + strconv.Itoa(len(body))
+	wantLine := "archive.simulated-delete thr=thr_1 project=prj_1 bytes=" + strconv.Itoa(len(body))
 	if !strings.Contains(log, wantLine) {
 		t.Errorf("event log missing %q\n%s", wantLine, log)
 	}
@@ -419,7 +419,7 @@ func TestArchiveThread_MissingFileSizeZero(t *testing.T) {
 	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
 		t.Fatalf("ArchiveThread with missing file: %v", err)
 	}
-	if !strings.Contains(readEventLog(t, a), "archive.simulated-delete thr=thr_1 bytes=0") {
+	if !strings.Contains(readEventLog(t, a), "archive.simulated-delete thr=thr_1 project=prj_1 bytes=0") {
 		t.Errorf("expected bytes=0 for missing thread file\n%s", readEventLog(t, a))
 	}
 }

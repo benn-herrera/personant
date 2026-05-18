@@ -32,12 +32,31 @@ const (
 // to archiveLowWater. "Coldest" is oldest by StateChanged (falling back to
 // LastEngaged when StateChanged is empty).
 //
+// Scope: archival is GLOBAL — the ThreadFilter{} below lists the entire
+// spine across every project, deliberately diverging from
+// surfaceClosureCandidates, which scopes to state.ActiveProject.ID. The
+// divergence is intentional. Archival relieves SPINE CARDINALITY pressure,
+// and per ARCHITECTURE.md the spine is one unified store across all
+// projects, so the cardinality budget is genuinely substrate-wide, not
+// per-project. And archival only ever touches ALREADY-RETIRED threads, so
+// the hazard that makes closure project-scoped — disturbing a sibling
+// project's live work — does not apply here. A global drain reaching into
+// a dormant project's retired threads is the correct behavior, not a leak.
+//
 // After the batch, the derived index is regenerated ONCE: each archival
-// delete leaves symbols.jsonl with dangling references, and a scenario
-// invariant would otherwise flag the drift.
+// delete leaves symbols.jsonl with dangling references. (A failed regen is
+// NOT caught by a scenario invariant — see the derivedIndexStale handling
+// below, which forces a retry on the next turn.)
 //
 // Opportunistic and non-fatal: an ArchiveThread or regenerate error is
 // logged and swallowed, never aborting the turn (closure is the precedent).
+//
+// Cross-turn ordering: archival is coldest-first, so a thread retired by
+// closure earlier THIS turn (step 5b) has the NEWEST StateChanged and is
+// therefore the LAST archival candidate. A same-turn retire+archive of the
+// same thread effectively cannot happen — it would require every older
+// retired thread to have already been drained, which contradicts the
+// thread being freshly retired. No minimum-age guard is needed.
 func surfaceArchivalCandidates(ctx context.Context, state *State) error {
 	recs, err := state.Ops.ListThreads(ctx, memops.ThreadFilter{})
 	if err != nil {
@@ -75,15 +94,33 @@ func surfaceArchivalCandidates(ctx context.Context, state *State) error {
 		}
 		archived++
 	}
-	if archived == 0 {
-		return nil
+
+	// Under-drain: the spine was over the high-water mark but retired
+	// threads were too scarce to drain to low-water — it settles ABOVE
+	// archiveLowWater. This is correct (live threads cannot be archived)
+	// but is a standing cardinality-pressure condition archival cannot
+	// relieve, exactly what the six-month sim must detect, so it gets a
+	// distinct log line.
+	if archived < target {
+		_ = state.Ops.Log(ctx, "archive", "under-drain",
+			fmt.Sprintf("spine=%d low-water=%d wanted=%d archived=%d retired-exhausted",
+				len(recs)-archived, archiveLowWater, target, archived))
 	}
 
-	// Regenerate the derived index ONCE after the batch: each delete left
-	// symbols.jsonl with dangling references until now.
-	if err := state.Ops.RegenerateDerivedState(ctx, memops.IndexBuildOptions{Quiet: true}); err != nil {
-		_ = state.Ops.Log(ctx, "archive", "regen-error", sanitizeDetail(err.Error()))
+	// Regenerate the derived index if this batch archived anything OR a
+	// prior turn's regen failed (derivedIndexStale). Each archival delete
+	// leaves symbols.jsonl with dangling references; a clean regen clears
+	// the staleness, a failed one re-arms it so the next turn retries even
+	// when it archives nothing.
+	if archived == 0 && !state.derivedIndexStale {
+		return nil
 	}
+	if err := state.Ops.RegenerateDerivedState(ctx, memops.IndexBuildOptions{Quiet: true}); err != nil {
+		state.derivedIndexStale = true
+		_ = state.Ops.Log(ctx, "archive", "regen-error", sanitizeDetail(err.Error()))
+		return nil
+	}
+	state.derivedIndexStale = false
 	return nil
 }
 
