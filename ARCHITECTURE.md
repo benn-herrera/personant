@@ -452,7 +452,6 @@ These are not "v0.2 / v0.3" — they are role-bounded.
 - Deep cold archival via git (v0.2)
 - Offline memory-consolidation cycle — the "sleep" cycle (future; see Mechanisms)
 - Concurrent sessions — one user multitasking across multiple live conversations (future; see Mechanisms)
-- Working-set content dedup (v0.2)
 - REPL line editing + history (v0.1 polish)
 - Shell escape (`$`/`#`) implementation with long-lived `$SHELL -i` subprocess (v0.1 polish; PTY mode-handoff for nested apps held until empirical pressure)
 
