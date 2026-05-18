@@ -420,7 +420,7 @@ No JSON schema in v0.1. Promote individual event types to structured form when q
 | `thread` | `engaged`, `created`, `state-change`, `summary-generated` |
 | `spine` | `match-fire`, `match-miss`, `entry-updated` |
 | `recall` | `offer` (with `count=N`), `accept` (with `thr=`, `layers=`), `decline` (with `thr=`, `reason=not-relevant\|wrong-project\|already-known`), `embed-error`, `cross-project-fire` |
-| `retire` | `prompt`, `ack`, `defer`, `complete` |
+| `retire` | `prompt`, `ack`, `defer`, `complete`, `curator-error`, `load-error` |
 | `dissect` | `fire`, `cluster-proposed`, `complete` |
 | `directive` | `accrual-update`, `parameter-read` (sampled) |
 | `index` | `rebuild-start`, `rebuild-complete`, `verify-fail` |

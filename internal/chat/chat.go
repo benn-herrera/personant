@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"personant/internal/curator"
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
@@ -222,6 +223,18 @@ func Run(opts Options) error {
 	// §3.4 recall UI surface (Part B): install an interactive resolver
 	// so recalled threads can be pulled into Layer B at turn close.
 	state.RecallResolver = interactiveRecallResolver(in, opts.Stdout)
+
+	// §3.5 decay-triggered closure flow: a model-backed curator drafts
+	// the closure summary, and an interactive resolver lets the user
+	// pick the retire / wip / defer outcome. Both must be installed for
+	// the per-turn decay scan to run; the curator reuses the session's
+	// chat client and resolved chat model.
+	closureModel := effectiveModel
+	if closureModel == "" {
+		closureModel = provider.DefaultModel
+	}
+	state.Curator = curator.NewHTTPCurator(client, closureModel)
+	state.ClosureResolver = interactiveClosureResolver(in, opts.Stdout)
 
 	banner := opts.Banner
 	if banner == "" {
@@ -722,6 +735,40 @@ func interactiveRecallResolver(in *bufio.Reader, out io.Writer) turn.RecallResol
 			}
 		}
 		return turn.RecallResolution{Accept: accept, Reason: reason}, nil
+	}
+}
+
+// interactiveClosureResolver returns a turn.ClosureResolver that
+// surfaces the §3.5 closure offer at the prompt and reads the user's
+// retire / wip / defer decision. Kept deliberately small — U/X polish
+// is deferred. On EOF (the session is ending) it returns ClosureDefer
+// so the thread is left untouched.
+func interactiveClosureResolver(in *bufio.Reader, out io.Writer) turn.ClosureResolver {
+	return func(_ context.Context, offer turn.ClosureOffer) (turn.ClosureResolution, error) {
+		fmt.Fprintf(out, "thread %s has gone idle — closure suggested.\n", offer.ThreadID)
+		fmt.Fprintf(out, "  summary: %s\n", offer.Summary)
+		fmt.Fprint(out, "close as? [r]esolved / [d]ecided / [a]bandoned / [w]ip / [s]kip: ")
+		ans, err := readLine(in)
+		if errors.Is(err, io.EOF) {
+			// Session ending — defer, leave the thread untouched.
+			return turn.ClosureResolution{Outcome: turn.ClosureDefer}, nil
+		}
+		if err != nil {
+			return turn.ClosureResolution{}, err
+		}
+		switch strings.ToLower(strings.TrimSpace(ans)) {
+		case "r":
+			return turn.ClosureResolution{Outcome: turn.ClosureResolved}, nil
+		case "d":
+			return turn.ClosureResolution{Outcome: turn.ClosureDecided}, nil
+		case "a":
+			return turn.ClosureResolution{Outcome: turn.ClosureAbandoned}, nil
+		case "w":
+			return turn.ClosureResolution{Outcome: turn.ClosureWIP}, nil
+		default:
+			// Empty / "s" / anything unrecognized → skip (defer).
+			return turn.ClosureResolution{Outcome: turn.ClosureDefer}, nil
+		}
 	}
 }
 

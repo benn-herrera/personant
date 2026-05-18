@@ -18,6 +18,13 @@ type InvariantCheck func(h *Harness) error
 // DefaultInvariants is the suite that runs after every step (and after
 // the last step, when FinalInvariants is empty). Cheap, always
 // applicable, and covers the spec §11.5 baseline.
+//
+// VerifyClosedThreadConsistency is deliberately excluded: it inspects
+// the in-memory session's ActiveThreads/DormantThreads, which is only
+// meaningful after a closure scenario has run. Promoting it would make
+// every non-closure scenario assert a property about a working set that
+// closure never touched — true but vacuous. Closure scenarios opt it in
+// explicitly.
 var DefaultInvariants = []InvariantCheck{
 	VerifySpineIntegrity,
 	VerifyIndexFresh,
@@ -201,6 +208,47 @@ func VerifyEngagementConsistency(h *Harness) error {
 		if thr.Frontmatter.LastEngaged != r.LastEngaged {
 			return fmt.Errorf("VerifyEngagementConsistency: %s frontmatter last_engaged %q != spine %q",
 				r.ID, thr.Frontmatter.LastEngaged, r.LastEngaged)
+		}
+	}
+	return nil
+}
+
+// VerifyClosedThreadConsistency: every thread whose spine state is a
+// retired state (resolved / decided / abandoned) must NOT appear in
+// State.ActiveThreads or State.DormantThreads and must carry a non-empty
+// Summary. This is the §3.5 closure-flow invariant — a closed thread
+// that leaked back into the active or dormant working set, or was
+// retired without a curator summary, is a closure-flow bug. The apply
+// path evicts a retired thread from both layers; WIP threads
+// legitimately live in DormantThreads, so the Dormant check is kept
+// specific to the three retired states.
+func VerifyClosedThreadConsistency(h *Harness) error {
+	recs, err := store.ReadSpine(h.Paths.Spine)
+	if err != nil {
+		return fmt.Errorf("VerifyClosedThreadConsistency: read spine: %w", err)
+	}
+	active := make(map[string]bool, len(h.State.ActiveThreads))
+	for _, id := range h.State.ActiveThreads {
+		active[id] = true
+	}
+	dormant := make(map[string]bool, len(h.State.DormantThreads))
+	for _, id := range h.State.DormantThreads {
+		dormant[id] = true
+	}
+	for _, r := range recs {
+		switch r.State {
+		case memops.ThreadResolved, memops.ThreadDecided, memops.ThreadAbandoned:
+		default:
+			continue
+		}
+		if active[r.ID] {
+			return fmt.Errorf("VerifyClosedThreadConsistency: %s is %s but still in ActiveThreads", r.ID, r.State)
+		}
+		if dormant[r.ID] {
+			return fmt.Errorf("VerifyClosedThreadConsistency: %s is %s but still in DormantThreads", r.ID, r.State)
+		}
+		if r.Summary == "" {
+			return fmt.Errorf("VerifyClosedThreadConsistency: %s is %s but has an empty summary", r.ID, r.State)
 		}
 	}
 	return nil

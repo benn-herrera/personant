@@ -910,3 +910,205 @@ func findMetricsBlobs(t *testing.T) ([]string, error) {
 	})
 	return matches, err
 }
+
+// assertLogContains is an InvariantCheck that reads every day-log file
+// under h.Paths.LogsDir and fails unless the concatenation contains
+// want. Used to assert §3.5 closure log lines fired.
+func assertLogContains(want string) InvariantCheck {
+	return func(h *Harness) error {
+		entries, err := os.ReadDir(h.Paths.LogsDir)
+		if err != nil {
+			return fmt.Errorf("assertLogContains: read logs dir: %w", err)
+		}
+		var all strings.Builder
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
+				continue
+			}
+			body, err := os.ReadFile(filepath.Join(h.Paths.LogsDir, e.Name()))
+			if err != nil {
+				return fmt.Errorf("assertLogContains: read %s: %w", e.Name(), err)
+			}
+			all.Write(body)
+		}
+		if !strings.Contains(all.String(), want) {
+			return fmt.Errorf("assertLogContains: log missing %q", want)
+		}
+		return nil
+	}
+}
+
+// assertThreadRetired is an InvariantCheck asserting the named thread's
+// spine state is wantState, its summary is non-empty, and it is no
+// longer in Layer B (State.ActiveThreads).
+func assertThreadRetired(threadID string, wantState memops.ThreadState) InvariantCheck {
+	return func(h *Harness) error {
+		rec, found, err := h.Ops.FindThread(context.Background(), threadID)
+		if err != nil {
+			return fmt.Errorf("assertThreadRetired: find %s: %w", threadID, err)
+		}
+		if !found {
+			return fmt.Errorf("assertThreadRetired: %s not in spine", threadID)
+		}
+		if rec.State != wantState {
+			return fmt.Errorf("assertThreadRetired: %s state %q, want %q", threadID, rec.State, wantState)
+		}
+		if rec.Summary == "" {
+			return fmt.Errorf("assertThreadRetired: %s has empty summary", threadID)
+		}
+		for _, id := range h.State.ActiveThreads {
+			if id == threadID {
+				return fmt.Errorf("assertThreadRetired: %s retired but still in ActiveThreads", threadID)
+			}
+		}
+		return nil
+	}
+}
+
+// seedActiveThread writes an active thread + matching spine record into
+// the harness home, with lastEngagedTurn / lastEngaged set so the §3.5
+// decay scan can be exercised. Used by the closure scenario's Setup.
+func seedActiveThread(h *Harness, threadID string, lastEngagedTurn int, lastEngaged string) error {
+	anchors := []string{"alpha", "beta", "gamma", "delta"}
+	rec := memops.SpineRecord{
+		ID:              threadID,
+		Project:         h.Project.ID,
+		Anchors:         anchors,
+		Summary:         "seeded active thread " + threadID,
+		State:           memops.ThreadActive,
+		Created:         "2026-04-01T00:00:00Z",
+		LastEngaged:     lastEngaged,
+		StateChanged:    "2026-04-01T00:00:00Z",
+		TurnCount:       1,
+		LastEngagedTurn: lastEngagedTurn,
+	}
+	if err := store.AppendSpineRecord(h.Paths, rec); err != nil {
+		return fmt.Errorf("seedActiveThread: append spine: %w", err)
+	}
+	thr := memops.Thread{
+		Frontmatter: memops.ThreadFrontmatter{
+			ID:              rec.ID,
+			Project:         rec.Project,
+			Anchors:         rec.Anchors,
+			Summary:         rec.Summary,
+			State:           rec.State,
+			Created:         rec.Created,
+			LastEngaged:     rec.LastEngaged,
+			StateChanged:    rec.StateChanged,
+			TurnCount:       rec.TurnCount,
+			LastEngagedTurn: rec.LastEngagedTurn,
+		},
+		Body: "# " + threadID + "\n\n## Turn 1 · 2026-04-01T00:00:00Z · [" +
+			strings.Join(anchors, ", ") + "]\n\n**user:** seed\n\n**agent:** seed reply\n",
+	}
+	if err := store.SaveThread(h.Paths, thr); err != nil {
+		return fmt.Errorf("seedActiveThread: save thread: %w", err)
+	}
+	return nil
+}
+
+// TestScenario_DecayTriggeredClosure drives §3.5 end-to-end: an active
+// thread seeded with an old last-engaged-turn decays as idle turns
+// accumulate, the curator drafts a closure summary, the scripted
+// ClosureAck retires it, and the thread leaves the working set with a
+// non-empty summary.
+func TestScenario_DecayTriggeredClosure(t *testing.T) {
+	closureInvariants := append(append([]InvariantCheck{},
+		DefaultInvariants...),
+		VerifyClosedThreadConsistency,
+	)
+
+	// scenarioDecayTurns mirrors turn.decayTurns (spec §2.6.1 default,
+	// unexported). The seeded thread crosses the turn-based threshold
+	// when State.TurnNumber reaches this value.
+	const scenarioDecayTurns = 8
+
+	steps := make([]Step, 0, scenarioDecayTurns)
+	// Idle turns: the seeded thread (last_engaged_turn=0) is engaged by
+	// none of them, so it crosses the turn-based threshold. No
+	// ClosureAck on the idle steps before the threshold → closure is
+	// detection-disabled for them.
+	for i := 0; i < scenarioDecayTurns-1; i++ {
+		steps = append(steps, Step{
+			UserInput:    fmt.Sprintf("idle chatter %d", i+1),
+			MockResponse: model.Response{Content: "Just a plain reply, nothing to engage."},
+			Annotation:   fmt.Sprintf("idle turn %d (no decay yet)", i+1),
+			Invariants:   closureInvariants,
+		})
+	}
+	// The threshold turn: TurnNumber reaches decayTurns, the seeded
+	// thread is decay-eligible, and the scripted ClosureAck retires it.
+	steps = append(steps, Step{
+		UserInput:    "one more idle turn — should trigger closure",
+		MockResponse: model.Response{Content: "Another plain reply."},
+		Annotation:   "decay threshold crossed → closure offered + retired",
+		ClosureAck:   &ClosureAck{Outcome: turn.ClosureResolved},
+		Invariants: append(append([]InvariantCheck{},
+			closureInvariants...),
+			assertThreadRetired("thr_1", memops.ThreadResolved),
+			assertLogContains("retire.complete thr=thr_1 resolution=resolved"),
+		),
+	})
+
+	sc := Scenario{
+		Name: "decay-triggered-closure",
+		Setup: func(h *Harness) error {
+			return seedActiveThread(h, "thr_1", 0, "2026-04-01T00:00:00Z")
+		},
+		Steps:           steps,
+		FinalInvariants: closureInvariants,
+	}
+	RunScenario(t, sc)
+}
+
+// TestScenario_WallClockDecayTriggeredClosure drives §3.5 through the
+// wall-clock OR-branch end-to-end: a thread whose turn-idle count stays
+// below the turn threshold but whose last_engaged timestamp is older
+// than decayTime once Step.TimeDelta advances the pinned clock. This
+// exercises the harness's pinnedClock advance and proves the wall-clock
+// signal fires through the real turn.Run stack — the turn-based
+// scenario above only crosses the turn threshold.
+func TestScenario_WallClockDecayTriggeredClosure(t *testing.T) {
+	closureInvariants := append(append([]InvariantCheck{},
+		DefaultInvariants...),
+		VerifyClosedThreadConsistency,
+	)
+
+	sc := Scenario{
+		Name: "wall-clock-decay-triggered-closure",
+		Setup: func(h *Harness) error {
+			// Seed thr_1 last-engaged at the harness's pinned-clock
+			// start (2026-05-01T12:00:00Z) with last_engaged_turn=0.
+			return seedActiveThread(h, "thr_1", 0, "2026-05-01T12:00:00Z")
+		},
+		Steps: []Step{
+			{
+				// Turn 1: no time advance, no decay (turn-idle=1, well
+				// under the turn threshold; wall-clock not yet aged).
+				UserInput:    "warm-up turn, no decay expected",
+				MockResponse: model.Response{Content: "A plain reply."},
+				Annotation:   "turn 1 — no decay",
+				Invariants:   closureInvariants,
+			},
+			{
+				// Turn 2: advance the pinned clock 8 days past the
+				// seed. turn-idle is still 2 (< turn threshold 8), so
+				// only the wall-clock branch (8d >= decayTime 7d) can
+				// fire. The scripted ClosureAck retires the thread.
+				UserInput:    "much later — wall-clock decay should trigger closure",
+				MockResponse: model.Response{Content: "Another plain reply."},
+				Annotation:   "turn 2 — wall-clock decay crossed → closure offered + retired",
+				TimeDelta:    8 * 24 * time.Hour,
+				ClosureAck:   &ClosureAck{Outcome: turn.ClosureResolved},
+				Invariants: append(append([]InvariantCheck{},
+					closureInvariants...),
+					assertThreadRetired("thr_1", memops.ThreadResolved),
+					assertLogContains("retire.prompt thr=thr_1 inactivity=idle="),
+					assertLogContains("retire.complete thr=thr_1 resolution=resolved"),
+				),
+			},
+		},
+		FinalInvariants: closureInvariants,
+	}
+	RunScenario(t, sc)
+}

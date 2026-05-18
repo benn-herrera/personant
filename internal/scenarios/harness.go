@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"personant/internal/curator"
 	"personant/internal/index"
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
@@ -92,6 +93,27 @@ type Step struct {
 	// declined with Reason. A nil RecallAck means the step installs no
 	// resolver — recall stays log-only (the pre-Part-B behavior).
 	RecallAck *RecallAck
+
+	// ClosureAck scripts how this step resolves a §3.5 closure offer
+	// surfaced at turn close. Its Outcome is applied to every closure
+	// offer the step surfaces. A nil ClosureAck means the step installs
+	// no ClosureResolver — closure stays detection-disabled for the
+	// step (mirrors a nil RecallAck yielding a nil recall resolver).
+	ClosureAck *ClosureAck
+
+	// TimeDelta, when non-zero, advances the harness's pinned clock by
+	// that much before this step's turn. The harness pins a fixed clock
+	// by default; a non-zero TimeDelta lets a scenario cross the §3.5
+	// wall-clock decay threshold deterministically.
+	TimeDelta time.Duration
+}
+
+// ClosureAck scripts how a step resolves a §3.5 closure offer surfaced
+// at turn close. Outcome is applied to every closure offer the step
+// surfaces. A nil ClosureAck means the step installs no resolver —
+// closure stays detection-disabled for that step.
+type ClosureAck struct {
+	Outcome turn.ClosureOutcome
 }
 
 // RecallAck scripts how a step resolves a recall offer surfaced at
@@ -180,6 +202,13 @@ type Harness struct {
 	// are computed from monotonic now() reads, but startedAt is kept
 	// for cross-correlation with the metrics blob's started_at.
 	startedAt time.Time
+
+	// pinnedClock is the deterministic time the turn.State clock
+	// returns. It defaults to a fixed instant; a Step.TimeDelta advances
+	// it before that step's turn so §3.5 wall-clock decay can be
+	// exercised. runStep is single-goroutine, so no synchronization is
+	// needed.
+	pinnedClock time.Time
 }
 
 // NewMockResponseWithTag is the common-case constructor for a Step's
@@ -314,12 +343,6 @@ defaultModel = "harness-mock"
 
 	ops := fileadapter.NewFileAdapter(paths)
 	state := turn.NewState(ops, project, provider, nil)
-	// Pin the clock so timestamps are deterministic — invariant checks
-	// (created ≤ last_engaged) are timestamp-sensitive, and a
-	// scenario's metrics blob is more readable with stable timestamps.
-	state.SetClock(func() time.Time {
-		return time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-	})
 
 	mPath := sc.MetricsPath
 	if mPath == "" {
@@ -328,7 +351,7 @@ defaultModel = "harness-mock"
 
 	run := metrics.New(map[string]string{"scenario": sc.Name})
 
-	return &Harness{
+	h := &Harness{
 		Paths:       paths,
 		Ops:         ops,
 		Project:     project,
@@ -338,7 +361,35 @@ defaultModel = "harness-mock"
 		T:           t,
 		MetricsPath: mPath,
 		startedAt:   time.Now(),
+		pinnedClock: time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC),
 	}
+
+	// Pin the clock so timestamps are deterministic — invariant checks
+	// (created ≤ last_engaged) are timestamp-sensitive, and a
+	// scenario's metrics blob is more readable with stable timestamps.
+	// A Step.TimeDelta advances h.pinnedClock; the closure reads it
+	// live so the advance takes effect on the next turn.
+	state.SetClock(func() time.Time { return h.pinnedClock })
+
+	// Install a deterministic scripted curator so closure scenarios
+	// never need a live model. The closure scan only runs when both a
+	// curator and a ClosureResolver are installed; the resolver is
+	// installed per-step from Step.ClosureAck.
+	state.Curator = scriptedCurator{}
+
+	return h
+}
+
+// scriptedCurator is the harness's deterministic Curator: it returns a
+// fixed summary and reuses the thread's existing anchors, so closure
+// scenarios run without a live model.
+type scriptedCurator struct{}
+
+func (scriptedCurator) DraftClosure(_ context.Context, thread memops.Thread) (curator.ClosureDraft, error) {
+	return curator.ClosureDraft{
+		Summary: "scripted closure summary for " + thread.Frontmatter.ID,
+		Anchors: append([]string(nil), thread.Frontmatter.Anchors...),
+	}, nil
 }
 
 // runStep drives one Step end-to-end: turn.Run, metrics record,
@@ -357,6 +408,13 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) {
 	}
 
 	h.State.RecallResolver = recallResolverFor(t, idx, label, step.RecallAck)
+	h.State.ClosureResolver = closureResolverFor(step.ClosureAck)
+
+	// Advance the pinned clock before the turn so the step can cross
+	// the §3.5 wall-clock decay threshold deterministically.
+	if step.TimeDelta != 0 {
+		h.pinnedClock = h.pinnedClock.Add(step.TimeDelta)
+	}
 
 	start := time.Now()
 	body, err := turn.RunWithDeltas(context.Background(), h.State, step.PreEvents, step.UserInput, io.Discard)
@@ -435,6 +493,20 @@ func recallResolverFor(t *testing.T, idx int, label string, ack *RecallAck) turn
 			reason = turn.DeclineNotRelevant
 		}
 		return turn.RecallResolution{Accept: accept, Reason: reason}, nil
+	}
+}
+
+// closureResolverFor builds a turn.ClosureResolver from a step's
+// scripted ClosureAck. A nil ack yields a nil resolver — closure stays
+// detection-disabled for the step (mirrors recallResolverFor). A
+// non-nil ack applies its Outcome to every closure offer the step
+// surfaces.
+func closureResolverFor(ack *ClosureAck) turn.ClosureResolver {
+	if ack == nil {
+		return nil
+	}
+	return func(_ context.Context, _ turn.ClosureOffer) (turn.ClosureResolution, error) {
+		return turn.ClosureResolution{Outcome: ack.Outcome}, nil
 	}
 }
 

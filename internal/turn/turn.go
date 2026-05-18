@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"personant/internal/curator"
 	"personant/internal/memops"
 	"personant/internal/model"
 	"personant/internal/prompt"
@@ -42,6 +43,20 @@ type State struct {
 	// (no offer surfaced). The chat REPL installs an interactive
 	// resolver; the scenario harness installs a scripted one.
 	RecallResolver RecallResolver
+
+	// Curator drafts the §3.5 closure summary + anchors for a thread
+	// that has decayed into idleness. NewState leaves it nil (closure
+	// disabled); the chat REPL installs a model-backed curator and the
+	// scenario harness installs a deterministic stub.
+	Curator curator.Curator
+
+	// ClosureResolver resolves the §3.5 closure offer surfaced at turn
+	// close into a retire / wip / defer outcome. nil → closure stays
+	// detection-disabled (no offer surfaced, no decay scan). The chat
+	// REPL installs an interactive resolver; the scenario harness
+	// installs a scripted one. Both Curator and ClosureResolver must be
+	// non-nil for closure detection to run.
+	ClosureResolver ClosureResolver
 
 	// Model overrides the provider's DefaultModel when non-empty.
 	Model string
@@ -96,6 +111,11 @@ type State struct {
 	// Tests inject a deterministic clock; production callers leave it nil
 	// and Run substitutes time.Now.
 	nowFn func() time.Time
+
+	// closureDeferUntil maps a thread ID to the turn index until which a
+	// §3.5 closure re-prompt is suppressed. Populated when the user
+	// defers a closure offer; not persisted (session-scoped).
+	closureDeferUntil map[string]int
 }
 
 // dormantThreadsCap is the v0.1 maximum count for State.DormantThreads.
@@ -111,13 +131,14 @@ const dormantThreadsCap = 20
 // either an HTTPClient or a MockClient, never nil).
 func NewState(ops memops.MemoryOps, project memops.ProjectMeta, provider memops.Provider, client model.Client) *State {
 	return &State{
-		Ops:           ops,
-		ActiveProject: project,
-		Provider:      provider,
-		Client:        client,
-		Budget:        workset.DefaultBudget(),
-		coalesce:      newCoalesceBuffer(),
-		staging:       newStagingBuffer(),
+		Ops:               ops,
+		ActiveProject:     project,
+		Provider:          provider,
+		Client:            client,
+		Budget:            workset.DefaultBudget(),
+		coalesce:          newCoalesceBuffer(),
+		staging:           newStagingBuffer(),
+		closureDeferUntil: make(map[string]int),
 		// Default to symbolic-only recall; callers with an embedding
 		// provider replace this with an embedding-enabled Service.
 		Recaller: recall.NewService(ops, nil),
@@ -366,6 +387,15 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 	// coalesced symbol set.
 	if err := closeTurnAndUpdateEngagement(ctx, state, userInput, full.Content); err != nil {
 		return "", fmt.Errorf("turn: close: %w", err)
+	}
+
+	// Step 5b: §3.5 decay-triggered closure scan. Runs on EVERY turn —
+	// including turns that engaged no thread — because a thread decays
+	// regardless of this turn's activity, so the scan must NOT sit
+	// behind closeTurnAndUpdateEngagement's no-engagement early return.
+	// Opportunistic, like recall: a failure is logged and swallowed.
+	if err := surfaceClosureCandidates(ctx, state); err != nil {
+		_ = state.Ops.Log(ctx, "retire", "error", sanitizeDetail(err.Error()))
 	}
 
 	// Step 6: derive the topic-tag-stripped body for the return value.
@@ -665,6 +695,11 @@ func updateLayerLRU(state *State, engaged []string) {
 		bTopK = workset.DefaultBTopK
 	}
 	for _, id := range engaged {
+		// An engaged thread has started a fresh idle clock; any
+		// §3.5 defer-suppression grace from a prior idle episode is
+		// now meaningless, so prune it to avoid wrongly suppressing a
+		// future legitimate re-prompt.
+		delete(state.closureDeferUntil, id)
 		// Drop from current positions in either layer.
 		state.ActiveThreads = removeString(state.ActiveThreads, id)
 		state.DormantThreads = removeString(state.DormantThreads, id)
@@ -746,6 +781,7 @@ func updateExistingThread(ctx context.Context, state *State, threadID, userInput
 	// first_seen_turn for any newly introduced history symbols.
 	newTurnCount := rec.TurnCount + 1
 	thr.Frontmatter.LastEngaged = now
+	thr.Frontmatter.LastEngagedTurn = state.TurnNumber
 	thr.Frontmatter.TurnCount = newTurnCount
 	// Mirror the canonical spine fields so the frontmatter stays in
 	// sync. The body of work reads the frontmatter; the spine is the
@@ -767,6 +803,7 @@ func updateExistingThread(ctx context.Context, state *State, threadID, userInput
 	thr.Body = appendTurnExcerpt(thr.Body, newTurnCount, now, turnAnchors, userInput, responseBody)
 
 	rec.LastEngaged = now
+	rec.LastEngagedTurn = state.TurnNumber
 	rec.TurnCount = newTurnCount
 	if err := state.Ops.EngageThread(ctx, memops.ThreadWrite{
 		Spine:       rec,
@@ -798,29 +835,31 @@ func createNewThread(ctx context.Context, state *State, userInput, responseBody,
 	summary := summarizeForNewThread(responseBody)
 
 	rec := memops.SpineRecord{
-		ID:           newID,
-		Project:      state.ActiveProject.ID,
-		Anchors:      anchors,
-		Summary:      summary,
-		State:        memops.ThreadWIP,
-		Created:      now,
-		LastEngaged:  now,
-		StateChanged: now,
-		TurnCount:    1,
+		ID:              newID,
+		Project:         state.ActiveProject.ID,
+		Anchors:         anchors,
+		Summary:         summary,
+		State:           memops.ThreadWIP,
+		Created:         now,
+		LastEngaged:     now,
+		StateChanged:    now,
+		TurnCount:       1,
+		LastEngagedTurn: state.TurnNumber,
 	}
 
 	frontmatter := ThreadFrontmatter{
-		ID:             newID,
-		Project:        rec.Project,
-		Anchors:        append([]string(nil), anchors...),
-		Summary:        summary,
-		State:          memops.ThreadWIP,
-		Created:        now,
-		LastEngaged:    now,
-		StateChanged:   now,
-		TurnCount:      1,
-		RecallFires:    0,
-		HistorySymbols: mergeHistorySymbols(nil, turnSymbols, 1),
+		ID:              newID,
+		Project:         rec.Project,
+		Anchors:         append([]string(nil), anchors...),
+		Summary:         summary,
+		State:           memops.ThreadWIP,
+		Created:         now,
+		LastEngaged:     now,
+		StateChanged:    now,
+		TurnCount:       1,
+		RecallFires:     0,
+		LastEngagedTurn: state.TurnNumber,
+		HistorySymbols:  mergeHistorySymbols(nil, turnSymbols, 1),
 	}
 	body := newThreadBody(anchors, 1, now, turnAnchors, userInput, responseBody)
 
@@ -866,16 +905,17 @@ func memopsBudgetFromWorkset(b workset.Budget) memops.Budget {
 // rather than failing the turn.
 func frontmatterFromSpine(rec memops.SpineRecord) ThreadFrontmatter {
 	return ThreadFrontmatter{
-		ID:           rec.ID,
-		Project:      rec.Project,
-		Anchors:      append([]string(nil), rec.Anchors...),
-		Summary:      rec.Summary,
-		State:        rec.State,
-		Created:      rec.Created,
-		LastEngaged:  rec.LastEngaged,
-		StateChanged: rec.StateChanged,
-		TurnCount:    rec.TurnCount,
-		RecallFires:  rec.RecallFires,
+		ID:              rec.ID,
+		Project:         rec.Project,
+		Anchors:         append([]string(nil), rec.Anchors...),
+		Summary:         rec.Summary,
+		State:           rec.State,
+		Created:         rec.Created,
+		LastEngaged:     rec.LastEngaged,
+		StateChanged:    rec.StateChanged,
+		TurnCount:       rec.TurnCount,
+		RecallFires:     rec.RecallFires,
+		LastEngagedTurn: rec.LastEngagedTurn,
 	}
 }
 

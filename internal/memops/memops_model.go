@@ -69,6 +69,12 @@ type SpineRecord struct {
 
 	TurnCount   int `json:"turn_count"`
 	RecallFires int `json:"recall_fires"`
+
+	// LastEngagedTurn is the global session-monotonic turn index
+	// (State.TurnNumber) at which the thread was last engaged — the
+	// basis for turn-based engagement decay (spec §3.5). A missing
+	// field in old JSON decodes to 0, treated as "very old".
+	LastEngagedTurn int `json:"last_engaged_turn"`
 }
 
 // HistorySymbol is one entry in a thread's frontmatter history_symbols list
@@ -99,6 +105,12 @@ type ThreadFrontmatter struct {
 
 	TurnCount   int `json:"turn_count" yaml:"turn_count"`
 	RecallFires int `json:"recall_fires" yaml:"recall_fires"`
+
+	// LastEngagedTurn is the global session-monotonic turn index
+	// (State.TurnNumber) at which the thread was last engaged — the
+	// basis for turn-based engagement decay (spec §3.5). A missing
+	// field in old YAML decodes to 0, treated as "very old".
+	LastEngagedTurn int `json:"last_engaged_turn" yaml:"last_engaged_turn"`
 
 	HistorySymbols []HistorySymbol `json:"history_symbols" yaml:"history_symbols"`
 }
