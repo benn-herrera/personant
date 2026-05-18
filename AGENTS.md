@@ -231,8 +231,11 @@ internal/store/             file substrate: paths, JSONL helpers,
 internal/autogit/           go-git-backed autonomic git wrapper with
                             bitflag systemic-validation policy
 internal/turn/              §3.0 chain, turn loop, per-turn coalescing,
-                            transient-data staging buffer
+                            transient-data staging buffer, §3.4 recall
+                            surface, §3.5 decay-triggered closure flow
 internal/recall/            symbolic Jaccard recall matcher
+internal/curator/           closure-summary drafting (§3.5/§5.2):
+                            model-backed summary + anchor selection
 internal/chat/              REPL, slash dispatch, bootstrap UX
 internal/workset/           layered context composition (E/A1/A2/B/C)
 internal/prompt/            template + topic-tag parser + stream filter
