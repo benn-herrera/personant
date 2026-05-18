@@ -22,6 +22,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"personant/internal/dedup"
 	"personant/internal/memops"
 	"personant/internal/prompt"
 	"personant/internal/store"
@@ -352,7 +353,7 @@ func renderLayerB(state State, budget Budget, logf func(string, ...any)) string 
 	rendered := make([]string, 0, limit)
 	for i := 0; i < limit; i++ {
 		id := state.ActiveThreads[i]
-		body, err := renderThreadBody(state.Paths, id)
+		body, err := renderThreadBody(state.Paths, id, logf)
 		if err != nil {
 			logf("workset: layer B: %s: %v", id, err)
 			continue
@@ -373,8 +374,14 @@ func renderLayerB(state State, budget Budget, logf func(string, ...any)) string 
 //
 //	<body>
 //
-// The body is the markdown content from the thread file, verbatim.
-func renderThreadBody(paths store.PersonantPaths, id string) (string, error) {
+//	=== tracked files ===
+//	<one block per §3.9.2 tracked file>
+//
+// The body is the markdown content from the thread file, verbatim. The
+// tracked-files section is appended only when the thread has a
+// .files.json sidecar with ≥1 entry; absent or empty sidecar renders
+// nothing extra, keeping no-tracked-file threads byte-identical.
+func renderThreadBody(paths store.PersonantPaths, id string, logf func(string, ...any)) (string, error) {
 	thr, err := store.LoadThread(paths, id)
 	if err != nil {
 		return "", err
@@ -399,7 +406,85 @@ func renderThreadBody(paths store.PersonantPaths, id string) (string, error) {
 	b.WriteString(strings.Join(fm.Anchors, ", "))
 	b.WriteString("\n\n")
 	b.WriteString(strings.TrimRight(thr.Body, "\n"))
+
+	appendTrackedFiles(&b, paths, id, logf)
 	return b.String(), nil
+}
+
+// appendTrackedFiles appends the §3.9.2 tracked-files section to b for
+// thread id. A missing sidecar yields an empty store and the section is
+// omitted entirely. A LiveWindow failure on one file is logged via logf
+// and that file skipped (tolerate-and-continue, matching renderLayerB).
+func appendTrackedFiles(b *strings.Builder, paths store.PersonantPaths, id string, logf func(string, ...any)) {
+	tf, err := store.LoadThreadFiles(paths, id)
+	if err != nil {
+		logf("workset: layer B: %s: load tracked files: %v", id, err)
+		return
+	}
+	if len(tf.Files) == 0 {
+		return
+	}
+	paths2 := make([]string, 0, len(tf.Files))
+	for p := range tf.Files {
+		paths2 = append(paths2, p)
+	}
+	sort.Strings(paths2)
+
+	var section strings.Builder
+	for _, p := range paths2 {
+		entry := tf.Files[p]
+		window, err := entry.Chain.LiveWindow(dedup.LiveDiffWindow)
+		if err != nil {
+			logf("workset: layer B: %s: tracked file %s: %v", id, p, err)
+			continue
+		}
+		writeTrackedFile(&section, entry, window)
+	}
+	if section.Len() == 0 {
+		return
+	}
+	b.WriteString("\n\n=== tracked files ===\n")
+	b.WriteString(strings.TrimRight(section.String(), "\n"))
+}
+
+// writeTrackedFile renders one tracked file's §3.9.2 block: a path
+// header (with the commit hash when committed), the current literal,
+// then the older entries oldest-first — diffs as labelled unified-diff
+// blocks, identifiers as their bracketed line.
+func writeTrackedFile(b *strings.Builder, entry *store.FileEntry, window []dedup.WindowEntry) {
+	b.WriteString("--- ")
+	b.WriteString(entry.Path)
+	if entry.LastCommit != "" {
+		b.WriteString(" [committed ")
+		b.WriteString(entry.LastCommit)
+		b.WriteString("]")
+	}
+	b.WriteString(" ---\n")
+
+	// window is oldest-first; the last entry is current. Render the
+	// current literal first, then the older history in temporal order.
+	for _, e := range window {
+		if e.Kind != "current" {
+			continue
+		}
+		b.WriteString(e.Text)
+		if !strings.HasSuffix(e.Text, "\n") {
+			b.WriteString("\n")
+		}
+	}
+	for _, e := range window {
+		switch e.Kind {
+		case "diff":
+			fmt.Fprintf(b, "[version %d diff]\n", e.Version)
+			b.WriteString(e.Text)
+			if !strings.HasSuffix(e.Text, "\n") {
+				b.WriteString("\n")
+			}
+		case "identifier":
+			fmt.Fprintf(b, "[version %d] %s\n", e.Version, e.Text)
+		}
+	}
+	b.WriteString("\n")
 }
 
 // ---------- Layer C: dormant thread summaries ----------

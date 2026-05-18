@@ -621,6 +621,77 @@ func TestComposeFullIntegration(t *testing.T) {
 	}
 }
 
+// TestLayerBTrackedFilesSection seeds a .files.json sidecar for an
+// active thread and asserts renderThreadBody appends the §3.9.2
+// tracked-files section: a path header, the current literal, and older
+// versions as diffs / content-addressed identifiers.
+func TestLayerBTrackedFilesSection(t *testing.T) {
+	paths := newHome(t)
+	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
+	if err := store.SaveProjectMeta(paths, meta); err != nil {
+		t.Fatalf("save meta: %v", err)
+	}
+	seedThread(t, paths, "thr_1", meta.ID, "thread body text")
+
+	// Build a tracked file with enough versions to produce both a diff
+	// and an identifier entry under the default 3-diff window.
+	tf := store.ThreadFiles{ThreadID: "thr_1", Files: map[string]*store.FileEntry{}}
+	for i := 0; i < 6; i++ {
+		body := fmt.Sprintf("title\nrevision %d\nstable footer\n", i)
+		tf.RecordWrite("src/main.go", body)
+	}
+	if err := store.SaveThreadFiles(paths, tf); err != nil {
+		t.Fatalf("save thread files: %v", err)
+	}
+
+	state := State{
+		Paths:         paths,
+		ActiveProject: meta,
+		ActiveThreads: []string{"thr_1"},
+		Budget:        DefaultBudget(),
+	}
+	params, err := Compose(state, ComposeOptions{})
+	if err != nil {
+		t.Fatalf("Compose: %v", err)
+	}
+	for _, want := range []string{
+		"=== tracked files ===",
+		"--- src/main.go ---",
+		"revision 5",                // current literal
+		"[version 4 diff]",          // a recent-diff entry
+		"see most-recent position]", // an older-version identifier
+	} {
+		if !strings.Contains(params.LayerB, want) {
+			t.Errorf("LayerB missing %q\ngot: %s", want, params.LayerB)
+		}
+	}
+}
+
+// TestLayerBNoTrackedFilesSidecar confirms a thread with no .files.json
+// sidecar renders no tracked-files section at all.
+func TestLayerBNoTrackedFilesSidecar(t *testing.T) {
+	paths := newHome(t)
+	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
+	if err := store.SaveProjectMeta(paths, meta); err != nil {
+		t.Fatalf("save meta: %v", err)
+	}
+	seedThread(t, paths, "thr_1", meta.ID, "plain thread body")
+
+	state := State{
+		Paths:         paths,
+		ActiveProject: meta,
+		ActiveThreads: []string{"thr_1"},
+		Budget:        DefaultBudget(),
+	}
+	params, err := Compose(state, ComposeOptions{})
+	if err != nil {
+		t.Fatalf("Compose: %v", err)
+	}
+	if strings.Contains(params.LayerB, "tracked files") {
+		t.Errorf("LayerB should have no tracked-files section; got %q", params.LayerB)
+	}
+}
+
 // ---- helpers ----
 
 func writeDigest(t *testing.T, paths store.PersonantPaths, d memops.ProjectDigest) {
