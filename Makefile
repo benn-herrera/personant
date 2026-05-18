@@ -116,10 +116,13 @@ cover: build recall-madlibs
 # a runtime parameter, no build tags. Deliberately NOT part of `make
 # test`: the default test run passes no flag, so TestSim there runs the
 # 1-day smoke rung. Run -v to see the logged metrics summary.
+# -timeout 0 disables go test's 10-minute default — the longer rungs
+# run for minutes to (at 6m) an hour; this is a deliberate, watched
+# invocation, so a runaway is the user's to Ctrl-C.
 #   make sim DURATION=1w   (1d|1w|1m|2m|6m or a Go duration like 168h)
 DURATION ?= 1w
 sim: build recall-madlibs
-	go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -sim.duration=$(DURATION)
+	go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 -sim.duration=$(DURATION)
 
 # integration-test runs the live-inference tests (build tag
 # `integration`) — they require the `reaper` provider reachable.
