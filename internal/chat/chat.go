@@ -93,9 +93,14 @@ func Run(opts Options) error {
 		return fmt.Errorf("chat: scaffold home: %w", err)
 	}
 
-	providers, err := ops.LoadProviders(ctx)
+	providers, faults, err := ops.LoadProviders(ctx)
 	if err != nil {
 		return fmt.Errorf("chat: load providers: %w", err)
+	}
+	// A broken pool entry is non-fatal: warn and carry on, so a session
+	// that does not use the broken provider still starts.
+	for _, fault := range faults {
+		fmt.Fprintf(opts.Stderr, "warn: provider %q unavailable: %s\n", fault.Name, fault.Reason)
 	}
 	if len(providers) == 0 {
 		return fmt.Errorf("chat: no providers configured in %s; edit it to add one (see spec §8.2.1)", paths.Providers)
@@ -106,21 +111,27 @@ func Run(opts Options) error {
 		return fmt.Errorf("chat: load config: %w", err)
 	}
 
+	// Cross-file validation: every [chat]/[embedding] reference must be
+	// well-formed and name a provider in the pool. Issues here are fatal
+	// — a misconfigured session must fail loud at bootstrap, not midway.
+	if issues := store.ValidateConfig(cfg, providers); len(issues) > 0 {
+		var b strings.Builder
+		b.WriteString("chat: config.toml validation failed:")
+		for _, iss := range issues {
+			fmt.Fprintf(&b, "\n  [%s] %s", iss.Section, iss.Message)
+		}
+		return errors.New(b.String())
+	}
+
 	// Resolve the chat provider and model. Precedence: CLI flag >
 	// config.toml [chat] > the conventional default / provider's own
 	// defaultModel. config.toml's "<provider>/<model>" reference names
-	// both; an invalid reference (or one naming an absent provider) is
-	// a bootstrap error.
+	// both; ValidateConfig has already verified the reference is
+	// well-formed and names a provider in the pool.
 	providerName := opts.ProviderName
 	chatModel := opts.Model
 	if cfg.Chat.DefaultModel != "" {
-		cp, cm, parsed := store.ParseModelRef(cfg.Chat.DefaultModel)
-		if !parsed {
-			return fmt.Errorf("chat: config.toml [chat] defaultModel %q is not a \"provider/model\" reference", cfg.Chat.DefaultModel)
-		}
-		if _, known := providers[cp]; !known {
-			return fmt.Errorf("chat: config.toml [chat] references provider %q, not in %s", cp, paths.Providers)
-		}
+		cp, cm, _ := store.ParseModelRef(cfg.Chat.DefaultModel)
 		if providerName == "" {
 			providerName = cp
 		}
@@ -181,17 +192,12 @@ func Run(opts Options) error {
 	// inferred from the chat provider. The embedding model defines the
 	// vector space; a model that could drift with the chat provider
 	// would silently corrupt the embedding index. Unset → embedding
-	// recall stays off (symbolic-only). An invalid reference is a
-	// bootstrap error — it fails loud.
+	// recall stays off (symbolic-only). ValidateConfig has already
+	// verified the reference is well-formed, names a provider in the
+	// pool, and matches that provider's defaultModel.
 	if cfg.Embedding.Model != "" {
-		ep, em, parsed := store.ParseModelRef(cfg.Embedding.Model)
-		if !parsed {
-			return fmt.Errorf("chat: config.toml [embedding] model %q is not a \"provider/model\" reference", cfg.Embedding.Model)
-		}
-		embProvider, known := providers[ep]
-		if !known {
-			return fmt.Errorf("chat: config.toml [embedding] references provider %q, not in %s", ep, paths.Providers)
-		}
+		ep, em, _ := store.ParseModelRef(cfg.Embedding.Model)
+		embProvider := providers[ep]
 		embedder := model.NewHTTPEmbedder(embProvider, em, cfg.Embedding.VectorLength)
 		state.Recaller = recall.NewService(ops, embedder)
 	}
@@ -624,7 +630,7 @@ func interactiveRecallResolver(in *bufio.Reader, out io.Writer) turn.RecallResol
 				accept = append(accept, i)
 			}
 		default:
-			for _, tok := range strings.Fields(trimmed) {
+			for tok := range strings.FieldsSeq(trimmed) {
 				n, perr := strconv.Atoi(tok)
 				if perr != nil || n < 1 || n > len(offer.Candidates) {
 					fmt.Fprintf(out, "ignoring %q\n", tok)

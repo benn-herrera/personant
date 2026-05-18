@@ -33,9 +33,13 @@ func projectRoot(t *testing.T) string {
 // APIKey — the fixture's apiKeyFile targets hold KEY_SECURITY_TEST_FAIL
 // sentinels, so an assertion message echoing one would itself be the
 // leak the sentinel is there to catch.
+//
+// The fixture also carries `broken-provider`, whose apiKeyFile points at
+// a file that does not exist: it must be omitted from the map and
+// reported as exactly one ProviderFault, without aborting the load.
 func TestLoadProvidersFixture(t *testing.T) {
 	path := filepath.Join(projectRoot(t), "test", "providers.toml")
-	got, err := LoadProviders(path)
+	got, faults, err := LoadProviders(path)
 	if err != nil {
 		t.Fatalf("LoadProviders: %v", err)
 	}
@@ -43,6 +47,26 @@ func TestLoadProvidersFixture(t *testing.T) {
 	for _, name := range []string{"local", "dummyrouter", "superinf", "dummy-emb-provider"} {
 		if _, ok := got.Get(name); !ok {
 			t.Errorf("missing provider %q (got %v)", name, keysOf(got))
+		}
+	}
+
+	// broken-provider's apiKeyFile is unreadable — it must not appear in
+	// the resolved map.
+	if _, ok := got.Get("broken-provider"); ok {
+		t.Errorf("broken-provider should be absent from the map (got %v)", keysOf(got))
+	}
+
+	// Exactly one fault, naming broken-provider. The Reason references
+	// the key-file path only — it must never carry key material.
+	if len(faults) != 1 {
+		t.Fatalf("expected exactly 1 ProviderFault, got %d: %+v", len(faults), faults)
+	}
+	if faults[0].Name != "broken-provider" {
+		t.Errorf("fault Name = %q, want broken-provider", faults[0].Name)
+	}
+	for _, leak := range []string{"somekey", "KEY_SECURITY_TEST_FAIL"} {
+		if strings.Contains(faults[0].Reason, leak) {
+			t.Errorf("ProviderFault.Reason carries key material (%q)", leak)
 		}
 	}
 
@@ -74,7 +98,7 @@ func TestLoadProvidersFixture(t *testing.T) {
 
 func TestLoadProvidersGetUnknown(t *testing.T) {
 	path := filepath.Join(projectRoot(t), "test", "providers.toml")
-	got, err := LoadProviders(path)
+	got, _, err := LoadProviders(path)
 	if err != nil {
 		t.Fatalf("LoadProviders: %v", err)
 	}
@@ -88,12 +112,15 @@ func TestLoadProvidersEmptyFile(t *testing.T) {
 	if err := os.WriteFile(path, nil, 0o644); err != nil {
 		t.Fatalf("write empty: %v", err)
 	}
-	got, err := LoadProviders(path)
+	got, faults, err := LoadProviders(path)
 	if err != nil {
 		t.Fatalf("LoadProviders empty: %v", err)
 	}
 	if len(got) != 0 {
 		t.Errorf("expected empty Providers, got %d entries: %v", len(got), keysOf(got))
+	}
+	if len(faults) != 0 {
+		t.Errorf("expected no faults from empty file, got %+v", faults)
 	}
 }
 
@@ -112,23 +139,29 @@ func TestLoadProvidersTemplateOnlyFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write template: %v", err)
 	}
-	got, err := LoadProviders(path)
+	got, faults, err := LoadProviders(path)
 	if err != nil {
 		t.Fatalf("LoadProviders template: %v", err)
 	}
 	if len(got) != 0 {
 		t.Errorf("expected empty Providers from comment-only file, got %d entries", len(got))
 	}
+	if len(faults) != 0 {
+		t.Errorf("expected no faults from comment-only file, got %+v", faults)
+	}
 }
 
 func TestLoadProvidersMissingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "definitely-not-here.toml")
-	got, err := LoadProviders(path)
+	got, faults, err := LoadProviders(path)
 	if err != nil {
 		t.Fatalf("LoadProviders missing: %v", err)
 	}
 	if len(got) != 0 {
 		t.Errorf("expected empty Providers on missing file, got %d entries", len(got))
+	}
+	if len(faults) != 0 {
+		t.Errorf("expected no faults from missing file, got %+v", faults)
 	}
 }
 
@@ -137,7 +170,7 @@ func TestLoadProvidersMalformed(t *testing.T) {
 	if err := os.WriteFile(path, []byte("[bad toml content\n"), 0o644); err != nil {
 		t.Fatalf("write malformed: %v", err)
 	}
-	_, err := LoadProviders(path)
+	_, _, err := LoadProviders(path)
 	if err == nil {
 		t.Fatal("expected error from malformed TOML, got nil")
 	}
@@ -163,7 +196,7 @@ this is not valid toml
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	_, err := LoadProviders(path)
+	_, _, err := LoadProviders(path)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

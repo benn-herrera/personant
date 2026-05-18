@@ -60,6 +60,71 @@ func LoadConfig(path string) (Config, error) {
 	return cfg, nil
 }
 
+// ConfigIssue is one cross-file validation problem found by ValidateConfig.
+type ConfigIssue struct {
+	Section string // "chat" or "embedding"
+	Message string
+}
+
+// ValidateConfig cross-checks a loaded config.toml against the provider
+// pool. It returns one ConfigIssue per problem; an empty slice means the
+// config is valid. An empty [chat] or [embedding] reference is NOT an
+// issue — it means "not configured, fall back to defaults".
+//
+// The chat model id is deliberately not validated here: chat model
+// correctness is resolved at runtime against the provider's /models
+// endpoint. The embedding model id, by contrast, is a hard static pin —
+// it defines the vector space — so it must match the provider's
+// defaultModel verbatim.
+func ValidateConfig(cfg Config, providers Providers) []ConfigIssue {
+	var issues []ConfigIssue
+
+	if cfg.Chat.DefaultModel != "" {
+		provider, _, ok := ParseModelRef(cfg.Chat.DefaultModel)
+		switch {
+		case !ok:
+			issues = append(issues, ConfigIssue{
+				Section: "chat",
+				Message: fmt.Sprintf("defaultModel %q is not a \"provider/model\" reference", cfg.Chat.DefaultModel),
+			})
+		default:
+			if _, known := providers[provider]; !known {
+				issues = append(issues, ConfigIssue{
+					Section: "chat",
+					Message: fmt.Sprintf("chat references provider %q, which is not in the provider pool", provider),
+				})
+			}
+		}
+	}
+
+	if cfg.Embedding.Model != "" {
+		provider, model, ok := ParseModelRef(cfg.Embedding.Model)
+		switch {
+		case !ok:
+			issues = append(issues, ConfigIssue{
+				Section: "embedding",
+				Message: fmt.Sprintf("model %q is not a \"provider/model\" reference", cfg.Embedding.Model),
+			})
+		default:
+			p, known := providers[provider]
+			switch {
+			case !known:
+				issues = append(issues, ConfigIssue{
+					Section: "embedding",
+					Message: fmt.Sprintf("embedding references provider %q, which is not in the provider pool", provider),
+				})
+			case model != p.DefaultModel:
+				issues = append(issues, ConfigIssue{
+					Section: "embedding",
+					Message: fmt.Sprintf("embedding model %q does not match provider %q defaultModel %q", model, provider, p.DefaultModel),
+				})
+			}
+		}
+	}
+
+	return issues
+}
+
 // ParseModelRef splits a "<provider>/<model>" config reference. The
 // split is on the FIRST '/', so the model part may itself contain
 // slashes (e.g. "openrouter/google/gemma-4-31b-it"). ok is false when

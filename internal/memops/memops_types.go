@@ -38,6 +38,10 @@ type (
 	// Provider is one LLM provider's connectivity record from
 	// providers.toml (spec §8.2.1).
 	Provider = store.Provider
+	// ProviderFault names a provider that parsed but could not be
+	// fully loaded (its apiKeyFile was unreadable); LoadProviders
+	// omits it from the map and reports it as a fault instead.
+	ProviderFault = store.ProviderFault
 	// Config is the personant settings file (config.toml) — the
 	// chat/embedding choices drawn from the providers.toml pool.
 	Config = store.Config

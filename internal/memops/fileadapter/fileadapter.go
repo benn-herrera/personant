@@ -19,6 +19,7 @@ package fileadapter
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"personant/internal/eventlog"
 	"personant/internal/index"
@@ -545,24 +546,24 @@ func bootstrapStepFromStore(s store.BootstrapStep) memops.BootstrapStep {
 // ---------- Configuration ----------
 
 // LoadProviders reads providers.toml. A nonexistent file yields an
-// empty map and no error.
-func (a *FileAdapter) LoadProviders(ctx context.Context) (map[string]memops.Provider, error) {
+// empty map and no error. A provider with an unreadable apiKeyFile is
+// omitted from the map and returned as a ProviderFault; the error is
+// reserved for file-level failures.
+func (a *FileAdapter) LoadProviders(ctx context.Context) (map[string]memops.Provider, []memops.ProviderFault, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	providers, err := store.LoadProviders(a.paths.Providers)
+	providers, faults, err := store.LoadProviders(a.paths.Providers)
 	if err != nil {
-		return nil, fmt.Errorf("fileadapter: load providers: %w", err)
+		return nil, nil, fmt.Errorf("fileadapter: load providers: %w", err)
 	}
 	// store.Providers is map[string]store.Provider; memops.Provider is an
 	// alias for store.Provider, so the assignment is type-compatible
 	// element-by-element. Allocate a fresh map of the named target type
 	// for clarity to callers reading via the port.
 	out := make(map[string]memops.Provider, len(providers))
-	for name, p := range providers {
-		out[name] = p
-	}
-	return out, nil
+	maps.Copy(out, providers)
+	return out, faults, nil
 }
 
 // LoadConfig reads config.toml — the chat/embedding choices. A

@@ -43,7 +43,7 @@ func Run(ops memops.MemoryOps, opts Options) error {
 		timeout = 30 * time.Second
 	}
 
-	providers, err := ops.LoadProviders(context.Background())
+	providers, _, err := ops.LoadProviders(context.Background())
 	if err != nil {
 		return fmt.Errorf("ping: load providers: %w", err)
 	}

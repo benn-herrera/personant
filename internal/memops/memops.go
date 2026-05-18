@@ -307,10 +307,15 @@ type MemoryOps interface {
 	// LoadProviders reads the LLM provider configuration table from
 	// the substrate (today, providers.toml). Folds in
 	// store.LoadProviders. A nonexistent or empty config yields an
-	// empty map and no error — `personant init` writes a
+	// empty map, no faults, and no error — `personant init` writes a
 	// template-only file and a fresh home may not have written one
 	// yet at all.
-	LoadProviders(ctx context.Context) (map[string]Provider, error)
+	//
+	// A provider that parsed but whose apiKeyFile is unreadable is
+	// omitted from the map and reported as a ProviderFault; the rest
+	// of the pool still loads. The error return is reserved for
+	// file-level failures (providers.toml unreadable or malformed).
+	LoadProviders(ctx context.Context) (map[string]Provider, []ProviderFault, error)
 
 	// LoadConfig reads config.toml — the chat/embedding choices that
 	// draw from the providers.toml pool. Folds in store.LoadConfig. A

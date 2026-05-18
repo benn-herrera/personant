@@ -44,6 +44,15 @@ type Provider struct {
 // Providers is a name-keyed set of providers loaded from providers.toml.
 type Providers map[string]Provider
 
+// ProviderFault names a provider that parsed correctly but could not
+// be fully loaded — its apiKeyFile was unreadable. The provider is
+// omitted from the returned Providers map; the fault lets the caller
+// surface the problem without discarding the rest of the pool.
+type ProviderFault struct {
+	Name   string
+	Reason string // never carries key content — path/IO detail only
+}
+
 // Get returns the provider by name. The second return is false when the
 // name is unknown (i.e. not declared in providers.toml).
 func (p Providers) Get(name string) (Provider, bool) {
@@ -56,38 +65,47 @@ func (p Providers) Get(name string) (Provider, bool) {
 // (read relative to the providers.toml directory), otherwise from
 // APIKeyUnsafe.
 //
-// A nonexistent or empty file yields an empty Providers and a nil
-// error — a fresh home may not have a populated providers.toml yet.
+// A nonexistent or empty file yields an empty Providers, no faults, and
+// a nil error — a fresh home may not have a populated providers.toml
+// yet.
 //
-// Errors are wrapped without TOML value content or key material — a
-// parse error references line/column, and a key-file read error
-// references the path, so no secret leaks through an error string.
-func LoadProviders(path string) (Providers, error) {
+// The error return is reserved for file-level failures only: the
+// providers.toml file unreadable (non-not-exist) or malformed TOML. A
+// provider whose apiKeyFile is set but unreadable does NOT abort the
+// load — it is omitted from the returned map and appended to the
+// returned []ProviderFault so the rest of the pool still loads.
+//
+// Errors and faults are constructed without TOML value content or key
+// material — a parse error references line/column, and a key-file read
+// failure references the path, so no secret leaks.
+func LoadProviders(path string) (Providers, []ProviderFault, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return Providers{}, nil
+			return Providers{}, nil, nil
 		}
-		return nil, fmt.Errorf("providers: read %s: %w", path, err)
+		return nil, nil, fmt.Errorf("providers: read %s: %w", path, err)
 	}
 
 	raw := map[string]Provider{}
 	if _, err := toml.Decode(string(data), &raw); err != nil {
-		return nil, fmt.Errorf("providers: parse %s: %w", path, err)
+		return nil, nil, fmt.Errorf("providers: parse %s: %w", path, err)
 	}
 
 	dir := filepath.Dir(path)
 	out := make(Providers, len(raw))
+	var faults []ProviderFault
 	for name, p := range raw {
 		p.Name = name
 		key, err := resolveAPIKey(p, dir)
 		if err != nil {
-			return nil, fmt.Errorf("providers: %s: %w", name, err)
+			faults = append(faults, ProviderFault{Name: name, Reason: err.Error()})
+			continue
 		}
 		p.APIKey = key
 		out[name] = p
 	}
-	return out, nil
+	return out, faults, nil
 }
 
 // resolveAPIKey returns the provider's API key from APIKeyFile

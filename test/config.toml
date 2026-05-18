@@ -1,5 +1,5 @@
 [embedding]
-model = "dummy-emb-provider/dummy-emb-model"
+model = "dummy-emb-provider/dummy-creator/dummy-emb-model"
 
 [chat]
 defaultModel = "dummyrouter/gemma-main"
