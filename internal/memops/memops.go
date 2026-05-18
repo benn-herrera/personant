@@ -287,6 +287,33 @@ type MemoryOps interface {
 	// adapter).
 	Log(ctx context.Context, category, action, details string) error
 
+	// ---------- §3.9 tracked-file content ----------
+
+	// RecordFileWrite records a content write for a tracked file in the
+	// per-thread §3.9 file store: it loads the thread's tracked-file
+	// sidecar, appends `content` as the path's new version, and saves it.
+	// Folds in store.LoadThreadFiles + ThreadFiles.RecordWrite +
+	// store.SaveThreadFiles.
+	//
+	// The write is idempotent on unchanged content: a re-write whose
+	// `content` equals the path's current version grows neither the
+	// version chain nor un-commits a committed file. The durable home of
+	// file content is this store, not the delta event log — the event
+	// log records only the event line.
+	RecordFileWrite(ctx context.Context, threadID, path, content string) error
+
+	// RecordFileCommit records a git-commit pointer for a tracked file in
+	// the per-thread §3.9 file store: it loads the sidecar, sets the
+	// commit hash + timestamp on the path's entry, and saves it. The
+	// adapter stamps the commit timestamp itself (clock.Timeline()) — the
+	// port carries no timestamp. Folds in store.LoadThreadFiles +
+	// ThreadFiles.RecordCommit + store.SaveThreadFiles.
+	//
+	// Returns an error when `path` is not tracked (a file the store has
+	// never seen a write for cannot be committed); callers treat that as
+	// non-fatal.
+	RecordFileCommit(ctx context.Context, threadID, path, hash string) error
+
 	// ---------- Bootstrap and verification ----------
 
 	// Init scaffolds the substrate for first-run use. Idempotent: a

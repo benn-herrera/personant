@@ -50,6 +50,7 @@ package sim
 
 import (
 	"fmt"
+	"hash/fnv"
 	"math/rand"
 	"strings"
 	"time"
@@ -271,8 +272,70 @@ func (t thread) threadID() string {
 	return fmt.Sprintf("thr_%d", t.order+1)
 }
 
+// fileState is the §3.9 per-thread tracked-file model the generator
+// carries to drive a realistic read/modify/write cycle on `work` turns.
+// path is derived deterministically from the thread's bound corpus topic;
+// content starts from a deterministic topic-keyed baseline and grows by
+// one line per write. writeCount counts writes applied so far — it both
+// keys the per-write content mutation (so successive writes produce real
+// diffs) and triggers a periodic fs.commit (every commitEvery writes).
+type fileState struct {
+	path       string
+	content    string
+	writeCount int
+}
+
+// commitEvery is N for the "every Nth write emits an fs.commit" rule. A
+// commit exercises the §3.9 git-commit pointer that checkpoint 5d's
+// clock-aging consumes.
+const commitEvery = 5
+
+// workFile returns the §3.9 file state for thread idx, creating it on
+// first use. The path is <topic>.go (topic slug sanitized to a filename);
+// the baseline content is a deterministic topic-keyed package stub. The
+// binding is purely a function of the thread's bound slot, so the same
+// config yields byte-identical file content.
+func (g *generator) workFile(idx int) *fileState {
+	if fs, ok := g.files[idx]; ok {
+		return fs
+	}
+	thr := g.threads[idx]
+	slot := g.model.slots[thr.slotIdx]
+	name := fileSlug(slot.Topic)
+	fs := &fileState{
+		path: name + ".go",
+		content: fmt.Sprintf("// %s.go — %s\npackage %s\n",
+			name, slot.Topic, name),
+	}
+	g.files[idx] = fs
+	return fs
+}
+
+// fileSlug turns a corpus topic name into a filename-safe lowercase slug:
+// non-alphanumeric runs collapse to a single underscore. Deterministic.
+func fileSlug(topic string) string {
+	var b strings.Builder
+	prevUnderscore := false
+	for _, r := range strings.ToLower(topic) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevUnderscore = false
+			continue
+		}
+		if !prevUnderscore {
+			b.WriteByte('_')
+			prevUnderscore = true
+		}
+	}
+	s := strings.Trim(b.String(), "_")
+	if s == "" {
+		return "topic"
+	}
+	return s
+}
+
 // turnType is the rapid/work classification driving gap length and
-// whether a PreEvents tool.result delta is attached.
+// whether a PreEvents file-edit cycle is attached.
 type turnType int
 
 const (
@@ -326,6 +389,7 @@ func GenerateWorkload(cfg WorkloadConfig) scenarios.Scenario {
 			slots:      cfg.Corpus,
 			familySize: cfg.FamilySize,
 		},
+		files: map[int]*fileState{},
 	}
 
 	// An empty corpus has no slot to bind threads to — emit nothing.
@@ -421,6 +485,12 @@ type generator struct {
 	// candidate — when it is no longer in Layer B but was engaged within
 	// the last ResumeWindowTurns turns.
 	lastEngagedTurn []int
+
+	// files[idx] is the §3.9 tracked-file state for thread idx: the
+	// deterministic file path and the file's current content, which grows
+	// by one line on every `work`-turn write. A thread gets a fileState
+	// the first time a work turn engages it (see workFile).
+	files map[int]*fileState
 
 	steps      []scenarios.Step
 	simNow     time.Duration
@@ -694,16 +764,41 @@ func (g *generator) buildStep(tt turnType, act action) scenarios.Step {
 		ClosureAck: &scenarios.ClosureAck{Outcome: turn.ClosureResolved},
 	}
 
-	// work turns carry a synthetic file-read delta to exercise the
-	// Phase B transient-data lifecycle on the heavy turns. rapid turns
-	// have no PreEvents.
+	// work turns carry a real §3.9 read/modify/write cycle to exercise
+	// the working-set content-dedup integration on the heavy turns:
+	// fs.read of the file's current content, a deterministic modify, then
+	// fs.write of the new content. Every commitEvery-th write also emits
+	// an fs.commit with a deterministic synthetic hash. rapid turns have
+	// no PreEvents.
 	if tt == turnWork {
-		fileText := fmt.Sprintf("cat %s.go returned: references %s",
-			slot.Topic, strings.Join(slot.Tags[:min(3, len(slot.Tags))], " "))
-		step.PreEvents = []turn.Delta{{
-			Source:  "tool.result",
-			Content: fileText,
+		fs := g.workFile(idx)
+		// fs.read: the file's content as it stands before this turn's edit.
+		preEvents := []turn.Delta{{
+			Source:  "fs.read",
+			Content: fs.content,
+			Meta:    map[string]string{"path": fs.path},
 		}}
+		// Modify: append a deterministic line keyed off the topic and the
+		// write count so successive writes produce real diffs.
+		fs.writeCount++
+		fs.content += fmt.Sprintf("\n// edit %d: %s\n", fs.writeCount, slot.Topic)
+		// fs.write: the new content.
+		preEvents = append(preEvents, turn.Delta{
+			Source:  "fs.write",
+			Content: fs.content,
+			Meta:    map[string]string{"path": fs.path},
+		})
+		// Every commitEvery-th write commits to the user's project git.
+		if fs.writeCount%commitEvery == 0 {
+			preEvents = append(preEvents, turn.Delta{
+				Source: "fs.commit",
+				Meta: map[string]string{
+					"path": fs.path,
+					"hash": syntheticHash(fs.content),
+				},
+			})
+		}
+		step.PreEvents = preEvents
 	}
 
 	// RecallAck is set on every step (a nil ack would disable the
@@ -727,6 +822,17 @@ func (g *generator) buildStep(tt turnType, act action) scenarios.Step {
 	// this turn's engagement. len(g.steps) is this turn's 0-based index.
 	g.engage(idx, len(g.steps))
 	return step
+}
+
+// syntheticHash returns a short deterministic hex digest of content, used
+// as the synthetic git-commit hash on an fs.commit delta. It is a content
+// hash (FNV-64a), so it is reproducible across runs and distinct per
+// content revision — exactly what checkpoint 5d's clock-aging needs from a
+// commit pointer.
+func syntheticHash(content string) string {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(content))
+	return fmt.Sprintf("%012x", h.Sum64()&0xffffffffffff)
 }
 
 func turnTypeName(tt turnType) string {

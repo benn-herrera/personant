@@ -93,6 +93,14 @@ type State struct {
 	// turn-scoped state
 	coalesce *coalesceBuffer
 
+	// fileEdits buffers §3.9 file-edit events (fs.read / fs.write /
+	// fs.commit) observed across the deltas of one turn. File-edit deltas
+	// arrive before the turn's engaged thread is known (engagement is
+	// deferred to turn close per §3.0.4), so they are buffered here and
+	// applied to the primary engaged thread's tracked-file store at close.
+	// Reset at the top of every Run alongside coalesce.
+	fileEdits []fileEdit
+
 	// TurnNumber is the monotonically incrementing turn count for this
 	// State. Incremented at the top of every Run before any chain steps
 	// fire, so a staged delta's StagedAt always matches the turn during
@@ -214,6 +222,9 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 		state.staging = newStagingBuffer()
 	}
 	state.coalesce.reset()
+	// §3.9 file-edit buffer is per-turn — clear it alongside coalesce so a
+	// prior turn's buffered edits cannot leak into this turn's close.
+	state.fileEdits = state.fileEdits[:0]
 	// Bump the turn counter BEFORE any chain step fires so the user.prompt
 	// delta and the model.response delta both observe the same
 	// TurnNumber. The transient-data lifecycle B.4 window-close GC keys
@@ -633,6 +644,12 @@ const historyCapPerThread = 40
 // the next turn's prompt includes them.
 func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, responseBody string) error {
 	if len(state.coalesce.threads) == 0 {
+		// No thread was engaged this turn. Any buffered §3.9 file edits
+		// have no thread to attach to — log and drop rather than crash.
+		if len(state.fileEdits) > 0 {
+			_ = state.Ops.Log(ctx, "fs", "orphan-edit",
+				"count="+itoa(len(state.fileEdits))+" reason=no-engaged-thread")
+		}
 		return nil
 	}
 
@@ -659,6 +676,15 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 		engaged = append(engaged, threadID)
 	}
 
+	// §3.9 step-3 close: apply this turn's buffered file edits to the
+	// primary engaged thread (engaged[0] — for a `work` turn that is the
+	// turn's single engaged thread). A RecordFileCommit error (an
+	// untracked path — e.g. a commit with no preceding write) is
+	// non-fatal: log it and continue, do not abort the turn.
+	if len(state.fileEdits) > 0 {
+		applyFileEdits(ctx, state, engaged[0])
+	}
+
 	updateLayerLRU(state, engaged)
 
 	engagedSet := make(map[string]struct{}, len(engaged))
@@ -670,6 +696,30 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 		// Non-fatal: opportunistic recall failure does not abort the turn.
 	}
 	return nil
+}
+
+// applyFileEdits flushes this turn's buffered §3.9 file-edit events into
+// threadID's tracked-file store, in buffer (chain) order. A write folds
+// content into the path's version chain via RecordFileWrite; a commit
+// records the git-commit pointer via RecordFileCommit. A commit against
+// an untracked path (no preceding write) is non-fatal — RecordFileCommit
+// returns an error, which is logged as fs/commit-untracked and skipped so
+// the turn still completes.
+func applyFileEdits(ctx context.Context, state *State, threadID string) {
+	for _, fe := range state.fileEdits {
+		switch fe.kind {
+		case fileEditWrite:
+			if err := state.Ops.RecordFileWrite(ctx, threadID, fe.path, fe.content); err != nil {
+				_ = state.Ops.Log(ctx, "fs", "write-error",
+					"thr="+threadID+" path="+fe.path+" err="+sanitizeDetail(err.Error()))
+			}
+		case fileEditCommit:
+			if err := state.Ops.RecordFileCommit(ctx, threadID, fe.path, fe.hash); err != nil {
+				_ = state.Ops.Log(ctx, "fs", "commit-untracked",
+					"thr="+threadID+" path="+fe.path+" err="+sanitizeDetail(err.Error()))
+			}
+		}
+	}
 }
 
 // updateLayerLRU applies the §3.1 Layer B/C eviction policy after a

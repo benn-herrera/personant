@@ -903,3 +903,79 @@ func TestRunRePromptLogsThreadFetchedDelta(t *testing.T) {
 		t.Errorf("log missing topic.re-prompt line:\n%s", logBody)
 	}
 }
+
+// TestRunBuffersFileEditsIntoThreadStore — the §3.9 checkpoint 5c path:
+// fs.read / fs.write / fs.commit PreEvents are buffered during the turn
+// and applied to the engaged thread's tracked-file sidecar at close.
+func TestRunBuffersFileEditsIntoThreadStore(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedThreadAndSpine(t, paths, meta.ID, "thr_42")
+
+	mock := model.NewScriptedMock([]model.Response{
+		{Content: "*topic: thr_42 [a, b, c, d]*\nDone."},
+	}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	pinClock(t, time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
+
+	pre := []Delta{
+		{Source: "fs.read", Content: "v0", Meta: map[string]string{"path": "src/a.go"}},
+		{Source: "fs.write", Content: "v1", Meta: map[string]string{"path": "src/a.go"}},
+		{Source: "fs.commit", Meta: map[string]string{"path": "src/a.go", "hash": "deadbeef"}},
+	}
+	if _, err := RunWithDeltas(context.Background(), state, pre, "edit it", io.Discard); err != nil {
+		t.Fatalf("RunWithDeltas: %v", err)
+	}
+
+	tf, err := store.LoadThreadFiles(paths, "thr_42")
+	if err != nil {
+		t.Fatalf("LoadThreadFiles: %v", err)
+	}
+	e, ok := tf.Entry("src/a.go")
+	if !ok {
+		t.Fatal("src/a.go not tracked after turn close")
+	}
+	// fs.read seeds the chain with "v0"; fs.write appends "v1" → len 2.
+	if e.Chain.Len() != 2 {
+		t.Errorf("Chain.Len = %d, want 2", e.Chain.Len())
+	}
+	if e.Chain.Current() != "v1" {
+		t.Errorf("Chain.Current = %q, want v1", e.Chain.Current())
+	}
+	// fs.commit lands after the write (the write is "v1"); the commit
+	// pointer is the synthetic hash, stamped by the adapter's clock.
+	if e.LastCommit != "deadbeef" {
+		t.Errorf("LastCommit = %q, want deadbeef", e.LastCommit)
+	}
+	if e.CommittedAt == "" {
+		t.Error("CommittedAt empty after fs.commit")
+	}
+}
+
+// TestRunFileCommitUntrackedIsNonFatal — an fs.commit with no preceding
+// write hits an untracked path; RecordFileCommit errors, but the turn
+// must still complete (the error is logged, not propagated).
+func TestRunFileCommitUntrackedIsNonFatal(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedThreadAndSpine(t, paths, meta.ID, "thr_42")
+
+	mock := model.NewScriptedMock([]model.Response{
+		{Content: "*topic: thr_42 [a, b, c, d]*\nDone."},
+	}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	pinClock(t, time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
+
+	pre := []Delta{
+		{Source: "fs.commit", Meta: map[string]string{"path": "never-written.go", "hash": "h"}},
+	}
+	if _, err := RunWithDeltas(context.Background(), state, pre, "commit it", io.Discard); err != nil {
+		t.Fatalf("RunWithDeltas must not fail on untracked commit: %v", err)
+	}
+
+	tf, err := store.LoadThreadFiles(paths, "thr_42")
+	if err != nil {
+		t.Fatalf("LoadThreadFiles: %v", err)
+	}
+	if _, ok := tf.Entry("never-written.go"); ok {
+		t.Error("untracked commit should not have created a file entry")
+	}
+}

@@ -133,6 +133,34 @@ func TestRecordWriteClearsCommitPointer(t *testing.T) {
 	}
 }
 
+func TestRecordWriteUnchangedContentIsNoOp(t *testing.T) {
+	tf := ThreadFiles{ThreadID: "thr_7", Files: map[string]*FileEntry{}}
+	tf.RecordWrite("f.txt", "v0")
+	if err := tf.RecordCommit("f.txt", "h1", "2026-05-18T00:00:00Z"); err != nil {
+		t.Fatalf("RecordCommit: %v", err)
+	}
+
+	// Re-write with byte-identical content: must not grow the chain and
+	// must not clear the commit pointer.
+	tf.RecordWrite("f.txt", "v0")
+	e, _ := tf.Entry("f.txt")
+	if e.Chain.Len() != 1 {
+		t.Errorf("after unchanged re-write Chain.Len = %d, want 1", e.Chain.Len())
+	}
+	if e.LastCommit != "h1" || e.CommittedAt != "2026-05-18T00:00:00Z" {
+		t.Errorf("commit pointer cleared by unchanged re-write: (%q,%q)", e.LastCommit, e.CommittedAt)
+	}
+
+	// A genuine change still appends and still clears the commit pointer.
+	tf.RecordWrite("f.txt", "v1")
+	if e.Chain.Len() != 2 {
+		t.Errorf("after changed write Chain.Len = %d, want 2", e.Chain.Len())
+	}
+	if e.LastCommit != "" || e.CommittedAt != "" {
+		t.Errorf("commit pointer not cleared by changed write: (%q,%q)", e.LastCommit, e.CommittedAt)
+	}
+}
+
 func TestRecordCommitErrors(t *testing.T) {
 	tf := ThreadFiles{ThreadID: "thr_6", Files: map[string]*FileEntry{}}
 	tf.RecordWrite("tracked.txt", "x")

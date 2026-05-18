@@ -29,6 +29,28 @@ type Delta struct {
 	Retention memops.RetentionClass
 }
 
+// fileEditKind discriminates the two §3.9 buffered file-edit operations:
+// a content write (from fs.read or fs.write) or a git-commit pointer
+// update (from fs.commit).
+type fileEditKind int
+
+const (
+	fileEditWrite fileEditKind = iota
+	fileEditCommit
+)
+
+// fileEdit is one buffered §3.9 file-edit event. It is accumulated on
+// State.fileEdits during a turn and applied to the primary engaged
+// thread's tracked-file store at turn close. For a write, content holds
+// the full file content; for a commit, hash holds the commit hash and
+// content is unused.
+type fileEdit struct {
+	kind    fileEditKind
+	path    string
+	content string
+	hash    string
+}
+
 // userTagRE matches user-emitted hash-tags in a prompt. The character
 // class deliberately excludes uppercase letters — the §2.7.2
 // normalization downcase happens via memops.Normalize after extraction,
@@ -56,17 +78,24 @@ func onContextDelta(ctx context.Context, state *State, delta Delta) error {
 	if delta.Retention == "" {
 		delta.Retention = provisionalRetention(delta.Source)
 	}
-	// Step 1: symbol extraction.
+	// Step 1: symbol extraction. Runs over the FULL delta content — the
+	// step-5 event-log minimization below must not affect what is
+	// extracted, so it happens first and against the unmodified delta.
 	if err := extractSymbols(ctx, state, delta); err != nil {
 		return fmt.Errorf("turn: extract symbols: %w", err)
 	}
 	// Step 2: engagement signal (DEFERRED per §3.0.4 — enqueue only).
 	//   noteEngagementOwed(state, delta) is implicit: extractSymbols put
 	//   the source's threads into state.coalesce.threads.
-	// Step 3: dedup decision — no-op in v0.1.
-	//   TODO(v0.2-dedup): per §3.9, replace literals with content-addressed
-	//   identifiers in the live window once a second-or-later occurrence is
-	//   observed; persistent storage records the diff chain.
+	// Step 3: §3.9 dedup decision — buffer file-edit events. The turn's
+	// engaged thread is not known until close (§3.0.4), so a file-edit
+	// delta is buffered here and applied to the primary engaged thread's
+	// tracked-file store at turn close. fs.read and fs.write both map to
+	// a write-buffer entry: the store's RecordWrite no-op guard makes an
+	// unchanged re-read harmless.
+	if err := bufferFileEdit(ctx, state, delta); err != nil {
+		return err
+	}
 	// Step 4: budget check — no-op in v0.1.
 	//   TODO(phase-2-budget): track byte counts when working-set composition
 	//   lands more layers (§2.e); evict to honor layer caps.
@@ -74,13 +103,59 @@ func onContextDelta(ctx context.Context, state *State, delta Delta) error {
 	// substrate side. Retention is the provisional class set above (or
 	// the caller's explicit override). The current file adapter ignores
 	// the field; a future transient-data-aware adapter will route on it.
+	//
+	// §3.9 content minimization: for fs.read / fs.write the full file
+	// content lives in the tracked-file store (buffered above); the event
+	// log records only a short metadata summary so the file content is
+	// not duplicated into the log. The buffered entry keeps the full
+	// content untouched — only this logged copy is summarized.
+	logContent := delta.Content
+	if delta.Source == "fs.read" || delta.Source == "fs.write" {
+		logContent = fmt.Sprintf("%s path=%s bytes=%d",
+			delta.Source, delta.Meta["path"], len(delta.Content))
+	}
 	if err := state.Ops.EmitDelta(ctx, memops.Delta{
 		Source:    delta.Source,
-		Content:   delta.Content,
+		Content:   logContent,
 		Meta:      delta.Meta,
 		Retention: delta.Retention,
 	}); err != nil {
 		return fmt.Errorf("turn: emit delta: %w", err)
+	}
+	return nil
+}
+
+// bufferFileEdit is the §3.9 step-3 hook: it appends a buffered file-edit
+// entry to state.fileEdits for an fs.read / fs.write / fs.commit delta.
+// fs.read and fs.write both buffer a write entry (the store's RecordWrite
+// no-op guard makes an unchanged re-read harmless); fs.commit buffers a
+// commit entry. The file path is read from delta.Meta["path"]; a delta
+// with no path is logged and skipped — it cannot be attributed to a file.
+// Non-fs delta sources are ignored.
+func bufferFileEdit(ctx context.Context, state *State, delta Delta) error {
+	switch delta.Source {
+	case "fs.read", "fs.write", "fs.commit":
+	default:
+		return nil
+	}
+	path := delta.Meta["path"]
+	if path == "" {
+		return state.Ops.Log(ctx, "fs", "edit-no-path",
+			"source="+delta.Source+" reason=missing-meta-path")
+	}
+	switch delta.Source {
+	case "fs.read", "fs.write":
+		state.fileEdits = append(state.fileEdits, fileEdit{
+			kind:    fileEditWrite,
+			path:    path,
+			content: delta.Content,
+		})
+	case "fs.commit":
+		state.fileEdits = append(state.fileEdits, fileEdit{
+			kind: fileEditCommit,
+			path: path,
+			hash: delta.Meta["hash"],
+		})
 	}
 	return nil
 }
@@ -93,7 +168,11 @@ func onContextDelta(ctx context.Context, state *State, delta Delta) error {
 // silently drop content).
 func provisionalRetention(source string) memops.RetentionClass {
 	switch source {
-	case "tool.result", "user.shell-capture":
+	case "tool.result", "user.shell-capture",
+		"fs.read", "fs.write", "fs.commit":
+		// §3.9 file-edit events are task-class: the durable home of file
+		// content is the per-thread tracked-file store, not the delta
+		// event log — the event-log line is just the event record.
 		return memops.RetentionTask
 	case "user.prompt", "model.response",
 		"thread.fetched", "digest.refresh",

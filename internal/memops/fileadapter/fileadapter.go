@@ -21,7 +21,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
+	"personant/internal/clock"
 	"personant/internal/eventlog"
 	"personant/internal/index"
 	"personant/internal/memops"
@@ -558,6 +560,52 @@ func (a *FileAdapter) Log(ctx context.Context, category, action, details string)
 	}
 	if err := eventlog.Log(a.paths, category, action, details); err != nil {
 		return fmt.Errorf("fileadapter: log: %w", err)
+	}
+	return nil
+}
+
+// ---------- §3.9 tracked-file content ----------
+
+// RecordFileWrite loads the thread's §3.9 tracked-file sidecar, appends
+// content as the path's new version, and saves the sidecar. A missing
+// sidecar is the fresh state — store.LoadThreadFiles returns an empty
+// store, so the first write seeds the path's chain. The write is
+// idempotent on unchanged content (see store.ThreadFiles.RecordWrite).
+func (a *FileAdapter) RecordFileWrite(ctx context.Context, threadID, path, content string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	tf, err := store.LoadThreadFiles(a.paths, threadID)
+	if err != nil {
+		return fmt.Errorf("fileadapter: record file write %s: load: %w", threadID, err)
+	}
+	tf.RecordWrite(path, content)
+	if err := store.SaveThreadFiles(a.paths, tf); err != nil {
+		return fmt.Errorf("fileadapter: record file write %s: save: %w", threadID, err)
+	}
+	return nil
+}
+
+// RecordFileCommit loads the thread's §3.9 tracked-file sidecar, sets the
+// git-commit pointer on the path's entry, and saves the sidecar. The
+// commit timestamp is stamped here from clock.Timeline() in RFC3339 form
+// — consistent with how eventlog stamps events — so the port signature
+// carries no timestamp. Surfaces ThreadFiles.RecordCommit's untracked-path
+// error to the caller (a commit with no preceding write).
+func (a *FileAdapter) RecordFileCommit(ctx context.Context, threadID, path, hash string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	tf, err := store.LoadThreadFiles(a.paths, threadID)
+	if err != nil {
+		return fmt.Errorf("fileadapter: record file commit %s: load: %w", threadID, err)
+	}
+	committedAt := clock.Timeline().Format(time.RFC3339)
+	if err := tf.RecordCommit(path, hash, committedAt); err != nil {
+		return fmt.Errorf("fileadapter: record file commit %s: %w", threadID, err)
+	}
+	if err := store.SaveThreadFiles(a.paths, tf); err != nil {
+		return fmt.Errorf("fileadapter: record file commit %s: save: %w", threadID, err)
 	}
 	return nil
 }

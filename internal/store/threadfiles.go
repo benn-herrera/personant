@@ -120,8 +120,15 @@ func SaveThreadFiles(paths PersonantPaths, tf ThreadFiles) error {
 // up the entry for path (creating one with a fresh dedup.Chain if absent),
 // then appends content as the new current version.
 //
-// A write always invalidates the commit pointer: LastCommit and
+// A genuine content change invalidates the commit pointer: LastCommit and
 // CommittedAt are cleared, since the file now has uncommitted edits.
+//
+// Idempotency: if path is already tracked and content equals the entry's
+// current chain literal, RecordWrite is a no-op — no new chain version is
+// appended and the commit pointer is left intact. An unchanged re-read
+// (fs.read carrying content that has not moved) or an idempotent re-write
+// must neither grow the version chain nor silently un-commit a committed
+// file.
 func (tf *ThreadFiles) RecordWrite(path, content string) {
 	if tf.Files == nil {
 		tf.Files = map[string]*FileEntry{}
@@ -130,6 +137,14 @@ func (tf *ThreadFiles) RecordWrite(path, content string) {
 	if !ok {
 		e = &FileEntry{Path: path}
 		tf.Files[path] = e
+		e.Chain.Append(content)
+		e.LastCommit = ""
+		e.CommittedAt = ""
+		return
+	}
+	if e.Chain.Current() == content {
+		// Unchanged content: no chain growth, commit pointer untouched.
+		return
 	}
 	e.Chain.Append(content)
 	e.LastCommit = ""
