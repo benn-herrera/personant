@@ -19,6 +19,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -315,6 +316,11 @@ func RunScenario(t *testing.T, sc Scenario) *Harness {
 	return h
 }
 
+// runTimestampSuffixRE matches a trailing `.<12 digits>` run-timestamp
+// suffix — Go layout `060102150405` (yymmddhhMMss). Compiled once at
+// package scope, consistent with the userTagRE-style pattern elsewhere.
+var runTimestampSuffixRE = regexp.MustCompile(`\.\d{12}$`)
+
 // runDataHome resolves and prepares the persistent per-scenario run
 // home: <repo-root>/test/rundata/<scenario-name>/. Run data is forensic
 // data — it deliberately does NOT live under t.TempDir() (which Go
@@ -323,8 +329,21 @@ func RunScenario(t *testing.T, sc Scenario) *Harness {
 // recreated at the start of each run so it always holds the latest run
 // of that scenario; no cleanup is registered, so it persists after the
 // test exits. test/rundata/ is gitignored.
+//
+// Every run home carries a consistent `<name>.<12-digit-suffix>` shape.
+// runSimRung stamps a real wall-clock timestamp suffix so each sim run
+// gets a unique directory; every other scenario arrives un-suffixed and
+// is given the all-zeros sentinel `.000000000000`. The sentinel is
+// deliberate: it marks a directory whose run was NOT stamped with a real
+// timestamp, and because it is constant the directory name is stable
+// across runs, so those scenarios overwrite in place (no accumulation).
+// Scenario names in this suite never legitimately end in `.<12 digits>`,
+// so detecting an existing suffix is safe and avoids double-suffixing.
 func runDataHome(t *testing.T, name string) string {
 	t.Helper()
+	if !runTimestampSuffixRE.MatchString(name) {
+		name += ".000000000000"
+	}
 	home := filepath.Join(repoRoot(t), "test", "rundata", name)
 	if err := os.RemoveAll(home); err != nil {
 		t.Fatalf("scenario %s: clear run home %s: %v", name, home, err)
