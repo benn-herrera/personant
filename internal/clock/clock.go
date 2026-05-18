@@ -51,11 +51,19 @@ type ProfilingTime struct {
 	t time.Time
 }
 
+func (this ProfilingTime) Format(fmt string) string {
+	return this.t.Format(fmt)
+}
+
+func (this ProfilingTime) UTC() ProfilingTime {
+	return ProfilingTime{t: this.t.UTC()}
+}
+
 // Profiling returns the real wall-clock time. It is never overridable;
 // use it for latency measurement and for timestamps that must stay
 // real-world even while a simulation has overridden Timeline.
 func Profiling() ProfilingTime {
-	return ProfilingTime{t:time.Now()}
+	return ProfilingTime{t: time.Now()}
 }
 
 // Since reports the real-clock duration elapsed since t. It is the

@@ -202,7 +202,7 @@ type Harness struct {
 	// startedAt is the harness construction time; per-step durations
 	// are computed from monotonic now() reads, but startedAt is kept
 	// for cross-correlation with the metrics blob's started_at.
-	startedAt time.Time
+	startedAt clock.ProfilingTime
 
 	// pinnedClock is the deterministic time the turn.State clock
 	// returns. It defaults to a fixed instant; a Step.TimeDelta advances

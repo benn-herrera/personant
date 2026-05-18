@@ -26,7 +26,7 @@ import (
 type Run struct {
 	mu sync.Mutex
 
-	startedAt  time.Time
+	startedAt  clock.ProfilingTime
 	labels     map[string]string
 	counters   map[string]int64
 	histograms map[string][]float64
