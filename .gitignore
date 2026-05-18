@@ -18,6 +18,7 @@ build/
 lib/
 bin/
 nohup.out
+cover.out
 .DS_Store
 .claude/settings.local.json
 # agent set working file

@@ -1,6 +1,6 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build test sim integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
+.PHONY: all build test cover sim integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
 
 all: build
 
@@ -98,6 +98,18 @@ recall-corpus-fetch:
 test: build recall-madlibs
 	go vet ./...
 	go test ./... --count=1
+
+# cover reports aggregate test coverage across all packages. -coverpkg
+# instruments every package for every test binary, so the number
+# reflects how much of the codebase the WHOLE suite exercises — not
+# just each package's own tests (cross-package scenario tests count).
+# The final `total:` line is the headline percentage; for a
+# line-by-line view run `go tool cover -html=cover.out`. cover.out is
+# a .gitignore'd derived artifact. Build-tagged tests (integration,
+# the sim rungs past 1d) are not included.
+cover: build recall-madlibs
+	go test -coverpkg=./... -coverprofile=cover.out ./... --count=1
+	@go tool cover -func=cover.out | tail -1
 
 # sim runs the six-month simulation rung walk at a given span — TestSim
 # in internal/scenarios/sim/ reads the span from -sim.duration. Span is
