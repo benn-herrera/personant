@@ -33,7 +33,7 @@ update-agents-dependency: agents
 BINDIR := bin
 
 build: $(BINDIR)/personant
-	# simulate expected user privacy settings for keys
+	@# simulate expected user privacy settings for keys
 	@chmod 700 test/api_keys; chmod 600 test/api_keys/*
 
 $(BINDIR)/personant:
@@ -105,9 +105,6 @@ test: build recall-madlibs
 # real defect. Override the endpoint with PERSONANT_REAPER_URL.
 integration-test: build
 	go test -tags integration ./... --count=1
-
-serve-local-api:
-	@llama-server --models-dir ~/projects/JIC/models --port 11117 --ctx-size 16384
 
 clean:
 	rm -f $(BINDIR)/personant
