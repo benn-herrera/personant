@@ -52,9 +52,11 @@ type RecallResolver func(ctx context.Context, offer RecallOffer) (RecallResoluti
 // resolves into accept/decline decisions. With no resolver it stays
 // log-only (the harness default for unmeasured steps).
 //
-// SpineRecord.RecallFires is still not incremented on accept; that
-// field reserves "matches that resulted in fetch" per §2.2 and wiring
-// the counter through the spine write is a deferred follow-up.
+// On accept, applyRecallResolution increments SpineRecord.RecallFires
+// (and the mirrored ThreadFrontmatter.RecallFires) via
+// MemoryOps.RecordRecallFire — the §2.2 "matches that resulted in
+// fetch" counter. A counter-write failure is logged and swallowed; it
+// never aborts turn close.
 //
 // Recall runs entirely behind the recall.Recaller interface — this
 // function knows nothing of symbolic Jaccard, embedding cosine, or the
@@ -134,6 +136,13 @@ func applyRecallResolution(ctx context.Context, state *State, offer RecallOffer,
 			if err := state.Ops.Log(ctx, "recall", "accept",
 				fmt.Sprintf("thr=%s layers=%s", c.ThreadID, strings.Join(c.Layers(), "+"))); err != nil {
 				return fmt.Errorf("log recall.accept: %w", err)
+			}
+			// An accept is a fetch — bump the §2.2 RecallFires counter.
+			// A counter-write failure must not abort turn close or skip
+			// the remaining accepted threads: log it and continue.
+			if err := state.Ops.RecordRecallFire(ctx, c.ThreadID); err != nil {
+				_ = state.Ops.Log(ctx, "recall", "fire-error",
+					"thr="+c.ThreadID+" err="+sanitizeDetail(err.Error()))
 			}
 			continue
 		}

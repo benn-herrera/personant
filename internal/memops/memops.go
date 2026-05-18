@@ -150,6 +150,13 @@ type MemoryOps interface {
 	// pre-read records; the port pushes the read into the adapter).
 	NextThreadID(ctx context.Context) (string, error)
 
+	// RecordRecallFire increments the RecallFires counter for threadID —
+	// a recall match that the user accepted into the working set (spec
+	// §2.2). Updates the spine record and the thread file's frontmatter
+	// together so the two stay in sync. Returns ErrThreadNotFound if no
+	// spine record exists for threadID.
+	RecordRecallFire(ctx context.Context, threadID string) error
+
 	// ---------- Project operations ----------
 
 	// CreateProject persists a new ProjectMeta. The caller is

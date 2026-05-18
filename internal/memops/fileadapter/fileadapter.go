@@ -18,6 +18,7 @@ package fileadapter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"personant/internal/eventlog"
@@ -181,6 +182,44 @@ func (a *FileAdapter) NextThreadID(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("fileadapter: read spine: %w", err)
 	}
 	return store.NextThreadID(records), nil
+}
+
+// RecordRecallFire increments the RecallFires counter for threadID. The
+// spine record is canonical; the thread file's frontmatter is updated to
+// the same value so the two stay in sync (a scenario invariant). If the
+// spine record exists but the thread file is missing (drift), the spine
+// write still stands and the frontmatter re-syncs on the next
+// engagement — that case is not an error.
+func (a *FileAdapter) RecordRecallFire(ctx context.Context, threadID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	rec, found, err := store.FindSpineRecord(a.paths, threadID)
+	if err != nil {
+		return fmt.Errorf("fileadapter: record recall fire %s: %w", threadID, err)
+	}
+	if !found {
+		return fmt.Errorf("fileadapter: record recall fire %s: %w", threadID, memops.ErrThreadNotFound)
+	}
+	newCount := rec.RecallFires + 1
+	rec.RecallFires = newCount
+	if err := store.UpdateSpineRecord(a.paths, rec); err != nil {
+		return fmt.Errorf("fileadapter: update spine: %w", err)
+	}
+	thr, err := store.LoadThread(a.paths, threadID)
+	if err != nil {
+		if errors.Is(err, memops.ErrThreadFileNotFound) {
+			// Drift: spine is canonical; frontmatter re-syncs on next
+			// engagement. Not a failure.
+			return nil
+		}
+		return fmt.Errorf("fileadapter: load thread: %w", err)
+	}
+	thr.Frontmatter.RecallFires = newCount
+	if err := store.SaveThread(a.paths, thr); err != nil {
+		return fmt.Errorf("fileadapter: save thread file: %w", err)
+	}
+	return nil
 }
 
 // ---------- Project operations ----------

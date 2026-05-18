@@ -183,7 +183,10 @@ func TestRunShellEscapeStubbed(t *testing.T) {
 func TestRunEmptyInputBenign(t *testing.T) {
 	paths := scaffoldHome(t)
 	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
-	mock := model.NewScriptedMock(nil, nil)
+	// This test asserts a clean (empty) stderr, so the startup /models
+	// probe must succeed: report the provider's default model so the
+	// chat-model resolution finds it and emits no warning.
+	mock := model.NewScriptedMock(nil, []model.ModelInfo{{ID: "test-model"}})
 	var stdout, stderr bytes.Buffer
 	in := strings.NewReader("\n   \n/quit\n")
 

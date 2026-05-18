@@ -177,14 +177,24 @@ func Run(opts Options) error {
 		client = model.NewHTTPClient(provider)
 	}
 
+	// Resolve the chat model against the provider's /models endpoint.
+	// config.toml's [chat] defaultModel (and --model) name a chat model
+	// that is not statically validated — it is checked here, when the
+	// provider is actually used. Embedding is validated separately by
+	// ValidateConfig; this probe is chat-provider only.
+	effectiveModel, err := resolveChatModel(ctx, client, opts.Stderr, providerName, chatModel, provider.DefaultModel)
+	if err != nil {
+		return err
+	}
+
 	if err := ops.Log(ctx, "system", "bootstrap",
 		fmt.Sprintf("active=%s provider=%s", project.ID, providerName)); err != nil {
 		fmt.Fprintf(opts.Stderr, "warn: log session.start: %v\n", err)
 	}
 
 	state := turn.NewState(ops, project, provider, client)
-	if chatModel != "" {
-		state.Model = chatModel
+	if effectiveModel != "" {
+		state.Model = effectiveModel
 	}
 
 	// §3.4 layer-2 embedding recall. The embedding provider+model are
@@ -247,6 +257,67 @@ func firstProvider(providers map[string]memops.Provider) (memops.Provider, strin
 		return memops.Provider{}, ""
 	}
 	return providers[names[0]], names[0]
+}
+
+// modelResolveTimeout caps the single /models probe at chat startup.
+const modelResolveTimeout = 30 * time.Second
+
+// resolveChatModel verifies the effective chat model against the
+// provider's /models endpoint and returns the model the session should
+// use.
+//
+// The effective model is configModel when non-empty, else providerDefault.
+//
+// Graceful degradation: if /models cannot be reached or reports no
+// models, the check is skipped — a warning is printed and the effective
+// model is returned unverified, so an offline provider does not block
+// the session.
+//
+// When /models returns a non-empty list:
+//   - effective model present → returned as-is.
+//   - configModel set but absent → warn and fall back to providerDefault;
+//     if providerDefault is present return it, otherwise fail.
+//   - configModel empty and providerDefault absent → fail: the provider
+//     does not offer its own default model.
+func resolveChatModel(ctx context.Context, client model.Client, stderr io.Writer, providerName, configModel, providerDefault string) (string, error) {
+	effective := configModel
+	if effective == "" {
+		effective = providerDefault
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, modelResolveTimeout)
+	defer cancel()
+	models, err := client.ListModels(probeCtx)
+	if err != nil {
+		fmt.Fprintf(stderr, "warn: could not verify model against provider %q /models: %v\n", providerName, err)
+		return effective, nil
+	}
+	if len(models) == 0 {
+		fmt.Fprintf(stderr, "warn: could not verify model against provider %q /models: provider reported no models\n", providerName)
+		return effective, nil
+	}
+
+	offered := make(map[string]struct{}, len(models))
+	for _, m := range models {
+		offered[m.ID] = struct{}{}
+	}
+	if _, ok := offered[effective]; ok {
+		return effective, nil
+	}
+
+	if configModel != "" {
+		fmt.Fprintf(stderr, "warn: model %q is not offered by provider %q; falling back to provider default %q\n",
+			configModel, providerName, providerDefault)
+		if providerDefault == "" {
+			return "", fmt.Errorf("chat: configured model %q unavailable and provider %q has no default model", configModel, providerName)
+		}
+		if _, ok := offered[providerDefault]; !ok {
+			return "", fmt.Errorf("chat: configured model %q unavailable and provider %q default %q is also not offered", configModel, providerName, providerDefault)
+		}
+		return providerDefault, nil
+	}
+
+	return "", fmt.Errorf("chat: provider %q does not offer its own default model %q", providerName, providerDefault)
 }
 
 // loop is the core REPL. Returns nil on a clean exit; non-nil on an
