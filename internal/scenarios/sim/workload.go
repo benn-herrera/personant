@@ -7,6 +7,18 @@
 // byte-identical Scenario — all randomness flows from one math/rand
 // source seeded by WorkloadConfig.Seed.
 //
+// Topic model — the recall_madlibs corpus. Each generated thread is
+// bound to one distinguishable corpus query slot drawn from the
+// Wikipedia-derived recall_madlibs corpus (Phase C). A slot carries a
+// fixed set of mad-libs query tags and the matching natural-language
+// query string. A thread's anchors ARE its slot's tags, so a
+// recall-opportunity turn — which re-issues that slot's query — fires
+// the §3.4 symbolic Jaccard layer for exactly the threads bound to
+// that slot. With 1520 corpus slots the recall oracle resolves to a
+// small, well-defined expected-match set instead of dozens of
+// indistinguishable same-symbol threads. See the corpusModel doc and
+// WorkloadConfig.Corpus for the binding mechanics.
+//
 // This package feeds the rung walk toward the six-month acceptance
 // simulation. TestSim drives the generated Scenario through
 // scenarios.RunScenario unchanged; no new runner is needed. Rate parameters here are seed values meant to be tuned as
@@ -36,9 +48,28 @@ import (
 	"personant/internal/turn"
 )
 
-// WorkloadConfig parameterises a generated workload. Seed and Duration
-// are the load-bearing knobs; the rate fields have sensible defaults
-// applied by withDefaults so a zero-value-but-for-Seed-and-Duration
+// CorpusSlot is one distinguishable recall_madlibs query slot a thread
+// can be bound to. Tags is the slot's fixed mad-libs symbol set (5
+// synonyms, one drawn from each of the topic's columns); a thread bound
+// to this slot is anchored on exactly these tags. UserInput is the
+// natural-language mad-libs query that mentions those tags as
+// #-prefixed symbols — re-issuing it fires the §3.4 recall layer for
+// every thread bound to this slot. Topic is the slot's wiki-* topic
+// name, retained for annotations.
+//
+// The slots are the corpus_queries.json `queries` array verbatim: 152
+// Wikipedia topics × 10 queries = 1520 slots. Loading is the test's
+// job (it owns the testdata path); GenerateWorkload takes the slice as
+// part of its config so it stays a pure function.
+type CorpusSlot struct {
+	Topic     string
+	Tags      []string
+	UserInput string
+}
+
+// WorkloadConfig parameterises a generated workload. Seed, Duration,
+// and Corpus are the load-bearing knobs; the rate fields have sensible
+// defaults applied by withDefaults so a zero-value-but-for-those
 // config is valid.
 type WorkloadConfig struct {
 	// Seed seeds the single rand source. Fixed seed → identical
@@ -52,6 +83,13 @@ type WorkloadConfig struct {
 	// calendar days until the simulated clock has advanced by Duration.
 	// A 1-day run passes 24*time.Hour; a 1-week run passes 7*24*time.Hour.
 	Duration time.Duration
+
+	// Corpus is the recall_madlibs query-slot pool a thread is bound
+	// to. The caller (the test) loads it from corpus_queries.json;
+	// passing it through the config keeps GenerateWorkload pure — same
+	// config (Corpus included) → byte-identical Scenario. A nil Corpus
+	// is a caller error surfaced as an empty Scenario.
+	Corpus []CorpusSlot
 
 	// RapidGap and WorkGap are the mean inter-turn gaps for the two
 	// turn classes. Each sampled gap carries modest multiplicative
@@ -84,14 +122,19 @@ type WorkloadConfig struct {
 	SwitchWeight   int
 	NewWeight      int
 
-	// TopicCount is the size of the synthetic topic pool a thread can
-	// be bound to.
-	TopicCount int
+	// FamilySize is the number of threads bound to the same corpus
+	// slot — a small bounded "family" sharing one topic. A family of 2
+	// means each recall opportunity has exactly one well-defined
+	// expected match (the engaged thread's dormant sibling). See
+	// corpusModel for why a family rather than a unique slot per
+	// thread: a unique slot would mean a recall opportunity never has
+	// any dormant same-slot thread to surface, so recall would never be
+	// exercised. 0 → default of 2.
+	FamilySize int
 }
 
 // withDefaults returns a copy of cfg with any zero rate field replaced
-// by its default. Seed and Duration are left untouched (Duration of 0
-// is a caller error surfaced as an empty Scenario).
+// by its default. Seed, Duration, and Corpus are left untouched.
 func (cfg WorkloadConfig) withDefaults() WorkloadConfig {
 	if cfg.RapidGap == 0 {
 		cfg.RapidGap = 1 * time.Minute
@@ -126,43 +169,49 @@ func (cfg WorkloadConfig) withDefaults() WorkloadConfig {
 	if cfg.NewWeight == 0 {
 		cfg.NewWeight = 20
 	}
-	if cfg.TopicCount == 0 {
-		cfg.TopicCount = 12
+	if cfg.FamilySize == 0 {
+		cfg.FamilySize = 2
 	}
 	return cfg
 }
 
-// topic is a synthetic subject a thread binds to. Symbols are the 6–8
-// distinct strings drawn on for the thread's anchors and turn text.
-type topic struct {
-	name    string
-	symbols []string
+// corpusModel is the deterministic thread→corpus-slot binding.
+//
+// Threads are created in a fixed order (creation order N maps to the
+// runtime's thr_{N+1}); the binding is purely a function of that order
+// and the FamilySize, so the same config yields the same Scenario.
+//
+// Binding rule: thread k is bound to slot (k / familySize) mod
+// len(slots). familySize consecutive threads thus share one slot — a
+// "family". The load-bearing property: a recall-opportunity turn
+// re-issues the engaged thread's slot's mad-libs query, whose symbol
+// set is exactly that slot's tags; every thread bound to that slot is
+// anchored on exactly those tags, so the §3.4 Jaccard layer (threshold
+// 0.4) fires for the whole family and nothing else. With familySize=2
+// the expected-match set of a recall opportunity is exactly the one
+// dormant sibling — a well-defined, small set that does not blur as the
+// thread population scales into the thousands.
+//
+// Why a family of 2 rather than one unique slot per thread: a unique
+// slot would mean no two threads ever share a slot, so a recall
+// opportunity would never have a dormant same-slot thread to surface
+// and recall would never be exercised at all. A bounded family of 2 is
+// the minimum that gives every recall opportunity exactly one
+// expected match.
+type corpusModel struct {
+	slots      []CorpusSlot
+	familySize int
 }
 
-// makeTopics builds a deterministic pool of n topics, each with 6–8
-// symbols named topic-<i>-<suffix>. Generation order is fixed, so the
-// pool is identical for a given (n, rng-sequence).
-func makeTopics(rng *rand.Rand, n int) []topic {
-	// A fixed suffix alphabet — index into it for symbol names.
-	suffixes := []string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"}
-	topics := make([]topic, n)
-	for i := range topics {
-		count := 6 + rng.Intn(3) // 6, 7, or 8
-		syms := make([]string, count)
-		for j := range syms {
-			syms[j] = fmt.Sprintf("topic-%d-%s", i, suffixes[j])
-		}
-		topics[i] = topic{
-			name:    fmt.Sprintf("topic-%d", i),
-			symbols: syms,
-		}
-	}
-	return topics
+// slotFor returns the corpus slot index a thread of creation order
+// `order` is bound to.
+func (m corpusModel) slotFor(order int) int {
+	return (order / m.familySize) % len(m.slots)
 }
 
 // thread is the generator's in-memory model of one simulated thread:
-// its creation order and its bound topic. The generator does not know
-// the runtime's thr_N ids at construction time; threadID() maps
+// its creation order and its bound corpus slot. The generator does not
+// know the runtime's thr_N ids at construction time; threadID() maps
 // creation order to the id the runtime is guaranteed to assign.
 //
 // Per-thread engagement timing and lifecycle intent are deliberately
@@ -171,21 +220,22 @@ func makeTopics(rng *rand.Rand, n int) []topic {
 // the clock. Layer-B membership (generator.layerB) is the only thread
 // state the generator must track to stay faithful to the runtime.
 type thread struct {
-	order    int // 0-based creation order
-	topicIdx int // index into the topic pool
+	order   int // 0-based creation order
+	slotIdx int // index into the corpus slot pool
 }
 
 // threadID returns the thr_N id the runtime assigns to a thread by
 // creation order. Threads are numbered thr_1, thr_2, … in the order
 // they are created.
 //
-// Precondition: this mapping holds only while threads are append-only
-// and no spine record is ever deleted. The runtime assigns thr_{max+1}
-// and closure merely marks a thread retired (keeping its spine record
-// and id), so creation order N maps cleanly to thr_{N+1} today. Note:
-// archival — a future work item — will delete spine records and break
-// this contiguity; the thread-id model here must be revisited when
-// archival lands.
+// Precondition: this mapping holds because the runtime assigns
+// thr_{max+1} for every new thread and never reuses an id. Archival
+// may DELETE retired spine records, leaving gaps in the live id set —
+// that is fine: creation order N still maps to thr_{N+1}, the
+// generator just may name a thr_N whose record has since been
+// archived. The generator only ever names threads still in Layer B
+// (warm, recently engaged, never archived), so a named id is always
+// live.
 func (t thread) threadID() string {
 	return fmt.Sprintf("thr_%d", t.order+1)
 }
@@ -224,24 +274,33 @@ const sessionActive = 6 * time.Hour
 // by an inter-session gap, followed by an overnight gap; a day off
 // emits no turns and simply advances the clock by DayOffGap, deliberately
 // exercising the §3.5 wall-clock decay path.
+//
+// A nil/empty Corpus yields an empty Scenario — the caller must supply
+// the recall_madlibs slot pool.
 func GenerateWorkload(cfg WorkloadConfig) scenarios.Scenario {
 	cfg = cfg.withDefaults()
 	rng := rand.New(rand.NewSource(cfg.Seed))
 
 	g := &generator{
-		cfg:    cfg,
-		rng:    rng,
-		topics: makeTopics(rng, cfg.TopicCount),
+		cfg: cfg,
+		rng: rng,
+		model: corpusModel{
+			slots:      cfg.Corpus,
+			familySize: cfg.FamilySize,
+		},
 	}
 
-	// Emit calendar days until the simulated clock has advanced by
-	// Duration. dayIndex 0-based; every 7th day (index 6, 13, …) is the
-	// week's day off.
-	for dayIndex := 0; g.simNow < cfg.Duration; dayIndex++ {
-		if dayIndex%7 == 6 {
-			g.runDayOff()
-		} else {
-			g.runWorkDay()
+	// An empty corpus has no slot to bind threads to — emit nothing.
+	if len(cfg.Corpus) > 0 {
+		// Emit calendar days until the simulated clock has advanced by
+		// Duration. dayIndex 0-based; every 7th day (index 6, 13, …) is
+		// the week's day off.
+		for dayIndex := 0; g.simNow < cfg.Duration; dayIndex++ {
+			if dayIndex%7 == 6 {
+				g.runDayOff()
+			} else {
+				g.runWorkDay()
+			}
 		}
 	}
 
@@ -303,13 +362,13 @@ func (g *generator) runDayOff() {
 const layerBCap = 3
 
 // generator carries the mutable state threaded through workload
-// construction: the rng, the topic pool, the live thread model
-// (including a faithful Layer-B LRU), the accumulating step list, and
-// the simulated clock.
+// construction: the rng, the corpus binding model, the live thread
+// model (including a faithful Layer-B LRU), the accumulating step list,
+// and the simulated clock.
 type generator struct {
-	cfg    WorkloadConfig
-	rng    *rand.Rand
-	topics []topic
+	cfg   WorkloadConfig
+	rng   *rand.Rand
+	model corpusModel
 
 	threads []thread // by creation order
 
@@ -446,25 +505,21 @@ func jitter(rng *rand.Rand, base time.Duration) time.Duration {
 // the Layer-B LRU). TimeDelta is filled in by the caller.
 func (g *generator) buildStep(tt turnType, act action) scenarios.Step {
 	var (
-		idx   int  // index of the engaged thread
+		idx   int // index of the engaged thread
 		isNew bool
 	)
 
 	switch act {
 	case actNew:
 		idx = len(g.threads)
-		// Topic binding is deterministic by creation order: thread k →
-		// topic k mod TopicCount. This is NOT a uniform random pick. A
-		// random pick would make the recall oracle (which fires only
-		// when a dormant thread shares the engaged thread's topic) fire
-		// at a birthday-paradox rate that varies with thread count —
-		// and thread count varies with Duration, so each rung would
-		// measure a different thing. Round-robin guarantees every
-		// TopicCount-th thread shares a topic: a controlled,
-		// duration-independent recall-oracle fire rate.
+		// Corpus binding is deterministic by creation order — see
+		// corpusModel.slotFor. familySize consecutive threads share one
+		// slot; the binding never depends on rng, so the recall-oracle
+		// fire rate is fixed and duration-independent (each rung
+		// measures the same thing).
 		g.threads = append(g.threads, thread{
-			order:    idx,
-			topicIdx: idx % len(g.topics),
+			order:   idx,
+			slotIdx: g.model.slotFor(idx),
 		})
 		isNew = true
 
@@ -480,57 +535,66 @@ func (g *generator) buildStep(tt turnType, act action) scenarios.Step {
 		idx = warm[g.rng.Intn(len(warm))]
 	}
 
-	thr := &g.threads[idx]
-	tp := g.topics[thr.topicIdx]
+	thr := g.threads[idx]
+	slot := g.model.slots[thr.slotIdx]
 
 	// Recall-opportunity oracle: a dormant thread (not in Layer B, not
-	// the one engaged this turn) bound to the SAME topic shares all of
-	// this turn's topic symbols, so the runtime's symbolic recall layer
-	// has a genuine spine.match-fire candidate. The generator knows
-	// this because it tracks every thread's topic binding — it is its
-	// own recall-fidelity oracle. Pick the lowest-index such thread for
-	// determinism.
-	recallID := ""
+	// the one engaged this turn) bound to the SAME corpus slot is
+	// anchored on exactly this slot's tags. The engaging turn's symbol
+	// set is also exactly this slot's tags, so the §3.4 Jaccard layer
+	// (threshold 0.4) fires for every such dormant thread — and ONLY
+	// for them, since a different slot draws different synonyms. With
+	// FamilySize=2 there is at most one such dormant sibling, so the
+	// expected-match set is small and well-defined. The generator knows
+	// the binding, so it is its own recall oracle. Collected in
+	// ascending creation order for determinism.
+	var recallIDs []string
 	for _, cand := range g.threads {
 		if cand.order == idx || g.inLayerB(cand.order) {
 			continue
 		}
-		if cand.topicIdx == thr.topicIdx {
-			recallID = cand.threadID()
-			break
+		if cand.slotIdx == thr.slotIdx {
+			recallIDs = append(recallIDs, cand.threadID())
 		}
 	}
 
-	// Anchors: 4–8 of the topic's symbols. The topic has 6–8 symbols;
-	// take a deterministic prefix sized in [4, len].
-	anchorCount := 4 + g.rng.Intn(len(tp.symbols)-3)
-	if anchorCount > len(tp.symbols) {
-		anchorCount = len(tp.symbols)
-	}
-	anchors := append([]string(nil), tp.symbols[:anchorCount]...)
+	// Anchors are the slot's full tag set. A thread bound to this slot
+	// is therefore anchored on exactly these tags — the lexical
+	// substrate a same-slot recall query scans.
+	anchors := append([]string(nil), slot.Tags...)
 
-	// UserInput mentions a couple of the topic's symbols so the
-	// runtime's deterministic symbol extraction picks them up. The #
-	// prefix on the first makes it a user-tag-class symbol.
-	mention := tp.symbols[0]
-	second := tp.symbols[1%len(tp.symbols)]
-	userInput := fmt.Sprintf("working on #%s and %s", mention, second)
+	// UserInput: on a recall opportunity, re-issue the slot's mad-libs
+	// query verbatim — its #-prefixed tags drive the runtime's symbol
+	// extraction, and the coalesced symbol set is exactly the slot's
+	// tags, firing recall for the dormant same-slot thread(s).
+	// Otherwise a plain engaging line mentioning a couple of the tags
+	// so the turn still extracts on-topic symbols.
+	var userInput string
+	if len(recallIDs) > 0 {
+		userInput = slot.UserInput
+	} else {
+		mention := slot.Tags[0]
+		second := slot.Tags[1%len(slot.Tags)]
+		userInput = fmt.Sprintf("working on #%s and %s", mention, second)
+	}
 
 	// MockResponse threads: *new-topic* for a new thread, else the
-	// target thread's thr_N id.
+	// engaged thread's thr_N id.
 	var threads []string
 	if isNew {
 		threads = []string{"*new-topic*"}
 	} else {
 		threads = []string{thr.threadID()}
 	}
-	body := fmt.Sprintf("Working through %s — %s.", tp.name, strings.Join(tp.symbols[:2], ", "))
+	body := fmt.Sprintf("Working through %s — %s.",
+		slot.Topic, strings.Join(slot.Tags[:min(2, len(slot.Tags))], ", "))
 	resp := scenarios.NewMockResponseWithTag(threads, anchors, body)
 
 	step := scenarios.Step{
 		UserInput:    userInput,
 		MockResponse: resp,
-		Annotation:   fmt.Sprintf("turn %d: %s %s (%s)", len(g.steps)+1, turnTypeName(tt), actionName(act), tp.name),
+		Annotation: fmt.Sprintf("turn %d: %s %s (%s)",
+			len(g.steps)+1, turnTypeName(tt), actionName(act), slot.Topic),
 		// Closure is set on EVERY step: any thread that decay-closes
 		// during the run is resolved, and a nil ClosureAck would
 		// disable closure detection that step.
@@ -542,7 +606,7 @@ func (g *generator) buildStep(tt turnType, act action) scenarios.Step {
 	// have no PreEvents.
 	if tt == turnWork {
 		fileText := fmt.Sprintf("cat %s.go returned: references %s",
-			tp.name, strings.Join(tp.symbols[:3], " "))
+			slot.Topic, strings.Join(slot.Tags[:min(3, len(slot.Tags))], " "))
 		step.PreEvents = []turn.Delta{{
 			Source:  "tool.result",
 			Content: fileText,
@@ -561,8 +625,8 @@ func (g *generator) buildStep(tt turnType, act action) scenarios.Step {
 	// On a recall opportunity, declare the ground-truth match set so
 	// the harness records per-step recall fidelity. RecallMeasureOnly:
 	// a recall miss must not fail this smoke rung.
-	if recallID != "" {
-		step.ExpectedRecallMatches = []string{recallID}
+	if len(recallIDs) > 0 {
+		step.ExpectedRecallMatches = recallIDs
 		step.RecallMode = scenarios.RecallMeasureOnly
 	}
 

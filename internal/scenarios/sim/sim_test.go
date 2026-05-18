@@ -16,6 +16,54 @@ import (
 	"personant/internal/store"
 )
 
+// corpusQueriesPath is the recall_madlibs corpus query artifact the
+// generator binds threads to. It is a committed, read-only input (152
+// Wikipedia topics × 10 queries = 1520 distinguishable slots).
+var corpusQueriesPath = filepath.Join("..", "testdata", "recall_madlibs", "corpus_queries.json")
+
+// corpusQueryDoc mirrors the subset of corpus_queries.json the
+// generator consumes: the flat `queries` array, each entry a
+// distinguishable slot.
+type corpusQueryDoc struct {
+	Queries []struct {
+		Topic     string   `json:"topic"`
+		Tags      []string `json:"tags"`
+		UserInput string   `json:"user_input"`
+	} `json:"queries"`
+}
+
+// loadCorpusSlots reads corpus_queries.json and returns its query slots
+// as the generator's CorpusSlot pool. The artifact is committed, so an
+// absence is a hard failure (not a skip): the rung walk cannot run
+// without it.
+func loadCorpusSlots(t *testing.T) []CorpusSlot {
+	t.Helper()
+	body, err := os.ReadFile(corpusQueriesPath)
+	if err != nil {
+		t.Fatalf("read corpus %s: %v", corpusQueriesPath, err)
+	}
+	var doc corpusQueryDoc
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("parse corpus %s: %v", corpusQueriesPath, err)
+	}
+	if len(doc.Queries) == 0 {
+		t.Fatalf("corpus %s: empty queries array", corpusQueriesPath)
+	}
+	slots := make([]CorpusSlot, len(doc.Queries))
+	for i, q := range doc.Queries {
+		if q.Topic == "" || len(q.Tags) == 0 || q.UserInput == "" {
+			t.Fatalf("corpus %s: query %d malformed (topic=%q tags=%v input=%q)",
+				corpusQueriesPath, i, q.Topic, q.Tags, q.UserInput)
+		}
+		slots[i] = CorpusSlot{
+			Topic:     q.Topic,
+			Tags:      append([]string(nil), q.Tags...),
+			UserInput: q.UserInput,
+		}
+	}
+	return slots
+}
+
 // simDayDuration is the simulated wall span the 1-day rung covers — one
 // calendar day. Duration is total simulated wall time (inter-turn,
 // inter-session, and overnight gaps all count toward it), so 24 h is
@@ -81,30 +129,34 @@ func TestSim(t *testing.T) {
 	// not this turn-count band. GenerateWorkload is deterministic for a
 	// fixed (Seed, Duration), so counting turns here and again inside
 	// runSimRung yields the identical workload.
+	corpus := loadCorpusSlots(t)
 	if d == simDayDuration {
-		turns := len(GenerateWorkload(WorkloadConfig{Seed: simSeed, Duration: d}).Steps)
+		turns := len(GenerateWorkload(WorkloadConfig{
+			Seed: simSeed, Duration: d, Corpus: corpus,
+		}).Steps)
 		if turns < 250 || turns > 600 {
 			t.Errorf("turn count %d outside plausible band [250, 600]", turns)
 		}
 	}
 
-	runSimRung(t, "sim-"+*simDuration, d)
+	runSimRung(t, "sim-"+*simDuration, d, corpus)
 }
 
 // runSimRung is the shared run-and-report logic for every rung of the
 // six-month simulation rung walk. It generates a deterministic workload
 // of simulated span d, drives it through the scenario harness, asserts
 // clean completion (RunScenario does the per-step invariant + turn.Run
-// error checks) plus thread-id contiguity, and logs the summary the
-// rung walk tracks. It is untagged so it compiles into every test
+// error checks) plus thread-id well-formedness, and logs the summary
+// the rung walk tracks. It is untagged so it compiles into every test
 // build, and returns the post-run *Harness for any rung-specific
 // follow-up assertions.
-func runSimRung(t *testing.T, label string, d time.Duration) *scenarios.Harness {
+func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot) *scenarios.Harness {
 	t.Helper()
 
 	sc := GenerateWorkload(WorkloadConfig{
 		Seed:     simSeed,
 		Duration: d,
+		Corpus:   corpus,
 	})
 
 	// Pin the metrics blob to this test's TempDir so the summary can
@@ -131,13 +183,14 @@ func runSimRung(t *testing.T, label string, d time.Duration) *scenarios.Harness 
 	threadsCreated := m.Counters["threads_created"]
 	closures := closureCount(t, h)
 
-	// Thread-id contiguity: the generator maps creation order →
-	// thr_1, thr_2, …, and every downstream assumption (recall oracle,
-	// threadID()) depends on that. Assert the spine's thread IDs are
-	// exactly thr_1 .. thr_N with no gaps. This holds while threads are
-	// append-only and no spine record is deleted (see threadID()'s
-	// precondition); archival will break it.
-	assertThreadIDsContiguous(t, h)
+	// Thread-id well-formedness: every spine thread ID must be a
+	// well-formed thr_<n> and unique. Gaps are LEGAL — archival deletes
+	// retired thread records from the spine, leaving holes in the live
+	// id set; the runtime never reuses an id, so the
+	// creation-order → thr_{N+1} mapping the generator relies on stays
+	// valid even with gaps. (This deliberately does NOT assert
+	// contiguity / no-gaps; see threadID()'s precondition.)
+	assertThreadIDsWellFormed(t, h)
 	finalPopulation := finalThreadPopulation(t, h)
 
 	t.Logf("=== %s summary ===", label)
@@ -192,7 +245,8 @@ func runSimRung(t *testing.T, label string, d time.Duration) *scenarios.Harness 
 // TestGenerateWorkload_Deterministic verifies the core contract: a
 // fixed config produces a byte-identical Scenario across runs.
 func TestGenerateWorkload_Deterministic(t *testing.T) {
-	cfg := WorkloadConfig{Seed: simSeed, Duration: simDayDuration}
+	corpus := loadCorpusSlots(t)
+	cfg := WorkloadConfig{Seed: simSeed, Duration: simDayDuration, Corpus: corpus}
 	a := GenerateWorkload(cfg)
 	b := GenerateWorkload(cfg)
 
@@ -210,7 +264,7 @@ func TestGenerateWorkload_Deterministic(t *testing.T) {
 
 	// A different seed must produce a different Scenario (sanity check
 	// that the seed actually drives generation).
-	c := GenerateWorkload(WorkloadConfig{Seed: simSeed + 1, Duration: simDayDuration})
+	c := GenerateWorkload(WorkloadConfig{Seed: simSeed + 1, Duration: simDayDuration, Corpus: corpus})
 	if reflect.DeepEqual(a.Steps, c.Steps) {
 		t.Errorf("different seeds produced identical step lists")
 	}
@@ -296,33 +350,33 @@ func finalThreadPopulation(t *testing.T, h *scenarios.Harness) int {
 	return len(recs)
 }
 
-// assertThreadIDsContiguous reads the post-run spine and verifies its
-// thread IDs are exactly thr_1 .. thr_N with no gaps — the contract
-// the generator's creation-order → thr_N mapping depends on.
-func assertThreadIDsContiguous(t *testing.T, h *scenarios.Harness) {
+// assertThreadIDsWellFormed reads the post-run spine and verifies every
+// thread ID is a well-formed thr_<n> with a positive integer suffix and
+// that the IDs are unique. It deliberately does NOT assert contiguity:
+// thread archival deletes retired records from the spine, leaving gaps
+// in the live id set. The runtime never reuses an id, so a gapped set
+// is legal and expected on the longer rungs.
+func assertThreadIDsWellFormed(t *testing.T, h *scenarios.Harness) {
 	t.Helper()
 	recs, err := store.ReadSpine(h.Paths.Spine)
 	if err != nil {
-		t.Fatalf("assertThreadIDsContiguous: ReadSpine: %v", err)
+		t.Fatalf("assertThreadIDsWellFormed: ReadSpine: %v", err)
 	}
-	// Parse the numeric suffix of each thr_N id and check the set is
-	// exactly {1 .. N}. A string sort would mis-order thr_2 vs thr_10,
-	// so sort numerically.
-	nums := make([]int, 0, len(recs))
+	seen := make(map[int]bool, len(recs))
 	for _, r := range recs {
+		if !strings.HasPrefix(r.ID, "thr_") {
+			t.Errorf("spine thread ID %q is not of the form thr_<n>", r.ID)
+			continue
+		}
 		n, err := strconv.Atoi(strings.TrimPrefix(r.ID, "thr_"))
-		if err != nil || !strings.HasPrefix(r.ID, "thr_") {
-			t.Errorf("spine thread ID %q is not of the form thr_N", r.ID)
-			return
+		if err != nil || n < 1 {
+			t.Errorf("spine thread ID %q has a non-positive-integer suffix", r.ID)
+			continue
 		}
-		nums = append(nums, n)
-	}
-	sort.Ints(nums)
-	for i, n := range nums {
-		if n != i+1 {
-			t.Errorf("spine thread IDs not contiguous: position %d is thr_%d, want thr_%d (sorted: %v)",
-				i, n, i+1, nums)
-			return
+		if seen[n] {
+			t.Errorf("spine thread ID %q is duplicated", r.ID)
+			continue
 		}
+		seen[n] = true
 	}
 }
