@@ -281,6 +281,9 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	if gen.episodeUnresolved > 0 {
 		h.Metrics.Counter("recall_episode_unresolved", int64(gen.episodeUnresolved))
 	}
+	if gen.userDictatedCount > 0 {
+		h.Metrics.Counter("workload_user_dictated_turns", int64(gen.userDictatedCount))
+	}
 	if err := h.Metrics.WriteJSON(h.MetricsPath); err != nil {
 		t.Fatalf("re-write metrics blob with episode stats: %v", err)
 	}
@@ -315,6 +318,8 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	t.Logf("closures:         %d", closures)
 	t.Logf("final thread pop: %d (final spine size)", finalPopulation)
 	t.Logf("turn latency:     P50=%.1fms P95=%.1fms mean=%.2fms", p50, p95, meanMs)
+	t.Logf("user-dictated turns: %d (Realism C variant — user prompt carries the literal line being appended)",
+		gen.userDictatedCount)
 
 	// Closure: counted from retire.complete log lines. The turn path
 	// creates threads in the Active state (spec §2.2.1), and the §3.5

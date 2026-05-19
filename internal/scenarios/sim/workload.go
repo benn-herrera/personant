@@ -366,6 +366,23 @@ type fileState struct {
 // clock-aging consumes.
 const commitEvery = 5
 
+// userDictatedPct is the percentage of *eligible* work turns that emit a
+// "user-dictated file content" variant (Realism C) instead of the default
+// agentic-edit shape. Eligibility excludes recall-opportunity turns (whose
+// UserInput must be the slot's mad-libs query verbatim) and new-thread
+// turns (whose extracted user-prompt symbols become spine anchors, and
+// must stay loose-clean). At 15% on a 1-week rung this yields ~30–50
+// variant episodes — enough to observe the user-prompt symbol-extraction,
+// §3.0 classification, and §3.9 live-window paths firing, without
+// shifting the existing recall-band statistics calibrated on the
+// current mix.
+const userDictatedPct = 15
+
+// userDictatedSelector is the [0,100) draw cap that decides variant vs.
+// agentic for an eligible turn. Drawn from g.rng inside buildStep, so the
+// selection is seed-deterministic.
+const userDictatedSelector = 100
+
 // workFile returns the §3.9 file state for thread idx, creating it on
 // first use. The path is <topic>.go (topic slug sanitized to a filename);
 // the baseline content is a deterministic topic-keyed package stub. The
@@ -934,6 +951,14 @@ type generator struct {
 	// package.
 	episodeQueriesToHit []int
 	episodeUnresolved   int
+
+	// userDictatedCount tallies work turns that emitted the Realism C
+	// "user-dictated file content" variant — the user prompt itself
+	// carrying the literal line being appended to the file. The test
+	// reads this post-run and surfaces it in the rung summary as
+	// observability for the §3.9 / §3.0 live-window paths the variant
+	// exercises.
+	userDictatedCount int
 }
 
 // appendStep buffers one generated step plus its generator-side
@@ -1223,6 +1248,57 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 		userInput = fmt.Sprintf("working on #%s and %s", mention, second)
 	}
 
+	// Realism C — user-dictated file content. On an *eligible* work
+	// turn (non-recall-opportunity, non-new, work-class), draw against
+	// userDictatedPct to decide whether this turn is the user-dictated
+	// variant. The draw must happen unconditionally inside the
+	// eligibility gate so the rng sequence is determined by buildStep's
+	// inputs alone — same (Seed, Duration, Corpus) → same draws.
+	//
+	// Eligibility:
+	//   - recall opportunity: UserInput is reserved for the slot's
+	//     verbatim mad-libs query; replacing it would break recall
+	//     measurement.
+	//   - new-thread: user-prompt symbol extraction on a creation turn
+	//     feeds the new thread's spine anchors via §3.3 → coalesce, and
+	//     embedding a file path / arbitrary literal would pollute those
+	//     anchors with non-topical noise.
+	//   - non-work: there is no fs.write to share the literal with.
+	//
+	// What the variant exercises (canonical spec §3.9 paragraph in
+	// ARCHITECTURE.md):
+	//   (a) user-prompt symbol extraction on file-content literals — the
+	//       prompt embeds the file path, which the deterministic pass on
+	//       user.prompt extracts as an identifier symbol.
+	//   (b) §3.0 transient-data classification — the same prompt
+	//       plausibly carries decision-class (high-level #-tag intent)
+	//       AND task-class (literal value via the file path arriving
+	//       through fs.read/fs.write).
+	//   (c) §3.9.2/§3.9.4 live-window — the literal line text appears in
+	//       both the user.prompt content and the fs.write content,
+	//       exercising dedup across delta sources.
+	//
+	// The variant flag is consulted again below to align the fs.write
+	// modify line with the literal embedded in the prompt — same
+	// literal in both deltas is the live-window case.
+	userDictated := false
+	if tt == turnWork && !isNew && len(recallIDs) == 0 {
+		if g.rng.Intn(userDictatedSelector) < userDictatedPct {
+			userDictated = true
+			mention := firstNonLooseTag(slot)
+			// pendingWriteCount is the writeCount the upcoming fs.write
+			// will use — workFile + writeCount++ happen later, so peek
+			// the current value and add one. This keeps the literal in
+			// the prompt byte-identical to what the modify step appends.
+			fs := g.workFile(idx)
+			pendingWriteCount := fs.writeCount + 1
+			userInput = fmt.Sprintf(
+				"append this exact line to %s: // edit %d: %s — #%s",
+				fs.path, pendingWriteCount, slot.Topic, mention)
+			g.userDictatedCount++
+		}
+	}
+
 	// MockResponse threads: *new-topic* for a new thread, else the
 	// engaged thread's thr_N id.
 	var threads []string
@@ -1235,11 +1311,15 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 		slot.Topic, strings.Join(slot.Tags[:min(2, len(slot.Tags))], ", "))
 	resp := scenarios.NewMockResponseWithTag(threads, anchorTags, body)
 
+	annotation := fmt.Sprintf("turn %d: %s %s (%s)",
+		g.stepIndex+1, turnTypeName(tt), actionName(act), slot.Topic)
+	if userDictated {
+		annotation += " [user-dictated]"
+	}
 	step := scenarios.Step{
 		UserInput:    userInput,
 		MockResponse: resp,
-		Annotation: fmt.Sprintf("turn %d: %s %s (%s)",
-			g.stepIndex+1, turnTypeName(tt), actionName(act), slot.Topic),
+		Annotation:   annotation,
 		// Closure is set on EVERY step: any thread that decay-closes
 		// during the run is resolved, and a nil ClosureAck would
 		// disable closure detection that step.
@@ -1261,9 +1341,19 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 			Meta:    map[string]string{"path": fs.path},
 		}}
 		// Modify: append a deterministic line keyed off the topic and the
-		// write count so successive writes produce real diffs.
+		// write count so successive writes produce real diffs. On a
+		// user-dictated turn the appended line is the literal the user
+		// already named in the prompt — the same byte sequence appears in
+		// both deltas, exercising the §3.9.2/§3.9.4 live-window dedup
+		// path. Otherwise the agentic-edit default line is used.
 		fs.writeCount++
-		fs.content += fmt.Sprintf("\n// edit %d: %s\n", fs.writeCount, slot.Topic)
+		if userDictated {
+			fs.content += fmt.Sprintf("\n// edit %d: %s — #%s\n",
+				fs.writeCount, slot.Topic, firstNonLooseTag(slot))
+		} else {
+			fs.content += fmt.Sprintf("\n// edit %d: %s\n",
+				fs.writeCount, slot.Topic)
+		}
 		// fs.write: the new content.
 		preEvents = append(preEvents, turn.Delta{
 			Source:  "fs.write",
