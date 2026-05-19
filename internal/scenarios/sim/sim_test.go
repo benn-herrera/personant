@@ -117,6 +117,9 @@ func TestSim(t *testing.T) {
 			*simDuration, err)
 	}
 
+	corpus := loadCorpusSlots(t)
+	h := runSimRung(t, "sim-"+*simDuration, d, corpus)
+
 	// Light sanity band — a smoke rung, not a tuning gate. Derivation:
 	// a work day is 2 sessions of 6 h turn-active time = 12 h of
 	// inter-turn gaps. With the 6:1 rapid:work weighting the mean gap is
@@ -125,21 +128,22 @@ func TestSim(t *testing.T) {
 	// [250, 600] band. Re-derive this if RapidGap/WorkGap or the
 	// rapid:work weights change. The band is 1-day-specific, so it
 	// applies only when the span is exactly 24 h — longer rungs still
-	// get runSimRung's clean-completion + contiguity assertions, just
-	// not this turn-count band. GenerateWorkload is deterministic for a
-	// fixed (Seed, Duration), so counting turns here and again inside
-	// runSimRung yields the identical workload.
-	corpus := loadCorpusSlots(t)
+	// get runSimRung's clean-completion + well-formedness assertions,
+	// just not this turn-count band.
+	//
+	// The on-demand generator yields steps one at a time, so the count
+	// is not knowable up front — it is asserted against the post-run
+	// `turns` counter the harness accumulated as the run proceeded.
 	if d == simDayDuration {
-		turns := len(GenerateWorkload(WorkloadConfig{
-			Seed: simSeed, Duration: d, Corpus: corpus,
-		}).Steps)
+		m, err := readMetrics(h.MetricsPath)
+		if err != nil {
+			t.Fatalf("read metrics blob for turn-count band: %v", err)
+		}
+		turns := m.Counters["turns"]
 		if turns < 250 || turns > 600 {
 			t.Errorf("turn count %d outside plausible band [250, 600]", turns)
 		}
 	}
-
-	runSimRung(t, "sim-"+*simDuration, d, corpus)
 }
 
 // runSimRung is the shared run-and-report logic for every rung of the
@@ -169,12 +173,11 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// clock would yield simulated, not real start, time.
 	sc.Name += "." + time.Now().Format("060102150405")
 
-	// The metrics blob defaults into the persistent test/rundata/<name>/
-	// run home (forensic data — not auto-deleted temp). RunScenario
-	// writes it at scenario completion and returns the harness so the
-	// summary can read the blob back via h.MetricsPath.
-	turns := len(sc.Steps)
-	t.Logf("generated workload: %d turns over %s simulated", turns, d)
+	// The workload is generated on demand — the harness pulls one step
+	// at a time from sc.StepSource — so the turn count is not knowable
+	// before the run. It is read back from the `turns` counter the
+	// metrics blob accumulated as the run proceeded.
+	t.Logf("driving on-demand workload over %s simulated", d)
 
 	start := time.Now()
 	h := scenarios.RunScenario(t, sc)
@@ -184,6 +187,7 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	if err != nil {
 		t.Fatalf("read metrics blob: %v", err)
 	}
+	turns := int(m.Counters["turns"])
 
 	durations := m.Histograms["turn_duration_ms"]
 	p50 := percentile(durations, 0.50)
@@ -252,30 +256,51 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	return h
 }
 
+// drainSteps pulls every step out of a scenario's on-demand StepSource,
+// returning them as a slice. The feedback passed into each Next() call
+// is the zero value (Index -1) — the generator does not branch on
+// feedback, so a fixed feedback yields the canonical workload.
+func drainSteps(sc scenarios.Scenario) []scenarios.Step {
+	var out []scenarios.Step
+	src := sc.StepSource
+	if src == nil {
+		return sc.Steps
+	}
+	for {
+		step, ok := src.Next(scenarios.StepFeedback{Index: -1})
+		if !ok {
+			return out
+		}
+		out = append(out, step)
+	}
+}
+
 // TestGenerateWorkload_Deterministic verifies the core contract: a
-// fixed config produces a byte-identical Scenario across runs.
+// fixed config produces an identical step stream across runs. The
+// generator is on-demand, so the streams are drained and compared
+// step-for-step.
 func TestGenerateWorkload_Deterministic(t *testing.T) {
 	corpus := loadCorpusSlots(t)
 	cfg := WorkloadConfig{Seed: simSeed, Duration: simDayDuration, Corpus: corpus}
-	a := GenerateWorkload(cfg)
-	b := GenerateWorkload(cfg)
+	aSc, bSc := GenerateWorkload(cfg), GenerateWorkload(cfg)
 
-	if a.Name != b.Name {
-		t.Errorf("scenario name differs: %q vs %q", a.Name, b.Name)
+	if aSc.Name != bSc.Name {
+		t.Errorf("scenario name differs: %q vs %q", aSc.Name, bSc.Name)
 	}
-	if len(a.Steps) != len(b.Steps) {
-		t.Fatalf("step count differs: %d vs %d", len(a.Steps), len(b.Steps))
+	a, b := drainSteps(aSc), drainSteps(bSc)
+	if len(a) != len(b) {
+		t.Fatalf("step count differs: %d vs %d", len(a), len(b))
 	}
-	for i := range a.Steps {
-		if !reflect.DeepEqual(a.Steps[i], b.Steps[i]) {
+	for i := range a {
+		if !reflect.DeepEqual(a[i], b[i]) {
 			t.Errorf("step %d differs between runs", i)
 		}
 	}
 
-	// A different seed must produce a different Scenario (sanity check
-	// that the seed actually drives generation).
-	c := GenerateWorkload(WorkloadConfig{Seed: simSeed + 1, Duration: simDayDuration, Corpus: corpus})
-	if reflect.DeepEqual(a.Steps, c.Steps) {
+	// A different seed must produce a different step stream (sanity
+	// check that the seed actually drives generation).
+	c := drainSteps(GenerateWorkload(WorkloadConfig{Seed: simSeed + 1, Duration: simDayDuration, Corpus: corpus}))
+	if reflect.DeepEqual(a, c) {
 		t.Errorf("different seeds produced identical step lists")
 	}
 }
@@ -306,9 +331,8 @@ func TestSim_DormantResumptionDrivesMidTurnFetch(t *testing.T) {
 
 	reprompts := logEventCount(t, h, "topic.re-prompt")
 	if reprompts == 0 {
-		t.Fatalf("no §5.5 mid-turn fetch observed: the generated workload "+
-			"scheduled no resumption that reached the runtime "+
-			"(turns=%d)", len(sc.Steps))
+		t.Fatalf("no §5.5 mid-turn fetch observed: the generated workload " +
+			"scheduled no resumption that reached the runtime")
 	}
 	t.Logf("§5.5 mid-turn fetches driven by dormant-thread resumption: %d", reprompts)
 

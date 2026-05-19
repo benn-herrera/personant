@@ -157,12 +157,77 @@ const (
 	RecallMeasureOnly
 )
 
+// StepFeedback is the per-step outcome the harness reports back to a
+// StepSource after each turn, so the next Next() call may (in a later
+// task) branch the generated workload on runtime behavior. It is the
+// seam between the runtime and an on-demand generator.
+//
+// As of the on-demand-workload refactor the feedback is defined and
+// threaded through but NOT consumed by the generator — the workload
+// stays purely a function of (Seed, Duration), preserving determinism.
+// A later task that wants runtime-conditional workload (e.g. reacting
+// to a recall miss) reads these fields in StepSource.Next.
+//
+// The zero value is the "no step has run yet" feedback passed into the
+// very first Next() call.
+type StepFeedback struct {
+	// Index is the 0-based index of the step that just ran. -1 before
+	// the first step.
+	Index int
+
+	// RecallMatchFires is the count of `spine.match-fire` events the
+	// just-run turn emitted — the observed recall hits for the step.
+	RecallMatchFires int
+
+	// RecallExpected is the count of ground-truth matches the step
+	// declared (len of Step.ExpectedRecallMatches); 0 for an unmeasured
+	// step.
+	RecallExpected int
+}
+
+// StepSource yields scenario steps on demand instead of materialising
+// the whole list up front. RunScenario drives a non-nil
+// Scenario.StepSource by looping Next(feedback) until it returns false.
+//
+// Next receives the StepFeedback for the step that just completed (the
+// zero value, with Index -1, before the first step) and returns the
+// next Step plus an ok flag — ok false signals the run is complete.
+//
+// A fixed []Step is adapted to this interface by sliceSource so the
+// harness has exactly one internal drive loop.
+type StepSource interface {
+	Next(feedback StepFeedback) (Step, bool)
+}
+
+// sliceSource adapts a fixed []Step to the StepSource interface so a
+// pre-built scenario and an on-demand generator share RunScenario's one
+// drive loop. It ignores the feedback — a fixed list never branches.
+type sliceSource struct {
+	steps []Step
+	pos   int
+}
+
+func (s *sliceSource) Next(_ StepFeedback) (Step, bool) {
+	if s.pos >= len(s.steps) {
+		return Step{}, false
+	}
+	step := s.steps[s.pos]
+	s.pos++
+	return step, true
+}
+
 // Scenario is a named end-to-end flow. Setup runs once before the
 // steps; FinalInvariants run once after the last step. MetricsPath
 // receives the per-scenario metrics blob when non-empty; otherwise the
 // harness writes <home>/<scenario-name>.metrics.json — where <home> is
 // the persistent test/rundata/<name>/ run home — and logs the path via
 // t.Logf so a developer can inspect it post-run.
+//
+// A scenario supplies its steps in exactly one of two ways: a fixed
+// Steps slice (the ~80 hand-written scenarios) or a StepSource that
+// yields them on demand (the six-month simulation, whose step count is
+// far too large to hold in memory). When StepSource is non-nil it
+// takes precedence and Steps is ignored.
 type Scenario struct {
 	Name string
 
@@ -173,6 +238,13 @@ type Scenario struct {
 	Setup func(h *Harness) error
 
 	Steps []Step
+
+	// StepSource, when non-nil, drives the scenario on demand instead of
+	// Steps: RunScenario pulls one Step per turn rather than iterating a
+	// pre-built slice. Used by the six-month simulation, whose ~59 000+
+	// steps must not all live in memory at once. When set, Steps is
+	// ignored.
+	StepSource StepSource
 
 	// FinalInvariants run after the last step. Use this for end-of-run
 	// assertions that are not meaningful step-by-step (e.g. spine
@@ -295,19 +367,15 @@ func RunScenario(t *testing.T, sc Scenario) *Harness {
 	t.Helper()
 	h := newHarness(t, sc)
 
-	// Pre-queue every step's mock response, one per step. The mock
-	// serves by step index, not per consult: runStep calls
-	// SetScriptedStep before each turn, so every consult within that
-	// turn — including a §5.5 mid-turn re-prompt (a second, legitimate
-	// consult triggered when a topic tag names a thread not in Layer B)
-	// — returns that step's one response. The re-prompt re-issues the
+	// The mock holds a single current-response slot. runStep sets it from
+	// each step's MockResponse before driving the turn; every consult
+	// within that turn — including a §5.5 mid-turn re-prompt (a second,
+	// legitimate consult triggered when a topic tag names a thread not in
+	// Layer B) — re-serves that one response. The re-prompt re-issues the
 	// same request; once the missing thread is fetched the topic tag
-	// drains cleanly. No queue index-shifting, no fetch prediction.
-	queue := make([]model.Response, 0, len(sc.Steps))
-	for _, step := range sc.Steps {
-		queue = append(queue, step.MockResponse)
-	}
-	h.Mock = model.NewScriptedMock(queue, nil)
+	// drains cleanly. No pre-queue, so an on-demand StepSource needs no
+	// up-front step count.
+	h.Mock = model.NewScriptedMock(nil, nil)
 	h.State.Client = h.Mock
 
 	if sc.Setup != nil {
@@ -318,8 +386,21 @@ func RunScenario(t *testing.T, sc Scenario) *Harness {
 
 	t.Logf("scenario %s: metrics path: %s", sc.Name, h.MetricsPath)
 
-	for i, step := range sc.Steps {
-		runStep(t, h, i, step)
+	// One drive loop for both modes: a fixed Steps slice is adapted to a
+	// StepSource by sliceSource. The feedback from each completed step is
+	// passed into the next Next() call (the zero value, Index -1, seeds
+	// the first call). The on-demand generator does not yet branch on it.
+	src := sc.StepSource
+	if src == nil {
+		src = &sliceSource{steps: sc.Steps}
+	}
+	fb := StepFeedback{Index: -1}
+	for i := 0; ; i++ {
+		step, ok := src.Next(fb)
+		if !ok {
+			break
+		}
+		fb = runStep(t, h, i, step)
 	}
 
 	// Final poll before the final invariant run: each runStep already
@@ -543,7 +624,12 @@ func (scriptedCurator) DraftClosure(_ context.Context, thread memops.Thread) (cu
 
 // runStep drives one Step end-to-end: turn.Run, metrics record,
 // invariants. Step indices in messages are 1-based for readability.
-func runStep(t *testing.T, h *Harness, idx int, step Step) {
+//
+// It returns the step's StepFeedback — the recall outcome the harness
+// observed — which RunScenario passes into the next StepSource.Next
+// call. The on-demand generator does not yet branch on it; the return
+// value is the seam a later runtime-conditional-workload task consumes.
+func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 	t.Helper()
 	label := step.Annotation
 	if label == "" {
@@ -561,9 +647,9 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) {
 		restartSession(t, h, idx, label)
 	}
 
-	// Select this step's mock response. Every consult during the turn —
-	// including a §5.5 mid-turn re-prompt — serves queue[idx].
-	h.Mock.SetScriptedStep(idx)
+	// Install this step's mock response. Every consult during the turn —
+	// including a §5.5 mid-turn re-prompt — re-serves this one response.
+	h.Mock.SetResponse(step.MockResponse)
 
 	h.State.RecallResolver = recallResolverFor(t, idx, label, step.RecallAck)
 	h.State.ClosureResolver = closureResolverFor(step.ClosureAck)
@@ -594,7 +680,8 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) {
 		t.Fatalf("scenario step %d (%s): tailer.poll: %v", idx+1, label, err)
 	}
 	h.foldEventLines(stepLines)
-	recordRecallFidelity(t, h, idx, label, step.RecallMode, step.ExpectedRecallMatches, matchFireSet(stepLines))
+	matchFires := matchFireSet(stepLines)
+	recordRecallFidelity(t, h, idx, label, step.RecallMode, step.ExpectedRecallMatches, matchFires)
 
 	// Per-step metrics.
 	h.Metrics.Counter("turns", 1)
@@ -625,6 +712,12 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) {
 		invs = DefaultInvariants
 	}
 	runInvariants(t, h, invs, label)
+
+	return StepFeedback{
+		Index:            idx,
+		RecallMatchFires: len(matchFires),
+		RecallExpected:   len(step.ExpectedRecallMatches),
+	}
 }
 
 // restartSession simulates a clean application shutdown→relaunch: it

@@ -41,11 +41,28 @@
 // resume that hits an already-archived thread is harmless — the §5.5
 // fetch logs thread.fetch-miss and the turn proceeds.
 //
-// The mock serves responses by scenario step, not per consult (see
-// model.MockClient): the harness selects the step's one response, and
-// every consult during the step — including the §5.5 re-prompt —
-// re-serves it. So a turn that triggers a mid-turn fetch needs no
-// fetch prediction from the generator and no second queued response.
+// The mock serves one response per scenario step (see model.MockClient):
+// the harness installs the step's response before the turn, and every
+// consult during the step — including the §5.5 re-prompt — re-serves it.
+// So a turn that triggers a mid-turn fetch needs no fetch prediction
+// from the generator and no second queued response.
+//
+// On-demand generation. GenerateWorkload does NOT materialise the whole
+// step list — a six-month run is ~59 000+ steps. Instead it returns a
+// scenarios.Scenario whose StepSource is a *generator: a resumable state
+// machine the harness pulls one step at a time. The generator advances
+// the simulated calendar one day at a time, buffering that day's steps
+// (~400 at most) and handing them out via Next(); when the buffer
+// drains it generates the next day, until the simulated clock has
+// advanced by Duration. Determinism is unchanged — the same (Seed,
+// Duration) draws from the RNG in the identical order and yields the
+// identical run; the workload is simply no longer pre-computed.
+//
+// Next(StepFeedback) receives the recall outcome of the step that just
+// ran. The generator does NOT branch on it — the workload stays a pure
+// function of (Seed, Duration). The feedback is the seam a later task
+// (runtime-conditional workload, e.g. reacting to a recall miss) will
+// consume; it is threaded through now so that task is purely additive.
 package sim
 
 import (
@@ -364,84 +381,178 @@ const (
 // overnight gaps make up a work day.
 const sessionActive = 6 * time.Hour
 
-// GenerateWorkload is a pure function: same WorkloadConfig → identical
-// scenarios.Scenario. It models the simulated user as a thread
-// population evolving across calendar days, emitting one scenarios.Step
-// per turn.
+// GenerateWorkload turns a WorkloadConfig into a scenarios.Scenario
+// driven by an on-demand StepSource. Same WorkloadConfig → identical
+// run: the workload is a pure function of (Seed, Duration, Corpus), it
+// is simply produced one step at a time rather than all up front.
 //
-// The day is the repeating primitive. The generator emits calendar
-// days until the simulated clock has advanced by cfg.Duration. A week
-// is 6 work days plus 1 day off: a work day is two ~6 h sessions split
-// by an inter-session gap, followed by an overnight gap; a day off
-// emits no turns and simply advances the clock by DayOffGap, deliberately
+// It models the simulated user as a thread population evolving across
+// calendar days, emitting one scenarios.Step per turn. The day is the
+// repeating primitive: the generator emits calendar days until the
+// simulated clock has advanced by cfg.Duration. A week is 6 work days
+// plus 1 day off: a work day is two ~6 h sessions split by an
+// inter-session gap, followed by an overnight gap; a day off emits no
+// turns and simply advances the clock by DayOffGap, deliberately
 // exercising the §3.5 wall-clock decay path.
 //
-// A nil/empty Corpus yields an empty Scenario — the caller must supply
-// the recall_madlibs slot pool.
+// A nil/empty Corpus yields a Scenario whose StepSource is immediately
+// exhausted — the caller must supply the recall_madlibs slot pool.
 func GenerateWorkload(cfg WorkloadConfig) scenarios.Scenario {
 	cfg = cfg.withDefaults()
-	rng := rand.New(rand.NewSource(cfg.Seed))
-
 	g := &generator{
 		cfg: cfg,
-		rng: rng,
+		rng: rand.New(rand.NewSource(cfg.Seed)),
 		model: corpusModel{
 			slots:      cfg.Corpus,
 			familySize: cfg.FamilySize,
 		},
 		files: map[int]*fileState{},
 	}
-
-	// An empty corpus has no slot to bind threads to — emit nothing.
-	if len(cfg.Corpus) > 0 {
-		// Emit calendar days until the simulated clock has advanced by
-		// Duration. dayIndex 0-based; every 7th day (index 6, 13, …) is
-		// the week's day off.
-		for dayIndex := 0; g.simNow < cfg.Duration; dayIndex++ {
-			if dayIndex%7 == 6 {
-				g.runDayOff()
-			} else {
-				g.runWorkDay()
-			}
-		}
-	}
-
-	g.markRestartSteps()
-
 	return scenarios.Scenario{
-		Name:  fmt.Sprintf("sim-workload-seed%d-dur%s", cfg.Seed, cfg.Duration),
-		Steps: g.steps,
+		Name:       fmt.Sprintf("sim-workload-seed%d-dur%s", cfg.Seed, cfg.Duration),
+		StepSource: g,
 	}
 }
 
-// markRestartSteps flags two steps with RestartSession so the workload
-// exercises a clean shutdown→relaunch at minimum and maximum history
-// load. The first mark is the start of the SECOND session (a restart
-// after the first session has completed — near the run start, minimum
-// persisted history); the second mark is the start of the FINAL session
-// (near the run end, maximum history).
+// dayBuf is one generated calendar day's steps plus the global step
+// index of its first step, so a global step index can be translated
+// into an offset within steps.
+type dayBuf struct {
+	steps     []scenarios.Step
+	firstStep int // global step index of steps[0]
+}
+
+// Next yields the next scenarios.Step, implementing scenarios.StepSource.
+// It hands out the current day's buffered steps one at a time; when that
+// day drains it advances the generator until another day with turns is
+// ready, until the simulated clock has advanced by cfg.Duration. The
+// returned bool is false once the run is complete.
 //
-// Constraints honored: never the very first step of the run (step 0 — a
-// restart before any turn has run is meaningless, the working set would
-// be trivially empty on both sides), and never the same step twice (a
-// very short run whose two boundaries collide marks at most one step).
-func (g *generator) markRestartSteps() {
-	mark := map[int]bool{}
-	// Near run start: the start of the second session. sessionStarts[0]
-	// is step 0 (skipped by the never-step-0 rule); sessionStarts[1] is
-	// the first post-first-session boundary.
-	if len(g.sessionStarts) >= 2 && g.sessionStarts[1] != 0 {
-		mark[g.sessionStarts[1]] = true
-	}
-	// Near run end: the start of the final session.
-	if len(g.sessionStarts) >= 1 {
-		last := g.sessionStarts[len(g.sessionStarts)-1]
-		if last != 0 {
-			mark[last] = true
+// feedback carries the recall outcome of the step that just ran. The
+// generator does not branch on it — the workload stays a pure function
+// of (Seed, Duration) — so determinism is unchanged. The parameter is
+// the seam a later runtime-conditional-workload task consumes.
+func (g *generator) Next(_ scenarios.StepFeedback) (scenarios.Step, bool) {
+	for g.ready == nil || g.readyPos >= len(g.ready.steps) {
+		if !g.advance() {
+			return scenarios.Step{}, false
 		}
 	}
-	for idx := range mark {
-		g.steps[idx].RestartSession = true
+	step := g.ready.steps[g.readyPos]
+	g.readyPos++
+	return step, true
+}
+
+// advance moves the next day-with-turns into g.ready, returning false
+// once the run is exhausted.
+//
+// It runs a one-day-deep pipeline: g.pending holds the most recently
+// generated day-with-turns, not yet released. advance generates calendar
+// days (a day off emits nothing and is skipped) until either another
+// day-with-turns is produced — at which point the old g.pending is
+// promoted to g.ready and the new day becomes g.pending — or the run
+// ends, at which point the final g.pending is promoted as the last day.
+//
+// The one-day hold is what makes the final-session restart mark
+// resolvable on demand: g.pending is released only once we know whether
+// a later day-with-turns exists, so the last one can be marked before
+// it leaves the generator. Memory stays bounded at two days (~800
+// steps) versus the whole ~59 000+-step run.
+func (g *generator) advance() bool {
+	for {
+		day, ok := g.generateNextDay()
+		if !ok {
+			// Run over. Promote the final pending day, if any, marking
+			// its last session as the final-session restart point.
+			if g.pending == nil {
+				return false
+			}
+			g.markFinalSession(g.pending)
+			g.ready, g.readyPos, g.pending = g.pending, 0, nil
+			return true
+		}
+		if len(day.steps) == 0 {
+			continue // a day off emits no turns; skip it
+		}
+		d := day
+		if g.pending == nil {
+			g.pending = &d
+			continue // hold the first day-with-turns for one more lap
+		}
+		// A later day-with-turns exists, so g.pending is not the final
+		// day — release it and hold the new day.
+		g.ready, g.readyPos, g.pending = g.pending, 0, &d
+		return true
+	}
+}
+
+// generateNextDay advances the simulated calendar by exactly one day,
+// returning that day's steps. ok is false when the run is complete: an
+// empty corpus (nothing to generate) or the simulated clock having
+// reached cfg.Duration.
+//
+// The day-loop control flow is the build-all generator's verbatim: emit
+// calendar days while g.simNow < cfg.Duration; every 7th day (index 6,
+// 13, …) is the week's day off, which emits no turns. The only change
+// is that a day's steps land in a fresh per-day buffer rather than one
+// run-long slice, and the second-session restart mark is applied as the
+// day is generated rather than in a final pass.
+func (g *generator) generateNextDay() (dayBuf, bool) {
+	if len(g.cfg.Corpus) == 0 || g.simNow >= g.cfg.Duration {
+		return dayBuf{}, false
+	}
+
+	day := dayBuf{firstStep: g.stepIndex}
+	g.day = &day // runSession appends into day.steps via g.day
+
+	if g.dayIndex%7 == 6 {
+		g.runDayOff()
+	} else {
+		g.runWorkDay()
+	}
+	g.dayIndex++
+	g.day = nil
+
+	g.markSecondSession(day)
+	return day, true
+}
+
+// markSecondSession flags the start of the run's SECOND session with
+// RestartSession if it falls inside the just-generated day — a clean
+// shutdown→relaunch near the run start, at minimum persisted history.
+//
+// g.sessionStarts accumulates every emitting session's global step
+// index; the second entry is the second session's start. Step 0 is
+// never marked (a restart before any turn is meaningless).
+func (g *generator) markSecondSession(day dayBuf) {
+	if len(g.sessionStarts) < 2 {
+		return
+	}
+	markRestartIn(day, g.sessionStarts[1])
+}
+
+// markFinalSession flags the start of the run's FINAL session — the
+// last emitting session of the last day with turns — with
+// RestartSession, a clean shutdown→relaunch near the run end, at
+// maximum persisted history.
+func (g *generator) markFinalSession(day *dayBuf) {
+	if len(g.sessionStarts) == 0 {
+		return
+	}
+	markRestartIn(*day, g.sessionStarts[len(g.sessionStarts)-1])
+}
+
+// markRestartIn sets RestartSession on the step at global index
+// globalIdx, if that step falls within day's buffer. Step 0 is never
+// marked. Setting the same step twice is harmless (idempotent), so a
+// short run whose second- and final-session boundaries collide is fine.
+func markRestartIn(day dayBuf, globalIdx int) {
+	if globalIdx == 0 {
+		return
+	}
+	off := globalIdx - day.firstStep
+	if off >= 0 && off < len(day.steps) {
+		day.steps[off].RestartSession = true
 	}
 }
 
@@ -496,10 +607,16 @@ func (g *generator) runDayOff() {
 // fetch) — and so the recall oracle can exclude resident threads.
 const layerBCap = 3
 
-// generator carries the mutable state threaded through workload
-// construction: the rng, the corpus binding model, the live thread
-// model (Layer-B LRU + per-thread last-engaged turn), the accumulating
-// step list, and the simulated clock.
+// generator is the resumable workload state machine. It implements
+// scenarios.StepSource: each Next() call yields one scenarios.Step,
+// advancing the simulated calendar a day at a time rather than building
+// the whole step list up front.
+//
+// It carries the mutable state the build-all generator carried — the
+// rng, the corpus binding model, the live thread model (Layer-B LRU +
+// per-thread last-engaged turn), the simulated clock — plus the
+// on-demand machinery: the day-loop position, the global step counter,
+// and the two-day step buffer pipeline (see advance).
 type generator struct {
 	cfg   WorkloadConfig
 	rng   *rand.Rand
@@ -525,16 +642,41 @@ type generator struct {
 	// the first time a work turn engages it (see workFile).
 	files map[int]*fileState
 
-	steps      []scenarios.Step
 	simNow     time.Duration
 	pendingGap time.Duration // gap to apply as the next step's TimeDelta
 
-	// sessionStarts records the 0-based step index that begins each
-	// session (each runSession call that emitted at least one turn). The
-	// shutdown/restart marking (markRestartSteps) uses this to locate two
-	// distinct session boundaries — one near the run start (minimum
+	// dayIndex is the 0-based calendar day the day loop is on; stepIndex
+	// is the running global 0-based index of the next step to emit (the
+	// build-all generator read this as len(g.steps)).
+	dayIndex  int
+	stepIndex int
+
+	// day is the buffer the current generateNextDay call appends into;
+	// nil outside a day-generation pass.
+	day *dayBuf
+
+	// ready is the day whose steps Next() is currently handing out;
+	// readyPos is the next offset within it. pending is the most
+	// recently generated day-with-turns, held one lap so the
+	// final-session restart mark is resolvable on demand (see advance).
+	ready    *dayBuf
+	readyPos int
+	pending  *dayBuf
+
+	// sessionStarts records the global 0-based step index that begins
+	// each session (each runSession call — runSession always emits at
+	// least one turn). The shutdown/restart marking uses this to locate
+	// two distinct session boundaries — one near the run start (minimum
 	// history) and one near the run end (maximum history).
 	sessionStarts []int
+}
+
+// appendStep buffers one generated step into the current day and
+// advances the global step counter. It is the on-demand replacement for
+// the build-all generator's `g.steps = append(g.steps, step)`.
+func (g *generator) appendStep(step scenarios.Step) {
+	g.day.steps = append(g.day.steps, step)
+	g.stepIndex++
 }
 
 // engage records thread index idx as the most-recently-engaged thread,
@@ -597,12 +739,12 @@ func (g *generator) inLayerB(idx int) bool {
 // TimeDelta (the first step of the run carries a zero TimeDelta,
 // matching the harness's pinned-clock start).
 func (g *generator) runSession(active time.Duration) {
-	sessionStart := len(g.steps)
+	sessionStart := g.stepIndex
 	emitted := false
 	var spent time.Duration
 	for spent < active {
 		tt := g.sampleTurnType()
-		act := g.sampleAction(len(g.steps))
+		act := g.sampleAction(g.stepIndex)
 
 		// The TimeDelta for this step is whatever gap accumulated
 		// before it: the inter-session/overnight/day-off gap (pendingGap)
@@ -613,7 +755,7 @@ func (g *generator) runSession(active time.Duration) {
 
 		step := g.buildStep(tt, act)
 		step.TimeDelta = td
-		g.steps = append(g.steps, step)
+		g.appendStep(step)
 		emitted = true
 
 		// Advance the clock by this turn's gap; it becomes the next
@@ -740,7 +882,7 @@ func (g *generator) buildStep(tt turnType, act action) scenarios.Step {
 		// step-indexed mock re-serves this step's response for the
 		// re-prompt, so the turn runs clean with no second queued
 		// response.
-		cands := g.resumeCandidates(len(g.steps))
+		cands := g.resumeCandidates(g.stepIndex)
 		idx = cands[g.rng.Intn(len(cands))]
 	}
 
@@ -803,7 +945,7 @@ func (g *generator) buildStep(tt turnType, act action) scenarios.Step {
 		UserInput:    userInput,
 		MockResponse: resp,
 		Annotation: fmt.Sprintf("turn %d: %s %s (%s)",
-			len(g.steps)+1, turnTypeName(tt), actionName(act), slot.Topic),
+			g.stepIndex+1, turnTypeName(tt), actionName(act), slot.Topic),
 		// Closure is set on EVERY step: any thread that decay-closes
 		// during the run is resolved, and a nil ClosureAck would
 		// disable closure detection that step.
@@ -865,8 +1007,8 @@ func (g *generator) buildStep(tt turnType, act action) scenarios.Step {
 	}
 
 	// Update the Layer-B LRU and last-engaged bookkeeping to reflect
-	// this turn's engagement. len(g.steps) is this turn's 0-based index.
-	g.engage(idx, len(g.steps))
+	// this turn's engagement. g.stepIndex is this turn's 0-based index.
+	g.engage(idx, g.stepIndex)
 	return step
 }
 

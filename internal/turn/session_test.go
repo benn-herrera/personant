@@ -23,16 +23,17 @@ func TestLoadSessionRestoresWorkingSet(t *testing.T) {
 	// Four new-topic turns. With Budget.BTopK defaulting to 3, the fourth
 	// turn overflows Layer B, demoting the oldest thread into Layer C —
 	// so both lists are non-empty when we restart.
-	mock := model.NewScriptedMock([]model.Response{
+	responses := []model.Response{
 		{Content: "*topic: *new-topic* [alpha, beta, gamma, delta]*\nFirst."},
 		{Content: "*topic: *new-topic* [epsilon, zeta, eta, theta]*\nSecond."},
 		{Content: "*topic: *new-topic* [iota, kappa, lambda, mu]*\nThird."},
 		{Content: "*topic: *new-topic* [nu, xi, omicron, pi]*\nFourth."},
-	}, nil)
+	}
+	mock := model.NewScriptedMock(nil, nil)
 
 	state := NewState(ops, meta, memops.Provider{}, mock)
 	for i := 0; i < 4; i++ {
-		mock.SetScriptedStep(i)
+		mock.SetResponse(responses[i])
 		if _, err := Run(context.Background(), state, "prompt", io.Discard); err != nil {
 			t.Fatalf("turn %d: Run: %v", i+1, err)
 		}

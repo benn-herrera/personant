@@ -352,9 +352,8 @@ func runProjectSwitchScenario(t *testing.T, sc Scenario) {
 	t.Helper()
 	h := newHarness(t, sc)
 
-	// We will append four synthesized steps after the user-supplied
-	// Setup-projected ones; build the full mock queue up front so the
-	// scripted client matches turn count exactly.
+	// Two synthesized steps run after the user-supplied Setup-projected
+	// ones, with a project switch between them.
 	additional := []Step{
 		{
 			UserInput: "topic C in project 2",
@@ -371,17 +370,11 @@ func runProjectSwitchScenario(t *testing.T, sc Scenario) {
 			Annotation: "re-engage thr_1 after switching back to prj_1",
 		},
 	}
-	allSteps := append(append([]Step{}, sc.Steps...), additional...)
-
-	// Build the response queue.
-	respQueue := make([]model.Response, 0, len(allSteps))
-	for _, s := range allSteps {
-		respQueue = append(respQueue, s.MockResponse)
-	}
-	h.Mock = model.NewScriptedMock(respQueue, nil)
-	// The mock serves by step index (see RunScenario): runStep calls
-	// SetScriptedStep before each turn, so a §5.5 mid-turn re-prompt —
-	// a second consult within one turn — re-serves that step's response.
+	// The mock holds a single current-response slot; runStep installs
+	// each step's response with SetResponse before driving the turn, so
+	// a §5.5 mid-turn re-prompt — a second consult within one turn —
+	// re-serves that step's response.
+	h.Mock = model.NewScriptedMock(nil, nil)
 	h.State.Client = h.Mock
 
 	if sc.Setup != nil {

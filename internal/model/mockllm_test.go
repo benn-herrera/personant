@@ -14,19 +14,18 @@ import (
 // will eventually use.
 var topicTagRe = regexp.MustCompile(`^\s*\*topic:\s*([^\[]+?)\s*\[([^\]]*)\]\s*\*\s*$`)
 
-// TestMockScriptedServesCurrentStep: a scripted mock serves queue[step],
-// where the harness advances step via SetScriptedStep. The default step
-// is 0; advancing it walks the queue.
-func TestMockScriptedServesCurrentStep(t *testing.T) {
+// TestMockScriptedServesCurrentResponse: a single-slot scripted mock
+// serves whatever response SetResponse last installed.
+func TestMockScriptedServesCurrentResponse(t *testing.T) {
 	scripted := []Response{
 		{Content: "first", FinishReason: "stop"},
 		{Content: "second", FinishReason: "stop"},
 		{Content: "third", FinishReason: "stop"},
 	}
-	m := NewScriptedMock(scripted, nil)
+	m := NewScriptedMock(nil, nil)
 
 	for i, want := range scripted {
-		m.SetScriptedStep(i)
+		m.SetResponse(want)
 		got, err := m.Consult(context.Background(), Request{})
 		if err != nil {
 			t.Fatalf("step %d: %v", i, err)
@@ -37,14 +36,12 @@ func TestMockScriptedServesCurrentStep(t *testing.T) {
 	}
 }
 
-// TestMockScriptedReServesWithinStep: every consult during one step —
-// the §5.5 mid-turn re-prompt case — serves that step's one response.
+// TestMockScriptedReServesWithinStep: every consult after one
+// SetResponse — the §5.5 mid-turn re-prompt case — serves that one
+// installed response.
 func TestMockScriptedReServesWithinStep(t *testing.T) {
-	m := NewScriptedMock([]Response{
-		{Content: "step0"},
-		{Content: "step1"},
-	}, nil)
-	m.SetScriptedStep(1)
+	m := NewScriptedMock(nil, nil)
+	m.SetResponse(Response{Content: "step1"})
 	for c := 0; c < 3; c++ {
 		got, err := m.Consult(context.Background(), Request{})
 		if err != nil {
@@ -56,16 +53,14 @@ func TestMockScriptedReServesWithinStep(t *testing.T) {
 	}
 }
 
+// TestMockScriptedExhausted: a single-slot scripted mock with no
+// response installed (neither via the constructor nor SetResponse)
+// yields ErrMockExhausted on Consult.
 func TestMockScriptedExhausted(t *testing.T) {
-	m := NewScriptedMock([]Response{{Content: "only one"}}, nil)
-	m.SetScriptedStep(0)
-	if _, err := m.Consult(context.Background(), Request{}); err != nil {
-		t.Fatalf("step 0: %v", err)
-	}
-	m.SetScriptedStep(1)
+	m := NewScriptedMock(nil, nil)
 	_, err := m.Consult(context.Background(), Request{})
 	if !errors.Is(err, ErrMockExhausted) {
-		t.Fatalf("expected ErrMockExhausted past queue end, got %v", err)
+		t.Fatalf("expected ErrMockExhausted with no response installed, got %v", err)
 	}
 }
 
@@ -201,15 +196,17 @@ func TestMockGeneratedTopicTagFormat(t *testing.T) {
 	}
 }
 
-// TestMockCallsAccumulates: every Consult invocation is recorded.
+// TestMockCallsAccumulates: every Consult invocation is recorded,
+// including a call past the queue end that yields ErrMockExhausted. A
+// per-consult-queue mock still has queue-exhaustion semantics, so it is
+// the natural vehicle for this assertion.
 func TestMockCallsAccumulates(t *testing.T) {
-	m := NewScriptedMock([]Response{
+	m := NewScriptedMockPerConsult([]Response{
 		{Content: "a"},
 		{Content: "b"},
 		{Content: "c"},
-	}, nil)
+	})
 	for i := 0; i < 4; i++ {
-		m.SetScriptedStep(i)
 		_, _ = m.Consult(context.Background(), Request{Model: "test"})
 	}
 	calls := m.Calls()

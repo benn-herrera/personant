@@ -21,23 +21,27 @@ import (
 type MockClient struct {
 	mu sync.Mutex
 
-	// Scripted mode: serve queue[step]. nil queue → not scripted.
+	// Scripted mode has two sub-modes, selected at construction.
 	//
-	// The queue holds exactly one Response per scenario Step. Serving is
-	// step-indexed, not per-consult: the harness advances `step` before
-	// each turn (SetScriptedStep), and every Consult during that step —
-	// including a §5.5 mid-turn re-prompt, a legitimate second consult
-	// within one turn — returns queue[step]. Re-serving the same
-	// response for a re-prompt is correct: the re-prompt re-issues the
+	// Single-slot mode (NewScriptedMock, perConsult false): the mock
+	// holds one current Response. Every Consult re-serves `current`,
+	// including a §5.5 mid-turn re-prompt — a legitimate second consult
+	// within one turn — which is correct: the re-prompt re-issues the
 	// same request, and once the missing thread is fetched the
-	// re-evaluated topic tag drains cleanly. A step index past the end
-	// of the queue returns ErrMockExhausted.
+	// re-evaluated topic tag drains cleanly. The harness (or a
+	// multi-turn unit test) installs each turn's response with
+	// SetResponse before driving the turn. If no response was ever
+	// installed, Consult returns ErrMockExhausted.
 	//
-	// perConsult flips serving to advance `step` after every Consult:
-	// queue[0], queue[1], … one per consult. This is for runtime unit
-	// tests (NewScriptedMockPerConsult) that drive a single turn and
-	// must observe two *distinct* consults — e.g. testing the §5.5
-	// re-prompt cap. It is NOT the scenario-harness path.
+	// Per-consult queue mode (NewScriptedMockPerConsult, perConsult
+	// true): the mock walks `queue` one entry per Consult — queue[0],
+	// queue[1], … This is for runtime unit tests that drive a single
+	// turn and must observe two *distinct* consults, e.g. testing the
+	// §5.5 re-prompt cap. A Consult past the queue end returns
+	// ErrMockExhausted. This is NOT the scenario-harness path.
+	scripted   bool     // true once the mock is in scripted mode
+	current    Response // single-slot mode: the response every Consult serves
+	hasCurrent bool     // single-slot mode: SetResponse (or ctor) installed a response
 	queue      []Response
 	step       int
 	perConsult bool
@@ -96,16 +100,25 @@ const (
 	defaultBodyWords     = 50
 )
 
-// NewScriptedMock returns a MockClient that serves one response per
-// scenario step. The queue holds exactly one Response per step; the
-// harness selects the current step with SetScriptedStep, and every
-// Consult during that step serves queue[step]. A step index past the
-// end of the queue yields ErrMockExhausted. models is returned verbatim
-// from ListModels; nil yields an empty list.
+// NewScriptedMock returns a single-slot scripted MockClient. The mock
+// holds one current Response that every Consult re-serves — including a
+// §5.5 mid-turn re-prompt. The current response is changed per turn via
+// SetResponse.
+//
+// `responses` seeds the initial slot: if non-empty, responses[0] is
+// installed as the current response, so a single-turn caller can pass a
+// one-element slice and never call SetResponse. Any further elements
+// are ignored — a multi-turn caller installs each subsequent turn's
+// response with SetResponse. A nil/empty `responses` leaves the slot
+// empty; the first Consult before any SetResponse yields ErrMockExhausted.
+//
+// models is returned verbatim from ListModels; nil yields an empty list.
 func NewScriptedMock(responses []Response, models []ModelInfo) *MockClient {
-	q := make([]Response, len(responses))
-	copy(q, responses)
-	m := &MockClient{queue: q}
+	m := &MockClient{scripted: true}
+	if len(responses) > 0 {
+		m.current = responses[0]
+		m.hasCurrent = true
+	}
 	if models != nil {
 		m.Models = make([]ModelInfo, len(models))
 		copy(m.Models, models)
@@ -123,7 +136,7 @@ func NewScriptedMock(responses []Response, models []ModelInfo) *MockClient {
 func NewScriptedMockPerConsult(responses []Response) *MockClient {
 	q := make([]Response, len(responses))
 	copy(q, responses)
-	return &MockClient{queue: q, perConsult: true}
+	return &MockClient{scripted: true, queue: q, perConsult: true}
 }
 
 // NewGeneratedMock returns a MockClient that synthesizes responses from a
@@ -161,14 +174,18 @@ func (m *MockClient) Consult(ctx context.Context, req Request) (Response, error)
 	switch {
 	case m.rng != nil:
 		resp = m.synthesize()
-	case m.queue != nil:
+	case m.scripted && m.perConsult:
 		if m.step >= 0 && m.step < len(m.queue) {
 			resp = m.queue[m.step]
 		} else {
 			err = ErrMockExhausted
 		}
-		if m.perConsult {
-			m.step++
+		m.step++
+	case m.scripted:
+		if m.hasCurrent {
+			resp = m.current
+		} else {
+			err = ErrMockExhausted
 		}
 	default:
 		err = fmt.Errorf("model: MockClient constructed without a mode")
@@ -212,13 +229,16 @@ func (m *MockClient) SetMockChunks(n int) {
 	m.mu.Unlock()
 }
 
-// SetScriptedStep selects which step's response a scripted mock serves.
-// The harness calls this before each turn; every Consult during the
-// turn — including a §5.5 mid-turn re-prompt — then returns queue[step].
-// Has no effect on a generated-mode mock.
-func (m *MockClient) SetScriptedStep(step int) {
+// SetResponse installs the current response a single-slot scripted mock
+// serves. The harness calls this before each turn; every Consult during
+// the turn — including a §5.5 mid-turn re-prompt — then returns resp.
+// Has no effect on a generated-mode or per-consult-queue mock.
+func (m *MockClient) SetResponse(resp Response) {
 	m.mu.Lock()
-	m.step = step
+	if m.scripted && !m.perConsult {
+		m.current = resp
+		m.hasCurrent = true
+	}
 	m.mu.Unlock()
 }
 
