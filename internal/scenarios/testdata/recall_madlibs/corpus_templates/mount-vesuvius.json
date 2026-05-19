@@ -1,0 +1,20 @@
+{
+  "name": "mount-vesuvius-corpus",
+  "topic": "wiki-mount-vesuvius",
+  "mode": "measure-only",
+  "source_article": "Mount Vesuvius",
+  "description": "Tests recall of Mount Vesuvius: the Italian stratovolcano, the AD 79 eruption, the destruction of Pompeii, its Plinian eruption style, and the present-day hazard to Naples.",
+  "anchors": ["mount-vesuvius","ad-79-eruption","destruction-of-pompeii","plinian-eruption-style","naples-volcanic-hazard"],
+  "columns": [
+    ["mount-vesuvius","vesuvius-volcano","italian-vesuvius-stratovolcano","vesuvius","that-volcano-near-naples-in-italy"],
+    ["ad-79-eruption","seventy-nine-ce-eruption","first-century-vesuvius-eruption","catastrophic-79-ad-eruption","the-ancient-roman-times-eruption"],
+    ["destruction-of-pompeii","burial-of-pompeii","pompeii-annihilation","entombment-of-pompeii","that-town-buried-in-ash"],
+    ["plinian-eruption-style","tall-column-plinian-style","sustained-eruption-column-style","vesuvian-plinian-style","a-towering-mushroom-cloud-of-ash"],
+    ["naples-volcanic-hazard","threat-to-naples","naples-region-eruption-risk","danger-to-greater-naples","its-still-a-danger-to-the-city-today"]
+  ],
+  "sentence_templates": [
+    "how did the {1} of {0} cause the {2}, why was its {3} so destructive, and what is today's {4}?",
+    "what makes {0} a present {4}, given the {1}, the {2}, and the {3} that defined it?",
+    "how does the {3} seen in the {1} of {0} explain both the {2} and today's {4}?"
+  ]
+}

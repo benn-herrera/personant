@@ -1,0 +1,20 @@
+{
+  "name": "opiliones-corpus",
+  "topic": "wiki-opiliones",
+  "mode": "measure-only",
+  "source_article": "Opiliones",
+  "description": "Tests recall of harvestman biology from the Opiliones article, covering the order Opiliones, the fused single-piece body, the lack of venom and silk, the extremely long legs, and the scent-gland defense.",
+  "anchors": ["opiliones-order","fused-body","no-venom-no-silk","long-legs","scent-gland-defense"],
+  "columns": [
+    ["opiliones-order","order-opiliones","harvestman-order","daddy-longlegs-order","those-spindly-daddy-longlegs-bugs"],
+    ["fused-body","one-piece-body","unsegmented-body","broadly-joined-body-regions","its-body-is-just-one-blob"],
+    ["no-venom-no-silk","venomless-and-silkless","lacking-venom-and-silk","without-fangs-or-spinnerets","no-poison-and-cant-spin-webs"],
+    ["long-legs","elongated-legs","extremely-long-legs","slender-stilt-legs","those-ridiculously-long-skinny-legs"],
+    ["scent-gland-defense","defensive-scent-glands","odorous-gland-secretion","repugnatorial-gland-defense","it-makes-a-stink-to-fend-off-stuff"]
+  ],
+  "sentence_templates": [
+    "what places an animal in the {0}, and how do its {1}, {2}, {3}, and {4} differ from spiders?",
+    "given {2}, how do members of the {0} rely on {4}, their {1}, and {3} for survival?",
+    "if an arachnid in the {0} has {3} and a {1}, how do {2} and {4} explain its defenses?"
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "name": "khajuraho-group-of-monuments-corpus",
+  "topic": "wiki-khajuraho-group-of-monuments",
+  "mode": "measure-only",
+  "source_article": "Khajuraho Group of Monuments",
+  "description": "Tests recall of the Khajuraho monuments, covering their Nagara-style temples, the Chandela-dynasty patronage, the celebrated erotic and figurative sculpture, the sandstone construction, and their World Heritage status.",
+  "anchors": [
+    "khajuraho-temples",
+    "chandela-patronage",
+    "khajuraho-sculpture",
+    "nagara-style",
+    "world-heritage-site"
+  ],
+  "columns": [
+    [
+      "khajuraho-temples",
+      "khajuraho-temple-group",
+      "khajuraho-monument-complex",
+      "khajuraho-shrine-cluster",
+      "those-famous-old-temples-in-central-india"
+    ],
+    [
+      "chandela-patronage",
+      "chandela-dynasty-sponsorship",
+      "chandela-royal-funding",
+      "chandela-era-commissions",
+      "the-old-kings-who-paid-to-build-them"
+    ],
+    [
+      "khajuraho-sculpture",
+      "erotic-temple-carving",
+      "figurative-stone-relief",
+      "sensuous-mithuna-sculpture",
+      "the-racy-carvings-theyre-known-for"
+    ],
+    [
+      "nagara-style",
+      "north-indian-temple-style",
+      "nagara-temple-form",
+      "curvilinear-shikhara-style",
+      "the-northern-temple-look"
+    ],
+    [
+      "world-heritage-site",
+      "unesco-listed-monument",
+      "protected-heritage-site",
+      "unesco-world-heritage-listing",
+      "an-officially-protected-landmark"
+    ]
+  ],
+  "sentence_templates": [
+    "how does the {3} shape the {0}, why is the {2} tied to them, and how did {1} and {4} follow?",
+    "what part did {1} play in raising the {0} in the {3}, and how did the {2} lead to {4}?",
+    "when the {0} gained {4}, how much was owed to the {1}, the {2}, and the {3}?"
+  ]
+}

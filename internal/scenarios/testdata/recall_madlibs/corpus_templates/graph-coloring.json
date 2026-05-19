@@ -16,31 +16,36 @@
       "chromatic-number",
       "color-number",
       "minimum-coloring-number",
-      "vertex-chromatic-number"
+      "vertex-chromatic-number",
+      "the-fewest-colors-you-can-get-away-with"
     ],
     [
       "four-color-theorem",
       "four-color-conjecture",
       "four-color-result",
-      "planar-four-coloring-theorem"
+      "planar-four-coloring-theorem",
+      "the-any-map-needs-only-four-colors-result"
     ],
     [
       "chromatic-polynomial",
       "color-counting-polynomial",
       "coloring-enumeration-polynomial",
-      "graph-coloring-polynomial"
+      "graph-coloring-polynomial",
+      "the-formula-that-counts-coloring-ways"
     ],
     [
       "greedy-coloring",
       "sequential-coloring",
       "first-fit-coloring",
-      "incremental-coloring"
+      "incremental-coloring",
+      "just-color-each-one-as-you-go"
     ],
     [
       "deletion-contraction",
       "delete-contract-algorithm",
       "contraction-deletion-recurrence",
-      "edge-deletion-contraction"
+      "edge-deletion-contraction",
+      "the-remove-or-merge-an-edge-trick"
     ]
   ],
   "sentence_templates": [

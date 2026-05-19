@@ -1,0 +1,20 @@
+{
+  "name": "great-sphinx-of-giza-corpus",
+  "topic": "wiki-great-sphinx-of-giza",
+  "mode": "measure-only",
+  "source_article": "Great Sphinx of Giza",
+  "description": "Tests recall of the Great Sphinx's lion-bodied human-headed form, its limestone construction, attribution to Khafre, missing nose, and erosion-and-restoration history.",
+  "anchors": ["great-sphinx","lion-body-human-head","limestone-bedrock-statue","khafre-attribution","sphinx-erosion-damage"],
+  "columns": [
+    ["great-sphinx","giza-sphinx-monument","great-sphinx-statue","sphinx-of-the-giza-plateau","that-giant-lion-thing-by-the-pyramids"],
+    ["lion-body-human-head","recumbent-lion-with-pharaoh-head","human-headed-lion-figure","leonine-body-royal-head","a-lion-with-a-persons-face"],
+    ["limestone-bedrock-statue","carved-limestone-monolith","bedrock-cut-limestone-sculpture","natural-rock-carved-statue","carved-straight-out-of-the-rock"],
+    ["khafre-attribution","attributed-to-pharaoh-khafre","khafre-as-builder","fourth-dynasty-khafre-origin","the-pharaoh-people-think-made-it"],
+    ["sphinx-erosion-damage","weathering-and-missing-nose","facial-and-surface-erosion","wind-and-sand-degradation","worn-down-with-the-nose-gone"]
+  ],
+  "sentence_templates": [
+    "what is the {0}, why does it have a {1}, how does the {3} arise, and how does its {2} explain the {4}?",
+    "how does the {3} date the {0}, given the {1}, the {2}, and the visible {4}?",
+    "tell me about the {1} of the {0}, its {2}, the {3}, and the {4} over time."
+  ]
+}

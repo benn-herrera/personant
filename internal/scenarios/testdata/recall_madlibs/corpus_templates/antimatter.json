@@ -16,31 +16,36 @@
       "baryon-asymmetry",
       "matter-antimatter-asymmetry",
       "matter-antimatter-imbalance",
-      "cosmic-matter-excess"
+      "cosmic-matter-excess",
+      "why-theres-more-stuff-than-anti-stuff"
     ],
     [
       "pair-annihilation",
       "matter-antimatter-annihilation",
       "particle-antiparticle-annihilation",
-      "annihilation-reaction"
+      "annihilation-reaction",
+      "when-they-touch-and-go-poof"
     ],
     [
       "positron",
       "antielectron",
       "positive-electron",
-      "beta-plus-particle"
+      "beta-plus-particle",
+      "the-electrons-evil-twin"
     ],
     [
       "baryogenesis",
       "baryon-number-generation",
       "matter-excess-genesis",
-      "primordial-asymmetry-mechanism"
+      "primordial-asymmetry-mechanism",
+      "how-the-early-universe-tipped-the-scales"
     ],
     [
       "antihydrogen",
       "anti-hydrogen-atom",
       "hydrogen-antiparticle-bound-state",
-      "antimatter-hydrogen"
+      "antimatter-hydrogen",
+      "hydrogen-but-made-of-antimatter"
     ]
   ],
   "sentence_templates": [

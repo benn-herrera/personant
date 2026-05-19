@@ -16,31 +16,36 @@
       "deflation",
       "negative-inflation",
       "falling-prices",
-      "price-level-decrease"
+      "price-level-decrease",
+      "everything-getting-cheaper-over-time"
     ],
     [
       "price-level-decline",
       "general-price-fall",
       "consumer-price-decrease",
-      "broad-price-drop"
+      "broad-price-drop",
+      "prices-sliding-down-across-the-board"
     ],
     [
       "deflationary-spiral",
       "price-decline-feedback-loop",
       "self-reinforcing-price-fall",
-      "debt-deflation-cycle"
+      "debt-deflation-cycle",
+      "the-downward-rut-prices-get-stuck-in"
     ],
     [
       "real-debt-burden",
       "inflation-adjusted-debt-cost",
       "purchasing-power-of-debt",
-      "real-value-of-liabilities"
+      "real-value-of-liabilities",
+      "your-loan-feeling-heavier-than-before"
     ],
     [
       "money-supply-contraction",
       "credit-contraction",
       "monetary-base-shrinkage",
-      "money-stock-reduction"
+      "money-stock-reduction",
+      "less-money-sloshing-around"
     ]
   ],
   "sentence_templates": [

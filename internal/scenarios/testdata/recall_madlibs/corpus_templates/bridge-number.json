@@ -6,11 +6,11 @@
   "description": "Recall test for the bridge number knot invariant and related concepts.",
   "anchors": ["bridge-number", "bridge-index", "2-bridge-knot", "connected-sum", "local-maxima"],
   "columns": [
-    ["bridge-number", "bridge-index", "bridge-count", "crossing-bridge-count"],
-    ["bridge-index", "bridge-number", "min-bridge-count", "bridge-invariant"],
-    ["2-bridge-knot", "rational-knot", "two-bridge-knot", "2-bridge-link"],
-    ["connected-sum", "knot-sum", "composition-of-knots", "knot-composition"],
-    ["local-maxima", "local-max-count", "height-maxima", "projection-maxima"]
+    ["bridge-number", "bridge-index", "bridge-count", "crossing-bridge-count", "how-many-overpasses-the-knot-needs"],
+    ["bridge-index", "bridge-number", "min-bridge-count", "bridge-invariant", "the-fewest-arches-you-can-get-away-with"],
+    ["2-bridge-knot", "rational-knot", "two-bridge-knot", "2-bridge-link", "the-simple-two-arch-kind-of-knot"],
+    ["connected-sum", "knot-sum", "composition-of-knots", "knot-composition", "tying-two-knots-end-to-end"],
+    ["local-maxima", "local-max-count", "height-maxima", "projection-maxima", "the-top-bumps-when-you-stand-it-up"]
   ],
   "sentence_templates": [
     "What is the {0} of the trefoil and how does {1} relate to the class of {2} defined under {3} in terms of {4}?",

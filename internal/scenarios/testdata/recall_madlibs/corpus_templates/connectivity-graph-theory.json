@@ -16,31 +16,36 @@
       "vertex-connectivity",
       "node-connectivity",
       "point-connectivity",
-      "vertex-cohesion"
+      "vertex-cohesion",
+      "how-many-dots-you-pull-to-break-it"
     ],
     [
       "edge-connectivity",
       "bond-connectivity",
       "line-connectivity",
-      "cut-connectivity"
+      "cut-connectivity",
+      "how-many-links-you-snip-to-break-it"
     ],
     [
       "connected-component",
       "maximal-connected-subgraph",
       "connected-cluster",
-      "graph-component"
+      "graph-component",
+      "one-island-of-stuff-thats-all-joined"
     ],
     [
       "vertex-cut",
       "separating-set",
       "node-separator",
-      "vertex-separator"
+      "vertex-separator",
+      "the-dots-that-split-it-in-two-if-removed"
     ],
     [
       "bridge",
       "cut-edge",
       "isthmus",
-      "disconnecting-edge"
+      "disconnecting-edge",
+      "the-one-link-holding-it-together"
     ]
   ],
   "sentence_templates": [

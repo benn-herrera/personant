@@ -16,31 +16,36 @@
       "non-newtonian-fluid",
       "variable-viscosity-fluid",
       "shear-dependent-fluid",
-      "stress-dependent-viscosity-fluid"
+      "stress-dependent-viscosity-fluid",
+      "weird-goo-that-doesnt-flow-like-water"
     ],
     [
       "shear-thickening",
       "dilatancy",
       "viscosity-increase-under-shear",
-      "stress-induced-thickening"
+      "stress-induced-thickening",
+      "the-cornstarch-goes-hard-when-you-hit-it"
     ],
     [
       "thixotropy",
       "time-dependent-thinning",
       "shear-history-thinning",
-      "reversible-viscosity-decrease"
+      "reversible-viscosity-decrease",
+      "ketchup-getting-runnier-the-more-you-shake-it"
     ],
     [
       "bingham-plastic",
       "yield-stress-fluid",
       "viscoplastic-material",
-      "finite-threshold-flow-fluid"
+      "finite-threshold-flow-fluid",
+      "stuff-that-wont-budge-until-you-push-hard"
     ],
     [
       "rheopexy",
       "anti-thixotropy",
       "time-dependent-thickening",
-      "shear-history-stiffening"
+      "shear-history-stiffening",
+      "it-gets-gloopier-the-longer-you-stir-it"
     ]
   ],
   "sentence_templates": [

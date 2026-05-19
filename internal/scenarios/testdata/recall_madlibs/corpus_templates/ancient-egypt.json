@@ -1,0 +1,20 @@
+{
+  "name": "ancient-egypt-corpus",
+  "topic": "wiki-ancient-egypt",
+  "mode": "measure-only",
+  "source_article": "Ancient Egypt",
+  "description": "Tests recall of ancient Egypt: the Nile-valley civilization, its pharaonic rule, hieroglyphic writing, its religion and pyramid-building, and its chronological division into kingdom periods.",
+  "anchors": ["ancient-egypt","nile-river-civilization","pharaonic-monarchy","hieroglyphic-writing","kingdom-period-chronology"],
+  "columns": [
+    ["ancient-egypt","ancient-egyptian-civilization","pharaonic-egypt","old-world-egyptian-state","the-land-of-the-pharaohs"],
+    ["nile-river-civilization","nile-valley-society","river-nile-floodplain-culture","civilization-along-the-nile","people-who-lived-by-that-big-river"],
+    ["pharaonic-monarchy","rule-by-pharaohs","divine-kingship","pharaoh-led-government","god-kings-running-the-show"],
+    ["hieroglyphic-writing","egyptian-hieroglyphs","sacred-pictorial-script","hieroglyphic-script-system","those-little-picture-symbols"],
+    ["kingdom-period-chronology","old-middle-new-kingdom-eras","division-into-kingdom-periods","dynastic-period-timeline","the-old-middle-new-era-split"]
+  ],
+  "sentence_templates": [
+    "what defined {0} as a {1}, how did the {2} organize it, what role did {3} play, and the {4}?",
+    "how did {3} record the history of {0}, a {1} under a {2}, across the {4}?",
+    "explain {0}: the {1}, the {2}, the {3}, and the {4}."
+  ]
+}

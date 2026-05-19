@@ -1,0 +1,20 @@
+{
+  "name": "general-relativity-corpus",
+  "topic": "wiki-general-relativity",
+  "mode": "measure-only",
+  "source_article": "General relativity",
+  "description": "Tests recall of general-relativity concepts from the general-relativity article, covering the theory itself, spacetime curvature, the Einstein field equations, the equivalence principle, and gravitational waves.",
+  "anchors": ["general-relativity","spacetime-curvature","einstein-field-equations","equivalence-principle","gravitational-waves"],
+  "columns": [
+    ["general-relativity","theory-of-general-relativity","einsteinian-gravity","relativistic-theory-of-gravitation","einsteins-big-gravity-theory"],
+    ["spacetime-curvature","curvature-of-spacetime","warping-of-spacetime","geometric-curvature-of-spacetime","space-getting-bent-by-mass"],
+    ["einstein-field-equations","field-equations-of-gravity","einstein-equations","gravitational-field-equations","the-equations-einstein-came-up-with"],
+    ["equivalence-principle","principle-of-equivalence","gravity-acceleration-equivalence","weak-equivalence-principle","gravity-feels-just-like-acceleration"],
+    ["gravitational-waves","ripples-in-spacetime","spacetime-waves","gravity-radiation","wobbles-spreading-through-space"]
+  ],
+  "sentence_templates": [
+    "how does {0} describe gravity as {1}, how do the {2} govern it, and how do the {3} and {4} follow?",
+    "what does the {3} state, how does it motivate {0} treating gravity as {1}, and how do the {2} predict {4}?",
+    "explain how {0} predicts {4} from the {2}, how it treats gravity as {1}, and how the {3} underpins the whole theory."
+  ]
+}

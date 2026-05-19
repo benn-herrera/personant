@@ -1,0 +1,20 @@
+{
+  "name": "latrodectus-corpus",
+  "topic": "wiki-latrodectus",
+  "mode": "measure-only",
+  "source_article": "Latrodectus",
+  "description": "Tests recall of widow spider biology from the Latrodectus article, covering the genus Latrodectus, the latrotoxin neurotoxic venom, the hourglass marking, the cobweb tangle web, and the antivenom treatment.",
+  "anchors": ["latrodectus-genus","latrotoxin-venom","hourglass-marking","cobweb-tangle-web","widow-antivenom"],
+  "columns": [
+    ["latrodectus-genus","genus-latrodectus","widow-spider-genus","black-widow-genus","those-scary-black-widow-spiders"],
+    ["latrotoxin-venom","alpha-latrotoxin","neurotoxic-widow-venom","widow-neurotoxin","the-nerve-poison-in-the-bite"],
+    ["hourglass-marking","red-hourglass-mark","ventral-hourglass-pattern","abdomen-hourglass-spot","the-red-mark-on-its-belly"],
+    ["cobweb-tangle-web","irregular-tangle-web","messy-cobweb","three-dimensional-tangle-web","that-messy-tangled-web-it-spins"],
+    ["widow-antivenom","latrodectus-antivenom","widow-bite-antivenin","antivenom-treatment","the-shot-they-give-you-after-a-bite"]
+  ],
+  "sentence_templates": [
+    "what identifies a spider in the {0}, and how do the {1}, {2}, {3}, and {4} help recognize it?",
+    "how does {1} cause envenomation in the {0}, and how do the {2}, {3}, and {4} factor in?",
+    "if a spider shows the {2} and builds a {3}, why does its membership in the {0} make {1} and {4} relevant?"
+  ]
+}

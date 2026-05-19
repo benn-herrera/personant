@@ -16,31 +16,36 @@
       "quantitative-easing",
       "large-scale-asset-purchases",
       "unconventional-monetary-easing",
-      "balance-sheet-expansion"
+      "balance-sheet-expansion",
+      "the-bank-basically-conjuring-money-to-buy-things"
     ],
     [
       "asset-purchase",
       "securities-buying",
       "bond-acquisition",
-      "open-market-buying"
+      "open-market-buying",
+      "scooping-up-bonds-and-other-paper"
     ],
     [
       "liquidity-trap",
       "zero-lower-bound",
       "interest-rate-floor",
-      "near-zero-rate-constraint"
+      "near-zero-rate-constraint",
+      "rates-already-at-rock-bottom-and-stuck"
     ],
     [
       "money-supply",
       "monetary-base",
       "money-stock",
-      "currency-in-circulation"
+      "currency-in-circulation",
+      "all-the-cash-sloshing-around-out-there"
     ],
     [
       "central-bank",
       "monetary-authority",
       "reserve-bank",
-      "national-bank-issuer"
+      "national-bank-issuer",
+      "the-folks-like-the-fed-who-run-the-money"
     ]
   ],
   "sentence_templates": [

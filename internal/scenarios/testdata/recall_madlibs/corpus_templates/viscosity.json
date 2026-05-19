@@ -16,31 +16,36 @@
       "dynamic-viscosity",
       "absolute-viscosity",
       "shear-viscosity",
-      "flow-resistance-coefficient"
+      "flow-resistance-coefficient",
+      "how-thick-and-gloopy-a-fluid-is"
     ],
     [
       "kinematic-viscosity",
       "momentum-diffusivity",
       "viscosity-density-ratio",
-      "diffusive-viscosity"
+      "diffusive-viscosity",
+      "the-thickness-divided-by-density"
     ],
     [
       "newtonian-fluid",
       "linear-viscosity-fluid",
       "constant-viscosity-fluid",
-      "viscosity-invariant-fluid"
+      "viscosity-invariant-fluid",
+      "a-fluid-with-steady-unchanging-thickness"
     ],
     [
       "strain-rate",
       "shear-rate",
       "velocity-gradient",
-      "deformation-rate"
+      "deformation-rate",
+      "how-fast-the-fluid-is-being-deformed"
     ],
     [
       "superfluidity",
       "zero-viscosity-flow",
       "frictionless-quantum-flow",
-      "inviscid-quantum-state"
+      "inviscid-quantum-state",
+      "a-fluid-that-flows-with-zero-friction"
     ]
   ],
   "sentence_templates": [

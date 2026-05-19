@@ -1,0 +1,20 @@
+{
+  "name": "sinking-of-the-titanic-corpus",
+  "topic": "wiki-sinking-of-the-titanic",
+  "mode": "measure-only",
+  "source_article": "Sinking of the Titanic",
+  "description": "Tests recall of the Titanic sinking, covering the disaster itself, the iceberg collision, the distress calls, the rescue by RMS Carpathia, and the resulting loss of life.",
+  "anchors": ["titanic-disaster","iceberg-collision","distress-calls","carpathia-rescue","loss-of-life"],
+  "columns": [
+    ["titanic-disaster","1912-liner-sinking","north-atlantic-shipwreck","titanic-catastrophe","when-the-big-ship-went-down"],
+    ["iceberg-collision","striking-the-iceberg","ice-impact","glancing-iceberg-blow","the-ship-hitting-the-ice"],
+    ["distress-calls","wireless-sos-signals","emergency-radio-calls","cqd-distress-messages","the-calls-for-help-over-radio"],
+    ["carpathia-rescue","rescue-by-carpathia","survivor-pickup","carpathia-recovery-of-survivors","the-other-ship-that-came-to-save-them"],
+    ["loss-of-life","mass-casualties","death-toll","over-1500-fatalities","all-the-people-who-died"]
+  ],
+  "sentence_templates": [
+    "after the {1}, how did {2} lead to the {3}, and what explains the {4} in the {0}?",
+    "in the {0}, what sequence connected the {1}, the {2}, and the eventual {3} amid such {4}?",
+    "why did the {4} stay so high during the {0} even after {2} prompted the {3} following the {1}?"
+  ]
+}

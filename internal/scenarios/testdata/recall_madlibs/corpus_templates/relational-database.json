@@ -1,0 +1,20 @@
+{
+  "name": "relational-database-corpus",
+  "topic": "wiki-relational-database",
+  "mode": "measure-only",
+  "source_article": "Relational database",
+  "description": "Tests recall of relational-database concepts: the table-based store, the relational model, primary and foreign keys, normalization, and ACID transactions.",
+  "anchors": ["relational-database","relational-model","keys","normalization","acid-transactions"],
+  "columns": [
+    ["relational-database","table-based-database","relational-data-store","rdbms","the-spreadsheet-style-database"],
+    ["relational-model","relation-based-model","tabular-data-model","table-and-tuple-model","the-tables-talk-to-each-other-design"],
+    ["keys","primary-and-foreign-keys","key-constraints","identifying-and-linking-keys","the-id-fields-that-link-rows"],
+    ["normalization","schema-normalization","redundancy-reduction","normal-form-decomposition","tidying-up-the-tables"],
+    ["acid-transactions","acid-properties","transactional-guarantees","atomic-consistent-isolated-durable","all-or-nothing-data-promises"]
+  ],
+  "sentence_templates": [
+    "how does a {0} use the {1} and {2} to connect tables, shaped by {3} and {4}?",
+    "when {3} is applied to a {0}, how does it reshape the {1} while keeping {2} and {4} valid?",
+    "if {4} are violated, what does it mean for {3}, the {2}, and the {1} of a {0}?"
+  ]
+}

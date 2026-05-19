@@ -16,31 +16,36 @@
       "knot-group",
       "complement-fundamental-group",
       "knot-complement-group",
-      "fundamental-group-of-complement"
+      "fundamental-group-of-complement",
+      "the-loop-counting-group-of-the-leftover-space"
     ],
     [
       "wirtinger-presentation",
       "wirtinger-algorithm",
       "knot-group-presentation",
-      "wirtinger-method"
+      "wirtinger-method",
+      "that-recipe-for-reading-the-group-off-a-diagram"
     ],
     [
       "abelianization",
       "abelian-quotient",
       "commutator-quotient",
-      "abelianized-form"
+      "abelianized-form",
+      "flattening-the-group-so-order-stops-mattering"
     ],
     [
       "knot-invariant",
       "topological-invariant",
       "isotopy-invariant",
-      "knot-distinguisher"
+      "knot-distinguisher",
+      "a-trait-that-survives-any-wiggling"
     ],
     [
       "knot-complement",
       "knot-exterior",
       "complement-space",
-      "complement-of-knot"
+      "complement-of-knot",
+      "the-space-around-the-knot"
     ]
   ],
   "sentence_templates": [

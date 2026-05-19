@@ -1,0 +1,56 @@
+{
+  "name": "sanchi-corpus",
+  "topic": "wiki-sanchi",
+  "mode": "measure-only",
+  "source_article": "Sanchi",
+  "description": "Tests recall of Sanchi, covering the Great Stupa, the carved gateway toranas, the Mauryan-era origin under Ashoka, the Buddhist pilgrimage function, and its World Heritage status.",
+  "anchors": [
+    "sanchi",
+    "great-stupa",
+    "carved-toranas",
+    "ashoka-mauryan-origin",
+    "buddhist-pilgrimage-site"
+  ],
+  "columns": [
+    [
+      "sanchi",
+      "sanchi-monuments",
+      "sanchi-stupa-complex",
+      "sanchi-buddhist-site",
+      "that-old-buddhist-site-in-india"
+    ],
+    [
+      "great-stupa",
+      "sanchi-great-stupa",
+      "hemispherical-relic-mound",
+      "main-stupa-of-sanchi",
+      "the-big-dome-shaped-monument"
+    ],
+    [
+      "carved-toranas",
+      "ornate-gateway-arches",
+      "sculpted-stone-gateways",
+      "decorated-torana-gates",
+      "the-fancy-carved-entrance-arches"
+    ],
+    [
+      "ashoka-mauryan-origin",
+      "emperor-ashoka-foundation",
+      "mauryan-era-commission",
+      "ashokan-period-origin",
+      "built-back-in-emperor-ashokas-day"
+    ],
+    [
+      "buddhist-pilgrimage-site",
+      "buddhist-devotional-centre",
+      "place-of-buddhist-worship",
+      "stupa-pilgrimage-destination",
+      "an-old-place-buddhists-travel-to"
+    ]
+  ],
+  "sentence_templates": [
+    "how does the {1} anchor {0}, what stories do the {2} tell, and how do {3} and {4} relate?",
+    "what role did the {3} play in founding the {0} as a {4}, given the {1} and the {2}?",
+    "when pilgrims visit the {4} at {0}, how do the {1}, the {2}, and {3} structure that experience?"
+  ]
+}

@@ -16,31 +16,36 @@
       "shortest-path",
       "geodesic",
       "minimum-cost-path",
-      "least-weight-path"
+      "least-weight-path",
+      "the-quickest-way-from-a-to-b"
     ],
     [
       "edge-weight",
       "arc-cost",
       "link-weight",
-      "traversal-cost"
+      "traversal-cost",
+      "how-much-a-step-costs-you"
     ],
     [
       "dijkstras-algorithm",
       "shortest-path-first",
       "dijkstra-search",
-      "label-setting-algorithm"
+      "label-setting-algorithm",
+      "that-classic-routing-algorithm"
     ],
     [
       "negative-cycle",
       "negative-weight-loop",
       "negative-cost-cycle",
-      "weight-reducing-cycle"
+      "weight-reducing-cycle",
+      "a-loop-that-keeps-lowering-the-cost"
     ],
     [
       "all-pairs-shortest-path",
       "all-to-all-routing",
       "complete-distance-matrix",
-      "pairwise-optimal-path"
+      "pairwise-optimal-path",
+      "shortest-routes-between-every-pair"
     ]
   ],
   "sentence_templates": [

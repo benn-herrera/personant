@@ -16,31 +16,36 @@
       "adjacency-matrix",
       "vertex-adjacency-array",
       "graph-connection-matrix",
-      "square-edge-indicator-matrix"
+      "square-edge-indicator-matrix",
+      "that-grid-of-who-touches-who"
     ],
     [
       "graph-spectrum",
       "eigenvalue-set",
       "eigen-spectrum",
-      "characteristic-value-set"
+      "characteristic-value-set",
+      "the-numbers-the-matrix-spits-out"
     ],
     [
       "graph-isomorphism",
       "graph-equivalence",
       "structural-graph-identity",
-      "vertex-relabeling-equivalence"
+      "vertex-relabeling-equivalence",
+      "same-shape-different-labels"
     ],
     [
       "adjacency-list",
       "neighbor-list",
       "vertex-neighbor-list",
-      "linked-neighbor-structure"
+      "linked-neighbor-structure",
+      "who-points-to-who-roster"
     ],
     [
       "spectral-gap",
       "eigenvalue-gap",
       "lambda-gap",
-      "expansion-gap"
+      "expansion-gap",
+      "space-between-top-two-eigenvalues"
     ]
   ],
   "sentence_templates": [

@@ -1,0 +1,20 @@
+{
+  "name": "pyramid-of-djoser-corpus",
+  "topic": "wiki-pyramid-of-djoser",
+  "mode": "measure-only",
+  "source_article": "Pyramid of Djoser",
+  "description": "Tests recall of the Pyramid of Djoser: its identity as the first Egyptian step pyramid, its location at Saqqara, its design by the architect Imhotep, its construction for pharaoh Djoser, and its stacked-mastaba form.",
+  "anchors": ["pyramid-of-djoser","first-step-pyramid","saqqara-location","architect-imhotep","stacked-mastaba-design"],
+  "columns": [
+    ["pyramid-of-djoser","djoser-s-pyramid","step-pyramid-of-djoser","saqqara-step-pyramid","that-old-staircase-looking-pyramid"],
+    ["first-step-pyramid","earliest-egyptian-step-pyramid","first-monumental-stone-pyramid","oldest-pyramid-in-egypt","the-very-first-pyramid-they-ever-built"],
+    ["saqqara-location","saqqara-necropolis-site","memphis-necropolis-at-saqqara","saqqara-burial-grounds","off-at-that-old-burial-site-near-memphis"],
+    ["architect-imhotep","designer-imhotep","imhotep-the-builder","imhotep-as-chief-architect","the-clever-guy-who-dreamed-it-up"],
+    ["stacked-mastaba-design","superimposed-mastaba-layers","tiered-stacked-tomb-form","six-stepped-terraced-structure","like-a-bunch-of-flat-tombs-piled-up"]
+  ],
+  "sentence_templates": [
+    "why is the {0} at its {2} the {1}, and how did the {3} conceive its {4}?",
+    "where is the {0} at its {2}, who was the {3}, and what makes the {4} the {1}?",
+    "describe the {0}: the {1}, its {2}, the {3}, and the {4}."
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "goliath-birdeater-corpus",
+  "topic": "wiki-goliath-birdeater",
+  "mode": "measure-only",
+  "source_article": "Goliath birdeater",
+  "description": "Tests recall of Goliath birdeater biology from the Goliath birdeater article, covering its status as the largest tarantula by mass, the urticating defensive hairs, the stridulation hissing sound, the South American rainforest burrow habitat, and the largely invertebrate diet.",
+  "anchors": ["largest-tarantula-by-mass","urticating-hairs","stridulation-hissing","rainforest-burrow-habitat","invertebrate-diet"],
+  "columns": [
+    ["largest-tarantula-by-mass","heaviest-tarantula","most-massive-tarantula","biggest-spider-by-weight","the-heftiest-spider-around"],
+    ["urticating-hairs","irritating-bristles","barbed-defensive-hairs","abdomen-flicked-setae","the-itchy-hairs-it-throws"],
+    ["stridulation-hissing","stridulatory-hiss","leg-rubbing-hiss-sound","defensive-hissing-noise","that-creepy-hissing-it-makes"],
+    ["rainforest-burrow-habitat","amazon-burrow-habitat","tropical-forest-burrow","rainforest-floor-burrow","its-hole-in-the-jungle-floor"],
+    ["invertebrate-diet","mostly-invertebrate-prey","insect-and-worm-diet","invertebrate-based-feeding","mostly-eats-bugs"]
+  ],
+  "sentence_templates": [
+    "what makes this spider the {0}, how does its {3} support that size, and how do {1}, {2}, and {4} fit in?",
+    "how do {1} and {2} work together for the {0} in its {3} when threatened, given its {4}?",
+    "if a spider is the {0} living in a {3}, how do its {4}, {1}, and {2} describe its biology?"
+  ]
+}

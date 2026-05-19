@@ -1,0 +1,20 @@
+{
+  "name": "magma-corpus",
+  "topic": "wiki-magma",
+  "mode": "measure-only",
+  "source_article": "Magma",
+  "description": "Tests recall of magma properties: molten rock itself, its silica content, its viscosity, the partial melting that produces it, and its crystallization on cooling.",
+  "anchors": ["magma","silica-content","magma-viscosity","partial-melting","magma-crystallization"],
+  "columns": [
+    ["magma","molten-rock","subsurface-melt","underground-molten-material","melted-rock-deep-underground"],
+    ["silica-content","silicon-dioxide-fraction","silica-concentration","sio2-proportion","how-much-glassy-stuff-is-in-it"],
+    ["magma-viscosity","melt-resistance-to-flow","magma-thickness","flow-stiffness-of-melt","how-runny-or-gloopy-it-is"],
+    ["partial-melting","incomplete-rock-melting","fractional-melting","partial-fusion-of-rock","rock-only-half-melting"],
+    ["magma-crystallization","melt-solidification","cooling-crystal-growth","magma-freezing-to-rock","it-hardening-back-into-stone"]
+  ],
+  "sentence_templates": [
+    "how does the {1} of {0} from {3} control its {2}, and what happens during {4}?",
+    "when {3} generates {0}, how does {1} set the {2} of the melt and shape its {4}?",
+    "what is the path from {3} to {4}, and how does {2} change as {0} cools given its {1}?"
+  ]
+}

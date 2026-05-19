@@ -1,0 +1,20 @@
+{
+  "name": "rms-titanic-corpus",
+  "topic": "wiki-rms-titanic",
+  "mode": "measure-only",
+  "source_article": "RMS Titanic",
+  "description": "Tests recall of the ship RMS Titanic, covering the vessel itself, its builder Harland and Wolff, the maiden voyage, the lifeboat shortfall, and the watertight-compartment design.",
+  "anchors": ["rms-titanic","harland-and-wolff","maiden-voyage","lifeboat-shortage","watertight-compartments"],
+  "columns": [
+    ["rms-titanic","the-titanic","white-star-flagship","ill-fated-ocean-liner","that-famous-ship-that-sank"],
+    ["harland-and-wolff","belfast-shipyard","titanic-builder","irish-shipbuilders","the-belfast-yard-that-built-her"],
+    ["maiden-voyage","first-crossing","inaugural-atlantic-trip","southampton-to-new-york-run","her-very-first-trip-across"],
+    ["lifeboat-shortage","too-few-lifeboats","insufficient-lifeboat-capacity","lifeboat-shortfall","nowhere-near-enough-lifeboats"],
+    ["watertight-compartments","sealed-bulkhead-sections","compartmentalized-hull","watertight-bulkheads","the-sealed-compartments-that-failed"]
+  ],
+  "sentence_templates": [
+    "who was {1}, and how did {4} and {3} affect {0} during its {2}?",
+    "during the {2} of {0}, why did {4} and {3} fail to prevent disaster despite the work of {1}?",
+    "what did {1} get wrong about {4} and {3}, and how did that doom {0} on its {2}?"
+  ]
+}

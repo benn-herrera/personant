@@ -1,0 +1,20 @@
+{
+  "name": "thermodynamics-corpus",
+  "topic": "wiki-thermodynamics",
+  "mode": "measure-only",
+  "source_article": "Thermodynamics",
+  "description": "Tests recall of thermodynamics concepts from the thermodynamics article, covering thermodynamics itself, the laws of thermodynamics, heat and work, thermodynamic equilibrium, and the thermodynamic system.",
+  "anchors": ["thermodynamics","laws-of-thermodynamics","heat-and-work","thermodynamic-equilibrium","thermodynamic-system"],
+  "columns": [
+    ["thermodynamics","science-of-heat-and-energy","study-of-heat-transfer","physics-of-thermal-energy","the-science-of-heat-and-energy"],
+    ["laws-of-thermodynamics","thermodynamic-laws","four-laws-of-thermodynamics","principles-of-thermodynamics","the-rules-heat-energy-obeys"],
+    ["heat-and-work","heat-transfer-and-work","energy-transfer-modes","thermal-energy-and-mechanical-work","heat-going-in-and-work-coming-out"],
+    ["thermodynamic-equilibrium","thermal-equilibrium","equilibrium-state","balanced-thermodynamic-state","when-everything-settles-to-the-same-temperature"],
+    ["thermodynamic-system","thermal-system","system-and-surroundings","bounded-thermodynamic-region","the-chunk-of-stuff-being-studied"]
+  ],
+  "sentence_templates": [
+    "how does {0} use the {1} to describe {2} in a {4} moving toward {3}?",
+    "how do {2} cross the boundary of a {4} as it moves toward {3}, and how do the {1} of {0} govern this?",
+    "explain how {0} relates the {1}, {2}, {3}, and the {4}."
+  ]
+}

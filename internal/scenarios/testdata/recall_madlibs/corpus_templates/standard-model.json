@@ -16,31 +16,36 @@
       "standard-model",
       "sm-framework",
       "glashow-salam-weinberg-model",
-      "particle-physics-standard-model"
+      "particle-physics-standard-model",
+      "the-big-particle-physics-rulebook"
     ],
     [
       "electroweak-unification",
       "electroweak-theory",
       "ew-unification",
-      "glashow-salam-weinberg-theory"
+      "glashow-salam-weinberg-theory",
+      "the-electric-and-weak-forces-merged"
     ],
     [
       "gauge-boson",
       "force-carrier",
       "vector-boson",
-      "messenger-particle"
+      "messenger-particle",
+      "the-particles-that-carry-forces"
     ],
     [
       "spontaneous-symmetry-breaking",
       "gauge-symmetry-breaking",
       "electroweak-symmetry-breaking",
-      "vacuum-symmetry-breaking"
+      "vacuum-symmetry-breaking",
+      "the-symmetry-quietly-breaking-itself"
     ],
     [
       "color-charge",
       "colour-charge",
       "chromodynamic-charge",
-      "qcd-charge"
+      "qcd-charge",
+      "the-charge-that-quarks-carry"
     ]
   ],
   "sentence_templates": [

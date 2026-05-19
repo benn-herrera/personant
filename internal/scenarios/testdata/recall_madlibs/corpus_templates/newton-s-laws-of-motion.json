@@ -1,0 +1,20 @@
+{
+  "name": "newton-s-laws-of-motion-corpus",
+  "topic": "wiki-newton-s-laws-of-motion",
+  "mode": "measure-only",
+  "source_article": "Newton's laws of motion",
+  "description": "Tests recall of classical-mechanics concepts from the Newton's-laws-of-motion article, covering the laws themselves, the law of inertia, the force-acceleration law, the action-reaction law, and inertial reference frames.",
+  "anchors": ["newtons-laws-of-motion","law-of-inertia","force-acceleration-law","action-reaction-law","inertial-reference-frame"],
+  "columns": [
+    ["newtons-laws-of-motion","newtonian-laws","three-laws-of-motion","laws-of-classical-motion","those-physics-rules-everybody-learns"],
+    ["law-of-inertia","first-law","principle-of-inertia","newtons-first-law","stuff-keeps-doing-what-its-doing"],
+    ["force-acceleration-law","second-law","f-equals-ma","newtons-second-law","push-harder-and-it-speeds-up-more"],
+    ["action-reaction-law","third-law","equal-and-opposite-forces","newtons-third-law","every-push-pushes-back-at-you"],
+    ["inertial-reference-frame","inertial-frame","non-accelerating-frame","newtonian-reference-frame","a-viewpoint-thats-not-speeding-up"]
+  ],
+  "sentence_templates": [
+    "how do {0} build from the {1} to the {2} and the {3}, all stated within an {4}?",
+    "why does the {1} only hold in an {4}, how does that affect the {2}, and how does it constrain the {3} within {0}?",
+    "explain how the {1}, {2}, and {3} comprise {0}, and why an {4} matters."
+  ]
+}

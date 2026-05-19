@@ -1,0 +1,20 @@
+{
+  "name": "calculus-corpus",
+  "topic": "wiki-calculus",
+  "mode": "measure-only",
+  "source_article": "Calculus",
+  "description": "Tests recall of calculus concepts from the calculus article, covering calculus itself, limits, differential calculus, integral calculus, and the fundamental theorem of calculus.",
+  "anchors": ["calculus","limit","differential-calculus","integral-calculus","fundamental-theorem-of-calculus"],
+  "columns": [
+    ["calculus","infinitesimal-calculus","mathematics-of-change","calculus-of-continuous-change","the-hard-math-with-the-squiggly-symbols"],
+    ["limit","limiting-value","limit-of-a-function","approached-value","what-it-creeps-toward-but-never-hits"],
+    ["differential-calculus","calculus-of-derivatives","rate-of-change-calculus","study-of-instantaneous-rates","the-slope-at-a-single-point-stuff"],
+    ["integral-calculus","calculus-of-integrals","accumulation-calculus","study-of-areas-and-totals","adding-up-the-area-under-the-curve"],
+    ["fundamental-theorem-of-calculus","ftc","derivative-integral-link","calculus-master-theorem","the-big-result-tying-the-two-halves"]
+  ],
+  "sentence_templates": [
+    "how does {0} use the idea of a {1} to build both {2} and {3}, and where does the {4} fit in?",
+    "what does the {4} say about the connection between {2} and {3} within {0}, and how does it rely on a {1}?",
+    "explain how a {1} underpins {2}, {3}, and the {4} as the core of {0}."
+  ]
+}

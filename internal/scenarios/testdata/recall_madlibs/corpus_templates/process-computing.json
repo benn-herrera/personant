@@ -1,0 +1,20 @@
+{
+  "name": "process-computing-corpus",
+  "topic": "wiki-process-computing",
+  "mode": "measure-only",
+  "source_article": "Process (computing)",
+  "description": "Tests recall of process concepts: the running-program instance, the address space, process state, inter-process communication, and the process control block.",
+  "anchors": ["process","address-space","process-state","inter-process-communication","process-control-block"],
+  "columns": [
+    ["process","running-program-instance","program-in-execution","executing-program","a-program-thats-actually-running-right-now"],
+    ["address-space","process-memory-space","virtual-address-region","isolated-memory-space","its-own-private-chunk-of-memory"],
+    ["process-state","execution-state","process-lifecycle-state","ready-running-blocked-state","whether-its-running-or-waiting-around"],
+    ["inter-process-communication","ipc","cross-process-messaging","process-to-process-communication","programs-passing-notes-to-each-other"],
+    ["process-control-block","pcb","process-descriptor","process-metadata-block","the-os-file-card-for-each-program"]
+  ],
+  "sentence_templates": [
+    "how does a {0} own an isolated {1} and a {2}, tracked by a {4} and reachable via {3}?",
+    "when {3} is needed for a {0}, how does it cross the {1} between processes in a given {2} via the {4}?",
+    "if the {2} changes, how do the {1}, {4}, and {3} of a {0} reflect it?"
+  ]
+}

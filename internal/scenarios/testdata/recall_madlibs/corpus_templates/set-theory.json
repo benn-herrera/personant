@@ -1,0 +1,20 @@
+{
+  "name": "set-theory-corpus",
+  "topic": "wiki-set-theory",
+  "mode": "measure-only",
+  "source_article": "Set theory",
+  "description": "Tests recall of set-theory concepts from the set-theory article, covering set theory itself, set membership, the subset relation, set operations, and cardinality.",
+  "anchors": ["set-theory","set-membership","subset-relation","set-operations","cardinality"],
+  "columns": [
+    ["set-theory","theory-of-sets","mathematics-of-collections","study-of-sets","the-math-of-groups-of-things"],
+    ["set-membership","element-of-relation","belonging-to-a-set","containment-of-an-element","whether-something-is-in-the-group"],
+    ["subset-relation","subset-inclusion","containment-of-one-set-in-another","is-a-subset-of-relation","one-group-sitting-inside-another"],
+    ["set-operations","operations-on-sets","union-intersection-and-complement","set-algebra-operations","ways-to-combine-groups"],
+    ["cardinality","set-size","number-of-elements","cardinal-count","how-many-things-are-in-the-group"]
+  ],
+  "sentence_templates": [
+    "how does {0} formalize {1}, the {2} between collections, {3}, and the {4} of a set?",
+    "what {3} does {0} define, how do they affect the {4} of a set, and how do they build on {1} and the {2}?",
+    "explain how {1}, the {2}, {3}, and {4} together form the basics of {0}."
+  ]
+}

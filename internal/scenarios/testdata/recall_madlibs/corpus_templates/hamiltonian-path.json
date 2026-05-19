@@ -16,31 +16,36 @@
       "hamiltonian-path",
       "traceable-path",
       "vertex-spanning-path",
-      "complete-vertex-walk"
+      "complete-vertex-walk",
+      "a-route-hitting-every-dot-once"
     ],
     [
       "hamiltonian-cycle",
       "hamiltonian-circuit",
       "vertex-tour",
-      "closed-hamiltonian-walk"
+      "closed-hamiltonian-walk",
+      "that-loop-back-to-where-you-started"
     ],
     [
       "np-complete",
       "computationally-intractable",
       "np-hard-decision",
-      "nondeterministic-polynomial-complete"
+      "nondeterministic-polynomial-complete",
+      "one-of-those-really-hard-problems"
     ],
     [
       "vertex",
       "graph-node",
       "node",
-      "graph-vertex"
+      "graph-vertex",
+      "one-of-the-dots"
     ],
     [
       "knights-tour",
       "chessboard-hamiltonian-path",
       "chess-knight-traversal",
-      "knight-hamiltonian-walk"
+      "knight-hamiltonian-walk",
+      "that-chess-puzzle-with-the-horse-piece"
     ]
   ],
   "sentence_templates": [

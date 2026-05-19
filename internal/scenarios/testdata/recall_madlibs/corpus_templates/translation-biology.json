@@ -12,11 +12,11 @@
     "translation-termination"
   ],
   "columns": [
-    ["ribosome", "protein-synthesis-machine", "mrna-translation-complex", "rna-protein-complex"],
-    ["transfer-rna", "trna", "amino-acid-carrier-rna", "anticodon-bearing-rna"],
-    ["start-codon", "initiation-codon", "aug-codon", "translation-start-signal"],
-    ["genetic-code", "codon-amino-acid-table", "triplet-code", "nucleotide-to-residue-mapping"],
-    ["translation-termination", "stop-codon-recognition", "polypeptide-release", "ribosome-disassembly"]
+    ["ribosome","protein-synthesis-machine","mrna-translation-complex","rna-protein-complex","the-cells-protein-building-machine"],
+    ["transfer-rna","trna","amino-acid-carrier-rna","anticodon-bearing-rna","the-rna-that-ferries-amino-acids"],
+    ["start-codon","initiation-codon","aug-codon","translation-start-signal","the-go-signal-codon"],
+    ["genetic-code","codon-amino-acid-table","triplet-code","nucleotide-to-residue-mapping","the-codon-to-amino-acid-cheat-sheet"],
+    ["translation-termination","stop-codon-recognition","polypeptide-release","ribosome-disassembly","the-protein-building-wrapping-up"]
   ],
   "sentence_templates": [
     "the {0} decodes each codon of the {3} as {1} delivers amino acids matching the {2} until a stop codon triggers {4}",

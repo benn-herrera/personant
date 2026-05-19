@@ -12,11 +12,11 @@
     "codon-table"
   ],
   "columns": [
-    ["codon-degeneracy", "codon-redundancy", "synonymous-coding", "wobble-degeneracy"],
-    ["transfer-rna", "trna", "adapter-molecule", "amino-acid-adaptor"],
-    ["reading-frame", "translation-frame", "triplet-frame", "codon-frame"],
-    ["stop-codon", "termination-codon", "nonsense-codon", "chain-terminator"],
-    ["codon-table", "genetic-code-table", "rna-codon-table", "codon-assignment-table"]
+    ["codon-degeneracy", "codon-redundancy", "synonymous-coding", "wobble-degeneracy", "several-codes-meaning-the-same-thing"],
+    ["transfer-rna", "trna", "adapter-molecule", "amino-acid-adaptor", "the-little-delivery-molecule"],
+    ["reading-frame", "translation-frame", "triplet-frame", "codon-frame", "where-you-start-counting-the-letters"],
+    ["stop-codon", "termination-codon", "nonsense-codon", "chain-terminator", "the-full-stop-signal"],
+    ["codon-table", "genetic-code-table", "rna-codon-table", "codon-assignment-table", "the-chart-that-decodes-the-letters"]
   ],
   "sentence_templates": [
     "{0} means multiple codons specify the same amino acid, and {1} identifies each one by carrying an anticodon that matches the {2} established at the start codon, ensuring that a {3} halts synthesis at the position shown in the {4}.",

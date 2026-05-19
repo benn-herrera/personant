@@ -1,0 +1,20 @@
+{
+  "name": "trapdoor-spider-corpus",
+  "topic": "wiki-trapdoor-spider",
+  "mode": "measure-only",
+  "source_article": "Trapdoor spider",
+  "description": "Tests recall of trapdoor spider biology from the Trapdoor spider article, covering burrow construction, the silk-hinged camouflaged door, ambush predation, the mygalomorph lineage, and trip-line prey detection.",
+  "anchors": ["silk-lined-burrow","hinged-trapdoor","ambush-predation","mygalomorph-lineage","trip-line-detection"],
+  "columns": [
+    ["silk-lined-burrow","silk-walled-tunnel","underground-silk-burrow","subterranean-silk-tube","the-silk-padded-underground-hole"],
+    ["hinged-trapdoor","silk-hinged-door","camouflaged-burrow-lid","soil-covered-trap-door","the-little-hinged-lid-on-the-burrow"],
+    ["ambush-predation","sit-and-wait-hunting","lie-in-wait-predation","burrow-ambush-attack","lying-in-wait-to-pounce"],
+    ["mygalomorph-lineage","mygalomorphae-group","primitive-spider-lineage","mygalomorph-infraorder","the-old-fashioned-spider-branch"],
+    ["trip-line-detection","silk-trip-lines","vibration-trip-threads","radiating-trigger-lines","the-tripwire-threads-around-the-door"]
+  ],
+  "sentence_templates": [
+    "how does a spider in the {3} build a {0} with a {1}, and how do {4} enable {2}?",
+    "how do {4} alert a spider in the {3}, and how do the {0} and {1} support {2}?",
+    "if a spider in the {3} uses a {0} and {1}, how do {4} make its {2} effective?"
+  ]
+}

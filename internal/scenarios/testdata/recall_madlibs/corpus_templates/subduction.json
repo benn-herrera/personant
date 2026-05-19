@@ -1,0 +1,20 @@
+{
+  "name": "subduction-corpus",
+  "topic": "wiki-subduction",
+  "mode": "measure-only",
+  "source_article": "Subduction",
+  "description": "Tests recall of subduction: the descent of one plate beneath another, the descending slab, the deep oceanic trench, the volcanic arc above it, and the megathrust earthquakes it produces.",
+  "anchors": ["subduction","subducting-slab","oceanic-trench","volcanic-arc","megathrust-earthquake"],
+  "columns": [
+    ["subduction","plate-underthrusting","slab-descent-process","plate-sinking-beneath-plate","one-plate-diving-under-another"],
+    ["subducting-slab","descending-plate-slab","downgoing-slab","sinking-lithospheric-slab","the-slab-sliding-down-into-the-earth"],
+    ["oceanic-trench","deep-sea-trench","subduction-trench","deep-ocean-floor-trough","the-deep-trench-on-the-sea-floor"],
+    ["volcanic-arc","arc-of-volcanoes","subduction-volcanic-arc","island-arc-volcano-chain","the-line-of-volcanoes-it-makes"],
+    ["megathrust-earthquake","subduction-zone-megaquake","great-thrust-earthquake","interplate-megathrust","the-giant-quake-from-the-stuck-plates"]
+  ],
+  "sentence_templates": [
+    "during {0}, how does the {1} create an {2}, a {3} above it, and the risk of a {4}?",
+    "why does {0} produce a {4}, and how are the {1}, the {2}, and the {3} involved?",
+    "what links the {1} in {0} to the {2}, the {3}, and the risk of a {4}?"
+  ]
+}

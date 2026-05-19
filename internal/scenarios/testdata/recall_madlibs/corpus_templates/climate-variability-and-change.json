@@ -16,31 +16,36 @@
       "internal-variability",
       "unforced-climate-variability",
       "internal-climate-fluctuation",
-      "natural-internal-oscillation"
+      "natural-internal-oscillation",
+      "the-climate-wobbling-on-its-own"
     ],
     [
       "external-forcing",
       "climate-forcing-mechanism",
       "external-climate-driver",
-      "exogenous-climate-perturbation"
+      "exogenous-climate-perturbation",
+      "something-outside-pushing-the-climate"
     ],
     [
       "milankovitch-cycles",
       "orbital-forcing",
       "orbital-climate-cycles",
-      "astronomical-climate-forcing"
+      "astronomical-climate-forcing",
+      "earths-wobbly-orbit-changing-things"
     ],
     [
       "thermohaline-circulation",
       "ocean-overturning-circulation",
       "deep-ocean-conveyor",
-      "meridional-overturning-circulation"
+      "meridional-overturning-circulation",
+      "that-big-ocean-conveyor-belt"
     ],
     [
       "climate-feedback",
       "climate-amplification",
       "feedback-mechanism",
-      "self-reinforcing-climate-response"
+      "self-reinforcing-climate-response",
+      "the-climate-egging-itself-on"
     ]
   ],
   "sentence_templates": [

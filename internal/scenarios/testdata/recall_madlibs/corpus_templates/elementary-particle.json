@@ -16,31 +16,36 @@
       "elementary-particle",
       "fundamental-particle",
       "point-particle",
-      "structureless-particle"
+      "structureless-particle",
+      "tiniest-bits-of-matter"
     ],
     [
       "fermion",
       "half-integer-spin-particle",
       "spin-half-particle",
-      "dirac-particle"
+      "dirac-particle",
+      "the-matter-type-particle"
     ],
     [
       "pauli-exclusion-principle",
       "exclusion-principle",
       "pauli-principle",
-      "fermi-exclusion-principle"
+      "fermi-exclusion-principle",
+      "no-two-can-share-a-spot-rule"
     ],
     [
       "antiparticle",
       "antimatter-partner",
       "charge-conjugate",
-      "antimatter-counterpart"
+      "antimatter-counterpart",
+      "the-mirror-opposite-particle"
     ],
     [
       "supersymmetry",
       "susy",
       "superpartner-symmetry",
-      "supersymmetric-extension"
+      "supersymmetric-extension",
+      "the-everything-has-a-twin-idea"
     ]
   ],
   "sentence_templates": [

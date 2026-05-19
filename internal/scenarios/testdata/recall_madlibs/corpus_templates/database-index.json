@@ -1,0 +1,20 @@
+{
+  "name": "database-index-corpus",
+  "topic": "wiki-database-index",
+  "mode": "measure-only",
+  "source_article": "Database index",
+  "description": "Tests recall of database-index concepts: the lookup-accelerating structure, the B-tree, query speedup, write overhead, and the covering index.",
+  "anchors": ["database-index","b-tree-index","query-speedup","write-overhead","covering-index"],
+  "columns": [
+    ["database-index","db-index","lookup-acceleration-structure","table-index","the-thing-that-makes-lookups-quick"],
+    ["b-tree-index","balanced-tree-index","btree","b-plus-tree-index","that-branching-tree-kind-of-index"],
+    ["query-speedup","faster-lookups","read-acceleration","scan-avoidance","not-having-to-scan-the-whole-table"],
+    ["write-overhead","index-maintenance-cost","insert-update-penalty","extra-write-cost","the-price-you-pay-on-every-write"],
+    ["covering-index","index-only-scan-support","covering-column-index","query-covering-index","an-index-that-answers-the-whole-query"]
+  ],
+  "sentence_templates": [
+    "how does a {0}, often a {1}, deliver {2} despite {3}, and what is a {4}?",
+    "when {4} is available, how does it improve {2} beyond a plain {0} or {1} despite {3}?",
+    "if {3} grows, how does it offset the {2} gained from a {0}, a {1}, or a {4}?"
+  ]
+}

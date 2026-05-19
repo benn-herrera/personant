@@ -6,11 +6,11 @@
   "description": "Tests recall of cryptanalysis concepts including frequency analysis, known-plaintext attacks, differential cryptanalysis, ciphertext-only attacks, and chosen-plaintext attacks.",
   "anchors": ["frequency-analysis", "known-plaintext-attack", "differential-cryptanalysis", "ciphertext-only-attack", "chosen-plaintext-attack"],
   "columns": [
-    ["frequency-analysis", "letter-frequency-attack", "statistical-cryptanalysis", "character-frequency-attack"],
-    ["known-plaintext-attack", "plaintext-pair-attack", "kpa-attack", "matched-plaintext-attack"],
-    ["differential-cryptanalysis", "differential-attack", "difference-propagation-attack", "differential-analysis"],
-    ["ciphertext-only-attack", "coa-attack", "blind-ciphertext-attack", "pure-ciphertext-attack"],
-    ["chosen-plaintext-attack", "selected-plaintext-attack", "oracle-attack", "cpa-attack"]
+    ["frequency-analysis", "letter-frequency-attack", "statistical-cryptanalysis", "character-frequency-attack", "counting-which-letters-show-up-most"],
+    ["known-plaintext-attack", "plaintext-pair-attack", "kpa-attack", "matched-plaintext-attack", "cracking-it-when-you-have-a-sample-pair"],
+    ["differential-cryptanalysis", "differential-attack", "difference-propagation-attack", "differential-analysis", "watching-how-small-changes-ripple-through"],
+    ["ciphertext-only-attack", "coa-attack", "blind-ciphertext-attack", "pure-ciphertext-attack", "cracking-it-with-just-the-scrambled-text"],
+    ["chosen-plaintext-attack", "selected-plaintext-attack", "oracle-attack", "cpa-attack", "feeding-it-your-own-text-to-see-output"]
   ],
   "sentence_templates": [
     "Against classical ciphers {0} is effective under a {3}, while {2} and {1} require more data than a {4}.",

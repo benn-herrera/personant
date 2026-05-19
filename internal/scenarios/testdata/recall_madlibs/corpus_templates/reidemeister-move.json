@@ -6,11 +6,11 @@
   "description": "Recall test for the three Reidemeister moves and their role in knot equivalence.",
   "anchors": ["reidemeister-move", "planar-isotopy", "knot-invariant", "writhe", "crossing-number"],
   "columns": [
-    ["reidemeister-move", "local-diagram-move", "reidemeister-operation", "link-diagram-move"],
-    ["planar-isotopy", "diagram-isotopy", "plane-deformation", "planar-deformation"],
-    ["knot-invariant", "knot-topological-invariant", "link-invariant", "diagram-invariant"],
-    ["writhe", "signed-crossing-sum", "crossing-sign-sum", "algebraic-crossing-number"],
-    ["crossing-number", "min-crossing-count", "crossing-count", "minimum-crossings"]
+    ["reidemeister-move","local-diagram-move","reidemeister-operation","link-diagram-move","wiggling-the-knot-picture"],
+    ["planar-isotopy","diagram-isotopy","plane-deformation","planar-deformation","smooshing-the-diagram-around"],
+    ["knot-invariant","knot-topological-invariant","link-invariant","diagram-invariant","the-number-that-survives-deformation"],
+    ["writhe","signed-crossing-sum","crossing-sign-sum","algebraic-crossing-number","the-curl-tally-of-the-diagram"],
+    ["crossing-number","min-crossing-count","crossing-count","minimum-crossings","fewest-times-the-strand-overlaps"]
   ],
   "sentence_templates": [
     "Applying a {0} up to {1} preserves the {2} but changes the {3} for type-I and does not alter the {4} only for type-III.",

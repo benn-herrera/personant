@@ -16,31 +16,36 @@
       "emulsification",
       "emulsion-formation",
       "dispersion-into-droplets",
-      "liquid-liquid-mixing"
+      "liquid-liquid-mixing",
+      "blending-two-liquids-that-dont-mix"
     ],
     [
       "emulsifier",
       "emulsifying-agent",
       "stabilizing-surfactant",
-      "amphiphilic-stabilizer"
+      "amphiphilic-stabilizer",
+      "the-stuff-that-keeps-it-mixed"
     ],
     [
       "dispersed-phase",
       "internal-phase",
       "droplet-phase",
-      "discontinuous-phase"
+      "discontinuous-phase",
+      "the-little-droplets-floating-inside"
     ],
     [
       "coalescence",
       "droplet-merging",
       "droplet-fusion",
-      "phase-reunion"
+      "phase-reunion",
+      "droplets-clumping-back-together"
     ],
     [
       "interfacial-tension",
       "oil-water-surface-tension",
       "phase-boundary-tension",
-      "liquid-liquid-interface-energy"
+      "liquid-liquid-interface-energy",
+      "the-pull-where-oil-meets-water"
     ]
   ],
   "sentence_templates": [

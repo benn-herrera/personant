@@ -6,11 +6,11 @@
   "description": "Tests recall of one-time pad concepts including the OTP system, perfect secrecy, key reuse, XOR operation, and key distribution.",
   "anchors": ["one-time-pad", "perfect-secrecy", "key-reuse", "xor-operation", "key-distribution"],
   "columns": [
-    ["one-time-pad", "otp", "vernam-pad", "single-use-pad"],
-    ["perfect-secrecy", "information-theoretic-security", "unconditional-security", "shannon-secrecy"],
-    ["key-reuse", "pad-reuse", "keystream-reuse", "repeated-key-use"],
-    ["xor-operation", "exclusive-or", "modulo-2-addition", "bitwise-xor"],
-    ["key-distribution", "key-delivery", "key-exchange-problem", "secure-key-transport"]
+    ["one-time-pad", "otp", "vernam-pad", "single-use-pad", "that-spy-code-with-the-throwaway-key"],
+    ["perfect-secrecy", "information-theoretic-security", "unconditional-security", "shannon-secrecy", "literally-impossible-to-crack"],
+    ["key-reuse", "pad-reuse", "keystream-reuse", "repeated-key-use", "the-mistake-of-using-the-same-key-twice"],
+    ["xor-operation", "exclusive-or", "modulo-2-addition", "bitwise-xor", "that-flip-the-bits-thing"],
+    ["key-distribution", "key-delivery", "key-exchange-problem", "secure-key-transport", "the-hassle-of-getting-the-key-to-them"]
   ],
   "sentence_templates": [
     "The {0} achieves {1} by applying a {3} to combine plaintext with a key, provided {2} never occurs and {4} is solved.",

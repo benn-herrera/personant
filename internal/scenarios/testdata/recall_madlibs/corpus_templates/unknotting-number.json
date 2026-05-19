@@ -16,31 +16,36 @@
       "unknotting-number",
       "crossing-switch-number",
       "minimum-crossing-switches",
-      "unknotting-index"
+      "unknotting-index",
+      "how-many-crossing-flips-to-undo-it"
     ],
     [
       "crossing-switch",
       "crossing-change",
       "crossing-flip",
-      "crossing-reversal"
+      "crossing-reversal",
+      "swapping-which-strand-goes-over"
     ],
     [
       "prime-knot",
       "irreducible-knot",
       "non-composite-knot",
-      "atomic-knot"
+      "atomic-knot",
+      "a-knot-you-cant-break-into-smaller-ones"
     ],
     [
       "knot-sum",
       "connected-sum-of-knots",
       "knot-composition",
-      "knot-concatenation"
+      "knot-concatenation",
+      "gluing-two-knots-end-to-end"
     ],
     [
       "crossing-number",
       "minimal-crossings",
       "minimum-crossing-count",
-      "least-crossing-number"
+      "least-crossing-number",
+      "the-fewest-times-the-strand-crosses-itself"
     ]
   ],
   "sentence_templates": [

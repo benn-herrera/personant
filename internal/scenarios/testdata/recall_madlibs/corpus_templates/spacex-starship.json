@@ -1,0 +1,20 @@
+{
+  "name": "spacex-starship-corpus",
+  "topic": "wiki-spacex-starship",
+  "mode": "measure-only",
+  "source_article": "SpaceX Starship",
+  "description": "Tests recall of the SpaceX Starship vehicle, covering its fully-reusable design, the Super Heavy booster, Raptor methane engines, orbital refueling, and its Mars-transport role.",
+  "anchors": ["reusable-launch-vehicle","super-heavy-booster","raptor-engine","orbital-refueling","mars-transport-vehicle"],
+  "columns": [
+    ["reusable-launch-vehicle","fully-reusable-rocket","reflyable-spacecraft","two-stage-reusable-system","the-rocket-you-can-fly-again"],
+    ["super-heavy-booster","starship-first-stage","heavy-lift-booster","reusable-booster-stage","the-big-bottom-booster-part"],
+    ["raptor-engine","methane-oxygen-engine","full-flow-staged-combustion-engine","methalox-rocket-engine","spacexs-methane-burning-engine"],
+    ["orbital-refueling","in-orbit-propellant-transfer","on-orbit-tanker-refueling","propellant-depot-resupply","topping-up-fuel-while-in-space"],
+    ["mars-transport-vehicle","mars-colony-ship","interplanetary-transport","crewed-mars-carrier","the-ship-meant-to-take-people-to-mars"]
+  ],
+  "sentence_templates": [
+    "how do the {1} and the {2} make Starship a {0}, why is {3} needed, and how does it serve as a {4}?",
+    "why does a {4} need {3}, and how do the {0} design, the {1}, and the {2} support that?",
+    "what do the {1} and {2} contribute before {3}, and how does that turn the {0} into a {4}?"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "pyramid-of-menkaure-corpus",
+  "topic": "wiki-pyramid-of-menkaure",
+  "mode": "measure-only",
+  "source_article": "Pyramid of Menkaure",
+  "description": "Tests recall of the Pyramid of Menkaure: its builder, its status as the smallest of the three Giza pyramids, its granite lower casing, its burial chamber, and its associated mortuary temple.",
+  "anchors": ["pyramid-of-menkaure","builder-pharaoh-menkaure","smallest-giza-pyramid","granite-lower-casing","menkaure-burial-chamber"],
+  "columns": [
+    ["pyramid-of-menkaure","menkaure-s-pyramid","third-pyramid-of-giza","smallest-giza-pyramid-structure","the-little-one-at-the-end-of-the-giza-three"],
+    ["builder-pharaoh-menkaure","commissioned-by-menkaure","menkaure-as-builder","fourth-dynasty-menkaure-patron","the-pharaoh-who-ordered-it-built"],
+    ["smallest-giza-pyramid","least-tall-of-the-giza-trio","minor-giza-pyramid","compact-third-pyramid","by-far-the-runt-of-the-three"],
+    ["granite-lower-casing","red-granite-base-cladding","aswan-granite-facing-blocks","lower-course-granite-casing","the-reddish-stone-around-the-bottom"],
+    ["menkaure-burial-chamber","granite-lined-tomb-room","subterranean-burial-chamber","royal-sarcophagus-chamber","the-room-down-inside-where-the-body-went"]
+  ],
+  "sentence_templates": [
+    "who is the {1} of the {0}, why is it the {2}, what about the {3}, and the {4}?",
+    "what is notable about the {3} and the {4} inside the {0}, the {2}, built by its {1}?",
+    "compare the {0} as the {2} with its {3} and the {4} built for the {1}."
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "in-situ-resource-utilization-corpus",
+  "topic": "wiki-in-situ-resource-utilization",
+  "mode": "measure-only",
+  "source_article": "In situ resource utilization",
+  "description": "Tests recall of in-situ-resource-utilization concepts, covering local resource harvesting, propellant production, water extraction, oxygen generation, and construction-material sourcing.",
+  "anchors": ["in-situ-resource-utilization","propellant-production","water-extraction","oxygen-generation","construction-material-sourcing"],
+  "columns": [
+    ["in-situ-resource-utilization","local-resource-harvesting","on-site-material-extraction","living-off-the-land","using-whatever-you-find-on-the-planet"],
+    ["propellant-production","isru-propellant-production","local-fuel-manufacture","in-situ-rocket-fuel","making-rocket-fuel-right-there"],
+    ["water-extraction","ice-mining","regolith-water-recovery","subsurface-water-harvesting","digging-water-out-of-the-ground"],
+    ["oxygen-generation","oxygen-production","co2-to-oxygen-conversion","breathable-o2-manufacture","making-air-to-breathe"],
+    ["construction-material-sourcing","local-building-material-supply","regolith-construction-feedstock","on-site-structural-material","getting-building-stuff-from-the-dirt"]
+  ],
+  "sentence_templates": [
+    "how does {0} enable {1}, and where do {2}, {3}, and {4} fit into that chain?",
+    "why is {2} a prerequisite for {3} and {1} under {0}, and how does {4} differ?",
+    "for a Mars base, how would {0} combine {2}, {3}, {4}, and {1} into one supply strategy?"
+  ]
+}

@@ -16,31 +16,36 @@
       "enso",
       "el-nino-southern-oscillation",
       "pacific-climate-cycle",
-      "pacific-ocean-oscillation"
+      "pacific-ocean-oscillation",
+      "that-warm-pacific-weather-thing"
     ],
     [
       "walker-circulation",
       "east-west-atmospheric-cell",
       "tropical-pacific-overturning",
-      "pacific-zonal-circulation"
+      "pacific-zonal-circulation",
+      "the-big-air-loop-over-the-pacific"
     ],
     [
       "trade-winds",
       "equatorial-easterlies",
       "tropical-easterly-winds",
-      "pacific-easterly-flow"
+      "pacific-easterly-flow",
+      "the-steady-winds-near-the-equator"
     ],
     [
       "sea-surface-temperature",
       "ocean-surface-warmth",
       "sst-anomaly",
-      "upper-ocean-temperature"
+      "upper-ocean-temperature",
+      "how-warm-the-water-is-on-top"
     ],
     [
       "southern-oscillation",
       "atmospheric-pressure-seesaw",
       "darwin-tahiti-pressure-gradient",
-      "tropical-pressure-oscillation"
+      "tropical-pressure-oscillation",
+      "the-pressure-teeter-totter"
     ]
   ],
   "sentence_templates": [

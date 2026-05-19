@@ -16,31 +16,36 @@
       "substitution-permutation-network",
       "sp-network",
       "substitution-and-permutation-design",
-      "sbox-and-permutation-structure"
+      "sbox-and-permutation-structure",
+      "swap-then-shuffle-layers"
     ],
     [
       "block-size",
       "block-length",
       "data-block-width",
-      "cipher-block-dimension"
+      "cipher-block-dimension",
+      "how-big-a-chunk-it-eats"
     ],
     [
       "key-schedule",
       "key-expansion",
       "round-key-derivation",
-      "subkey-generation"
+      "subkey-generation",
+      "stretching-the-password-into-round-keys"
     ],
     [
       "subbytes",
       "byte-substitution",
       "sbox-substitution",
-      "nonlinear-substitution-step"
+      "nonlinear-substitution-step",
+      "the-lookup-table-swap-step"
     ],
     [
       "rijndael",
       "rijndael-cipher",
       "daemen-rijmen-cipher",
-      "aes-origin-cipher"
+      "aes-origin-cipher",
+      "the-belgian-cipher-that-won-the-contest"
     ]
   ],
   "sentence_templates": [

@@ -1,0 +1,20 @@
+{
+  "name": "volcanic-explosivity-index-corpus",
+  "topic": "wiki-volcanic-explosivity-index",
+  "mode": "measure-only",
+  "source_article": "Volcanic Explosivity Index",
+  "description": "Tests recall of the Volcanic Explosivity Index: the explosivity scale itself, erupted tephra volume as the basis, eruption column height, the logarithmic scale steps, and supereruptions at the top of the scale.",
+  "anchors": ["volcanic-explosivity-index","erupted-tephra-volume","eruption-column-height","logarithmic-scale-steps","supereruption-rating"],
+  "columns": [
+    ["volcanic-explosivity-index","vei","eruption-explosivity-scale","volcanic-eruption-magnitude-index","the-how-big-was-the-eruption-scale"],
+    ["erupted-tephra-volume","ejecta-volume","total-erupted-material-volume","pyroclastic-volume-output","how-much-stuff-got-blasted-out"],
+    ["eruption-column-height","plume-height","ash-column-altitude","eruptive-column-elevation","how-high-the-ash-column-went-up"],
+    ["logarithmic-scale-steps","order-of-magnitude-steps","tenfold-scale-increments","logarithmic-rating-intervals","each-step-is-ten-times-bigger"],
+    ["supereruption-rating","top-of-scale-eruption","vei-8-supereruption","maximum-rating-eruption","a-top-of-the-chart-mega-eruption"]
+  ],
+  "sentence_templates": [
+    "how does the {0} use {1} and {2} across its {3} to rate an eruption up to a {4}?",
+    "why does the {0} combine {1} and {2} into {3}, and what counts as a {4}?",
+    "what relates {1} and {2} to the {3} of the {0} and to a {4}?"
+  ]
+}

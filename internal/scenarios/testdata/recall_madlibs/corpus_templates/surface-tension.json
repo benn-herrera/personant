@@ -16,31 +16,36 @@
       "surface-tension",
       "interfacial-tension",
       "surface-energy-per-area",
-      "liquid-surface-energy"
+      "liquid-surface-energy",
+      "the-skin-like-pull-on-water"
     ],
     [
       "capillary-action",
       "capillarity",
       "capillary-rise",
-      "wicking-effect"
+      "wicking-effect",
+      "water-creeping-up-a-narrow-tube"
     ],
     [
       "contact-angle",
       "wetting-angle",
       "liquid-solid-interface-angle",
-      "meniscus-angle"
+      "meniscus-angle",
+      "the-angle-a-droplet-sits-at"
     ],
     [
       "young-laplace-equation",
       "laplace-pressure-equation",
       "curvature-pressure-relation",
-      "capillary-pressure-equation"
+      "capillary-pressure-equation",
+      "the-curvature-pressure-formula"
     ],
     [
       "cohesive-forces",
       "intermolecular-attraction",
       "like-molecule-bonding",
-      "self-adhesion-forces"
+      "self-adhesion-forces",
+      "molecules-pulling-on-their-own-kind"
     ]
   ],
   "sentence_templates": [

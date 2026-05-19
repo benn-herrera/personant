@@ -1,0 +1,20 @@
+{
+  "name": "virtual-memory-corpus",
+  "topic": "wiki-virtual-memory",
+  "mode": "measure-only",
+  "source_article": "Virtual memory",
+  "description": "Tests recall of virtual-memory concepts: the address-space abstraction, paging, the page table, page faults, and swapping to disk.",
+  "anchors": ["virtual-memory","paging","page-table","page-fault","swapping"],
+  "columns": [
+    ["virtual-memory","virtual-address-space","memory-virtualization","logical-memory-abstraction","the-pretend-bigger-memory-trick"],
+    ["paging","page-based-memory","fixed-block-paging","memory-paging-scheme","chopping-memory-into-fixed-pages"],
+    ["page-table","address-translation-table","virtual-to-physical-map","page-mapping-table","the-lookup-table-for-page-addresses"],
+    ["page-fault","missing-page-trap","page-not-resident-fault","page-miss-exception","when-a-page-isnt-loaded-yet"],
+    ["swapping","page-swapping","disk-paging","swap-to-disk","shuffling-pages-out-to-disk"]
+  ],
+  "sentence_templates": [
+    "how does {0} use {1}, a {2}, {3} handling, and {4} to give each process its own space?",
+    "when a {3} occurs, how do the {2}, {1}, and {4} resolve it under {0}?",
+    "if {4} thrashes, what does it reveal about {1}, the {2}, and {3} rates in {0}?"
+  ]
+}

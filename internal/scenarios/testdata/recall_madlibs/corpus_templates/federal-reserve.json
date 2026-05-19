@@ -16,31 +16,36 @@
       "federal-reserve",
       "us-central-bank",
       "fed",
-      "federal-reserve-system"
+      "federal-reserve-system",
+      "the-people-who-run-the-money"
     ],
     [
       "dual-mandate",
       "price-stability-and-employment-goal",
       "twin-objectives",
-      "maximum-employment-stable-prices-mandate"
+      "maximum-employment-stable-prices-mandate",
+      "their-two-main-jobs"
     ],
     [
       "federal-funds-rate",
       "overnight-interbank-lending-rate",
       "policy-benchmark-rate",
-      "fed-target-rate"
+      "fed-target-rate",
+      "the-interest-rate-they-set"
     ],
     [
       "federal-open-market-committee",
       "fomc",
       "monetary-policy-committee",
-      "rate-setting-committee"
+      "rate-setting-committee",
+      "the-group-that-decides-rates"
     ],
     [
       "lender-of-last-resort",
       "emergency-liquidity-provider",
       "backstop-lender",
-      "discount-window-provider"
+      "discount-window-provider",
+      "the-bank-that-bails-out-banks"
     ]
   ],
   "sentence_templates": [

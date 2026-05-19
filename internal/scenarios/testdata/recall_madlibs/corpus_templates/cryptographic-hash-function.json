@@ -16,31 +16,36 @@
       "preimage-resistance",
       "one-way-hash-property",
       "hash-irreversibility",
-      "inversion-hardness"
+      "inversion-hardness",
+      "you-cant-work-backward-to-the-input"
     ],
     [
       "collision-resistance",
       "collision-avoidance",
       "collision-hardness",
-      "anti-collision-property"
+      "anti-collision-property",
+      "no-two-inputs-give-the-same-result"
     ],
     [
       "message-digest",
       "hash-value",
       "hash-output",
-      "digest-value"
+      "digest-value",
+      "the-fingerprint-it-spits-out"
     ],
     [
       "merkle-damgard-construction",
       "iterated-hash-construction",
       "compression-chaining-scheme",
-      "sequential-block-hashing"
+      "sequential-block-hashing",
+      "chewing-the-data-block-by-block"
     ],
     [
       "one-way-function",
       "trapdoor-function",
       "irreversible-function",
-      "hard-to-invert-map"
+      "hard-to-invert-map",
+      "easy-one-way-impossible-the-other"
     ]
   ],
   "sentence_templates": [

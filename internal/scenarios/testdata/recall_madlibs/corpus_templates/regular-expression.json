@@ -1,0 +1,20 @@
+{
+  "name": "regular-expression-corpus",
+  "topic": "wiki-regular-expression",
+  "mode": "measure-only",
+  "source_article": "Regular expression",
+  "description": "Tests recall of regular-expression concepts: the pattern notation, pattern matching, the finite-automaton model, capture groups, and catastrophic backtracking.",
+  "anchors": ["regular-expression","pattern-matching","finite-automaton","capture-group","catastrophic-backtracking"],
+  "columns": [
+    ["regular-expression","regex","pattern-syntax","text-matching-pattern","that-cryptic-search-pattern-thing"],
+    ["pattern-matching","string-matching","pattern-search","match-against-text","fishing-for-text-that-fits"],
+    ["finite-automaton","finite-state-machine","dfa-or-nfa","automaton-model","the-rules-engine-behind-search"],
+    ["capture-group","capturing-subexpression","match-group","parenthesized-subpattern","the-bit-in-parentheses-you-keep"],
+    ["catastrophic-backtracking","exponential-backtracking","regex-blowup","pathological-backtracking","regex-grinding-to-a-halt"]
+  ],
+  "sentence_templates": [
+    "how does a {0} drive {1} using an underlying {2}, a {3}, and avoid {4}?",
+    "when a {3} is extracted, how does the {2} of a {0} support it during {1} without {4}?",
+    "if {4} occurs, what does it reveal about the {2} and {3} behind a {0} doing {1}?"
+  ]
+}

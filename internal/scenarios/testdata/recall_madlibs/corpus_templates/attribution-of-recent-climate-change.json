@@ -16,31 +16,36 @@
       "fingerprint-method",
       "climate-fingerprinting",
       "pattern-attribution-analysis",
-      "signature-based-attribution"
+      "signature-based-attribution",
+      "matching-warmings-telltale-pattern"
     ],
     [
       "greenhouse-gas-forcing",
       "ghg-radiative-forcing",
       "co2-driven-warming",
-      "trace-gas-warming-influence"
+      "trace-gas-warming-influence",
+      "the-push-from-all-that-carbon"
     ],
     [
       "aerosol-cooling",
       "sulfate-aerosol-cooling",
       "aerosol-masking-effect",
-      "particulate-cooling-effect"
+      "particulate-cooling-effect",
+      "smog-actually-cooling-things-down"
     ],
     [
       "detection-and-attribution",
       "climate-change-attribution",
       "cause-identification-in-climate",
-      "climate-signal-attribution"
+      "climate-signal-attribution",
+      "figuring-out-whats-to-blame"
     ],
     [
       "climate-model-simulation",
       "gcm-run",
       "climate-model-experiment",
-      "coupled-model-projection"
+      "coupled-model-projection",
+      "running-the-climate-on-a-computer"
     ]
   ],
   "sentence_templates": [

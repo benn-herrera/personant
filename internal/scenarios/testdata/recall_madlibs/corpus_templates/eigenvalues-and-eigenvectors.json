@@ -1,0 +1,20 @@
+{
+  "name": "eigenvalues-and-eigenvectors-corpus",
+  "topic": "wiki-eigenvalues-and-eigenvectors",
+  "mode": "measure-only",
+  "source_article": "Eigenvalues and eigenvectors",
+  "description": "Tests recall of eigen-analysis concepts from the eigenvalues-and-eigenvectors article, covering eigenvalues, eigenvectors, the characteristic polynomial, eigenspaces, and diagonalization.",
+  "anchors": ["eigenvalue","eigenvector","characteristic-polynomial","eigenspace","diagonalization"],
+  "columns": [
+    ["eigenvalue","characteristic-value","latent-root","eigen-scalar","the-stretch-number"],
+    ["eigenvector","characteristic-vector","invariant-direction-vector","eigen-direction","the-arrow-that-stays-put"],
+    ["characteristic-polynomial","eigen-polynomial","secular-equation","characteristic-equation","the-equation-you-solve-for-eigenvalues"],
+    ["eigenspace","eigenvalue-subspace","invariant-subspace","span-of-eigenvectors","the-zone-of-eigenvectors"],
+    ["diagonalization","eigen-decomposition","matrix-diagonalizing","spectral-decomposition","breaking-the-matrix-apart"]
+  ],
+  "sentence_templates": [
+    "how does an {0} pair with an {1}, how does the {2} let you find both, and how do they span an {3} used for {4}?",
+    "what is the {3} for a given {0} found via the {2}, how does its {1} basis enable {4}?",
+    "explain how {2} yields each {0}, how an {1} spans the {3}, and when {4} is possible."
+  ]
+}

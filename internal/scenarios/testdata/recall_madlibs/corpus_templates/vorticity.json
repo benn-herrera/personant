@@ -16,31 +16,36 @@
       "vorticity",
       "local-spin-rate",
       "fluid-rotation-field",
-      "rotational-tendency"
+      "rotational-tendency",
+      "how-much-the-fluid-is-spinning"
     ],
     [
       "curl-of-velocity",
       "velocity-curl",
       "rotational-derivative-of-velocity",
-      "cross-product-nabla-v"
+      "cross-product-nabla-v",
+      "the-curl-math-of-the-velocity"
     ],
     [
       "vortex-tube",
       "vorticity-tube",
       "flux-tube-of-vorticity",
-      "vortex-filament-bundle"
+      "vortex-filament-bundle",
+      "a-bundle-of-spinning-fluid"
     ],
     [
       "circulation",
       "velocity-line-integral",
       "closed-path-flow-integral",
-      "loop-integral-of-velocity"
+      "loop-integral-of-velocity",
+      "the-total-swirl-around-a-loop"
     ],
     [
       "vortex-stretching",
       "vortex-line-extension",
       "vorticity-intensification",
-      "vortex-tube-elongation"
+      "vortex-tube-elongation",
+      "swirls-getting-stretched-thinner"
     ]
   ],
   "sentence_templates": [

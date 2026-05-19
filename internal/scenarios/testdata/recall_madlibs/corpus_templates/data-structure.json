@@ -1,0 +1,20 @@
+{
+  "name": "data-structure-corpus",
+  "topic": "wiki-data-structure",
+  "mode": "measure-only",
+  "source_article": "Data structure",
+  "description": "Tests recall of data-structure concepts: the abstraction itself, abstract data types, time complexity of operations, memory layout, and the role of choosing the right structure.",
+  "anchors": ["data-structure","abstract-data-type","time-complexity","memory-layout","structure-selection"],
+  "columns": [
+    ["data-structure","data-organization-scheme","collection-type","structured-data-format","a-way-of-arranging-your-data"],
+    ["abstract-data-type","adt","interface-specification","behavioral-data-model","what-it-does-not-how-its-built"],
+    ["time-complexity","operation-cost","asymptotic-running-time","big-o-of-operations","how-slow-it-gets-as-it-grows"],
+    ["memory-layout","storage-arrangement","in-memory-representation","physical-data-layout","how-its-actually-laid-out-in-memory"],
+    ["structure-selection","choosing-the-right-structure","data-structure-tradeoff","picking-a-collection","picking-the-right-tool-for-the-job"]
+  ],
+  "sentence_templates": [
+    "how does a {0} realize an {1}, and how do {2}, {3}, and {4} interact?",
+    "when picking via {4}, what does {1} hide about {3} and {2} in a {0}?",
+    "if {2} is the metric, how do {3} and {1} of a {0} inform {4}?"
+  ]
+}

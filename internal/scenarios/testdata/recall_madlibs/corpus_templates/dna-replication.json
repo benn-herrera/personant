@@ -12,11 +12,11 @@
     "origin-of-replication"
   ],
   "columns": [
-    ["replication-fork", "replication-junction", "unwinding-fork", "strand-separation-point"],
-    ["dna-polymerase", "replicative-polymerase", "dna-synthesizing-enzyme", "nucleotide-adding-enzyme"],
-    ["okazaki-fragments", "lagging-strand-fragments", "discontinuous-synthesis-segments", "short-lagging-strand-pieces"],
-    ["helicase", "dna-unwinding-enzyme", "strand-separation-enzyme", "duplex-unwinding-protein"],
-    ["origin-of-replication", "replication-origin", "ori-sequence", "replication-start-site"]
+    ["replication-fork", "replication-junction", "unwinding-fork", "strand-separation-point", "the-y-shape-where-the-dna-splits"],
+    ["dna-polymerase", "replicative-polymerase", "dna-synthesizing-enzyme", "nucleotide-adding-enzyme", "the-enzyme-that-builds-the-new-strand"],
+    ["okazaki-fragments", "lagging-strand-fragments", "discontinuous-synthesis-segments", "short-lagging-strand-pieces", "the-little-stitched-together-chunks"],
+    ["helicase", "dna-unwinding-enzyme", "strand-separation-enzyme", "duplex-unwinding-protein", "the-enzyme-that-unzips-the-dna"],
+    ["origin-of-replication", "replication-origin", "ori-sequence", "replication-start-site", "the-spot-where-copying-kicks-off"]
   ],
   "sentence_templates": [
     "at the {4} a {3} opens the duplex forming a {0} where {1} extends the leading strand continuously while producing {2} on the lagging strand",

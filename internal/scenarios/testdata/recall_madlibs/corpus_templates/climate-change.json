@@ -16,31 +16,36 @@
       "global-warming",
       "global-temperature-rise",
       "planetary-heating",
-      "surface-warming-trend"
+      "surface-warming-trend",
+      "the-whole-planet-getting-hotter"
     ],
     [
       "fossil-fuel-combustion",
       "fossil-fuel-burning",
       "hydrocarbon-combustion",
-      "fossil-energy-use"
+      "fossil-energy-use",
+      "burning-all-that-coal-and-gas"
     ],
     [
       "ice-albedo-feedback",
       "ice-reflectivity-feedback",
       "cryosphere-albedo-loop",
-      "melt-reflectance-feedback"
+      "melt-reflectance-feedback",
+      "melting-ice-makes-it-melt-faster"
     ],
     [
       "sea-level-rise",
       "ocean-level-increase",
       "coastal-inundation-trend",
-      "sea-surface-elevation-gain"
+      "sea-surface-elevation-gain",
+      "the-oceans-creeping-up-the-coast"
     ],
     [
       "paris-agreement",
       "paris-accord",
       "paris-climate-accord",
-      "paris-climate-treaty"
+      "paris-climate-treaty",
+      "that-big-climate-deal-from-paris"
     ]
   ],
   "sentence_templates": [

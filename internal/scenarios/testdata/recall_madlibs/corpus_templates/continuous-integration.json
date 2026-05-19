@@ -1,0 +1,20 @@
+{
+  "name": "continuous-integration-corpus",
+  "topic": "wiki-continuous-integration",
+  "mode": "measure-only",
+  "source_article": "Continuous integration",
+  "description": "Tests recall of continuous-integration concepts: the frequent-merge practice, the automated build, the automated test suite, the build pipeline, and fast feedback.",
+  "anchors": ["continuous-integration","automated-build","automated-testing","build-pipeline","fast-feedback"],
+  "columns": [
+    ["continuous-integration","ci-practice","frequent-merge-practice","mainline-integration-discipline","everyone-merging-their-code-all-the-time"],
+    ["automated-build","build-automation","scripted-build-step","unattended-build","the-machine-compiles-it-for-you"],
+    ["automated-testing","automated-test-suite","automated-verification","scripted-test-run","tests-that-run-themselves"],
+    ["build-pipeline","ci-pipeline","integration-pipeline","staged-build-workflow","the-conveyor-belt-of-build-steps"],
+    ["fast-feedback","rapid-feedback-loop","quick-failure-signal","early-defect-notification","finding-out-fast-when-you-broke-it"]
+  ],
+  "sentence_templates": [
+    "how does {0} chain an {1} into {2} within a {3} to deliver {4}?",
+    "when {4} is the goal of {0}, how do the {1} and {2} stages of a {3} support it?",
+    "if {2} is skipped, why does {0} lose {4} despite an {1} and a working {3}?"
+  ]
+}

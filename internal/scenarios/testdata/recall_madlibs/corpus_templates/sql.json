@@ -1,0 +1,20 @@
+{
+  "name": "sql-corpus",
+  "topic": "wiki-sql",
+  "mode": "measure-only",
+  "source_article": "SQL",
+  "description": "Tests recall of SQL concepts: the query language, declarative querying, the SELECT statement, joins, and data definition versus data manipulation.",
+  "anchors": ["sql","declarative-querying","select-statement","join","ddl-vs-dml"],
+  "columns": [
+    ["sql","structured-query-language","relational-query-language","database-query-language","the-language-for-asking-databases-things"],
+    ["declarative-querying","declarative-query-style","what-not-how-querying","set-oriented-querying","you-say-what-you-want-not-how"],
+    ["select-statement","select-query","data-retrieval-statement","row-selection-query","the-statement-that-pulls-rows-out"],
+    ["join","table-join","relational-join","cross-table-combination","stitching-two-tables-together"],
+    ["ddl-vs-dml","definition-vs-manipulation","schema-vs-data-statements","ddl-and-dml-split","the-build-schema-vs-change-data-split"]
+  ],
+  "sentence_templates": [
+    "how does {0} use a {2}, a {3}, and the {4} split to express {1}?",
+    "when a {3} combines tables in {0}, how does {1} keep the {2} concise within the {4} split?",
+    "if {4} is confused, why do the {3} and {2} of {0} still rely on {1}?"
+  ]
+}

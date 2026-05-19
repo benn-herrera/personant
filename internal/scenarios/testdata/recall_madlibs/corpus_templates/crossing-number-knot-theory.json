@@ -16,31 +16,36 @@
       "crossing-number",
       "minimal-crossing-count",
       "minimum-crossings",
-      "knot-crossing-minimum"
+      "knot-crossing-minimum",
+      "fewest-times-the-rope-crosses-itself"
     ],
     [
       "alternating-knot",
       "crossing-alternating-knot",
       "alternating-diagram",
-      "over-under-alternating"
+      "over-under-alternating",
+      "the-kind-that-goes-over-under-over-under"
     ],
     [
       "prime-knot",
       "irreducible-knot",
       "non-composite-knot",
-      "atomic-knot"
+      "atomic-knot",
+      "a-knot-you-cant-break-into-smaller-knots"
     ],
     [
       "knot-tabulation",
       "knot-table",
       "knot-catalog",
-      "knot-enumeration"
+      "knot-enumeration",
+      "the-big-list-of-all-the-knots"
     ],
     [
       "knot-sum",
       "connected-sum-of-knots",
       "knot-composition",
-      "knot-concatenation"
+      "knot-concatenation",
+      "tying-two-knots-together-into-one"
     ]
   ],
   "sentence_templates": [

@@ -6,11 +6,11 @@
   "description": "Tests recall of hash function concepts including hash collisions, hash tables, cryptographic hashes, hash values, and preimage resistance.",
   "anchors": ["hash-collision", "hash-table", "cryptographic-hash", "hash-value", "preimage-resistance"],
   "columns": [
-    ["hash-collision", "key-collision", "hash-clash", "digest-collision"],
-    ["hash-table", "hash-map", "scatter-storage", "associative-array"],
-    ["cryptographic-hash", "secure-hash", "one-way-hash", "crypto-digest"],
-    ["hash-value", "hash-code", "message-digest", "fingerprint"],
-    ["preimage-resistance", "one-way-property", "non-invertibility", "hash-irreversibility"]
+    ["hash-collision", "key-collision", "hash-clash", "digest-collision", "when-two-inputs-land-on-the-same-spot"],
+    ["hash-table", "hash-map", "scatter-storage", "associative-array", "that-fast-key-lookup-thing"],
+    ["cryptographic-hash", "secure-hash", "one-way-hash", "crypto-digest", "the-scrambler-you-cant-undo"],
+    ["hash-value", "hash-code", "message-digest", "fingerprint", "the-little-summary-number"],
+    ["preimage-resistance", "one-way-property", "non-invertibility", "hash-irreversibility", "you-cant-work-backwards-from-it"]
   ],
   "sentence_templates": [
     "A {2} produces a fixed-length {3} with {4}, so a {0} is computationally hard to find, unlike in a plain {1} where it merely causes slowdown.",

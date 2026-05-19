@@ -16,31 +16,36 @@
       "color-confinement",
       "quark-confinement",
       "colour-confinement",
-      "chromodynamic-confinement"
+      "chromodynamic-confinement",
+      "quarks-are-stuck-and-cant-go-it-alone"
     ],
     [
       "quark-flavor",
       "quark-flavour",
       "quark-type",
-      "flavor-quantum-number"
+      "flavor-quantum-number",
+      "which-of-the-six-kinds-of-quark-it-is"
     ],
     [
       "hadron",
       "quark-composite",
       "color-neutral-composite",
-      "strongly-bound-composite"
+      "strongly-bound-composite",
+      "a-clump-of-quarks-like-a-proton"
     ],
     [
       "asymptotic-freedom",
       "qcd-asymptotic-freedom",
       "short-distance-freedom",
-      "running-coupling-decrease"
+      "running-coupling-decrease",
+      "the-pull-fades-when-they-get-up-close"
     ],
     [
       "ckm-matrix",
       "cabibbo-kobayashi-maskawa-matrix",
       "quark-mixing-matrix",
-      "flavor-mixing-matrix"
+      "flavor-mixing-matrix",
+      "the-grid-for-quarks-switching-types"
     ]
   ],
   "sentence_templates": [

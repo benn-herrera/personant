@@ -16,31 +16,36 @@
       "ocean-acidification",
       "seawater-acidification",
       "ocean-ph-decline",
-      "marine-acidification"
+      "marine-acidification",
+      "the-sea-slowly-turning-more-acidic"
     ],
     [
       "calcification",
       "biogenic-calcification",
       "shell-formation",
-      "carbonate-biomineralization"
+      "carbonate-biomineralization",
+      "critters-building-their-shells"
     ],
     [
       "carbonate-saturation-state",
       "aragonite-saturation-state",
       "carbonate-ion-saturation",
-      "omega-saturation-index"
+      "omega-saturation-index",
+      "how-easy-it-is-to-make-shell-material"
     ],
     [
       "carbonate-compensation-depth",
       "ccd",
       "calcite-compensation-depth",
-      "carbonate-dissolution-depth"
+      "carbonate-dissolution-depth",
+      "the-depth-below-which-shells-dissolve"
     ],
     [
       "ocean-alkalinity-enhancement",
       "alkalinity-addition",
       "seawater-alkalinization",
-      "marine-alkalinity-increase"
+      "marine-alkalinity-increase",
+      "dumping-stuff-in-to-counteract-the-acid"
     ]
   ],
   "sentence_templates": [

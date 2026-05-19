@@ -16,31 +16,36 @@
       "reynolds-number",
       "inertia-viscosity-ratio",
       "flow-regime-criterion",
-      "turbulence-onset-parameter"
+      "turbulence-onset-parameter",
+      "the-number-that-says-if-flow-gets-choppy"
     ],
     [
       "navier-stokes-equations",
       "viscous-momentum-pdes",
       "momentum-transport-equations",
-      "fluid-motion-differential-system"
+      "fluid-motion-differential-system",
+      "the-hard-equations-for-how-fluids-move"
     ],
     [
       "continuity-equation",
       "mass-conservation-law",
       "mass-balance-equation",
-      "conservation-of-mass"
+      "conservation-of-mass",
+      "stuff-doesnt-just-disappear-rule"
     ],
     [
       "mach-number",
       "compressibility-ratio",
       "sonic-speed-fraction",
-      "flow-speed-index"
+      "flow-speed-index",
+      "how-fast-it-is-compared-to-sound"
     ],
     [
       "boundary-layer",
       "near-wall-viscous-region",
       "wall-shear-zone",
-      "surface-friction-sublayer"
+      "surface-friction-sublayer",
+      "the-thin-draggy-bit-right-by-the-wall"
     ]
   ],
   "sentence_templates": [

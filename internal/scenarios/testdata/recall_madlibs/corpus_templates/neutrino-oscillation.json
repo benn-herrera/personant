@@ -16,31 +16,36 @@
       "neutrino-oscillation",
       "flavor-mixing",
       "flavor-conversion",
-      "flavor-transition"
+      "flavor-transition",
+      "neutrinos-changing-type-as-they-go"
     ],
     [
       "pmns-matrix",
       "lepton-mixing-matrix",
       "mns-matrix",
-      "neutrino-mixing-matrix"
+      "neutrino-mixing-matrix",
+      "the-grid-that-blends-the-flavors"
     ],
     [
       "solar-neutrino-problem",
       "solar-neutrino-deficit",
       "solar-neutrino-anomaly",
-      "homestake-deficit"
+      "homestake-deficit",
+      "the-sun-seemed-to-be-short-on-neutrinos"
     ],
     [
       "mixing-angle",
       "oscillation-parameter",
       "neutrino-mixing-parameter",
-      "flavor-mixing-angle"
+      "flavor-mixing-angle",
+      "the-knob-setting-how-much-they-blend"
     ],
     [
       "mass-squared-difference",
       "delta-m-squared",
       "neutrino-mass-splitting",
-      "oscillation-phase-parameter"
+      "oscillation-phase-parameter",
+      "the-tiny-gap-between-their-masses"
     ]
   ],
   "sentence_templates": [

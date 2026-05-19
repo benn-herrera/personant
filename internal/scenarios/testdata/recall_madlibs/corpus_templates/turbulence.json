@@ -16,31 +16,36 @@
       "turbulence",
       "chaotic-flow",
       "turbulent-flow",
-      "irregular-fluid-motion"
+      "irregular-fluid-motion",
+      "messy-chaotic-fluid-flow"
     ],
     [
       "energy-cascade",
       "eddy-energy-transfer",
       "scale-energy-transfer",
-      "inertial-range-transfer"
+      "inertial-range-transfer",
+      "energy-tumbling-from-big-to-small-eddies"
     ],
     [
       "kolmogorov-microscales",
       "dissipation-length-scales",
       "viscous-cutoff-scales",
-      "smallest-turbulent-scales"
+      "smallest-turbulent-scales",
+      "the-tiniest-swirl-sizes"
     ],
     [
       "vortex-stretching",
       "vorticity-amplification",
       "vortex-tube-extension",
-      "rotational-intensification"
+      "rotational-intensification",
+      "swirls-getting-skinnier-and-faster"
     ],
     [
       "turbulent-diffusivity",
       "eddy-diffusivity",
       "turbulent-mixing-coefficient",
-      "chaotic-transport-coefficient"
+      "chaotic-transport-coefficient",
+      "the-extra-mixing-from-all-the-swirls"
     ]
   ],
   "sentence_templates": [

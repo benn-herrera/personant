@@ -6,11 +6,11 @@
   "description": "Recall test for the linking number of two closed curves and its computation.",
   "anchors": ["linking-number", "gauss-linking-integral", "orientation", "signed-crossing", "winding-number"],
   "columns": [
-    ["linking-number", "link-number", "loop-linking-count", "curve-linking-invariant"],
-    ["gauss-linking-integral", "gauss-integral", "linking-integral", "gauss-double-integral"],
-    ["orientation", "curve-orientation", "loop-orientation", "directed-orientation"],
-    ["signed-crossing", "crossing-sign", "positive-negative-crossing", "oriented-crossing"],
-    ["winding-number", "winding-count", "loop-winding", "rotation-number"]
+    ["linking-number", "link-number", "loop-linking-count", "curve-linking-invariant", "how-many-times-two-loops-hook-together"],
+    ["gauss-linking-integral", "gauss-integral", "linking-integral", "gauss-double-integral", "that-old-formula-for-counting-the-links"],
+    ["orientation", "curve-orientation", "loop-orientation", "directed-orientation", "which-way-around-the-loop-goes"],
+    ["signed-crossing", "crossing-sign", "positive-negative-crossing", "oriented-crossing", "plus-or-minus-where-strands-overlap"],
+    ["winding-number", "winding-count", "loop-winding", "rotation-number", "how-many-loops-it-makes-around-a-point"]
   ],
   "sentence_templates": [
     "The {0} of two curves is computed via the {1} by summing {3} values and depends on the {2} of each curve similarly to how a {4} depends on axis choice.",

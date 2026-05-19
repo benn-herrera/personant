@@ -16,31 +16,36 @@
       "boundary-layer",
       "viscous-sublayer",
       "wall-layer",
-      "prandtl-layer"
+      "prandtl-layer",
+      "the-sticky-thin-bit-right-by-the-surface"
     ],
     [
       "laminar-flow",
       "streamlined-flow",
       "smooth-flow",
-      "viscous-flow-regime"
+      "viscous-flow-regime",
+      "flow-that-glides-along-nice-and-orderly"
     ],
     [
       "turbulent-flow",
       "turbulent-regime",
       "eddy-flow",
-      "chaotic-flow"
+      "chaotic-flow",
+      "all-churned-up-and-swirly"
     ],
     [
       "skin-friction-drag",
       "viscous-friction-drag",
       "surface-friction-drag",
-      "wall-shear-drag"
+      "wall-shear-drag",
+      "the-rubbing-drag-along-the-surface"
     ],
     [
       "no-slip-condition",
       "zero-velocity-wall-condition",
       "wall-adhesion-condition",
-      "fluid-wall-boundary-condition"
+      "fluid-wall-boundary-condition",
+      "fluid-stuck-still-against-the-wall"
     ]
   ],
   "sentence_templates": [

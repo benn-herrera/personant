@@ -1,0 +1,20 @@
+{
+  "name": "old-kingdom-of-egypt-corpus",
+  "topic": "wiki-old-kingdom-of-egypt",
+  "mode": "measure-only",
+  "source_article": "Old Kingdom of Egypt",
+  "description": "Tests recall of the Old Kingdom of Egypt: its third-to-sixth dynasty span, its label as the Age of the Pyramids, its centralized royal government, its capital at Memphis, and its decline into the First Intermediate Period.",
+  "anchors": ["old-kingdom-of-egypt","third-to-sixth-dynasties","age-of-the-pyramids","centralized-royal-government","capital-at-memphis"],
+  "columns": [
+    ["old-kingdom-of-egypt","egyptian-old-kingdom","old-kingdom-period","early-bronze-age-egyptian-state","ancient-egypts-early-glory-days"],
+    ["third-to-sixth-dynasties","dynasties-three-through-six","3rd-to-6th-dynasty-span","fourth-dynasty-centered-era","that-stretch-of-four-old-dynasties"],
+    ["age-of-the-pyramids","pyramid-building-age","era-of-great-pyramid-construction","golden-age-of-pyramids","when-they-were-cranking-out-pyramids"],
+    ["centralized-royal-government","strong-pharaonic-central-rule","centralized-monarchy","unified-royal-administration","the-pharaoh-running-everything-from-the-top"],
+    ["capital-at-memphis","royal-seat-of-memphis","memphis-as-state-capital","administrative-center-memphis","they-ran-the-country-out-of-memphis"]
+  ],
+  "sentence_templates": [
+    "what was the {0}, which dynasties did the {1} cover, why is it the {2}, what about the {3}, and the {4}?",
+    "how did the {3} from the {4} enable the {2} during the {0} across the {1}?",
+    "describe the {0}: the {1}, the {3}, the {4}, and its reputation as the {2}."
+  ]
+}

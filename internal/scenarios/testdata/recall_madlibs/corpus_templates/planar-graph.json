@@ -16,31 +16,36 @@
       "planar-embedding",
       "plane-drawing",
       "crossing-free-drawing",
-      "planar-representation"
+      "planar-representation",
+      "drawing-it-flat-with-no-lines-crossing"
     ],
     [
       "kuratowskis-theorem",
       "forbidden-subgraph-theorem",
       "subdivision-characterization",
-      "planarity-obstruction-theorem"
+      "planarity-obstruction-theorem",
+      "the-rule-about-which-shapes-cant-lie-flat"
     ],
     [
       "eulers-formula",
       "euler-characteristic",
       "vertex-edge-face-relation",
-      "polyhedron-formula"
+      "polyhedron-formula",
+      "that-corners-minus-edges-plus-faces-thing"
     ],
     [
       "dual-graph",
       "planar-dual",
       "face-adjacency-graph",
-      "geometric-dual"
+      "geometric-dual",
+      "the-flipped-around-version-of-the-graph"
     ],
     [
       "four-color-theorem",
       "four-colorability",
       "4-chromatic-bound",
-      "planar-coloring-theorem"
+      "planar-coloring-theorem",
+      "any-map-needs-only-four-colors"
     ]
   ],
   "sentence_templates": [

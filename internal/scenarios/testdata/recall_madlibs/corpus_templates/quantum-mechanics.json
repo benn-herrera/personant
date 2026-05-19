@@ -1,0 +1,20 @@
+{
+  "name": "quantum-mechanics-corpus",
+  "topic": "wiki-quantum-mechanics",
+  "mode": "measure-only",
+  "source_article": "Quantum mechanics",
+  "description": "Tests recall of quantum-mechanics concepts from the quantum-mechanics article, covering the theory itself, the wave function, superposition, the uncertainty principle, and quantum measurement.",
+  "anchors": ["quantum-mechanics","wave-function","superposition","uncertainty-principle","quantum-measurement"],
+  "columns": [
+    ["quantum-mechanics","quantum-theory","quantum-physics","mechanics-of-the-very-small","that-weird-physics-of-tiny-particles"],
+    ["wave-function","quantum-state-function","psi-function","probability-amplitude-function","the-math-blob-describing-where-it-might-be"],
+    ["superposition","quantum-superposition","state-overlap","linear-combination-of-states","being-in-two-states-at-once"],
+    ["uncertainty-principle","heisenberg-uncertainty-principle","indeterminacy-principle","position-momentum-tradeoff","you-cant-pin-down-both-at-once"],
+    ["quantum-measurement","wave-function-collapse","quantum-observation","state-reduction","looking-at-it-forces-it-to-pick"]
+  ],
+  "sentence_templates": [
+    "how does {0} use the {1} to encode a particle's state in {2}, given the {3} and {4}?",
+    "what does the {3} say about pairs of observables, how does {4} change the {1}, and how does {0} use {2}?",
+    "explain how {0} combines the {1}, {2}, the {3}, and {4} into one framework."
+  ]
+}

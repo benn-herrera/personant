@@ -16,31 +16,36 @@
       "quantum-chromodynamics",
       "qcd",
       "chromodynamics",
-      "color-force-theory"
+      "color-force-theory",
+      "the-physics-of-the-glue-inside-protons"
     ],
     [
       "color-charge",
       "colour-charge",
       "chromodynamic-charge",
-      "qcd-color"
+      "qcd-color",
+      "the-strong-force-version-of-charge"
     ],
     [
       "gluon",
       "color-gauge-boson",
       "chromodynamic-boson",
-      "color-force-carrier"
+      "color-force-carrier",
+      "the-particle-that-glues-quarks-together"
     ],
     [
       "asymptotic-freedom",
       "short-distance-weakening",
       "uv-freedom",
-      "colour-asymptotic-freedom"
+      "colour-asymptotic-freedom",
+      "the-force-eases-off-when-quarks-are-close"
     ],
     [
       "color-confinement",
       "quark-confinement",
       "colour-confinement",
-      "chromodynamic-confinement"
+      "chromodynamic-confinement",
+      "you-can-never-pull-a-quark-out-on-its-own"
     ]
   ],
   "sentence_templates": [

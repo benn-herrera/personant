@@ -1,0 +1,20 @@
+{
+  "name": "types-of-volcanic-eruptions-corpus",
+  "topic": "wiki-types-of-volcanic-eruptions",
+  "mode": "measure-only",
+  "source_article": "Types of volcanic eruptions",
+  "description": "Tests recall of eruption styles: the gentle effusive eruption, the violent explosive eruption, the Hawaiian style, the Plinian style, and the water-driven phreatic eruption.",
+  "anchors": ["effusive-eruption","explosive-eruption","hawaiian-eruption","plinian-eruption","phreatic-eruption"],
+  "columns": [
+    ["effusive-eruption","gentle-lava-outpouring","non-explosive-eruption","quiet-lava-effusion","the-gentle-lava-oozing-kind"],
+    ["explosive-eruption","violent-fragmenting-eruption","blast-style-eruption","pyroclastic-explosive-event","the-blow-up-violently-kind"],
+    ["hawaiian-eruption","fluid-basaltic-fountaining","hawaiian-style-eruption","low-viscosity-fountain-eruption","the-lava-fountain-hawaii-kind"],
+    ["plinian-eruption","tall-column-eruption","vesuvian-style-eruption","sustained-eruption-column-event","the-towering-ash-column-kind"],
+    ["phreatic-eruption","steam-driven-eruption","groundwater-flash-eruption","hydrothermal-blast","the-steam-blast-kind"]
+  ],
+  "sentence_templates": [
+    "what separates an {0} from an {1}, and where do {2}, {3}, and {4} fall on that scale?",
+    "how does a {4} differ from an {1}, why is a {2} more like an {0} than a {3}?",
+    "given magma type, when does an eruption become {0}, {1}, {2}, {3}, or {4}?"
+  ]
+}

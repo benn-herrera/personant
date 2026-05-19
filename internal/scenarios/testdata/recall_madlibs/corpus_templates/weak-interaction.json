@@ -16,31 +16,36 @@
       "weak-interaction",
       "weak-force",
       "weak-nuclear-force",
-      "fermi-interaction"
+      "fermi-interaction",
+      "the-weak-force-of-nature"
     ],
     [
       "beta-decay",
       "radioactive-beta-decay",
       "nuclear-beta-decay",
-      "beta-emission"
+      "beta-emission",
+      "the-radioactive-decay-of-a-nucleus"
     ],
     [
       "parity-violation",
       "p-violation",
       "mirror-symmetry-breaking",
-      "handedness-violation"
+      "handedness-violation",
+      "nature-telling-left-from-right"
     ],
     [
       "w-boson",
       "charged-weak-boson",
       "w-plus-minus",
-      "weak-charged-carrier"
+      "weak-charged-carrier",
+      "the-heavy-charged-weak-force-particle"
     ],
     [
       "cp-violation",
       "charge-parity-violation",
       "cp-symmetry-breaking",
-      "matter-antimatter-asymmetry-source"
+      "matter-antimatter-asymmetry-source",
+      "the-tiny-matter-antimatter-imbalance"
     ]
   ],
   "sentence_templates": [

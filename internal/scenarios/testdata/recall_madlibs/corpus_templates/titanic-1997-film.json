@@ -1,0 +1,20 @@
+{
+  "name": "titanic-1997-film-corpus",
+  "topic": "wiki-titanic-1997-film",
+  "mode": "measure-only",
+  "source_article": "Titanic (1997 film)",
+  "description": "Tests recall of the 1997 film Titanic, covering the film itself, director James Cameron, the fictional Jack-and-Rose romance, the record box-office success, and its Academy Award sweep.",
+  "anchors": ["titanic-1997-film","james-cameron","jack-and-rose-romance","box-office-record","academy-award-sweep"],
+  "columns": [
+    ["titanic-1997-film","cameron-titanic-movie","1997-titanic-film","the-titanic-movie","that-big-titanic-movie-from-the-90s"],
+    ["james-cameron","director-james-cameron","cameron-the-director","filmmaker-james-cameron","the-guy-who-directed-it"],
+    ["jack-and-rose-romance","jack-dawson-and-rose-love-story","fictional-onboard-romance","jack-and-rose-storyline","the-jack-and-rose-love-story"],
+    ["box-office-record","record-breaking-ticket-sales","highest-grossing-film-status","box-office-blockbuster-success","broke-all-the-ticket-sales-records"],
+    ["academy-award-sweep","oscar-haul","eleven-oscar-wins","best-picture-oscar-sweep","won-a-pile-of-oscars"]
+  ],
+  "sentence_templates": [
+    "how did {1} shape the {0}, and why did the {2} drive its {3} and {4}?",
+    "what made the {0} achieve a {3}, and how did {1} balance the {2} against the {4}?",
+    "did the {2} or the {1} direction matter more to the {0} earning its {3} and {4}?"
+  ]
+}

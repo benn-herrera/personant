@@ -16,31 +16,36 @@
       "spacer-acquisition",
       "spacer-integration",
       "spacer-incorporation",
-      "spacer-insertion"
+      "spacer-insertion",
+      "filing-away-a-snippet-of-the-invader"
     ],
     [
       "protospacer-adjacent-motif",
       "pam-sequence",
       "flanking-recognition-sequence",
-      "target-flanking-motif"
+      "target-flanking-motif",
+      "the-little-tag-next-to-the-target"
     ],
     [
       "guide-rna",
       "crrna",
       "targeting-rna",
-      "spacer-rna"
+      "spacer-rna",
+      "the-rna-that-points-to-the-spot"
     ],
     [
       "adaptive-immunity",
       "acquired-immunity",
       "heritable-immunity",
-      "adaptive-immune-response"
+      "adaptive-immune-response",
+      "the-defense-that-learns-from-past-attacks"
     ],
     [
       "genome-editing",
       "gene-editing",
       "dna-editing",
-      "targeted-gene-modification"
+      "targeted-gene-modification",
+      "rewriting-the-dna-on-purpose"
     ]
   ],
   "sentence_templates": [

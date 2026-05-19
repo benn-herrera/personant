@@ -1,0 +1,56 @@
+{
+  "name": "stepwell-corpus",
+  "topic": "wiki-stepwell",
+  "mode": "measure-only",
+  "source_article": "Stepwell",
+  "description": "Tests recall of the stepwell, covering its descending stepped structure for water access, its water-conservation role in arid regions, the ornate carved galleries, its social gathering function, and notable examples like Rani ki Vav.",
+  "anchors": [
+    "stepwell",
+    "descending-step-structure",
+    "water-conservation",
+    "carved-galleries",
+    "rani-ki-vav"
+  ],
+  "columns": [
+    [
+      "stepwell",
+      "baoli-water-well",
+      "vav-stepped-well",
+      "subterranean-step-well",
+      "the-old-indian-stepped-water-well"
+    ],
+    [
+      "descending-step-structure",
+      "tiered-descending-stairs",
+      "multi-storey-step-flights",
+      "stepped-shaft-descent",
+      "the-staircase-going-down-to-water"
+    ],
+    [
+      "water-conservation",
+      "groundwater-storage",
+      "arid-region-water-supply",
+      "seasonal-water-harvesting",
+      "saving-up-water-for-dry-times"
+    ],
+    [
+      "carved-galleries",
+      "ornate-pillared-corridors",
+      "sculpted-wall-niches",
+      "decorated-side-pavilions",
+      "the-carved-decorated-passageways"
+    ],
+    [
+      "rani-ki-vav",
+      "queen-s-stepwell",
+      "patan-stepwell",
+      "rani-ki-vav-at-patan",
+      "that-famous-queens-stepwell"
+    ]
+  ],
+  "sentence_templates": [
+    "how does the {1} of a {0} enable {2}, and what do the {3} add, as seen in {4}?",
+    "what social role did the {0} serve beyond {2}, given its {1} and {3}, exemplified by {4}?",
+    "why is {4} a peak example of the {0}, especially for its {1}, {2}, and {3}?"
+  ]
+}

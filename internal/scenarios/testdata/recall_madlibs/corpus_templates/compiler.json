@@ -1,0 +1,20 @@
+{
+  "name": "compiler-corpus",
+  "topic": "wiki-compiler",
+  "mode": "measure-only",
+  "source_article": "Compiler",
+  "description": "Tests recall of compiler concepts: the translation tool, lexical and syntax analysis, intermediate representation, code optimization, and code generation.",
+  "anchors": ["compiler","syntax-analysis","intermediate-representation","code-optimization","code-generation"],
+  "columns": [
+    ["compiler","source-to-target-translator","language-compiler","program-translation-tool","the-thing-that-turns-code-into-a-program"],
+    ["syntax-analysis","parsing","grammar-checking","parse-tree-construction","checking-the-code-grammar-is-right"],
+    ["intermediate-representation","ir-form","intermediate-code","compiler-internal-form","the-halfway-version-inside-the-compiler"],
+    ["code-optimization","optimization-pass","program-transformation","performance-improvement-stage","tidying-the-code-to-run-faster"],
+    ["code-generation","target-code-emission","machine-code-output","backend-code-emission","spitting-out-the-final-machine-code"]
+  ],
+  "sentence_templates": [
+    "how does a {0} move from {1} to an {2} through {3} before {4}?",
+    "when {3} runs on the {2} after {1}, how does it change what {4} produces in a {0}?",
+    "if {1} fails in a {0}, why can {2}, {3}, and {4} never proceed?"
+  ]
+}

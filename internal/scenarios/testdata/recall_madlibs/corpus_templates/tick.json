@@ -1,0 +1,20 @@
+{
+  "name": "tick-corpus",
+  "topic": "wiki-tick",
+  "mode": "measure-only",
+  "source_article": "Tick",
+  "description": "Tests recall of tick biology from the Tick article, covering ticks as obligate blood-feeding ectoparasites, the hypostome attachment mouthpart, hard and soft tick families, the multi-host life cycle, and disease vectoring.",
+  "anchors": ["blood-feeding-ectoparasite","hypostome-attachment","hard-and-soft-ticks","multi-host-life-cycle","disease-vectoring"],
+  "columns": [
+    ["blood-feeding-ectoparasite","obligate-blood-parasite","hematophagous-ectoparasite","blood-sucking-parasite","the-little-blood-sucking-bug"],
+    ["hypostome-attachment","barbed-hypostome-anchor","mouthpart-skin-anchor","hypostome-feeding-tube","the-mouthpart-that-digs-into-skin"],
+    ["hard-and-soft-ticks","ixodidae-and-argasidae","hard-bodied-and-soft-bodied-ticks","two-tick-families","the-hard-shelled-and-soft-shelled-kinds"],
+    ["multi-host-life-cycle","several-host-life-cycle","host-switching-life-cycle","staged-multi-host-development","feeds-on-several-hosts-over-its-life"],
+    ["disease-vectoring","pathogen-transmission","tick-borne-disease-spread","vector-of-infections","spreads-diseases-when-it-bites"]
+  ],
+  "sentence_templates": [
+    "how does a tick act as a {0}, and what roles do the {1}, {2}, {3}, and {4} play?",
+    "how do the {2} differ across the {3}, and how do that, the {0}, and the {1} affect {4}?",
+    "if a {0} uses its {1} to feed, how do the {2} and a {3} contribute to {4}?"
+  ]
+}

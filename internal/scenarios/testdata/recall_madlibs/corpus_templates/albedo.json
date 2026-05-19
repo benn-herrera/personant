@@ -16,31 +16,36 @@
       "albedo",
       "solar-reflectivity",
       "reflectance-fraction",
-      "shortwave-reflectance"
+      "shortwave-reflectance",
+      "how-shiny-a-surface-is"
     ],
     [
       "ice-albedo-feedback",
       "cryosphere-reflectivity-feedback",
       "ice-reflectance-feedback",
-      "melt-albedo-feedback"
+      "melt-albedo-feedback",
+      "melting-ice-makes-it-warmer-loop"
     ],
     [
       "surface-reflectance",
       "land-surface-reflectance",
       "surface-solar-reflectance",
-      "ground-reflectivity"
+      "ground-reflectivity",
+      "how-much-light-the-ground-bounces"
     ],
     [
       "bidirectional-reflectance-distribution-function",
       "brdf",
       "angular-reflectance-function",
-      "directional-reflectance-model"
+      "directional-reflectance-model",
+      "the-which-angle-it-reflects-formula"
     ],
     [
       "planetary-albedo",
       "earth-albedo",
       "global-mean-albedo",
-      "bond-albedo"
+      "bond-albedo",
+      "how-bright-the-whole-earth-looks"
     ]
   ],
   "sentence_templates": [

@@ -1,0 +1,20 @@
+{
+  "name": "menkaure-corpus",
+  "topic": "wiki-menkaure",
+  "mode": "measure-only",
+  "source_article": "Menkaure",
+  "description": "Tests recall of the pharaoh Menkaure: his Fourth Dynasty reign, the smallest of the three Giza pyramids, the Menkaure triad statues, his Greek name Mycerinus, and his lineage.",
+  "anchors": ["pharaoh-menkaure","fourth-dynasty-reign","pyramid-of-menkaure","menkaure-triad-statues","greek-name-mycerinus"],
+  "columns": [
+    ["pharaoh-menkaure","king-menkaure","menkaure-of-egypt","mykerinos","that-pharaoh-with-the-small-pyramid"],
+    ["fourth-dynasty-reign","old-kingdom-fourth-dynasty-rule","reign-in-dynasty-four","4th-dynasty-kingship","back-in-the-pyramid-building-era"],
+    ["pyramid-of-menkaure","smallest-giza-pyramid","menkaure-s-pyramid","third-pyramid-of-giza","the-littlest-one-of-the-three-at-giza"],
+    ["menkaure-triad-statues","greywacke-triad-sculptures","menkaure-with-deities-groups","king-and-goddess-triads","those-stone-statues-of-him-with-gods"],
+    ["greek-name-mycerinus","hellenized-name-mycerinus","mycerinus-classical-rendering","greek-form-mycerinus","what-the-greeks-called-him-instead"]
+  ],
+  "sentence_templates": [
+    "who was {0}, when was his {1}, why is the {2} smaller than the others, what do the {3} show, and why the {4}?",
+    "what do the {3} of {0} depict, why is he also known by the {4}, how big is the {2}, and his {1}?",
+    "during his {1}, how did {0} build the {2}, and what survives in the {3} and the {4}?"
+  ]
+}

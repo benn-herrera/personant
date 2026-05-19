@@ -1,0 +1,20 @@
+{
+  "name": "mite-corpus",
+  "topic": "wiki-mite",
+  "mode": "measure-only",
+  "source_article": "Mite",
+  "description": "Tests recall of mite biology from the Mite article, covering the Acari subclass, microscopic body size, diverse feeding ecology, the six-legged larval stage, and host parasitism.",
+  "anchors": ["acari-subclass","microscopic-size","diverse-feeding","six-legged-larva","host-parasitism"],
+  "columns": [
+    ["acari-subclass","subclass-acari","acari-arachnid-group","acarine-lineage","the-bug-group-mites-and-ticks-belong-to"],
+    ["microscopic-size","tiny-body-size","sub-millimeter-size","minute-body-dimensions","too-small-to-really-see"],
+    ["diverse-feeding","varied-feeding-ecology","broad-dietary-range","wide-feeding-habits","they-eat-all-sorts-of-things"],
+    ["six-legged-larva","hexapod-larval-stage","six-leg-immature-stage","larval-six-leg-form","the-baby-stage-with-only-six-legs"],
+    ["host-parasitism","parasitic-host-association","ectoparasitic-lifestyle","host-feeding-parasitism","living-off-some-other-animal"]
+  ],
+  "sentence_templates": [
+    "what places a mite in the {0}, and how do its {1}, {2}, {3}, and {4} shape its ecology?",
+    "how does the {3} differ from the adult in the {0}, and how does {2} include {4} and depend on {1}?",
+    "if a member of the {0} shows {4}, how do its {1}, {2}, and {3} fit that lifestyle?"
+  ]
+}

@@ -6,11 +6,11 @@
   "description": "Recall test for Seifert surfaces and their role in computing knot invariants.",
   "anchors": ["seifert-surface", "seifert-algorithm", "seifert-matrix", "knot-genus", "alexander-polynomial"],
   "columns": [
-    ["seifert-surface", "orientable-spanning-surface", "knot-spanning-surface", "spanning-orientable-surface"],
-    ["seifert-algorithm", "seifert-construction", "seifert-circle-algorithm", "seifert-disk-algorithm"],
-    ["seifert-matrix", "seifert-form-matrix", "linking-form-matrix", "seifert-linking-matrix"],
-    ["knot-genus", "genus-of-knot", "seifert-genus", "minimal-genus"],
-    ["alexander-polynomial", "alexander-invariant", "knot-alexander-polynomial", "alexander-knot-polynomial"]
+    ["seifert-surface","orientable-spanning-surface","knot-spanning-surface","spanning-orientable-surface","the-membrane-stretched-across-a-knot"],
+    ["seifert-algorithm","seifert-construction","seifert-circle-algorithm","seifert-disk-algorithm","the-recipe-for-building-that-surface"],
+    ["seifert-matrix","seifert-form-matrix","linking-form-matrix","seifert-linking-matrix","the-grid-of-linking-numbers"],
+    ["knot-genus","genus-of-knot","seifert-genus","minimal-genus","how-twisty-the-knot-really-is"],
+    ["alexander-polynomial","alexander-invariant","knot-alexander-polynomial","alexander-knot-polynomial","that-classic-knot-polynomial"]
   ],
   "sentence_templates": [
     "A {0} is constructed by the {1} and encoded by a {2} whose determinant yields the {4} while the minimal {3} is the knot genus.",

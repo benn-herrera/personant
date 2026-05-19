@@ -1,0 +1,20 @@
+{
+  "name": "spider-bite-corpus",
+  "topic": "wiki-spider-bite",
+  "mode": "measure-only",
+  "source_article": "Spider bite",
+  "description": "Tests recall of spider bite medicine from the Spider bite article, covering venom envenomation, local and systemic symptoms, medically significant species, clinical treatment, and frequent misdiagnosis.",
+  "anchors": ["venom-envenomation","bite-symptoms","medically-significant-species","clinical-treatment","bite-misdiagnosis"],
+  "columns": [
+    ["venom-envenomation","venom-injection","envenoming-from-bite","toxin-delivery-into-skin","getting-poison-pumped-into-you"],
+    ["bite-symptoms","bite-effects","local-and-systemic-symptoms","clinical-signs-of-a-bite","what-a-bite-does-to-you"],
+    ["medically-significant-species","dangerous-spider-species","medically-important-spiders","clinically-relevant-species","the-spiders-that-can-actually-hurt-you"],
+    ["clinical-treatment","bite-treatment","medical-management","wound-care-and-antivenom","treating-the-bite"],
+    ["bite-misdiagnosis","misattributed-bites","overdiagnosis-of-spider-bites","mistaken-bite-attribution","blaming-a-spider-when-it-wasnt-one"]
+  ],
+  "sentence_templates": [
+    "how does {0} produce {1}, which {2} cause serious cases, and how do {3} and {4} factor in?",
+    "what {3} is appropriate for {1} from {0} by {2}, and why is {4} a common problem?",
+    "if {0} occurs, how do the {1}, the suspected {2}, and the risk of {4} guide {3}?"
+  ]
+}

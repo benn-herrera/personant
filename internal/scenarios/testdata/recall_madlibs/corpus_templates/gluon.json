@@ -16,31 +16,36 @@
       "color-charge",
       "strong-color-charge",
       "qcd-color-charge",
-      "chromodynamic-charge"
+      "chromodynamic-charge",
+      "the-color-thing-quarks-have"
     ],
     [
       "quark-confinement",
       "color-confinement",
       "hadronic-confinement",
-      "quark-trapping"
+      "quark-trapping",
+      "why-you-cant-pull-a-quark-out-alone"
     ],
     [
       "color-octet",
       "eight-gluon-states",
       "gluon-color-octet",
-      "eight-color-types"
+      "eight-color-types",
+      "the-fact-that-there-are-eight-gluons"
     ],
     [
       "quantum-chromodynamics",
       "qcd",
       "strong-interaction-field-theory",
-      "chromodynamic-gauge-theory"
+      "chromodynamic-gauge-theory",
+      "the-physics-of-the-strong-force"
     ],
     [
       "gluon-self-interaction",
       "gluon-gluon-interaction",
       "non-abelian-self-coupling",
-      "gluon-self-coupling"
+      "gluon-self-coupling",
+      "gluons-sticking-to-each-other"
     ]
   ],
   "sentence_templates": [

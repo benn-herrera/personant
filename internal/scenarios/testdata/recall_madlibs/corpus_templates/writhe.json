@@ -6,11 +6,11 @@
   "description": "Recall test for writhe as a signed crossing count of link diagrams and a geometric property of space curves.",
   "anchors": ["writhe", "signed-crossing-count", "reidemeister-type-i", "dna-supercoiling", "calugareanu-theorem"],
   "columns": [
-    ["writhe", "crossing-sign-sum", "algebraic-crossing-count", "signed-writhe"],
-    ["signed-crossing-count", "algebraic-crossing-number", "signed-crossing-sum", "crossing-sign-total"],
-    ["reidemeister-type-i", "type-i-move", "twist-move", "loop-twist-move"],
-    ["dna-supercoiling", "dna-superhelicity", "superhelical-coiling", "supercoiled-dna"],
-    ["calugareanu-theorem", "white-formula", "lk-tw-wr-theorem", "ribbon-linking-theorem"]
+    ["writhe","crossing-sign-sum","algebraic-crossing-count","signed-writhe","the-add-up-the-crossing-signs-number"],
+    ["signed-crossing-count","algebraic-crossing-number","signed-crossing-sum","crossing-sign-total","the-plus-minus-crossing-tally"],
+    ["reidemeister-type-i","type-i-move","twist-move","loop-twist-move","the-add-a-little-twist-move"],
+    ["dna-supercoiling","dna-superhelicity","superhelical-coiling","supercoiled-dna","dna-coiling-up-on-itself"],
+    ["calugareanu-theorem","white-formula","lk-tw-wr-theorem","ribbon-linking-theorem","the-twist-plus-writhe-linking-theorem"]
   ],
   "sentence_templates": [
     "The {0} of a link diagram equals the {1} and changes only under {2} while describing {3} in biology via the {4}.",

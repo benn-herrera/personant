@@ -6,11 +6,11 @@
   "description": "Tests recall of encryption concepts including plaintext, ciphertext, symmetric keys, public-key cryptography, and brute-force attacks.",
   "anchors": ["plaintext", "ciphertext", "symmetric-key", "public-key-cryptography", "brute-force-attack"],
   "columns": [
-    ["plaintext", "cleartext", "unencrypted-text", "original-message"],
-    ["ciphertext", "encrypted-output", "enciphered-text", "scrambled-text"],
-    ["symmetric-key", "shared-key", "single-key", "private-key-encryption"],
-    ["public-key-cryptography", "asymmetric-encryption", "two-key-cryptography", "public-private-key-scheme"],
-    ["brute-force-attack", "exhaustive-key-search", "keyspace-search", "exhaustive-search"]
+    ["plaintext", "cleartext", "unencrypted-text", "original-message", "the-readable-version"],
+    ["ciphertext", "encrypted-output", "enciphered-text", "scrambled-text", "the-garbled-locked-text"],
+    ["symmetric-key", "shared-key", "single-key", "private-key-encryption", "the-one-password-both-sides-use"],
+    ["public-key-cryptography", "asymmetric-encryption", "two-key-cryptography", "public-private-key-scheme", "the-lock-with-two-different-keys"],
+    ["brute-force-attack", "exhaustive-key-search", "keyspace-search", "exhaustive-search", "guessing-every-possible-password"]
   ],
   "sentence_templates": [
     "Converting {0} to {1} with {3} avoids the shared-secret problem of {2} but remains vulnerable to {4}.",

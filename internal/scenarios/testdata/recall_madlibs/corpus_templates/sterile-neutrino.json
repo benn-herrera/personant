@@ -16,31 +16,36 @@
       "right-handed-chirality",
       "right-chiral-helicity",
       "right-handed-neutrino-chirality",
-      "sterile-right-handedness"
+      "sterile-right-handedness",
+      "the-spins-the-wrong-way-property"
     ],
     [
       "seesaw-mechanism",
       "type-1-seesaw",
       "neutrino-mass-seesaw",
-      "seesaw-mass-suppression"
+      "seesaw-mass-suppression",
+      "the-mechanism-that-makes-masses-tiny"
     ],
     [
       "dark-matter-candidate",
       "dark-matter-particle-candidate",
       "potential-dark-matter-constituent",
-      "dark-matter-prospect"
+      "dark-matter-prospect",
+      "could-be-what-dark-matter-is"
     ],
     [
       "active-sterile-mixing",
       "active-sterile-oscillation",
       "sterile-active-neutrino-mixing",
-      "flavor-sterile-mixing"
+      "flavor-sterile-mixing",
+      "the-normal-and-sterile-types-blending"
     ],
     [
       "heavy-neutral-lepton",
       "neutral-heavy-lepton",
       "hnl",
-      "nhl"
+      "nhl",
+      "a-heavy-version-of-a-neutral-lepton"
     ]
   ],
   "sentence_templates": [

@@ -12,11 +12,11 @@
     "directed-acyclic-graph"
   ],
   "columns": [
-    ["directed-graph", "digraph", "directed-network", "directed-multigraph"],
-    ["directed-edge", "arc", "arrow", "directed-arc"],
-    ["indegree", "in-degree", "in-valence", "incoming-degree"],
-    ["strongly-connected", "strong-connectivity", "strong-connectedness", "mutually-reachable"],
-    ["directed-acyclic-graph", "dag", "acyclic-digraph", "cycle-free-digraph"]
+    ["directed-graph", "digraph", "directed-network", "directed-multigraph", "a-graph-where-the-links-have-arrows"],
+    ["directed-edge", "arc", "arrow", "directed-arc", "a-one-way-link-between-dots"],
+    ["indegree", "in-degree", "in-valence", "incoming-degree", "how-many-arrows-point-at-a-dot"],
+    ["strongly-connected", "strong-connectivity", "strong-connectedness", "mutually-reachable", "you-can-get-anywhere-from-anywhere"],
+    ["directed-acyclic-graph", "dag", "acyclic-digraph", "cycle-free-digraph", "arrows-that-never-loop-back-around"]
   ],
   "sentence_templates": [
     "in a {0}, what is the relationship between a {1} and the {2} of a vertex, and how does {3} differ from {4}?",

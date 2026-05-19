@@ -1,0 +1,20 @@
+{
+  "name": "special-relativity-corpus",
+  "topic": "wiki-special-relativity",
+  "mode": "measure-only",
+  "source_article": "Special relativity",
+  "description": "Tests recall of special-relativity concepts from the special-relativity article, covering the theory itself, the invariant speed of light, time dilation, length contraction, and the Lorentz transformation.",
+  "anchors": ["special-relativity","invariance-of-light-speed","time-dilation","length-contraction","lorentz-transformation"],
+  "columns": [
+    ["special-relativity","theory-of-special-relativity","einsteinian-special-relativity","relativity-of-flat-spacetime","einsteins-fast-motion-theory"],
+    ["invariance-of-light-speed","constancy-of-the-speed-of-light","light-speed-postulate","fixed-speed-of-light","light-always-goes-the-same-speed"],
+    ["time-dilation","slowing-of-moving-clocks","relativistic-time-stretching","dilated-time","moving-clocks-run-slow"],
+    ["length-contraction","lorentz-contraction","shortening-of-moving-objects","relativistic-length-shrinkage","moving-things-look-shorter"],
+    ["lorentz-transformation","lorentz-boost","relativistic-coordinate-transform","spacetime-transformation","the-math-for-switching-between-frames"]
+  ],
+  "sentence_templates": [
+    "how does {0} follow from the {1}, how does that produce {2} and {3}, and how does the {4} encode them?",
+    "what does the {4} say about coordinates between observers, how does it give {2} and {3}, and how does it rest on the {1} within {0}?",
+    "explain how {0} predicts {2}, {3}, and the {4} starting from the {1}."
+  ]
+}

@@ -16,31 +16,36 @@
       "colloidal-dispersion",
       "colloidal-suspension",
       "colloid-mixture",
-      "dispersed-colloid-system"
+      "dispersed-colloid-system",
+      "tiny-bits-floating-evenly-in-a-liquid"
     ],
     [
       "tyndall-effect",
       "colloidal-light-scattering",
       "particle-light-scatter",
-      "beam-visibility-in-colloid"
+      "beam-visibility-in-colloid",
+      "the-way-a-flashlight-beam-shows-up"
     ],
     [
       "zeta-potential",
       "electrokinetic-potential",
       "particle-surface-charge-potential",
-      "double-layer-potential"
+      "double-layer-potential",
+      "the-charge-that-keeps-bits-apart"
     ],
     [
       "sedimentation",
       "gravitational-settling",
       "particle-settling",
-      "colloidal-settling"
+      "colloidal-settling",
+      "the-stuff-slowly-sinking-to-the-bottom"
     ],
     [
       "electrostatic-stabilization",
       "charge-based-stabilization",
       "coulombic-repulsion-stabilization",
-      "electric-double-layer-stabilization"
+      "electric-double-layer-stabilization",
+      "using-like-charges-to-stop-clumping"
     ]
   ],
   "sentence_templates": [

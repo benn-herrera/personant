@@ -1,0 +1,20 @@
+{
+  "name": "cache-computing-corpus",
+  "topic": "wiki-cache-computing",
+  "mode": "measure-only",
+  "source_article": "Cache (computing)",
+  "description": "Tests recall of caching concepts: the fast intermediate store, cache hits and misses, locality of reference, eviction policy, and cache coherence.",
+  "anchors": ["cache","cache-hit-and-miss","locality-of-reference","eviction-policy","cache-coherence"],
+  "columns": [
+    ["cache","fast-intermediate-store","high-speed-buffer","cached-copy-store","the-quick-stash-of-recent-stuff"],
+    ["cache-hit-and-miss","hit-or-miss-outcome","cache-lookup-result","hit-miss-ratio","whether-it-was-already-there-or-not"],
+    ["locality-of-reference","reference-locality","temporal-and-spatial-locality","access-pattern-locality","you-tend-to-reuse-nearby-stuff"],
+    ["eviction-policy","replacement-policy","cache-replacement-strategy","lru-or-lfu-policy","how-it-decides-what-to-toss"],
+    ["cache-coherence","coherency-protocol","consistency-across-caches","multi-cache-consistency","keeping-all-the-copies-in-sync"]
+  ],
+  "sentence_templates": [
+    "how does a {0} exploit {2} and a {3} to maximize a favorable {1} while keeping {4}?",
+    "when {3} chooses what to drop, how does it shift the {1} in a {0} exploiting {2} and {4}?",
+    "if {4} is lost, what does it imply for {1}, {2}, and {3} across each {0}?"
+  ]
+}

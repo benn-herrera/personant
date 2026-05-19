@@ -16,31 +16,36 @@
       "flow-conservation",
       "kirchhoff-current-analogy",
       "balance-constraint",
-      "in-out-balance"
+      "in-out-balance",
+      "whatever-goes-in-comes-out"
     ],
     [
       "residual-network",
       "residual-graph",
       "capacity-graph",
-      "leftover-capacity-graph"
+      "leftover-capacity-graph",
+      "the-map-of-spare-room-left"
     ],
     [
       "augmenting-path",
       "flow-augmenting-path",
       "available-flow-path",
-      "residual-path"
+      "residual-path",
+      "a-route-you-can-still-push-more-through"
     ],
     [
       "max-flow-min-cut",
       "maxflow-mincut-theorem",
       "flow-cut-duality",
-      "capacity-cut-bound"
+      "capacity-cut-bound",
+      "the-bottleneck-caps-the-flow"
     ],
     [
       "flow-decomposition",
       "path-flow-decomposition",
       "flow-path-breakdown",
-      "cycle-path-decomposition"
+      "cycle-path-decomposition",
+      "splitting-the-flow-into-separate-routes"
     ]
   ],
   "sentence_templates": [

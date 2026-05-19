@@ -1,0 +1,20 @@
+{
+  "name": "integral-corpus",
+  "topic": "wiki-integral",
+  "mode": "measure-only",
+  "source_article": "Integral",
+  "description": "Tests recall of integral concepts from the integral article, covering the integral itself, the Riemann sum, the antiderivative, definite versus indefinite integrals, and integration techniques.",
+  "anchors": ["integral","riemann-sum","antiderivative","definite-integral","integration-technique"],
+  "columns": [
+    ["integral","integration","area-under-the-curve","accumulated-quantity","adding-up-an-infinite-amount-of-tiny-bits"],
+    ["riemann-sum","rectangle-approximation-sum","partition-sum","finite-area-approximation","slicing-it-into-skinny-rectangles"],
+    ["antiderivative","indefinite-integral","primitive-function","inverse-of-the-derivative","undoing-a-derivative"],
+    ["definite-integral","bounded-integral","integral-over-an-interval","numerical-area-integral","the-area-between-two-points"],
+    ["integration-technique","method-of-integration","integration-strategy","antiderivative-finding-method","a-trick-for-cracking-the-integral"]
+  ],
+  "sentence_templates": [
+    "how does a {1} approximate the {3}, how does the {2} let you evaluate the {0} exactly, and where does an {4} help?",
+    "what is the {0}, how do a {1} and the {2} define it, and how does an {4} help you compute a {3}?",
+    "explain the {0} as the limit of a {1}, its link to the {2}, and which {4} applies to a given {3}."
+  ]
+}

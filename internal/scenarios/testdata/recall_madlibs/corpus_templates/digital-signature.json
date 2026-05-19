@@ -16,31 +16,36 @@
       "signing-algorithm",
       "signature-generation-algorithm",
       "signing-procedure",
-      "message-signing-step"
+      "message-signing-step",
+      "the-part-that-stamps-the-message"
     ],
     [
       "signature-verification",
       "signature-validation",
       "signature-checking",
-      "authenticity-confirmation"
+      "authenticity-confirmation",
+      "making-sure-the-stamp-is-real"
     ],
     [
       "non-repudiation",
       "irrefutability",
       "denial-prevention",
-      "signer-accountability"
+      "signer-accountability",
+      "you-cant-later-say-you-didnt-sign-it"
     ],
     [
       "existential-unforgeability",
       "euf-cma-security",
       "signature-unforgeability",
-      "forgery-resistance"
+      "forgery-resistance",
+      "nobody-can-fake-your-signature"
     ],
     [
       "hash-then-sign",
       "digest-then-sign",
       "hash-and-sign-paradigm",
-      "sign-over-hash"
+      "sign-over-hash",
+      "scrunch-it-down-first-then-stamp-it"
     ]
   ],
   "sentence_templates": [

@@ -16,31 +16,36 @@
       "drag-force",
       "fluid-resistance-force",
       "aerodynamic-resistance",
-      "viscous-retarding-force"
+      "viscous-retarding-force",
+      "the-push-back-the-air-gives-you"
     ],
     [
       "drag-coefficient",
       "resistance-coefficient",
       "drag-factor",
-      "dimensionless-drag-parameter"
+      "dimensionless-drag-parameter",
+      "the-number-for-how-draggy-a-shape-is"
     ],
     [
       "terminal-velocity",
       "settling-velocity",
       "free-fall-limiting-speed",
-      "drag-limited-velocity"
+      "drag-limited-velocity",
+      "the-fastest-a-falling-thing-can-go"
     ],
     [
       "form-drag",
       "pressure-drag",
       "bluff-body-drag",
-      "profile-drag-component"
+      "profile-drag-component",
+      "the-drag-from-being-a-clunky-shape"
     ],
     [
       "reynolds-number",
       "inertia-viscosity-ratio",
       "flow-regime-parameter",
-      "re-dimensionless-number"
+      "re-dimensionless-number",
+      "the-number-that-says-smooth-or-churny"
     ]
   ],
   "sentence_templates": [

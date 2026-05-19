@@ -1,0 +1,20 @@
+{
+  "name": "health-threat-from-cosmic-rays-corpus",
+  "topic": "wiki-health-threat-from-cosmic-rays",
+  "mode": "measure-only",
+  "source_article": "Health threat from cosmic rays",
+  "description": "Tests recall of cosmic-ray health hazards, covering galactic cosmic rays, ionizing radiation dose, cancer risk, central-nervous-system damage, and radiation shielding countermeasures.",
+  "anchors": ["galactic-cosmic-rays","ionizing-radiation-dose","cancer-risk","central-nervous-system-damage","radiation-shielding"],
+  "columns": [
+    ["galactic-cosmic-rays","deep-space-cosmic-radiation","high-energy-cosmic-particles","interstellar-radiation","that-radiation-zipping-in-from-space"],
+    ["ionizing-radiation-dose","absorbed-radiation-dose","cumulative-radiation-exposure","tissue-radiation-dose","how-much-radiation-you-soaked-up"],
+    ["cancer-risk","carcinogenesis-risk","radiation-induced-cancer","elevated-tumor-risk","the-chance-of-getting-cancer"],
+    ["central-nervous-system-damage","brain-tissue-damage","cns-radiation-injury","neural-cognitive-harm","harm-to-the-brain-and-nerves"],
+    ["radiation-shielding","radiation-protection","cosmic-ray-blocking","passive-mass-shielding","stuff-that-blocks-the-radiation"]
+  ],
+  "sentence_templates": [
+    "how do {0} raise the {1}, what does that mean for {2} and {3}, and can {4} reduce it?",
+    "why does {4} matter for {0}, and how does it reduce {1}, {2}, and {3}?",
+    "if {1} from {0} is unavoidable, how do {2} and {3} compare, and can {4} help?"
+  ]
+}

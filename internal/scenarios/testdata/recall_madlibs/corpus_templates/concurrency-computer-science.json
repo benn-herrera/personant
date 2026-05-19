@@ -1,0 +1,20 @@
+{
+  "name": "concurrency-computer-science-corpus",
+  "topic": "wiki-concurrency-computer-science",
+  "mode": "measure-only",
+  "source_article": "Concurrency (computer science)",
+  "description": "Tests recall of concurrency concepts: overlapping computations, shared-state access, race conditions, synchronization, and the contrast with parallelism.",
+  "anchors": ["concurrency","shared-state","race-condition","synchronization","parallelism-contrast"],
+  "columns": [
+    ["concurrency","overlapping-execution","interleaved-computation","concurrent-execution","juggling-several-things-at-once"],
+    ["shared-state","shared-mutable-data","shared-memory-access","common-state","data-everyone-can-touch"],
+    ["race-condition","data-race","timing-dependent-bug","unsynchronized-access-error","that-bug-where-timing-screws-it-up"],
+    ["synchronization","coordination-mechanism","access-serialization","thread-coordination","making-the-threads-take-turns"],
+    ["parallelism-contrast","versus-parallelism","concurrency-vs-parallelism","simultaneous-vs-interleaved","the-not-quite-the-same-as-parallel-thing"]
+  ],
+  "sentence_templates": [
+    "how does {0} over {1} create a {2} without {3}, and how does {4} clarify it?",
+    "when {3} is applied, how does it tame {2} on {1} under {0}, distinct from {4}?",
+    "if {4} is misunderstood, why do {1}, {2}, and {3} still matter in {0}?"
+  ]
+}

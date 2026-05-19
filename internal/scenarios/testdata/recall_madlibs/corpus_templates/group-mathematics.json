@@ -1,0 +1,20 @@
+{
+  "name": "group-mathematics-corpus",
+  "topic": "wiki-group-mathematics",
+  "mode": "measure-only",
+  "source_article": "Group (mathematics)",
+  "description": "Tests recall of group-theory concepts from the group article, covering the group itself, the group axioms, the identity element, inverse elements, and subgroups.",
+  "anchors": ["group","group-axioms","identity-element","inverse-element","subgroup"],
+  "columns": [
+    ["group","algebraic-group","group-structure","set-with-a-group-operation","a-set-with-a-well-behaved-operation"],
+    ["group-axioms","group-defining-properties","group-laws","closure-associativity-identity-inverse","the-rules-it-has-to-follow"],
+    ["identity-element","neutral-element","unit-element","do-nothing-element","the-one-that-changes-nothing"],
+    ["inverse-element","group-inverse","element-inverse","undoing-element","the-thing-that-cancels-it-out"],
+    ["subgroup","sub-group","group-within-a-group","closed-subset-group","a-smaller-group-tucked-inside"]
+  ],
+  "sentence_templates": [
+    "what are the {1} that make a {0}, how do they require an {2} and an {3}, and how does a {4} satisfy them?",
+    "how does a {4} inherit the {1} from its parent {0}, including the {2} and an {3} for each member?",
+    "explain why a {0} needs an {2}, every member needs an {3}, and how a {4} satisfies the {1}."
+  ]
+}

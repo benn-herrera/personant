@@ -16,31 +16,36 @@
       "mode-of-operation",
       "cipher-mode",
       "block-chaining-mode",
-      "encryption-mode"
+      "encryption-mode",
+      "how-you-string-the-blocks-together"
     ],
     [
       "pseudorandom-permutation",
       "keyed-permutation",
       "random-looking-permutation",
-      "strong-pseudorandom-permutation"
+      "strong-pseudorandom-permutation",
+      "a-scramble-that-looks-totally-random"
     ],
     [
       "key-size",
       "key-length",
       "secret-key-bitlength",
-      "key-bit-width"
+      "key-bit-width",
+      "how-many-bits-long-the-password-is"
     ],
     [
       "round-function",
       "cipher-round",
       "encryption-round-step",
-      "iterated-round-operation"
+      "iterated-round-operation",
+      "the-step-it-repeats-over-and-over"
     ],
     [
       "confusion-diffusion",
       "substitution-permutation-principle",
       "diffusion-and-confusion",
-      "shannonss-design-principle"
+      "shannonss-design-principle",
+      "mixing-it-up-so-no-pattern-shows"
     ]
   ],
   "sentence_templates": [

@@ -16,31 +16,36 @@
       "aggregate-demand",
       "total-spending",
       "effective-demand",
-      "economy-wide-demand"
+      "economy-wide-demand",
+      "how-much-everyone-wants-to-buy"
     ],
     [
       "business-cycle",
       "economic-cycle",
       "boom-and-bust-cycle",
-      "trade-cycle"
+      "trade-cycle",
+      "the-ups-and-downs-of-the-economy"
     ],
     [
       "gross-domestic-product",
       "gdp",
       "national-output",
-      "total-economic-output"
+      "total-economic-output",
+      "the-big-number-for-how-much-a-country-makes"
     ],
     [
       "phillips-curve",
       "inflation-unemployment-tradeoff",
       "wage-price-curve",
-      "unemployment-inflation-curve"
+      "unemployment-inflation-curve",
+      "that-jobs-versus-prices-graph"
     ],
     [
       "monetary-transmission",
       "interest-rate-channel",
       "policy-transmission-mechanism",
-      "monetary-policy-channel"
+      "monetary-policy-channel",
+      "how-rate-changes-ripple-through-the-economy"
     ]
   ],
   "sentence_templates": [

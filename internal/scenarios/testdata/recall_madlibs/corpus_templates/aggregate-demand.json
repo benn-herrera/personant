@@ -16,31 +16,36 @@
       "aggregate-demand",
       "total-spending",
       "effective-demand",
-      "domestic-final-demand"
+      "domestic-final-demand",
+      "how-much-the-whole-economy-buys"
     ],
     [
       "consumer-spending",
       "household-consumption",
       "personal-consumption-expenditure",
-      "consumption-expenditure"
+      "consumption-expenditure",
+      "what-regular-folks-spend"
     ],
     [
       "government-expenditure",
       "public-spending",
       "fiscal-outlays",
-      "government-outlays"
+      "government-outlays",
+      "what-the-state-shells-out"
     ],
     [
       "net-exports",
       "trade-balance",
       "exports-minus-imports",
-      "current-account-balance"
+      "current-account-balance",
+      "sell-abroad-minus-buy-abroad"
     ],
     [
       "price-level",
       "general-price-index",
       "average-price-level",
-      "gdp-deflator"
+      "gdp-deflator",
+      "how-expensive-things-are-on-average"
     ]
   ],
   "sentence_templates": [

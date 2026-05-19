@@ -16,31 +16,36 @@
       "perfect-matching",
       "complete-matching",
       "full-matching",
-      "vertex-saturating-matching"
+      "vertex-saturating-matching",
+      "everyone-paired-up-with-nobody-left-out"
     ],
     [
       "augmenting-path",
       "improvement-path",
       "berge-path",
-      "augmentation-path"
+      "augmentation-path",
+      "a-zigzag-route-that-adds-a-pairing"
     ],
     [
       "maximum-matching",
       "maximum-cardinality-matching",
       "largest-matching",
-      "optimal-matching"
+      "optimal-matching",
+      "as-many-pairs-as-you-can-possibly-get"
     ],
     [
       "bipartite-graph",
       "bigraph",
       "two-partite-graph",
-      "two-colorable-graph"
+      "two-colorable-graph",
+      "a-graph-split-into-two-sides"
     ],
     [
       "edge-cover",
       "vertex-edge-cover",
       "edge-covering-set",
-      "covering-edge-set"
+      "covering-edge-set",
+      "enough-edges-to-touch-every-vertex"
     ]
   ],
   "sentence_templates": [

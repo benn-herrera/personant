@@ -1,0 +1,20 @@
+{
+  "name": "orb-weaver-spider-corpus",
+  "topic": "wiki-orb-weaver-spider",
+  "mode": "measure-only",
+  "source_article": "Orb-weaver spider",
+  "description": "Tests recall of orb-weaver biology from the Orb-weaver spider article, covering the family Araneidae, wheel-shaped orb web construction, sticky spiral capture threads, nightly web rebuilding, and sexual size dimorphism.",
+  "anchors": ["araneidae-family","orb-web-construction","sticky-spiral-threads","nightly-web-rebuilding","sexual-size-dimorphism"],
+  "columns": [
+    ["araneidae-family","family-araneidae","orb-weaver-family","araneid-spiders","those-classic-garden-web-spiders"],
+    ["orb-web-construction","wheel-web-building","orb-web-assembly","spiral-web-construction","spinning-that-pretty-wheel-shaped-web"],
+    ["sticky-spiral-threads","adhesive-capture-spiral","gluey-spiral-lines","sticky-catching-threads","the-gluey-strands-that-trap-bugs"],
+    ["nightly-web-rebuilding","daily-web-renewal","web-reconstruction-cycle","periodic-web-replacement","it-builds-a-fresh-web-every-night"],
+    ["sexual-size-dimorphism","male-female-size-difference","size-based-sexual-dimorphism","female-biased-size-gap","the-females-are-way-bigger-than-males"]
+  ],
+  "sentence_templates": [
+    "what characterizes the {0}, and how do {1}, {2}, and {4} relate to its {3}?",
+    "how does {2} fit into {1} for the {0}, and why do {3} and {4} matter for these spiders?",
+    "if the {0} shows {4}, how does that interact with {1}, {2}, and the {3}?"
+  ]
+}

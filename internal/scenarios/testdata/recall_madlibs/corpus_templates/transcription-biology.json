@@ -12,11 +12,11 @@
     "transcription-termination"
   ],
   "columns": [
-    ["rna-polymerase", "rnap", "rna-synthesizing-enzyme", "transcriptase"],
-    ["promoter", "transcription-start-region", "upstream-binding-sequence", "core-promoter"],
-    ["transcription-bubble", "open-complex-bubble", "unwound-dna-region", "single-stranded-transcription-zone"],
-    ["transcription-elongation", "rna-chain-extension", "transcript-lengthening", "polymerase-progression"],
-    ["transcription-termination", "transcript-release", "rna-synthesis-stop", "polymerase-disengagement"]
+    ["rna-polymerase","rnap","rna-synthesizing-enzyme","transcriptase","the-enzyme-that-copies-dna-into-rna"],
+    ["promoter","transcription-start-region","upstream-binding-sequence","core-promoter","the-start-here-spot-on-the-gene"],
+    ["transcription-bubble","open-complex-bubble","unwound-dna-region","single-stranded-transcription-zone","the-pried-open-dna-stretch"],
+    ["transcription-elongation","rna-chain-extension","transcript-lengthening","polymerase-progression","the-rna-strand-getting-longer"],
+    ["transcription-termination","transcript-release","rna-synthesis-stop","polymerase-disengagement","the-rna-copying-coming-to-a-stop"]
   ],
   "sentence_templates": [
     "after {0} binds the {1} it unwinds dna to form the {2} then proceeds through {3} until signals trigger {4}",

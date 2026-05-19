@@ -1,0 +1,56 @@
+{
+  "name": "qutb-minar-corpus",
+  "topic": "wiki-qutb-minar",
+  "mode": "measure-only",
+  "source_article": "Qutb Minar",
+  "description": "Tests recall of the Qutb Minar, covering its tall tapering victory minaret, its red sandstone and marble construction, its commission under the Delhi Sultanate, the inscribed Quranic calligraphy bands, and its World Heritage status.",
+  "anchors": [
+    "qutb-minar",
+    "victory-minaret",
+    "tapering-fluted-tower",
+    "delhi-sultanate-commission",
+    "quranic-inscription-bands"
+  ],
+  "columns": [
+    [
+      "qutb-minar",
+      "qutub-minar-tower",
+      "qutb-minar-monument",
+      "delhi-qutb-minar",
+      "that-really-tall-old-tower-in-delhi"
+    ],
+    [
+      "victory-minaret",
+      "triumphal-tower",
+      "tower-of-victory",
+      "commemorative-minaret",
+      "a-tower-built-to-brag-about-a-win"
+    ],
+    [
+      "tapering-fluted-tower",
+      "tapered-cylindrical-tower",
+      "fluted-rising-shaft",
+      "narrowing-stone-tower",
+      "a-ridged-tower-that-gets-skinnier-going-up"
+    ],
+    [
+      "delhi-sultanate-commission",
+      "qutb-ud-din-aibak-commission",
+      "sultanate-era-project",
+      "early-muslim-rule-commission",
+      "put-up-by-the-old-rulers-of-delhi"
+    ],
+    [
+      "quranic-inscription-bands",
+      "calligraphic-quran-verses",
+      "inscribed-arabic-bands",
+      "carved-quranic-calligraphy",
+      "those-bands-of-fancy-arabic-writing-on-it"
+    ]
+  ],
+  "sentence_templates": [
+    "why was the {0} raised as a {1}, who issued the {3}, and how do the {2} and {4} express it?",
+    "how does the {2} of the {0} carry its {4}, and how does the {1} relate to the {3}?",
+    "when the {3} produced the {0}, how did the {1} idea, the {2}, and the {4} convey that purpose?"
+  ]
+}

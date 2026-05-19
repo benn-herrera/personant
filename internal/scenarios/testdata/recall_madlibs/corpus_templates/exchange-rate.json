@@ -16,31 +16,36 @@
       "floating-exchange-rate",
       "market-determined-exchange-rate",
       "flexible-exchange-rate",
-      "free-floating-rate"
+      "free-floating-rate",
+      "letting-the-market-set-the-currency-price"
     ],
     [
       "purchasing-power-parity",
       "ppp",
       "price-level-equalization-theory",
-      "real-exchange-rate-benchmark"
+      "real-exchange-rate-benchmark",
+      "same-basket-of-goods-costs-the-same-idea"
     ],
     [
       "nominal-exchange-rate",
       "headline-exchange-rate",
       "quoted-currency-rate",
-      "stated-forex-rate"
+      "stated-forex-rate",
+      "the-number-on-the-currency-board"
     ],
     [
       "current-account",
       "trade-balance",
       "net-exports-account",
-      "external-balance"
+      "external-balance",
+      "the-tally-of-money-in-versus-out"
     ],
     [
       "currency-depreciation",
       "exchange-rate-decline",
       "currency-weakening",
-      "forex-value-drop"
+      "forex-value-drop",
+      "the-money-losing-its-worth"
     ]
   ],
   "sentence_templates": [

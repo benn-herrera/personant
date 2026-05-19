@@ -16,31 +16,36 @@
       "chirality",
       "handedness",
       "mirror-asymmetry",
-      "chiral-nature"
+      "chiral-nature",
+      "whether-its-different-from-its-mirror"
     ],
     [
       "tricolorability",
       "3-colorability",
       "three-colorability",
-      "tricolor-property"
+      "tricolor-property",
+      "you-can-paint-it-with-three-colors"
     ],
     [
       "fibered-knot",
       "fiber-bundle-knot",
       "fibered-complement",
-      "fibration-knot"
+      "fibration-knot",
+      "a-knot-whose-complement-bundles-nicely"
     ],
     [
       "prime-knot",
       "irreducible-knot",
       "non-composite-knot",
-      "atomic-knot"
+      "atomic-knot",
+      "a-knot-you-cant-split-into-smaller-knots"
     ],
     [
       "alternating-knot",
       "crossing-alternating-knot",
       "alternating-diagram",
-      "over-under-alternating"
+      "over-under-alternating",
+      "a-knot-whose-crossings-go-over-under-over"
     ]
   ],
   "sentence_templates": [

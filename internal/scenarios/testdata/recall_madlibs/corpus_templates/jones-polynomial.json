@@ -16,31 +16,36 @@
       "skein-relation",
       "skein-equation",
       "crossing-skein",
-      "skein-identity"
+      "skein-identity",
+      "the-rule-linking-tweaked-crossings"
     ],
     [
       "writhe",
       "signed-crossing-count",
       "crossing-sign-sum",
-      "writhe-number"
+      "writhe-number",
+      "the-tally-of-twist-directions"
     ],
     [
       "braid-representation",
       "braid-closure",
       "braid-trace",
-      "braid-form"
+      "braid-form",
+      "writing-the-knot-as-a-braid"
     ],
     [
       "kauffman-bracket",
       "bracket-polynomial",
       "state-sum-polynomial",
-      "kauffman-state-sum"
+      "kauffman-state-sum",
+      "that-bracket-thing-kauffman-came-up-with"
     ],
     [
       "amphicheiral-knot",
       "amphicheiral",
       "achiral-knot",
-      "mirror-symmetric-knot"
+      "mirror-symmetric-knot",
+      "a-knot-that-equals-its-own-reflection"
     ]
   ],
   "sentence_templates": [

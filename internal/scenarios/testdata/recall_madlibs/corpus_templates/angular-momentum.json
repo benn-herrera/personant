@@ -1,0 +1,20 @@
+{
+  "name": "angular-momentum-corpus",
+  "topic": "wiki-angular-momentum",
+  "mode": "measure-only",
+  "source_article": "Angular momentum",
+  "description": "Tests recall of angular-momentum concepts from the angular-momentum article, covering angular momentum itself, torque, the moment of inertia, conservation of angular momentum, and spin angular momentum.",
+  "anchors": ["angular-momentum","torque","moment-of-inertia","conservation-of-angular-momentum","spin-angular-momentum"],
+  "columns": [
+    ["angular-momentum","rotational-momentum","moment-of-momentum","angular-motion-quantity","how-much-spin-oomph-it-has"],
+    ["torque","rotational-force","moment-of-force","twisting-force","the-thing-that-makes-it-spin-faster"],
+    ["moment-of-inertia","rotational-inertia","mass-distribution-factor","inertia-of-rotation","how-hard-it-is-to-get-spinning"],
+    ["conservation-of-angular-momentum","angular-momentum-conservation","constancy-of-angular-momentum","rotational-momentum-conservation","why-the-skater-speeds-up-arms-in"],
+    ["spin-angular-momentum","intrinsic-angular-momentum","spin","particle-spin","the-built-in-twirl-of-a-particle"]
+  ],
+  "sentence_templates": [
+    "how does {1} change a body's {0}, given its {2}, and how is {4} a special case where {3} still applies?",
+    "why does {3} hold when no {1} acts on a body's {0}, how does its {2} factor in, and how does that explain {4} in a spinning skater?",
+    "explain how {0} combines the {2} with rotation, how {1} alters it, why {3} holds, and how {4} differs."
+  ]
+}

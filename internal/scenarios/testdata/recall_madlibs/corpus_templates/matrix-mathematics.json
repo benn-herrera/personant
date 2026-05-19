@@ -1,0 +1,20 @@
+{
+  "name": "matrix-mathematics-corpus",
+  "topic": "wiki-matrix-mathematics",
+  "mode": "measure-only",
+  "source_article": "Matrix (mathematics)",
+  "description": "Tests recall of matrix concepts from the matrix article, covering the matrix itself, matrix multiplication, the determinant, the inverse matrix, and linear transformations.",
+  "anchors": ["matrix","matrix-multiplication","determinant","inverse-matrix","linear-transformation"],
+  "columns": [
+    ["matrix","rectangular-number-array","grid-of-numbers","two-dimensional-array-of-entries","that-table-of-numbers-in-brackets"],
+    ["matrix-multiplication","matrix-product","row-by-column-multiplication","composition-of-matrices","the-fiddly-row-times-column-thing"],
+    ["determinant","det","scalar-volume-factor","matrix-determinant-value","the-single-number-that-says-if-it-flips"],
+    ["inverse-matrix","matrix-inverse","reciprocal-matrix","multiplicative-inverse-matrix","the-one-that-undoes-the-other"],
+    ["linear-transformation","linear-map","linear-mapping","matrix-induced-transformation","stretching-and-rotating-space"]
+  ],
+  "sentence_templates": [
+    "how does a {0} represent a {4}, how does {1} compose two of them, and what do the {2} and {3} reveal?",
+    "what does the {2} tell you about whether a {0} has an {3}, when does that {3} exist, and how does {1} relate to a {4}?",
+    "explain how {1} of a {0} corresponds to composing a {4}, and how the {2} signals the existence of the {3}."
+  ]
+}

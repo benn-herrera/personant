@@ -1,0 +1,56 @@
+{
+  "name": "dravidian-architecture-corpus",
+  "topic": "wiki-dravidian-architecture",
+  "mode": "measure-only",
+  "source_article": "Dravidian architecture",
+  "description": "Tests recall of South Indian temple architecture, covering the pyramidal vimana tower, the towering gopuram gateway, the pillared mandapa, the temple tank, and the Chola-period flourishing of the style.",
+  "anchors": [
+    "dravidian-temple-style",
+    "vimana-tower",
+    "gopuram-gateway",
+    "pillared-mandapa",
+    "chola-period-architecture"
+  ],
+  "columns": [
+    [
+      "dravidian-temple-style",
+      "south-indian-temple-style",
+      "dravida-temple-form",
+      "southern-temple-tradition",
+      "the-way-they-build-temples-down-south"
+    ],
+    [
+      "vimana-tower",
+      "pyramidal-vimana-style",
+      "tiered-sanctum-tower",
+      "stepped-temple-tower",
+      "that-stacked-up-tower-over-the-shrine"
+    ],
+    [
+      "gopuram-gateway",
+      "monumental-temple-gate",
+      "ornate-entrance-tower",
+      "towering-gateway-pylon",
+      "the-giant-carved-doorway-tower"
+    ],
+    [
+      "pillared-mandapa",
+      "columned-hall",
+      "hall-of-pillars",
+      "colonnaded-pavilion",
+      "the-big-hall-full-of-stone-columns"
+    ],
+    [
+      "chola-period-architecture",
+      "chola-dynasty-building",
+      "imperial-chola-style",
+      "chola-era-temple-work",
+      "the-stuff-from-when-the-cholas-ruled"
+    ]
+  ],
+  "sentence_templates": [
+    "how does the {1} differ from the {2} within {0}, where does the {3} sit, and what did {4} contribute?",
+    "what made {4} a high point for {0}, especially for the {1}, {2}, and {3}?",
+    "when a visitor passes the {2} into the {3}, how does that frame the {1} of {0} during {4}?"
+  ]
+}

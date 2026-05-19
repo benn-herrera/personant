@@ -16,31 +16,36 @@
       "plasma-membrane",
       "cell-membrane",
       "plasmalemma",
-      "lipid-bilayer-membrane"
+      "lipid-bilayer-membrane",
+      "the-skin-around-the-cell"
     ],
     [
       "oxidative-phosphorylation",
       "aerobic-atp-synthesis",
       "mitochondrial-energy-production",
-      "respiratory-chain-phosphorylation"
+      "respiratory-chain-phosphorylation",
+      "how-the-cell-makes-its-energy"
     ],
     [
       "endosymbiosis",
       "symbiogenesis",
       "endosymbiotic-origin",
-      "intracellular-symbiosis"
+      "intracellular-symbiosis",
+      "a-cell-that-swallowed-another-cell"
     ],
     [
       "apoptosis",
       "programmed-cell-death",
       "regulated-cell-death",
-      "cell-suicide"
+      "cell-suicide",
+      "when-a-cell-kills-itself-on-purpose"
     ],
     [
       "mitosis",
       "karyokinesis",
       "nuclear-division",
-      "somatic-cell-division"
+      "somatic-cell-division",
+      "a-cell-splitting-into-two"
     ]
   ],
   "sentence_templates": [

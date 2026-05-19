@@ -1,0 +1,56 @@
+{
+  "name": "indo-islamic-architecture-corpus",
+  "topic": "wiki-indo-islamic-architecture",
+  "mode": "measure-only",
+  "source_article": "Indo-Islamic architecture",
+  "description": "Tests recall of Indo-Islamic building, covering the true arch and dome, the mosque and tomb building types, the synthesis of Persian and indigenous Indian craft, and the Delhi Sultanate origins of the style.",
+  "anchors": [
+    "indo-islamic-style",
+    "arch-and-dome",
+    "mosque-and-tomb-types",
+    "persian-indian-synthesis",
+    "delhi-sultanate-architecture"
+  ],
+  "columns": [
+    [
+      "indo-islamic-style",
+      "islamic-indian-architecture",
+      "muslim-era-building-style",
+      "indo-saracenic-style",
+      "the-muslim-influenced-building-look-in-india"
+    ],
+    [
+      "arch-and-dome",
+      "pointed-arch-and-cupola",
+      "true-arch-construction",
+      "voussoir-arch-and-dome",
+      "those-curved-archways-and-rounded-roofs"
+    ],
+    [
+      "mosque-and-tomb-types",
+      "masjid-and-mausoleum",
+      "prayer-hall-and-funerary-tomb",
+      "congregational-mosque-and-tomb",
+      "the-prayer-buildings-and-burial-buildings"
+    ],
+    [
+      "persian-indian-synthesis",
+      "fusion-of-persian-and-local-craft",
+      "cross-cultural-design-blend",
+      "hybrid-islamic-hindu-craft",
+      "mixing-the-two-traditions-together"
+    ],
+    [
+      "delhi-sultanate-architecture",
+      "sultanate-period-building",
+      "early-muslim-rule-architecture",
+      "pre-mughal-islamic-style",
+      "the-stuff-built-before-the-mughals"
+    ]
+  ],
+  "sentence_templates": [
+    "how did {0} introduce the {1}, shape the {2}, and reflect {3} from {4} onward?",
+    "in what ways did {2} express {0}, how did the {1} enable it, and where did {3} and {4} matter?",
+    "when tracing {0} from {4}, how do the {1}, the {2}, and {3} together mark the style?"
+  ]
+}

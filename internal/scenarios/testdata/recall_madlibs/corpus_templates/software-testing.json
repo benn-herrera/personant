@@ -1,0 +1,20 @@
+{
+  "name": "software-testing-corpus",
+  "topic": "wiki-software-testing",
+  "mode": "measure-only",
+  "source_article": "Software testing",
+  "description": "Tests recall of software-testing concepts: the verification activity, test-case design, unit testing, code coverage, and regression testing.",
+  "anchors": ["software-testing","test-case-design","unit-testing","code-coverage","regression-testing"],
+  "columns": [
+    ["software-testing","software-verification","quality-testing","defect-detection-activity","making-sure-the-code-works"],
+    ["test-case-design","test-case-construction","test-scenario-design","test-input-selection","figuring-out-what-cases-to-try"],
+    ["unit-testing","component-level-testing","isolated-unit-tests","module-testing","checking-one-piece-at-a-time"],
+    ["code-coverage","test-coverage","coverage-measurement","exercised-code-fraction","how-much-of-the-code-got-exercised"],
+    ["regression-testing","regression-checks","re-testing-for-regressions","change-safety-testing","rechecking-nothing-broke-after-a-change"]
+  ],
+  "sentence_templates": [
+    "how does {0} rely on {1} to drive {2}, measured by {3} and guarded by {4}?",
+    "when {3} is measured, how does it reveal gaps in {1} and {2} during {0} alongside {4}?",
+    "if {4} is skipped, why does {0} miss defects despite good {1}, {2}, and {3}?"
+  ]
+}

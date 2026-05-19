@@ -16,31 +16,36 @@
       "weak-interaction",
       "weak-force",
       "weak-nuclear-force",
-      "fermi-weak-interaction"
+      "fermi-weak-interaction",
+      "the-feeble-force-behind-decay"
     ],
     [
       "nuclear-transmutation",
       "nuclear-transformation",
       "element-transmutation",
-      "isotope-conversion"
+      "isotope-conversion",
+      "one-element-turning-into-another"
     ],
     [
       "electron-antineutrino",
       "anti-electron-neutrino",
       "beta-minus-antineutrino",
-      "antineutrino-from-beta-decay"
+      "antineutrino-from-beta-decay",
+      "the-ghost-particle-that-flies-off"
     ],
     [
       "lepton-number-conservation",
       "leptonic-number-conservation",
       "lepton-number-invariance",
-      "leptonic-charge-conservation"
+      "leptonic-charge-conservation",
+      "the-bookkeeping-rule-for-leptons"
     ],
     [
       "continuous-beta-spectrum",
       "continuous-energy-spectrum",
       "beta-particle-energy-distribution",
-      "beta-energy-continuum"
+      "beta-energy-continuum",
+      "the-smeared-out-range-of-energies"
     ]
   ],
   "sentence_templates": [

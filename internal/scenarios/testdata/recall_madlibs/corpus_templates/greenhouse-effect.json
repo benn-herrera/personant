@@ -16,31 +16,36 @@
       "greenhouse-effect",
       "atmospheric-heat-trapping",
       "thermal-blanketing",
-      "radiative-insulation"
+      "radiative-insulation",
+      "the-atmosphere-acting-like-a-blanket"
     ],
     [
       "infrared-radiation",
       "longwave-radiation",
       "thermal-radiation",
-      "far-infrared-emission"
+      "far-infrared-emission",
+      "the-heat-rays-you-cant-see"
     ],
     [
       "carbon-dioxide",
       "co2",
       "atmospheric-co2",
-      "carbonic-gas"
+      "carbonic-gas",
+      "the-gas-we-breathe-out"
     ],
     [
       "radiative-forcing",
       "radiation-imbalance",
       "energy-flux-perturbation",
-      "top-of-atmosphere-imbalance"
+      "top-of-atmosphere-imbalance",
+      "the-extra-push-on-the-climate"
     ],
     [
       "energy-imbalance",
       "earth-energy-imbalance",
       "heat-budget-deficit",
-      "radiative-energy-surplus"
+      "radiative-energy-surplus",
+      "more-heat-coming-in-than-going-out"
     ]
   ],
   "sentence_templates": [

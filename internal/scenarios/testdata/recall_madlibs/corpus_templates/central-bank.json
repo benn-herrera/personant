@@ -16,31 +16,36 @@
       "lender-of-last-resort",
       "emergency-liquidity-provider",
       "crisis-liquidity-backstop",
-      "bank-bailout-facility"
+      "bank-bailout-facility",
+      "the-bank-that-rescues-other-banks"
     ],
     [
       "monetary-policy",
       "money-supply-management",
       "interest-rate-policy",
-      "credit-conditions-management"
+      "credit-conditions-management",
+      "fiddling-with-rates-and-money"
     ],
     [
       "price-stability",
       "inflation-control",
       "stable-price-level",
-      "low-and-stable-inflation"
+      "low-and-stable-inflation",
+      "keeping-prices-from-going-crazy"
     ],
     [
       "open-market-operations",
       "central-bank-asset-purchases",
       "bond-buying-program",
-      "securities-market-intervention"
+      "securities-market-intervention",
+      "buying-and-selling-bonds-to-steer-things"
     ],
     [
       "central-bank-independence",
       "monetary-authority-autonomy",
       "depoliticized-monetary-policy",
-      "insulated-central-bank"
+      "insulated-central-bank",
+      "keeping-politicians-hands-off-it"
     ]
   ],
   "sentence_templates": [

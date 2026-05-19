@@ -1,0 +1,20 @@
+{
+  "name": "huntsman-spider-corpus",
+  "topic": "wiki-huntsman-spider",
+  "mode": "measure-only",
+  "source_article": "Huntsman spider",
+  "description": "Tests recall of huntsman spider biology from the Huntsman spider article, covering the family Sparassidae, the laterigrade crab-like leg orientation, the fast sideways running gait, the webless free-roaming hunting, and the flattened body for crevice dwelling.",
+  "anchors": ["sparassidae-family","laterigrade-legs","fast-sideways-running","webless-free-roaming-hunting","flattened-crevice-body"],
+  "columns": [
+    ["sparassidae-family","family-sparassidae","huntsman-family","sparassid-spiders","the-group-these-spiders-belong-to"],
+    ["laterigrade-legs","crab-like-leg-orientation","sideways-twisted-legs","laterigrade-leg-arrangement","legs-that-stick-out-sideways"],
+    ["fast-sideways-running","rapid-lateral-gait","quick-crab-walk-running","speedy-sideways-movement","how-fast-it-scuttles-sideways"],
+    ["webless-free-roaming-hunting","wandering-prey-hunting","webless-active-foraging","free-ranging-predation","hunting-without-spinning-a-web"],
+    ["flattened-crevice-body","flat-body-for-crevices","compressed-body-shape","low-profile-flattened-body","a-flat-body-for-squeezing-into-cracks"]
+  ],
+  "sentence_templates": [
+    "what defines the {0}, and how do its {1}, {2}, {3}, and {4} characterize it?",
+    "how does the {4} help a spider in the {0} live in tight spaces while its {1} drive {2} and {3}?",
+    "if a spider in the {0} has {1} and a {4}, how do {2} and {3} follow from that?"
+  ]
+}

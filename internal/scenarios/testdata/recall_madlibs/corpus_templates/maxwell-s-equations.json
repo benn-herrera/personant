@@ -1,0 +1,20 @@
+{
+  "name": "maxwell-s-equations-corpus",
+  "topic": "wiki-maxwell-s-equations",
+  "mode": "measure-only",
+  "source_article": "Maxwell's equations",
+  "description": "Tests recall of Maxwell's-equations concepts from the Maxwell's-equations article, covering the equations themselves, Gauss's law, Faraday's law of induction, the Ampere-Maxwell law, and electromagnetic waves.",
+  "anchors": ["maxwells-equations","gausss-law","faradays-law","ampere-maxwell-law","electromagnetic-wave"],
+  "columns": [
+    ["maxwells-equations","four-equations-of-electromagnetism","maxwell-field-equations","electromagnetic-field-equations","those-four-famous-physics-equations"],
+    ["gausss-law","gauss-law-for-electric-fields","electric-flux-law","gauss-flux-theorem","the-one-about-charge-and-field-lines"],
+    ["faradays-law","faradays-law-of-induction","induction-law","changing-flux-emf-law","a-moving-magnet-makes-electricity"],
+    ["ampere-maxwell-law","ampere-law-with-displacement-current","ampere-maxwell-equation","magnetic-circulation-law","the-one-where-current-makes-magnetism"],
+    ["electromagnetic-wave","em-wave","light-wave","self-propagating-electromagnetic-disturbance","a-ripple-of-light-traveling-along"]
+  ],
+  "sentence_templates": [
+    "how do {0} combine {1}, {2}, and the {3} into one set that predicts an {4}?",
+    "how does the {3} together with {2} predict an {4}, and how do {0} also rely on {1}?",
+    "explain how {0} use {1}, {2}, and the {3} to give rise to the {4}."
+  ]
+}

@@ -16,31 +16,36 @@
       "general-circulation-model",
       "gcm",
       "global-climate-model",
-      "atmospheric-circulation-model"
+      "atmospheric-circulation-model",
+      "the-big-computer-model-of-the-whole-climate"
     ],
     [
       "coupled-atmosphere-ocean-model",
       "atmosphere-ocean-gcm",
       "coupled-climate-model",
-      "atmosphere-ocean-coupled-system"
+      "atmosphere-ocean-coupled-system",
+      "the-one-that-links-air-and-sea-together"
     ],
     [
       "energy-balance-model",
       "ebm",
       "radiative-energy-balance-model",
-      "heat-balance-model"
+      "heat-balance-model",
+      "the-simple-heat-in-heat-out-model"
     ],
     [
       "extreme-event-attribution",
       "climate-attribution-science",
       "weather-event-attribution",
-      "extreme-weather-attribution"
+      "extreme-weather-attribution",
+      "blaming-this-heatwave-on-climate-change"
     ],
     [
       "climate-feedback",
       "climate-system-feedback",
       "feedback-process",
-      "amplifying-feedback"
+      "amplifying-feedback",
+      "warming-feeding-on-itself"
     ]
   ],
   "sentence_templates": [

@@ -1,0 +1,20 @@
+{
+  "name": "mount-st-helens-corpus",
+  "topic": "wiki-mount-st-helens",
+  "mode": "measure-only",
+  "source_article": "Mount St. Helens",
+  "description": "Tests recall of Mount St. Helens: the Washington stratovolcano, the 1980 eruption, the lateral blast, the cryptodome bulge that preceded it, and the resulting summit crater.",
+  "anchors": ["mount-st-helens","nineteen-eighty-eruption","lateral-blast","cryptodome-bulge","new-summit-crater"],
+  "columns": [
+    ["mount-st-helens","st-helens-volcano","washington-st-helens-stratovolcano","mount-saint-helens","that-volcano-out-in-washington-state"],
+    ["nineteen-eighty-eruption","1980-st-helens-eruption","may-1980-eruption","may-18-1980-eruption","the-big-one-back-in-the-eighties"],
+    ["lateral-blast","sideways-directed-blast","north-directed-explosion","laterally-directed-eruption","the-explosion-that-went-out-sideways"],
+    ["cryptodome-bulge","north-flank-bulge","intruded-magma-bulge","pre-eruption-flank-swelling","the-mountain-side-puffing-out-first"],
+    ["new-summit-crater","blast-formed-crater","horseshoe-shaped-crater","post-eruption-amphitheater-crater","the-big-scoop-left-in-the-top"]
+  ],
+  "sentence_templates": [
+    "how did the {3} on {0} set up the {2} during the {1} that carved the {4}?",
+    "what caused the {2} in the {1} of {0} after the {3}, and how did it form the {4}?",
+    "trace the sequence on {0}: from the {3} to the {1}, the {2}, and the {4}."
+  ]
+}

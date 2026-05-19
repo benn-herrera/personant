@@ -1,0 +1,20 @@
+{
+  "name": "bayes-theorem-corpus",
+  "topic": "wiki-bayes-theorem",
+  "mode": "measure-only",
+  "source_article": "Bayes' theorem",
+  "description": "Tests recall of Bayesian-inference concepts from the Bayes'-theorem article, covering the theorem itself, conditional probability, the prior probability, the likelihood, and the posterior probability.",
+  "anchors": ["bayes-theorem","conditional-probability","prior-probability","likelihood","posterior-probability"],
+  "columns": [
+    ["bayes-theorem","bayes-rule","bayes-law","probability-updating-theorem","that-formula-for-updating-odds"],
+    ["conditional-probability","probability-given-evidence","dependent-probability","probability-conditioned-on-an-event","odds-once-you-know-something"],
+    ["prior-probability","prior","prior-belief","initial-probability-estimate","your-hunch-before-the-data"],
+    ["likelihood","likelihood-function","evidence-probability","data-given-hypothesis-probability","how-well-the-guess-fits-the-data"],
+    ["posterior-probability","posterior","updated-probability","revised-belief","what-you-think-after-seeing-evidence"]
+  ],
+  "sentence_templates": [
+    "how does {0} use {1} and the {3} to turn a {2} into a {4}?",
+    "what role does the {3} play when {0} uses {1} to combine a {2} into a {4} with observed data?",
+    "explain how {0} relates {1}, the {2}, the {3}, and the {4} in a single update step."
+  ]
+}

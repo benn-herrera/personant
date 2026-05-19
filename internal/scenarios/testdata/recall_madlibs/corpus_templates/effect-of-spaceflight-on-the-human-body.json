@@ -1,0 +1,20 @@
+{
+  "name": "effect-of-spaceflight-on-the-human-body-corpus",
+  "topic": "wiki-effect-of-spaceflight-on-the-human-body",
+  "mode": "measure-only",
+  "source_article": "Effect of spaceflight on the human body",
+  "description": "Tests recall of spaceflight physiology, covering microgravity effects, bone density loss, muscle atrophy, fluid redistribution, and vision impairment from long-duration flight.",
+  "anchors": ["microgravity-effects","bone-density-loss","muscle-atrophy","fluid-redistribution","spaceflight-vision-impairment"],
+  "columns": [
+    ["microgravity-effects","weightlessness-effects","zero-g-physiological-impact","reduced-gravity-effects","what-floating-around-does-to-you"],
+    ["bone-density-loss","spaceflight-osteopenia","skeletal-demineralization","bone-mass-decline","your-bones-getting-thin-and-brittle"],
+    ["muscle-atrophy","muscle-wasting","disuse-muscle-loss","skeletal-muscle-deconditioning","your-muscles-shrinking-from-not-using-them"],
+    ["fluid-redistribution","cephalad-fluid-shift","headward-fluid-shift","body-fluid-redistribution","all-the-fluid-pooling-up-in-your-head"],
+    ["spaceflight-vision-impairment","spaceflight-associated-neuro-ocular-syndrome","eye-and-vision-changes","optic-disc-edema","your-eyesight-going-wonky-up-there"]
+  ],
+  "sentence_templates": [
+    "how do {0} drive {1}, {2}, {3}, and {4} over a long mission, and why are they linked?",
+    "why does {3} occur in space, and how is it connected to {1}, {2}, {4}, and the other {0}?",
+    "if {1}, {2}, and {4} all stem from {0}, how does {3} fit into that picture?"
+  ]
+}

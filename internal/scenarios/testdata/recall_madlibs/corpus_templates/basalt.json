@@ -1,0 +1,20 @@
+{
+  "name": "basalt-corpus",
+  "topic": "wiki-basalt",
+  "mode": "measure-only",
+  "source_article": "Basalt",
+  "description": "Tests recall of basalt: the mafic volcanic rock, its low silica content, its fine-grained texture, columnar jointing on cooling, and the flood basalt provinces it can form.",
+  "anchors": ["basalt","low-silica-mafic-composition","fine-grained-texture","columnar-jointing","flood-basalt-province"],
+  "columns": [
+    ["basalt","basaltic-rock","mafic-volcanic-rock","extrusive-basalt","that-dark-hardened-lava-rock"],
+    ["low-silica-mafic-composition","mafic-low-silica-makeup","silica-poor-composition","iron-magnesium-rich-composition","not-much-quartz-stuff-in-it"],
+    ["fine-grained-texture","aphanitic-texture","fine-crystalline-texture","rapidly-cooled-fine-grain","too-fine-to-see-the-crystals"],
+    ["columnar-jointing","columnar-basalt-columns","polygonal-cooling-joints","hexagonal-cooling-columns","those-stacked-stone-pillars"],
+    ["flood-basalt-province","large-igneous-province","continental-flood-basalt","vast-basalt-lava-plateau","a-giant-ancient-lava-flood-zone"]
+  ],
+  "sentence_templates": [
+    "how does the {1} of {0} give it a {2}, a {3} on cooling, and the ability to build a {4}?",
+    "why does {0} with its {1} develop a {2} and {3} as it cools, and how does it build a {4}?",
+    "what links the {1} of {0} to its {2}, its {3}, and a {4}?"
+  ]
+}

@@ -16,31 +16,36 @@
       "elliptic-curve-discrete-logarithm",
       "ecdlp",
       "elliptic-log-problem",
-      "curve-discrete-log-hardness"
+      "curve-discrete-log-hardness",
+      "the-hard-curve-math-problem"
     ],
     [
       "finite-field",
       "galois-field",
       "prime-field",
-      "modular-arithmetic-field"
+      "modular-arithmetic-field",
+      "a-number-system-that-wraps-around"
     ],
     [
       "key-agreement",
       "key-exchange-protocol",
       "shared-key-establishment",
-      "mutual-key-derivation"
+      "mutual-key-derivation",
+      "agreeing-on-a-secret-together"
     ],
     [
       "smaller-key-size",
       "shorter-key-length",
       "compact-key",
-      "reduced-key-bits"
+      "reduced-key-bits",
+      "needing-a-shorter-password"
     ],
     [
       "elliptic-curve-digital-signature",
       "ecdsa",
       "curve-based-signature",
-      "ec-signature-scheme"
+      "ec-signature-scheme",
+      "signing-stuff-with-curve-math"
     ]
   ],
   "sentence_templates": [

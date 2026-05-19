@@ -16,31 +16,36 @@
       "nominal-interest-rate",
       "stated-interest-rate",
       "headline-rate",
-      "contractual-rate"
+      "contractual-rate",
+      "the-rate-on-the-paper"
     ],
     [
       "real-interest-rate",
       "inflation-adjusted-rate",
       "deflated-interest-rate",
-      "purchasing-power-adjusted-rate"
+      "purchasing-power-adjusted-rate",
+      "the-rate-after-you-account-for-prices-rising"
     ],
     [
       "federal-funds-rate",
       "overnight-policy-rate",
       "central-bank-policy-rate",
-      "interbank-lending-rate"
+      "interbank-lending-rate",
+      "the-rate-the-central-bank-controls"
     ],
     [
       "risk-premium",
       "default-spread",
       "credit-risk-spread",
-      "yield-spread"
+      "yield-spread",
+      "the-extra-charged-for-risky-borrowers"
     ],
     [
       "liquidity-preference",
       "cash-preference",
       "demand-for-money",
-      "money-hoarding-tendency"
+      "money-hoarding-tendency",
+      "people-wanting-to-keep-cash-on-hand"
     ]
   ],
   "sentence_templates": [

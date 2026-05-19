@@ -1,0 +1,20 @@
+{
+  "name": "object-oriented-programming-corpus",
+  "topic": "wiki-object-oriented-programming",
+  "mode": "measure-only",
+  "source_article": "Object-oriented programming",
+  "description": "Tests recall of object-oriented-programming concepts: the paradigm itself, encapsulation, inheritance, polymorphism, and the class-object relationship.",
+  "anchors": ["object-oriented-programming","encapsulation","inheritance","polymorphism","class-and-object"],
+  "columns": [
+    ["object-oriented-programming","oop","object-oriented-paradigm","object-based-design","that-coding-style-built-around-objects"],
+    ["encapsulation","data-hiding","state-bundling","information-hiding","keeping-the-guts-tucked-away"],
+    ["inheritance","subclassing","class-derivation","is-a-hierarchy","one-class-borrowing-from-another"],
+    ["polymorphism","dynamic-dispatch","subtype-substitutability","many-forms-behavior","same-call-different-behavior"],
+    ["class-and-object","class-instance-relationship","blueprint-and-instance","type-and-instance","the-cookie-cutter-and-the-cookie"]
+  ],
+  "sentence_templates": [
+    "how does {0} use {1}, {2}, and {3} to shape the state of a {4}?",
+    "when {2} is combined with {3}, how does behavior of a {4} change under {0} given {1}?",
+    "if {1} is violated, why do {2}, {3}, and the {4} model weaken in {0}?"
+  ]
+}

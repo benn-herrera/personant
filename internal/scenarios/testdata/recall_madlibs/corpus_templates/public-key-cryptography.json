@@ -16,31 +16,36 @@
       "asymmetric-cryptography",
       "public-key-cryptography",
       "asymmetric-encryption",
-      "two-key-cryptography"
+      "two-key-cryptography",
+      "that-encryption-with-a-public-and-private-key"
     ],
     [
       "public-key",
       "encryption-key",
       "open-key",
-      "shareable-key"
+      "shareable-key",
+      "the-key-youre-allowed-to-hand-out"
     ],
     [
       "private-key",
       "secret-key",
       "signing-key",
-      "decryption-key"
+      "decryption-key",
+      "the-key-you-have-to-keep-hidden"
     ],
     [
       "one-way-function",
       "trapdoor-function",
       "irreversible-computation",
-      "hard-to-invert-function"
+      "hard-to-invert-function",
+      "easy-to-do-but-near-impossible-to-undo"
     ],
     [
       "hybrid-cryptosystem",
       "combined-encryption-scheme",
       "mixed-mode-encryption",
-      "asymmetric-symmetric-combination"
+      "asymmetric-symmetric-combination",
+      "mixing-both-kinds-of-encryption-together"
     ]
   ],
   "sentence_templates": [

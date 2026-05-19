@@ -16,31 +16,36 @@
       "acyclic-graph",
       "cycle-free-graph",
       "forest-graph",
-      "cycle-absent-graph"
+      "cycle-absent-graph",
+      "a-graph-with-no-loops"
     ],
     [
       "leaf",
       "terminal-vertex",
       "external-vertex",
-      "pendant-vertex"
+      "pendant-vertex",
+      "a-dead-end-node-with-one-link"
     ],
     [
       "spanning-tree",
       "covering-tree",
       "connecting-subtree",
-      "minimal-connected-subgraph"
+      "minimal-connected-subgraph",
+      "a-no-loop-skeleton-covering-the-graph"
     ],
     [
       "arborescence",
       "out-tree",
       "directed-rooted-tree",
-      "outward-branching"
+      "outward-branching",
+      "a-tree-with-everything-pointing-outward"
     ],
     [
       "prufer-sequence",
       "prufer-code",
       "tree-encoding",
-      "vertex-label-sequence"
+      "vertex-label-sequence",
+      "the-number-code-for-a-tree"
     ]
   ],
   "sentence_templates": [

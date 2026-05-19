@@ -1,0 +1,20 @@
+{
+  "name": "human-mission-to-mars-corpus",
+  "topic": "wiki-human-mission-to-mars",
+  "mode": "measure-only",
+  "source_article": "Human mission to Mars",
+  "description": "Tests recall of crewed-Mars-mission planning concepts, covering mission architecture, the transfer trajectory, crew radiation exposure, surface stay duration, and the return-journey problem.",
+  "anchors": ["crewed-mars-mission","mars-transfer-trajectory","crew-radiation-exposure","surface-stay-duration","return-journey"],
+  "columns": [
+    ["crewed-mars-mission","human-mars-expedition","piloted-mars-flight","astronaut-mission-to-mars","sending-people-to-mars"],
+    ["mars-transfer-trajectory","interplanetary-transfer-orbit","hohmann-transfer-path","earth-to-mars-cruise","the-flight-path-to-get-there"],
+    ["crew-radiation-exposure","astronaut-radiation-dose","cosmic-ray-exposure","in-transit-radiation-risk","all-that-radiation-the-crew-soaks-up"],
+    ["surface-stay-duration","time-on-mars-surface","martian-surface-mission-length","stay-time-window","how-long-they-hang-out-on-mars"],
+    ["return-journey","trip-back-to-earth","mars-ascent-and-return","homeward-leg","the-ride-home"]
+  ],
+  "sentence_templates": [
+    "for a {0}, how does the {1} drive the {2}, the {3}, and the {4}?",
+    "what makes the {4} of a {0} hard, and how do the {1} and {3} factor in alongside {2}?",
+    "if you plan the {3} around the {1}, how do you also limit {2} and prepare the {4} for a {0}?"
+  ]
+}

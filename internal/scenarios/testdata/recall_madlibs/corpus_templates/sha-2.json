@@ -6,11 +6,11 @@
   "description": "Tests recall of SHA-2 concepts including the Merkle-Damgard construction, collision resistance, preimage attacks, hash digests, and the avalanche effect.",
   "anchors": ["merkle-damgard-construction", "collision-resistance", "preimage-attack", "hash-digest", "avalanche-effect"],
   "columns": [
-    ["merkle-damgard-construction", "merkle-damgard", "iterated-hash-construction", "md-construction"],
-    ["collision-resistance", "collision-hardness", "birthday-attack-resistance", "collision-security"],
-    ["preimage-attack", "hash-inversion", "first-preimage-attack", "reverse-hash-attack"],
-    ["hash-digest", "message-digest", "hash-value", "hash-output"],
-    ["avalanche-effect", "bit-diffusion", "hash-sensitivity", "cascade-effect"]
+    ["merkle-damgard-construction","merkle-damgard","iterated-hash-construction","md-construction","the-chained-block-by-block-hashing"],
+    ["collision-resistance","collision-hardness","birthday-attack-resistance","collision-security","no-two-inputs-give-the-same-hash"],
+    ["preimage-attack","hash-inversion","first-preimage-attack","reverse-hash-attack","guessing-the-input-from-the-hash"],
+    ["hash-digest","message-digest","hash-value","hash-output","the-scrambled-fingerprint-output"],
+    ["avalanche-effect","bit-diffusion","hash-sensitivity","cascade-effect","one-bit-flip-changes-everything"]
   ],
   "sentence_templates": [
     "SHA-256 uses the {0} to iteratively compress blocks, producing a fixed-length {3} that exhibits the {4} and achieves {1} while resisting a {2}.",

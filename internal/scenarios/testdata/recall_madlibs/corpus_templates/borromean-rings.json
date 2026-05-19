@@ -6,11 +6,11 @@
   "description": "Recall test for the Borromean rings as a Brunnian link with special geometric and topological properties.",
   "anchors": ["borromean-rings", "brunnian-link", "hyperbolic-link", "link-complement", "pairwise-unlinked"],
   "columns": [
-    ["borromean-rings", "borromean-link", "ballantine-rings", "borromeo-rings"],
-    ["brunnian-link", "brunnian-chain", "brunnian-structure", "brunnian-configuration"],
-    ["hyperbolic-link", "hyperbolic-knot-link", "hyperbolic-3-link", "hyperbolic-link-type"],
-    ["link-complement", "complement-of-link", "link-exterior", "link-space-complement"],
-    ["pairwise-unlinked", "pairwise-unlinking", "mutually-unlinked", "componentwise-unlinked"]
+    ["borromean-rings", "borromean-link", "ballantine-rings", "borromeo-rings", "those-three-interlocked-loops"],
+    ["brunnian-link", "brunnian-chain", "brunnian-structure", "brunnian-configuration", "cut-one-and-they-all-fall-apart"],
+    ["hyperbolic-link", "hyperbolic-knot-link", "hyperbolic-3-link", "hyperbolic-link-type", "the-saddle-shaped-geometry-kind"],
+    ["link-complement", "complement-of-link", "link-exterior", "link-space-complement", "the-empty-space-around-the-loops"],
+    ["pairwise-unlinked", "pairwise-unlinking", "mutually-unlinked", "componentwise-unlinked", "no-two-of-them-actually-hooked"]
   ],
   "sentence_templates": [
     "The {0} form a {1} because any component removal leaves {4} loops and their {3} is a {2} with finite volume.",

@@ -16,31 +16,36 @@
       "unemployment-rate",
       "jobless-rate",
       "out-of-work-rate",
-      "labor-market-slack-rate"
+      "labor-market-slack-rate",
+      "the-share-of-people-without-jobs"
     ],
     [
       "frictional-unemployment",
       "search-unemployment",
       "job-search-unemployment",
-      "transitional-unemployment"
+      "transitional-unemployment",
+      "the-between-jobs-kind-of-joblessness"
     ],
     [
       "structural-unemployment",
       "skills-mismatch-unemployment",
       "technology-displacement-unemployment",
-      "long-run-joblessness"
+      "long-run-joblessness",
+      "jobless-because-skills-dont-match"
     ],
     [
       "cyclical-unemployment",
       "demand-deficient-unemployment",
       "keynesian-unemployment",
-      "recession-driven-unemployment"
+      "recession-driven-unemployment",
+      "jobless-because-the-economy-slumped"
     ],
     [
       "nairu",
       "natural-rate-of-unemployment",
       "non-accelerating-inflation-rate",
-      "structural-unemployment-floor"
+      "structural-unemployment-floor",
+      "the-lowest-jobless-rate-without-inflation-rising"
     ]
   ],
   "sentence_templates": [

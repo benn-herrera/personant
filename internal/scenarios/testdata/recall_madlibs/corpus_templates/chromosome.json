@@ -16,31 +16,36 @@
       "chromatin",
       "dna-protein-complex",
       "nuclear-fiber",
-      "chromosome-material"
+      "chromosome-material",
+      "the-stuff-chromosomes-are-made-of"
     ],
     [
       "centromere",
       "primary-constriction",
       "kinetochore-anchor",
-      "chromatid-junction"
+      "chromatid-junction",
+      "the-pinched-in-middle-of-the-x-shape"
     ],
     [
       "sister-chromatids",
       "duplicated-chromosome-copies",
       "joined-chromatid-pair",
-      "replicated-chromatid-pair"
+      "replicated-chromatid-pair",
+      "the-two-matching-halves-stuck-together"
     ],
     [
       "histone",
       "dna-packaging-protein",
       "nucleosome-core-protein",
-      "chromatin-scaffold-protein"
+      "chromatin-scaffold-protein",
+      "the-spools-the-dna-winds-around"
     ],
     [
       "karyotype",
       "chromosome-complement",
       "chromosomal-profile",
-      "chromosome-set"
+      "chromosome-set",
+      "the-full-lineup-of-chromosomes"
     ]
   ],
   "sentence_templates": [

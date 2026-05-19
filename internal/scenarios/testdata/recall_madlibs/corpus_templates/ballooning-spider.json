@@ -1,0 +1,20 @@
+{
+  "name": "ballooning-spider-corpus",
+  "topic": "wiki-ballooning-spider",
+  "mode": "measure-only",
+  "source_article": "Ballooning (spider)",
+  "description": "Tests recall of spider ballooning from the Ballooning (spider) article, covering the airborne silk-thread dispersal behavior, the tiptoe launch posture, aerial wind transport, the role of atmospheric electric fields, and long-distance colonization.",
+  "anchors": ["silk-thread-dispersal","tiptoe-launch-posture","wind-aerial-transport","atmospheric-electric-field","long-distance-colonization"],
+  "columns": [
+    ["silk-thread-dispersal","gossamer-thread-dispersal","silk-borne-dispersal","airborne-silk-travel","floating-away-on-a-strand-of-web"],
+    ["tiptoe-launch-posture","tiptoeing-takeoff-stance","raised-abdomen-launch-pose","pre-flight-tiptoe-posture","standing-on-toes-to-take-off"],
+    ["wind-aerial-transport","wind-carried-flight","air-current-transport","breeze-borne-aerial-drift","getting-blown-around-by-the-breeze"],
+    ["atmospheric-electric-field","electrostatic-field-lift","global-electric-circuit-field","aerial-electric-charge-effect","the-static-in-the-air-giving-a-lift"],
+    ["long-distance-colonization","wide-range-colonization","remote-habitat-colonization","far-reaching-dispersal-spread","ending-up-somewhere-really-far-off"]
+  ],
+  "sentence_templates": [
+    "how does {0} let a spider achieve {2} and {4}, what does the {1} look like, and where does the {3} fit?",
+    "how might the {3} contribute to lift beyond {2} alone during {0} that begins with a {1} and ends in {4}?",
+    "if a spider uses a {1} to begin {0}, how do {2} and the {3} drive {4}?"
+  ]
+}

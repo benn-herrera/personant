@@ -1,0 +1,20 @@
+{
+  "name": "schrodinger-equation-corpus",
+  "topic": "wiki-schrodinger-equation",
+  "mode": "measure-only",
+  "source_article": "Schrödinger equation",
+  "description": "Tests recall of Schrödinger-equation concepts from the Schrödinger-equation article, covering the equation itself, the wave function, the Hamiltonian operator, time-dependent versus time-independent forms, and stationary states.",
+  "anchors": ["schrodinger-equation","wave-function","hamiltonian-operator","time-dependent-vs-independent","stationary-state"],
+  "columns": [
+    ["schrodinger-equation","schrodinger-wave-equation","quantum-state-equation","fundamental-quantum-equation","the-main-quantum-physics-equation"],
+    ["wave-function","quantum-state-function","psi-function","probability-amplitude-function","the-psi-thing-describing-the-particle"],
+    ["hamiltonian-operator","hamiltonian","total-energy-operator","energy-operator","the-energy-math-operator"],
+    ["time-dependent-vs-independent","time-dependent-or-time-independent-form","dynamic-versus-stationary-form","time-evolution-versus-energy-eigenvalue-form","the-with-time-or-without-time-version"],
+    ["stationary-state","energy-eigenstate","standing-quantum-state","time-independent-state","a-quantum-state-that-just-sits-still"]
+  ],
+  "sentence_templates": [
+    "how does the {0} evolve the {1} using the {2}, and how do its {3} forms relate to a {4}?",
+    "what is the difference in the {3} of the {0}, which one yields a {4}, and how does the {2} act on the {1}?",
+    "explain how the {0} relates the {1}, the {2}, the {3}, and the notion of a {4}."
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "giza-pyramid-complex-corpus",
+  "topic": "wiki-giza-pyramid-complex",
+  "mode": "measure-only",
+  "source_article": "Giza pyramid complex",
+  "description": "Tests recall of the Giza plateau site, its three main pyramids, the Great Sphinx, the surrounding necropolis, and the mortuary infrastructure.",
+  "anchors": ["giza-plateau","three-great-pyramids","great-sphinx","giza-necropolis","mortuary-temples"],
+  "columns": [
+    ["giza-plateau","giza-archaeological-site","plateau-of-giza","giza-monument-grounds","that-desert-spot-with-the-pyramids"],
+    ["three-great-pyramids","khufu-khafre-menkaure-pyramids","main-giza-pyramids","trio-of-giza-pyramids","the-famous-three-pyramids"],
+    ["great-sphinx","giza-sphinx-statue","limestone-sphinx","sphinx-of-giza","the-big-lion-statue"],
+    ["giza-necropolis","giza-burial-grounds","plateau-cemetery","royal-tomb-field","the-ancient-graveyard-out-there"],
+    ["mortuary-temples","funerary-temple-complexes","valley-temple-buildings","cult-temple-structures","the-little-worship-buildings-nearby"]
+  ],
+  "sentence_templates": [
+    "how is the {0} laid out, with the {1}, the {2}, and the {3} all part of it, plus the {4}?",
+    "what connects the {1} and the {2} on the {0}, and how do the {4} and {3} fit the site plan?",
+    "if I visit the {0}, what should I know about the {2}, the {1}, the {4}, and the {3}?"
+  ]
+}

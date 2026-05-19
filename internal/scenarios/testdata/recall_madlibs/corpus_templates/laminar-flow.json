@@ -16,31 +16,36 @@
       "laminar-flow",
       "streamlined-flow",
       "sheet-flow",
-      "layered-flow"
+      "layered-flow",
+      "smooth-no-mixing-kind-of-flow"
     ],
     [
       "streamline",
       "flow-path",
       "fluid-trajectory",
-      "particle-path-line"
+      "particle-path-line",
+      "the-line-a-bit-of-fluid-traces"
     ],
     [
       "parabolic-velocity-profile",
       "hagen-poiseuille-profile",
       "pipe-flow-velocity-distribution",
-      "quadratic-velocity-distribution"
+      "quadratic-velocity-distribution",
+      "fastest-in-the-middle-of-the-pipe"
     ],
     [
       "stokes-flow",
       "creeping-flow",
       "viscosity-dominated-flow",
-      "low-reynolds-flow"
+      "low-reynolds-flow",
+      "super-slow-thick-syrup-flow"
     ],
     [
       "reynolds-number-threshold",
       "critical-reynolds-number",
       "laminar-stability-limit",
-      "transition-reynolds-value"
+      "transition-reynolds-value",
+      "speed-where-it-starts-getting-messy"
     ]
   ],
   "sentence_templates": [

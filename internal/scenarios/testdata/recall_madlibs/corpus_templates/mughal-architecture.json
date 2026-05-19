@@ -1,0 +1,56 @@
+{
+  "name": "mughal-architecture-corpus",
+  "topic": "wiki-mughal-architecture",
+  "mode": "measure-only",
+  "source_article": "Mughal architecture",
+  "description": "Tests recall of Mughal-era building, covering the bulbous onion dome, the use of red sandstone and white marble, the formal charbagh garden, pietra dura inlay, and the imperial mausoleum building type.",
+  "anchors": [
+    "mughal-style",
+    "onion-dome",
+    "sandstone-and-marble",
+    "charbagh-garden",
+    "imperial-mausoleum"
+  ],
+  "columns": [
+    [
+      "mughal-style",
+      "mughal-era-architecture",
+      "imperial-mughal-building",
+      "mughal-dynasty-design",
+      "that-fancy-old-indian-emperor-style"
+    ],
+    [
+      "onion-dome",
+      "bulbous-dome",
+      "double-shelled-dome",
+      "swelling-cupola",
+      "that-rounded-bulgy-roof-on-top"
+    ],
+    [
+      "sandstone-and-marble",
+      "red-sandstone-and-white-marble",
+      "sandstone-and-inlaid-marble",
+      "stone-and-marble-cladding",
+      "the-red-and-white-stone-look"
+    ],
+    [
+      "charbagh-garden",
+      "four-part-paradise-garden",
+      "quartered-formal-garden",
+      "mughal-garden-layout",
+      "that-garden-split-into-four-squares"
+    ],
+    [
+      "imperial-mausoleum",
+      "royal-domed-tomb",
+      "grand-funerary-monument",
+      "emperor-s-tomb-building",
+      "a-grand-tomb-like-the-taj-mahal"
+    ]
+  ],
+  "sentence_templates": [
+    "how does the {1} sit atop the {4}, what does {2} contribute, and how does {3} reflect {0}?",
+    "in what way does the {3} frame the {4}, and how do the {1} and {2} express {0}?",
+    "when comparing buildings of {0}, how do the {1}, {2}, {3}, and {4} combine?"
+  ]
+}

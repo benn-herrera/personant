@@ -16,31 +16,36 @@
       "graph-isomorphism",
       "edge-preserving-bijection",
       "structure-preserving-bijection",
-      "adjacency-preserving-map"
+      "adjacency-preserving-map",
+      "when-two-graphs-are-secretly-the-same"
     ],
     [
       "vertex-bijection",
       "vertex-correspondence",
       "vertex-mapping",
-      "node-mapping"
+      "node-mapping",
+      "pairing-up-the-dots-one-to-one"
     ],
     [
       "graph-isomorphism-problem",
       "isomorphism-decision-problem",
       "gi-problem",
-      "graph-equivalence-problem"
+      "graph-equivalence-problem",
+      "the-question-of-whether-two-graphs-match"
     ],
     [
       "automorphism",
       "self-isomorphism",
       "graph-self-map",
-      "symmetry-mapping"
+      "symmetry-mapping",
+      "a-graph-matching-up-with-itself"
     ],
     [
       "isomorphism-class",
       "equivalence-class",
       "graph-equivalence-class",
-      "iso-class"
+      "iso-class",
+      "the-bucket-of-graphs-that-are-the-same"
     ]
   ],
   "sentence_templates": [

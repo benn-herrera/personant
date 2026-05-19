@@ -16,31 +16,36 @@
       "reynolds-number",
       "inertia-viscosity-ratio",
       "flow-regime-index",
-      "dimensionless-flow-parameter"
+      "dimensionless-flow-parameter",
+      "the-will-it-go-turbulent-number"
     ],
     [
       "inertial-force",
       "convective-momentum",
       "flow-inertia",
-      "advective-force"
+      "advective-force",
+      "the-push-from-the-fluid-momentum"
     ],
     [
       "viscous-force",
       "friction-force",
       "diffusive-momentum",
-      "viscous-damping"
+      "viscous-damping",
+      "the-fluids-internal-drag"
     ],
     [
       "dynamic-similitude",
       "flow-similarity",
       "hydrodynamic-equivalence",
-      "scale-model-correspondence"
+      "scale-model-correspondence",
+      "making-a-small-model-act-like-the-real-thing"
     ],
     [
       "laminar-turbulent-transition",
       "flow-regime-change",
       "onset-of-turbulence",
-      "critical-reynolds-threshold"
+      "critical-reynolds-threshold",
+      "the-point-where-smooth-flow-breaks-up"
     ]
   ],
   "sentence_templates": [

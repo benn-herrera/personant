@@ -1,0 +1,20 @@
+{
+  "name": "yellowstone-caldera-corpus",
+  "topic": "wiki-yellowstone-caldera",
+  "mode": "measure-only",
+  "source_article": "Yellowstone Caldera",
+  "description": "Tests recall of the Yellowstone Caldera: the supervolcano caldera, the mantle hotspot beneath it, its supereruption history, the hydrothermal systems it powers, and ongoing ground deformation.",
+  "anchors": ["yellowstone-caldera","yellowstone-hotspot","supereruption-history","hydrothermal-system","ground-deformation"],
+  "columns": [
+    ["yellowstone-caldera","yellowstone-supervolcano","yellowstone-volcanic-caldera","yellowstone-collapse-caldera","the-giant-yellowstone-supervolcano-crater"],
+    ["yellowstone-hotspot","yellowstone-mantle-plume","deep-yellowstone-hotspot","yellowstone-mantle-hotspot","the-hot-plume-feeding-yellowstone"],
+    ["supereruption-history","past-supereruptions","record-of-giant-eruptions","caldera-forming-eruption-history","yellowstones-record-of-huge-blasts"],
+    ["hydrothermal-system","geothermal-system","hot-spring-and-geyser-system","subsurface-hydrothermal-network","yellowstones-geyser-and-hot-spring-plumbing"],
+    ["ground-deformation","caldera-floor-uplift-and-subsidence","surface-deformation","measurable-ground-movement","the-ground-slowly-rising-and-falling"]
+  ],
+  "sentence_templates": [
+    "how does the {1} feed the {0}, what does its {2} reveal, and how do its {3} and {4} relate?",
+    "why does the {0} above the {1} have an active {3}, a long {2}, and ongoing {4}?",
+    "what links the {1} beneath the {0} to its {2}, its {3}, and present-day {4}?"
+  ]
+}

@@ -16,31 +16,36 @@
       "radiative-forcing",
       "climate-forcing",
       "energy-flux-perturbation",
-      "radiative-imbalance-driver"
+      "radiative-imbalance-driver",
+      "what-tips-the-planets-heat-budget"
     ],
     [
       "energy-imbalance",
       "radiation-budget-deficit",
       "net-energy-flux-anomaly",
-      "planetary-energy-imbalance"
+      "planetary-energy-imbalance",
+      "earth-soaking-up-more-heat-than-it-loses"
     ],
     [
       "effective-radiative-forcing",
       "erf",
       "adjusted-forcing-with-feedbacks",
-      "troposphere-adjusted-forcing"
+      "troposphere-adjusted-forcing",
+      "the-forcing-number-after-the-air-settles"
     ],
     [
       "greenhouse-gas-concentration",
       "ghg-burden",
       "atmospheric-ghg-loading",
-      "trace-gas-accumulation"
+      "trace-gas-accumulation",
+      "how-much-heat-trapping-gas-is-piled-up"
     ],
     [
       "climate-sensitivity",
       "equilibrium-temperature-response",
       "warming-per-unit-forcing",
-      "ecs"
+      "ecs",
+      "how-much-hotter-it-gets-when-you-push-it"
     ]
   ],
   "sentence_templates": [

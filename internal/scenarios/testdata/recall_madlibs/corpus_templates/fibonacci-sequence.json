@@ -1,0 +1,20 @@
+{
+  "name": "fibonacci-sequence-corpus",
+  "topic": "wiki-fibonacci-sequence",
+  "mode": "measure-only",
+  "source_article": "Fibonacci sequence",
+  "description": "Tests recall of Fibonacci-sequence concepts from the Fibonacci-sequence article, covering the sequence itself, its recurrence relation, the golden ratio, Binet's formula, and its appearances in nature.",
+  "anchors": ["fibonacci-sequence","recurrence-relation","golden-ratio","binet-s-formula","fibonacci-in-nature"],
+  "columns": [
+    ["fibonacci-sequence","fibonacci-numbers","fibonacci-series","sum-of-prior-two-sequence","that-add-the-last-two-number-pattern"],
+    ["recurrence-relation","recursive-definition","term-to-term-rule","successive-sum-rule","the-rule-for-the-next-number"],
+    ["golden-ratio","phi","divine-proportion","golden-mean","that-magic-pleasing-proportion"],
+    ["binet-s-formula","closed-form-fibonacci","explicit-fibonacci-formula","fibonacci-closed-form-expression","the-shortcut-equation-for-any-term"],
+    ["fibonacci-in-nature","phyllotaxis-patterns","natural-spiral-arrangements","botanical-fibonacci-occurrence","the-spirals-you-see-on-plants"]
+  ],
+  "sentence_templates": [
+    "how does the {1} generate the {0}, and why do {2} and {3} both show up when you analyze it alongside {4}?",
+    "what is the {0}, and how do {3} and the {2} let you compute terms without the {1}, as seen in {4}?",
+    "explain the link between the {2}, the {1}, the {3}, and {4} when describing the {0}."
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "shield-volcano-corpus",
+  "topic": "wiki-shield-volcano",
+  "mode": "measure-only",
+  "source_article": "Shield volcano",
+  "description": "Tests recall of shield volcano features: the broad low-profile edifice, its fluid basaltic lava, its gentle slopes, its effusive eruptions, and the Hawaiian shield volcanoes as the type example.",
+  "anchors": ["shield-volcano","basaltic-lava","gentle-slopes","effusive-eruption","hawaiian-shield-volcano"],
+  "columns": [
+    ["shield-volcano","broad-low-profile-volcano","shield-shaped-volcano","gently-sloping-lava-volcano","the-wide-flat-pancake-volcano"],
+    ["basaltic-lava","fluid-basalt-flow","low-viscosity-basalt","mafic-runny-lava","the-runny-dark-lava"],
+    ["gentle-slopes","shallow-flank-angles","low-angle-sides","broad-gentle-flanks","the-barely-tilted-sides"],
+    ["effusive-eruption","gentle-lava-outpouring","non-explosive-eruption","quiet-lava-effusion","lava-just-oozing-out-quietly"],
+    ["hawaiian-shield-volcano","hawaiian-type-shield","mauna-loa-style-volcano","hawaiian-island-shield","the-hawaii-style-broad-volcano"]
+  ],
+  "sentence_templates": [
+    "why does a {0} have {2}, how does its {1} produce an {3}, and why is a {4} the model?",
+    "how does the {1} of a {0} explain its {2} and {3}, using a {4} as the example?",
+    "what makes a {4} the classic {0}, and how do {1}, {2}, and the {3} style fit together?"
+  ]
+}

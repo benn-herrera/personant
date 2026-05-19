@@ -16,31 +16,36 @@
       "transcription",
       "dna-transcription",
       "rna-synthesis",
-      "gene-transcription"
+      "gene-transcription",
+      "copying-the-dna-into-rna"
     ],
     [
       "rna-splicing",
       "pre-mrna-splicing",
       "intron-removal",
-      "splicing"
+      "splicing",
+      "cutting-out-the-junk-bits"
     ],
     [
       "polyadenylation",
       "poly-a-addition",
       "3-prime-tailing",
-      "poly-a-tailing"
+      "poly-a-tailing",
+      "sticking-a-tail-on-the-end"
     ],
     [
       "nonsense-mediated-decay",
       "nmd",
       "premature-stop-codon-surveillance",
-      "aberrant-mrna-surveillance"
+      "aberrant-mrna-surveillance",
+      "the-cell-junking-broken-messages"
     ],
     [
       "untranslated-region",
       "utr",
       "non-coding-flanking-region",
-      "mrna-utr"
+      "mrna-utr",
+      "the-end-bits-that-dont-get-read"
     ]
   ],
   "sentence_templates": [

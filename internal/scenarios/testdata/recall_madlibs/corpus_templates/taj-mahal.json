@@ -1,0 +1,56 @@
+{
+  "name": "taj-mahal-corpus",
+  "topic": "wiki-taj-mahal",
+  "mode": "measure-only",
+  "source_article": "Taj Mahal",
+  "description": "Tests recall of the Taj Mahal, covering its commission by Shah Jahan as a mausoleum for Mumtaz Mahal, its white marble construction, the central onion dome, the charbagh garden setting, and its World Heritage status.",
+  "anchors": [
+    "taj-mahal",
+    "shah-jahan-commission",
+    "white-marble-mausoleum",
+    "central-onion-dome",
+    "charbagh-garden"
+  ],
+  "columns": [
+    [
+      "taj-mahal",
+      "taj-mahal-monument",
+      "taj-mausoleum",
+      "agra-taj-mahal",
+      "that-famous-white-marble-building-in-india"
+    ],
+    [
+      "shah-jahan-commission",
+      "shah-jahan-s-order",
+      "commissioned-for-mumtaz-mahal",
+      "mughal-emperor-commission",
+      "the-emperor-who-ordered-it-built"
+    ],
+    [
+      "white-marble-mausoleum",
+      "ivory-marble-tomb",
+      "white-marble-funerary-monument",
+      "gleaming-marble-mausoleum",
+      "the-white-marble-tomb"
+    ],
+    [
+      "central-onion-dome",
+      "great-bulbous-dome",
+      "crowning-marble-dome",
+      "double-shelled-central-dome",
+      "the-big-bulgy-dome-on-top"
+    ],
+    [
+      "charbagh-garden",
+      "four-part-paradise-garden",
+      "quartered-formal-garden",
+      "mughal-axial-garden",
+      "the-formal-four-square-garden"
+    ]
+  ],
+  "sentence_templates": [
+    "why did the {1} produce the {0} as a {2}, and how do the {3} and {4} complete it?",
+    "how does the {3} crown the {2} of the {0}, how does the {4} frame it, and why did the {1} order it?",
+    "when the {0} is approached through the {4}, how do the {1}, the {2}, and the {3} create its symmetry?"
+  ]
+}

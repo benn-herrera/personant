@@ -6,11 +6,11 @@
   "description": "Tests recall of TLS concepts including the TLS handshake, digital certificates, forward secrecy, cipher suites, and session keys.",
   "anchors": ["tls-handshake", "certificate", "forward-secrecy", "cipher-suite", "session-key"],
   "columns": [
-    ["tls-handshake", "ssl-handshake", "cryptographic-handshake", "key-negotiation-handshake"],
-    ["certificate", "digital-certificate", "tls-certificate", "x509-certificate"],
-    ["forward-secrecy", "perfect-forward-secrecy", "pfs", "forward-security"],
-    ["cipher-suite", "cryptographic-suite", "tls-cipher-suite", "algorithm-suite"],
-    ["session-key", "ephemeral-key", "connection-key", "transient-key"]
+    ["tls-handshake","ssl-handshake","cryptographic-handshake","key-negotiation-handshake","the-secure-connection-setup-chat"],
+    ["certificate","digital-certificate","tls-certificate","x509-certificate","the-id-card-proving-who-you-are"],
+    ["forward-secrecy","perfect-forward-secrecy","pfs","forward-security","old-traffic-stays-safe-even-if-key-leaks"],
+    ["cipher-suite","cryptographic-suite","tls-cipher-suite","algorithm-suite","the-bundle-of-crypto-choices"],
+    ["session-key","ephemeral-key","connection-key","transient-key","the-throwaway-key-for-this-session"]
   ],
   "sentence_templates": [
     "During the {0}, the server presents its {1} and both sides negotiate a {3} to derive a {4} that provides {2}.",

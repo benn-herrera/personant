@@ -1,0 +1,20 @@
+{
+  "name": "volcanology-corpus",
+  "topic": "wiki-volcanology",
+  "mode": "measure-only",
+  "source_article": "Volcanology",
+  "description": "Tests recall of the science of volcanology: the discipline itself, the volcanologist who practices it, eruption monitoring, eruption forecasting, and the study of past volcanic deposits.",
+  "anchors": ["volcanology","volcanologist","volcano-monitoring","eruption-forecasting","volcanic-deposit-study"],
+  "columns": [
+    ["volcanology","study-of-volcanoes","volcanic-science","science-of-eruptions","the-study-of-volcanoes"],
+    ["volcanologist","volcano-scientist","eruption-researcher","volcanic-field-geologist","the-scientist-who-studies-volcanoes"],
+    ["volcano-monitoring","volcanic-surveillance","eruption-watch","volcanic-activity-tracking","keeping-an-eye-on-a-volcano"],
+    ["eruption-forecasting","eruption-prediction","volcanic-hazard-forecast","unrest-anticipation","trying-to-predict-eruptions"],
+    ["volcanic-deposit-study","tephra-record-analysis","eruption-deposit-mapping","past-eruption-study","studying-leftovers-from-past-eruptions"]
+  ],
+  "sentence_templates": [
+    "what does {0} study, and how does a {1} use {2} and {4} to support {3}?",
+    "how does {4} inform {3}, and why does a {1} treat {2} and {4} as core to {0}?",
+    "when {2} detects unrest, how do {1} findings and {4} feed into {3} within {0}?"
+  ]
+}

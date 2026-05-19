@@ -1,0 +1,20 @@
+{
+  "name": "egyptian-pyramid-construction-techniques-corpus",
+  "topic": "wiki-egyptian-pyramid-construction-techniques",
+  "mode": "measure-only",
+  "source_article": "Egyptian pyramid construction techniques",
+  "description": "Tests recall of how Egyptian pyramids were built: quarrying of stone, the ramp hypotheses for raising blocks, the organized labor force, surveying and alignment, and casing-stone finishing.",
+  "anchors": ["stone-quarrying","construction-ramp-hypotheses","organized-labor-force","precise-site-alignment","casing-stone-finishing"],
+  "columns": [
+    ["stone-quarrying","limestone-and-granite-quarrying","block-extraction-from-quarries","cutting-stone-from-bedrock","digging-up-the-rock"],
+    ["construction-ramp-hypotheses","ramp-building-theories","straight-and-spiral-ramp-models","block-raising-ramp-proposals","guesses-about-the-ramps"],
+    ["organized-labor-force","skilled-worker-crews","conscripted-construction-workforce","organized-builder-gangs","all-the-people-who-built-it"],
+    ["precise-site-alignment","cardinal-direction-orientation","astronomical-pyramid-surveying","accurate-base-leveling","lining-it-up-just-right"],
+    ["casing-stone-finishing","outer-limestone-cladding","smooth-casing-block-fitting","polished-exterior-facing","the-shiny-outer-shell"]
+  ],
+  "sentence_templates": [
+    "how did {0} feed the {1}, how did the {2} carry out the {3}, and what about the {4}?",
+    "what role did the {2} play in {0}, the {1}, the {3}, and the final {4}?",
+    "compare the {1} for moving blocks against {0}, the work of the {2}, the {3}, and the {4}."
+  ]
+}

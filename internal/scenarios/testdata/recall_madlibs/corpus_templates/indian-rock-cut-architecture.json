@@ -1,0 +1,56 @@
+{
+  "name": "indian-rock-cut-architecture-corpus",
+  "topic": "wiki-indian-rock-cut-architecture",
+  "mode": "measure-only",
+  "source_article": "Indian rock-cut architecture",
+  "description": "Tests recall of Indian rock-cut architecture, covering the subtractive carving technique, the chaitya prayer hall, the vihara monastery, the arched chaitya window, and the monolithic excavation of structures from living rock.",
+  "anchors": [
+    "rock-cut-architecture",
+    "subtractive-carving",
+    "chaitya-hall",
+    "vihara-monastery",
+    "monolithic-excavation"
+  ],
+  "columns": [
+    [
+      "rock-cut-architecture",
+      "cave-temple-architecture",
+      "excavated-stone-architecture",
+      "living-rock-building",
+      "buildings-dug-straight-into-cliffs"
+    ],
+    [
+      "subtractive-carving",
+      "material-removal-technique",
+      "carving-away-stone",
+      "sculpting-by-excavation",
+      "chipping-away-instead-of-stacking-up"
+    ],
+    [
+      "chaitya-hall",
+      "apsidal-prayer-hall",
+      "stupa-shrine-hall",
+      "barrel-vaulted-worship-hall",
+      "the-long-room-for-praying"
+    ],
+    [
+      "vihara-monastery",
+      "monastic-residence-cave",
+      "monk-cell-monastery",
+      "sangharama-dwelling",
+      "the-cave-where-the-monks-lived"
+    ],
+    [
+      "monolithic-excavation",
+      "single-rock-carving",
+      "carved-from-living-rock",
+      "one-block-excavation",
+      "carved-out-of-a-single-giant-rock"
+    ]
+  ],
+  "sentence_templates": [
+    "how does {1} make {0} possible, what distinguishes a {2} from a {3}, and where does {4} apply?",
+    "when a {2} is shaped by {4}, how does {1} differ from masonry in {0}, and how does a {3} compare?",
+    "what links the {3} and the {2} within {0}, given both rely on {1} and {4}?"
+  ]
+}

@@ -16,31 +16,36 @@
       "fast-carbon-cycle",
       "biological-carbon-cycle",
       "short-term-carbon-cycle",
-      "biotic-carbon-cycle"
+      "biotic-carbon-cycle",
+      "the-quick-loop-through-living-things"
     ],
     [
       "slow-carbon-cycle",
       "geological-carbon-cycle",
       "deep-carbon-cycle",
-      "geologic-carbon-cycle"
+      "geologic-carbon-cycle",
+      "the-million-year-rock-loop"
     ],
     [
       "biological-pump",
       "ocean-biological-pump",
       "marine-biological-pump",
-      "oceanic-carbon-pump"
+      "oceanic-carbon-pump",
+      "sea-critters-dragging-carbon-down-deep"
     ],
     [
       "carbon-sequestration",
       "carbon-storage",
       "carbon-capture-and-storage",
-      "carbon-sink-uptake"
+      "carbon-sink-uptake",
+      "locking-carbon-away-somewhere"
     ],
     [
       "dissolved-inorganic-carbon",
       "dic",
       "oceanic-inorganic-carbon",
-      "seawater-inorganic-carbon"
+      "seawater-inorganic-carbon",
+      "the-carbon-fizzed-into-the-seawater"
     ]
   ],
   "sentence_templates": [

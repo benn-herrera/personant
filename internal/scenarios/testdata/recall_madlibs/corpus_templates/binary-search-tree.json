@@ -1,0 +1,20 @@
+{
+  "name": "binary-search-tree-corpus",
+  "topic": "wiki-binary-search-tree",
+  "mode": "measure-only",
+  "source_article": "Binary search tree",
+  "description": "Tests recall of binary-search-tree concepts: the ordered tree structure, the search invariant, in-order traversal, tree balancing, and worst-case degeneration.",
+  "anchors": ["binary-search-tree","search-invariant","in-order-traversal","tree-balancing","worst-case-degeneration"],
+  "columns": [
+    ["binary-search-tree","ordered-binary-tree","sorted-tree-structure","bst","that-tree-where-things-are-in-order"],
+    ["search-invariant","ordering-property","bst-property","left-less-right-greater-rule","smaller-goes-left-bigger-goes-right"],
+    ["in-order-traversal","sorted-order-walk","ascending-key-traversal","left-root-right-traversal","walking-it-to-get-sorted-output"],
+    ["tree-balancing","height-balancing","self-balancing","rebalancing-rotations","keeping-it-from-getting-lopsided"],
+    ["worst-case-degeneration","degeneration-to-a-list","unbalanced-skew","linear-chain-collapse","when-it-flops-into-a-straight-line"]
+  ],
+  "sentence_templates": [
+    "how does the {1} of a {0} make {2} produce sorted output, why is {3} needed, and what is {4}?",
+    "when {3} is skipped, how does {4} change the cost of {2} compared to a balanced {0} obeying its {1}?",
+    "if {2} reveals the keys of a {0}, what do {1} and {3} say about avoiding {4}?"
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "name": "ajanta-caves-corpus",
+  "topic": "wiki-ajanta-caves",
+  "mode": "measure-only",
+  "source_article": "Ajanta Caves",
+  "description": "Tests recall of the Ajanta Caves, covering their rock-cut Buddhist monastery setting, the celebrated mural paintings, the jataka tale narratives, the Vakataka-era patronage, and their UNESCO World Heritage status.",
+  "anchors": [
+    "ajanta-buddhist-caves",
+    "ajanta-murals",
+    "jataka-narratives",
+    "vakataka-patronage",
+    "world-heritage-site"
+  ],
+  "columns": [
+    [
+      "ajanta-buddhist-caves",
+      "ajanta-rock-cut-monastery",
+      "ajanta-cave-complex",
+      "buddhist-cave-shrines",
+      "those-temples-carved-into-the-cliff"
+    ],
+    [
+      "ajanta-murals",
+      "ajanta-wall-paintings",
+      "ancient-cave-frescoes",
+      "painted-cave-ceilings",
+      "the-old-paintings-on-the-cave-walls"
+    ],
+    [
+      "jataka-narratives",
+      "jataka-tale-scenes",
+      "past-life-buddha-stories",
+      "painted-jataka-cycles",
+      "stories-of-buddha-before-he-was-buddha"
+    ],
+    [
+      "vakataka-patronage",
+      "vakataka-dynasty-sponsorship",
+      "royal-vakataka-funding",
+      "fifth-century-patron-kings",
+      "the-kings-who-paid-for-it-all"
+    ],
+    [
+      "world-heritage-site",
+      "unesco-listed-monument",
+      "protected-heritage-site",
+      "unesco-world-heritage-listing",
+      "one-of-those-unesco-places"
+    ]
+  ],
+  "sentence_templates": [
+    "how do the {1} inside the {0} depict {2}, who provided the {3}, and what earned {4}?",
+    "what made the {0} worthy of {4}, given the {1}, the {2}, and the {3}?",
+    "when {3} funded the {0}, how did that shape the {2} in the {1} that led to {4}?"
+  ]
+}

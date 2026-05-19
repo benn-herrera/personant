@@ -1,0 +1,20 @@
+{
+  "name": "functional-programming-corpus",
+  "topic": "wiki-functional-programming",
+  "mode": "measure-only",
+  "source_article": "Functional programming",
+  "description": "Tests recall of functional-programming concepts: the paradigm itself, pure functions, immutability, higher-order functions, and referential transparency.",
+  "anchors": ["functional-programming","pure-function","immutability","higher-order-function","referential-transparency"],
+  "columns": [
+    ["functional-programming","function-oriented-paradigm","declarative-functional-style","fp-paradigm","the-coding-style-built-on-functions"],
+    ["pure-function","side-effect-free-function","deterministic-function","pure-mapping","a-function-that-just-returns-a-value"],
+    ["immutability","immutable-data","no-mutation","persistent-data-values","data-you-never-change-after-making-it"],
+    ["higher-order-function","function-taking-functions","function-valued-argument","function-as-first-class-value","a-function-you-can-pass-around"],
+    ["referential-transparency","substitution-safety","expression-replaceability","value-equivalence-property","swapping-code-for-its-result-is-safe"]
+  ],
+  "sentence_templates": [
+    "how does {0} rely on {1}, {2}, and a {3} to achieve {4}?",
+    "when a {3} is used in {0}, how do {1} and {2} preserve {4}?",
+    "if {2} is broken, why does {0} lose {4}, the benefits of {1}, and the use of a {3}?"
+  ]
+}

@@ -16,31 +16,36 @@
       "recession",
       "economic-downturn",
       "economic-contraction",
-      "business-cycle-trough"
+      "business-cycle-trough",
+      "when-the-economy-hits-the-skids"
     ],
     [
       "gdp-contraction",
       "negative-gdp-growth",
       "output-decline",
-      "economic-shrinkage"
+      "economic-shrinkage",
+      "the-economy-actually-getting-smaller"
     ],
     [
       "unemployment",
       "joblessness",
       "labor-market-slack",
-      "workforce-idleness"
+      "workforce-idleness",
+      "lots-of-people-out-of-work"
     ],
     [
       "business-cycle",
       "economic-cycle",
       "boom-bust-cycle",
-      "expansion-contraction-cycle"
+      "expansion-contraction-cycle",
+      "the-good-times-bad-times-rhythm"
     ],
     [
       "demand-shock",
       "spending-collapse",
       "demand-shortfall",
-      "aggregate-spending-drop"
+      "aggregate-spending-drop",
+      "everyone-suddenly-stops-buying-stuff"
     ]
   ],
   "sentence_templates": [

@@ -1,0 +1,20 @@
+{
+  "name": "wolf-spider-corpus",
+  "topic": "wiki-wolf-spider",
+  "mode": "measure-only",
+  "source_article": "Wolf spider",
+  "description": "Tests recall of wolf spider biology from the Wolf spider article, covering the family Lycosidae, ground-dwelling pursuit hunting, eyeshine from the tapetum, egg-sac carrying, and spiderlings riding the mother.",
+  "anchors": ["lycosidae-family","ground-pursuit-hunting","eyeshine-tapetum","egg-sac-carrying","spiderlings-on-back"],
+  "columns": [
+    ["lycosidae-family","family-lycosidae","wolf-spider-family","lycosid-spiders","the-ground-running-spider-family"],
+    ["ground-pursuit-hunting","cursorial-hunting","webless-ground-chasing","run-down-prey-hunting","chasing-down-prey-on-foot"],
+    ["eyeshine-tapetum","reflective-eyeshine","tapetum-lucidum-glow","green-eye-reflection","the-glowing-eyes-in-a-flashlight"],
+    ["egg-sac-carrying","spinneret-attached-egg-sac","egg-case-carrying","abdomen-borne-egg-sac","the-mom-lugging-her-egg-ball-around"],
+    ["spiderlings-on-back","young-riding-mother","brood-carried-on-abdomen","hatchlings-on-her-back","the-baby-spiders-riding-on-mom"]
+  ],
+  "sentence_templates": [
+    "what defines the {0}, and how do {1}, {2}, {3}, and {4} aid its lifestyle?",
+    "how does {3} lead to {4} in the {0}, given its {1} and {2}?",
+    "if {2} reveals a spider at night, how do the {0}, its {1}, and {3} explain {4}?"
+  ]
+}

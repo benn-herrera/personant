@@ -1,0 +1,20 @@
+{
+  "name": "terraforming-of-mars-corpus",
+  "topic": "wiki-terraforming-of-mars",
+  "mode": "measure-only",
+  "source_article": "Terraforming of Mars",
+  "description": "Tests recall of Mars-terraforming concepts, covering planetary engineering, atmospheric thickening, global warming of the planet, liquid-water reintroduction, and a breathable-atmosphere goal.",
+  "anchors": ["planetary-engineering","atmospheric-thickening","global-warming-of-mars","liquid-water-reintroduction","breathable-atmosphere-goal"],
+  "columns": [
+    ["planetary-engineering","planet-scale-modification","large-scale-planetary-alteration","world-engineering","reshaping-a-whole-planet"],
+    ["atmospheric-thickening","atmospheric-pressure-increase","building-up-the-atmosphere","raising-air-density","fattening-up-the-air-on-mars"],
+    ["global-warming-of-mars","martian-greenhouse-warming","planetary-temperature-raising","deliberate-mars-heating","warming-mars-up-on-purpose"],
+    ["liquid-water-reintroduction","restoring-surface-water","melting-mars-ice","reviving-liquid-water","bringing-liquid-water-back-to-mars"],
+    ["breathable-atmosphere-goal","human-breathable-air-target","oxygen-rich-atmosphere-goal","habitable-air-objective","making-the-air-safe-to-breathe"]
+  ],
+  "sentence_templates": [
+    "how does {0} use {2} to drive {1}, why does that enable {3}, and how close is the {4}?",
+    "why is {3} a step toward the {4}, and how do {1} and {2} make it possible under {0}?",
+    "if {0} starts with {2} and {1}, how far is that from {3} and the {4}?"
+  ]
+}

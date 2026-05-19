@@ -16,31 +16,36 @@
       "monetary-base",
       "reserve-money",
       "high-powered-money",
-      "base-money"
+      "base-money",
+      "the-core-cash-everything-builds-on"
     ],
     [
       "fractional-reserve-banking",
       "partial-reserve-banking",
       "reserve-ratio-banking",
-      "deposit-lending-system"
+      "deposit-lending-system",
+      "banks-only-keeping-a-slice-of-deposits"
     ],
     [
       "money-multiplier",
       "credit-multiplier",
       "deposit-expansion-multiplier",
-      "bank-money-multiplier"
+      "bank-money-multiplier",
+      "how-one-dollar-turns-into-many"
     ],
     [
       "velocity-of-money",
       "money-turnover-rate",
       "circulation-speed-of-money",
-      "spending-velocity"
+      "spending-velocity",
+      "how-fast-a-dollar-changes-hands"
     ],
     [
       "monetary-aggregate",
       "money-stock-measure",
       "broad-money-measure",
-      "money-supply-indicator"
+      "money-supply-indicator",
+      "the-tally-of-all-the-money-out-there"
     ]
   ],
   "sentence_templates": [

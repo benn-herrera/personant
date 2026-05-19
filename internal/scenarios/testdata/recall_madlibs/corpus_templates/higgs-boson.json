@@ -16,31 +16,36 @@
       "higgs-boson",
       "higgs-particle",
       "god-particle",
-      "h-boson"
+      "h-boson",
+      "that-particle-they-found-at-cern"
     ],
     [
       "higgs-mechanism",
       "higgs-symmetry-breaking-mechanism",
       "electroweak-breaking-mechanism",
-      "mass-generation-mechanism"
+      "mass-generation-mechanism",
+      "the-way-particles-get-their-mass"
     ],
     [
       "vacuum-expectation-value",
       "higgs-vev",
       "nonzero-vacuum-value",
-      "higgs-ground-state-value"
+      "higgs-ground-state-value",
+      "the-fields-built-in-background-value"
     ],
     [
       "higgs-field",
       "scalar-field",
       "spin-zero-field",
-      "electroweak-scalar-field"
+      "electroweak-scalar-field",
+      "the-invisible-field-filling-all-space"
     ],
     [
       "yukawa-coupling",
       "higgs-yukawa-coupling",
       "fermion-mass-coupling",
-      "yukawa-interaction"
+      "yukawa-interaction",
+      "how-strongly-a-particle-grabs-the-field"
     ]
   ],
   "sentence_templates": [

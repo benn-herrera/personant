@@ -1,0 +1,20 @@
+{
+  "name": "khufu-corpus",
+  "topic": "wiki-khufu",
+  "mode": "measure-only",
+  "source_article": "Khufu",
+  "description": "Tests recall of the pharaoh Khufu: his Fourth Dynasty reign, the Great Pyramid he commissioned, his Greek name Cheops, his lineage, and the scarcity of his surviving portraiture.",
+  "anchors": ["pharaoh-khufu","fourth-dynasty-reign","great-pyramid-builder","greek-name-cheops","khufu-ivory-statuette"],
+  "columns": [
+    ["pharaoh-khufu","king-khufu","khufu-of-egypt","second-pharaoh-of-dynasty-four","the-king-behind-the-biggest-pyramid"],
+    ["fourth-dynasty-reign","old-kingdom-fourth-dynasty-rule","reign-in-dynasty-four","4th-dynasty-kingship","his-stretch-as-pharaoh"],
+    ["great-pyramid-builder","commissioner-of-the-great-pyramid","builder-of-the-giza-great-pyramid","patron-of-the-largest-pyramid","the-guy-who-had-the-big-one-built"],
+    ["greek-name-cheops","hellenized-name-cheops","cheops-the-greek-rendering","classical-name-cheops","what-the-greeks-called-him"],
+    ["khufu-ivory-statuette","tiny-ivory-portrait","only-known-khufu-likeness","miniature-ivory-figure","that-tiny-little-statue-of-him"]
+  ],
+  "sentence_templates": [
+    "who was {0}, when was his {1}, how is he tied to the {2}, why is he called by the {3}, and what does the {4} show?",
+    "why is {0} also called by the {3}, why is the {4} so significant given the {2}, and what about his {1}?",
+    "during his {1}, what did {0} accomplish with the {2}, and what does the {4} tell us beyond the {3}?"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "white-star-line-corpus",
+  "topic": "wiki-white-star-line",
+  "mode": "measure-only",
+  "source_article": "White Star Line",
+  "description": "Tests recall of the White Star Line, covering the shipping company itself, its transatlantic passenger service, the Olympic-class fleet, the J.P. Morgan IMM ownership, and the 1934 merger with Cunard.",
+  "anchors": ["white-star-line","transatlantic-service","olympic-class-fleet","morgan-imm-ownership","cunard-merger"],
+  "columns": [
+    ["white-star-line","white-star-shipping-line","white-star-company","white-star-steamship-firm","the-company-that-owned-the-titanic"],
+    ["transatlantic-service","atlantic-passenger-crossings","north-atlantic-liner-service","ocean-crossing-passenger-trade","running-ships-across-the-atlantic"],
+    ["olympic-class-fleet","olympic-titanic-britannic-fleet","olympic-class-liner-trio","white-star-flagship-fleet","the-three-big-sister-ships"],
+    ["morgan-imm-ownership","j-p-morgan-imm-control","international-mercantile-marine-ownership","american-imm-conglomerate-ownership","owned-by-the-american-morgan-outfit"],
+    ["cunard-merger","merger-with-cunard","cunard-white-star-amalgamation","1934-cunard-combination","when-they-joined-up-with-cunard"]
+  ],
+  "sentence_templates": [
+    "how did the {0} run its {1}, and why did {3} and the {2} shape its path to the {4}?",
+    "after {3} took over the {0}, how did the {2} affect its {1} before the {4}?",
+    "what led the {0} from dominating {1} with the {2} under {3} to the eventual {4}?"
+  ]
+}

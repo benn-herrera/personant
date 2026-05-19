@@ -16,31 +16,36 @@
       "climate-normal",
       "climatological-normal",
       "30-year-climate-average",
-      "wmo-climate-normal"
+      "wmo-climate-normal",
+      "the-usual-weather-averaged-over-decades"
     ],
     [
       "koppen-climate-classification",
       "koppen-classification",
       "koppen-system",
-      "koppen-climate-scheme"
+      "koppen-climate-scheme",
+      "that-system-for-naming-climate-zones"
     ],
     [
       "climate-proxy",
       "paleoclimate-proxy",
       "proxy-climate-indicator",
-      "indirect-climate-record"
+      "indirect-climate-record",
+      "clues-like-tree-rings-and-ice-cores"
     ],
     [
       "climate-variability",
       "natural-climate-variability",
       "internal-climate-variation",
-      "climate-fluctuation"
+      "climate-fluctuation",
+      "the-climate-jumping-around-year-to-year"
     ],
     [
       "thermohaline-circulation",
       "ocean-thermohaline-circulation",
       "deep-ocean-circulation",
-      "thermohaline-overturning"
+      "thermohaline-overturning",
+      "that-big-ocean-conveyor-belt"
     ]
   ],
   "sentence_templates": [

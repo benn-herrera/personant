@@ -12,11 +12,11 @@
     "genetic-transformation"
   ],
   "columns": [
-    ["central-dogma", "dna-rna-protein-flow", "information-flow-dogma", "sequence-information-transfer"],
-    ["polymerase-chain-reaction", "pcr", "dna-amplification", "in-vitro-dna-copying"],
-    ["molecular-cloning", "gene-cloning", "recombinant-dna-cloning", "dna-sequence-cloning"],
-    ["gel-electrophoresis", "dna-size-separation", "agarose-gel-separation", "electrophoretic-separation"],
-    ["genetic-transformation", "horizontal-gene-transfer", "exogenous-dna-uptake", "dna-incorporation-by-cells"]
+    ["central-dogma", "dna-rna-protein-flow", "information-flow-dogma", "sequence-information-transfer", "the-dna-makes-rna-makes-protein-idea"],
+    ["polymerase-chain-reaction", "pcr", "dna-amplification", "in-vitro-dna-copying", "the-trick-for-making-tons-of-dna-copies"],
+    ["molecular-cloning", "gene-cloning", "recombinant-dna-cloning", "dna-sequence-cloning", "splicing-a-gene-into-something-else"],
+    ["gel-electrophoresis", "dna-size-separation", "agarose-gel-separation", "electrophoretic-separation", "running-dna-through-a-jelly-slab"],
+    ["genetic-transformation", "horizontal-gene-transfer", "exogenous-dna-uptake", "dna-incorporation-by-cells", "a-cell-slurping-up-loose-dna"]
   ],
   "sentence_templates": [
     "the {0} describes how genes are read and {1} can amplify specific regions while {2} transfers them into vectors confirmed by {3} with {4} showing bacteria can acquire new dna",

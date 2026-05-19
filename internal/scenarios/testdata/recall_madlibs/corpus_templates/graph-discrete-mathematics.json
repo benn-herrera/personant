@@ -12,11 +12,11 @@
     "weighted-graph"
   ],
   "columns": [
-    ["vertex", "node", "point", "corner"],
-    ["edge", "link", "arc", "line"],
-    ["digraph", "directed-graph", "oriented-graph", "quiver"],
-    ["vertex-degree", "valency", "incidence-count", "edge-count-per-node"],
-    ["weighted-graph", "network", "cost-graph", "capacitated-graph"]
+    ["vertex", "node", "point", "corner", "one-of-the-dots"],
+    ["edge", "link", "arc", "line", "the-connecting-line-between-dots"],
+    ["digraph", "directed-graph", "oriented-graph", "quiver", "a-graph-where-the-arrows-point"],
+    ["vertex-degree", "valency", "incidence-count", "edge-count-per-node", "how-many-lines-touch-a-dot"],
+    ["weighted-graph", "network", "cost-graph", "capacitated-graph", "a-graph-with-numbers-on-the-lines"]
   ],
   "sentence_templates": [
     "what is the relationship between a {0} and an {1} in a {2}, and how does {3} affect the structure of a {4}?",

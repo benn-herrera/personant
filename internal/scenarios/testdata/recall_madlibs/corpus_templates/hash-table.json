@@ -1,0 +1,20 @@
+{
+  "name": "hash-table-corpus",
+  "topic": "wiki-hash-table",
+  "mode": "measure-only",
+  "source_article": "Hash table",
+  "description": "Tests recall of hash-table concepts: the structure itself, the hash function, collision resolution, load factor, and amortized lookup cost.",
+  "anchors": ["hash-table","hash-function","collision-resolution","load-factor","lookup-cost"],
+  "columns": [
+    ["hash-table","hash-map","associative-array","key-value-lookup-table","that-thing-that-finds-stuff-by-key"],
+    ["hash-function","key-hashing-function","index-mapping-function","hash-code-generator","the-thing-that-turns-a-key-into-a-slot"],
+    ["collision-resolution","collision-handling","chaining-or-open-addressing","bucket-collision-strategy","what-to-do-when-two-keys-clash"],
+    ["load-factor","fill-ratio","occupancy-ratio","table-density","how-full-the-table-is-getting"],
+    ["lookup-cost","amortized-access-time","average-case-retrieval-cost","constant-time-lookup","how-long-it-takes-to-find-something"]
+  ],
+  "sentence_templates": [
+    "how does a {0} use a {1} and {2} to achieve {4}, and why does {3} matter?",
+    "when {2} is needed, how do {3} and the {1} affect {4} in a {0}?",
+    "if {3} rises in a {0} using a {1}, what happens to {4} and which {2} scheme helps?"
+  ]
+}

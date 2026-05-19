@@ -16,31 +16,36 @@
       "synchrotron-radiation",
       "magnetic-bremsstrahlung",
       "synchrotron-light",
-      "synchrotron-emission"
+      "synchrotron-emission",
+      "the-light-particles-shed-when-they-curve"
     ],
     [
       "cyclotron",
       "circular-resonance-accelerator",
       "dee-magnet-accelerator",
-      "lawrence-cyclotron"
+      "lawrence-cyclotron",
+      "that-old-spiral-particle-spinner"
     ],
     [
       "linear-accelerator",
       "linac",
       "straight-line-accelerator",
-      "drift-tube-linac"
+      "drift-tube-linac",
+      "the-long-straight-shoot-em-down-a-line-one"
     ],
     [
       "collider",
       "storage-ring-collider",
       "particle-collider",
-      "beam-beam-collider"
+      "beam-beam-collider",
+      "the-machine-that-smashes-particles-together"
     ],
     [
       "radio-frequency-acceleration",
       "rf-acceleration",
       "resonant-rf-acceleration",
-      "microwave-cavity-acceleration"
+      "microwave-cavity-acceleration",
+      "giving-particles-a-push-with-radio-waves"
     ]
   ],
   "sentence_templates": [

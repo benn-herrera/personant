@@ -16,31 +16,36 @@
       "neutrino-oscillation",
       "flavor-oscillation",
       "flavor-conversion",
-      "flavor-change-in-flight"
+      "flavor-change-in-flight",
+      "neutrinos-shape-shifting-mid-journey"
     ],
     [
       "lepton-flavor",
       "neutrino-flavor",
       "flavor-eigenstate",
-      "neutrino-type"
+      "neutrino-type",
+      "which-of-the-three-kinds-it-is"
     ],
     [
       "inverse-beta-decay",
       "antineutrino-proton-capture",
       "proton-antineutrino-scattering",
-      "reines-cowan-reaction"
+      "reines-cowan-reaction",
+      "the-reaction-that-first-caught-a-neutrino"
     ],
     [
       "weak-interaction",
       "weak-force",
       "weak-nuclear-force",
-      "weak-coupling"
+      "weak-coupling",
+      "the-feeble-force-behind-radioactivity"
     ],
     [
       "beta-decay",
       "beta-radioactivity",
       "beta-disintegration",
-      "radioactive-beta-emission"
+      "radioactive-beta-emission",
+      "an-atom-spitting-out-a-beta-particle"
     ]
   ],
   "sentence_templates": [

@@ -16,31 +16,36 @@
       "point-mutation",
       "single-nucleotide-change",
       "base-substitution",
-      "single-base-alteration"
+      "single-base-alteration",
+      "just-one-letter-in-the-dna-changed"
     ],
     [
       "frameshift-mutation",
       "reading-frame-disruption",
       "indel-frame-shift",
-      "codon-frame-displacement"
+      "codon-frame-displacement",
+      "the-whole-rest-of-the-gene-gets-garbled"
     ],
     [
       "germline-mutation",
       "heritable-mutation",
       "inherited-sequence-change",
-      "transmissible-mutation"
+      "transmissible-mutation",
+      "the-kind-you-pass-on-to-your-kids"
     ],
     [
       "natural-selection",
       "selective-pressure",
       "fitness-based-filtering",
-      "adaptive-selection"
+      "adaptive-selection",
+      "survival-of-the-fittest-weeding-things-out"
     ],
     [
       "mutagen",
       "mutagenic-agent",
       "mutation-inducer",
-      "dna-damaging-agent"
+      "dna-damaging-agent",
+      "something-that-messes-up-your-dna"
     ]
   ],
   "sentence_templates": [

@@ -1,0 +1,20 @@
+{
+  "name": "great-pyramid-of-giza-corpus",
+  "topic": "wiki-great-pyramid-of-giza",
+  "mode": "measure-only",
+  "source_article": "Great Pyramid of Giza",
+  "description": "Tests recall of the Great Pyramid's builder, dynasty, structural dimensions, internal chambers, and its status as a Wonder of the ancient world.",
+  "anchors": ["pharaoh-khufu","fourth-dynasty","pyramid-dimensions","kings-chamber","ancient-wonder"],
+  "columns": [
+    ["pharaoh-khufu","king-khufu","cheops","builder-khufu","the-king-who-had-it-built"],
+    ["fourth-dynasty","old-kingdom-fourth-dynasty","dynasty-four","4th-dynasty-period","that-old-line-of-kings"],
+    ["pyramid-dimensions","monument-height-and-base","structural-measurements","original-pyramid-size","how-big-it-is"],
+    ["kings-chamber","royal-burial-chamber","granite-kings-room","upper-burial-chamber","the-room-where-the-king-was-buried"],
+    ["ancient-wonder","seven-wonders-monument","last-surviving-wonder","wonder-of-the-ancient-world","one-of-those-old-world-wonders"]
+  ],
+  "sentence_templates": [
+    "who was {0} of the {1}, and how do {2} relate to the {3} inside the {4}?",
+    "what makes the structure an {4}, given its {2} and the {3} commissioned under {0} during the {1}?",
+    "during the {1}, how did {0} plan the {2}, the {3}, and the legacy as an {4}?"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "differential-equation-corpus",
+  "topic": "wiki-differential-equation",
+  "mode": "measure-only",
+  "source_article": "Differential equation",
+  "description": "Tests recall of differential-equation concepts from the differential-equation article, covering the equation itself, ordinary versus partial equations, the order of an equation, boundary and initial conditions, and the general solution.",
+  "anchors": ["differential-equation","ordinary-vs-partial","equation-order","initial-and-boundary-conditions","general-solution"],
+  "columns": [
+    ["differential-equation","equation-with-derivatives","derivative-relating-equation","equation-of-rates","an-equation-with-rates-of-change-in-it"],
+    ["ordinary-vs-partial","ode-versus-pde","single-vs-multivariable-equation","ordinary-or-partial-classification","whether-it-has-one-variable-or-several"],
+    ["equation-order","order-of-the-equation","highest-derivative-order","differential-order","how-many-times-you-took-the-derivative"],
+    ["initial-and-boundary-conditions","side-conditions","constraint-conditions","initial-value-and-boundary-value-data","the-extra-facts-that-pin-down-the-answer"],
+    ["general-solution","family-of-solutions","complete-solution","solution-with-arbitrary-constants","the-whole-batch-of-possible-answers"]
+  ],
+  "sentence_templates": [
+    "how does a {0} relate a function to its derivatives, how does the {1} classify it, and how do the {2} and {3} narrow it to a {4}?",
+    "why does the {2} of a {0} determine how many {3} you need to pin down a particular answer from the {4}, given its {1}?",
+    "explain how the {1}, the {2}, and the {3} together select a specific case from the {4} of a {0}."
+  ]
+}

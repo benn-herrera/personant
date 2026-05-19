@@ -16,31 +16,36 @@
       "enumerative-combinatorics",
       "counting-combinatorics",
       "combinatorial-enumeration",
-      "structure-counting"
+      "structure-counting",
+      "the-math-of-counting-how-many-ways"
     ],
     [
       "binomial-coefficient",
       "n-choose-k",
       "choose-number",
-      "combination-count"
+      "combination-count",
+      "that-pick-some-out-of-a-bunch-number"
     ],
     [
       "integer-partition",
       "number-partition",
       "additive-partition",
-      "partition-of-n"
+      "partition-of-n",
+      "ways-to-break-a-number-into-pieces"
     ],
     [
       "ramsey-theory",
       "ramsey-principle",
       "partition-regularity",
-      "order-in-large-structures"
+      "order-in-large-structures",
+      "why-big-enough-chaos-always-has-patterns"
     ],
     [
       "extremal-combinatorics",
       "extremal-set-theory",
       "max-min-combinatorics",
-      "size-extremal-combinatorics"
+      "size-extremal-combinatorics",
+      "how-big-or-small-things-can-possibly-get"
     ]
   ],
   "sentence_templates": [

@@ -1,0 +1,20 @@
+{
+  "name": "wave-particle-duality-corpus",
+  "topic": "wiki-wave-particle-duality",
+  "mode": "measure-only",
+  "source_article": "Wave–particle duality",
+  "description": "Tests recall of wave-particle-duality concepts from the wave-particle-duality article, covering the duality itself, the photoelectric effect, the de Broglie wavelength, the double-slit experiment, and complementarity.",
+  "anchors": ["wave-particle-duality","photoelectric-effect","de-broglie-wavelength","double-slit-experiment","complementarity"],
+  "columns": [
+    ["wave-particle-duality","wave-and-particle-nature","dual-wave-particle-behavior","particle-wave-duality","being-both-a-wave-and-a-particle"],
+    ["photoelectric-effect","photoemission-effect","light-induced-electron-emission","hertz-photoeffect","light-knocking-electrons-loose"],
+    ["de-broglie-wavelength","matter-wavelength","de-broglie-matter-wave","particle-wavelength","the-wavelength-a-particle-has"],
+    ["double-slit-experiment","two-slit-experiment","interference-slit-experiment","young-style-quantum-experiment","the-two-slit-light-experiment"],
+    ["complementarity","bohr-complementarity","complementarity-principle","mutually-exclusive-descriptions","you-cant-see-both-sides-at-once"]
+  ],
+  "sentence_templates": [
+    "how does {0} explain why light shows the {1} and the {2} yet also interferes in the {3}, illustrating {4}?",
+    "what does the {2} predict, how does the {3} reveal {0}, and how do the {1} and {4} fit in?",
+    "explain how the {1}, the {2}, and the {3} all illustrate {0} and the idea of {4}."
+  ]
+}

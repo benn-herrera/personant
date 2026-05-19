@@ -1,0 +1,20 @@
+{
+  "name": "linked-list-corpus",
+  "topic": "wiki-linked-list",
+  "mode": "measure-only",
+  "source_article": "Linked list",
+  "description": "Tests recall of linked-list concepts: the node-and-pointer structure, sequential access, constant-time insertion, the doubly-linked variant, and the contrast with arrays.",
+  "anchors": ["linked-list","node-and-pointer","sequential-access","constant-time-insertion","array-contrast"],
+  "columns": [
+    ["linked-list","chained-node-list","pointer-linked-sequence","singly-linked-list","that-chain-of-boxes-pointing-along"],
+    ["node-and-pointer","node-with-next-reference","element-and-link","record-plus-pointer","a-box-that-knows-the-next-box"],
+    ["sequential-access","traversal-only-access","no-random-indexing","linear-walk-access","you-have-to-walk-through-it-in-order"],
+    ["constant-time-insertion","o1-splice","cheap-node-insertion","pointer-rewire-insert","sticking-in-an-item-is-quick"],
+    ["array-contrast","versus-contiguous-array","tradeoff-with-arrays","linked-vs-array-storage","unlike-a-plain-old-array"]
+  ],
+  "sentence_templates": [
+    "how does the {1} layout of a {0} enable {3} but force {2}, and what does {4} show?",
+    "when comparing under {4}, why does a {0} with its {1} give {3} but force {2}?",
+    "if {2} is the only option, how do {1} and {3} of a {0} look under {4}?"
+  ]
+}

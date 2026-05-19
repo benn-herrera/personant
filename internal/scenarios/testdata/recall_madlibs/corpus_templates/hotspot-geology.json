@@ -1,0 +1,20 @@
+{
+  "name": "hotspot-geology-corpus",
+  "topic": "wiki-hotspot-geology",
+  "mode": "measure-only",
+  "source_article": "Hotspot (geology)",
+  "description": "Tests recall of geologic hotspots: the fixed intraplate hotspot, the rising mantle plume, the volcanic island chain it builds, the age progression along that chain, and Hawaii as the type example.",
+  "anchors": ["geologic-hotspot","mantle-plume","hotspot-island-chain","age-progression","hawaii-hotspot"],
+  "columns": [
+    ["geologic-hotspot","intraplate-hotspot","fixed-volcanic-hotspot","mantle-hotspot","that-fixed-spot-that-makes-volcanoes"],
+    ["mantle-plume","rising-mantle-upwelling","deep-mantle-plume","hot-rock-upwelling","a-column-of-hot-rock-rising-up"],
+    ["hotspot-island-chain","volcanic-island-chain","hotspot-track","chain-of-hotspot-volcanoes","a-string-of-islands-in-a-line"],
+    ["age-progression","along-chain-age-gradient","progressive-island-aging","age-trend-along-track","the-islands-getting-older-down-the-line"],
+    ["hawaii-hotspot","hawaiian-hotspot","hawaiian-emperor-hotspot","hawaii-mantle-hotspot","the-one-under-hawaii"]
+  ],
+  "sentence_templates": [
+    "how does a {1} feed a {0}, build a {2} with a clear {3}, as seen at the {4}?",
+    "what does the {3} along a {2} reveal about a {0} and its {1}, using the {4} as the example?",
+    "why does a {4} produce a {2} with a clear {3}, given a fixed {0} above a {1}?"
+  ]
+}

@@ -16,31 +16,36 @@
       "stokes-drag",
       "stokes-friction-force",
       "viscous-drag-on-sphere",
-      "stokes-frictional-resistance"
+      "stokes-frictional-resistance",
+      "the-drag-on-a-tiny-ball-in-syrup"
     ],
     [
       "dynamic-viscosity",
       "absolute-viscosity",
       "fluid-viscosity",
-      "shear-viscosity"
+      "shear-viscosity",
+      "how-thick-and-sticky-the-fluid-is"
     ],
     [
       "terminal-settling-velocity",
       "settling-velocity",
       "sedimentation-velocity",
-      "free-fall-terminal-speed"
+      "free-fall-terminal-speed",
+      "the-steady-speed-a-particle-settles-at"
     ],
     [
       "low-reynolds-number",
       "creeping-flow-regime",
       "viscous-dominated-regime",
-      "stokes-flow-regime"
+      "stokes-flow-regime",
+      "the-slow-thick-creeping-flow-regime"
     ],
     [
       "spherical-particle",
       "sphere-in-fluid",
       "round-particle",
-      "ball-shaped-body"
+      "ball-shaped-body",
+      "a-little-round-ball-in-the-fluid"
     ]
   ],
   "sentence_templates": [

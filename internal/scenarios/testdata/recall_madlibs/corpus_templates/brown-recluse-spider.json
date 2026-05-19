@@ -1,0 +1,20 @@
+{
+  "name": "brown-recluse-spider-corpus",
+  "topic": "wiki-brown-recluse-spider",
+  "mode": "measure-only",
+  "source_article": "Brown recluse spider",
+  "description": "Tests recall of brown recluse biology from the Brown recluse spider article, covering the genus Loxosceles, the violin-shaped dorsal marking, six eyes in three pairs, necrotic loxoscelism venom, and reclusive nocturnal habits.",
+  "anchors": ["loxosceles-genus","violin-marking","six-eyes-three-pairs","loxoscelism-necrosis","reclusive-habits"],
+  "columns": [
+    ["loxosceles-genus","genus-loxosceles","recluse-spider-genus","loxosceles-recluse-genus","the-family-the-recluse-belongs-to"],
+    ["violin-marking","fiddle-shaped-mark","violin-back-pattern","cephalothorax-violin-marking","that-fiddle-shape-on-its-back"],
+    ["six-eyes-three-pairs","three-pairs-of-eyes","six-eyed-arrangement","dyad-eye-grouping","only-six-eyes-not-eight"],
+    ["loxoscelism-necrosis","necrotic-loxoscelism","skin-necrosis-from-bite","tissue-destroying-venom","the-bite-that-rots-your-skin"],
+    ["reclusive-habits","secretive-behavior","shy-nocturnal-habits","hidden-retreat-living","keeps-to-itself-and-hides"]
+  ],
+  "sentence_templates": [
+    "what identifies a spider in the {0}, and how do the {1}, {2}, {3}, and {4} help?",
+    "how does a bite in the {0} progress to {3}, and how do the {1}, {2}, and {4} affect bite frequency?",
+    "if you suspect the {0} from a {1}, how do the {2}, {3}, and {4} confirm or qualify that?"
+  ]
+}

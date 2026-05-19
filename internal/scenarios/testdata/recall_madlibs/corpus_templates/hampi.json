@@ -1,0 +1,56 @@
+{
+  "name": "hampi-corpus",
+  "topic": "wiki-hampi",
+  "mode": "measure-only",
+  "source_article": "Hampi",
+  "description": "Tests recall of Hampi, covering its role as the Vijayanagara Empire capital, the surviving temple and civic ruins, the Virupaksha Temple, the boulder-strewn landscape setting, and its World Heritage status.",
+  "anchors": [
+    "hampi",
+    "vijayanagara-capital",
+    "temple-ruins",
+    "virupaksha-temple",
+    "boulder-landscape"
+  ],
+  "columns": [
+    [
+      "hampi",
+      "hampi-ruins-site",
+      "hampi-heritage-town",
+      "ruined-city-of-hampi",
+      "that-old-broken-down-city-in-india"
+    ],
+    [
+      "vijayanagara-capital",
+      "vijayanagara-empire-seat",
+      "capital-of-vijayanagara",
+      "medieval-vijayanagara-city",
+      "the-old-empires-main-city"
+    ],
+    [
+      "temple-ruins",
+      "ruined-temple-complexes",
+      "surviving-stone-shrines",
+      "abandoned-temple-structures",
+      "the-crumbling-old-temples"
+    ],
+    [
+      "virupaksha-temple",
+      "virupaksha-shiva-shrine",
+      "pampapathi-temple",
+      "hampi-virupaksha-mandir",
+      "the-one-temple-still-in-use"
+    ],
+    [
+      "boulder-landscape",
+      "granite-boulder-terrain",
+      "rocky-boulder-strewn-setting",
+      "stone-strewn-hilly-landscape",
+      "all-those-big-rocks-everywhere"
+    ]
+  ],
+  "sentence_templates": [
+    "how did {0} function as the {1}, what remains of it as {2}, and where do the {3} and {4} fit?",
+    "what makes the {3} central among the {2} at {0}, given its role in the {1} and the {4}?",
+    "how did the {4} shape the {1}, the {2}, and the {3} across {0}?"
+  ]
+}

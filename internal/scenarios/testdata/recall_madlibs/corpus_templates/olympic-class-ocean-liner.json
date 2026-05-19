@@ -1,0 +1,20 @@
+{
+  "name": "olympic-class-ocean-liner-corpus",
+  "topic": "wiki-olympic-class-ocean-liner",
+  "mode": "measure-only",
+  "source_article": "Olympic-class ocean liner",
+  "description": "Tests recall of the Olympic-class ocean liners, covering the ship class itself, the three sister ships, their luxury-over-speed design philosophy, the White Star Line operator, and their record-setting size.",
+  "anchors": ["olympic-class-liners","three-sister-ships","luxury-over-speed-design","white-star-line","record-setting-size"],
+  "columns": [
+    ["olympic-class-liners","olympic-class-ships","white-star-trio-class","olympic-type-liners","that-class-of-ships-the-titanic-was-in"],
+    ["three-sister-ships","olympic-titanic-britannic","trio-of-sister-vessels","three-sister-liners","the-titanic-and-its-two-look-alikes"],
+    ["luxury-over-speed-design","comfort-prioritized-over-speed","opulence-not-pace-philosophy","luxury-focused-design-choice","built-fancy-rather-than-fast"],
+    ["white-star-line","white-star-shipping-company","white-star-operator","white-star-line-firm","the-company-that-owned-the-titanic"],
+    ["record-setting-size","largest-ships-of-their-era","unprecedented-vessel-dimensions","record-breaking-tonnage","the-biggest-ships-around-back-then"]
+  ],
+  "sentence_templates": [
+    "why did {3} build the {0}, and how did {2} and {4} define the {1}?",
+    "among the {1}, how did {4} and {2} reflect what {3} wanted from the {0}?",
+    "what made the {0} stand out for {4}, and why did {3} pick {2} for the {1}?"
+  ]
+}

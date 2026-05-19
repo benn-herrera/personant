@@ -16,31 +16,36 @@
       "knot-diagram",
       "knot-projection",
       "crossing-diagram",
-      "shadow-diagram"
+      "shadow-diagram",
+      "the-flat-sketch-of-the-knot"
     ],
     [
       "ambient-isotopy",
       "continuous-deformation",
       "topological-equivalence",
-      "homotopy-equivalence"
+      "homotopy-equivalence",
+      "squishing-it-around-without-tearing"
     ],
     [
       "knot-invariant",
       "topological-invariant",
       "isotopy-invariant",
-      "deformation-invariant"
+      "deformation-invariant",
+      "a-trait-that-survives-any-wiggling"
     ],
     [
       "knot-complement",
       "knot-exterior",
       "complement-space",
-      "surrounding-space"
+      "surrounding-space",
+      "all-the-empty-space-around-the-knot"
     ],
     [
       "skein-relation",
       "crossing-change-formula",
       "strand-exchange-relation",
-      "recursive-crossing-rule"
+      "recursive-crossing-rule",
+      "the-rule-for-swapping-a-crossing"
     ]
   ],
   "sentence_templates": [

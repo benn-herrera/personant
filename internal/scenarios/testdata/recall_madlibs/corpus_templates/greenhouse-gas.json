@@ -16,31 +16,36 @@
       "greenhouse-gas",
       "heat-trapping-gas",
       "infrared-active-gas",
-      "radiatively-active-gas"
+      "radiatively-active-gas",
+      "the-gases-that-warm-the-planet"
     ],
     [
       "water-vapor-feedback",
       "water-vapour-feedback",
       "humidity-amplification",
-      "moisture-feedback-loop"
+      "moisture-feedback-loop",
+      "warmer-air-holding-more-water-and-warming-more"
     ],
     [
       "global-warming-potential",
       "gwp",
       "warming-equivalence-metric",
-      "radiative-potency-index"
+      "radiative-potency-index",
+      "the-score-for-how-much-a-gas-heats"
     ],
     [
       "atmospheric-lifetime",
       "atmospheric-residence-time",
       "gas-persistence-time",
-      "mean-atmospheric-lifetime"
+      "mean-atmospheric-lifetime",
+      "how-long-it-hangs-around-in-the-sky"
     ],
     [
       "airborne-fraction",
       "atmospheric-retention-fraction",
       "airborne-co2-fraction",
-      "emission-retention-ratio"
+      "emission-retention-ratio",
+      "the-share-of-emissions-that-stays-up-there"
     ]
   ],
   "sentence_templates": [

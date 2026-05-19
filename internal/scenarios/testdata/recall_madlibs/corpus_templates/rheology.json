@@ -16,31 +16,36 @@
       "rheology",
       "flow-science",
       "deformation-science",
-      "fluid-deformation-study"
+      "fluid-deformation-study",
+      "the-study-of-how-goop-flows"
     ],
     [
       "viscoelasticity",
       "elastic-viscous-behavior",
       "viscous-elastic-response",
-      "combined-elastic-flow"
+      "combined-elastic-flow",
+      "acting-springy-and-runny-at-once"
     ],
     [
       "shear-thinning",
       "pseudoplasticity",
       "shear-rate-viscosity-decrease",
-      "flow-induced-thinning"
+      "flow-induced-thinning",
+      "gets-runnier-when-you-stir-it"
     ],
     [
       "yield-stress",
       "flow-threshold",
       "critical-stress",
-      "minimum-flow-stress"
+      "minimum-flow-stress",
+      "the-push-needed-before-it-flows"
     ],
     [
       "deborah-number",
       "relaxation-observation-ratio",
       "elasticity-timescale-ratio",
-      "viscoelastic-dimensionless-ratio"
+      "viscoelastic-dimensionless-ratio",
+      "the-springy-versus-slow-flow-ratio"
     ]
   ],
   "sentence_templates": [

@@ -16,31 +16,36 @@
       "spanning-tree",
       "covering-tree",
       "spanning-subgraph-tree",
-      "connector-tree"
+      "connector-tree",
+      "a-no-loop-skeleton-touching-every-node"
     ],
     [
       "minimum-spanning-tree",
       "lightest-spanning-tree",
       "least-cost-spanning-tree",
-      "optimal-spanning-tree"
+      "optimal-spanning-tree",
+      "the-cheapest-skeleton-of-the-graph"
     ],
     [
       "fundamental-cycle",
       "back-edge-cycle",
       "chord-cycle",
-      "cotree-cycle"
+      "cotree-cycle",
+      "the-loop-you-get-by-adding-one-edge"
     ],
     [
       "kirchhoffs-theorem",
       "matrix-tree-theorem",
       "kirchhoff-matrix-rule",
-      "laplacian-determinant-method"
+      "laplacian-determinant-method",
+      "the-count-spanning-trees-theorem"
     ],
     [
       "depth-first-search",
       "dfs-traversal",
       "backtracking-search",
-      "stack-based-traversal"
+      "stack-based-traversal",
+      "the-go-deep-first-graph-walk"
     ]
   ],
   "sentence_templates": [

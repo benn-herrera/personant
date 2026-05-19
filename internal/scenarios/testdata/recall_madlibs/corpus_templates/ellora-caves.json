@@ -1,0 +1,56 @@
+{
+  "name": "ellora-caves-corpus",
+  "topic": "wiki-ellora-caves",
+  "mode": "measure-only",
+  "source_article": "Ellora Caves",
+  "description": "Tests recall of the Ellora Caves, covering their rock-cut cave complex, the monolithic Kailasa Temple, the coexistence of Buddhist, Hindu, and Jain shrines, the Rashtrakuta-era patronage, and their World Heritage status.",
+  "anchors": [
+    "ellora-cave-complex",
+    "kailasa-temple",
+    "three-faith-shrines",
+    "rashtrakuta-patronage",
+    "world-heritage-site"
+  ],
+  "columns": [
+    [
+      "ellora-cave-complex",
+      "ellora-rock-cut-caves",
+      "ellora-excavated-shrines",
+      "ellora-cave-monuments",
+      "those-caves-carved-into-the-cliff"
+    ],
+    [
+      "kailasa-temple",
+      "kailasanatha-monolith",
+      "monolithic-kailasa-shrine",
+      "cave-sixteen-temple",
+      "the-temple-cut-from-one-rock"
+    ],
+    [
+      "three-faith-shrines",
+      "buddhist-hindu-jain-caves",
+      "multi-religion-cave-group",
+      "interfaith-cave-shrines",
+      "caves-for-three-different-religions"
+    ],
+    [
+      "rashtrakuta-patronage",
+      "rashtrakuta-dynasty-sponsorship",
+      "rashtrakuta-royal-funding",
+      "eighth-century-patron-kings",
+      "the-old-kings-who-paid-for-it"
+    ],
+    [
+      "world-heritage-site",
+      "unesco-listed-monument",
+      "protected-heritage-site",
+      "unesco-world-heritage-listing",
+      "an-officially-protected-landmark"
+    ]
+  ],
+  "sentence_templates": [
+    "how does the {1} stand out among the {2} within {0}, given {3} and the path to {4}?",
+    "what role did {3} play in creating the {0}, the {1}, and the {2} now under {4}?",
+    "when the {0} earned {4}, how much weight did the {1}, the {2}, and {3} carry?"
+  ]
+}

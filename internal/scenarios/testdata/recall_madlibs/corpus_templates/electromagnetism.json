@@ -1,0 +1,20 @@
+{
+  "name": "electromagnetism-corpus",
+  "topic": "wiki-electromagnetism",
+  "mode": "measure-only",
+  "source_article": "Electromagnetism",
+  "description": "Tests recall of electromagnetism concepts from the electromagnetism article, covering electromagnetism itself, the electric field, the magnetic field, the Lorentz force, and electromagnetic induction.",
+  "anchors": ["electromagnetism","electric-field","magnetic-field","lorentz-force","electromagnetic-induction"],
+  "columns": [
+    ["electromagnetism","electromagnetic-theory","physics-of-electric-and-magnetic-forces","study-of-the-electromagnetic-force","the-electricity-and-magnets-stuff"],
+    ["electric-field","e-field","electrostatic-field","field-of-electric-force","the-invisible-charge-zone"],
+    ["magnetic-field","b-field","magnetic-flux-field","field-of-magnetic-force","the-area-a-magnet-pulls-on"],
+    ["lorentz-force","electromagnetic-force-on-a-charge","force-on-a-moving-charge","combined-electric-magnetic-force","the-push-on-a-moving-charge"],
+    ["electromagnetic-induction","induction","faraday-induction","emf-from-changing-flux","making-electricity-with-a-magnet"]
+  ],
+  "sentence_templates": [
+    "how does {0} unify the {1} and the {2} into one framework, including the {3} and {4}?",
+    "what is the {3} exerted on a charge moving through a {1} and a {2}, and how does {0} link it to {4}?",
+    "explain how {0} accounts for {4}, and how the {1}, {2}, and {3} interrelate."
+  ]
+}

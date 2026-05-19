@@ -1,0 +1,20 @@
+{
+  "name": "mars-corpus",
+  "topic": "wiki-mars",
+  "mode": "measure-only",
+  "source_article": "Mars",
+  "description": "Tests recall of basic facts about the planet Mars, covering its surface geology, thin atmosphere, two moons, polar ice caps, and the iron-oxide coloring that gives it the Red Planet name.",
+  "anchors": ["red-planet","martian-atmosphere","martian-moons","polar-ice-caps","iron-oxide-surface"],
+  "columns": [
+    ["red-planet","fourth-planet-from-sun","planet-mars","terrestrial-outer-neighbor","that-rusty-planet-next-door"],
+    ["martian-atmosphere","thin-co2-atmosphere","martian-air","low-pressure-gas-envelope","barely-any-air-up-there"],
+    ["martian-moons","phobos-and-deimos","mars-natural-satellites","two-small-moons","its-couple-of-little-moons"],
+    ["polar-ice-caps","martian-ice-caps","frozen-polar-deposits","co2-and-water-ice-caps","the-white-frozen-bits-at-the-poles"],
+    ["iron-oxide-surface","rusty-soil","red-dust-coating","oxidized-mineral-surface","the-rust-that-makes-it-look-red"]
+  ],
+  "sentence_templates": [
+    "why is the {0} red, and how do {4}, the {1}, the {2}, and the {3} all relate to that?",
+    "what would you find at the {3} of the {0}, how does the {1} compare with the {4}, and where do the {2} fit?",
+    "how do the {2} orbit the {0}, and do the {1} or the {3} affect them or the {4} at all?"
+  ]
+}

@@ -16,31 +16,36 @@
       "integer-factorization",
       "prime-factorization",
       "number-factoring",
-      "composite-decomposition"
+      "composite-decomposition",
+      "breaking-a-number-into-its-primes"
     ],
     [
       "modular-exponentiation",
       "modular-powering",
       "exponentiation-mod-n",
-      "power-with-remainder"
+      "power-with-remainder",
+      "raising-to-a-power-then-taking-remainder"
     ],
     [
       "key-generation",
       "key-creation",
       "keypair-production",
-      "key-derivation"
+      "key-derivation",
+      "making-the-pair-of-keys"
     ],
     [
       "padding-scheme",
       "message-padding",
       "encoding-scheme",
-      "plaintext-padding"
+      "plaintext-padding",
+      "the-extra-padding-on-the-message"
     ],
     [
       "prime-number",
       "large-prime",
       "prime-factor",
-      "prime-integer"
+      "prime-integer",
+      "one-of-those-big-prime-numbers"
     ]
   ],
   "sentence_templates": [

@@ -16,31 +16,36 @@
       "lepton-number",
       "leptonic-number",
       "lepton-quantum-number",
-      "lepton-charge"
+      "lepton-charge",
+      "the-tally-of-leptons-you-keep"
     ],
     [
       "lepton-flavor",
       "lepton-flavour",
       "lepton-generation",
-      "leptonic-generation"
+      "leptonic-generation",
+      "which-family-the-lepton-belongs-to"
     ],
     [
       "charged-lepton",
       "electron-like-lepton",
       "electron-type-lepton",
-      "electrically-charged-lepton"
+      "electrically-charged-lepton",
+      "the-electron-and-its-heavier-cousins"
     ],
     [
       "seesaw-mechanism",
       "seesaw",
       "neutrino-seesaw",
-      "inverse-seesaw"
+      "inverse-seesaw",
+      "the-trick-that-explains-tiny-masses"
     ],
     [
       "lepton-universality",
       "lepton-flavor-universality",
       "lepton-coupling-universality",
-      "flavor-independent-coupling"
+      "flavor-independent-coupling",
+      "all-leptons-treated-the-same-way"
     ]
   ],
   "sentence_templates": [

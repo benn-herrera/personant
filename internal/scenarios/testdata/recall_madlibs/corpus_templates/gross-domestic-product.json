@@ -16,31 +16,36 @@
       "expenditure-approach",
       "spending-based-gdp",
       "demand-side-gdp",
-      "consumption-plus-investment-method"
+      "consumption-plus-investment-method",
+      "adding-up-everything-everyone-spends"
     ],
     [
       "gdp-deflator",
       "price-level-index",
       "output-price-deflator",
-      "nominal-to-real-price-index"
+      "nominal-to-real-price-index",
+      "the-number-that-strips-out-price-changes"
     ],
     [
       "real-gdp",
       "inflation-adjusted-gdp",
       "constant-price-gdp",
-      "volume-measure-of-output"
+      "volume-measure-of-output",
+      "the-economy-size-after-removing-inflation"
     ],
     [
       "gross-national-income",
       "gni",
       "gross-national-product",
-      "national-income-measure"
+      "national-income-measure",
+      "what-the-whole-country-earns"
     ],
     [
       "gdp-per-capita",
       "output-per-person",
       "average-national-output",
-      "per-head-gdp"
+      "per-head-gdp",
+      "the-economy-split-evenly-per-person"
     ]
   ],
   "sentence_templates": [

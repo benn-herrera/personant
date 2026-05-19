@@ -1,0 +1,20 @@
+{
+  "name": "load-balancing-computing-corpus",
+  "topic": "wiki-load-balancing-computing",
+  "mode": "measure-only",
+  "source_article": "Load balancing (computing)",
+  "description": "Tests recall of load-balancing concepts: the work-distribution technique, the load balancer, distribution algorithms, health checks, and session persistence.",
+  "anchors": ["load-balancing","load-balancer","distribution-algorithm","health-check","session-persistence"],
+  "columns": [
+    ["load-balancing","work-distribution","traffic-spreading","request-balancing","sharing-the-work-across-servers"],
+    ["load-balancer","traffic-distributor","balancing-front-end","request-dispatcher","the-thing-that-hands-out-the-traffic"],
+    ["distribution-algorithm","balancing-algorithm","round-robin-or-least-connections","request-routing-policy","the-rule-for-who-gets-the-next-request"],
+    ["health-check","server-health-probe","liveness-check","backend-availability-probe","poking-a-server-to-see-if-its-alive"],
+    ["session-persistence","sticky-sessions","session-affinity","client-server-pinning","keeping-a-user-on-the-same-server"]
+  ],
+  "sentence_templates": [
+    "how does {0} use a {1} running a {2}, with a {3} and {4}, to spread requests?",
+    "when a {3} fails a node, how does the {1} in {0} adjust its {2} and {4}?",
+    "if {4} is required, how does it constrain the {2} and {3} a {1} can use for {0}?"
+  ]
+}

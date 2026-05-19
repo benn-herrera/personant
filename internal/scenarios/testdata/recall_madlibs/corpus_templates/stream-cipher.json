@@ -6,11 +6,11 @@
   "description": "Tests recall of stream cipher concepts including keystreams, linear feedback shift registers, XOR operations, self-synchronizing ciphers, and seed values.",
   "anchors": ["keystream", "linear-feedback-shift-register", "xor-operation", "self-synchronizing-stream-cipher", "seed-value"],
   "columns": [
-    ["keystream", "cipher-stream", "pseudorandom-stream", "key-digit-stream"],
-    ["linear-feedback-shift-register", "lfsr", "feedback-shift-register", "shift-register-sequence"],
-    ["xor-operation", "exclusive-or", "modulo-2-addition", "bitwise-xor"],
-    ["self-synchronizing-stream-cipher", "asynchronous-stream-cipher", "ciphertext-autokey", "ctak-cipher"],
-    ["seed-value", "initial-state", "cipher-seed", "key-seed"]
+    ["keystream","cipher-stream","pseudorandom-stream","key-digit-stream","the-running-key-bits"],
+    ["linear-feedback-shift-register","lfsr","feedback-shift-register","shift-register-sequence","the-feedback-loop-bit-generator"],
+    ["xor-operation","exclusive-or","modulo-2-addition","bitwise-xor","the-flip-the-bits-if-different-operation"],
+    ["self-synchronizing-stream-cipher","asynchronous-stream-cipher","ciphertext-autokey","ctak-cipher","the-cipher-that-resyncs-itself"],
+    ["seed-value","initial-state","cipher-seed","key-seed","the-starting-number-you-feed-it"]
   ],
   "sentence_templates": [
     "A {1} initialized with a {4} generates a {0} whose bits are combined with plaintext using a {2}, unlike a {3} which derives state from prior ciphertext.",

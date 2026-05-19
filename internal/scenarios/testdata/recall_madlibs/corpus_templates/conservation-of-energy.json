@@ -1,0 +1,20 @@
+{
+  "name": "conservation-of-energy-corpus",
+  "topic": "wiki-conservation-of-energy",
+  "mode": "measure-only",
+  "source_article": "Conservation of energy",
+  "description": "Tests recall of energy-conservation concepts from the conservation-of-energy article, covering the principle itself, the isolated system, energy transformation, the first law of thermodynamics, and Noether's theorem.",
+  "anchors": ["conservation-of-energy","isolated-system","energy-transformation","first-law-of-thermodynamics","noethers-theorem"],
+  "columns": [
+    ["conservation-of-energy","energy-conservation-principle","law-of-energy-conservation","constancy-of-total-energy","energy-cant-just-vanish"],
+    ["isolated-system","closed-system","system-with-no-exchange","energy-isolated-system","a-setup-sealed-off-from-everything"],
+    ["energy-transformation","energy-conversion","change-of-energy-form","transfer-between-energy-types","energy-switching-from-one-kind-to-another"],
+    ["first-law-of-thermodynamics","first-law","energy-balance-law","thermodynamic-conservation-law","the-heat-and-work-balance-rule"],
+    ["noethers-theorem","noether-theorem","symmetry-conservation-theorem","time-symmetry-energy-theorem","the-symmetry-gives-you-conservation-idea"]
+  ],
+  "sentence_templates": [
+    "how does {0} hold within an {1} despite ongoing {2}, how does the {3} restate it, and how does {4} explain it?",
+    "how does the {3} express {0} for heat and work in an {1} undergoing {2}, and how does {4} ground it?",
+    "explain how {0} applies to an {1}, permits {2}, restates as the {3}, and follows from {4}."
+  ]
+}

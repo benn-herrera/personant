@@ -16,31 +16,36 @@
       "cp-symmetry",
       "charge-parity-symmetry",
       "combined-cp-invariance",
-      "c-times-p-symmetry"
+      "c-times-p-symmetry",
+      "swap-charge-and-mirror-and-it-looks-same"
     ],
     [
       "charge-conjugation",
       "c-symmetry",
       "particle-antiparticle-swap",
-      "charge-reversal-symmetry"
+      "charge-reversal-symmetry",
+      "flipping-every-particle-to-its-anti"
     ],
     [
       "indirect-cp-violation",
       "mixing-induced-cp-violation",
       "cp-violation-via-mixing",
-      "kaon-mixing-cp-violation"
+      "kaon-mixing-cp-violation",
+      "the-rule-bending-that-shows-up-in-kaons"
     ],
     [
       "ckm-matrix",
       "quark-mixing-matrix",
       "cabibbo-kobayashi-maskawa-matrix",
-      "quark-flavor-mixing-matrix"
+      "quark-flavor-mixing-matrix",
+      "the-quark-flavor-mixing-table"
     ],
     [
       "matter-antimatter-asymmetry",
       "baryon-asymmetry",
       "matter-dominance",
-      "baryonic-matter-excess"
+      "baryonic-matter-excess",
+      "why-theres-stuff-instead-of-nothing"
     ]
   ],
   "sentence_templates": [

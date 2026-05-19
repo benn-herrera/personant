@@ -12,11 +12,11 @@
     "alternative-splicing"
   ],
   "columns": [
-    ["gene-expression", "gene-readout", "transcription-and-translation", "gene-activation"],
-    ["allele", "gene-variant", "sequence-variant", "genetic-variant"],
-    ["genetic-code", "codon-table", "nucleotide-to-amino-acid-mapping", "triplet-code"],
-    ["promoter", "transcription-start-region", "rna-polymerase-binding-site", "upstream-regulatory-sequence"],
-    ["alternative-splicing", "differential-splicing", "splice-variant-production", "exon-skipping"]
+    ["gene-expression", "gene-readout", "transcription-and-translation", "gene-activation", "the-gene-getting-switched-on"],
+    ["allele", "gene-variant", "sequence-variant", "genetic-variant", "a-different-flavor-of-a-gene"],
+    ["genetic-code", "codon-table", "nucleotide-to-amino-acid-mapping", "triplet-code", "the-cheat-sheet-for-building-proteins"],
+    ["promoter", "transcription-start-region", "rna-polymerase-binding-site", "upstream-regulatory-sequence", "the-on-switch-in-front-of-a-gene"],
+    ["alternative-splicing", "differential-splicing", "splice-variant-production", "exon-skipping", "mixing-and-matching-gene-pieces"]
   ],
   "sentence_templates": [
     "the {3} controls {0} by recruiting rna polymerase and the {2} determines how each {1} is decoded with {4} generating multiple proteins from one locus",

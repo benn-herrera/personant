@@ -1,0 +1,20 @@
+{
+  "name": "wreck-of-the-titanic-corpus",
+  "topic": "wiki-wreck-of-the-titanic",
+  "mode": "measure-only",
+  "source_article": "Wreck of the Titanic",
+  "description": "Tests recall of the Titanic wreck site, covering the wreck itself, Robert Ballard's 1985 discovery, the debris field, the broken hull sections, and the ongoing wreck deterioration.",
+  "anchors": ["titanic-wreck","ballard-discovery","debris-field","split-hull-sections","wreck-deterioration"],
+  "columns": [
+    ["titanic-wreck","sunken-titanic","wreck-site","titanic-on-the-seabed","the-sunken-titanic-on-the-bottom"],
+    ["ballard-discovery","1985-ballard-find","robert-ballard-expedition","discovery-of-the-wreck","when-ballard-found-it-in-the-80s"],
+    ["debris-field","scattered-wreckage-zone","field-of-debris","debris-scatter-area","the-spread-out-junk-on-the-sea-floor"],
+    ["split-hull-sections","separated-bow-and-stern","broken-hull-pieces","bow-and-stern-sections","the-ship-broke-into-two-big-chunks"],
+    ["wreck-deterioration","corroding-wreck","rusticle-decay","ongoing-wreck-decay","the-wreck-slowly-rusting-away"]
+  ],
+  "sentence_templates": [
+    "how did the {1} locate the {0}, and what did the {2} reveal about the {3} and {4}?",
+    "since the {1}, how has {4} affected the {3} and the surrounding {2} of the {0}?",
+    "what does the {2} tell us about how the {0} formed {3}, and why does {4} now threaten it after the {1}?"
+  ]
+}

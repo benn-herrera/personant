@@ -16,31 +16,36 @@
       "muon",
       "mu-lepton",
       "heavy-electron",
-      "second-generation-lepton"
+      "second-generation-lepton",
+      "like-an-electron-but-way-chunkier"
     ],
     [
       "weak-decay",
       "weak-interaction-decay",
       "weak-force-mediated-decay",
-      "weak-mediated-disintegration"
+      "weak-mediated-disintegration",
+      "it-falls-apart-via-the-weak-force"
     ],
     [
       "anomalous-magnetic-moment",
       "magnetic-moment-deviation",
       "g-minus-2",
-      "gyromagnetic-anomaly"
+      "gyromagnetic-anomaly",
+      "the-tiny-magnetic-wobble-thats-off"
     ],
     [
       "muonic-atom",
       "mu-mesic-atom",
       "muon-substituted-atom",
-      "muon-bound-atomic-state"
+      "muon-bound-atomic-state",
+      "an-atom-with-a-muon-swapped-in"
     ],
     [
       "michel-decay",
       "dominant-muon-decay",
       "three-body-muon-decay",
-      "electron-two-neutrino-decay"
+      "electron-two-neutrino-decay",
+      "the-usual-way-it-breaks-into-bits"
     ]
   ],
   "sentence_templates": [

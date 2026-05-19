@@ -16,31 +16,36 @@
       "consumer-price-index",
       "cpi",
       "retail-price-index",
-      "cost-of-living-index"
+      "cost-of-living-index",
+      "the-thing-that-tracks-how-much-stuff-costs"
     ],
     [
       "purchasing-power",
       "real-value-of-money",
       "money-buying-power",
-      "currency-purchasing-capacity"
+      "currency-purchasing-capacity",
+      "how-much-your-money-actually-buys"
     ],
     [
       "quantity-theory-of-money",
       "qtm",
       "money-supply-price-theory",
-      "fisher-equation-framework"
+      "fisher-equation-framework",
+      "the-idea-that-more-money-means-higher-prices"
     ],
     [
       "phillips-curve",
       "inflation-unemployment-tradeoff",
       "wage-price-curve",
-      "unemployment-inflation-curve"
+      "unemployment-inflation-curve",
+      "the-jobs-versus-prices-seesaw"
     ],
     [
       "hyperinflation",
       "runaway-inflation",
       "extreme-price-surge",
-      "galloping-inflation"
+      "galloping-inflation",
+      "prices-spiraling-totally-out-of-control"
     ]
   ],
   "sentence_templates": [

@@ -1,0 +1,20 @@
+{
+  "name": "algorithm-corpus",
+  "topic": "wiki-algorithm",
+  "mode": "measure-only",
+  "source_article": "Algorithm",
+  "description": "Tests recall of algorithm concepts: the step-by-step procedure, correctness, computational complexity, termination, and algorithm design paradigms.",
+  "anchors": ["algorithm","correctness","computational-complexity","termination","design-paradigm"],
+  "columns": [
+    ["algorithm","step-by-step-procedure","computational-method","finite-instruction-sequence","the-recipe-the-computer-follows"],
+    ["correctness","provable-soundness","output-validity","algorithmic-correctness","does-it-actually-give-the-right-answer"],
+    ["computational-complexity","resource-cost","time-and-space-complexity","asymptotic-efficiency","how-slow-it-gets-when-big"],
+    ["termination","guaranteed-halting","finite-completion","halting-property","does-it-ever-stop"],
+    ["design-paradigm","algorithmic-strategy","problem-solving-approach","algorithm-design-technique","the-general-trick-for-cracking-it"]
+  ],
+  "sentence_templates": [
+    "how does an {0} guarantee {1} and {3}, and how do {2} and {4} shape it?",
+    "when choosing a {4}, how do {2}, {1}, and {3} of the {0} compare?",
+    "if {3} fails, what does that imply for {1} and {2} of the {0} under a given {4}?"
+  ]
+}

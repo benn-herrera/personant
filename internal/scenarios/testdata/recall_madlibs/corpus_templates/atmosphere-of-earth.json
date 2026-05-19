@@ -16,31 +16,36 @@
       "atmospheric-stratification",
       "layering-of-the-atmosphere",
       "vertical-atmospheric-structure",
-      "atmospheric-layer-division"
+      "atmospheric-layer-division",
+      "the-sky-stacked-in-layers"
     ],
     [
       "greenhouse-effect",
       "heat-retention-by-atmosphere",
       "infrared-trapping",
-      "radiative-blanketing"
+      "radiative-blanketing",
+      "the-air-acting-like-a-blanket"
     ],
     [
       "ozone-layer",
       "stratospheric-ozone",
       "uv-shielding-band",
-      "ozone-shield"
+      "ozone-shield",
+      "the-sunburn-shield-up-high"
     ],
     [
       "albedo",
       "surface-reflectivity",
       "solar-reflectance",
-      "shortwave-reflectance"
+      "shortwave-reflectance",
+      "how-much-sunlight-bounces-back"
     ],
     [
       "troposphere",
       "lowest-atmospheric-layer",
       "weather-layer",
-      "boundary-air-layer"
+      "boundary-air-layer",
+      "the-bit-of-sky-where-clouds-happen"
     ]
   ],
   "sentence_templates": [

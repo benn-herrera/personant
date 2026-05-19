@@ -1,0 +1,20 @@
+{
+  "name": "spider-silk-corpus",
+  "topic": "wiki-spider-silk",
+  "mode": "measure-only",
+  "source_article": "Spider silk",
+  "description": "Tests recall of silk material science from the Spider silk article, covering silk protein composition, dragline silk, tensile strength, the silk-spinning process, and silk gland types.",
+  "anchors": ["silk-protein","dragline-silk","tensile-strength","silk-spinning-process","silk-gland-types"],
+  "columns": [
+    ["silk-protein","spidroin","silk-fibroin","spider-protein-fiber","the-stuff-spider-thread-is-made-of"],
+    ["dragline-silk","major-ampullate-silk","safety-line-silk","drop-line-thread","the-strong-anchor-line-silk"],
+    ["tensile-strength","pull-strength","breaking-strength","stretch-resistance","how-hard-it-is-to-pull-apart"],
+    ["silk-spinning-process","silk-extrusion","fiber-drawing-process","liquid-to-solid-silk-conversion","how-the-spider-makes-the-thread"],
+    ["silk-gland-types","kinds-of-silk-glands","specialized-silk-glands","ampullate-and-aciniform-glands","the-different-silk-making-glands"]
+  ],
+  "sentence_templates": [
+    "how does {0} give {1} its {2}, and what happens during the {3} across the {4}?",
+    "across the {4}, how do {0}, {1}, and {3} differ to produce silks of varying {2}?",
+    "if {1} is valued for {2}, how do the {0} and the {3} explain that property across the {4}?"
+  ]
+}

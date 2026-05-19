@@ -1,0 +1,20 @@
+{
+  "name": "probability-distribution-corpus",
+  "topic": "wiki-probability-distribution",
+  "mode": "measure-only",
+  "source_article": "Probability distribution",
+  "description": "Tests recall of probability-distribution concepts from the probability-distribution article, covering the distribution itself, the random variable, the probability density function, the cumulative distribution function, and expected value.",
+  "anchors": ["probability-distribution","random-variable","probability-density-function","cumulative-distribution-function","expected-value"],
+  "columns": [
+    ["probability-distribution","distribution-of-probabilities","probability-law","outcome-likelihood-distribution","how-the-odds-are-spread-around"],
+    ["random-variable","stochastic-variable","chance-variable","random-quantity","some-number-that-comes-out-by-chance"],
+    ["probability-density-function","density-function","pdf","probability-density-curve","that-bell-shaped-curve-thing"],
+    ["cumulative-distribution-function","cdf","cumulative-probability-function","distribution-function","the-odds-of-landing-at-or-below-something"],
+    ["expected-value","mean","expectation","long-run-average","what-youd-get-on-average-over-many-tries"]
+  ],
+  "sentence_templates": [
+    "how does a {0} assign probabilities to a {1}, how do the {2} and {3} describe it, and how does the {4} summarize it?",
+    "what is the {4} of a {1}, how is it computed from the {2}, and how do the {3} and {0} relate to it?",
+    "explain how the {2} and {3} both characterize a {0}, and how the {4} summarizes a {1}."
+  ]
+}

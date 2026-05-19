@@ -12,11 +12,11 @@
     "quaternary-structure"
   ],
   "columns": [
-    ["polypeptide", "amino-acid-chain", "peptide-chain", "residue-chain"],
-    ["protein-folding", "chain-folding", "tertiary-structure-formation", "native-conformation-acquisition"],
-    ["active-site", "catalytic-pocket", "substrate-binding-cleft", "enzyme-binding-site"],
-    ["post-translational-modification", "protein-modification", "residue-chemical-modification", "co-translational-processing"],
-    ["quaternary-structure", "multi-subunit-assembly", "protein-complex-architecture", "oligomeric-structure"]
+    ["polypeptide", "amino-acid-chain", "peptide-chain", "residue-chain", "a-string-of-amino-acid-beads"],
+    ["protein-folding", "chain-folding", "tertiary-structure-formation", "native-conformation-acquisition", "the-chain-scrunching-into-its-shape"],
+    ["active-site", "catalytic-pocket", "substrate-binding-cleft", "enzyme-binding-site", "the-business-end-where-it-does-its-job"],
+    ["post-translational-modification", "protein-modification", "residue-chemical-modification", "co-translational-processing", "tweaks-made-to-it-after-its-built"],
+    ["quaternary-structure", "multi-subunit-assembly", "protein-complex-architecture", "oligomeric-structure", "several-protein-pieces-clicked-together"]
   ],
   "sentence_templates": [
     "after the {0} is synthesized {1} shapes the {2} geometry and {3} can alter activity before the subunits adopt a {4}",

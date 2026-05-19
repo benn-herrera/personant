@@ -1,0 +1,20 @@
+{
+  "name": "life-support-system-corpus",
+  "topic": "wiki-life-support-system",
+  "mode": "measure-only",
+  "source_article": "Life-support system",
+  "description": "Tests recall of life-support-system concepts, covering atmosphere regulation, oxygen supply, carbon-dioxide removal, water recycling, and waste management in a closed habitat.",
+  "anchors": ["life-support-system","oxygen-supply","carbon-dioxide-removal","water-recycling","waste-management"],
+  "columns": [
+    ["life-support-system","environmental-control-system","habitat-life-support","crew-survival-system","the-gear-that-keeps-you-alive-in-space"],
+    ["oxygen-supply","oxygen-generation","breathable-air-provision","o2-replenishment","keeping-air-you-can-breathe"],
+    ["carbon-dioxide-removal","co2-scrubbing","carbon-dioxide-capture","exhaled-co2-removal","getting-rid-of-the-stale-air"],
+    ["water-recycling","water-reclamation","wastewater-recovery","closed-loop-water-processing","cleaning-and-reusing-the-water"],
+    ["waste-management","waste-processing","human-waste-handling","trash-and-waste-disposal","dealing-with-the-poop-and-garbage"]
+  ],
+  "sentence_templates": [
+    "how does a {0} balance {1} against {2} while also handling {3} and {4}?",
+    "why must a {0} pair {2} with {1}, and how do {3} and {4} close the loop?",
+    "in a closed habitat, how do {1}, {3}, and {4} depend on the {0}, and where does {2} fit?"
+  ]
+}

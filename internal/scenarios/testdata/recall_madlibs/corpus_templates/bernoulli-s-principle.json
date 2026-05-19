@@ -16,31 +16,36 @@
       "bernoullis-principle",
       "bernoulli-effect",
       "flow-speed-pressure-tradeoff",
-      "energy-conservation-in-flow"
+      "energy-conservation-in-flow",
+      "faster-fluid-means-lower-pressure"
     ],
     [
       "stagnation-pressure",
       "total-pressure",
       "pitot-pressure",
-      "impact-pressure"
+      "impact-pressure",
+      "pressure-where-the-flow-stops-dead"
     ],
     [
       "dynamic-pressure",
       "velocity-pressure",
       "kinetic-pressure",
-      "ram-pressure"
+      "ram-pressure",
+      "the-push-from-how-fast-it-moves"
     ],
     [
       "venturi-effect",
       "constriction-induced-pressure-drop",
       "throat-pressure-drop",
-      "flow-acceleration-in-constriction"
+      "flow-acceleration-in-constriction",
+      "the-suck-when-a-pipe-narrows"
     ],
     [
       "streamline",
       "flow-path",
       "fluid-trajectory",
-      "particle-path-line"
+      "particle-path-line",
+      "the-line-the-fluid-traces-out"
     ]
   ],
   "sentence_templates": [

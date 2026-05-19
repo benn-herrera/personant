@@ -16,31 +16,36 @@
       "boson",
       "bose-particle",
       "bosonic-particle",
-      "integer-spin-particle"
+      "integer-spin-particle",
+      "the-kind-of-particle-that-likes-company"
     ],
     [
       "force-carrier",
       "gauge-boson",
       "mediating-particle",
-      "interaction-mediator"
+      "interaction-mediator",
+      "the-particle-that-passes-the-push"
     ],
     [
       "bose-einstein-statistics",
       "bose-statistics",
       "bosonic-statistics",
-      "bosonic-quantum-statistics"
+      "bosonic-quantum-statistics",
+      "the-counting-rule-that-lets-them-pile-up"
     ],
     [
       "integer-spin",
       "whole-number-spin",
       "bosonic-spin",
-      "spin-integer"
+      "spin-integer",
+      "spin-that-comes-in-whole-numbers"
     ],
     [
       "bose-einstein-condensate",
       "bec",
       "quantum-condensate",
-      "bosonic-condensate"
+      "bosonic-condensate",
+      "when-they-all-clump-into-one-state"
     ]
   ],
   "sentence_templates": [

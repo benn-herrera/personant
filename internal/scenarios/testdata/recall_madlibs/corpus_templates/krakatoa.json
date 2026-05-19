@@ -1,0 +1,20 @@
+{
+  "name": "krakatoa-corpus",
+  "topic": "wiki-krakatoa",
+  "mode": "measure-only",
+  "source_article": "Krakatoa",
+  "description": "Tests recall of Krakatoa: the Indonesian volcanic island, the 1883 eruption, the caldera collapse, the deadly eruption-generated tsunamis, and the global atmospheric and climate effects.",
+  "anchors": ["krakatoa","eighteen-eighty-three-eruption","caldera-collapse","eruption-tsunami","global-atmospheric-effects"],
+  "columns": [
+    ["krakatoa","krakatau","krakatoa-volcanic-island","indonesian-krakatoa-volcano","that-volcano-island-that-blew-up"],
+    ["eighteen-eighty-three-eruption","1883-krakatoa-eruption","cataclysmic-1883-eruption","august-1883-eruption","the-famous-victorian-era-blast"],
+    ["caldera-collapse","island-collapse-caldera","post-eruption-collapse","volcanic-edifice-collapse","the-island-basically-caved-in"],
+    ["eruption-tsunami","volcanic-tsunami","eruption-generated-sea-wave","krakatoa-tsunami","giant-killer-wave-from-the-blast"],
+    ["global-atmospheric-effects","worldwide-atmospheric-impact","global-sky-and-climate-effects","planet-wide-aerosol-effects","weird-red-sunsets-all-over-the-world"]
+  ],
+  "sentence_templates": [
+    "how did the {1} of {0} lead to a {2}, devastating {3}, and lasting {4}?",
+    "why did the {1} of {0} produce a {2}, deadly {3}, and {4} felt worldwide?",
+    "what connects the {1} and {2} of {0} to the {3} that killed thousands and the lasting {4}?"
+  ]
+}

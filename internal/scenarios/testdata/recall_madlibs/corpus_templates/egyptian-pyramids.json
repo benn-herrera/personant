@@ -1,0 +1,20 @@
+{
+  "name": "egyptian-pyramids-corpus",
+  "topic": "wiki-egyptian-pyramids",
+  "mode": "measure-only",
+  "source_article": "Egyptian pyramids",
+  "description": "Tests recall of Egyptian pyramids as a class: their role as royal tombs, the evolution from step to true pyramid, their Old Kingdom peak, the major necropolis sites, and their total count.",
+  "anchors": ["egyptian-pyramids","royal-tomb-function","step-to-true-pyramid-evolution","old-kingdom-pyramid-age","pyramid-necropolis-sites"],
+  "columns": [
+    ["egyptian-pyramids","pyramids-of-egypt","ancient-egyptian-pyramids","egyptian-royal-pyramids","those-giant-stone-triangles"],
+    ["royal-tomb-function","pharaoh-burial-monuments","kings-funerary-tombs","royal-mortuary-structures","fancy-graves-for-kings"],
+    ["step-to-true-pyramid-evolution","stepped-to-smooth-sided-development","mastaba-to-pyramid-progression","architectural-pyramid-evolution","how-the-shape-changed-over-time"],
+    ["old-kingdom-pyramid-age","old-kingdom-pyramid-building-era","peak-pyramid-construction-period","third-to-sixth-dynasty-pyramid-age","the-big-pyramid-building-days"],
+    ["pyramid-necropolis-sites","giza-saqqara-dahshur-fields","pyramid-burial-grounds","major-pyramid-cemetery-locations","where-all-the-pyramids-are"]
+  ],
+  "sentence_templates": [
+    "what are {0}, why did they serve a {1}, how did the {2} unfold during the {3}, and where are the {4}?",
+    "during the {3}, where were the {4}, what {1} did each {0} fulfill, and how did the {2} happen?",
+    "explain the {2} of {0}, their {1}, the {3}, and the {4}."
+  ]
+}

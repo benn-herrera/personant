@@ -1,0 +1,20 @@
+{
+  "name": "colonization-of-mars-corpus",
+  "topic": "wiki-colonization-of-mars",
+  "mode": "measure-only",
+  "source_article": "Colonization of Mars",
+  "description": "Tests recall of permanent-Mars-settlement concepts, covering the self-sustaining colony, local resource use, radiation shielding, food production, and the long-term population goal.",
+  "anchors": ["mars-colony","local-resource-use","radiation-shielding","food-production","self-sustaining-settlement"],
+  "columns": [
+    ["mars-colony","martian-settlement","permanent-mars-base","off-world-colony","people-actually-living-on-mars"],
+    ["local-resource-use","in-situ-resource-utilization","living-off-the-land","martian-material-harvesting","making-do-with-whats-already-there"],
+    ["radiation-shielding","radiation-protection","cosmic-ray-blocking","regolith-shielding","keeping-the-deadly-space-rays-out"],
+    ["food-production","crop-growing","martian-agriculture","greenhouse-farming","figuring-out-how-to-grow-dinner"],
+    ["self-sustaining-settlement","self-sufficient-colony","independent-mars-habitat","earth-independent-base","a-base-that-doesnt-need-earth-anymore"]
+  ],
+  "sentence_templates": [
+    "what does a {0} need to become a {4}, and how do {1}, {2}, and {3} each contribute?",
+    "how does {1} support {3} in a {0}, and why is {2} still needed for a {4}?",
+    "if {2} and {3} both rely on {1}, what else does a {0} require to count as a {4}?"
+  ]
+}

@@ -16,31 +16,36 @@
       "thermal-expansion",
       "thermosteric-expansion",
       "seawater-thermal-expansion",
-      "ocean-thermal-expansion"
+      "ocean-thermal-expansion",
+      "water-puffing-up-as-it-warms"
     ],
     [
       "ice-sheet-melt",
       "ice-sheet-mass-loss",
       "glacier-and-ice-sheet-melt",
-      "cryosphere-mass-loss"
+      "cryosphere-mass-loss",
+      "the-big-ice-sheets-melting-away"
     ],
     [
       "sea-level-acceleration",
       "rate-of-sea-level-rise",
       "sea-level-rise-acceleration",
-      "accelerating-sea-level-trend"
+      "accelerating-sea-level-trend",
+      "the-sea-rising-faster-and-faster"
     ],
     [
       "coastal-flood-hazard",
       "coastal-inundation-risk",
       "tidal-flood-risk",
-      "storm-surge-flood-risk"
+      "storm-surge-flood-risk",
+      "low-lying-coasts-getting-flooded"
     ],
     [
       "marine-ice-sheet-instability",
       "west-antarctic-instability",
       "ice-sheet-collapse-risk",
-      "marine-ice-cliff-instability"
+      "marine-ice-cliff-instability",
+      "the-antarctic-ice-could-suddenly-give-way"
     ]
   ],
   "sentence_templates": [

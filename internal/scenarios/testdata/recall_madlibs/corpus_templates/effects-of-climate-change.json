@@ -16,31 +16,36 @@
       "global-surface-warming",
       "global-mean-temperature-increase",
       "planetary-surface-heating",
-      "global-temperature-rise"
+      "global-temperature-rise",
+      "the-world-getting-hotter"
     ],
     [
       "sea-level-rise",
       "ocean-level-increase",
       "coastal-inundation",
-      "marine-transgression"
+      "marine-transgression",
+      "oceans-creeping-up-the-shore"
     ],
     [
       "ocean-acidification",
       "marine-acidification",
       "seawater-ph-decline",
-      "ocean-ph-drop"
+      "ocean-ph-drop",
+      "the-sea-turning-sour"
     ],
     [
       "ice-albedo-feedback",
       "snow-ice-reflectivity-feedback",
       "cryosphere-albedo-feedback",
-      "reflectivity-loss-feedback"
+      "reflectivity-loss-feedback",
+      "melting-ice-speeds-up-warming"
     ],
     [
       "extreme-weather",
       "weather-extremes",
       "climate-extremes",
-      "severe-weather-events"
+      "severe-weather-events",
+      "crazy-weather"
     ]
   ],
   "sentence_templates": [

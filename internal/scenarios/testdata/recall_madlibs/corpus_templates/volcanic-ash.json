@@ -1,0 +1,20 @@
+{
+  "name": "volcanic-ash-corpus",
+  "topic": "wiki-volcanic-ash",
+  "mode": "measure-only",
+  "source_article": "Volcanic ash",
+  "description": "Tests recall of volcanic ash: the fine fragmented particles, magma fragmentation that creates it, the airborne ash plume, ashfall deposits, and the aviation hazard ash poses.",
+  "anchors": ["volcanic-ash","magma-fragmentation","ash-plume","ashfall-deposit","aviation-ash-hazard"],
+  "columns": [
+    ["volcanic-ash","fine-volcanic-particles","pulverized-eruption-debris","fragmented-volcanic-glass","the-gritty-dust-from-an-eruption"],
+    ["magma-fragmentation","melt-shattering","explosive-magma-breakup","gas-driven-fragmentation","magma-blowing-itself-to-bits"],
+    ["ash-plume","eruption-ash-cloud","airborne-ash-column","drifting-ash-cloud","the-ash-cloud-rising-from-the-volcano"],
+    ["ashfall-deposit","tephra-fallout-layer","settled-ash-blanket","ash-accumulation-layer","the-layer-of-ash-that-settles-out"],
+    ["aviation-ash-hazard","ash-risk-to-aircraft","jet-engine-ash-danger","airspace-ash-threat","ash-being-dangerous-to-airplanes"]
+  ],
+  "sentence_templates": [
+    "how does {1} create {0}, how does it rise into an {2}, form an {3}, and become an {4}?",
+    "once {1} lofts {0} into an {2} that drifts, how does an {3} form, and why is it an {4}?",
+    "what links {1} to the {0} in an {2}, the resulting {3}, and the {4}?"
+  ]
+}

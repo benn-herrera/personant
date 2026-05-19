@@ -12,11 +12,11 @@
     "genetic-drift"
   ],
   "columns": [
-    ["heredity", "trait-inheritance", "genetic-transmission", "heritable-variation"],
-    ["genotype", "genetic-makeup", "allele-composition", "genomic-constitution"],
-    ["phenotype", "observable-trait", "expressed-characteristic", "outward-trait"],
-    ["natural-selection", "selection-pressure", "adaptive-selection", "differential-reproduction"],
-    ["genetic-drift", "allele-frequency-drift", "random-allele-sampling", "stochastic-gene-frequency-change"]
+    ["heredity", "trait-inheritance", "genetic-transmission", "heritable-variation", "stuff-getting-passed-down-from-parents"],
+    ["genotype", "genetic-makeup", "allele-composition", "genomic-constitution", "the-genes-youre-actually-carrying"],
+    ["phenotype", "observable-trait", "expressed-characteristic", "outward-trait", "what-you-can-actually-see"],
+    ["natural-selection", "selection-pressure", "adaptive-selection", "differential-reproduction", "survival-of-the-fittest"],
+    ["genetic-drift", "allele-frequency-drift", "random-allele-sampling", "stochastic-gene-frequency-change", "genes-changing-just-by-luck"]
   ],
   "sentence_templates": [
     "the rules of {0} determine how {1} shapes {2} and over generations {3} and {4} shift allele frequencies in populations",

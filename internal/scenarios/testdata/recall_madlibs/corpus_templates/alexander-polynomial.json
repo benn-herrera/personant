@@ -16,31 +16,36 @@
       "skein-relation",
       "conway-skein-relation",
       "crossing-skein",
-      "skein-identity"
+      "skein-identity",
+      "the-rule-for-swapping-crossings"
     ],
     [
       "knot-genus",
       "seifert-genus",
       "genus-of-knot",
-      "three-genus"
+      "three-genus",
+      "how-many-holes-the-knots-surface-has"
     ],
     [
       "seifert-surface",
       "spanning-surface",
       "knot-surface",
-      "genus-surface"
+      "genus-surface",
+      "the-membrane-stretched-across-the-knot"
     ],
     [
       "alexander-module",
       "alexander-invariant",
       "homology-module",
-      "knot-module"
+      "knot-module",
+      "the-algebra-gadget-behind-the-polynomial"
     ],
     [
       "knot-determinant",
       "determinant-of-knot",
       "alexander-determinant",
-      "knot-det"
+      "knot-det",
+      "the-number-at-minus-one"
     ]
   ],
   "sentence_templates": [

@@ -1,0 +1,20 @@
+{
+  "name": "spider-web-corpus",
+  "topic": "wiki-spider-web",
+  "mode": "measure-only",
+  "source_article": "Spider web",
+  "description": "Tests recall of web architecture from the Spider web article, covering the orb web, sticky capture spiral, the structural frame and radii, web types, and prey-snaring function.",
+  "anchors": ["orb-web","capture-spiral","web-frame-radii","web-types","prey-snaring"],
+  "columns": [
+    ["orb-web","wheel-shaped-web","circular-orb-web","spiral-orb-web","the-classic-round-spider-web"],
+    ["capture-spiral","sticky-spiral","adhesive-catching-spiral","gluey-prey-spiral","the-sticky-coiling-thread"],
+    ["web-frame-radii","frame-and-spokes","radial-support-threads","structural-radii-lines","the-spoke-lines-holding-it-up"],
+    ["web-types","kinds-of-webs","web-architectures","types-of-spider-webs","the-different-kinds-of-webs"],
+    ["prey-snaring","prey-trapping","insect-ensnarement","web-based-prey-capture","catching-bugs-in-the-web"]
+  ],
+  "sentence_templates": [
+    "how is an {0} built from {2} and {1}, and how does that and the {3} achieve {4}?",
+    "across different {3}, how do the {0}, its {2}, and {1} vary while still enabling {4}?",
+    "if {4} depends on the {1}, what does the {2} contribute to the {0} among the various {3}?"
+  ]
+}

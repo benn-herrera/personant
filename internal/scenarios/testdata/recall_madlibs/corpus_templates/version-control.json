@@ -1,0 +1,20 @@
+{
+  "name": "version-control-corpus",
+  "topic": "wiki-version-control",
+  "mode": "measure-only",
+  "source_article": "Version control",
+  "description": "Tests recall of version-control concepts: the change-tracking system, the repository, commits, branching and merging, and conflict resolution.",
+  "anchors": ["version-control","repository","commit","branching-and-merging","conflict-resolution"],
+  "columns": [
+    ["version-control","revision-control","source-control","change-tracking-system","the-track-your-code-changes-system"],
+    ["repository","code-repository","versioned-store","project-history-store","the-place-all-the-code-versions-live"],
+    ["commit","change-set-snapshot","revision","recorded-change","a-saved-snapshot-of-changes"],
+    ["branching-and-merging","branch-and-merge","divergence-and-integration","parallel-line-of-development","splitting-off-and-merging-back-work"],
+    ["conflict-resolution","merge-conflict-resolution","reconciling-divergent-edits","conflicting-change-fixup","sorting-out-clashing-edits"]
+  ],
+  "sentence_templates": [
+    "how does a {0} keep every {2} in a {1}, supporting {3} and {4}?",
+    "when {3} happens in a {0}, how does the {1} record each {2} and surface a need for {4}?",
+    "if {4} fails, what does it reveal about {3} history, the {2} chain, and the {1} in {0}?"
+  ]
+}

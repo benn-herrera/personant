@@ -1,0 +1,56 @@
+{
+  "name": "konark-sun-temple-corpus",
+  "topic": "wiki-konark-sun-temple",
+  "mode": "measure-only",
+  "source_article": "Konark Sun Temple",
+  "description": "Tests recall of the Konark Sun Temple, covering its chariot-shaped design dedicated to Surya, the Eastern Ganga dynasty patronage, the carved stone wheels, the Kalinga architectural style, and its World Heritage status.",
+  "anchors": [
+    "konark-sun-temple",
+    "chariot-of-surya",
+    "ganga-dynasty-patronage",
+    "carved-stone-wheels",
+    "kalinga-style"
+  ],
+  "columns": [
+    [
+      "konark-sun-temple",
+      "konark-surya-mandir",
+      "sun-temple-at-konark",
+      "konark-solar-shrine",
+      "that-old-sun-chariot-temple-in-odisha"
+    ],
+    [
+      "chariot-of-surya",
+      "sun-god-chariot-form",
+      "surya-s-celestial-chariot",
+      "ratha-shaped-temple",
+      "temple-built-to-look-like-a-giant-cart"
+    ],
+    [
+      "ganga-dynasty-patronage",
+      "eastern-ganga-sponsorship",
+      "narasimhadeva-commission",
+      "ganga-royal-funding",
+      "paid-for-by-the-local-medieval-kings"
+    ],
+    [
+      "carved-stone-wheels",
+      "monumental-chariot-wheels",
+      "spoked-sundial-wheels",
+      "ornate-temple-wheels",
+      "those-big-stone-wheels-on-the-side"
+    ],
+    [
+      "kalinga-style",
+      "odishan-temple-style",
+      "kalinga-architecture-tradition",
+      "orissan-temple-form",
+      "that-east-indian-way-of-building-temples"
+    ]
+  ],
+  "sentence_templates": [
+    "how does the {1} define {0}, what do the {3} represent, and how did {2} and {4} shape it?",
+    "what role did {2} play in raising the {0} in the {4}, and how do the {1} and {3} embody it?",
+    "when the {0} is read as a {1}, how do the {3}, the {4}, and {2} reinforce that idea?"
+  ]
+}

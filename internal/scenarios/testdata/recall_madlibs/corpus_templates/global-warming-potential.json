@@ -16,31 +16,36 @@
       "global-warming-potential",
       "gwp",
       "heat-trapping-index",
-      "greenhouse-warming-index"
+      "greenhouse-warming-index",
+      "how-bad-a-gas-is-for-warming"
     ],
     [
       "carbon-dioxide-equivalent",
       "co2-equivalent",
       "co2e",
-      "co2-eq"
+      "co2-eq",
+      "measured-in-carbon-terms"
     ],
     [
       "atmospheric-lifetime",
       "gas-residence-time",
       "atmospheric-persistence",
-      "decay-time-in-atmosphere"
+      "decay-time-in-atmosphere",
+      "how-long-it-sticks-around-up-there"
     ],
     [
       "radiative-efficiency",
       "infrared-absorbing-ability",
       "heat-absorbing-capacity",
-      "ir-absorptance-per-molecule"
+      "ir-absorptance-per-molecule",
+      "how-good-it-is-at-soaking-up-heat"
     ],
     [
       "time-horizon",
       "integration-period",
       "gwp-time-window",
-      "assessment-timeframe"
+      "assessment-timeframe",
+      "how-far-out-you-are-counting"
     ]
   ],
   "sentence_templates": [

@@ -1,0 +1,56 @@
+{
+  "name": "brihadisvara-temple-corpus",
+  "topic": "wiki-brihadisvara-temple",
+  "mode": "measure-only",
+  "source_article": "Brihadisvara Temple",
+  "description": "Tests recall of the Brihadisvara Temple at Thanjavur, covering its Chola-dynasty construction under Rajaraja I, its towering vimana, its dedication to Shiva, its granite construction, and its World Heritage status.",
+  "anchors": [
+    "brihadisvara-temple",
+    "chola-construction",
+    "great-vimana",
+    "shiva-dedication",
+    "granite-construction"
+  ],
+  "columns": [
+    [
+      "brihadisvara-temple",
+      "thanjavur-big-temple",
+      "peruvudaiyar-koil",
+      "rajarajeswaram-temple",
+      "that-huge-old-temple-down-south"
+    ],
+    [
+      "chola-construction",
+      "rajaraja-chola-commission",
+      "chola-dynasty-building",
+      "imperial-chola-project",
+      "built-back-when-the-cholas-ran-things"
+    ],
+    [
+      "great-vimana",
+      "towering-sanctum-tower",
+      "monumental-temple-tower",
+      "tall-pyramidal-vimana",
+      "that-giant-tower-over-the-shrine"
+    ],
+    [
+      "shiva-dedication",
+      "temple-to-shiva",
+      "shaivite-consecration",
+      "lord-shiva-shrine",
+      "the-one-built-for-the-god-shiva"
+    ],
+    [
+      "granite-construction",
+      "carved-granite-masonry",
+      "solid-granite-building",
+      "granite-block-construction",
+      "made-out-of-all-that-hard-stone"
+    ]
+  ],
+  "sentence_templates": [
+    "how did {1} produce the {0}, what makes its {2} remarkable, and how do {3} and {4} support it?",
+    "what does the {3} of the {0} say about Chola religion, and how do the {2} and {4} serve it under {1}?",
+    "when the {0} was built by {1} using {4}, how did that enable the {2} and express the {3}?"
+  ]
+}

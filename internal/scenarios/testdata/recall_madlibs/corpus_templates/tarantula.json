@@ -1,0 +1,20 @@
+{
+  "name": "tarantula-corpus",
+  "topic": "wiki-tarantula",
+  "mode": "measure-only",
+  "source_article": "Tarantula",
+  "description": "Tests recall of tarantula biology from the Tarantula article, covering the family Theraphosidae, large hairy body, urticating defensive hairs, exoskeleton molting, and long lifespan.",
+  "anchors": ["theraphosidae-family","large-hairy-body","urticating-hairs","molting-process","long-lifespan"],
+  "columns": [
+    ["theraphosidae-family","family-theraphosidae","tarantula-family","theraphosid-spiders","the-big-hairy-spider-family"],
+    ["large-hairy-body","big-hairy-build","bulky-setae-covered-body","heavy-bristled-body","the-chunky-fuzzy-body"],
+    ["urticating-hairs","irritating-bristles","barbed-defensive-hairs","abdomen-flicked-setae","the-itchy-flick-off-defense-hairs"],
+    ["molting-process","exoskeleton-shedding","ecdysis-molt","cuticle-renewal-molt","shedding-its-old-skin"],
+    ["long-lifespan","extended-longevity","decades-long-lifespan","long-lived-life-cycle","lives-for-a-really-long-time"]
+  ],
+  "sentence_templates": [
+    "what defines the {0}, and how do {1}, {2}, {3}, and {4} characterize its members?",
+    "how does the {3} support the {0}, its {1}, {2}, and the {4} of a tarantula?",
+    "if a spider has {2} and a {1}, what links it to the {0} and explains its {4} via the {3}?"
+  ]
+}

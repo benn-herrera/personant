@@ -16,31 +16,36 @@
       "couette-flow",
       "viscometric-flow",
       "parallel-plate-viscous-flow",
-      "plane-shear-flow"
+      "plane-shear-flow",
+      "fluid-dragged-between-two-plates"
     ],
     [
       "linear-velocity-profile",
       "uniform-velocity-gradient",
       "constant-shear-velocity-field",
-      "straight-line-velocity-distribution"
+      "straight-line-velocity-distribution",
+      "speed-rising-evenly-across-the-gap"
     ],
     [
       "wall-shear-stress",
       "surface-shear-force",
       "viscous-wall-stress",
-      "boundary-shear-stress"
+      "boundary-shear-stress",
+      "the-drag-the-fluid-puts-on-the-wall"
     ],
     [
       "taylor-couette-flow",
       "coaxial-cylinder-flow",
       "rotating-cylinder-flow",
-      "annular-viscous-flow"
+      "annular-viscous-flow",
+      "the-spinning-cylinder-version"
     ],
     [
       "shear-driven-flow",
       "viscosity-induced-flow",
       "moving-wall-driven-flow",
-      "surface-motion-flow"
+      "surface-motion-flow",
+      "flow-pulled-along-by-a-moving-surface"
     ]
   ],
   "sentence_templates": [

@@ -1,0 +1,20 @@
+{
+  "name": "pyramid-of-khafre-corpus",
+  "topic": "wiki-pyramid-of-khafre",
+  "mode": "measure-only",
+  "source_article": "Pyramid of Khafre",
+  "description": "Tests recall of the Pyramid of Khafre: its builder, its appearance as the tallest due to higher ground, its surviving casing stones at the apex, its mortuary and valley temples, and its place in the Giza complex.",
+  "anchors": ["pyramid-of-khafre","builder-pharaoh-khafre","retained-apex-casing","khafre-mortuary-temple","second-giza-pyramid"],
+  "columns": [
+    ["pyramid-of-khafre","khafre-s-pyramid","second-pyramid-of-giza","middle-giza-pyramid","the-giza-pyramid-with-the-cap-still-on-it"],
+    ["builder-pharaoh-khafre","commissioned-by-khafre","khafre-as-builder","fourth-dynasty-khafre-patron","the-pharaoh-who-had-it-put-up"],
+    ["retained-apex-casing","surviving-summit-casing-stones","preserved-limestone-cap","intact-casing-at-the-top","that-smooth-bit-still-stuck-near-the-tip"],
+    ["khafre-mortuary-temple","khafre-funerary-temple","attached-cult-temple","valley-and-mortuary-temple-pair","the-temples-built-alongside-it"],
+    ["second-giza-pyramid","appears-tallest-on-higher-bedrock","raised-ground-illusion-of-height","middle-pyramid-of-the-giza-trio","it-only-looks-tallest-cause-of-the-hill"]
+  ],
+  "sentence_templates": [
+    "why does the {0} appear taller as the {4}, who is its {1}, what about the {2}, and the {3}?",
+    "what survives of the {2}, how does the {3} connect to the {0} of its {1}, and why the {4}?",
+    "describe the {0}: its {1}, the {2}, the {3}, and why it is the {4}."
+  ]
+}

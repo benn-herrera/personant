@@ -1,0 +1,20 @@
+{
+  "name": "mastaba-corpus",
+  "topic": "wiki-mastaba",
+  "mode": "measure-only",
+  "source_article": "Mastaba",
+  "description": "Tests recall of the mastaba: its flat-topped rectangular form with sloping sides, its function as an early Egyptian tomb, its underground burial chamber, its offering chapel, and its role as the precursor to the pyramid.",
+  "anchors": ["mastaba","flat-topped-rectangular-tomb","underground-burial-chamber","offering-chapel","pyramid-precursor"],
+  "columns": [
+    ["mastaba","mastaba-tomb","ancient-egyptian-bench-tomb","rectangular-mud-brick-tomb","that-flat-mud-brick-tomb-thing"],
+    ["flat-topped-rectangular-tomb","flat-roofed-sloping-sided-structure","bench-shaped-superstructure","trapezoidal-flat-top-tomb","a-low-box-with-slanted-sides"],
+    ["underground-burial-chamber","subterranean-tomb-shaft","below-ground-burial-room","deep-burial-chamber-pit","the-room-down-the-shaft-with-the-body"],
+    ["offering-chapel","cult-offering-room","chapel-for-the-deceased","funerary-offering-niche","the-little-room-for-leaving-gifts"],
+    ["pyramid-precursor","forerunner-of-the-step-pyramid","architectural-ancestor-of-pyramids","early-stage-before-pyramids","what-they-built-before-real-pyramids"]
+  ],
+  "sentence_templates": [
+    "what is a {0}, why is it a {1} with an {3}, what about the {2}, and its role as a {4}?",
+    "how does the {2} of a {0}, a {1}, relate to its {3}, and why is it a {4}?",
+    "describe the {0}: its {1}, the {2}, the {3}, and its status as a {4}."
+  ]
+}

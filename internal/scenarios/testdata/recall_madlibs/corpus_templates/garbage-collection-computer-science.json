@@ -1,0 +1,20 @@
+{
+  "name": "garbage-collection-computer-science-corpus",
+  "topic": "wiki-garbage-collection-computer-science",
+  "mode": "measure-only",
+  "source_article": "Garbage collection (computer science)",
+  "description": "Tests recall of garbage-collection concepts: automatic memory reclamation, reachability, mark-and-sweep, generational collection, and collection pause overhead.",
+  "anchors": ["garbage-collection","reachability","mark-and-sweep","generational-collection","collection-pause"],
+  "columns": [
+    ["garbage-collection","automatic-memory-reclamation","automatic-deallocation","managed-memory-cleanup","the-thing-that-cleans-up-memory-for-you"],
+    ["reachability","object-liveness","reference-reachability","live-object-determination","whether-anything-still-points-to-it"],
+    ["mark-and-sweep","mark-sweep-algorithm","trace-and-reclaim","marking-collector","tag-the-live-ones-then-toss-the-rest"],
+    ["generational-collection","generational-gc","age-based-collection","young-old-generation-gc","sorting-objects-by-how-old-they-are"],
+    ["collection-pause","gc-pause","stop-the-world-pause","collection-latency","the-hiccup-when-cleanup-runs"]
+  ],
+  "sentence_templates": [
+    "how does {0} use {1} to decide what to free, and where do {2}, {3}, and {4} fit?",
+    "when {3} is enabled in a {0}, how does it use {1} to reduce {4} compared to plain {2}?",
+    "if {1} is computed wrong by a {0}, what happens to {2}, {3}, and {4}?"
+  ]
+}

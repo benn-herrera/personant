@@ -16,31 +16,36 @@
       "tricolorability",
       "3-colorability",
       "three-colorability",
-      "tricolor-property"
+      "tricolor-property",
+      "whether-you-can-color-it-with-three-crayons"
     ],
     [
       "crossing-number",
       "minimal-crossings",
       "minimum-crossing-count",
-      "least-crossing-number"
+      "least-crossing-number",
+      "the-fewest-times-it-has-to-cross-itself"
     ],
     [
       "knot-genus",
       "seifert-genus",
       "genus-of-knot",
-      "three-genus"
+      "three-genus",
+      "how-many-holes-the-simplest-spanning-surface-has"
     ],
     [
       "hyperbolic-volume",
       "complement-volume",
       "hyperbolic-knot-volume",
-      "volume-invariant"
+      "volume-invariant",
+      "how-much-room-the-warped-leftover-space-takes"
     ],
     [
       "reidemeister-move",
       "triangular-move",
       "diagram-move",
-      "local-diagram-move"
+      "local-diagram-move",
+      "a-little-tweak-to-the-knot-picture"
     ]
   ],
   "sentence_templates": [

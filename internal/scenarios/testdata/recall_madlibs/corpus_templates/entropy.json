@@ -1,0 +1,20 @@
+{
+  "name": "entropy-corpus",
+  "topic": "wiki-entropy",
+  "mode": "measure-only",
+  "source_article": "Entropy",
+  "description": "Tests recall of entropy concepts from the entropy article, covering entropy itself, the second law of thermodynamics, disorder and microstates, irreversibility, and the statistical definition of entropy.",
+  "anchors": ["entropy","second-law-of-thermodynamics","disorder-and-microstates","irreversibility","statistical-entropy"],
+  "columns": [
+    ["entropy","thermodynamic-entropy","measure-of-disorder","entropy-quantity","how-messed-up-things-are"],
+    ["second-law-of-thermodynamics","second-law","entropy-increase-law","law-of-entropy-growth","the-rule-that-things-get-messier"],
+    ["disorder-and-microstates","microstate-count","arrangement-multiplicity","number-of-accessible-states","the-count-of-ways-to-arrange-it"],
+    ["irreversibility","irreversible-process","one-way-process","non-reversible-change","stuff-you-cant-take-back"],
+    ["statistical-entropy","boltzmann-entropy","statistical-mechanical-entropy","entropy-from-microstate-counting","entropy-figured-from-counting-arrangements"]
+  ],
+  "sentence_templates": [
+    "how does {0} relate to {2}, what does the {1} say about its direction, and how does {3} connect to {4}?",
+    "why does {3} of a process tie to an increase in {0} under the {1}, and how does {4} explain it via {2}?",
+    "explain {0} via {4}, its link to {2}, and how the {1} explains {3}."
+  ]
+}

@@ -6,11 +6,11 @@
   "description": "Recall test for torus knots and their principal invariants.",
   "anchors": ["torus-knot", "coprime-integers", "seifert-fibered-manifold", "knot-genus", "closed-braid"],
   "columns": [
-    ["torus-knot", "torus-curve-knot", "knot-on-torus", "torus-embedded-knot"],
-    ["coprime-integers", "relatively-prime-pair", "coprime-pair", "gcd-one-pair"],
-    ["seifert-fibered-manifold", "seifert-fibration", "fibered-seifert-space", "seifert-fiber-space"],
-    ["knot-genus", "genus-of-knot", "seifert-genus", "minimal-genus"],
-    ["closed-braid", "braid-closure", "closed-braid-form", "braid-knot-closure"]
+    ["torus-knot","torus-curve-knot","knot-on-torus","torus-embedded-knot","a-knot-that-lives-on-a-donut"],
+    ["coprime-integers","relatively-prime-pair","coprime-pair","gcd-one-pair","a-pair-of-numbers-sharing-no-factors"],
+    ["seifert-fibered-manifold","seifert-fibration","fibered-seifert-space","seifert-fiber-space","a-space-built-from-bundled-fibers"],
+    ["knot-genus","genus-of-knot","seifert-genus","minimal-genus","how-twisty-the-knot-is"],
+    ["closed-braid","braid-closure","closed-braid-form","braid-knot-closure","a-braid-with-its-ends-joined-up"]
   ],
   "sentence_templates": [
     "A {0} is parametrized by a {1} and its complement is a {2} with {3} given by a formula involving a {4}.",

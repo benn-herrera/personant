@@ -6,11 +6,11 @@
   "description": "Tests recall of cipher concepts including ciphertext, plaintext, keys, block ciphers, and substitution ciphers.",
   "anchors": ["ciphertext", "plaintext", "cryptographic-key", "block-cipher", "substitution-cipher"],
   "columns": [
-    ["ciphertext", "encrypted-output", "enciphered-text", "cipher-output"],
-    ["plaintext", "cleartext", "unencrypted-text", "original-message"],
-    ["cryptographic-key", "secret-key", "cipher-key", "encryption-key"],
-    ["block-cipher", "fixed-block-cipher", "block-encryption-scheme", "block-based-cipher"],
-    ["substitution-cipher", "letter-substitution-cipher", "monoalphabetic-cipher", "replacement-cipher"]
+    ["ciphertext", "encrypted-output", "enciphered-text", "cipher-output", "the-scrambled-gibberish-version"],
+    ["plaintext", "cleartext", "unencrypted-text", "original-message", "the-plain-readable-message"],
+    ["cryptographic-key", "secret-key", "cipher-key", "encryption-key", "the-secret-needed-to-unlock-it"],
+    ["block-cipher", "fixed-block-cipher", "block-encryption-scheme", "block-based-cipher", "the-kind-that-works-on-chunks"],
+    ["substitution-cipher", "letter-substitution-cipher", "monoalphabetic-cipher", "replacement-cipher", "swapping-each-letter-for-another"]
   ],
   "sentence_templates": [
     "In a {3}, each {1} letter is mapped by a {4} using a {2} to produce {0}.",

@@ -16,31 +16,36 @@
       "pressure-transmission",
       "pressure-propagation",
       "isotropic-pressure-transfer",
-      "equal-pressure-distribution"
+      "equal-pressure-distribution",
+      "a-squeeze-felt-the-same-everywhere"
     ],
     [
       "hydraulic-press",
       "hydraulic-machine",
       "fluid-pressure-machine",
-      "pascal-press"
+      "pascal-press",
+      "like-the-jack-that-lifts-a-car"
     ],
     [
       "incompressible-fluid",
       "non-compressible-liquid",
       "constant-density-fluid",
-      "volume-conserving-fluid"
+      "volume-conserving-fluid",
+      "a-liquid-you-cant-really-squash"
     ],
     [
       "hydrostatic-pressure",
       "fluid-column-pressure",
       "static-fluid-pressure",
-      "gravitational-fluid-pressure"
+      "gravitational-fluid-pressure",
+      "the-deeper-you-go-the-more-it-presses"
     ],
     [
       "force-multiplication",
       "mechanical-advantage-in-fluid",
       "hydraulic-force-amplification",
-      "area-ratio-force-gain"
+      "area-ratio-force-gain",
+      "a-little-push-becomes-a-big-push"
     ]
   ],
   "sentence_templates": [

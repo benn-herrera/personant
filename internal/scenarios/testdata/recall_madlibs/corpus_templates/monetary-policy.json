@@ -16,31 +16,36 @@
       "inflation-targeting",
       "price-stability-mandate",
       "inflation-objective",
-      "cpi-target-regime"
+      "cpi-target-regime",
+      "aiming-to-keep-prices-from-rising-too-fast"
     ],
     [
       "open-market-operations",
       "central-bank-asset-purchases",
       "bond-buying-program",
-      "securities-market-intervention"
+      "securities-market-intervention",
+      "the-bank-buying-and-selling-bonds"
     ],
     [
       "quantitative-easing",
       "large-scale-asset-purchases",
       "balance-sheet-expansion",
-      "unconventional-monetary-easing"
+      "unconventional-monetary-easing",
+      "basically-printing-money-to-buy-stuff"
     ],
     [
       "forward-guidance",
       "policy-communication",
       "rate-path-signaling",
-      "central-bank-guidance"
+      "central-bank-guidance",
+      "the-bank-telling-everyone-its-plans"
     ],
     [
       "monetary-transmission",
       "interest-rate-channel",
       "policy-transmission-mechanism",
-      "monetary-policy-channel"
+      "monetary-policy-channel",
+      "how-rate-moves-trickle-down-to-people"
     ]
   ],
   "sentence_templates": [

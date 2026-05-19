@@ -1,0 +1,20 @@
+{
+  "name": "stratovolcano-corpus",
+  "topic": "wiki-stratovolcano",
+  "mode": "measure-only",
+  "source_article": "Stratovolcano",
+  "description": "Tests recall of stratovolcano features: the layered composite cone, its andesitic magma, its steep profile, its explosive eruptions, and its summit crater.",
+  "anchors": ["stratovolcano","andesitic-magma","steep-conical-profile","explosive-eruption","summit-crater"],
+  "columns": [
+    ["stratovolcano","composite-volcano","layered-cone-volcano","andesitic-strato-cone","the-tall-pointy-layered-volcano"],
+    ["andesitic-magma","intermediate-silica-magma","viscous-andesite-melt","andesite-composition-magma","the-thick-mid-silica-lava"],
+    ["steep-conical-profile","steep-sided-cone-shape","sharp-volcanic-profile","tall-conical-edifice","the-steep-cone-shape"],
+    ["explosive-eruption","violent-fragmenting-eruption","pyroclastic-blast-eruption","explosive-eruptive-event","the-blow-its-top-kind-of-eruption"],
+    ["summit-crater","peak-crater","top-vent-depression","apex-eruption-crater","the-crater-at-the-very-top"]
+  ],
+  "sentence_templates": [
+    "why does a {0} have a {2}, and how does its {1} lead to an {3} venting through a {4}?",
+    "how do alternating layers build a {0} with a {2}, and what role do the {4} and {1} play in its {3}?",
+    "what links {1} to the {2}, the {3} tendency, and the {4} of a {0}?"
+  ]
+}

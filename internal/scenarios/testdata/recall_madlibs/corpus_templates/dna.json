@@ -12,11 +12,11 @@
     "semiconservative-replication"
   ],
   "columns": [
-    ["double-helix", "double-stranded-helix", "twin-helical-structure", "dual-strand-spiral"],
-    ["base-pairing", "nucleobase-bonding", "complementary-pairing", "watson-crick-pairing"],
-    ["sugar-phosphate-backbone", "phosphodiester-backbone", "nucleotide-chain-backbone", "ribose-phosphate-spine"],
-    ["antiparallel", "antiparallel-orientation", "opposing-strand-direction", "counter-directional-strands"],
-    ["semiconservative-replication", "semiconservative-copying", "half-conserved-duplication", "one-old-one-new-replication"]
+    ["double-helix", "double-stranded-helix", "twin-helical-structure", "dual-strand-spiral", "that-twisty-ladder-shape"],
+    ["base-pairing", "nucleobase-bonding", "complementary-pairing", "watson-crick-pairing", "the-letters-matching-up-a-with-t"],
+    ["sugar-phosphate-backbone", "phosphodiester-backbone", "nucleotide-chain-backbone", "ribose-phosphate-spine", "the-rails-the-ladder-rungs-hang-off"],
+    ["antiparallel", "antiparallel-orientation", "opposing-strand-direction", "counter-directional-strands", "the-two-sides-running-opposite-ways"],
+    ["semiconservative-replication", "semiconservative-copying", "half-conserved-duplication", "one-old-one-new-replication", "each-copy-keeps-one-old-half"]
   ],
   "sentence_templates": [
     "the {0} of dna is stabilized by {1} rules along the {2} with each strand running in {3} fashion enabling {4}",

@@ -1,0 +1,56 @@
+{
+  "name": "red-fort-corpus",
+  "topic": "wiki-red-fort",
+  "mode": "measure-only",
+  "source_article": "Red Fort",
+  "description": "Tests recall of the Red Fort in Delhi, covering its red sandstone walls, its role as the Mughal imperial residence, its commission by Shah Jahan, the Diwan-i-Aam audience hall, and its World Heritage status.",
+  "anchors": [
+    "red-fort",
+    "red-sandstone-walls",
+    "mughal-imperial-residence",
+    "shah-jahan-commission",
+    "diwan-i-aam"
+  ],
+  "columns": [
+    [
+      "red-fort",
+      "lal-qila",
+      "delhi-red-fort",
+      "red-fort-complex",
+      "that-big-red-walled-fort-in-delhi"
+    ],
+    [
+      "red-sandstone-walls",
+      "red-sandstone-ramparts",
+      "crimson-stone-fortifications",
+      "red-walled-fort-enclosure",
+      "those-big-reddish-stone-walls-around-it"
+    ],
+    [
+      "mughal-imperial-residence",
+      "mughal-royal-palace",
+      "seat-of-mughal-emperors",
+      "imperial-mughal-court",
+      "where-the-old-emperors-actually-lived"
+    ],
+    [
+      "shah-jahan-commission",
+      "shah-jahan-s-order",
+      "commissioned-by-shah-jahan",
+      "mughal-emperor-commission",
+      "the-emperor-who-built-the-taj-also-ordered-this"
+    ],
+    [
+      "diwan-i-aam",
+      "hall-of-public-audience",
+      "public-audience-hall",
+      "emperor-s-audience-pavilion",
+      "the-hall-where-the-emperor-met-the-public"
+    ]
+  ],
+  "sentence_templates": [
+    "how do the {1} enclose the {0}, what made it a {2}, and how did {3} and the {4} feature?",
+    "why did the {3} build the {0}, what function did the {4} serve, and how did the {1} make it a {2}?",
+    "when the {0} served as a {2}, how did the {1}, the {3}, and the {4} support that role?"
+  ]
+}

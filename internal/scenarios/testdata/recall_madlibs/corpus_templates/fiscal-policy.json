@@ -16,31 +16,36 @@
       "government-spending",
       "public-expenditure",
       "fiscal-expenditure",
-      "state-outlays"
+      "state-outlays",
+      "the-money-the-government-shells-out"
     ],
     [
       "aggregate-demand",
       "total-spending",
       "effective-demand",
-      "economy-wide-demand"
+      "economy-wide-demand",
+      "how-much-everyone-is-buying"
     ],
     [
       "crowding-out",
       "private-investment-displacement",
       "fiscal-displacement-effect",
-      "government-borrowing-crowding"
+      "government-borrowing-crowding",
+      "the-state-elbowing-out-private-investors"
     ],
     [
       "automatic-stabilizers",
       "built-in-stabilizers",
       "automatic-fiscal-stabilizers",
-      "cyclical-budget-mechanisms"
+      "cyclical-budget-mechanisms",
+      "the-stuff-that-cushions-the-economy-on-its-own"
     ],
     [
       "budget-deficit",
       "fiscal-deficit",
       "government-shortfall",
-      "public-sector-deficit"
+      "public-sector-deficit",
+      "spending-more-than-it-takes-in"
     ]
   ],
   "sentence_templates": [

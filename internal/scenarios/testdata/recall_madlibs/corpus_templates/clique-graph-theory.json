@@ -16,31 +16,36 @@
       "clique",
       "complete-subgraph",
       "fully-connected-subgraph",
-      "mutual-adjacency-set"
+      "mutual-adjacency-set",
+      "a-bunch-of-dots-all-linked-to-each-other"
     ],
     [
       "maximal-clique",
       "inclusion-maximal-clique",
       "non-extendable-clique",
-      "locally-maximum-clique"
+      "locally-maximum-clique",
+      "a-clique-you-cant-add-anyone-else-to"
     ],
     [
       "clique-number",
       "maximum-clique-size",
       "omega-number",
-      "largest-clique-order"
+      "largest-clique-order",
+      "size-of-the-biggest-all-connected-group"
     ],
     [
       "independent-set",
       "stable-set",
       "coclique",
-      "anticlique"
+      "anticlique",
+      "a-bunch-of-dots-none-linked-at-all"
     ],
     [
       "clique-problem",
       "maximum-clique-problem",
       "clique-finding-problem",
-      "clique-detection-problem"
+      "clique-detection-problem",
+      "the-hard-task-of-spotting-big-cliques"
     ]
   ],
   "sentence_templates": [

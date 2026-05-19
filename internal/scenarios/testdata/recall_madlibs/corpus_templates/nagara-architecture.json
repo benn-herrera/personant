@@ -1,0 +1,56 @@
+{
+  "name": "nagara-architecture-corpus",
+  "topic": "wiki-nagara-architecture",
+  "mode": "measure-only",
+  "source_article": "Nagara architecture",
+  "description": "Tests recall of North Indian temple architecture, covering the curvilinear shikhara, the crowning amalaka and kalasha finial, the latina single-spire form, and the clustered shekhari multi-spire form.",
+  "anchors": [
+    "nagara-temple-style",
+    "curvilinear-shikhara",
+    "amalaka-finial",
+    "latina-spire-form",
+    "shekhari-clustered-spire"
+  ],
+  "columns": [
+    [
+      "nagara-temple-style",
+      "north-indian-temple-style",
+      "northern-temple-tradition",
+      "nagara-temple-form",
+      "the-way-they-build-temples-up-north"
+    ],
+    [
+      "curvilinear-shikhara",
+      "beehive-shaped-tower",
+      "curved-temple-spire",
+      "convex-rising-tower",
+      "the-curvy-tower-bit-over-the-shrine"
+    ],
+    [
+      "amalaka-finial",
+      "ribbed-stone-disc",
+      "crowning-amalaka-stone",
+      "notched-cap-disc",
+      "the-ridged-stone-doughnut-on-top"
+    ],
+    [
+      "latina-spire-form",
+      "single-spire-shikhara",
+      "monospire-tower",
+      "unbroken-curvilinear-spire",
+      "the-plain-just-one-tower-kind"
+    ],
+    [
+      "shekhari-clustered-spire",
+      "multi-spire-shikhara",
+      "clustered-turret-tower",
+      "shekhari-mode-tower",
+      "the-busy-bunch-of-mini-towers-kind"
+    ]
+  ],
+  "sentence_templates": [
+    "how does the {1} define {0}, what crowns it via the {2}, and how do the {3} and {4} differ?",
+    "what distinguishes the {3} from the {4} within {0}, and how does each treat the {1} and {2}?",
+    "when the {1} evolves from a {3} into a {4}, how do {0} and the {2} change overall?"
+  ]
+}

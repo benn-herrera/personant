@@ -16,31 +16,36 @@
       "active-site",
       "binding-pocket",
       "catalytic-pocket",
-      "catalytic-center"
+      "catalytic-center",
+      "the-spot-where-the-action-happens"
     ],
     [
       "activation-energy",
       "energy-barrier",
       "reaction-barrier",
-      "transition-state-energy"
+      "transition-state-energy",
+      "the-hump-a-reaction-has-to-get-over"
     ],
     [
       "induced-fit",
       "conformational-adaptation",
       "dynamic-active-site",
-      "flexible-binding"
+      "flexible-binding",
+      "the-enzyme-molding-around-its-target"
     ],
     [
       "turnover-number",
       "kcat",
       "catalytic-rate-constant",
-      "substrate-turnover-rate"
+      "substrate-turnover-rate",
+      "how-fast-it-cranks-through-molecules"
     ],
     [
       "feedback-inhibition",
       "negative-feedback",
       "end-product-inhibition",
-      "feedback-regulation"
+      "feedback-regulation",
+      "the-product-telling-it-to-stop"
     ]
   ],
   "sentence_templates": [

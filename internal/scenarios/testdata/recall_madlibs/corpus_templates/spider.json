@@ -1,0 +1,20 @@
+{
+  "name": "spider-corpus",
+  "topic": "wiki-spider",
+  "mode": "measure-only",
+  "source_article": "Spider",
+  "description": "Tests recall of general spider biology from the Spider article, covering the order Araneae, body segmentation, venom delivery, silk production, and predatory feeding.",
+  "anchors": ["araneae-order","spider-body-plan","venom-fangs","silk-spinnerets","predatory-feeding"],
+  "columns": [
+    ["araneae-order","spider-order","order-araneae","arachnid-order-araneae","the-eight-legged-critter-group"],
+    ["spider-body-plan","two-part-body","cephalothorax-and-abdomen","prosoma-opisthosoma-division","the-spiders-two-section-body"],
+    ["venom-fangs","chelicerae-fangs","venom-injecting-jaws","fang-venom-apparatus","the-poison-injecting-fangs"],
+    ["silk-spinnerets","silk-glands","spinneret-organs","abdominal-silk-spigots","the-silk-spinning-nozzles"],
+    ["predatory-feeding","prey-capture","carnivorous-feeding","external-digestion-of-prey","hunting-and-eating-other-bugs"]
+  ],
+  "sentence_templates": [
+    "what defines membership in the {0}, and how do {1}, {2}, and {3} support {4}?",
+    "how does {1} relate to {2} and {3}, and why are all three important for {4} in the {0}?",
+    "if a spider in the {0} relies on {3} and {2}, how does that shape its {4} given its {1}?"
+  ]
+}

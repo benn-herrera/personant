@@ -16,31 +16,36 @@
       "medium-of-exchange",
       "payment-intermediary",
       "transaction-vehicle",
-      "exchange-facilitator"
+      "exchange-facilitator",
+      "the-thing-you-use-to-buy-stuff"
     ],
     [
       "unit-of-account",
       "common-measure-of-value",
       "pricing-standard",
-      "standard-of-value"
+      "standard-of-value",
+      "the-yardstick-for-how-much-things-cost"
     ],
     [
       "store-of-value",
       "wealth-preservation-instrument",
       "value-reservoir",
-      "deferred-purchasing-power"
+      "deferred-purchasing-power",
+      "a-way-to-stash-wealth-for-later"
     ],
     [
       "fiat-money",
       "government-decree-currency",
       "unbacked-currency",
-      "legal-tender-currency"
+      "legal-tender-currency",
+      "cash-thats-only-worth-it-cause-we-say-so"
     ],
     [
       "commodity-money",
       "intrinsic-value-money",
       "specie-money",
-      "gold-or-silver-money"
+      "gold-or-silver-money",
+      "back-when-coins-were-actual-gold"
     ]
   ],
   "sentence_templates": [

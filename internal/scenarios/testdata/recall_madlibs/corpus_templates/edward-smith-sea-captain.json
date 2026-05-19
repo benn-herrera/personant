@@ -1,0 +1,20 @@
+{
+  "name": "edward-smith-sea-captain-corpus",
+  "topic": "wiki-edward-smith-sea-captain",
+  "mode": "measure-only",
+  "source_article": "Edward Smith (sea captain)",
+  "description": "Tests recall of Captain Edward Smith, covering the man himself, his role as Titanic's commander, his White Star Line career, the iceberg-warning decisions, and his death during the sinking.",
+  "anchors": ["edward-smith","titanic-captain","white-star-career","iceberg-warning-decisions","captains-death"],
+  "columns": [
+    ["edward-smith","captain-edward-smith","commander-e-j-smith","captain-e-j-smith","the-guy-in-charge-of-the-titanic"],
+    ["titanic-captain","master-of-the-titanic","titanic-commanding-officer","skipper-of-the-titanic","the-fellow-steering-that-doomed-ship"],
+    ["white-star-career","white-star-line-service","career-as-white-star-commodore","years-with-white-star-line","his-long-run-with-the-shipping-company"],
+    ["iceberg-warning-decisions","ignored-ice-warnings","handling-of-ice-reports","response-to-iceberg-warnings","brushing-off-those-ice-warnings"],
+    ["captains-death","death-in-the-sinking","captain-lost-with-the-ship","smiths-death-aboard","going-down-with-the-ship"]
+  ],
+  "sentence_templates": [
+    "how did {0}, the senior {1}, build his {2}, and how did his {3} lead to his {4}?",
+    "given his long {2}, why did {0} make those {3} as {1}, and what was his {4}?",
+    "what does the {4} of {0} reveal about his {3} and his standing from his {2} as {1}?"
+  ]
+}

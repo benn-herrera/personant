@@ -1,0 +1,20 @@
+{
+  "name": "arachnid-corpus",
+  "topic": "wiki-arachnid",
+  "mode": "measure-only",
+  "source_article": "Arachnid",
+  "description": "Tests recall of arachnid classification from the Arachnid article, covering the class Arachnida, eight-legged body plan, chelicerate lineage, book lungs, and the diversity of arachnid orders.",
+  "anchors": ["arachnida-class","eight-legged-body","chelicerata-lineage","book-lungs","arachnid-orders"],
+  "columns": [
+    ["arachnida-class","class-arachnida","arachnid-class","arachnida-taxon","the-spider-and-scorpion-family"],
+    ["eight-legged-body","eight-legs","four-pairs-of-legs","octopod-leg-arrangement","two-extra-legs-more-than-a-bug"],
+    ["chelicerata-lineage","chelicerate-ancestry","chelicerate-subphylum","cheliceral-arthropod-lineage","the-fang-mouthed-branch-of-the-tree"],
+    ["book-lungs","lamellate-lungs","book-lung-respiration","stacked-plate-lungs","those-page-like-breathing-organs"],
+    ["arachnid-orders","arachnid-subgroups","orders-of-arachnida","arachnid-taxonomic-orders","all-the-different-spider-cousin-groups"]
+  ],
+  "sentence_templates": [
+    "what places an animal in the {0}, and how do {1}, {2}, and {3} distinguish the {4}?",
+    "how does {2} explain the {1} and {3} shared across the {4} within the {0}?",
+    "if {3} is the breathing mechanism, how does that fit the {0}, its {1}, the {2}, and the spread of {4}?"
+  ]
+}

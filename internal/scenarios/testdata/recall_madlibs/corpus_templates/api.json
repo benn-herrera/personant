@@ -1,0 +1,20 @@
+{
+  "name": "api-corpus",
+  "topic": "wiki-api",
+  "mode": "measure-only",
+  "source_article": "API",
+  "description": "Tests recall of API concepts: the application programming interface, the interface contract, abstraction and information hiding, endpoints, and versioning.",
+  "anchors": ["api","interface-contract","abstraction-and-hiding","endpoint","api-versioning"],
+  "columns": [
+    ["api","application-programming-interface","programmatic-interface","software-interface","the-way-programs-talk-to-each-other"],
+    ["interface-contract","api-contract","interface-specification","agreed-call-protocol","the-promise-about-how-it-behaves"],
+    ["abstraction-and-hiding","implementation-hiding","detail-abstraction","information-hiding","tucking-the-messy-bits-out-of-sight"],
+    ["endpoint","api-endpoint","callable-entry-point","interface-access-point","the-url-you-hit"],
+    ["api-versioning","interface-versioning","version-compatibility","api-version-management","not-breaking-old-callers"]
+  ],
+  "sentence_templates": [
+    "how does an {0} expose an {3} while enforcing its {1}, providing {2} and {4}?",
+    "when {2} is the goal, how does the {1} of an {0} support a stable {3} across {4}?",
+    "if {4} is mishandled, what breaks in the {1}, the {2}, and the {3} of an {0}?"
+  ]
+}

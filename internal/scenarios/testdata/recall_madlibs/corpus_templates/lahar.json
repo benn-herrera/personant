@@ -1,0 +1,20 @@
+{
+  "name": "lahar-corpus",
+  "topic": "wiki-lahar",
+  "mode": "measure-only",
+  "source_article": "Lahar",
+  "description": "Tests recall of lahars: the volcanic mudflow itself, the water source that mobilizes it, its confinement to river valleys, the destructive sediment burial it causes, and lahar warning systems.",
+  "anchors": ["lahar","lahar-water-source","valley-confined-flow","sediment-burial","lahar-warning-system"],
+  "columns": [
+    ["lahar","volcanic-mudflow","volcanic-debris-flow","volcanic-mud-and-debris-slurry","river-of-mud-off-a-volcano"],
+    ["lahar-water-source","mobilizing-water-supply","meltwater-or-rain-source","triggering-water-source","the-water-that-gets-it-moving"],
+    ["valley-confined-flow","river-channel-confinement","valley-channelled-flow","drainage-following-flow","it-just-follows-the-valleys-down"],
+    ["sediment-burial","mud-and-debris-burial","downstream-sediment-inundation","valley-floor-burial","everything-downstream-gets-buried"],
+    ["lahar-warning-system","lahar-detection-system","lahar-alert-network","acoustic-flow-monitoring-system","sirens-that-warn-you-its-coming"]
+  ],
+  "sentence_templates": [
+    "how does a {1} mobilize loose material into a {0} that stays a {2}, causes {3}, despite a {4}?",
+    "why does a {0} from a {1} become a {2}, cause {3} downstream, and how does a {4} help?",
+    "what links the {1} of a {0} to its {2}, the {3} it leaves, and the role of a {4}?"
+  ]
+}

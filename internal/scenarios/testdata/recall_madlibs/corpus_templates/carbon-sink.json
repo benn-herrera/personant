@@ -16,31 +16,36 @@
       "carbon-sequestration",
       "carbon-removal",
       "co2-drawdown",
-      "atmospheric-carbon-capture"
+      "atmospheric-carbon-capture",
+      "pulling-carbon-out-of-the-air"
     ],
     [
       "terrestrial-carbon-sink",
       "land-based-carbon-sink",
       "forest-carbon-sink",
-      "vegetation-carbon-sink"
+      "vegetation-carbon-sink",
+      "trees-and-soil-soaking-it-up"
     ],
     [
       "oceanic-carbon-uptake",
       "ocean-carbon-absorption",
       "marine-co2-uptake",
-      "sea-co2-dissolution"
+      "sea-co2-dissolution",
+      "the-sea-drinking-in-carbon"
     ],
     [
       "blue-carbon",
       "coastal-ecosystem-carbon",
       "mangrove-saltmarsh-carbon",
-      "tidal-wetland-carbon"
+      "tidal-wetland-carbon",
+      "carbon-stashed-in-coastal-swamps"
     ],
     [
       "carbon-pool",
       "carbon-reservoir",
       "carbon-store",
-      "carbon-stock"
+      "carbon-stock",
+      "wherever-the-carbon-is-piled-up"
     ]
   ],
   "sentence_templates": [

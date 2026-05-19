@@ -1,0 +1,20 @@
+{
+  "name": "pyroclastic-flow-corpus",
+  "topic": "wiki-pyroclastic-flow",
+  "mode": "measure-only",
+  "source_article": "Pyroclastic flow",
+  "description": "Tests recall of pyroclastic flows: the fast hot gas-and-rock current, its extreme temperature, column collapse as a trigger, the dense basal flow, and the dilute pyroclastic surge.",
+  "anchors": ["pyroclastic-flow","extreme-flow-temperature","column-collapse","dense-basal-flow","pyroclastic-surge"],
+  "columns": [
+    ["pyroclastic-flow","hot-ash-and-gas-current","ground-hugging-volcanic-flow","glowing-avalanche","that-deadly-cloud-that-races-down-a-volcano"],
+    ["extreme-flow-temperature","searing-flow-heat","incandescent-temperatures","extreme-thermal-load","hot-enough-to-cook-everything-instantly"],
+    ["column-collapse","eruption-column-collapse","fountain-collapse-trigger","plume-collapse","when-the-ash-tower-falls-back-down"],
+    ["dense-basal-flow","concentrated-basal-current","dense-bottom-flow","ground-hugging-dense-layer","the-heavy-part-scraping-along-the-ground"],
+    ["pyroclastic-surge","dilute-turbulent-surge","low-density-ash-cloud-surge","expanded-pyroclastic-cloud","the-billowy-ashy-part-that-rolls-on-top"]
+  ],
+  "sentence_templates": [
+    "how does {2} produce a {0} with a {3} and a {4}, and why is its {1} so deadly?",
+    "what distinguishes a {3} from a {4} within a {0} born of {2}, given its {1}?",
+    "when {2} happens, how do the {3} and the {4} parts of the {0} differ, and how does {1} affect each?"
+  ]
+}

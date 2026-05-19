@@ -1,0 +1,20 @@
+{
+  "name": "plate-tectonics-corpus",
+  "topic": "wiki-plate-tectonics",
+  "mode": "measure-only",
+  "source_article": "Plate tectonics",
+  "description": "Tests recall of plate tectonics: the lithospheric plates, divergent boundaries, convergent boundaries, transform boundaries, and the mantle convection that drives plate motion.",
+  "anchors": ["lithospheric-plate","divergent-boundary","convergent-boundary","transform-boundary","mantle-convection"],
+  "columns": [
+    ["lithospheric-plate","tectonic-plate","crustal-plate","rigid-lithosphere-slab","one-of-those-big-slabs-the-crust-is-made-of"],
+    ["divergent-boundary","spreading-plate-margin","plate-separation-zone","rifting-boundary","where-two-plates-pull-apart"],
+    ["convergent-boundary","colliding-plate-margin","plate-collision-zone","plate-convergence-boundary","where-two-plates-crash-into-each-other"],
+    ["transform-boundary","sliding-plate-margin","strike-slip-plate-boundary","lateral-shear-boundary","where-plates-grind-sideways-past-each-other"],
+    ["mantle-convection","convective-mantle-flow","mantle-heat-circulation","convecting-mantle-currents","the-slow-churning-deep-down-that-shoves-them"]
+  ],
+  "sentence_templates": [
+    "how does {4} move a {0}, and what happens at a {1}, a {2}, and a {3}?",
+    "what distinguishes a {1}, a {2}, and a {3} between instances of a {0} driven by {4}?",
+    "how does {4} drive the {0} that creates a {1}, a {2}, and a {3}?"
+  ]
+}

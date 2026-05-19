@@ -1,0 +1,20 @@
+{
+  "name": "distributed-computing-corpus",
+  "topic": "wiki-distributed-computing",
+  "mode": "measure-only",
+  "source_article": "Distributed computing",
+  "description": "Tests recall of distributed-computing concepts: the multi-node system, message passing, fault tolerance, consistency models, and the CAP theorem.",
+  "anchors": ["distributed-computing","message-passing","fault-tolerance","consistency-model","cap-theorem"],
+  "columns": [
+    ["distributed-computing","distributed-systems","multi-node-computation","networked-computing","lots-of-machines-working-together"],
+    ["message-passing","inter-node-messaging","network-message-exchange","communication-by-messages","machines-talking-by-sending-notes"],
+    ["fault-tolerance","failure-resilience","fault-resilience","graceful-failure-handling","keeps-working-even-when-bits-break"],
+    ["consistency-model","consistency-guarantee","data-consistency-semantics","replication-consistency-model","the-promise-about-how-fresh-data-is"],
+    ["cap-theorem","cap-tradeoff","consistency-availability-partition-theorem","brewer-s-theorem","that-pick-two-of-three-rule"]
+  ],
+  "sentence_templates": [
+    "how does {0} coordinate nodes through {1} while keeping {2}, {3}, and respecting the {4}?",
+    "when a {4} forces a choice, how does it constrain the {3} in a {0} relying on {1} and {2}?",
+    "if {1} is lost in a {0}, what does it imply for {2} and the {3} under the {4}?"
+  ]
+}

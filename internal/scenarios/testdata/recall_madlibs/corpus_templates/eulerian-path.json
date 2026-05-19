@@ -16,31 +16,36 @@
       "eulerian-trail",
       "euler-walk",
       "edge-traversal-path",
-      "unicursal-trail"
+      "unicursal-trail",
+      "a-route-using-every-edge-once"
     ],
     [
       "even-degree",
       "even-valence",
       "balanced-vertex-degree",
-      "equal-in-out-degree"
+      "equal-in-out-degree",
+      "every-dot-has-an-even-count-of-lines"
     ],
     [
       "hierholzers-algorithm",
       "euler-tour-construction",
       "linear-time-circuit-finder",
-      "closed-tour-stitching"
+      "closed-tour-stitching",
+      "the-trick-for-building-the-loop"
     ],
     [
       "bridge",
       "cut-edge",
       "isthmus",
-      "disconnecting-edge"
+      "disconnecting-edge",
+      "the-edge-that-splits-the-graph-if-cut"
     ],
     [
       "konigsberg-problem",
       "seven-bridges-problem",
       "bridge-crossing-puzzle",
-      "konigsberg-bridge-puzzle"
+      "konigsberg-bridge-puzzle",
+      "that-old-walk-across-the-bridges-riddle"
     ]
   ],
   "sentence_templates": [

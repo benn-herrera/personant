@@ -1,0 +1,20 @@
+{
+  "name": "rms-olympic-corpus",
+  "topic": "wiki-rms-olympic",
+  "mode": "measure-only",
+  "source_article": "RMS Olympic",
+  "description": "Tests recall of RMS Olympic, covering the ship itself as Titanic's lead sister, its long career, the collision with HMS Hawke, its World War I trooping service, and its eventual scrapping.",
+  "anchors": ["rms-olympic","lead-sister-ship","hawke-collision","wartime-trooping-service","ship-scrapping"],
+  "columns": [
+    ["rms-olympic","the-olympic","titanic-sister-olympic","olympic-liner","the-titanics-twin-that-survived"],
+    ["lead-sister-ship","first-of-the-sisters","titanics-elder-sister","lead-olympic-class-vessel","the-original-of-the-three-sisters"],
+    ["hawke-collision","collision-with-hms-hawke","hawke-incident","olympic-hawke-crash","the-time-it-hit-a-warship"],
+    ["wartime-trooping-service","world-war-i-troopship-role","troop-transport-duty","wartime-troop-carrier-service","hauling-soldiers-during-the-war"],
+    ["ship-scrapping","breaking-up-for-scrap","olympics-demolition","scrapping-of-the-vessel","when-they-tore-the-old-ship-apart"]
+  ],
+  "sentence_templates": [
+    "as the {1}, how did {0} survive the {2} and go on to {3} before its {4}?",
+    "what role did {3} play in the {0} legacy as the {1}, from the {2} to its {4}?",
+    "why is {0} remembered as the lucky {1}, given the {2}, its {3}, and the final {4}?"
+  ]
+}

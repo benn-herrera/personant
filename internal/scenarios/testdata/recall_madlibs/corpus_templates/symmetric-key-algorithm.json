@@ -16,31 +16,36 @@
       "shared-secret-key",
       "common-secret",
       "mutual-secret-key",
-      "pre-shared-key"
+      "pre-shared-key",
+      "the-same-secret-key-both-sides"
     ],
     [
       "stream-cipher",
       "keystream-cipher",
       "bit-by-bit-cipher",
-      "continuous-stream-encryptor"
+      "continuous-stream-encryptor",
+      "the-encrypt-it-as-it-streams-cipher"
     ],
     [
       "block-cipher",
       "fixed-block-encryptor",
       "chunk-cipher",
-      "block-encryption-algorithm"
+      "block-encryption-algorithm",
+      "the-encrypt-fixed-chunks-cipher"
     ],
     [
       "feistel-network",
       "feistel-structure",
       "feistel-construction",
-      "balanced-feistel-scheme"
+      "balanced-feistel-scheme",
+      "the-split-and-swap-cipher-structure"
     ],
     [
       "key-exchange",
       "key-agreement",
       "key-establishment",
-      "secret-key-negotiation"
+      "secret-key-negotiation",
+      "agreeing-on-a-secret-key"
     ]
   ],
   "sentence_templates": [

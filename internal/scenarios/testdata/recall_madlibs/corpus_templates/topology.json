@@ -1,0 +1,20 @@
+{
+  "name": "topology-corpus",
+  "topic": "wiki-topology",
+  "mode": "measure-only",
+  "source_article": "Topology",
+  "description": "Tests recall of topology concepts from the topology article, covering topology itself, open sets, continuity, homeomorphism, and topological invariants.",
+  "anchors": ["topology","open-set","continuity","homeomorphism","topological-invariant"],
+  "columns": [
+    ["topology","study-of-topological-spaces","mathematics-of-continuous-deformation","rubber-sheet-geometry","the-stretchy-shapes-branch-of-math"],
+    ["open-set","open-subset","topology-defining-set","neighborhood-set","the-no-edge-included-kind-of-set"],
+    ["continuity","continuous-mapping","continuous-function","unbroken-mapping","drawing-it-without-lifting-the-pen"],
+    ["homeomorphism","topological-equivalence","bicontinuous-bijection","topological-isomorphism","two-shapes-you-can-bend-into-each-other"],
+    ["topological-invariant","topology-preserved-property","invariant-under-homeomorphism","topological-property","a-property-bending-doesnt-change"]
+  ],
+  "sentence_templates": [
+    "how does {0} use a collection of {1} to define {2}, a {3}, and a {4}?",
+    "what makes two spaces related by a {3}, which {4} stays unchanged, and how do {1} and {2} ground {0}?",
+    "explain how {1} ground {2} in {0}, and how a {3} preserves every {4}."
+  ]
+}

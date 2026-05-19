@@ -1,0 +1,20 @@
+{
+  "name": "khafre-corpus",
+  "topic": "wiki-khafre",
+  "mode": "measure-only",
+  "source_article": "Khafre",
+  "description": "Tests recall of the pharaoh Khafre: his Fourth Dynasty reign, the second Giza pyramid, his probable link to the Great Sphinx, his diorite seated statue, and his lineage as Khufu's son.",
+  "anchors": ["pharaoh-khafre","fourth-dynasty-reign","pyramid-of-khafre","khafre-and-the-sphinx","khafre-diorite-statue"],
+  "columns": [
+    ["pharaoh-khafre","king-khafre","khafre-of-egypt","chephren","that-pharaoh-with-the-second-pyramid"],
+    ["fourth-dynasty-reign","old-kingdom-fourth-dynasty-rule","reign-in-dynasty-four","4th-dynasty-kingship","back-when-he-was-on-the-throne"],
+    ["pyramid-of-khafre","second-giza-pyramid","khafre-s-pyramid","middle-pyramid-of-giza","the-one-that-looks-taller-but-isnt"],
+    ["khafre-and-the-sphinx","sphinx-attributed-to-khafre","khafre-as-sphinx-builder","great-sphinx-of-khafre","the-guy-they-think-made-the-sphinx"],
+    ["khafre-diorite-statue","seated-diorite-portrait","enthroned-statue-with-horus","khafre-enthroned-sculpture","that-famous-sitting-statue-of-him"]
+  ],
+  "sentence_templates": [
+    "who was {0}, when was his {1}, how does the {2} compare to other Giza pyramids, what about {3}, and what does the {4} show?",
+    "why is {3} a common claim about {0}, how does the {4} portray him from his {1}, and what about the {2}?",
+    "tell me about {0}: his {1}, the {2}, the {4}, and the {3}."
+  ]
+}

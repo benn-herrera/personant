@@ -16,31 +16,36 @@
       "plaintext",
       "cleartext",
       "unencrypted-message",
-      "readable-data"
+      "readable-data",
+      "the-message-before-its-locked-up"
     ],
     [
       "ciphertext",
       "encrypted-text",
       "enciphered-output",
-      "scrambled-message"
+      "scrambled-message",
+      "the-locked-up-unreadable-version"
     ],
     [
       "symmetric-key-cryptography",
       "secret-key-cryptography",
       "shared-key-encryption",
-      "single-key-cipher"
+      "single-key-cipher",
+      "both-sides-use-the-same-secret"
     ],
     [
       "authentication",
       "identity-verification",
       "sender-verification",
-      "origin-validation"
+      "origin-validation",
+      "proving-you-are-who-you-say"
     ],
     [
       "cryptanalysis",
       "codebreaking",
       "cipher-attack",
-      "decryption-analysis"
+      "decryption-analysis",
+      "trying-to-crack-the-code"
     ]
   ],
   "sentence_templates": [

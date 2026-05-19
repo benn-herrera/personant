@@ -16,31 +16,36 @@
       "hamiltonian-cycle",
       "hamiltonian-tour",
       "closed-hamiltonian-path",
-      "round-trip-tour"
+      "round-trip-tour",
+      "a-loop-that-visits-every-city-once"
     ],
     [
       "np-hardness",
       "intractability",
       "computational-hardness",
-      "exponential-worst-case-complexity"
+      "exponential-worst-case-complexity",
+      "the-no-fast-solution-exists-difficulty"
     ],
     [
       "nearest-neighbour-heuristic",
       "greedy-nearest-city",
       "closest-unvisited-heuristic",
-      "proximity-first-search"
+      "proximity-first-search",
+      "just-go-to-the-nearest-city-shortcut"
     ],
     [
       "christofides-serdyukov-algorithm",
       "1-5-approximation-algorithm",
       "three-halves-approximation",
-      "serdyukov-christofides-method"
+      "serdyukov-christofides-method",
+      "the-three-halves-good-approximation"
     ],
     [
       "subtour-elimination-constraint",
       "sub-tour-prevention-inequality",
       "no-proper-subset-cycle-condition",
-      "cycle-breaking-constraint"
+      "cycle-breaking-constraint",
+      "the-rule-banning-little-side-loops"
     ]
   ],
   "sentence_templates": [

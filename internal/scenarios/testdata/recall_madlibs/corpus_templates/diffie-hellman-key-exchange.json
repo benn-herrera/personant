@@ -16,31 +16,36 @@
       "discrete-logarithm-problem",
       "dlog-hardness",
       "discrete-log-difficulty",
-      "group-logarithm-problem"
+      "group-logarithm-problem",
+      "the-math-that-is-easy-forward-hard-back"
     ],
     [
       "shared-secret",
       "common-secret",
       "mutual-secret-value",
-      "jointly-derived-key"
+      "jointly-derived-key",
+      "the-secret-they-both-end-up-with"
     ],
     [
       "forward-secrecy",
       "perfect-forward-secrecy",
       "session-key-independence",
-      "past-session-protection"
+      "past-session-protection",
+      "old-chats-stay-safe-even-if-keys-leak"
     ],
     [
       "ephemeral-key",
       "session-key",
       "temporary-key",
-      "per-session-keypair"
+      "per-session-keypair",
+      "a-one-time-key-you-throw-away-after"
     ],
     [
       "public-channel",
       "insecure-channel",
       "open-communication-medium",
-      "unauthenticated-channel"
+      "unauthenticated-channel",
+      "a-line-anyone-could-be-listening-on"
     ]
   ],
   "sentence_templates": [

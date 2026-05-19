@@ -1,0 +1,20 @@
+{
+  "name": "deadlock-corpus",
+  "topic": "wiki-deadlock",
+  "mode": "measure-only",
+  "source_article": "Deadlock",
+  "description": "Tests recall of deadlock concepts: the mutual standstill, the four Coffman conditions, circular wait, deadlock prevention, and deadlock detection.",
+  "anchors": ["deadlock","coffman-conditions","circular-wait","deadlock-prevention","deadlock-detection"],
+  "columns": [
+    ["deadlock","mutual-standstill","stuck-resource-cycle","permanent-blocking-state","everyone-frozen-waiting-on-everyone"],
+    ["coffman-conditions","four-deadlock-conditions","necessary-deadlock-conditions","deadlock-prerequisites","the-four-things-that-must-all-be-true"],
+    ["circular-wait","cyclic-resource-dependency","wait-for-cycle","resource-holding-loop","a-loop-of-who-is-waiting-on-who"],
+    ["deadlock-prevention","deadlock-avoidance","prevention-strategy","breaking-a-coffman-condition","stopping-the-jam-before-it-happens"],
+    ["deadlock-detection","detection-and-recovery","wait-for-graph-analysis","cycle-detection-in-resources","noticing-the-jam-after-it-happens"]
+  ],
+  "sentence_templates": [
+    "how do the {1} together with {2} produce a {0}, and how do {3} and {4} respond?",
+    "when {3} is applied, which of the {1} does it break to stop a {0} before {4} sees a {2}?",
+    "if {4} finds a {2}, what recovery follows for the {0}, the {1}, and any {3}?"
+  ]
+}

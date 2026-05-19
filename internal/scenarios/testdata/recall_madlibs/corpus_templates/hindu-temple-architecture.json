@@ -1,0 +1,56 @@
+{
+  "name": "hindu-temple-architecture-corpus",
+  "topic": "wiki-hindu-temple-architecture",
+  "mode": "measure-only",
+  "source_article": "Hindu temple architecture",
+  "description": "Tests recall of Hindu temple design, covering the garbhagriha sanctum, the towering shikhara superstructure, the mandapa hall, the vastu-shastra design canon, and the two great regional styles.",
+  "anchors": [
+    "garbhagriha",
+    "shikhara",
+    "mandapa",
+    "vastu-shastra",
+    "nagara-and-dravida-styles"
+  ],
+  "columns": [
+    [
+      "garbhagriha",
+      "inner-sanctum",
+      "womb-chamber",
+      "sanctum-sanctorum",
+      "the-little-holy-room-deep-inside"
+    ],
+    [
+      "shikhara",
+      "temple-tower",
+      "superstructure-spire",
+      "rising-temple-peak",
+      "the-pointy-tower-on-top"
+    ],
+    [
+      "mandapa",
+      "pillared-hall",
+      "temple-porch-hall",
+      "assembly-pavilion",
+      "the-hall-where-people-gather"
+    ],
+    [
+      "vastu-shastra",
+      "architectural-canon",
+      "sacred-design-treatise",
+      "temple-planning-rules",
+      "the-old-rulebook-for-laying-it-out"
+    ],
+    [
+      "nagara-and-dravida-styles",
+      "northern-and-southern-styles",
+      "two-regional-temple-forms",
+      "nagara-versus-dravidian",
+      "the-north-style-versus-the-south-style"
+    ]
+  ],
+  "sentence_templates": [
+    "how does the {0} sit beneath the {1}, where does the {2} lead, and how does {3} govern {4}?",
+    "what does {3} prescribe for the {0} and {2}, and how does that vary between {4} in the {1}?",
+    "when comparing {4}, how do the {0}, {1}, and {2} differ, and what does {3} say about each?"
+  ]
+}

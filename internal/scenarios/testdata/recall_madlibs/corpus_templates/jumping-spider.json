@@ -1,0 +1,20 @@
+{
+  "name": "jumping-spider-corpus",
+  "topic": "wiki-jumping-spider",
+  "mode": "measure-only",
+  "source_article": "Jumping spider",
+  "description": "Tests recall of jumping spider biology from the Jumping spider article, covering the family Salticidae, acute vision, hydraulic jumping mechanism, courtship displays, and active hunting.",
+  "anchors": ["salticidae-family","acute-vision","hydraulic-jumping","courtship-display","active-hunting"],
+  "columns": [
+    ["salticidae-family","family-salticidae","jumping-spider-family","salticid-spiders","the-group-these-little-jumpers-are-in"],
+    ["acute-vision","sharp-eyesight","high-resolution-eyes","keen-visual-acuity","really-good-eyesight"],
+    ["hydraulic-jumping","blood-pressure-leap","hemolymph-powered-jump","hydraulic-leg-extension","jumping-by-pumping-fluid-into-its-legs"],
+    ["courtship-display","mating-dance","visual-courtship-ritual","male-display-behavior","that-funny-little-mating-dance"],
+    ["active-hunting","stalking-predation","pursuit-hunting","webless-prey-pursuit","chasing-down-its-food-instead-of-trapping-it"]
+  ],
+  "sentence_templates": [
+    "what defines the {0}, and how do {1}, {2}, and {3} enable its {4}?",
+    "how does {1} support the {0}, its {2}, the {3}, and the {4} of a jumping spider?",
+    "if {2} powers a leap, how do the {1} and {4} of the {0} also feed into its {3}?"
+  ]
+}

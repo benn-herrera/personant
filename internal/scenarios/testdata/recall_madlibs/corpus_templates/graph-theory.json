@@ -6,11 +6,11 @@
   "description": "Tests recall of graph theory concepts using synonym drift across vertex, edge, graph coloring, spanning tree, and adjacency list terminology.",
   "anchors": ["vertex", "edge", "graph-coloring", "spanning-tree", "adjacency-list"],
   "columns": [
-    ["vertex", "node", "point", "junction"],
-    ["edge", "arc", "link", "line"],
-    ["graph-coloring", "vertex-coloring", "chromatic-assignment", "color-labeling"],
-    ["spanning-tree", "covering-tree", "tree-subgraph", "connected-spanning-subgraph"],
-    ["adjacency-list", "neighbor-list", "incidence-list", "neighbor-roster"]
+    ["vertex", "node", "point", "junction", "one-of-the-dots"],
+    ["edge", "arc", "link", "line", "the-line-joining-two-dots"],
+    ["graph-coloring", "vertex-coloring", "chromatic-assignment", "color-labeling", "painting-the-dots-so-neighbors-differ"],
+    ["spanning-tree", "covering-tree", "tree-subgraph", "connected-spanning-subgraph", "a-skeleton-that-touches-every-dot"],
+    ["adjacency-list", "neighbor-list", "incidence-list", "neighbor-roster", "a-list-of-who-is-next-to-who"]
   ],
   "sentence_templates": [
     "what role does a {0} play in a {1}, and how does {2} use {3} structures stored in an {4}?",

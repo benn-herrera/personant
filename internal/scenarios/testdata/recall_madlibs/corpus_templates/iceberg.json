@@ -1,0 +1,20 @@
+{
+  "name": "iceberg-corpus",
+  "topic": "wiki-iceberg",
+  "mode": "measure-only",
+  "source_article": "Iceberg",
+  "description": "Tests recall of icebergs, covering the iceberg itself, calving from glaciers, the submerged mass below the waterline, ocean drift, and the hazard posed to shipping.",
+  "anchors": ["iceberg","glacial-calving","submerged-mass","ocean-drift","shipping-hazard"],
+  "columns": [
+    ["iceberg","floating-ice-mass","drifting-ice-mountain","large-ice-chunk-at-sea","a-big-hunk-of-ice-in-the-ocean"],
+    ["glacial-calving","calving-from-glaciers","breaking-off-from-ice-shelves","ice-shelf-fracturing","ice-snapping-off-a-glacier"],
+    ["submerged-mass","underwater-bulk","tip-of-the-iceberg-effect","hidden-portion-below-waterline","the-huge-part-you-cant-see-underwater"],
+    ["ocean-drift","wind-and-current-drift","drifting-on-ocean-currents","sea-borne-drifting","floating-along-wherever-the-sea-takes-it"],
+    ["shipping-hazard","danger-to-vessels","navigation-hazard","threat-to-ships","something-that-could-sink-a-boat"]
+  ],
+  "sentence_templates": [
+    "how does an {0} form through {1}, and why does its {2} make it such a {4} during {3}?",
+    "after {1} produces an {0}, how do {3} and the {2} combine to create a {4}?",
+    "why is the {2} of an {0} the real {4}, given how far {3} carries it from {1}?"
+  ]
+}

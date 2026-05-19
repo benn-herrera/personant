@@ -16,31 +16,36 @@
       "hyperbolic-knot",
       "hyperbolic-complement-knot",
       "negatively-curved-knot",
-      "thurston-hyperbolic-knot"
+      "thurston-hyperbolic-knot",
+      "a-knot-with-curvy-warped-space-around-it"
     ],
     [
       "achiral",
       "amphicheiral",
       "mirror-symmetric",
-      "mirror-equivalent"
+      "mirror-equivalent",
+      "looks-the-same-flipped-in-a-mirror"
     ],
     [
       "alternating-knot",
       "crossing-alternating",
       "alternating-diagram",
-      "over-under-alternating"
+      "over-under-alternating",
+      "the-strand-weaves-over-then-under"
     ],
     [
       "fibered-knot",
       "fiber-bundle-knot",
       "fibered-complement",
-      "fibration-knot"
+      "fibration-knot",
+      "a-knot-whose-outside-spins-into-pages"
     ],
     [
       "prime-knot",
       "irreducible-knot",
       "non-composite-knot",
-      "atomic-knot"
+      "atomic-knot",
+      "a-knot-you-cant-break-into-smaller-knots"
     ]
   ],
   "sentence_templates": [

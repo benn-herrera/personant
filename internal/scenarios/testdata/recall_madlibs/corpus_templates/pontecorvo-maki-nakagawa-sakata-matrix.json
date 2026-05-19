@@ -16,31 +16,36 @@
       "pmns-matrix",
       "lepton-mixing-matrix",
       "neutrino-mixing-matrix",
-      "mns-matrix"
+      "mns-matrix",
+      "the-grid-that-mixes-up-neutrino-types"
     ],
     [
       "neutrino-mixing-angle",
       "leptonic-mixing-angle",
       "neutrino-oscillation-angle",
-      "flavor-rotation-angle"
+      "flavor-rotation-angle",
+      "the-dial-for-how-much-the-flavors-blend"
     ],
     [
       "mass-eigenstate",
       "neutrino-mass-eigenstate",
       "definite-mass-state",
-      "mass-basis-state"
+      "mass-basis-state",
+      "a-neutrino-with-a-definite-weight"
     ],
     [
       "flavor-eigenstate",
       "weak-eigenstate",
       "interaction-eigenstate",
-      "charged-current-eigenstate"
+      "charged-current-eigenstate",
+      "the-version-you-see-when-it-interacts"
     ],
     [
       "cp-violating-phase",
       "delta-cp-phase",
       "leptonic-cp-phase",
-      "charge-parity-phase"
+      "charge-parity-phase",
+      "the-bit-that-makes-matter-and-antimatter-differ"
     ]
   ],
   "sentence_templates": [

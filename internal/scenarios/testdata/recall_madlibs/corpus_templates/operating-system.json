@@ -1,0 +1,20 @@
+{
+  "name": "operating-system-corpus",
+  "topic": "wiki-operating-system",
+  "mode": "measure-only",
+  "source_article": "Operating system",
+  "description": "Tests recall of operating-system concepts: the system software itself, the kernel, process scheduling, memory management, and the system-call interface.",
+  "anchors": ["operating-system","kernel","process-scheduling","memory-management","system-call-interface"],
+  "columns": [
+    ["operating-system","system-software","os-platform","resource-management-layer","the-thing-like-windows-or-mac-os"],
+    ["kernel","os-core","privileged-core","supervisor-component","the-deep-down-part-that-runs-everything"],
+    ["process-scheduling","cpu-scheduling","task-scheduling","process-dispatch","deciding-which-program-runs-next"],
+    ["memory-management","ram-allocation","memory-allocation-subsystem","address-space-management","handing-out-and-tracking-the-memory"],
+    ["system-call-interface","syscall-api","kernel-call-boundary","user-to-kernel-interface","how-an-app-asks-the-os-for-things"]
+  ],
+  "sentence_templates": [
+    "how does the {1} of an {0} provide {3}, {2}, and the {4} to applications?",
+    "when a program in an {0} crosses the {4}, how do the {1}, {2}, and {3} respond?",
+    "if {3} is exhausted, what does the {1} of an {0} do for {2} and the {4}?"
+  ]
+}

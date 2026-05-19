@@ -1,0 +1,56 @@
+{
+  "name": "architecture-of-india-corpus",
+  "topic": "wiki-architecture-of-india",
+  "mode": "measure-only",
+  "source_article": "Architecture of India",
+  "description": "Tests recall of the broad sweep of Indian architecture, covering temple architecture, Indo-Islamic building, colonial-era styles, vernacular regional traditions, and the use of stone and brick as core materials.",
+  "anchors": [
+    "indian-temple-architecture",
+    "indo-islamic-architecture",
+    "colonial-architecture",
+    "vernacular-architecture",
+    "stone-and-brick-construction"
+  ],
+  "columns": [
+    [
+      "indian-temple-architecture",
+      "hindu-shrine-building",
+      "indian-religious-architecture",
+      "mandir-design-tradition",
+      "the-old-carved-temple-look"
+    ],
+    [
+      "indo-islamic-architecture",
+      "islamic-influenced-building",
+      "muslim-era-architecture",
+      "sultanate-and-mughal-style",
+      "the-domes-and-arches-era"
+    ],
+    [
+      "colonial-architecture",
+      "british-era-building",
+      "european-colonial-style",
+      "raj-period-architecture",
+      "the-stuff-the-british-put-up"
+    ],
+    [
+      "vernacular-architecture",
+      "regional-folk-building",
+      "local-traditional-housing",
+      "indigenous-construction-style",
+      "how-ordinary-villages-built-houses"
+    ],
+    [
+      "stone-and-brick-construction",
+      "masonry-building-material",
+      "carved-stone-and-fired-brick",
+      "structural-stone-and-clay",
+      "what-they-built-it-all-out-of"
+    ]
+  ],
+  "sentence_templates": [
+    "how did {0} develop alongside {1}, and what part did {2} and {3} play, all shaped by {4}?",
+    "in what ways did {1} differ from {2}, how did {3} resist both, and where does {0} draw on {4}?",
+    "when tracing {0} through {1}, {2}, and {3}, how does {4} reveal continuity across them?"
+  ]
+}

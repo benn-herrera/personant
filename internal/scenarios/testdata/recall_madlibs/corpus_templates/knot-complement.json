@@ -6,11 +6,11 @@
   "description": "Recall test for the knot complement and its role in knot theory.",
   "anchors": ["knot-complement", "tubular-neighborhood", "gordon-luecke-theorem", "3-manifold", "haken-manifold"],
   "columns": [
-    ["knot-complement", "knot-exterior", "complement-of-knot", "knot-space-complement"],
-    ["tubular-neighborhood", "solid-torus-neighborhood", "regular-neighborhood", "thickened-knot"],
-    ["gordon-luecke-theorem", "knot-complement-theorem", "complement-determines-knot", "luecke-gordon-result"],
-    ["3-manifold", "three-manifold", "compact-3-manifold", "3d-manifold"],
-    ["haken-manifold", "sufficiently-large-manifold", "haken-3-manifold", "irreducible-haken-manifold"]
+    ["knot-complement", "knot-exterior", "complement-of-knot", "knot-space-complement", "all-the-space-thats-not-the-knot"],
+    ["tubular-neighborhood", "solid-torus-neighborhood", "regular-neighborhood", "thickened-knot", "a-fattened-up-tube-around-the-knot"],
+    ["gordon-luecke-theorem", "knot-complement-theorem", "complement-determines-knot", "luecke-gordon-result", "the-leftover-space-pins-down-the-knot"],
+    ["3-manifold", "three-manifold", "compact-3-manifold", "3d-manifold", "a-three-dimensional-shape"],
+    ["haken-manifold", "sufficiently-large-manifold", "haken-3-manifold", "irreducible-haken-manifold", "one-of-those-nicely-behaved-3d-spaces"]
   ],
   "sentence_templates": [
     "The {0} is obtained by removing a {1} from the ambient {3} and the {2} states that this result is a {4}.",

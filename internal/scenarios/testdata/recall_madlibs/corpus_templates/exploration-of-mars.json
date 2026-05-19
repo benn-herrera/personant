@@ -1,0 +1,20 @@
+{
+  "name": "exploration-of-mars-corpus",
+  "topic": "wiki-exploration-of-mars",
+  "mode": "measure-only",
+  "source_article": "Exploration of Mars",
+  "description": "Tests recall of robotic-Mars-exploration history, covering orbiters, surface rovers, landers, the search for past life, and sample-return missions.",
+  "anchors": ["mars-orbiter","mars-rover","mars-lander","search-for-life","sample-return-mission"],
+  "columns": [
+    ["mars-orbiter","orbiting-mars-probe","martian-orbital-spacecraft","mars-survey-satellite","the-thing-circling-mars"],
+    ["mars-rover","surface-roving-robot","martian-exploration-vehicle","wheeled-mars-robot","the-little-car-driving-on-mars"],
+    ["mars-lander","stationary-mars-probe","martian-surface-lander","fixed-landing-craft","the-probe-that-just-sits-there"],
+    ["search-for-life","hunt-for-past-life","biosignature-detection","astrobiology-investigation","looking-for-aliens"],
+    ["sample-return-mission","mars-sample-return","rock-retrieval-mission","return-of-martian-samples","bringing-mars-rocks-back-home"]
+  ],
+  "sentence_templates": [
+    "how does a {0} differ from a {1} and a {2} in the {3}, and where does a {4} come in?",
+    "in a {4}, what roles do a {1}, a {2}, and a {0} play, and how does that aid the {3}?",
+    "why does the {3} need both a {0} and a {1}, and how would a {4} build on a {2}?"
+  ]
+}

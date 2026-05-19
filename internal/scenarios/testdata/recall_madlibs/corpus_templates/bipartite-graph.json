@@ -16,31 +16,36 @@
       "bipartite-graph",
       "bigraph",
       "two-mode-graph",
-      "bichromatic-graph"
+      "bichromatic-graph",
+      "that-graph-split-into-two-camps"
     ],
     [
       "vertex-partition",
       "bipartition",
       "two-coloring",
-      "graph-2-partition"
+      "graph-2-partition",
+      "splitting-the-dots-into-two-piles"
     ],
     [
       "maximum-matching",
       "max-cardinality-matching",
       "largest-matching",
-      "maximum-edge-matching"
+      "maximum-edge-matching",
+      "the-most-pairs-you-can-pair-up"
     ],
     [
       "odd-cycle",
       "odd-length-cycle",
       "odd-circuit",
-      "odd-closed-walk"
+      "odd-closed-walk",
+      "a-loop-with-an-odd-number-of-steps"
     ],
     [
       "konigs-theorem",
       "konig-minimax-theorem",
       "vertex-cover-matching-duality",
-      "matching-cover-equality"
+      "matching-cover-equality",
+      "the-matching-equals-cover-result"
     ]
   ],
   "sentence_templates": [

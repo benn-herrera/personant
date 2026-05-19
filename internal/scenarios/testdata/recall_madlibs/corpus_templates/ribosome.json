@@ -16,31 +16,36 @@
       "translation",
       "mrna-decoding",
       "protein-biosynthesis",
-      "protein-synthesis"
+      "protein-synthesis",
+      "turning-the-rna-recipe-into-protein"
     ],
     [
       "peptidyl-transfer",
       "transpeptidation",
       "peptide-bond-formation",
-      "aminoacyl-transfer"
+      "aminoacyl-transfer",
+      "stitching-the-next-amino-acid-on"
     ],
     [
       "aminoacyl-trna",
       "charged-trna",
       "aa-trna",
-      "acylated-trna"
+      "acylated-trna",
+      "the-amino-acid-loaded-trna"
     ],
     [
       "polypeptide",
       "peptide-chain",
       "amino-acid-chain",
-      "protein-chain"
+      "protein-chain",
+      "the-finished-string-of-amino-acids"
     ],
     [
       "ribosomal-subunit",
       "ribosome-unit",
       "ribosome-component",
-      "ribosomal-particle"
+      "ribosomal-particle",
+      "one-of-the-two-ribosome-halves"
     ]
   ],
   "sentence_templates": [

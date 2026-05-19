@@ -1,0 +1,56 @@
+{
+  "name": "fatehpur-sikri-corpus",
+  "topic": "wiki-fatehpur-sikri",
+  "mode": "measure-only",
+  "source_article": "Fatehpur Sikri",
+  "description": "Tests recall of Fatehpur Sikri, covering its founding by Akbar as a short-lived Mughal capital, its red sandstone palace complex, the Buland Darwaza gateway, the syncretic Mughal architecture, and its World Heritage status.",
+  "anchors": [
+    "fatehpur-sikri",
+    "akbar-founded-capital",
+    "red-sandstone-palace",
+    "buland-darwaza",
+    "syncretic-mughal-style"
+  ],
+  "columns": [
+    [
+      "fatehpur-sikri",
+      "fatehpur-sikri-city",
+      "fatehpur-sikri-complex",
+      "mughal-fatehpur-sikri",
+      "that-abandoned-mughal-city"
+    ],
+    [
+      "akbar-founded-capital",
+      "emperor-akbar-capital",
+      "short-lived-mughal-capital",
+      "akbar-s-imperial-city",
+      "the-capital-the-emperor-built-then-left"
+    ],
+    [
+      "red-sandstone-palace",
+      "red-sandstone-court-complex",
+      "crimson-stone-palace-buildings",
+      "sandstone-imperial-palaces",
+      "the-reddish-stone-palace-buildings"
+    ],
+    [
+      "buland-darwaza",
+      "gate-of-magnificence",
+      "monumental-victory-gateway",
+      "towering-entrance-gate",
+      "that-huge-doorway-out-front"
+    ],
+    [
+      "syncretic-mughal-style",
+      "blended-hindu-islamic-style",
+      "fusion-mughal-architecture",
+      "eclectic-imperial-design",
+      "the-mash-up-of-two-cultures-look"
+    ]
+  ],
+  "sentence_templates": [
+    "why did the {1} create the {0}, how does the {3} announce the {2}, and where is the {4} seen?",
+    "how does the {3} mark the {2} of the {0}, given the {1} and the {4}?",
+    "in what ways does the {4} appear across the {0}, the {2}, and the {3} built by the {1}?"
+  ]
+}

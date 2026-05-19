@@ -1,0 +1,20 @@
+{
+  "name": "derivative-corpus",
+  "topic": "wiki-derivative",
+  "mode": "measure-only",
+  "source_article": "Derivative",
+  "description": "Tests recall of derivative concepts from the derivative article, covering the derivative itself, the difference quotient, the tangent-line slope, differentiation rules, and higher-order derivatives.",
+  "anchors": ["derivative","difference-quotient","tangent-line-slope","differentiation-rules","higher-order-derivative"],
+  "columns": [
+    ["derivative","instantaneous-rate-of-change","rate-of-change-function","slope-function","how-fast-something-is-changing-right-now"],
+    ["difference-quotient","newton-quotient","secant-slope-ratio","incremental-ratio","the-rise-over-run-before-you-shrink-it"],
+    ["tangent-line-slope","slope-of-the-tangent","tangent-gradient","line-of-best-touch-slope","the-steepness-where-the-line-just-grazes"],
+    ["differentiation-rules","derivative-rules","calculus-derivative-laws","rules-for-differentiating","the-shortcuts-for-taking-derivatives"],
+    ["higher-order-derivative","second-derivative","repeated-derivative","nth-derivative","taking-the-derivative-again-and-again"]
+  ],
+  "sentence_templates": [
+    "how does the {1} define the {0}, how does that give the {2}, and how do {3} extend it to a {4}?",
+    "which {3} let you compute a {0} quickly from the {1}, how do they give the {2}, and how do they extend to a {4}?",
+    "explain the {0} as a limit of the {1}, its meaning as the {2}, and its iteration into a {4} via {3}."
+  ]
+}

@@ -16,31 +16,36 @@
       "navier-stokes-equations",
       "viscous-flow-equations",
       "fluid-motion-pdes",
-      "continuum-momentum-equations"
+      "continuum-momentum-equations",
+      "those-brutal-equations-for-how-fluids-move"
     ],
     [
       "momentum-conservation",
       "momentum-balance",
       "newtons-second-law-fluids",
-      "fluid-momentum-principle"
+      "fluid-momentum-principle",
+      "force-equals-mass-times-acceleration-for-fluids"
     ],
     [
       "incompressible-flow",
       "constant-density-flow",
       "divergence-free-flow",
-      "solenoidal-flow"
+      "solenoidal-flow",
+      "fluid-that-doesnt-squish-or-compress"
     ],
     [
       "viscous-stress-tensor",
       "deviatoric-stress-tensor",
       "shear-stress-tensor",
-      "viscosity-stress-term"
+      "viscosity-stress-term",
+      "the-internal-friction-bookkeeping"
     ],
     [
       "smoothness-problem",
       "regularity-problem",
       "existence-smoothness-conjecture",
-      "millennium-prize-fluid-problem"
+      "millennium-prize-fluid-problem",
+      "that-unsolved-million-dollar-math-puzzle"
     ]
   ],
   "sentence_templates": [

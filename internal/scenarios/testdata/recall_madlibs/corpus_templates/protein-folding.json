@@ -12,11 +12,11 @@
     "energy-funnel"
   ],
   "columns": [
-    ["native-state", "native-conformation", "folded-state", "native-fold"],
-    ["hydrophobic-collapse", "hydrophobic-core-burial", "hydrophobic-condensation", "nonpolar-core-burial"],
-    ["molecular-chaperone", "chaperone-protein", "folding-helper", "protein-chaperone"],
-    ["misfolded-protein", "aberrant-fold", "misfold", "incorrectly-folded-protein"],
-    ["energy-funnel", "folding-funnel", "free-energy-funnel", "energy-landscape-funnel"]
+    ["native-state", "native-conformation", "folded-state", "native-fold", "the-proper-shape-its-supposed-to-be-in"],
+    ["hydrophobic-collapse", "hydrophobic-core-burial", "hydrophobic-condensation", "nonpolar-core-burial", "the-water-fearing-bits-tucking-inside"],
+    ["molecular-chaperone", "chaperone-protein", "folding-helper", "protein-chaperone", "a-helper-that-keeps-it-folding-right"],
+    ["misfolded-protein", "aberrant-fold", "misfold", "incorrectly-folded-protein", "one-thats-folded-up-all-wrong"],
+    ["energy-funnel", "folding-funnel", "free-energy-funnel", "energy-landscape-funnel", "the-downhill-slope-it-folds-along"]
   ],
   "sentence_templates": [
     "what is the {0} of a protein and how does {1} drive the chain toward it without {2} assistance when a {3} forms and how does the {4} explain why folding is fast",

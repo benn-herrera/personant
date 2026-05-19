@@ -1,0 +1,20 @@
+{
+  "name": "fourier-transform-corpus",
+  "topic": "wiki-fourier-transform",
+  "mode": "measure-only",
+  "source_article": "Fourier transform",
+  "description": "Tests recall of Fourier-analysis concepts from the Fourier-transform article, covering the transform itself, the frequency domain, the inverse transform, the frequency spectrum, and the convolution theorem.",
+  "anchors": ["fourier-transform","frequency-domain","inverse-fourier-transform","frequency-spectrum","convolution-theorem"],
+  "columns": [
+    ["fourier-transform","spectral-transform","frequency-decomposition","time-to-frequency-transform","the-math-that-finds-the-pitches"],
+    ["frequency-domain","spectral-domain","frequency-space","domain-of-frequencies","the-pitch-side-of-things"],
+    ["inverse-fourier-transform","inverse-transform","frequency-to-time-transform","reconstruction-transform","the-one-that-puts-the-signal-back"],
+    ["frequency-spectrum","spectrum","amplitude-spectrum","frequency-content","the-mix-of-tones-in-a-signal"],
+    ["convolution-theorem","convolution-multiplication-theorem","convolution-product-rule","fourier-convolution-identity","the-blurring-becomes-multiplying-trick"]
+  ],
+  "sentence_templates": [
+    "how does the {0} move a signal into the {1}, how does the {2} bring it back, and what do the {3} and {4} add?",
+    "what does the {3} reveal about a signal once the {0} is applied, how does the {2} undo it, and what does the {4} say about products in the {1}?",
+    "explain how the {0}, the {1}, the {2}, and the {3} relate, and what the {4} says about products."
+  ]
+}

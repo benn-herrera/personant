@@ -1,0 +1,20 @@
+{
+  "name": "lava-corpus",
+  "topic": "wiki-lava",
+  "mode": "measure-only",
+  "source_article": "Lava",
+  "description": "Tests recall of lava behavior: erupted molten rock, the lava flow it forms, the smooth pahoehoe texture, the rubbly aa texture, and the lava tube that channels it.",
+  "anchors": ["lava","lava-flow","pahoehoe","aa-lava","lava-tube"],
+  "columns": [
+    ["lava","erupted-molten-rock","surface-magma","extruded-melt","that-glowing-hot-orange-stuff"],
+    ["lava-flow","molten-rock-stream","flowing-lava-body","advancing-lava-front","a-creeping-river-of-fire"],
+    ["pahoehoe","ropy-smooth-lava","billowy-pahoehoe-crust","smooth-surfaced-lava","the-smooth-ropy-looking-kind"],
+    ["aa-lava","blocky-rubbly-lava","clinkery-aa-flow","jagged-fragmented-lava","the-sharp-rubbly-painful-kind"],
+    ["lava-tube","lava-conduit-tunnel","drained-flow-channel","subsurface-lava-passage","an-empty-cave-the-lava-left-behind"]
+  ],
+  "sentence_templates": [
+    "once {0} erupts, how does a {1} develop, what distinguishes {2} from {3}, and where does a {4} fit?",
+    "how does a {4} form within a {1}, and why does {0} produce {2} in some places and {3} in others?",
+    "what surface conditions turn {0} into {2} versus {3}, and how does a {4} affect how far the {1} travels?"
+  ]
+}

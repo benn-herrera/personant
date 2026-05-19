@@ -1,0 +1,20 @@
+{
+  "name": "recursion-computer-science-corpus",
+  "topic": "wiki-recursion-computer-science",
+  "mode": "measure-only",
+  "source_article": "Recursion (computer science)",
+  "description": "Tests recall of recursion concepts: the self-referential technique, the base case, the recursive case, the call stack, and tail-call optimization.",
+  "anchors": ["recursion","base-case","recursive-case","call-stack","tail-call-optimization"],
+  "columns": [
+    ["recursion","self-referential-procedure","recursive-technique","self-calling-method","a-function-that-keeps-calling-itself"],
+    ["base-case","termination-case","stopping-condition","recursion-anchor","the-point-where-it-finally-stops"],
+    ["recursive-case","self-call-step","reduction-step","inductive-case","the-part-where-it-calls-itself-again"],
+    ["call-stack","execution-stack","stack-of-frames","activation-record-stack","that-pile-of-pending-function-calls"],
+    ["tail-call-optimization","tail-call-elimination","tail-recursion-optimization","constant-stack-recursion","the-trick-that-keeps-it-from-blowing-up"]
+  ],
+  "sentence_templates": [
+    "how does {0} combine a {1} with a {2}, using the {3} and aided by {4}?",
+    "when the {3} grows, how does {4} change the cost of {0} versus a plain {2} with its {1}?",
+    "if the {1} is missing, what happens to the {3} as {0} repeats the {2} without {4}?"
+  ]
+}

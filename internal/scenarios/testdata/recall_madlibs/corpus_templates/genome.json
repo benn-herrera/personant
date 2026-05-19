@@ -12,11 +12,11 @@
     "mitochondrial-genome"
   ],
   "columns": [
-    ["genome-sequencing", "whole-genome-sequencing", "genomic-sequencing", "full-genome-determination"],
-    ["transposable-elements", "transposons", "mobile-genetic-elements", "jumping-genes"],
-    ["noncoding-dna", "non-protein-coding-dna", "junk-dna", "intergenic-dna"],
-    ["ploidy", "chromosome-copy-number", "chromosomal-dosage", "haploid-diploid-status"],
-    ["mitochondrial-genome", "mitochondrial-dna", "mtdna", "organellar-genome"]
+    ["genome-sequencing", "whole-genome-sequencing", "genomic-sequencing", "full-genome-determination", "reading-out-all-the-dna"],
+    ["transposable-elements", "transposons", "mobile-genetic-elements", "jumping-genes", "bits-of-dna-that-move-around"],
+    ["noncoding-dna", "non-protein-coding-dna", "junk-dna", "intergenic-dna", "the-dna-that-doesnt-make-proteins"],
+    ["ploidy", "chromosome-copy-number", "chromosomal-dosage", "haploid-diploid-status", "how-many-sets-of-chromosomes"],
+    ["mitochondrial-genome", "mitochondrial-dna", "mtdna", "organellar-genome", "the-dna-inside-the-cells-powerhouse"]
   ],
   "sentence_templates": [
     "{0} reveals the proportion of {2} and {1} while {3} determines how many copies are present alongside the {4}",

@@ -1,0 +1,20 @@
+{
+  "name": "australian-funnel-web-spider-corpus",
+  "topic": "wiki-australian-funnel-web-spider",
+  "mode": "measure-only",
+  "source_article": "Australian funnel-web spider",
+  "description": "Tests recall of funnel-web spider biology from the Australian funnel-web spider article, covering the mygalomorph lineage, the potent atracotoxin venom, the funnel-shaped silk retreat, the aggressive defensive posture, and the life-saving antivenom.",
+  "anchors": ["mygalomorph-lineage","atracotoxin-venom","funnel-silk-retreat","defensive-posture","funnel-web-antivenom"],
+  "columns": [
+    ["mygalomorph-lineage","mygalomorphae-group","mygalomorph-infraorder","primitive-spider-lineage","the-old-fashioned-tarantula-type-branch"],
+    ["atracotoxin-venom","delta-atracotoxin","funnel-web-neurotoxin","potent-atracid-venom","the-stuff-that-can-kill-you"],
+    ["funnel-silk-retreat","funnel-shaped-burrow","silk-funnel-shelter","tube-and-funnel-retreat","the-cone-shaped-silk-hideout"],
+    ["defensive-posture","threat-display-stance","reared-up-fang-display","aggressive-warning-posture","rearing-up-to-show-its-fangs"],
+    ["funnel-web-antivenom","atrax-antivenom","funnel-web-bite-antivenin","life-saving-antivenom","the-shot-that-saves-bite-victims"]
+  ],
+  "sentence_templates": [
+    "what places these spiders in the {0}, how dangerous is their {1}, and how do the {2}, {3}, and {4} matter?",
+    "how do the {2} and the {1} relate to the {3} a spider in the {0} shows, and when is {4} needed?",
+    "if {1} from a spider in the {0} is involved, how do the {2}, {3}, and {4} fit the clinical picture?"
+  ]
+}

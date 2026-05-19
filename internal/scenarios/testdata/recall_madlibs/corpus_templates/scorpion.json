@@ -1,0 +1,20 @@
+{
+  "name": "scorpion-corpus",
+  "topic": "wiki-scorpion",
+  "mode": "measure-only",
+  "source_article": "Scorpion",
+  "description": "Tests recall of scorpion biology from the Scorpion article, covering the order Scorpiones, the venomous stinging tail, the grasping pedipalp pincers, ultraviolet fluorescence, and live birth of young.",
+  "anchors": ["scorpiones-order","venomous-tail-sting","pedipalp-pincers","uv-fluorescence","live-birth"],
+  "columns": [
+    ["scorpiones-order","order-scorpiones","scorpion-order","scorpiones-arachnid-order","the-stinger-tailed-bug-group"],
+    ["venomous-tail-sting","metasoma-stinger","tail-tip-venom-sting","telson-stinging-apparatus","the-poisonous-tail-jab"],
+    ["pedipalp-pincers","grasping-claws","pincer-pedipalps","chela-grasping-appendages","those-lobster-like-front-claws"],
+    ["uv-fluorescence","ultraviolet-glow","blacklight-fluorescence","cuticle-uv-luminescence","glows-under-a-blacklight"],
+    ["live-birth","viviparous-birth","live-young-bearing","brood-carried-and-born-live","babies-born-alive-not-from-eggs"]
+  ],
+  "sentence_templates": [
+    "what defines the {0}, and how do the {1}, {2}, {3}, and {4} characterize it?",
+    "how does {3} reveal a member of the {0}, and how do its {1}, {2}, and {4} differ from other arachnids?",
+    "if an animal in the {0} has {2} and a {1}, how do {3} and {4} round out its biology?"
+  ]
+}

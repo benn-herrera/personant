@@ -16,31 +16,36 @@
       "open-market-operation",
       "central-bank-securities-transaction",
       "repo-or-outright-purchase",
-      "liquidity-injection-operation"
+      "liquidity-injection-operation",
+      "the-bank-buying-and-selling-bonds-to-steer-things"
     ],
     [
       "government-securities",
       "treasury-bonds",
       "sovereign-debt-instruments",
-      "government-debt-paper"
+      "government-debt-paper",
+      "those-iou-notes-the-government-sells"
     ],
     [
       "reserve-balances",
       "bank-reserves",
       "central-bank-deposits",
-      "settlement-balances"
+      "settlement-balances",
+      "the-cash-banks-park-at-the-central-bank"
     ],
     [
       "federal-funds-rate",
       "overnight-interbank-rate",
       "policy-interest-rate",
-      "target-short-term-rate"
+      "target-short-term-rate",
+      "the-rate-the-news-says-the-fed-set"
     ],
     [
       "monetary-policy-implementation",
       "policy-rate-steering",
       "central-bank-rate-management",
-      "interest-rate-targeting"
+      "interest-rate-targeting",
+      "how-the-bank-actually-pulls-the-levers"
     ]
   ],
   "sentence_templates": [

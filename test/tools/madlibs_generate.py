@@ -11,12 +11,15 @@ lexically *fixed* (its anchor set), while a retrieval query is lexically
 one topic cluster — its ``anchors`` are the stored side, its
 ``columns`` x ``sentence_templates`` span the query side.
 
-Phase C.2 is the end-to-end harness validation: every column cell is
-itself an anchor, so each generated query reliably clears the §3.4
-Jaccard threshold for its source topic. Genuine vocabulary drift —
-synonym/phrase cells that do *not* overlap the anchor set, the case
-that stresses Jaccard's hard floor — is introduced by the C.3
-adversarial templates.
+Phase C.2 is the end-to-end harness validation: in a strict template
+every column cell is itself an anchor, so each generated query
+reliably clears the §3.4 Jaccard threshold for its source topic.
+Genuine vocabulary drift — cells that do *not* overlap the anchor
+set, the case that stresses Jaccard's hard floor — is introduced by
+the C.3 adversarial (measure-only) templates. Those columns carry a
+final "extra loose" cell: a deliberate semantic stretch that the
+default generation path draws like any other cell (see
+``enumerate_queries``).
 
 Output is a DERIVED artifact: ``.gitignore``-d, regenerated via
 ``make recall-madlibs``. Canonical sources are this script and the
@@ -141,10 +144,23 @@ def enumerate_queries(tpl, depth):
     are increasingly drifted synonyms, depth=1 yields only zero-drift
     queries and larger depths admit progressively more drift. depth<=0
     means "all cells" (no restriction).
+
+    The default generation path uses depth<=0, so it draws from the
+    full column via `len(column)` — never capped at a fixed width. A
+    column's last cell is the "extra loose" synonym (a deliberate
+    semantic stretch); the default path admits it like any other cell.
+    With a 5-cell column the loose cell is one of 5 uniform draws, so
+    its per-column probability is 1/5. Across the 5 columns of a query,
+    the count of loose cells is Binomial(5, 1/5): P(>=2 loose) =
+    1 - (4/5)^5 - 5*(1/5)*(4/5)^4 ~= 0.26, so ~26% of default queries
+    draw genuinely-hard terms. The m1..m4 sweep keeps depth<=4 and thus
+    excludes the loose cell; only depth>=5 (or default) includes it.
     """
     columns = tpl["columns"]
     combos = [()]
     for column in columns:
+        # depth<=0: draw from every cell (len(column)); length-agnostic,
+        # so 4- and 5-cell columns both work during the 5th-cell rollout.
         cells = column if depth <= 0 else column[:depth]
         combos = [combo + (cell,) for combo in combos for cell in cells]
     pairs = []

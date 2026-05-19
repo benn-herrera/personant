@@ -1,0 +1,20 @@
+{
+  "name": "passengers-of-the-titanic-corpus",
+  "topic": "wiki-passengers-of-the-titanic",
+  "mode": "measure-only",
+  "source_article": "Passengers of the Titanic",
+  "description": "Tests recall of the Titanic passengers, covering the passenger manifest, the three-tier class system, notable wealthy passengers, third-class emigrants, and the women-and-children-first survival pattern.",
+  "anchors": ["passenger-manifest","passenger-classes","notable-passengers","third-class-emigrants","women-and-children-first"],
+  "columns": [
+    ["passenger-manifest","passenger-list","roster-of-travelers","ship-passenger-register","the-list-of-who-was-on-board"],
+    ["passenger-classes","onboard-class-system","first-second-third-class-tiers","three-tier-accommodations","the-rich-middle-and-poor-decks"],
+    ["notable-passengers","prominent-travelers","wealthy-first-class-figures","famous-passengers-aboard","the-rich-and-famous-folks-aboard"],
+    ["third-class-emigrants","steerage-emigrants","third-class-immigrants","steerage-passengers","the-poor-folks-down-in-steerage"],
+    ["women-and-children-first","women-and-children-priority","female-and-child-evacuation-rule","priority-to-women-and-children","that-rule-about-loading-women-first"]
+  ],
+  "sentence_templates": [
+    "what does the {0} reveal about {1}, and how did {4} change outcomes for {2} versus {3}?",
+    "across the {1}, how did {2} and {3} fare differently once {4} was applied, per the {0}?",
+    "if the {0} groups people by {1}, why did {3} survive at lower rates than {2} under {4}?"
+  ]
+}

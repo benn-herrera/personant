@@ -1,0 +1,20 @@
+{
+  "name": "mars-habitat-corpus",
+  "topic": "wiki-mars-habitat",
+  "mode": "measure-only",
+  "source_article": "Mars habitat",
+  "description": "Tests recall of Mars-habitat concepts, covering the pressurized living module, radiation-shielded structure, the airlock, internal climate control, and use of local construction materials.",
+  "anchors": ["pressurized-habitat-module","radiation-shielded-structure","habitat-airlock","internal-climate-control","local-construction-materials"],
+  "columns": [
+    ["pressurized-habitat-module","pressurized-living-quarters","sealed-crew-module","breathable-pressure-vessel","the-sealed-room-you-actually-live-in"],
+    ["radiation-shielded-structure","radiation-protected-shell","regolith-covered-habitat","shielded-habitat-walls","walls-thick-enough-to-block-the-rays"],
+    ["habitat-airlock","pressure-transition-chamber","entry-exit-airlock","decompression-airlock","the-door-room-you-pass-through-to-go-out"],
+    ["internal-climate-control","habitat-temperature-regulation","interior-environmental-control","indoor-thermal-management","keeping-it-a-comfy-temperature-inside"],
+    ["local-construction-materials","martian-regolith-building-material","in-situ-structural-material","on-site-building-feedstock","building-with-the-dirt-thats-already-there"]
+  ],
+  "sentence_templates": [
+    "how does a {0} stay safe as a {1}, what roles do the {2} and {3} play, and how does {4} help?",
+    "why might a {1} use {4}, and how does that affect the {0}, the {2}, and its {3}?",
+    "when crew pass through the {2}, how do the {0}, {3}, and {1} keep conditions stable, given the {4}?"
+  ]
+}

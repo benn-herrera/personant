@@ -16,31 +16,36 @@
       "equilibrium-climate-sensitivity",
       "ecs",
       "long-term-climate-sensitivity",
-      "equilibrium-warming-response"
+      "equilibrium-warming-response",
+      "how-hot-it-gets-if-you-double-the-co2"
     ],
     [
       "transient-climate-response",
       "tcr",
       "near-term-warming-response",
-      "transient-temperature-response"
+      "transient-temperature-response",
+      "how-fast-it-warms-right-away"
     ],
     [
       "radiative-forcing",
       "energy-flux-imbalance",
       "top-of-atmosphere-forcing",
-      "climate-forcing"
+      "climate-forcing",
+      "the-extra-energy-shove-on-the-planet"
     ],
     [
       "water-vapor-feedback",
       "water-vapour-feedback",
       "humidity-feedback",
-      "atmospheric-moisture-feedback"
+      "atmospheric-moisture-feedback",
+      "warmer-air-holds-more-moisture-loop"
     ],
     [
       "earth-system-sensitivity",
       "ess",
       "long-term-earth-sensitivity",
-      "deep-time-climate-sensitivity"
+      "deep-time-climate-sensitivity",
+      "the-really-long-haul-warming-figure"
     ]
   ],
   "sentence_templates": [

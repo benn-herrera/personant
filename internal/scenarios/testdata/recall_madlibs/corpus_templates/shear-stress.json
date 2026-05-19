@@ -16,31 +16,36 @@
       "shear-stress",
       "tangential-stress",
       "coplanar-stress",
-      "friction-stress"
+      "friction-stress",
+      "the-sideways-sliding-push"
     ],
     [
       "wall-shear-stress",
       "boundary-shear-stress",
       "surface-friction-stress",
-      "near-wall-traction"
+      "near-wall-traction",
+      "the-drag-right-at-the-surface"
     ],
     [
       "shear-modulus",
       "rigidity-modulus",
       "elastic-shear-constant",
-      "torsional-stiffness"
+      "torsional-stiffness",
+      "how-stiff-it-is-against-twisting"
     ],
     [
       "velocity-gradient",
       "shear-rate",
       "flow-velocity-derivative",
-      "speed-gradient"
+      "speed-gradient",
+      "how-fast-speed-changes-across-the-flow"
     ],
     [
       "no-slip-condition",
       "zero-velocity-at-wall",
       "fluid-wall-adhesion",
-      "viscous-boundary-condition"
+      "viscous-boundary-condition",
+      "fluid-sticking-still-at-the-wall"
     ]
   ],
   "sentence_templates": [

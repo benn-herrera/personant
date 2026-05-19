@@ -6,11 +6,11 @@
   "description": "Tests recall of cryptographic key concepts including the key itself, key generation, key exchange, asymmetric cryptography, and key management.",
   "anchors": ["cryptographic-key", "key-generation", "key-exchange", "asymmetric-cryptography", "key-management"],
   "columns": [
-    ["cryptographic-key", "cipher-key", "secret-key", "encryption-key"],
-    ["key-generation", "key-creation", "key-derivation", "key-production"],
-    ["key-exchange", "key-establishment", "key-agreement", "key-transport"],
-    ["asymmetric-cryptography", "public-key-cryptography", "two-key-cryptography", "asymmetric-encryption"],
-    ["key-management", "key-lifecycle", "key-administration", "cryptographic-key-management"]
+    ["cryptographic-key", "cipher-key", "secret-key", "encryption-key", "the-secret-code-that-unlocks-it"],
+    ["key-generation", "key-creation", "key-derivation", "key-production", "making-a-fresh-key"],
+    ["key-exchange", "key-establishment", "key-agreement", "key-transport", "swapping-keys-with-someone"],
+    ["asymmetric-cryptography", "public-key-cryptography", "two-key-cryptography", "asymmetric-encryption", "the-kind-with-a-public-and-private-key"],
+    ["key-management", "key-lifecycle", "key-administration", "cryptographic-key-management", "keeping-track-of-all-the-keys"]
   ],
   "sentence_templates": [
     "In {3}, {1} produces a public-private pair rather than a single {0}, simplifying {2} and reducing the burden on {4}.",

@@ -1,0 +1,20 @@
+{
+  "name": "caldera-corpus",
+  "topic": "wiki-caldera",
+  "mode": "measure-only",
+  "source_article": "Caldera",
+  "description": "Tests recall of caldera formation: the large collapse depression, the chamber-emptying eruption, the roof collapse, the resurgent dome, and the crater lake that often fills it.",
+  "anchors": ["caldera","chamber-emptying-eruption","roof-collapse","resurgent-dome","caldera-lake"],
+  "columns": [
+    ["caldera","volcanic-collapse-basin","large-collapse-depression","cauldron-shaped-crater","that-giant-pit-where-a-volcano-caved-in"],
+    ["chamber-emptying-eruption","magma-reservoir-evacuation","reservoir-draining-eruption","large-volume-evacuating-eruption","the-blast-that-drains-the-magma-out"],
+    ["roof-collapse","chamber-ceiling-subsidence","ground-collapse-inward","overlying-rock-foundering","the-ground-caving-in-on-itself"],
+    ["resurgent-dome","post-collapse-uplift","caldera-floor-bulge","resurgent-uplift-dome","the-floor-bulging-back-up-later"],
+    ["caldera-lake","crater-lake","caldera-filling-lake","collapse-basin-lake","the-lake-that-pools-in-the-old-crater"]
+  ],
+  "sentence_templates": [
+    "how does a {1} trigger the {2} that creates a {0}, and how do a {3} and a {4} follow?",
+    "after a {1} and {2} form a {0}, how can a {3} grow, and when does a {4} appear?",
+    "what is the sequence from {1} to {2} to a {0}, and how do a {3} and a {4} develop afterward?"
+  ]
+}

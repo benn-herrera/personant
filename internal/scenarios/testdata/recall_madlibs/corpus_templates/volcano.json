@@ -1,0 +1,20 @@
+{
+  "name": "volcano-corpus",
+  "topic": "wiki-volcano",
+  "mode": "measure-only",
+  "source_article": "Volcano",
+  "description": "Tests recall of volcano fundamentals: the vent itself, the eruption process, the magma chamber feeding it, the resulting volcanic landform, and the surrounding hazard zone.",
+  "anchors": ["volcano","volcanic-eruption","magma-chamber","volcanic-landform","volcanic-hazard-zone"],
+  "columns": [
+    ["volcano","volcanic-vent","eruptive-mountain","magma-discharge-vent","the-mountain-that-spews-lava"],
+    ["volcanic-eruption","eruptive-event","volcanic-outburst","magma-expulsion-event","when-a-volcano-blows"],
+    ["magma-chamber","subsurface-magma-reservoir","molten-rock-reservoir","crustal-magma-pool","the-pool-of-molten-rock-underground"],
+    ["volcanic-landform","volcanic-edifice","eruption-built-cone","volcanic-mountain-structure","the-landform-a-volcano-builds"],
+    ["volcanic-hazard-zone","eruption-danger-area","volcanic-risk-region","hazard-exposed-zone","the-danger-zone-around-a-volcano"]
+  ],
+  "sentence_templates": [
+    "how does a {0} form, and how does its {2} drive a {1} that builds a {3} and defines a {4}?",
+    "when a {1} occurs at a {0}, how does the state of the {2} affect the {3} and the {4}?",
+    "what links the {2} beneath a {0} to the {1} it produces, the shape of its {3}, and the extent of its {4}?"
+  ]
+}

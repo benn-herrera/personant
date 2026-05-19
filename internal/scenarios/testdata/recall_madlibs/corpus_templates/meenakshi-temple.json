@@ -1,0 +1,56 @@
+{
+  "name": "meenakshi-temple-corpus",
+  "topic": "wiki-meenakshi-temple",
+  "mode": "measure-only",
+  "source_article": "Meenakshi Temple",
+  "description": "Tests recall of the Meenakshi Temple at Madurai, covering its dedication to Meenakshi and Sundareswarar, its towering gopuram gateways, the pillared halls, the Nayak-dynasty patronage, and the Dravidian architectural style.",
+  "anchors": [
+    "meenakshi-temple",
+    "meenakshi-sundareswarar-dedication",
+    "towering-gopurams",
+    "pillared-halls",
+    "nayak-patronage"
+  ],
+  "columns": [
+    [
+      "meenakshi-temple",
+      "madurai-meenakshi-temple",
+      "meenakshi-amman-temple",
+      "meenakshi-sundareswarar-temple",
+      "that-huge-temple-down-in-madurai"
+    ],
+    [
+      "meenakshi-sundareswarar-dedication",
+      "dedication-to-meenakshi-and-shiva",
+      "parvati-and-shiva-shrine",
+      "goddess-meenakshi-consecration",
+      "built-for-the-goddess-and-her-husband"
+    ],
+    [
+      "towering-gopurams",
+      "monumental-gateway-towers",
+      "colourful-gopuram-pylons",
+      "tall-temple-gate-towers",
+      "those-giant-colorful-pyramid-gateways"
+    ],
+    [
+      "pillared-halls",
+      "thousand-pillar-hall",
+      "colonnaded-mandapas",
+      "hall-of-carved-pillars",
+      "the-rooms-full-of-stone-columns"
+    ],
+    [
+      "nayak-patronage",
+      "nayak-dynasty-sponsorship",
+      "madurai-nayak-funding",
+      "nayak-era-commissions",
+      "paid-for-by-the-old-local-rulers"
+    ]
+  ],
+  "sentence_templates": [
+    "how does the {1} shape the {0}, where do the {3} sit, and how do the {2} and {4} frame it?",
+    "what part did {4} play in expanding the {0}, its {2}, and its {3}, all under the {1}?",
+    "when a visitor passes the {2} into the {3}, how does the {1} of the {0} unfold during {4}?"
+  ]
+}
