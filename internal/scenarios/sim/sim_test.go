@@ -21,6 +21,13 @@ import (
 // Wikipedia topics × 10 queries = 3010 distinguishable slots).
 var corpusQueriesPath = filepath.Join("..", "testdata", "recall_madlibs", "corpus_queries.json")
 
+// corpusTemplatesDir holds the per-topic column data behind the
+// recall_madlibs query draw. It is the ground truth for which cell of
+// each column a slot's Tags[i] was drawn from — and in particular
+// whether that cell is the "loose" (drift) cell at the column's tail.
+// loadCorpusSlots consults it to populate each slot's LooseMask.
+var corpusTemplatesDir = filepath.Join("..", "testdata", "recall_madlibs", "corpus_templates")
+
 // corpusQueryDoc mirrors the subset of corpus_queries.json the
 // generator consumes: the flat `queries` array, each entry a
 // distinguishable slot.
@@ -32,10 +39,29 @@ type corpusQueryDoc struct {
 	} `json:"queries"`
 }
 
+// templateDoc mirrors the subset of corpus_templates/<topic>.json the
+// loader consumes: the per-column cell lists. Order within a column
+// follows the generator's depth convention — the last cell is the
+// "loose" drift cell (a deliberate semantic stretch); earlier cells are
+// canonical (index 0) and progressively-drifted synonyms (1..n-2).
+type templateDoc struct {
+	Topic   string     `json:"topic"`
+	Columns [][]string `json:"columns"`
+}
+
 // loadCorpusSlots reads corpus_queries.json and returns its query slots
 // as the generator's CorpusSlot pool. The artifact is committed, so an
 // absence is a hard failure (not a skip): the rung walk cannot run
 // without it.
+//
+// Each slot's LooseMask is filled in by consulting the corresponding
+// corpus_templates file for the slot's topic: a slot Tag at position i
+// is "loose" iff it equals the LAST cell of column i (the conventional
+// drift position). A missing or malformed template is a hard failure —
+// the workload binding depends on the mask to make recall miss
+// probabilistically, and silently falling back to an all-false mask
+// would re-introduce the trivially-perfect-recall failure the loose
+// binding is meant to fix.
 func loadCorpusSlots(t *testing.T) []CorpusSlot {
 	t.Helper()
 	body, err := os.ReadFile(corpusQueriesPath)
@@ -49,19 +75,73 @@ func loadCorpusSlots(t *testing.T) []CorpusSlot {
 	if len(doc.Queries) == 0 {
 		t.Fatalf("corpus %s: empty queries array", corpusQueriesPath)
 	}
+	columnsByTopic := loadCorpusColumns(t)
 	slots := make([]CorpusSlot, len(doc.Queries))
 	for i, q := range doc.Queries {
 		if q.Topic == "" || len(q.Tags) == 0 || q.UserInput == "" {
 			t.Fatalf("corpus %s: query %d malformed (topic=%q tags=%v input=%q)",
 				corpusQueriesPath, i, q.Topic, q.Tags, q.UserInput)
 		}
+		cols, ok := columnsByTopic[q.Topic]
+		if !ok {
+			t.Fatalf("corpus %s: query %d topic %q has no template columns",
+				corpusQueriesPath, i, q.Topic)
+		}
+		if len(cols) != len(q.Tags) {
+			t.Fatalf("corpus %s: query %d topic %q: %d columns vs %d tags",
+				corpusQueriesPath, i, q.Topic, len(cols), len(q.Tags))
+		}
+		mask := make([]bool, len(q.Tags))
+		for ci, tag := range q.Tags {
+			col := cols[ci]
+			if len(col) == 0 {
+				t.Fatalf("corpus %s: topic %q column %d is empty",
+					corpusQueriesPath, q.Topic, ci)
+			}
+			mask[ci] = tag == col[len(col)-1]
+		}
 		slots[i] = CorpusSlot{
 			Topic:     q.Topic,
 			Tags:      append([]string(nil), q.Tags...),
+			LooseMask: mask,
 			UserInput: q.UserInput,
 		}
 	}
 	return slots
+}
+
+// loadCorpusColumns reads every corpus_templates/*.json file and
+// returns a topic→columns lookup. Used by loadCorpusSlots to compute
+// each slot's LooseMask.
+func loadCorpusColumns(t *testing.T) map[string][][]string {
+	t.Helper()
+	entries, err := os.ReadDir(corpusTemplatesDir)
+	if err != nil {
+		t.Fatalf("read corpus templates dir %s: %v", corpusTemplatesDir, err)
+	}
+	out := make(map[string][][]string, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(corpusTemplatesDir, e.Name())
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read corpus template %s: %v", path, err)
+		}
+		var doc templateDoc
+		if err := json.Unmarshal(body, &doc); err != nil {
+			t.Fatalf("parse corpus template %s: %v", path, err)
+		}
+		if doc.Topic == "" || len(doc.Columns) == 0 {
+			t.Fatalf("corpus template %s: missing topic or columns", path)
+		}
+		out[doc.Topic] = doc.Columns
+	}
+	if len(out) == 0 {
+		t.Fatalf("corpus templates dir %s: no templates loaded", corpusTemplatesDir)
+	}
+	return out
 }
 
 // simDayDuration is the simulated wall span the 1-day rung covers — one

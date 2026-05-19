@@ -76,6 +76,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math/rand"
+	"slices"
 	"strings"
 	"time"
 
@@ -92,6 +93,20 @@ import (
 // every thread bound to this slot. Topic is the slot's wiki-* topic
 // name, retained for annotations.
 //
+// LooseMask is aligned position-wise with Tags: LooseMask[i] is true
+// iff Tags[i] was drawn from its column's "loose" (drift) cell — the
+// last cell of the template's column, deliberately a semantic stretch
+// rather than a close synonym. The mask is the load-bearing input to
+// the thread-anchor binding: a new thread's anchors are slot.Tags
+// FILTERED to drop the loose positions, so the §3.4 Jaccard layer's
+// thread-set (T) excludes loose drift while the recall query (Q) still
+// contains those terms (the query is the verbatim UserInput including
+// the loose #-tags). The resulting Q vs. T asymmetry is what makes
+// recall miss probabilistically on loose-heavy slots — see buildStep.
+// Loading the mask is the test's job (it consults the corpus_templates
+// column data); slots without column ground truth pass an all-false
+// mask, restoring the previous all-tags-are-anchors binding.
+//
 // The slots are the corpus_queries.json `queries` array verbatim: 301
 // Wikipedia topics × 10 queries = 3010 slots. Loading is the test's
 // job (it owns the testdata path); GenerateWorkload takes the slice as
@@ -99,6 +114,7 @@ import (
 type CorpusSlot struct {
 	Topic     string
 	Tags      []string
+	LooseMask []bool
 	UserInput string
 }
 
@@ -260,6 +276,42 @@ type corpusModel struct {
 // `order` is bound to.
 func (m corpusModel) slotFor(order int) int {
 	return (order / m.familySize) % len(m.slots)
+}
+
+// nonLooseTags returns the slot's tags with loose-cell positions
+// dropped, preserving order. A slot whose LooseMask is nil (no column
+// ground truth available) yields a copy of Tags unchanged — the prior
+// all-tags-are-anchors binding. If every position is loose (vanishingly
+// rare under Binomial(5, 1/5)) the result is nil; callers downstream
+// handle that via the spec §2.2 anchor-cap padding path.
+func nonLooseTags(slot CorpusSlot) []string {
+	if len(slot.LooseMask) != len(slot.Tags) {
+		return append([]string(nil), slot.Tags...)
+	}
+	out := make([]string, 0, len(slot.Tags))
+	for i, t := range slot.Tags {
+		if !slot.LooseMask[i] {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// firstNonLooseTag returns the first tag in slot.Tags whose LooseMask
+// entry is false — the user-input #-mention on a new-thread turn must
+// be a non-loose tag, so the runtime's symbol extraction does not
+// re-introduce a loose term into the new thread's coalesced anchor set
+// (which would defeat the loose-filter on anchorTags). Falls back to
+// Tags[0] when no mask is provided or every position is loose.
+func firstNonLooseTag(slot CorpusSlot) string {
+	if len(slot.LooseMask) == len(slot.Tags) {
+		for i, loose := range slot.LooseMask {
+			if !loose {
+				return slot.Tags[i]
+			}
+		}
+	}
+	return slot.Tags[0]
 }
 
 // thread is the generator's in-memory model of one simulated thread:
@@ -602,7 +654,7 @@ func (g *generator) buildRefinementStep() scenarios.Step {
 		// new-topic; refinements never spawn).
 		MockResponse: scenarios.NewMockResponseWithTag(
 			[]string{thr.threadID()},
-			append([]string(nil), slot.Tags...),
+			nonLooseTags(slot),
 			fmt.Sprintf("Refining %s — %s.",
 				slot.Topic, strings.Join(slot.Tags[:min(2, len(slot.Tags))], ", ")),
 		),
@@ -933,12 +985,7 @@ func (g *generator) resumeCandidates(turn int) []int {
 
 // inLayerB reports whether thread index idx is currently in Layer B.
 func (g *generator) inLayerB(idx int) bool {
-	for _, id := range g.layerB {
-		if id == idx {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(g.layerB, idx)
 }
 
 // runSession emits turns until it has consumed `active` worth of
@@ -1107,40 +1154,71 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 
 	// Recall-opportunity oracle: a dormant thread (not in Layer B, not
 	// the one engaged this turn) bound to the SAME corpus slot is
-	// anchored on exactly this slot's tags. The engaging turn's symbol
-	// set is also exactly this slot's tags, so the §3.4 Jaccard layer
-	// (threshold 0.4) fires for every such dormant thread — and ONLY
-	// for them, since a different slot draws different synonyms. With
-	// FamilySize=2 there is at most one such dormant sibling, so the
-	// expected-match set is small and well-defined. The generator knows
-	// the binding, so it is its own recall oracle. Collected in
-	// ascending creation order for determinism.
+	// anchored on the slot's NON-LOOSE tags. The engaging turn's symbol
+	// set Q is the slot's full UserInput tags (loose cells included);
+	// the sibling's symbol set T is the filtered subset that drops loose
+	// positions, so the §3.4 Jaccard layer's score is (5-L) / (|T|+L)
+	// where L = #loose cells in this slot — a hit when L is small, a
+	// probabilistic miss when L is large enough to push the score below
+	// the 0.4 threshold (the §2.2 anchor-cap padding from 5-L up to 4
+	// inflates the union and makes L≥3 a clean miss). With FamilySize=2
+	// there is still at most one such dormant sibling, so the
+	// expected-match set is small and well-defined; what changed is
+	// that the sibling can now legitimately miss, exercising the
+	// miss→refinement loop. Collected in ascending creation order for
+	// determinism.
+	//
+	// New-thread turns suppress the recall-opportunity emission: the
+	// engaging userInput on a recall opportunity is the slot's full
+	// UserInput (5 #-tags including any loose cells), and on a
+	// thread-creation turn that pollutes the new thread's coalesced
+	// anchors with the loose terms via §1 symbol extraction — defeating
+	// the loose-filter on anchorTags. The dormant first-family-member
+	// still surfaces as the sibling on later continue/switch/resume
+	// turns; we drop at most one recall opportunity per family pair
+	// (the creation turn of the second member), which costs a handful
+	// of samples even on the long rungs.
 	var recallIDs []string
-	for _, cand := range g.threads {
-		if cand.order == idx || g.inLayerB(cand.order) {
-			continue
-		}
-		if cand.slotIdx == thr.slotIdx {
-			recallIDs = append(recallIDs, cand.threadID())
+	if !isNew {
+		for _, cand := range g.threads {
+			if cand.order == idx || g.inLayerB(cand.order) {
+				continue
+			}
+			if cand.slotIdx == thr.slotIdx {
+				recallIDs = append(recallIDs, cand.threadID())
+			}
 		}
 	}
 
-	// Anchors are the slot's full tag set. A thread bound to this slot
-	// is therefore anchored on exactly these tags — the lexical
-	// substrate a same-slot recall query scans.
-	anchors := append([]string(nil), slot.Tags...)
+	// Anchors declared in the §5.1 topic tag are ALWAYS the slot's tags
+	// FILTERED to drop loose-cell positions, on every step regardless
+	// of action. The runtime's §3.3 model-response extractor folds the
+	// declared anchors into coalesce, which then feeds (a) the new
+	// thread's spine anchors on creation and (b) every engaged thread's
+	// `history_symbols` on update. Declaring the filtered list keeps
+	// the loose term out of those persistent symbol sets — the
+	// asymmetry that lets a same-slot recall query (whose user input
+	// brings the loose term in for THAT turn only) sometimes fail to
+	// overlap the sibling enough to clear the §3.4 0.4 threshold. A
+	// dormant sibling's symbol set thus stabilises at the non-loose
+	// substrate, and the recall opportunity's query (Q) differs from
+	// the sibling's set (T) by the slot's loose positions.
+	anchorTags := nonLooseTags(slot)
 
 	// UserInput: on a recall opportunity, re-issue the slot's mad-libs
-	// query verbatim — its #-prefixed tags drive the runtime's symbol
-	// extraction, and the coalesced symbol set is exactly the slot's
-	// tags, firing recall for the dormant same-slot thread(s).
-	// Otherwise a plain engaging line mentioning a couple of the tags
-	// so the turn still extracts on-topic symbols.
+	// query verbatim — its #-prefixed tags (loose cells included) drive
+	// the runtime's symbol extraction, and the coalesced query set is
+	// the full slot.Tags, firing recall against the dormant sibling's
+	// filtered anchors. Otherwise a plain engaging line mentioning a
+	// couple of the tags so the turn still extracts on-topic symbols —
+	// and on the new-thread case the #-prefixed mention must be a
+	// NON-LOOSE tag, so the §1 symbol extraction does not slip a loose
+	// term into the new thread's spine anchors via coalesce.
 	var userInput string
 	if len(recallIDs) > 0 {
 		userInput = slot.UserInput
 	} else {
-		mention := slot.Tags[0]
+		mention := firstNonLooseTag(slot)
 		second := slot.Tags[1%len(slot.Tags)]
 		userInput = fmt.Sprintf("working on #%s and %s", mention, second)
 	}
@@ -1155,7 +1233,7 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 	}
 	body := fmt.Sprintf("Working through %s — %s.",
 		slot.Topic, strings.Join(slot.Tags[:min(2, len(slot.Tags))], ", "))
-	resp := scenarios.NewMockResponseWithTag(threads, anchors, body)
+	resp := scenarios.NewMockResponseWithTag(threads, anchorTags, body)
 
 	step := scenarios.Step{
 		UserInput:    userInput,
