@@ -176,3 +176,178 @@ https://en.wikipedia.org/wiki/Matching_(graph_theory)
 https://en.wikipedia.org/wiki/Flow_network
 https://en.wikipedia.org/wiki/Travelling_salesman_problem
 https://en.wikipedia.org/wiki/Combinatorics
+
+# ---------------------------------------------------------------------
+# Corpus-doubling expansion (2026-05-19): 8 new domains, ~152 articles,
+# to roughly double the 1520-slot recall corpus so a six-month sim run
+# does not exhaust/wrap it. Bare titles; wikipedia_corpus.py resolves
+# them via the API and skips any miss. Curate after the fetch report.
+# ---------------------------------------------------------------------
+
+## domain: software-engineering
+Data structure
+Algorithm
+Hash table
+Binary search tree
+Linked list
+Compiler
+Operating system
+Garbage collection (computer science)
+Concurrency (computer science)
+Functional programming
+Object-oriented programming
+Regular expression
+Recursion (computer science)
+Cache (computing)
+Virtual memory
+Process (computing)
+Thread (computing)
+Deadlock
+Version control
+Continuous integration
+API
+Relational database
+Database index
+SQL
+Distributed computing
+Load balancing (computing)
+Public-key cryptography
+Software testing
+
+## domain: mathematical-physics
+Prime number
+Fibonacci sequence
+Calculus
+Derivative
+Integral
+Eigenvalues and eigenvectors
+Matrix (mathematics)
+Probability distribution
+Bayes' theorem
+Set theory
+Group (mathematics)
+Topology
+Differential equation
+Fourier transform
+Newton's laws of motion
+Special relativity
+General relativity
+Quantum mechanics
+Thermodynamics
+Entropy
+Electromagnetism
+Maxwell's equations
+Wave–particle duality
+Standard Model
+Higgs boson
+Conservation of energy
+Angular momentum
+Schrödinger equation
+
+## domain: arachnology
+Spider
+Arachnid
+Spider web
+Spider silk
+Tarantula
+Jumping spider
+Orb-weaver spider
+Wolf spider
+Latrodectus
+Brown recluse spider
+Trapdoor spider
+Scorpion
+Opiliones
+Mite
+Tick
+Spider bite
+Australian funnel-web spider
+Ballooning (spider)
+Goliath birdeater
+Huntsman spider
+
+## domain: volcanology
+Volcano
+Volcanology
+Magma
+Lava
+Types of volcanic eruptions
+Stratovolcano
+Shield volcano
+Caldera
+Pyroclastic flow
+Volcanic ash
+Hotspot (geology)
+Plate tectonics
+Subduction
+Mount Vesuvius
+Krakatoa
+Mount St. Helens
+Yellowstone Caldera
+Volcanic Explosivity Index
+Lahar
+Basalt
+
+## domain: indian-architecture
+Architecture of India
+Hindu temple architecture
+Dravidian architecture
+Nagara architecture
+Indo-Islamic architecture
+Mughal architecture
+Indian rock-cut architecture
+Ajanta Caves
+Ellora Caves
+Khajuraho Group of Monuments
+Brihadisvara Temple
+Konark Sun Temple
+Stepwell
+Hampi
+Taj Mahal
+Red Fort
+Qutb Minar
+Sanchi
+Meenakshi Temple
+Fatehpur Sikri
+
+## domain: ancient-egypt
+Great Pyramid of Giza
+Giza pyramid complex
+Great Sphinx of Giza
+Khufu
+Khafre
+Menkaure
+Egyptian pyramids
+Egyptian pyramid construction techniques
+Pyramid of Khafre
+Pyramid of Menkaure
+Old Kingdom of Egypt
+Ancient Egypt
+Mastaba
+Pyramid of Djoser
+
+## domain: mars-exploration
+Mars
+Human mission to Mars
+Colonization of Mars
+Exploration of Mars
+SpaceX Starship
+Life-support system
+Health threat from cosmic rays
+In situ resource utilization
+Mars habitat
+Effect of spaceflight on the human body
+Interplanetary spaceflight
+Terraforming of Mars
+
+## domain: titanic
+RMS Titanic
+Sinking of the Titanic
+Passengers of the Titanic
+Wreck of the Titanic
+Olympic-class ocean liner
+RMS Olympic
+Edward Smith (sea captain)
+Titanic (1997 film)
+Iceberg
+White Star Line
