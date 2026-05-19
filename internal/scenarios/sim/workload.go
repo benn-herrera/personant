@@ -14,7 +14,7 @@
 // query string. A thread's anchors ARE its slot's tags, so a
 // recall-opportunity turn — which re-issues that slot's query — fires
 // the §3.4 symbolic Jaccard layer for exactly the threads bound to
-// that slot. With 1520 corpus slots the recall oracle resolves to a
+// that slot. With 3010 corpus slots the recall oracle resolves to a
 // small, well-defined expected-match set instead of dozens of
 // indistinguishable same-symbol threads. See the corpusModel doc and
 // WorkloadConfig.Corpus for the binding mechanics.
@@ -59,10 +59,17 @@
 // identical run; the workload is simply no longer pre-computed.
 //
 // Next(StepFeedback) receives the recall outcome of the step that just
-// ran. The generator does NOT branch on it — the workload stays a pure
-// function of (Seed, Duration). The feedback is the seam a later task
-// (runtime-conditional workload, e.g. reacting to a recall miss) will
-// consume; it is threaded through now so that task is purely additive.
+// ran and drives the miss → refinement loop: when a recall-opportunity
+// step misses (observed match-fires < expected), the generator injects
+// a refinement turn ahead of the next buffered step — same primary
+// thread, a different slot of the same topic. Up to three attempts per
+// episode; each closed episode contributes one sample to
+// `recall_episode_queries_to_hit` (or increments
+// `recall_episode_unresolved` if all three miss). The canonical
+// (zero-feedback) step stream — the workload before any refinement
+// injection — remains a pure function of (Seed, Duration, Corpus), so
+// the determinism contract holds when no feedback is supplied
+// (drainSteps in the determinism tests).
 package sim
 
 import (
@@ -85,8 +92,8 @@ import (
 // every thread bound to this slot. Topic is the slot's wiki-* topic
 // name, retained for annotations.
 //
-// The slots are the corpus_queries.json `queries` array verbatim: 152
-// Wikipedia topics × 10 queries = 1520 slots. Loading is the test's
+// The slots are the corpus_queries.json `queries` array verbatim: 301
+// Wikipedia topics × 10 queries = 3010 slots. Loading is the test's
 // job (it owns the testdata path); GenerateWorkload takes the slice as
 // part of its config so it stays a pure function.
 type CorpusSlot struct {
@@ -414,11 +421,23 @@ func GenerateWorkload(cfg WorkloadConfig) scenarios.Scenario {
 	}
 }
 
+// bufStep is one buffered step plus the per-step generator metadata the
+// refinement loop needs: the corpus slot the step issued and the
+// 0-based corpus-creation-order index of the engaged thread. These are
+// cheap to record at buildStep time and avoid re-parsing the step's
+// Annotation. Refinement-injected steps never live in a day buffer, so
+// only the canonical buffered steps carry bufStep wrappers.
+type bufStep struct {
+	step       scenarios.Step
+	slotIdx    int // corpus slot the step issued the query of
+	engagedIdx int // creation-order index of the engaged thread
+}
+
 // dayBuf is one generated calendar day's steps plus the global step
 // index of its first step, so a global step index can be translated
 // into an offset within steps.
 type dayBuf struct {
-	steps     []scenarios.Step
+	steps     []bufStep
 	firstStep int // global step index of steps[0]
 }
 
@@ -429,18 +448,188 @@ type dayBuf struct {
 // returned bool is false once the run is complete.
 //
 // feedback carries the recall outcome of the step that just ran. The
-// generator does not branch on it — the workload stays a pure function
-// of (Seed, Duration) — so determinism is unchanged. The parameter is
-// the seam a later runtime-conditional-workload task consumes.
-func (g *generator) Next(_ scenarios.StepFeedback) (scenarios.Step, bool) {
+// generator consumes it to drive the miss → refinement loop: on an
+// open episode, an observed hit closes the episode (recording
+// attempts), an observed miss with attempts < 3 INJECTS a refinement
+// turn ahead of the next buffered step, and a miss on the 3rd attempt
+// closes the episode as unresolved. Refinement injection does not
+// reshape the day buffer — it simply emits one extra step before the
+// next buffered draw, leaving downstream Layer-B/thread assumptions
+// intact. A zero feedback (RecallExpected == 0) is the
+// "no-recall-opportunity-observed" signal and never triggers
+// refinement, so the canonical step stream remains a pure function of
+// (Seed, Duration, Corpus) — the determinism contract drainSteps
+// relies on.
+func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool) {
+	// Process the just-completed step's outcome.
+	if g.recallEpisodeOpen && feedback.RecallExpected > 0 {
+		switch {
+		case feedback.RecallMatchFires >= feedback.RecallExpected:
+			// HIT — close the episode and record queries-to-hit.
+			g.closeEpisodeHit()
+		case g.recallAttempts < 3:
+			// MISS with attempts remaining — inject a refinement turn
+			// (a different slot of the same topic, same primary thread).
+			g.recallAttempts++
+			return g.buildRefinementStep(), true
+		default:
+			// MISS on the 3rd attempt — close as unresolved.
+			g.closeEpisodeUnresolved()
+		}
+	}
+
+	// Draw the next buffered step, advancing days as needed.
 	for g.ready == nil || g.readyPos >= len(g.ready.steps) {
 		if !g.advance() {
+			// Run is over. If an episode is still open without a clean
+			// close (e.g. final step was a missed recall opportunity and
+			// no further steps remain), count it as unresolved.
+			if g.recallEpisodeOpen {
+				g.closeEpisodeUnresolved()
+			}
 			return scenarios.Step{}, false
 		}
 	}
-	step := g.ready.steps[g.readyPos]
+	bs := g.ready.steps[g.readyPos]
 	g.readyPos++
-	return step, true
+
+	// If this buffered step opens a new recall opportunity, start an
+	// episode. A new opportunity supersedes any still-open prior episode
+	// (the prior never got a clean close — record it as unresolved so
+	// it is not silently dropped from the count).
+	if len(bs.step.ExpectedRecallMatches) > 0 {
+		if g.recallEpisodeOpen {
+			g.closeEpisodeUnresolved()
+		}
+		g.openEpisode(bs)
+	}
+
+	return bs.step, true
+}
+
+// openEpisode begins a new recall episode for the just-emitted buffered
+// step. The slot the step issued is captured so a later refinement can
+// pick the NEXT slot of the same topic.
+func (g *generator) openEpisode(bs bufStep) {
+	g.recallEpisodeOpen = true
+	g.recallAttempts = 1
+	g.currentRecallSlotIdx = bs.slotIdx
+	g.currentRecallTopic = g.model.slots[bs.slotIdx].Topic
+}
+
+// closeEpisodeHit records a hit episode (n attempts to first hit) and
+// resets episode state.
+func (g *generator) closeEpisodeHit() {
+	g.episodeQueriesToHit = append(g.episodeQueriesToHit, g.recallAttempts)
+	g.resetEpisode()
+}
+
+// closeEpisodeUnresolved increments the unresolved counter and resets
+// episode state.
+func (g *generator) closeEpisodeUnresolved() {
+	g.episodeUnresolved++
+	g.resetEpisode()
+}
+
+// resetEpisode clears the per-episode state. Called after every close.
+func (g *generator) resetEpisode() {
+	g.recallEpisodeOpen = false
+	g.recallAttempts = 0
+	g.currentRecallSlotIdx = 0
+	g.currentRecallTopic = ""
+}
+
+// buildRefinementStep constructs one refinement turn: re-engage the
+// current primary thread (Layer-B head — re-engaging the head is an
+// LRU no-op, so the day buffer's downstream Layer-B assumptions stay
+// valid) and issue a DIFFERENT slot of the same topic so the query
+// phrasing genuinely differs from the missed attempt. The recall
+// oracle for the refinement is computed the same slot-equality way as
+// canonical steps — dormant non-Layer-B threads bound to the new slot.
+//
+// Refinement does NOT mutate the generator's Layer-B/last-engaged
+// bookkeeping: the runtime sees the engagement in its own Layer B, but
+// the generator's view of the world is the one that drives future
+// buffered-day generation, and we want minimal disturbance to that.
+func (g *generator) buildRefinementStep() scenarios.Step {
+	// The primary thread to re-engage is layerB[0]. layerB is non-empty
+	// because the episode-opening canonical step engaged some thread,
+	// which is now layerB[0].
+	idx := g.layerB[0]
+
+	// Pick the next slot of the same topic. slotsForTopic caches the
+	// list of corpus-wide slot indices for a topic (10 per topic in the
+	// recall_madlibs corpus, but slotsForTopic uses the actual count).
+	topicSlots := g.slotsForTopic(g.currentRecallTopic)
+	// currentRecallSlotIdx is the last-issued slot; advance to its next
+	// sibling in topicSlots (modulo for wraparound on long episodes,
+	// though attempts <= 3 means we will never wrap in practice with
+	// 10 slots per topic).
+	pos := 0
+	for i, si := range topicSlots {
+		if si == g.currentRecallSlotIdx {
+			pos = i
+			break
+		}
+	}
+	newSlotIdx := topicSlots[(pos+1)%len(topicSlots)]
+	g.currentRecallSlotIdx = newSlotIdx
+	slot := g.model.slots[newSlotIdx]
+
+	// Recall oracle for the refinement: dormant threads (not in Layer B,
+	// not the engaged primary) bound to the NEW slot. Same algorithm as
+	// canonical buildStep — only the slot-index differs.
+	var recallIDs []string
+	for _, cand := range g.threads {
+		if cand.order == idx || g.inLayerB(cand.order) {
+			continue
+		}
+		if cand.slotIdx == newSlotIdx {
+			recallIDs = append(recallIDs, cand.threadID())
+		}
+	}
+
+	thr := g.threads[idx]
+	step := scenarios.Step{
+		// The refinement's TimeDelta is a small jittered rapid gap — the
+		// user issuing a re-phrased follow-up moments later. This
+		// consumes rng, but rng is consumed only on refinement injection
+		// (conditional on real feedback), so the canonical (zero-feedback)
+		// step stream's rng draws are unchanged.
+		TimeDelta: jitter(g.rng, g.cfg.RapidGap),
+		UserInput: slot.UserInput,
+		// MockResponse threads: re-engagement of the engaged thread (no
+		// new-topic; refinements never spawn).
+		MockResponse: scenarios.NewMockResponseWithTag(
+			[]string{thr.threadID()},
+			append([]string(nil), slot.Tags...),
+			fmt.Sprintf("Refining %s — %s.",
+				slot.Topic, strings.Join(slot.Tags[:min(2, len(slot.Tags))], ", ")),
+		),
+		Annotation: fmt.Sprintf("refinement attempt %d (%s)",
+			g.recallAttempts, slot.Topic),
+		ClosureAck: &scenarios.ClosureAck{Outcome: turn.ClosureResolved},
+		RecallAck:  &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
+	}
+	if len(recallIDs) > 0 {
+		step.ExpectedRecallMatches = recallIDs
+		step.RecallMode = scenarios.RecallMeasureOnly
+	}
+	return step
+}
+
+// slotsForTopic returns the corpus-wide slot indices belonging to topic,
+// in corpus order. Built lazily on first call and memoised — every call
+// after the first is a map lookup. Topic order is stable for a given
+// corpus, so the result is deterministic.
+func (g *generator) slotsForTopic(topic string) []int {
+	if g.topicSlots == nil {
+		g.topicSlots = map[string][]int{}
+		for i, s := range g.model.slots {
+			g.topicSlots[s.Topic] = append(g.topicSlots[s.Topic], i)
+		}
+	}
+	return g.topicSlots[topic]
 }
 
 // advance moves the next day-with-turns into g.ready, returning false
@@ -552,7 +741,7 @@ func markRestartIn(day dayBuf, globalIdx int) {
 	}
 	off := globalIdx - day.firstStep
 	if off >= 0 && off < len(day.steps) {
-		day.steps[off].RestartSession = true
+		day.steps[off].step.RestartSession = true
 	}
 }
 
@@ -669,13 +858,38 @@ type generator struct {
 	// two distinct session boundaries — one near the run start (minimum
 	// history) and one near the run end (maximum history).
 	sessionStarts []int
+
+	// Per-recall-episode state. An episode opens when Next() emits a
+	// buffered step with ExpectedRecallMatches > 0 and closes on
+	// observed hit (record queries-to-hit), unresolved exhaustion (after
+	// 3 attempts of misses), or supersession (a new recall opportunity
+	// emitted before the prior closed).
+	recallEpisodeOpen    bool
+	recallAttempts       int    // 1..3 — number of recall queries issued in the current episode
+	currentRecallSlotIdx int    // corpus-wide slot index of the LAST issued recall query
+	currentRecallTopic   string // topic of the open episode (its slots form the refinement pool)
+
+	// topicSlots maps a topic name to the corpus-wide slot indices
+	// belonging to that topic, in corpus order. Built lazily on first
+	// refinement (slotsForTopic).
+	topicSlots map[string][]int
+
+	// episodeQueriesToHit accumulates the attempt count (1..3) of every
+	// closed-by-hit episode; episodeUnresolved counts episodes that
+	// failed to hit within 3 attempts or were superseded before
+	// closure. The test reads these post-run and writes them to the
+	// metrics blob — keeping the generator independent of the metrics
+	// package.
+	episodeQueriesToHit []int
+	episodeUnresolved   int
 }
 
-// appendStep buffers one generated step into the current day and
-// advances the global step counter. It is the on-demand replacement for
-// the build-all generator's `g.steps = append(g.steps, step)`.
-func (g *generator) appendStep(step scenarios.Step) {
-	g.day.steps = append(g.day.steps, step)
+// appendStep buffers one generated step plus its generator-side
+// metadata into the current day, and advances the global step counter.
+// It is the on-demand replacement for the build-all generator's
+// `g.steps = append(g.steps, step)`.
+func (g *generator) appendStep(bs bufStep) {
+	g.day.steps = append(g.day.steps, bs)
 	g.stepIndex++
 }
 
@@ -753,9 +967,9 @@ func (g *generator) runSession(active time.Duration) {
 		td := g.pendingGap
 		g.pendingGap = 0
 
-		step := g.buildStep(tt, act)
-		step.TimeDelta = td
-		g.appendStep(step)
+		bs := g.buildStep(tt, act)
+		bs.step.TimeDelta = td
+		g.appendStep(bs)
 		emitted = true
 
 		// Advance the clock by this turn's gap; it becomes the next
@@ -840,10 +1054,12 @@ func jitter(rng *rand.Rand, base time.Duration) time.Duration {
 	return time.Duration(float64(base) * factor)
 }
 
-// buildStep constructs one scenarios.Step for the given turn type and
+// buildStep constructs one buffered step for the given turn type and
 // action, mutating the thread model (creating the new thread, updating
-// the Layer-B LRU). TimeDelta is filled in by the caller.
-func (g *generator) buildStep(tt turnType, act action) scenarios.Step {
+// the Layer-B LRU). TimeDelta is filled in by the caller. The returned
+// bufStep carries the generator-side metadata (slot index, engaged
+// thread index) the refinement loop reads on emission.
+func (g *generator) buildStep(tt turnType, act action) bufStep {
 	var (
 		idx   int // index of the engaged thread
 		isNew bool
@@ -1009,7 +1225,7 @@ func (g *generator) buildStep(tt turnType, act action) scenarios.Step {
 	// Update the Layer-B LRU and last-engaged bookkeeping to reflect
 	// this turn's engagement. g.stepIndex is this turn's 0-based index.
 	g.engage(idx, g.stepIndex)
-	return step
+	return bufStep{step: step, slotIdx: thr.slotIdx, engagedIdx: idx}
 }
 
 // syntheticHash returns a short deterministic hex digest of content, used

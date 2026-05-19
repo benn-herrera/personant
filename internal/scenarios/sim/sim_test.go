@@ -17,8 +17,8 @@ import (
 )
 
 // corpusQueriesPath is the recall_madlibs corpus query artifact the
-// generator binds threads to. It is a committed, read-only input (152
-// Wikipedia topics × 10 queries = 1520 distinguishable slots).
+// generator binds threads to. It is a committed, read-only input (301
+// Wikipedia topics × 10 queries = 3010 distinguishable slots).
 var corpusQueriesPath = filepath.Join("..", "testdata", "recall_madlibs", "corpus_queries.json")
 
 // corpusQueryDoc mirrors the subset of corpus_queries.json the
@@ -179,9 +179,31 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// metrics blob accumulated as the run proceeded.
 	t.Logf("driving on-demand workload over %s simulated", d)
 
+	// Hold the generator pointer so the post-run episode stats can be
+	// pulled out. The generator is the only thing that knows about
+	// refinement episodes — the harness sees them as ordinary steps.
+	gen := sc.StepSource.(*generator)
+
 	start := time.Now()
 	h := scenarios.RunScenario(t, sc)
 	wall := time.Since(start)
+
+	// Fold the generator's miss → refinement episode stats into the
+	// metrics blob. RunScenario already wrote the blob, but h.Metrics
+	// is still live in memory; record the new samples and re-write so
+	// readMetrics below sees them. recall_episode_queries_to_hit is a
+	// histogram series (one sample per HIT episode, n in {1,2,3});
+	// recall_episode_unresolved is a counter (episodes that failed to
+	// hit within 3 attempts or were superseded before closing).
+	for _, n := range gen.episodeQueriesToHit {
+		h.Metrics.Record("recall_episode_queries_to_hit", float64(n))
+	}
+	if gen.episodeUnresolved > 0 {
+		h.Metrics.Counter("recall_episode_unresolved", int64(gen.episodeUnresolved))
+	}
+	if err := h.Metrics.WriteJSON(h.MetricsPath); err != nil {
+		t.Fatalf("re-write metrics blob with episode stats: %v", err)
+	}
 
 	m, err := readMetrics(h.MetricsPath)
 	if err != nil {
@@ -235,6 +257,19 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 			mean(m.Histograms["recall_fidelity_adversarial_f1"]))
 	} else {
 		t.Logf("recall fidelity:  no measured steps this run")
+	}
+
+	// Miss → refinement episode summary. queries-to-hit is a per-episode
+	// sample (n attempts to first hit, n ∈ {1,2,3}); unresolved is a
+	// counter of episodes that exhausted 3 attempts without a hit or
+	// were superseded by a new opportunity before closure.
+	qth := m.Histograms["recall_episode_queries_to_hit"]
+	unresolved := m.Counters["recall_episode_unresolved"]
+	if len(qth) > 0 || unresolved > 0 {
+		t.Logf("recall episodes:  mean queries-to-hit %.2f (%d episodes, %d unresolved)",
+			mean(qth), len(qth), unresolved)
+	} else {
+		t.Logf("recall episodes:  no closed episodes this run")
 	}
 
 	t.Logf("wall-clock runtime: %s", wall.Round(time.Millisecond))
