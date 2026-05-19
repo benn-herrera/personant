@@ -77,11 +77,12 @@ type Delta struct {
 
 // ThreadWrite bundles the three pieces of state needed to materialize a
 // thread on the substrate: the spine index entry, the in-file
-// frontmatter (which mirrors the spine fields), and the markdown body.
+// frontmatter (which mirrors the spine fields), and the new turn's
+// excerpt.
 //
 // The three are kept distinct on the port surface because they map to
 // different substrate concerns in the file adapter (spine.jsonl vs
-// thread file frontmatter vs thread file body), and callers in
+// thread.md frontmatter vs one turns/ excerpt file), and callers in
 // internal/turn build them up side-by-side during turn close. Bundling
 // them into one struct at the call site is what eliminates the
 // historical three-parameter signature; the adapter's job is to
@@ -89,24 +90,24 @@ type Delta struct {
 //
 // Invariant: Spine.ID == Frontmatter.ID. The adapter does not enforce
 // this; callers are responsible for keeping the two in sync at
-// construction. (A future adapter might collapse the duplication, but
-// the substrate spec keeps them separate because the frontmatter
-// version is what a human reads when they open the thread file
-// directly, and the spine version is what derived indexes consume.)
+// construction.
 type ThreadWrite struct {
 	// Spine is the canonical index entry for the thread. Always written
 	// to spine.jsonl by the adapter.
 	Spine SpineRecord
 
 	// Frontmatter is the in-file metadata block. Always written to the
-	// thread file's frontmatter by the adapter.
+	// thread's thread.md frontmatter by the adapter.
 	Frontmatter ThreadFrontmatter
 
-	// Body is the markdown content for the thread file. For
-	// CreateThread, this is the initial body; for EngageThread, this is
-	// the new full body (typically the prior body with one excerpt
-	// appended). The adapter writes it verbatim.
-	Body string
+	// TurnExcerpt is the terse operational excerpt for the turn this
+	// write records. The adapter appends it as a new turn-excerpt file
+	// numbered by Frontmatter.TurnCount (the recency-windowed turns/
+	// directory; see store.AppendThreadTurn). An empty TurnExcerpt is a
+	// frontmatter-only update — it appends no turn file. The closure
+	// path uses the empty form to rewrite frontmatter without recording
+	// a turn.
+	TurnExcerpt string
 }
 
 // ---------- Filters and options ----------

@@ -294,7 +294,7 @@ func TestPropose_IntegrationLoadsFromDisk(t *testing.T) {
 		},
 		Body: "body\n",
 	}
-	if err := store.SaveThread(paths, thread); err != nil {
+	if err := store.SeedThread(paths, thread); err != nil {
 		t.Fatalf("save thread: %v", err)
 	}
 

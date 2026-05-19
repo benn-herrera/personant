@@ -59,17 +59,17 @@ type FileEntry struct {
 }
 
 // ThreadFiles is the per-thread tracked-file store, persisted as the JSON
-// sidecar <Home>/threads/<thr_id>.files.json.
+// sidecar <Home>/threads/thr_<id>/files.json.
 type ThreadFiles struct {
 	ThreadID string                `json:"thread_id"`
 	Files    map[string]*FileEntry `json:"files"`
 }
 
 // ThreadFilesPath returns the canonical sidecar path for a thread's
-// tracked-file store: <ThreadsDir>/<threadID>.files.json, a sibling to the
-// thread's .md file (see ThreadPath).
+// tracked-file store: <ThreadsDir>/thr_<id>/files.json, inside the
+// thread's directory (see ThreadDir).
 func ThreadFilesPath(paths PersonantPaths, threadID string) string {
-	return filepath.Join(paths.ThreadsDir, threadID+".files.json")
+	return filepath.Join(ThreadDir(paths, threadID), "files.json")
 }
 
 // LoadThreadFiles reads and parses the tracked-file sidecar for threadID.
@@ -103,7 +103,7 @@ func SaveThreadFiles(paths PersonantPaths, tf ThreadFiles) error {
 	if tf.ThreadID == "" {
 		return errors.New("save thread files: ThreadID is empty")
 	}
-	dir := paths.ThreadsDir
+	dir := ThreadDir(paths, tf.ThreadID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("save thread files %s: mkdir %s: %w", tf.ThreadID, dir, err)
 	}

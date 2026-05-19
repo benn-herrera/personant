@@ -240,7 +240,7 @@ func applyClosureResolution(ctx context.Context, state *State, threadID string, 
 	if !found {
 		return fmt.Errorf("closure: thread %s not in spine", threadID)
 	}
-	thr, err := state.Ops.LoadThread(ctx, threadID)
+	fm, err := state.Ops.LoadThreadFrontmatter(ctx, threadID)
 	if err != nil {
 		return fmt.Errorf("closure: load thread %s: %w", threadID, err)
 	}
@@ -260,29 +260,30 @@ func applyClosureResolution(ctx context.Context, state *State, threadID string, 
 	}
 
 	// Mirror the spine and frontmatter so they stay in sync (the
-	// updateExistingThread pattern). The body is preserved unchanged.
+	// updateExistingThread pattern). Closure records no new turn — it is
+	// a frontmatter-only update, so ThreadWrite.TurnExcerpt is empty and
+	// the turns/ directory is left untouched.
 	anchors := append([]string(nil), draft.Anchors...)
 	rec.State = newState
 	rec.Summary = draft.Summary
 	rec.Anchors = anchors
 	rec.StateChanged = now
 
-	thr.Frontmatter.ID = rec.ID
-	thr.Frontmatter.Project = rec.Project
-	thr.Frontmatter.State = newState
-	thr.Frontmatter.Summary = draft.Summary
-	thr.Frontmatter.Anchors = append([]string(nil), anchors...)
-	thr.Frontmatter.StateChanged = now
-	thr.Frontmatter.LastEngaged = rec.LastEngaged
-	thr.Frontmatter.LastEngagedTurn = rec.LastEngagedTurn
-	thr.Frontmatter.Created = rec.Created
-	thr.Frontmatter.TurnCount = rec.TurnCount
-	thr.Frontmatter.RecallFires = rec.RecallFires
+	fm.ID = rec.ID
+	fm.Project = rec.Project
+	fm.State = newState
+	fm.Summary = draft.Summary
+	fm.Anchors = append([]string(nil), anchors...)
+	fm.StateChanged = now
+	fm.LastEngaged = rec.LastEngaged
+	fm.LastEngagedTurn = rec.LastEngagedTurn
+	fm.Created = rec.Created
+	fm.TurnCount = rec.TurnCount
+	fm.RecallFires = rec.RecallFires
 
 	if err := state.Ops.EngageThread(ctx, memops.ThreadWrite{
 		Spine:       rec,
-		Frontmatter: thr.Frontmatter,
-		Body:        thr.Body,
+		Frontmatter: fm,
 	}); err != nil {
 		return fmt.Errorf("closure: write thread %s: %w", threadID, err)
 	}

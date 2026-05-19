@@ -490,7 +490,7 @@ func TestRunExistingThreadAppendsExcerpt(t *testing.T) {
 		},
 		Body: "# trefoil\n\n## Turn 7 · 2026-04-01T00:00:00Z · [trefoil, unknot, body-topology, electron-shape]\n\n**user:** earlier prompt\n\n**agent:** earlier reply\n",
 	}
-	if err := store.SaveThread(paths, prior); err != nil {
+	if err := store.SeedThread(paths, prior); err != nil {
 		t.Fatalf("seed save: %v", err)
 	}
 	if err := store.AppendSpineRecord(paths, memops.SpineRecord{
@@ -725,7 +725,7 @@ func seedThreadAndSpine(t *testing.T, paths store.PersonantPaths, project, thrID
 		},
 		Body: "# " + thrID + "\n\n## Turn 1 · 2026-04-01T00:00:00Z · [a, b, c, d]\n\n**user:** seed\n\n**agent:** seed reply\n",
 	}
-	if err := store.SaveThread(paths, thr); err != nil {
+	if err := store.SeedThread(paths, thr); err != nil {
 		t.Fatalf("seed thread %s: %v", thrID, err)
 	}
 }

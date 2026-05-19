@@ -867,25 +867,27 @@ func updateExistingThread(ctx context.Context, state *State, threadID, userInput
 			"thr="+threadID+" project="+rec.Project+" active="+state.ActiveProject.ID)
 	}
 
-	// Load the thread file. The adapter owns the missing-file fallback:
-	// EngageThread materializes a fresh file when the spine record exists
-	// but the on-disk file is absent, so we don't special-case
-	// ErrThreadFileNotFound here.
-	thr, err := state.Ops.LoadThread(ctx, threadID)
+	// Load only the thread's frontmatter — the new format appends one
+	// turn-excerpt file per engagement, so the prior body is never
+	// loaded or rewritten. The adapter owns the missing-thread-dir
+	// recovery: EngageThread recreates the directory when the spine
+	// record exists but the on-disk thread is absent, so we don't
+	// special-case ErrThreadFileNotFound here.
+	fm, err := state.Ops.LoadThreadFrontmatter(ctx, threadID)
 	if err != nil && !errors.Is(err, memops.ErrThreadFileNotFound) {
 		return fmt.Errorf("load thread %s: %w", threadID, err)
 	}
 	if errors.Is(err, memops.ErrThreadFileNotFound) {
-		thr = memops.Thread{Frontmatter: frontmatterFromSpine(rec)}
+		fm = frontmatterFromSpine(rec)
 	}
 
 	// Bookkeeping update on the in-memory record. The new turn_count is
 	// the value used for the per-turn excerpt header and as
 	// first_seen_turn for any newly introduced history symbols.
 	newTurnCount := rec.TurnCount + 1
-	thr.Frontmatter.LastEngaged = now
-	thr.Frontmatter.LastEngagedTurn = state.TurnNumber
-	thr.Frontmatter.TurnCount = newTurnCount
+	fm.LastEngaged = now
+	fm.LastEngagedTurn = state.TurnNumber
+	fm.TurnCount = newTurnCount
 	// Re-engagement resurrects the thread per the §2.2.1 state-transition
 	// table (wip/paused/resolved/decided/abandoned → active). Engagement
 	// promotes to active unconditionally when not already active; an
@@ -897,30 +899,30 @@ func updateExistingThread(ctx context.Context, state *State, threadID, userInput
 	// Mirror the canonical spine fields so the frontmatter stays in
 	// sync. The body of work reads the frontmatter; the spine is the
 	// outer index.
-	thr.Frontmatter.ID = rec.ID
-	thr.Frontmatter.Project = rec.Project
-	thr.Frontmatter.Anchors = append([]string(nil), rec.Anchors...)
-	thr.Frontmatter.Summary = rec.Summary
-	thr.Frontmatter.State = rec.State
-	if thr.Frontmatter.Created == "" {
-		thr.Frontmatter.Created = rec.Created
+	fm.ID = rec.ID
+	fm.Project = rec.Project
+	fm.Anchors = append([]string(nil), rec.Anchors...)
+	fm.Summary = rec.Summary
+	fm.State = rec.State
+	if fm.Created == "" {
+		fm.Created = rec.Created
 	}
 	// StateChanged is mirrored from the canonical spine unconditionally:
 	// an engagement that resurrects the thread to active bumps the spine
 	// timestamp, and a stale frontmatter value would desync the file.
-	thr.Frontmatter.StateChanged = rec.StateChanged
-	thr.Frontmatter.RecallFires = rec.RecallFires
+	fm.StateChanged = rec.StateChanged
+	fm.RecallFires = rec.RecallFires
 
-	thr.Frontmatter.HistorySymbols = mergeHistorySymbols(thr.Frontmatter.HistorySymbols, turnSymbols, newTurnCount)
-	thr.Body = appendTurnExcerpt(thr.Body, newTurnCount, now, turnAnchors, userInput, responseBody)
+	fm.HistorySymbols = mergeHistorySymbols(fm.HistorySymbols, turnSymbols, newTurnCount)
+	excerpt := renderTurnExcerpt(newTurnCount, now, turnAnchors, userInput, responseBody)
 
 	rec.LastEngaged = now
 	rec.LastEngagedTurn = state.TurnNumber
 	rec.TurnCount = newTurnCount
 	if err := state.Ops.EngageThread(ctx, memops.ThreadWrite{
 		Spine:       rec,
-		Frontmatter: thr.Frontmatter,
-		Body:        thr.Body,
+		Frontmatter: fm,
+		TurnExcerpt: excerpt,
 	}); err != nil {
 		return fmt.Errorf("engage thread %s: %w", threadID, err)
 	}
@@ -973,12 +975,12 @@ func createNewThread(ctx context.Context, state *State, userInput, responseBody,
 		LastEngagedTurn: state.TurnNumber,
 		HistorySymbols:  mergeHistorySymbols(nil, turnSymbols, 1),
 	}
-	body := newThreadBody(anchors, 1, now, turnAnchors, userInput, responseBody)
+	excerpt := renderTurnExcerpt(1, now, turnAnchors, userInput, responseBody)
 
 	if err := state.Ops.CreateThread(ctx, memops.ThreadWrite{
 		Spine:       rec,
 		Frontmatter: frontmatter,
-		Body:        body,
+		TurnExcerpt: excerpt,
 	}); err != nil {
 		return "", fmt.Errorf("create thread %s: %w", newID, err)
 	}
@@ -1135,9 +1137,9 @@ func evictLowestWeight(out []memops.HistorySymbol, cap int) []memops.HistorySymb
 	return survivors
 }
 
-// appendTurnExcerpt appends a single per-turn excerpt block to body and
-// returns the new body. The block format (spec §2.3 body content
-// guidelines):
+// renderTurnExcerpt renders a single per-turn excerpt block — the unit
+// the new thread format stores as one turns/<n>.md file (spec §2.3 body
+// content guidelines):
 //
 //	## Turn <N> · <RFC3339> · [a, b, c]
 //
@@ -1145,29 +1147,7 @@ func evictLowestWeight(out []memops.HistorySymbol, cap int) []memops.HistorySymb
 //
 //	**agent:** <responseBody with topic tag stripped>
 //
-// Exactly one trailing newline is preserved on the returned body so
-// repeated saves produce byte-identical files when nothing has changed.
-func appendTurnExcerpt(body string, turnN int, when string, anchors []string, userInput, responseBody string) string {
-	excerpt := renderTurnExcerpt(turnN, when, anchors, userInput, responseBody)
-	if body == "" {
-		return excerpt
-	}
-	body = strings.TrimRight(body, "\n") + "\n"
-	return body + "\n" + excerpt
-}
-
-// newThreadBody renders the initial body for a freshly-created thread:
-// a top-level title taken from the first anchor (or fallback) followed
-// by the first turn excerpt.
-func newThreadBody(anchors []string, turnN int, when string, headerAnchors []string, userInput, responseBody string) string {
-	title := "new thread"
-	if len(anchors) > 0 && anchors[0] != "" {
-		title = anchors[0]
-	}
-	excerpt := renderTurnExcerpt(turnN, when, headerAnchors, userInput, responseBody)
-	return "# " + title + "\n\n" + excerpt
-}
-
+// Exactly one trailing newline is preserved.
 func renderTurnExcerpt(turnN int, when string, anchors []string, userInput, responseBody string) string {
 	stripped := responseBody
 	if pr, err := prompt.Parse(responseBody); err == nil {

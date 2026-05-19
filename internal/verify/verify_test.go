@@ -53,11 +53,35 @@ func validRecord(id string) memops.SpineRecord {
 	}
 }
 
-// writeSpine writes records via store.WriteSpine.
+// writeSpine writes records via store.WriteSpine and seeds a matching
+// thread.md for each record so checkThreads finds the threads it expects
+// — verify's thread check warns on a spine record with no thread.md.
+// Records whose ID does not match the canonical pattern are skipped for
+// the thread seed (those tests deliberately exercise a malformed ID).
 func writeSpine(t *testing.T, paths store.PersonantPaths, recs []memops.SpineRecord) {
 	t.Helper()
 	if err := store.WriteSpine(paths.Spine, recs); err != nil {
 		t.Fatalf("WriteSpine: %v", err)
+	}
+	for _, rec := range recs {
+		if !memops.ThreadIDPattern.MatchString(rec.ID) || rec.Project == "" {
+			continue
+		}
+		fm := memops.ThreadFrontmatter{
+			ID:           rec.ID,
+			Project:      rec.Project,
+			Anchors:      rec.Anchors,
+			Summary:      rec.Summary,
+			State:        rec.State,
+			Created:      rec.Created,
+			LastEngaged:  rec.LastEngaged,
+			StateChanged: rec.StateChanged,
+			TurnCount:    rec.TurnCount,
+			RecallFires:  rec.RecallFires,
+		}
+		if err := store.SaveThreadFrontmatter(paths, rec.ID, fm); err != nil {
+			t.Fatalf("SaveThreadFrontmatter %s: %v", rec.ID, err)
+		}
 	}
 }
 

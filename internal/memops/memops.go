@@ -86,10 +86,11 @@ type MemoryOps interface {
 
 	// ---------- Thread operations ----------
 
-	// CreateThread atomically creates a new thread: appends a new spine
-	// record and writes the canonical thread file. Folds in the
-	// createNewThread path currently open-coded in
-	// internal/turn/turn.go (store.SaveThread + store.AppendSpineRecord).
+	// CreateThread atomically creates a new thread: the adapter creates
+	// the thread directory, writes thread.md from w.Frontmatter, appends
+	// w.TurnExcerpt as turn w.Frontmatter.TurnCount, and appends the
+	// spine record. Folds in the createNewThread path currently
+	// open-coded in internal/turn/turn.go.
 	//
 	// `w.Spine.ID` must already be allocated via NextThreadID; the
 	// adapter returns ErrDuplicateThreadID (sentinel via errors.Is) if
@@ -104,29 +105,44 @@ type MemoryOps interface {
 	// passes a fully-built ThreadWrite and trusts the adapter.
 	CreateThread(ctx context.Context, w ThreadWrite) error
 
-	// EngageThread atomically updates an existing thread: overwrites the
-	// spine record and rewrites the thread file with the supplied
-	// frontmatter and body. Folds in the updateExistingThread path
-	// currently open-coded in internal/turn/turn.go
-	// (store.SaveThread + store.UpdateSpineRecord).
+	// EngageThread atomically updates an existing thread: the adapter
+	// rewrites thread.md from w.Frontmatter, appends w.TurnExcerpt as
+	// turn w.Frontmatter.TurnCount (FIFO-windowed in the turns/
+	// directory), and updates the spine record. An empty w.TurnExcerpt
+	// is a frontmatter-only update (the closure path). Folds in the
+	// updateExistingThread path currently open-coded in
+	// internal/turn/turn.go.
 	//
-	// Adapter owns the missing-file fallback. When `w.Spine.ID` exists
-	// in the spine but the thread file is missing (drift state), the
-	// adapter materializes a fresh file from `w.Frontmatter` and
-	// `w.Body` rather than failing. The application never sees this
-	// recovery path — it doesn't synthesize frontmatter from spine,
-	// doesn't deal with ErrThreadFileNotFound on engagement.
+	// Adapter owns the missing-thread-dir recovery. When `w.Spine.ID`
+	// exists in the spine but the thread directory is missing (drift
+	// state), the adapter materializes the directory from w.Frontmatter
+	// rather than failing. The application never sees this recovery path
+	// — it doesn't synthesize frontmatter from spine, doesn't deal with
+	// ErrThreadFileNotFound on engagement.
 	//
 	// Returns ErrThreadNotFound (sentinel) only when the spine itself
 	// has no record matching `w.Spine.ID`.
 	EngageThread(ctx context.Context, w ThreadWrite) error
 
-	// LoadThread returns the full thread (frontmatter + body) for the
-	// given ID. Folds in store.LoadThread. ErrThreadFileNotFound is
-	// returned (via errors.Is) when no on-disk file exists for the ID;
-	// callers distinguish "fresh thread about to be created" from a
-	// parse failure.
+	// LoadThread returns the full thread (frontmatter + recency-windowed
+	// body) for the given ID. Folds in store.LoadThread.
+	// ErrThreadFileNotFound is returned (via errors.Is) when no on-disk
+	// thread exists for the ID; callers distinguish "fresh thread about
+	// to be created" from a parse failure.
+	//
+	// LoadThread assembles the body from every retained turn-excerpt
+	// file. For callers that only need metadata, LoadThreadFrontmatter
+	// is the cheaper choice — it never touches the turns/ directory.
 	LoadThread(ctx context.Context, threadID string) (Thread, error)
+
+	// LoadThreadFrontmatter returns only the thread's frontmatter
+	// metadata — it reads the small bounded thread.md and skips the
+	// turn-excerpt directory entirely. This is the workhorse for the
+	// engagement-update path, which rewrites frontmatter and appends one
+	// turn excerpt without ever loading the prior body. Folds in
+	// store.LoadThreadFrontmatter; ErrThreadFileNotFound semantics match
+	// LoadThread.
+	LoadThreadFrontmatter(ctx context.Context, threadID string) (ThreadFrontmatter, error)
 
 	// FindThread looks up the spine record for threadID. The second
 	// return is false when no record exists. Folds in

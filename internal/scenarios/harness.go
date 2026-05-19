@@ -737,11 +737,11 @@ func peakHistorySymbols(paths store.PersonantPaths) int {
 	}
 	peak := 0
 	for _, r := range recs {
-		thr, err := store.LoadThread(paths, r.ID)
+		fm, err := store.LoadThreadFrontmatter(paths, r.ID)
 		if err != nil {
 			continue
 		}
-		if n := len(thr.Frontmatter.HistorySymbols); n > peak {
+		if n := len(fm.HistorySymbols); n > peak {
 			peak = n
 		}
 	}

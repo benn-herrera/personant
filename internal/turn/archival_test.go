@@ -74,7 +74,7 @@ func seedArchivalThread(t *testing.T, paths store.PersonantPaths, project, thrID
 		},
 		Body: "# " + thrID + "\n\nbody\n",
 	}
-	if err := store.SaveThread(paths, thr); err != nil {
+	if err := store.SeedThread(paths, thr); err != nil {
 		t.Fatalf("seed thread %s: %v", thrID, err)
 	}
 }

@@ -9,7 +9,7 @@ import (
 func TestThreadFilesPath(t *testing.T) {
 	paths := PathsForHome("/home/x")
 	got := ThreadFilesPath(paths, "thr_7")
-	want := "/home/x/threads/thr_7.files.json"
+	want := "/home/x/threads/thr_7/files.json"
 	if got != want {
 		t.Fatalf("ThreadFilesPath = %q, want %q", got, want)
 	}
@@ -34,7 +34,7 @@ func TestLoadThreadFilesMissingSidecar(t *testing.T) {
 
 func TestLoadThreadFilesCorruptSidecar(t *testing.T) {
 	paths := PathsForHome(t.TempDir())
-	if err := os.MkdirAll(paths.ThreadsDir, 0o755); err != nil {
+	if err := os.MkdirAll(ThreadDir(paths, "thr_2"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(ThreadFilesPath(paths, "thr_2"), []byte("{not json"), 0o644); err != nil {

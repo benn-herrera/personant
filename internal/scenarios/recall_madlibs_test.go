@@ -283,7 +283,7 @@ func seedMadlibsThreads(doc madlibsDoc) func(*Harness) error {
 				},
 				Body: "# seed\n",
 			}
-			if err := store.SaveThread(h.Paths, thr); err != nil {
+			if err := store.SeedThread(h.Paths, thr); err != nil {
 				return fmt.Errorf("seedMadlibsThreads: SaveThread %s: %w", rec.ID, err)
 			}
 		}

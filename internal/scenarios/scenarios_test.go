@@ -983,7 +983,7 @@ func seedActiveThread(h *Harness, threadID string, lastEngagedTurn int, lastEnga
 		Body: "# " + threadID + "\n\n## Turn 1 · 2026-04-01T00:00:00Z · [" +
 			strings.Join(anchors, ", ") + "]\n\n**user:** seed\n\n**agent:** seed reply\n",
 	}
-	if err := store.SaveThread(h.Paths, thr); err != nil {
+	if err := store.SeedThread(h.Paths, thr); err != nil {
 		return fmt.Errorf("seedActiveThread: save thread: %w", err)
 	}
 	return nil

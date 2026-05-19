@@ -307,10 +307,10 @@ func TestRebuildSymbolsRoundtrips(t *testing.T) {
 		},
 		Body: "body\n",
 	}
-	if err := store.SaveThread(paths, thr1); err != nil {
+	if err := store.SeedThread(paths, thr1); err != nil {
 		t.Fatalf("SaveThread thr_1: %v", err)
 	}
-	if err := store.SaveThread(paths, thr2); err != nil {
+	if err := store.SeedThread(paths, thr2); err != nil {
 		t.Fatalf("SaveThread thr_2: %v", err)
 	}
 
@@ -385,13 +385,17 @@ func TestLoadAllThreadFrontmatterTolerantOnParseError(t *testing.T) {
 			},
 			Body: "b\n",
 		}
-		if err := store.SaveThread(paths, th); err != nil {
+		if err := store.SeedThread(paths, th); err != nil {
 			t.Fatalf("save %s: %v", id, err)
 		}
 	}
-	// One malformed thread — missing closing delimiter.
-	bad := filepath.Join(paths.ThreadsDir, "thr_3.md")
-	if err := os.WriteFile(bad, []byte("---\nid: thr_3\nproject: prj_1\nbody-but-no-close\n"), 0o644); err != nil {
+	// One malformed thread — thread.md missing the closing delimiter.
+	badDir := filepath.Join(paths.ThreadsDir, "thr_3")
+	if err := os.MkdirAll(badDir, 0o755); err != nil {
+		t.Fatalf("mkdir bad: %v", err)
+	}
+	bad := filepath.Join(badDir, "thread.md")
+	if err := os.WriteFile(bad, []byte("---\nid: thr_3\nproject: prj_1\nno-close\n"), 0o644); err != nil {
 		t.Fatalf("write bad: %v", err)
 	}
 
@@ -432,12 +436,16 @@ func TestListThreadIDsSortedAndFiltered(t *testing.T) {
 		t.Fatalf("mkdir threads: %v", err)
 	}
 
-	// Create a mix of canonical thread files and noise.
-	for _, name := range []string{"thr_3.md", "thr_1.md", "thr_10.md", "notes.md", "thr_abc.md", ".swp"} {
+	// Create a mix of canonical thread directories and noise.
+	for _, name := range []string{"thr_3", "thr_1", "thr_10", "notes", "thr_abc"} {
 		p := filepath.Join(paths.ThreadsDir, name)
-		if err := os.WriteFile(p, []byte("placeholder\n"), 0o644); err != nil {
-			t.Fatalf("write %s: %v", name, err)
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", name, err)
 		}
+	}
+	// A stray loose file under threads/ must be ignored (only dirs count).
+	if err := os.WriteFile(filepath.Join(paths.ThreadsDir, "stray.md"), []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("write stray: %v", err)
 	}
 
 	got, err := store.ListThreadIDs(paths)

@@ -2,9 +2,11 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -21,195 +23,323 @@ func newThreadHome(t *testing.T) PersonantPaths {
 	return paths
 }
 
-func sampleThread() memops.Thread {
-	return memops.Thread{
-		Frontmatter: memops.ThreadFrontmatter{
-			ID:           "thr_42",
-			Project:      "prj_3",
-			Anchors:      []string{"trefoil", "unknot", "body-topology", "electron-shape"},
-			Summary:      "topology investigation; trefoil vs unknot.",
-			State:        memops.ThreadWIP,
-			Created:      "2026-05-06T14:23:00-07:00",
-			LastEngaged:  "2026-05-08T03:12:00-07:00",
-			StateChanged: "2026-05-07T19:42:00-07:00",
-			TurnCount:    24,
-			RecallFires:  3,
-			HistorySymbols: []memops.HistorySymbol{
-				{Raw: "trefoil", Normalized: "trefoil", FirstSeenTurn: 142, Count: 17, Source: memops.SourceDeterministic},
-				{Raw: "(3,2)-torus knot", Normalized: "3-2-torus-knot", FirstSeenTurn: 145, Count: 4, Source: memops.SourceModel},
-				{Raw: "Faddeev-Skyrme", Normalized: "faddeev-skyrme", FirstSeenTurn: 148, Count: 2, Source: memops.SourceUser},
-				{Raw: "Curator pick", Normalized: "curator-pick", FirstSeenTurn: 150, Count: 1, Source: memops.SourceCurator},
-			},
+func sampleFrontmatter() memops.ThreadFrontmatter {
+	return memops.ThreadFrontmatter{
+		ID:           "thr_42",
+		Project:      "prj_3",
+		Anchors:      []string{"trefoil", "unknot", "body-topology", "electron-shape"},
+		Summary:      "topology investigation; trefoil vs unknot.",
+		State:        memops.ThreadWIP,
+		Created:      "2026-05-06T14:23:00-07:00",
+		LastEngaged:  "2026-05-08T03:12:00-07:00",
+		StateChanged: "2026-05-07T19:42:00-07:00",
+		TurnCount:    24,
+		RecallFires:  3,
+		HistorySymbols: []memops.HistorySymbol{
+			{Raw: "trefoil", Normalized: "trefoil", FirstSeenTurn: 142, Count: 17, Source: memops.SourceDeterministic},
+			{Raw: "(3,2)-torus knot", Normalized: "3-2-torus-knot", FirstSeenTurn: 145, Count: 4, Source: memops.SourceModel},
+			{Raw: "Faddeev-Skyrme", Normalized: "faddeev-skyrme", FirstSeenTurn: 148, Count: 2, Source: memops.SourceUser},
+			{Raw: "Curator pick", Normalized: "curator-pick", FirstSeenTurn: 150, Count: 1, Source: memops.SourceCurator},
 		},
-		Body: "# Body topology — trefoil vs unknot\n\nOperational notes go here.\n",
 	}
 }
 
-func TestThreadRoundTrip(t *testing.T) {
-	paths := newThreadHome(t)
-	in := sampleThread()
+// turnExcerpt renders a plausible turn-excerpt block for turn n.
+func turnExcerpt(n int) string {
+	return fmt.Sprintf("## Turn %d\n\n**user:** prompt %d\n\n**agent:** reply %d\n", n, n, n)
+}
 
-	if err := SaveThread(paths, in); err != nil {
-		t.Fatalf("SaveThread: %v", err)
+func TestSaveLoadFrontmatterRoundTrip(t *testing.T) {
+	paths := newThreadHome(t)
+	in := sampleFrontmatter()
+
+	if err := SaveThreadFrontmatter(paths, in.ID, in); err != nil {
+		t.Fatalf("SaveThreadFrontmatter: %v", err)
 	}
-	got, err := LoadThread(paths, in.Frontmatter.ID)
+	got, err := LoadThreadFrontmatter(paths, in.ID)
 	if err != nil {
-		t.Fatalf("LoadThread: %v", err)
+		t.Fatalf("LoadThreadFrontmatter: %v", err)
 	}
-	if !reflect.DeepEqual(got.Frontmatter, in.Frontmatter) {
-		t.Fatalf("frontmatter mismatch:\n got: %#v\nwant: %#v", got.Frontmatter, in.Frontmatter)
-	}
-	if got.Body != in.Body {
-		t.Fatalf("body mismatch:\n got: %q\nwant: %q", got.Body, in.Body)
+	if !reflect.DeepEqual(got, in) {
+		t.Fatalf("frontmatter mismatch:\n got: %#v\nwant: %#v", got, in)
 	}
 }
 
-func TestLoadThreadMissingFile(t *testing.T) {
+func TestSaveThreadFrontmatterWritesTitle(t *testing.T) {
 	paths := newThreadHome(t)
-	_, err := LoadThread(paths, "thr_999")
+	in := sampleFrontmatter()
+	if err := SaveThreadFrontmatter(paths, in.ID, in); err != nil {
+		t.Fatalf("SaveThreadFrontmatter: %v", err)
+	}
+	data, err := os.ReadFile(ThreadMetaPath(paths, in.ID))
+	if err != nil {
+		t.Fatalf("read thread.md: %v", err)
+	}
+	if !strings.Contains(string(data), "# "+in.Summary) {
+		t.Errorf("thread.md missing title line derived from summary:\n%s", data)
+	}
+}
+
+func TestSaveThreadFrontmatterTitleFallsBackToID(t *testing.T) {
+	paths := newThreadHome(t)
+	in := sampleFrontmatter()
+	in.Summary = ""
+	if err := SaveThreadFrontmatter(paths, in.ID, in); err != nil {
+		t.Fatalf("SaveThreadFrontmatter: %v", err)
+	}
+	data, err := os.ReadFile(ThreadMetaPath(paths, in.ID))
+	if err != nil {
+		t.Fatalf("read thread.md: %v", err)
+	}
+	if !strings.Contains(string(data), "# "+in.ID) {
+		t.Errorf("thread.md missing ID-fallback title:\n%s", data)
+	}
+}
+
+func TestLoadThreadFrontmatterMissing(t *testing.T) {
+	paths := newThreadHome(t)
+	_, err := LoadThreadFrontmatter(paths, "thr_999")
 	if !errors.Is(err, memops.ErrThreadFileNotFound) {
 		t.Fatalf("expected memops.ErrThreadFileNotFound; got %v", err)
 	}
 }
 
-func TestLoadThreadMissingClosingDelimiter(t *testing.T) {
+func TestLoadThreadFrontmatterMissingClosingDelimiter(t *testing.T) {
 	paths := newThreadHome(t)
-	path := ThreadPath(paths, "thr_1")
-	if err := os.WriteFile(path, []byte("---\nid: thr_1\nproject: prj_1\nbody-without-close\n"), 0o644); err != nil {
+	dir := ThreadDir(paths, "thr_1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ThreadMetaPath(paths, "thr_1"), []byte("---\nid: thr_1\nproject: prj_1\nno-close\n"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	_, err := LoadThread(paths, "thr_1")
+	_, err := LoadThreadFrontmatter(paths, "thr_1")
 	if err == nil || !strings.Contains(err.Error(), "closing delimiter") {
 		t.Fatalf("expected closing-delimiter error; got %v", err)
 	}
 }
 
-func TestLoadThreadGarbageYAML(t *testing.T) {
+func TestLoadThreadFrontmatterMissingID(t *testing.T) {
 	paths := newThreadHome(t)
-	path := ThreadPath(paths, "thr_1")
-	if err := os.WriteFile(path, []byte("---\nthis is: not: valid: yaml\n---\nbody\n"), 0o644); err != nil {
+	dir := ThreadDir(paths, "thr_1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ThreadMetaPath(paths, "thr_1"), []byte("---\nproject: prj_1\n---\n# t\n"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	_, err := LoadThread(paths, "thr_1")
-	if err == nil || !strings.Contains(err.Error(), "parse yaml") {
-		t.Fatalf("expected yaml parse error; got %v", err)
-	}
-}
-
-func TestLoadThreadMissingID(t *testing.T) {
-	paths := newThreadHome(t)
-	path := ThreadPath(paths, "thr_1")
-	if err := os.WriteFile(path, []byte("---\nproject: prj_1\n---\nbody\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	_, err := LoadThread(paths, "thr_1")
+	_, err := LoadThreadFrontmatter(paths, "thr_1")
 	if err == nil || !strings.Contains(err.Error(), "id") {
 		t.Fatalf("expected missing-id error; got %v", err)
 	}
 }
 
-func TestLoadThreadMissingProject(t *testing.T) {
+func TestLoadThreadFrontmatterMissingProject(t *testing.T) {
 	paths := newThreadHome(t)
-	path := ThreadPath(paths, "thr_1")
-	if err := os.WriteFile(path, []byte("---\nid: thr_1\n---\nbody\n"), 0o644); err != nil {
+	dir := ThreadDir(paths, "thr_1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ThreadMetaPath(paths, "thr_1"), []byte("---\nid: thr_1\n---\n# t\n"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	_, err := LoadThread(paths, "thr_1")
+	_, err := LoadThreadFrontmatter(paths, "thr_1")
 	if err == nil || !strings.Contains(err.Error(), "project") {
 		t.Fatalf("expected missing-project error; got %v", err)
 	}
 }
 
-func TestLoadThreadEmptyBody(t *testing.T) {
+// TestAppendThreadTurnAndReadBody exercises the core append + assemble
+// round-trip: excerpts are written one per file and ReadThreadBody
+// reassembles them in chronological order.
+func TestAppendThreadTurnAndReadBody(t *testing.T) {
 	paths := newThreadHome(t)
-	path := ThreadPath(paths, "thr_1")
-	if err := os.WriteFile(path, []byte("---\nid: thr_1\nproject: prj_1\n---\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
+	fm := sampleFrontmatter()
+	fm.ID = "thr_1"
+	if err := SaveThreadFrontmatter(paths, fm.ID, fm); err != nil {
+		t.Fatalf("SaveThreadFrontmatter: %v", err)
 	}
-	thr, err := LoadThread(paths, "thr_1")
-	if err != nil {
-		t.Fatalf("LoadThread: %v", err)
-	}
-	if thr.Body != "" {
-		t.Errorf("empty body expected; got %q", thr.Body)
-	}
-}
 
-func TestLoadThreadNoOpeningDelimiter(t *testing.T) {
-	paths := newThreadHome(t)
-	path := ThreadPath(paths, "thr_1")
-	if err := os.WriteFile(path, []byte("id: thr_1\nproject: prj_1\nbody\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	_, err := LoadThread(paths, "thr_1")
-	if err == nil || !strings.Contains(err.Error(), "opening delimiter") {
-		t.Fatalf("expected opening-delimiter error; got %v", err)
-	}
-}
-
-func TestSaveThreadBodyWithEmbeddedDelimiters(t *testing.T) {
-	paths := newThreadHome(t)
-	thr := memops.Thread{
-		Frontmatter: memops.ThreadFrontmatter{
-			ID:      "thr_5",
-			Project: "prj_1",
-			Anchors: []string{"a", "b", "c", "d"},
-			Summary: "test",
-			State:   memops.ThreadActive,
-		},
-		Body: "# title\n\nbefore\n\n```\n---\nembedded yaml in code block\n---\n```\n\nafter\n",
-	}
-	if err := SaveThread(paths, thr); err != nil {
-		t.Fatalf("SaveThread: %v", err)
-	}
-	got, err := LoadThread(paths, thr.Frontmatter.ID)
-	if err != nil {
-		t.Fatalf("LoadThread: %v", err)
-	}
-	if got.Body != thr.Body {
-		t.Errorf("body with embedded delimiters lost in round-trip:\n got: %q\nwant: %q", got.Body, thr.Body)
-	}
-}
-
-func TestSaveThreadAtomicNoTempLeftBehind(t *testing.T) {
-	paths := newThreadHome(t)
-	thr := sampleThread()
-	if err := SaveThread(paths, thr); err != nil {
-		t.Fatalf("SaveThread: %v", err)
-	}
-	// Confirm no .thread-*.tmp files remain.
-	entries, err := os.ReadDir(paths.ThreadsDir)
-	if err != nil {
-		t.Fatalf("readdir: %v", err)
-	}
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".thread-") {
-			t.Errorf("temp file leaked: %s", e.Name())
+	for n := 1; n <= 3; n++ {
+		if err := AppendThreadTurn(paths, fm.ID, n, turnExcerpt(n)); err != nil {
+			t.Fatalf("AppendThreadTurn %d: %v", n, err)
 		}
 	}
+	body, err := ReadThreadBody(paths, fm.ID, 0)
+	if err != nil {
+		t.Fatalf("ReadThreadBody: %v", err)
+	}
+	// Chronological order: turn 1 before 2 before 3.
+	i1, i2, i3 := strings.Index(body, "Turn 1"), strings.Index(body, "Turn 2"), strings.Index(body, "Turn 3")
+	if !(i1 >= 0 && i1 < i2 && i2 < i3) {
+		t.Errorf("body not chronological:\n%s", body)
+	}
 }
 
-func TestSaveThreadStableFieldOrder(t *testing.T) {
+func TestReadThreadBodyEmptyWhenNoTurns(t *testing.T) {
 	paths := newThreadHome(t)
-	thr := sampleThread()
-	if err := SaveThread(paths, thr); err != nil {
-		t.Fatalf("SaveThread #1: %v", err)
+	fm := sampleFrontmatter()
+	fm.ID = "thr_1"
+	if err := SaveThreadFrontmatter(paths, fm.ID, fm); err != nil {
+		t.Fatalf("SaveThreadFrontmatter: %v", err)
 	}
-	first, err := os.ReadFile(ThreadPath(paths, thr.Frontmatter.ID))
+	body, err := ReadThreadBody(paths, fm.ID, 0)
+	if err != nil {
+		t.Fatalf("ReadThreadBody: %v", err)
+	}
+	if body != "" {
+		t.Errorf("expected empty body; got %q", body)
+	}
+}
+
+// TestReadThreadBodyBudgetStopsEarly: with a small budget, ReadThreadBody
+// reads newest-first and stops, so only the most recent excerpt(s)
+// appear.
+func TestReadThreadBodyBudgetStopsEarly(t *testing.T) {
+	paths := newThreadHome(t)
+	fm := sampleFrontmatter()
+	fm.ID = "thr_1"
+	if err := SaveThreadFrontmatter(paths, fm.ID, fm); err != nil {
+		t.Fatalf("SaveThreadFrontmatter: %v", err)
+	}
+	for n := 1; n <= 10; n++ {
+		if err := AppendThreadTurn(paths, fm.ID, n, turnExcerpt(n)); err != nil {
+			t.Fatalf("AppendThreadTurn %d: %v", n, err)
+		}
+	}
+	// Budget large enough for only the single newest excerpt.
+	budget := len(turnExcerpt(10)) - 1
+	body, err := ReadThreadBody(paths, fm.ID, budget)
+	if err != nil {
+		t.Fatalf("ReadThreadBody: %v", err)
+	}
+	if !strings.Contains(body, "Turn 10") {
+		t.Errorf("budgeted body missing newest turn:\n%s", body)
+	}
+	if strings.Contains(body, "Turn 1\n") {
+		t.Errorf("budgeted body should not reach turn 1:\n%s", body)
+	}
+}
+
+// TestAppendThreadTurnFIFOEviction: appending past ThreadTurnWindow
+// evicts the lowest-numbered excerpts.
+func TestAppendThreadTurnFIFOEviction(t *testing.T) {
+	paths := newThreadHome(t)
+	fm := sampleFrontmatter()
+	fm.ID = "thr_1"
+	if err := SaveThreadFrontmatter(paths, fm.ID, fm); err != nil {
+		t.Fatalf("SaveThreadFrontmatter: %v", err)
+	}
+	total := ThreadTurnWindow + 5
+	for n := 1; n <= total; n++ {
+		if err := AppendThreadTurn(paths, fm.ID, n, turnExcerpt(n)); err != nil {
+			t.Fatalf("AppendThreadTurn %d: %v", n, err)
+		}
+	}
+	nums, err := turnFileNumbers(ThreadTurnsDir(paths, fm.ID))
+	if err != nil {
+		t.Fatalf("turnFileNumbers: %v", err)
+	}
+	if len(nums) != ThreadTurnWindow {
+		t.Fatalf("retained %d turn files, want %d", len(nums), ThreadTurnWindow)
+	}
+	// The oldest 5 must be gone; the lowest retained is turn 6.
+	if nums[0] != total-ThreadTurnWindow+1 {
+		t.Errorf("lowest retained turn = %d, want %d", nums[0], total-ThreadTurnWindow+1)
+	}
+	if nums[len(nums)-1] != total {
+		t.Errorf("highest retained turn = %d, want %d", nums[len(nums)-1], total)
+	}
+}
+
+func TestAppendThreadTurnEmptyExcerptIsNoOp(t *testing.T) {
+	paths := newThreadHome(t)
+	fm := sampleFrontmatter()
+	fm.ID = "thr_1"
+	if err := SaveThreadFrontmatter(paths, fm.ID, fm); err != nil {
+		t.Fatalf("SaveThreadFrontmatter: %v", err)
+	}
+	if err := AppendThreadTurn(paths, fm.ID, 1, ""); err != nil {
+		t.Fatalf("AppendThreadTurn empty: %v", err)
+	}
+	body, err := ReadThreadBody(paths, fm.ID, 0)
+	if err != nil {
+		t.Fatalf("ReadThreadBody: %v", err)
+	}
+	if body != "" {
+		t.Errorf("empty-excerpt append wrote a turn file; body=%q", body)
+	}
+}
+
+func TestLoadThreadAssemblesBody(t *testing.T) {
+	paths := newThreadHome(t)
+	fm := sampleFrontmatter()
+	fm.ID = "thr_1"
+	if err := SaveThreadFrontmatter(paths, fm.ID, fm); err != nil {
+		t.Fatalf("SaveThreadFrontmatter: %v", err)
+	}
+	if err := AppendThreadTurn(paths, fm.ID, 1, turnExcerpt(1)); err != nil {
+		t.Fatalf("AppendThreadTurn: %v", err)
+	}
+	thr, err := LoadThread(paths, fm.ID)
+	if err != nil {
+		t.Fatalf("LoadThread: %v", err)
+	}
+	if thr.Frontmatter.ID != fm.ID {
+		t.Errorf("frontmatter ID = %q, want %q", thr.Frontmatter.ID, fm.ID)
+	}
+	if !strings.Contains(thr.Body, "Turn 1") {
+		t.Errorf("assembled body missing turn 1:\n%s", thr.Body)
+	}
+}
+
+func TestSeedThreadSplitsBodyIntoTurns(t *testing.T) {
+	paths := newThreadHome(t)
+	fm := sampleFrontmatter()
+	fm.ID = "thr_1"
+	thr := memops.Thread{
+		Frontmatter: fm,
+		Body:        "# title\n\n" + turnExcerpt(7) + "\n" + turnExcerpt(8),
+	}
+	if err := SeedThread(paths, thr); err != nil {
+		t.Fatalf("SeedThread: %v", err)
+	}
+	nums, err := turnFileNumbers(ThreadTurnsDir(paths, fm.ID))
+	if err != nil {
+		t.Fatalf("turnFileNumbers: %v", err)
+	}
+	if !reflect.DeepEqual(nums, []int{7, 8}) {
+		t.Errorf("seeded turn numbers = %v, want [7 8]", nums)
+	}
+	body, err := ReadThreadBody(paths, fm.ID, 0)
+	if err != nil {
+		t.Fatalf("ReadThreadBody: %v", err)
+	}
+	if strings.Contains(body, "# title") {
+		t.Errorf("title leaked into turn body:\n%s", body)
+	}
+}
+
+func TestSaveThreadFrontmatterStableFieldOrder(t *testing.T) {
+	paths := newThreadHome(t)
+	fm := sampleFrontmatter()
+	if err := SaveThreadFrontmatter(paths, fm.ID, fm); err != nil {
+		t.Fatalf("save #1: %v", err)
+	}
+	first, err := os.ReadFile(ThreadMetaPath(paths, fm.ID))
 	if err != nil {
 		t.Fatalf("read first: %v", err)
 	}
-	if err := SaveThread(paths, thr); err != nil {
-		t.Fatalf("SaveThread #2: %v", err)
+	if err := SaveThreadFrontmatter(paths, fm.ID, fm); err != nil {
+		t.Fatalf("save #2: %v", err)
 	}
-	second, err := os.ReadFile(ThreadPath(paths, thr.Frontmatter.ID))
+	second, err := os.ReadFile(ThreadMetaPath(paths, fm.ID))
 	if err != nil {
 		t.Fatalf("read second: %v", err)
 	}
 	if string(first) != string(second) {
 		t.Errorf("byte-identical re-save expected; diff:\nfirst:\n%s\nsecond:\n%s", first, second)
 	}
-	// Field-order: id should appear before project, before anchors, before history_symbols.
 	got := string(first)
 	idx := func(s string) int { return strings.Index(got, s) }
 	if !(idx("id:") < idx("project:") &&
@@ -219,52 +349,61 @@ func TestSaveThreadStableFieldOrder(t *testing.T) {
 	}
 }
 
-func TestSaveThreadIdempotentBodyTrailingNewline(t *testing.T) {
+func TestSaveThreadFrontmatterAtomicNoTempLeftBehind(t *testing.T) {
 	paths := newThreadHome(t)
-	// Body without trailing newline; SaveThread should add exactly one.
-	thr := memops.Thread{
-		Frontmatter: memops.ThreadFrontmatter{
-			ID: "thr_7", Project: "prj_1",
-			Anchors: []string{"a", "b", "c", "d"}, Summary: "x", State: memops.ThreadActive,
-		},
-		Body: "# title\n\nno trailing newline",
+	fm := sampleFrontmatter()
+	if err := SaveThreadFrontmatter(paths, fm.ID, fm); err != nil {
+		t.Fatalf("SaveThreadFrontmatter: %v", err)
 	}
-	if err := SaveThread(paths, thr); err != nil {
-		t.Fatalf("save 1: %v", err)
-	}
-	loaded1, err := LoadThread(paths, thr.Frontmatter.ID)
+	entries, err := os.ReadDir(ThreadDir(paths, fm.ID))
 	if err != nil {
-		t.Fatalf("load 1: %v", err)
+		t.Fatalf("readdir: %v", err)
 	}
-	if err := SaveThread(paths, loaded1); err != nil {
-		t.Fatalf("save 2: %v", err)
-	}
-	first, _ := os.ReadFile(ThreadPath(paths, thr.Frontmatter.ID))
-	loaded2, _ := LoadThread(paths, thr.Frontmatter.ID)
-	if err := SaveThread(paths, loaded2); err != nil {
-		t.Fatalf("save 3: %v", err)
-	}
-	second, _ := os.ReadFile(ThreadPath(paths, thr.Frontmatter.ID))
-	if string(first) != string(second) {
-		t.Errorf("repeated save-load-save should be byte-identical; diff:\nfirst:\n%s\nsecond:\n%s", first, second)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".thread-meta-") {
+			t.Errorf("temp file leaked: %s", e.Name())
+		}
 	}
 }
 
-func TestSaveThreadRequiresIDAndProject(t *testing.T) {
+func TestSaveThreadFrontmatterRequiresIDAndProject(t *testing.T) {
 	paths := newThreadHome(t)
-	if err := SaveThread(paths, memops.Thread{}); err == nil {
-		t.Errorf("expected error for empty frontmatter")
+	if err := SaveThreadFrontmatter(paths, "", memops.ThreadFrontmatter{}); err == nil {
+		t.Errorf("expected error for empty id")
 	}
-	if err := SaveThread(paths, memops.Thread{Frontmatter: memops.ThreadFrontmatter{ID: "thr_1"}}); err == nil {
+	if err := SaveThreadFrontmatter(paths, "thr_1", memops.ThreadFrontmatter{ID: "thr_1"}); err == nil {
 		t.Errorf("expected error for missing project")
 	}
 }
 
-func TestThreadPathFormat(t *testing.T) {
+func TestThreadPathFormats(t *testing.T) {
 	paths := PathsForHome("/tmp/p")
-	got := ThreadPath(paths, "thr_42")
-	want := filepath.Join("/tmp/p", "threads", "thr_42.md")
-	if got != want {
-		t.Errorf("ThreadPath: got %q want %q", got, want)
+	if got, want := ThreadDir(paths, "thr_42"), filepath.Join("/tmp/p", "threads", "thr_42"); got != want {
+		t.Errorf("ThreadDir: got %q want %q", got, want)
+	}
+	if got, want := ThreadMetaPath(paths, "thr_42"), filepath.Join("/tmp/p", "threads", "thr_42", "thread.md"); got != want {
+		t.Errorf("ThreadMetaPath: got %q want %q", got, want)
+	}
+	if got, want := ThreadTurnsDir(paths, "thr_42"), filepath.Join("/tmp/p", "threads", "thr_42", "turns"); got != want {
+		t.Errorf("ThreadTurnsDir: got %q want %q", got, want)
+	}
+}
+
+func TestListThreadIDsIgnoresLooseFiles(t *testing.T) {
+	paths := newThreadHome(t)
+	for _, id := range []string{"thr_2", "thr_1"} {
+		if err := os.MkdirAll(ThreadDir(paths, id), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(paths.ThreadsDir, "loose.md"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ListThreadIDs(paths)
+	if err != nil {
+		t.Fatalf("ListThreadIDs: %v", err)
+	}
+	if !sort.StringsAreSorted(got) || !reflect.DeepEqual(got, []string{"thr_1", "thr_2"}) {
+		t.Errorf("ListThreadIDs = %v, want [thr_1 thr_2]", got)
 	}
 }

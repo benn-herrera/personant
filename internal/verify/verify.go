@@ -100,6 +100,11 @@ func Verify(paths store.PersonantPaths, opts VerifyOptions) (Report, error) {
 	// Project meta: validate every projects/prj_<n>/meta.json that exists.
 	checkProjectMetas(&report, paths.ProjectsDir)
 
+	// Threads: every spine record's thread.md must exist and parse. The
+	// turns/ directory is structural and recency-windowed; verify does
+	// not read every excerpt, only confirms the bounded metadata file.
+	checkThreads(&report, paths, spine)
+
 	// Index drift: delegate to internal/index.
 	idxOpts := index.Options{Quiet: true}
 	chk, ierr := index.Check(paths, idxOpts)
@@ -214,6 +219,41 @@ func checkSpine(report *Report, spine []memops.SpineRecord, entryMax int, knownP
 		if rec.RecallFires < 0 {
 			report.Errors = append(report.Errors, Finding{Path: loc, Field: "recall_fires",
 				Message: fmt.Sprintf("recall_fires %d < 0", rec.RecallFires)})
+		}
+	}
+}
+
+// checkThreads validates that every spine record has a parseable
+// threads/thr_<n>/thread.md whose frontmatter id/project agree with the
+// spine. A missing thread.md is a warning, not an error — v0.1 has no
+// path that legitimately strands a spine record without a thread, but
+// Phase 4 retirement may; surfacing it as a warning keeps that future
+// code landable. The recency-windowed turns/ directory is structural;
+// checkThreads does not read excerpt files.
+func checkThreads(report *Report, paths store.PersonantPaths, spine []memops.SpineRecord) {
+	for i, rec := range spine {
+		if rec.ID == "" {
+			continue // already flagged by checkSpine
+		}
+		loc := filepath.Join("threads", rec.ID, "thread.md")
+		fm, err := store.LoadThreadFrontmatter(paths, rec.ID)
+		if err != nil {
+			if errors.Is(err, memops.ErrThreadFileNotFound) {
+				report.Warnings = append(report.Warnings, Finding{Path: loc,
+					Message: fmt.Sprintf("spine.jsonl[%d] %s has no thread.md", i+1, rec.ID)})
+				continue
+			}
+			report.Errors = append(report.Errors, Finding{Path: loc,
+				Message: fmt.Sprintf("thread.md unreadable or malformed: %v", err)})
+			continue
+		}
+		if fm.ID != rec.ID {
+			report.Errors = append(report.Errors, Finding{Path: loc, Field: "id",
+				Message: fmt.Sprintf("frontmatter id %q != spine id %q", fm.ID, rec.ID)})
+		}
+		if fm.Project != rec.Project {
+			report.Errors = append(report.Errors, Finding{Path: loc, Field: "project",
+				Message: fmt.Sprintf("frontmatter project %q != spine project %q", fm.Project, rec.Project)})
 		}
 	}
 }

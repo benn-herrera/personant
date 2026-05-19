@@ -41,7 +41,10 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
   spine.jsonl                       # canonical, sorted lexically by id
   symbols.jsonl                     # [derived] inverse symbol → threads index
   threads/
-    thr_<id>.md                     # one file per thread; markdown + YAML frontmatter
+    thr_<id>/                       # one directory per thread (see §2.3)
+      thread.md                     # frontmatter (canonical) + title; no accumulating body
+      turns/                        # serial FIFO-windowed turn-excerpt files (0000024.md)
+      files.json                    # [§3.9] tracked-file sidecar
   projects/
     prj_<n>/                        # stable internal handle (see §2.5.1 / §4.5)
       meta.json                     # project metadata (canonical)
@@ -161,9 +164,17 @@ thr_88 [trefoil, unknot, body-topology, electron-shape] — electron body-topolo
 
 The display form is what the LLM sees in working context; it is generated from the JSONL record, not stored.
 
-### 2.3 Thread file format (`threads/thr_<id>.md`)
+### 2.3 Thread file format (`threads/thr_<id>/`)
 
-Markdown body with YAML frontmatter. Frontmatter is canonical for metadata; body is operational content (turn excerpts, decisions, working notes — not pedagogy).
+A thread is a **directory**, `threads/thr_<id>/`, holding three things:
+
+- **`thread.md`** — YAML frontmatter (canonical for metadata) followed by a single `# <title>` line. Small and bounded; no accumulating body. Rewritten in full on every engagement — that is cheap precisely because it carries no body.
+- **`turns/`** — a directory of serial turn-excerpt files, one per primary-engagement turn, named by the thread's turn number zero-padded to 7 digits (`turns/0000024.md`). Each file holds that turn's terse operational excerpt.
+- **`files.json`** — the §3.9 tracked-file sidecar (see §3.9).
+
+The single growing markdown file of earlier drafts is gone: appending a turn was O(thread length) per engagement and O(K²) over a thread's life, which the §11.1 simulation surfaced as a severe superlinear slowdown. Splitting the body into one file per turn makes appending O(1) — write one small file, FIFO-evict one — and decouples per-turn write cost from thread length.
+
+`thread.md`:
 
 ```markdown
 ---
@@ -187,15 +198,24 @@ history_symbols:
 ---
 
 # Body topology — trefoil vs unknot
-
-[Operational body content. Terse, accumulated as thread progressed.]
 ```
+
+One turn-excerpt file, `turns/0000024.md`:
+
+```markdown
+## Turn 24 · 2026-05-08T03:12:00-07:00 · [trefoil, unknot, body-topology]
+
+**user:** [terse prompt excerpt]
+
+**agent:** [terse response excerpt, topic tag stripped]
+```
+
+**FIFO recency window.** The `turns/` directory retains at most `ThreadTurnWindow` excerpt files (currently 512; a calibratable count). Appending a new excerpt past that bound deletes the lowest-numbered files until the count is back within the window. The live thread body — what the working-set assembler reads — is therefore **recency-windowed**: it holds the last `ThreadTurnWindow` turn-excerpts. Older operational detail is not lost: it remains recoverable from the §2.8 event log, and the distilled symbol memory persists in frontmatter `history_symbols`. The body assembled for a prompt is read newest-first up to a byte budget, then joined oldest→newest so it reads naturally top-to-bottom.
 
 **Body content guidelines:**
 - This is operational, not pedagogical. Terse; machine-friendly.
-- Typical structure: chronological excerpts of turns where this thread was primary engagement, plus curator-summarized milestones at retirement.
-- No required heading structure beyond a top-level title matching the thread's working name.
-- The retirement summary (the same text that becomes the spine `summary`) is not duplicated in the body — the body holds detail; the summary is in frontmatter only.
+- Each `turns/<n>.md` file is one turn's excerpt — a turn where this thread was the primary engagement. Files carry no file-level title (the title lives in `thread.md`).
+- The retirement summary (the same text that becomes the spine `summary`) is not duplicated in any turn file — the turn files hold detail; the summary is in frontmatter only.
 
 **Frontmatter `history_symbols` structure:**
 
@@ -1167,7 +1187,7 @@ Mechanism:
 1. Model emits topic tag at response start.
 2. Runtime parses tag (per §5.1.2) before consuming any response body.
 3. For each `thr_<n>` in the tag not currently in Layer B:
-   - Read `threads/thr_<n>.md` (frontmatter + body).
+   - Read `threads/thr_<n>/` (frontmatter from `thread.md`, body assembled from the recency-windowed `turns/` excerpts; see §2.3).
    - Truncate to budget allowance (subject to §3.1 layer caps).
    - Inject as a `thread.fetched` context delta (per §3.0).
 4. Re-prompt the model with the augmented context; the model's actual

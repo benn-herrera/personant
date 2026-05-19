@@ -44,7 +44,7 @@ func seedThread(t *testing.T, paths store.PersonantPaths, id string, anchors []s
 		},
 		Body: body,
 	}
-	if err := store.SaveThread(paths, thr); err != nil {
+	if err := store.SeedThread(paths, thr); err != nil {
 		t.Fatalf("seed thread %s: %v", id, err)
 	}
 }

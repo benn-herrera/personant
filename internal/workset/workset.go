@@ -353,7 +353,7 @@ func renderLayerB(state State, budget Budget, logf func(string, ...any)) string 
 	rendered := make([]string, 0, limit)
 	for i := 0; i < limit; i++ {
 		id := state.ActiveThreads[i]
-		body, err := renderThreadBody(state.Paths, id, logf)
+		body, err := renderThreadBody(state.Paths, id, perThread, logf)
 		if err != nil {
 			logf("workset: layer B: %s: %v", id, err)
 			continue
@@ -367,7 +367,7 @@ func renderLayerB(state State, budget Budget, logf func(string, ...any)) string 
 	return truncateToBudget(joined, budget.LayerB, "Layer B")
 }
 
-// renderThreadBody loads a thread file and renders it as:
+// renderThreadBody loads a thread and renders it as:
 //
 //	# <summary> (<id>) — <state>
 //	[anchors]: a, b, c, d
@@ -377,16 +377,23 @@ func renderLayerB(state State, budget Budget, logf func(string, ...any)) string 
 //	=== tracked files ===
 //	<one block per §3.9.2 tracked file>
 //
-// The body is the markdown content from the thread file, verbatim. The
+// The body is assembled from the thread's recency-windowed turn-excerpt
+// files. byteBudget is passed to store.ReadThreadBody so only ~budget
+// worth of the most recent excerpts is read (newest-first), not all
+// retained turns — the outer truncateToBudget still trims the rendered
+// result, but the budget hint keeps the read itself bounded. The
 // tracked-files section is appended only when the thread has a
-// .files.json sidecar with ≥1 entry; absent or empty sidecar renders
+// files.json sidecar with ≥1 entry; absent or empty sidecar renders
 // nothing extra, keeping no-tracked-file threads byte-identical.
-func renderThreadBody(paths store.PersonantPaths, id string, logf func(string, ...any)) (string, error) {
-	thr, err := store.LoadThread(paths, id)
+func renderThreadBody(paths store.PersonantPaths, id string, byteBudget int, logf func(string, ...any)) (string, error) {
+	fm, err := store.LoadThreadFrontmatter(paths, id)
 	if err != nil {
 		return "", err
 	}
-	fm := thr.Frontmatter
+	body, err := store.ReadThreadBody(paths, id, byteBudget)
+	if err != nil {
+		return "", err
+	}
 	state := strings.ToUpper(string(fm.State))
 	if state == "" {
 		state = "UNKNOWN"
@@ -405,7 +412,7 @@ func renderThreadBody(paths store.PersonantPaths, id string, logf func(string, .
 	b.WriteString("\n[anchors]: ")
 	b.WriteString(strings.Join(fm.Anchors, ", "))
 	b.WriteString("\n\n")
-	b.WriteString(strings.TrimRight(thr.Body, "\n"))
+	b.WriteString(strings.TrimRight(body, "\n"))
 
 	appendTrackedFiles(&b, paths, id, logf)
 	return b.String(), nil

@@ -68,9 +68,10 @@ var _ memops.MemoryOps = (*FileAdapter)(nil)
 
 // ---------- Thread operations ----------
 
-// CreateThread atomically writes the thread file then appends the
+// CreateThread atomically materializes a new thread: writes thread.md
+// from the frontmatter, appends the first turn excerpt, then appends the
 // spine record. Pre-checks for a duplicate ID so a duplicate does not
-// produce a stray thread file. AppendSpineRecord also enforces
+// produce a stray thread directory. AppendSpineRecord also enforces
 // uniqueness as belt-and-braces; the pre-check is the visible guard.
 func (a *FileAdapter) CreateThread(ctx context.Context, w memops.ThreadWrite) error {
 	if err := ctx.Err(); err != nil {
@@ -81,8 +82,8 @@ func (a *FileAdapter) CreateThread(ctx context.Context, w memops.ThreadWrite) er
 	} else if found {
 		return fmt.Errorf("fileadapter: create thread %s: %w", w.Spine.ID, memops.ErrDuplicateThreadID)
 	}
-	if err := store.SaveThread(a.paths, memops.Thread{Frontmatter: w.Frontmatter, Body: w.Body}); err != nil {
-		return fmt.Errorf("fileadapter: save thread file: %w", err)
+	if err := writeThread(a.paths, w); err != nil {
+		return fmt.Errorf("fileadapter: create thread: %w", err)
 	}
 	if err := store.AppendSpineRecord(a.paths, w.Spine); err != nil {
 		return fmt.Errorf("fileadapter: append spine: %w", err)
@@ -90,10 +91,11 @@ func (a *FileAdapter) CreateThread(ctx context.Context, w memops.ThreadWrite) er
 	return nil
 }
 
-// EngageThread rewrites the thread file and updates the spine record.
-// Owns the missing-file fallback: if the spine record exists but the
-// thread file is absent (drift state), the adapter materializes a fresh
-// file from the supplied ThreadWrite rather than failing.
+// EngageThread rewrites thread.md and appends one turn excerpt, then
+// updates the spine record. Owns the missing-thread-dir recovery: if the
+// spine record exists but the thread directory is absent (drift state),
+// SaveThreadFrontmatter recreates the directory — no special case
+// needed.
 func (a *FileAdapter) EngageThread(ctx context.Context, w memops.ThreadWrite) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -103,11 +105,8 @@ func (a *FileAdapter) EngageThread(ctx context.Context, w memops.ThreadWrite) er
 	} else if !found {
 		return fmt.Errorf("fileadapter: engage thread %s: %w", w.Spine.ID, memops.ErrThreadNotFound)
 	}
-	// SaveThread is an unconditional write — it creates the file if
-	// absent. That is the missing-file fallback in one line: no special
-	// case needed.
-	if err := store.SaveThread(a.paths, memops.Thread{Frontmatter: w.Frontmatter, Body: w.Body}); err != nil {
-		return fmt.Errorf("fileadapter: save thread file: %w", err)
+	if err := writeThread(a.paths, w); err != nil {
+		return fmt.Errorf("fileadapter: engage thread: %w", err)
 	}
 	if err := store.UpdateSpineRecord(a.paths, w.Spine); err != nil {
 		return fmt.Errorf("fileadapter: update spine: %w", err)
@@ -115,7 +114,24 @@ func (a *FileAdapter) EngageThread(ctx context.Context, w memops.ThreadWrite) er
 	return nil
 }
 
-// LoadThread reads and parses the thread file for threadID.
+// writeThread persists a ThreadWrite to the substrate: it rewrites the
+// bounded thread.md frontmatter file, then appends w.TurnExcerpt as turn
+// w.Frontmatter.TurnCount (a no-op when the excerpt is empty — the
+// closure path's frontmatter-only update). The turn-excerpt directory is
+// FIFO-windowed by store.AppendThreadTurn. Shared by CreateThread and
+// EngageThread; the only difference between the two is the spine op.
+func writeThread(paths store.PersonantPaths, w memops.ThreadWrite) error {
+	if err := store.SaveThreadFrontmatter(paths, w.Frontmatter.ID, w.Frontmatter); err != nil {
+		return fmt.Errorf("save thread.md: %w", err)
+	}
+	if err := store.AppendThreadTurn(paths, w.Frontmatter.ID, w.Frontmatter.TurnCount, w.TurnExcerpt); err != nil {
+		return fmt.Errorf("append turn excerpt: %w", err)
+	}
+	return nil
+}
+
+// LoadThread reads a thread's frontmatter and assembles its body from
+// the recency-windowed turn-excerpt files.
 func (a *FileAdapter) LoadThread(ctx context.Context, threadID string) (memops.Thread, error) {
 	if err := ctx.Err(); err != nil {
 		return memops.Thread{}, err
@@ -125,6 +141,19 @@ func (a *FileAdapter) LoadThread(ctx context.Context, threadID string) (memops.T
 		return memops.Thread{}, fmt.Errorf("fileadapter: load thread: %w", err)
 	}
 	return thr, nil
+}
+
+// LoadThreadFrontmatter reads only the thread's thread.md metadata,
+// skipping the turn-excerpt directory.
+func (a *FileAdapter) LoadThreadFrontmatter(ctx context.Context, threadID string) (memops.ThreadFrontmatter, error) {
+	if err := ctx.Err(); err != nil {
+		return memops.ThreadFrontmatter{}, err
+	}
+	fm, err := store.LoadThreadFrontmatter(a.paths, threadID)
+	if err != nil {
+		return memops.ThreadFrontmatter{}, fmt.Errorf("fileadapter: load thread frontmatter: %w", err)
+	}
+	return fm, nil
 }
 
 // FindThread looks up the spine record for threadID.
@@ -213,18 +242,18 @@ func (a *FileAdapter) RecordRecallFire(ctx context.Context, threadID string) err
 	if err := store.UpdateSpineRecord(a.paths, rec); err != nil {
 		return fmt.Errorf("fileadapter: update spine: %w", err)
 	}
-	thr, err := store.LoadThread(a.paths, threadID)
+	fm, err := store.LoadThreadFrontmatter(a.paths, threadID)
 	if err != nil {
 		if errors.Is(err, memops.ErrThreadFileNotFound) {
 			// Drift: spine is canonical; frontmatter re-syncs on next
 			// engagement. Not a failure.
 			return nil
 		}
-		return fmt.Errorf("fileadapter: load thread: %w", err)
+		return fmt.Errorf("fileadapter: load thread frontmatter: %w", err)
 	}
-	thr.Frontmatter.RecallFires = newCount
-	if err := store.SaveThread(a.paths, thr); err != nil {
-		return fmt.Errorf("fileadapter: save thread file: %w", err)
+	fm.RecallFires = newCount
+	if err := store.SaveThreadFrontmatter(a.paths, threadID, fm); err != nil {
+		return fmt.Errorf("fileadapter: save thread.md: %w", err)
 	}
 	return nil
 }
@@ -254,28 +283,27 @@ func (a *FileAdapter) ArchiveThread(ctx context.Context, threadID string) error 
 		return fmt.Errorf("fileadapter: archive thread %s: %w", threadID, memops.ErrThreadNotFound)
 	}
 
-	// Measure the body byte size before deletion. A missing thread file is
+	// Measure the body byte size before deletion. A missing thread is
 	// size 0, not an error — the spine record alone is enough to archive.
-	// NOTE: bodySize is the thread BODY size only — it excludes the YAML
-	// frontmatter and the spine.jsonl line. v0.2 archival sizing against
-	// this stat must account for that: real on-disk cost is body +
-	// frontmatter + one spine line.
+	// NOTE: bodySize is the assembled turn-excerpt body only — it
+	// excludes the YAML frontmatter and the spine.jsonl line. v0.2
+	// archival sizing against this stat must account for that: real
+	// on-disk cost is body + frontmatter + one spine line. The body is
+	// also recency-windowed (store.ThreadTurnWindow), so it is the live
+	// window, not the thread's full history.
 	bodySize := 0
-	if thr, err := store.LoadThread(a.paths, threadID); err == nil {
-		bodySize = len(thr.Body)
+	if body, err := store.ReadThreadBody(a.paths, threadID, 0); err == nil {
+		bodySize = len(body)
 	} else if !errors.Is(err, memops.ErrThreadFileNotFound) {
-		return fmt.Errorf("fileadapter: archive thread %s: load: %w", threadID, err)
+		return fmt.Errorf("fileadapter: archive thread %s: read body: %w", threadID, err)
 	}
 
-	// Delete the thread file (a missing file is fine — already gone).
-	if err := os.Remove(store.ThreadPath(a.paths, threadID)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("fileadapter: archive thread %s: remove file: %w", threadID, err)
-	}
-	// Delete the §3.9 tracked-file sidecar so it is not left orphaned. A
-	// thread with no tracked files never had one — a missing sidecar is
-	// fine, not an error.
-	if err := os.Remove(store.ThreadFilesPath(a.paths, threadID)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("fileadapter: archive thread %s: remove file-store sidecar: %w", threadID, err)
+	// Delete the entire thread directory — thread.md, turns/, and
+	// files.json all go together. A missing directory is fine (already
+	// gone). os.RemoveAll subsumes the explicit §3.9 sidecar delete that
+	// the single-file format needed.
+	if err := os.RemoveAll(store.ThreadDir(a.paths, threadID)); err != nil {
+		return fmt.Errorf("fileadapter: archive thread %s: remove dir: %w", threadID, err)
 	}
 	if err := store.RemoveSpineRecord(a.paths, threadID); err != nil {
 		return fmt.Errorf("fileadapter: archive thread %s: remove spine: %w", threadID, err)

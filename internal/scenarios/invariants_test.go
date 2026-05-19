@@ -77,7 +77,7 @@ func seedThread(t *testing.T, h *Harness, rec memops.SpineRecord) {
 		},
 		Body: "# seed\n",
 	}
-	if err := store.SaveThread(h.Paths, thr); err != nil {
+	if err := store.SeedThread(h.Paths, thr); err != nil {
 		t.Fatalf("SaveThread: %v", err)
 	}
 	if err := indexRebuild(h.Paths); err != nil {
@@ -171,7 +171,7 @@ func TestVerifyProjectReferences_FailsOnUnknownProject(t *testing.T) {
 			TurnCount: rec.TurnCount,
 		},
 	}
-	if err := store.SaveThread(h.Paths, thr); err != nil {
+	if err := store.SeedThread(h.Paths, thr); err != nil {
 		t.Fatalf("save thread: %v", err)
 	}
 	if err := VerifyProjectReferences(h); err == nil {

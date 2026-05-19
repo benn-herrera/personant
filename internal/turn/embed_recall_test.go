@@ -43,7 +43,7 @@ func seedThreadWithBody(t *testing.T, paths store.PersonantPaths, project, thrID
 		},
 		Body: body,
 	}
-	if err := store.SaveThread(paths, thr); err != nil {
+	if err := store.SeedThread(paths, thr); err != nil {
 		t.Fatalf("seed thread %s: %v", thrID, err)
 	}
 }

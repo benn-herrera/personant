@@ -137,7 +137,7 @@ func VerifyThreadFrontmatterMatchesSpine(h *Harness) error {
 		return fmt.Errorf("VerifyThreadFrontmatterMatchesSpine: read spine: %w", err)
 	}
 	for i, r := range recs {
-		thr, err := store.LoadThread(h.Paths, r.ID)
+		fm, err := store.LoadThreadFrontmatter(h.Paths, r.ID)
 		if err != nil {
 			if errors.Is(err, memops.ErrThreadFileNotFound) {
 				h.T.Logf("VerifyThreadFrontmatterMatchesSpine: spine[%d] %s has no thread file (suspicious in v0.1)", i+1, r.ID)
@@ -145,7 +145,6 @@ func VerifyThreadFrontmatterMatchesSpine(h *Harness) error {
 			}
 			return fmt.Errorf("VerifyThreadFrontmatterMatchesSpine: load %s: %w", r.ID, err)
 		}
-		fm := thr.Frontmatter
 		if fm.ID != r.ID {
 			return fmt.Errorf("frontmatter id %q != spine id %q (record %d)", fm.ID, r.ID, i+1)
 		}
@@ -197,20 +196,20 @@ func VerifyEngagementConsistency(h *Harness) error {
 		return fmt.Errorf("VerifyEngagementConsistency: read spine: %w", err)
 	}
 	for _, r := range recs {
-		thr, err := store.LoadThread(h.Paths, r.ID)
+		fm, err := store.LoadThreadFrontmatter(h.Paths, r.ID)
 		if err != nil {
 			if errors.Is(err, memops.ErrThreadFileNotFound) {
 				continue
 			}
 			return fmt.Errorf("VerifyEngagementConsistency: load %s: %w", r.ID, err)
 		}
-		if thr.Frontmatter.TurnCount != r.TurnCount {
+		if fm.TurnCount != r.TurnCount {
 			return fmt.Errorf("VerifyEngagementConsistency: %s frontmatter turn_count %d != spine %d",
-				r.ID, thr.Frontmatter.TurnCount, r.TurnCount)
+				r.ID, fm.TurnCount, r.TurnCount)
 		}
-		if thr.Frontmatter.LastEngaged != r.LastEngaged {
+		if fm.LastEngaged != r.LastEngaged {
 			return fmt.Errorf("VerifyEngagementConsistency: %s frontmatter last_engaged %q != spine %q",
-				r.ID, thr.Frontmatter.LastEngaged, r.LastEngaged)
+				r.ID, fm.LastEngaged, r.LastEngaged)
 		}
 	}
 	return nil
