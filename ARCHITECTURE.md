@@ -421,6 +421,8 @@ The cost of getting this wrong without proof ahead of time is **asymmetric and s
 
 When making technique changes (parameter tweaks, algorithm adjustments), the question is always "what does the simulation say?" — not "does it compile and pass invariants?" Bake metrics emission into new code from day one; bolting it on later is much more expensive.
 
+**Next testing change on deck — user-contributed file content.** The §3.9 file-editing workload currently models the *agentic* edit shape: file content arrives via `fs.read`/`fs.write` tool deltas while the user prompt stays generic. The planned variant models the *user-dictated* shape — the user prompt itself carries the literal values and lines being added. The §3.9 reverse-delta store is content-agnostic to source, so storage / dedup / clock-aging is already covered; the variant exists to exercise the upstream paths that differ — user-prompt symbol extraction, the §3.0 transient-data classification (`RetentionDecision` vs `RetentionTask`), and the §3.9.2/§3.9.4 live-window handling of the same literal appearing in both the prompt and the file.
+
 ---
 
 ## Out of scope (deliberately)
