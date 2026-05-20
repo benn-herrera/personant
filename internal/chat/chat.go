@@ -59,10 +59,6 @@ const (
 	// Banner is printed once on startup. Single line, terse.
 	Banner = "personant — type /help for commands; Ctrl-D to exit"
 
-	// defaultProviderName is the conventional name used in providers.toml
-	// for the on-machine OpenAI-compatible endpoint (e.g. llama-server).
-	defaultProviderName = "local"
-
 	// turnTimeout caps a single LLM round-trip. Phase 2.c.2 does not yet
 	// thread a deadline through from a directive; this is a process-wide
 	// safety bound.
@@ -146,7 +142,7 @@ func Run(opts Options) error {
 		}
 	}
 	if providerName == "" {
-		providerName = defaultProviderName
+		providerName = memops.LocalProviderName
 	}
 	provider, ok := providers[providerName]
 	if !ok {

@@ -17,7 +17,7 @@ import (
 
 // Options carries the call-time knobs from the CLI flag layer.
 type Options struct {
-	Provider string        // provider name from providers.toml; "" → "local"
+	Provider string        // provider name from providers.toml; "" → memops.LocalProviderName
 	Timeout  time.Duration // request timeout; 0 → 30s
 	Stdout   io.Writer     // model-id sink (one per line, sorted ascending)
 	Stderr   io.Writer     // summary line + warnings sink
@@ -32,7 +32,7 @@ func Run(ops memops.MemoryOps, opts Options) error {
 	}
 	provider := opts.Provider
 	if provider == "" {
-		provider = "local"
+		provider = memops.LocalProviderName
 	}
 	timeout := opts.Timeout
 	if timeout == 0 {

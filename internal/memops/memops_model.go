@@ -184,6 +184,12 @@ type ProjectDigest struct {
 // is the legacy inline form. Either way the resolved key lands in
 // APIKey, which the runtime is the sole consumer of — it must never
 // appear in a log line, error message, or LLM-bound context.
+
+// LocalProviderName is the conventional providers.toml name for the
+// on-machine OpenAI-compatible endpoint (e.g. llama-server). It is the
+// default provider for CLI subcommands when --provider is unset.
+const LocalProviderName = "local"
+
 type Provider struct {
 	Name         string `toml:"-"` // table header from TOML; populated post-decode
 	BaseURL      string `toml:"baseUrl"`
