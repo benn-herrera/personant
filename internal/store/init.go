@@ -392,7 +392,7 @@ const seedReadmeMD = "# personant home\n" +
 	"- `config.toml` — chat/embedding choices drawn from the provider pool.\n" +
 	"- `tmp/` — agent drafting scratch (not git-committed).\n" +
 	"\n" +
-	"Layout details and schemas are in the project's `spec.md` and `outline.md`.\n" +
+	"Layout details and schemas are in the project's `SPEC.md` and `outline.md`.\n" +
 	"This directory is git-managed by the runtime; you do not need to run git\n" +
 	"commands here yourself.\n"
 

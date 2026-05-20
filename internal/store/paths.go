@@ -7,7 +7,7 @@ import (
 )
 
 // PersonantPaths holds the canonical layout of $PERSONANT_HOME.
-// See v0.1-spec.md §2.1.
+// See v0.1-SPEC.md §2.1.
 //
 // The struct is value-based; every field is an absolute path. Paths are
 // computed but not created — `personant init` is the scaffolder.
