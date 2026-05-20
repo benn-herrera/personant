@@ -152,6 +152,22 @@ This is **not** a planned upgrade. The asymmetric-cost discipline says: wait for
 
 Pebble and LMDB were considered and rejected for this hypothetical role: Pebble for being write-optimized (wrong workload shape) and LMDB for CGo (violates substrate non-negotiable). SQLite remains a candidate if SQL-shaped queries become useful, but for KV-shaped access patterns bbolt is the closer fit.
 
+### Port abstraction policy
+
+Personant's `memops` port is **substrate-agnostic by design** with **one file-based implementation today**. The substrate non-negotiables above govern the canonical layer; this section governs the port surface that the application layer talks to. Both disciplines apply concurrently — the substrate stays text + git, *and* the port stays clean of substrate-specific naming.
+
+Design rules for this layer:
+
+1. **Default: substrate-agnostic naming and types.** Port types describe abstract concepts (per-thread metadata, project record, spine entry), not storage-format details. Names that would not make sense for an alternate substrate (SQL, bbolt, in-memory, etc.) are leaks.
+
+2. **No ceremony for hypothetical substrates.** Don't pre-engineer abstractions, defensive interfaces, or migration scaffolds for substrates that don't exist. Keeping the port clean of substrate-leaks is a fixed-cost discipline; *adding* ongoing complexity to defend against futures that may never arrive is not.
+
+3. **API surface is not frozen.** The port evolves when concrete evidence — a real second substrate, a discovered constraint — shows the current shape needs to change. Mutability of the port is a design property, not a defect; the asymmetric-cost discipline applies here too (revisit on evidence, not speculation).
+
+4. **Concessions are explicit, case-by-case, user-approved.** When a substrate-specific concept legitimately needs to live at the port (performance, debuggability, no abstract framing exists yet), it's an explicit exception: name the concession, state the rationale, state what would cause it to be revisited. Implicit concessions — a substrate term creeping in without deliberation — get cleaned up to the default.
+
+This complements (does not replace) the "Port-and-adapter at the substrate boundary" recurring pattern above: that pattern describes *where* the boundary sits; this policy describes *what belongs on its surface*.
+
 ---
 
 ## The §3.0 hook chain (load-bearing primitive)

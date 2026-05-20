@@ -3,33 +3,46 @@
 //
 // # Port-and-adapter boundary
 //
-// Today the application layer (internal/turn, internal/recall,
-// internal/workset, internal/chat) imports internal/store directly. That
-// entangles application logic with concrete file-format, path layout, and
-// I/O-strategy choices (JSONL spine, YAML frontmatter, atomic temp+rename,
-// daily-rotated log files). It also entangles every test that exercises
-// those packages with the same concrete substrate.
+// The application layer (internal/turn, internal/recall, internal/workset,
+// internal/chat) depends on MemoryOps, not on any concrete substrate
+// package. One adapter ships today — internal/memops/fileadapter, which
+// wraps internal/store and its derived-index helpers; future adapters can
+// swap in without rewriting callers or tests.
 //
-// MemoryOps is the port between the two halves. The application layer
-// composes the conceptual operations defined here; one or more adapter
-// implementations (the first being internal/memops/fileadapter, planned
-// for step A.2) translate them into the concrete substrate ops currently
-// living in internal/store, internal/eventlog, internal/index, etc.
+// MemoryOps is the port between the two halves. Application code composes
+// the conceptual operations defined here; the adapter translates them
+// into substrate-specific ops (JSONL, markdown, frontmatter, atomic
+// temp+rename, go-git — all the file-substrate details the application
+// must not see).
+//
+// # Port abstraction policy
+//
+// The port is substrate-agnostic by design with one file-based
+// implementation today. ARCHITECTURE.md's "Port abstraction policy"
+// section is the source of truth — read it for the four design rules
+// governing what does and doesn't belong at this layer
+// (substrate-agnostic naming by default, no ceremony for hypothetical
+// substrates, mutable API surface, explicit case-by-case concessions).
+//
+// In short: method names and parameter types on MemoryOps describe
+// abstract operations (load a thread's metadata, list spine records,
+// engage a thread). Names tied to a specific storage format — paths,
+// file extensions, on-disk layout — stay on the adapter side. Concessions
+// to substrate-specific terminology at the port surface are explicit
+// exceptions, not implicit drift; the ThreadFrontmatter type name is a
+// known exception currently queued for cleanup (MAD review item D-1).
 //
 // # Design rationale and the larger queued workstream
 //
-// This is Phase A.1 of a two-stage abstraction: A.1 defines the port,
-// A.2 lifts the existing store/eventlog/index/verify call sites into a
-// concrete adapter and migrates callers. The design rationale and the
-// connection to the transient-data lifecycle and recall-fidelity
-// workstreams live in two memory entries:
+// The design rationale and the connection to the transient-data
+// lifecycle and recall-fidelity workstreams live in two memory entries:
 //
 //   - project_personant_memory_ops_abstraction_queued.md
 //   - project_personant_transient_data_lifecycle.md
 //
 // In particular: every delta-emit operation carries a RetentionClass so
 // the interface is forward-compatible with the transient-data lifecycle
-// work. The current adapter ignores the field, but new adapters and the
+// work. The current adapter ignores the field; future adapters and the
 // §3.0 chain integration will use it without a signature change.
 //
 // # What is on the port and what is not
@@ -47,8 +60,6 @@
 //     model, not on the MemoryOps port).
 //   - PersonantPaths in any signature (paths are the adapter's secret;
 //     application code does not see them).
-//   - File-format details — no method mentions JSONL, YAML, or
-//     temp+rename.
 //
 // # Data-model types
 //
