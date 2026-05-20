@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 )
 
 // PersonantPaths holds the canonical layout of $PERSONANT_HOME.
@@ -37,8 +36,8 @@ const EnvHome = "PERSONANT_HOME"
 const DefaultHomeName = ".personant"
 
 // PathsForHome returns a PersonantPaths rooted at an explicit home directory.
-// Used by tests and by `personant init --home <dir>` to bypass the cached
-// global resolution.
+// Used by tests and by `personant init --home <dir>` to bypass environment
+// resolution.
 func PathsForHome(home string) PersonantPaths {
 	return makePaths(home)
 }
@@ -63,12 +62,6 @@ func makePaths(home string) PersonantPaths {
 	}
 }
 
-var (
-	resolvedPaths PersonantPaths
-	resolveErr    error
-	resolveOnce   sync.Once
-)
-
 // IsDir reports whether path exists and is a directory.
 func IsDir(path string) bool {
 	stat, err := os.Stat(path)
@@ -81,22 +74,17 @@ func IsDir(path string) bool {
 //  1. $PERSONANT_HOME if set and non-empty.
 //  2. $HOME/.personant otherwise.
 //
-// The result is computed once and cached for the lifetime of the process.
 // Path validity (existence, scaffold completeness) is not checked here —
 // callers that require an initialized home should consult `personant init`
 // or `personant verify`.
 func ResolvePaths() (PersonantPaths, error) {
-	resolveOnce.Do(func() {
-		home := os.Getenv(EnvHome)
-		if home == "" {
-			userHome, err := os.UserHomeDir()
-			if err != nil {
-				resolveErr = fmt.Errorf("resolve user home: %w", err)
-				return
-			}
-			home = filepath.Join(userHome, DefaultHomeName)
+	home := os.Getenv(EnvHome)
+	if home == "" {
+		userHome, err := os.UserHomeDir()
+		if err != nil {
+			return PersonantPaths{}, fmt.Errorf("resolve user home: %w", err)
 		}
-		resolvedPaths = makePaths(home)
-	})
-	return resolvedPaths, resolveErr
+		home = filepath.Join(userHome, DefaultHomeName)
+	}
+	return makePaths(home), nil
 }
