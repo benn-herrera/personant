@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"personant/internal/clock"
 	pnlog "personant/internal/log"
 )
 
@@ -96,7 +97,7 @@ func (m *memTelemetry) sample(step int, simClock time.Time) {
 	rec := memSample{
 		Step:            step,
 		SimClockNs:      simClock.UnixNano(),
-		WallNs:          time.Now().UnixNano(),
+		WallNs:          clock.Profiling().UnixNano(),
 		AllocBytes:      ms.Alloc,
 		HeapInUseBytes:  ms.HeapInuse,
 		HeapObjects:     ms.HeapObjects,
@@ -224,7 +225,7 @@ func (w *memWatchdog) run() {
 // best-effort: if pprof fails, the panic still fires — the stack trace
 // alone is more useful than a SIGKILL.
 func (w *memWatchdog) trip(heapInUse uint64) {
-	ts := time.Now().Format("20060102-150405")
+	ts := clock.Profiling().Format("20060102-150405")
 	dir := ""
 	if w.tel != nil {
 		dir = w.tel.dir

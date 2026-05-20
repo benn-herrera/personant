@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"personant/internal/clock"
 )
 
 // TestMemTelemetry_AppendsParseableSamples is the contract test for the
@@ -67,7 +69,7 @@ func TestMemTelemetry_AppendsParseableSamples(t *testing.T) {
 // memTelemetry without panicking.
 func TestMemTelemetry_NilReceiverIsNoOp(t *testing.T) {
 	var m *memTelemetry
-	m.sample(0, time.Now()) // must not panic
+	m.sample(0, clock.Timeline()) // must not panic
 	m.flush()               // must not panic
 	m.close()               // must not panic
 }

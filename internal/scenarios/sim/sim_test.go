@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"personant/internal/clock"
 	"personant/internal/scenarios"
 	"personant/internal/store"
 )
@@ -284,10 +285,9 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// (seed, duration) only, so two runs of the same duration would
 	// otherwise reuse one test/rundata/<name>/ directory and the
 	// harness's runDataHome RemoveAll would destroy the prior run's data.
-	// Real wall-clock time (time.Now), NOT internal/clock: the harness
-	// overrides clock.Timeline() to the simulated clock during a run, so
-	// clock would yield simulated, not real start, time.
-	sc.Name += "." + time.Now().Format("060102150405")
+	// clock.Profiling() is the real wall-clock; it is unaffected by the
+	// Timeline override the harness installs during a run.
+	sc.Name += "." + clock.Profiling().Format("060102150405")
 
 	// The workload is generated on demand — the harness pulls one step
 	// at a time from sc.StepSource — so the turn count is not knowable
@@ -300,9 +300,9 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// refinement episodes — the harness sees them as ordinary steps.
 	gen := sc.StepSource.(*generator)
 
-	start := time.Now()
+	start := clock.Profiling()
 	h := scenarios.RunScenario(t, sc)
-	wall := time.Since(start)
+	wall := clock.Since(start)
 
 	// Fold the generator's miss → refinement episode stats into the
 	// metrics blob. RunScenario already wrote the blob, but h.Metrics

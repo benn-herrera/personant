@@ -59,6 +59,16 @@ func (this ProfilingTime) UTC() ProfilingTime {
 	return ProfilingTime{t: this.t.UTC()}
 }
 
+// UnixNano returns the real wall-clock time expressed as nanoseconds
+// since the Unix epoch. Routed through here (rather than calling
+// time.Now().UnixNano() at the call site) so the package retains its
+// single-point invariant: every clock read in the runtime goes through
+// internal/clock. The reading is real wall time and is not affected by
+// any Timeline override.
+func (this ProfilingTime) UnixNano() int64 {
+	return this.t.UnixNano()
+}
+
 // Profiling returns the real wall-clock time. It is never overridable;
 // use it for latency measurement and for timestamps that must stay
 // real-world even while a simulation has overridden Timeline.
