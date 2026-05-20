@@ -285,12 +285,15 @@ Go 1.26.1+.
     + scope grounds — see substrate-decisions memory for the revisit
     conditions.
 - **Application code talks to `MemoryOps`, not to the substrate directly.**
-  `internal/turn`, `internal/chat`, `internal/recall/measure`, `internal/workset`,
-  cmd/*, and the scenarios harness all depend on the port (`memops.MemoryOps`).
-  Pure helpers (`store.Normalize`, `store.DominantSource`) and data-type
-  aliases stay direct because they're not substrate operations. Tests
-  inspect the substrate directly via `h.Paths` in invariants — that's the
-  test-side substrate validator pattern; it's the right access.
+  `internal/turn`, `internal/chat`, `internal/recall/measure`, cmd/*, and
+  the scenarios harness all depend on the port (`memops.MemoryOps`).
+  Pure renderers (`internal/workset.Compose`, `internal/recall/scoring`)
+  are substrate-free and operate on plain types pre-fetched by the
+  adapter — they import neither the port nor the substrate. Pure helpers
+  (`store.Normalize`, `store.DominantSource`) and data-type aliases stay
+  direct because they're not substrate operations. Tests inspect the
+  substrate directly via `h.Paths` in invariants — that's the test-side
+  substrate validator pattern; it's the right access.
 - **All clock reads go through `internal/clock`.** Direct reads of the
   `time` package clock (`time.Now`, `time.Since`) are forbidden outside
   `internal/clock`. Use `clock.Timeline()` for simulated-world timestamps

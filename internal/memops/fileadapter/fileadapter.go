@@ -35,7 +35,6 @@ import (
 	"personant/internal/recall/scoring"
 	"personant/internal/store"
 	"personant/internal/verify"
-	"personant/internal/workset"
 )
 
 // FileAdapter is the file-backed implementation of memops.MemoryOps.
@@ -595,59 +594,9 @@ func indexOptionsFromMemops(o memops.IndexBuildOptions) index.Options {
 }
 
 // ---------- Working set ----------
-
-// ComposeWorkingSet builds the layer-by-layer working-set content for
-// one turn. Non-fatal layer-render warnings are emitted to the event log
-// as workset.warning lines (the substrate's canonical destination); any
-// caller-supplied a.Logger is also notified.
-func (a *FileAdapter) ComposeWorkingSet(ctx context.Context, in memops.WorksetInput) (memops.WorksetLayers, error) {
-	if err := ctx.Err(); err != nil {
-		return memops.WorksetLayers{}, err
-	}
-	state := workset.State{
-		Paths:          a.paths,
-		ActiveProject:  in.ActiveProject,
-		ActiveThreads:  in.ActiveThreads,
-		DormantThreads: in.DormantThreads,
-		Budget:         in.Budget,
-	}
-	opts := workset.ComposeOptions{
-		Logger: func(format string, args ...any) {
-			_ = a.Log(ctx, "workset", "warning", sanitizeWorksetDetail(fmt.Sprintf(format, args...)))
-			if a.Logger != nil {
-				a.Logger(format, args...)
-			}
-		},
-	}
-	params, err := workset.Compose(state, opts)
-	if err != nil {
-		return memops.WorksetLayers{}, fmt.Errorf("fileadapter: compose working set: %w", err)
-	}
-	return memops.WorksetLayers{
-		LayerE:  params.LayerE,
-		LayerA1: params.LayerA1,
-		LayerA2: params.LayerA2,
-		LayerB:  params.LayerB,
-		LayerC:  params.LayerC,
-	}, nil
-}
-
-// sanitizeWorksetDetail strips newlines and tabs from a workset warning
-// before it lands in a one-per-line event-log entry. Local twin of
-// internal/turn.sanitizeDetail so this package keeps its narrow import
-// graph (no cross-import into the turn-loop side of the application).
-func sanitizeWorksetDetail(s string) string {
-	r := make([]byte, 0, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == '\n' || c == '\r' || c == '\t' {
-			r = append(r, ' ')
-			continue
-		}
-		r = append(r, c)
-	}
-	return string(r)
-}
+//
+// ComposeWorkingSet and its substrate-fetch helpers live in
+// workset_compose.go so the fetch surface is visible as a unit.
 
 // ---------- Event log ----------
 

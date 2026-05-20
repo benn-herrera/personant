@@ -1,103 +1,57 @@
 package workset
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
+	"personant/internal/dedup"
 	"personant/internal/memops"
-	"personant/internal/store"
 )
 
-func newHome(t *testing.T) store.PersonantPaths {
-	t.Helper()
-	tmp := t.TempDir()
-	paths := store.PathsForHome(tmp)
-	for _, dir := range []string{paths.ThreadsDir, paths.ProjectsDir, paths.LogsDir, paths.DirectivesDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", dir, err)
-		}
+// defaultBudget returns a baseline budget for tests that don't care.
+func defaultBudget() memops.Budget { return memops.DefaultBudget() }
+
+// activeMeta is the canonical "current project" fixture.
+var activeMeta = memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
+
+func TestComposeRequiresProjectID(t *testing.T) {
+	if _, err := Compose(Inputs{}, ComposeOptions{}); err == nil {
+		t.Fatalf("expected error for empty ActiveProject.ID")
 	}
-	// Tests need an empty spine on disk; ReadJSONL errors on a missing file.
-	if err := store.WriteSpine(paths.Spine, nil); err != nil {
-		t.Fatalf("write spine: %v", err)
-	}
-	return paths
 }
 
-func defaultCompose(state State) State {
-	if state.Budget.Total == 0 {
-		state.Budget = memops.DefaultBudget()
-	}
-	return state
-}
-
-func TestComposeEmptySpine(t *testing.T) {
-	paths := newHome(t)
-	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
-	if err := store.SaveProjectMeta(paths, meta); err != nil {
-		t.Fatalf("save meta: %v", err)
-	}
-
-	params, err := Compose(defaultCompose(State{Paths: paths, ActiveProject: meta}), ComposeOptions{})
+func TestComposeEmptyInputs(t *testing.T) {
+	in := Inputs{ActiveProject: activeMeta, Budget: defaultBudget()}
+	params, err := Compose(in, ComposeOptions{})
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
 	}
-	if params.LayerA1 != "" {
-		t.Errorf("LayerA1 should be empty; got %q", params.LayerA1)
-	}
-	if params.LayerA2 != "" || params.LayerB != "" || params.LayerC != "" {
-		t.Errorf("non-A1 layers should be empty without seeded inputs; got %+v", params)
-	}
-	// Layer E may or may not be empty depending on whether seed
-	// directives are present — for this test the home has none.
-	if params.LayerE != "" {
-		t.Errorf("LayerE should be empty without seeded directives; got %q", params.LayerE)
+	if params.LayerE != "" || params.LayerA1 != "" || params.LayerA2 != "" || params.LayerB != "" || params.LayerC != "" {
+		t.Errorf("all layers should be empty when no inputs provided; got %+v", params)
 	}
 }
 
-func TestComposeRendersDisplayLines(t *testing.T) {
-	paths := newHome(t)
-	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
-	if err := store.SaveProjectMeta(paths, meta); err != nil {
-		t.Fatalf("save meta: %v", err)
-	}
-	otherMeta := memops.ProjectMeta{ID: "prj_2", Name: "beta"}
-	if err := store.SaveProjectMeta(paths, otherMeta); err != nil {
-		t.Fatalf("save other meta: %v", err)
-	}
-
-	recs := []memops.SpineRecord{
-		{
-			ID: "thr_2", Project: "prj_1",
-			Anchors: []string{"trefoil", "unknot", "body-topology", "electron-shape"},
-			Summary: "topology conflict; awaiting resolution",
-			State:   memops.ThreadWIP,
-		},
-		{
-			ID: "thr_1", Project: "prj_1",
-			Anchors: []string{"alpha", "beta", "gamma", "delta"},
-			Summary: "first thread",
-			State:   memops.ThreadActive,
-		},
-		{
-			// In a different project; must be filtered out.
-			ID: "thr_99", Project: "prj_2",
-			Anchors: []string{"x", "y", "z", "w"},
-			Summary: "other project",
-			State:   memops.ThreadActive,
+func TestComposeRendersA1DisplayLines(t *testing.T) {
+	in := Inputs{
+		ActiveProject: activeMeta,
+		Budget:        defaultBudget(),
+		ActiveProjectSpine: []memops.SpineRecord{
+			{
+				ID: "thr_1", Project: "prj_1",
+				Anchors: []string{"alpha", "beta", "gamma", "delta"},
+				Summary: "first thread",
+				State:   memops.ThreadActive,
+			},
+			{
+				ID: "thr_2", Project: "prj_1",
+				Anchors: []string{"trefoil", "unknot", "body-topology", "electron-shape"},
+				Summary: "topology conflict; awaiting resolution",
+				State:   memops.ThreadWIP,
+			},
 		},
 	}
-	for _, r := range recs {
-		if err := store.AppendSpineRecord(paths, r); err != nil {
-			t.Fatalf("append %s: %v", r.ID, err)
-		}
-	}
-
-	params, err := Compose(defaultCompose(State{Paths: paths, ActiveProject: meta}), ComposeOptions{})
+	params, err := Compose(in, ComposeOptions{})
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
 	}
@@ -105,27 +59,11 @@ func TestComposeRendersDisplayLines(t *testing.T) {
 	if got, want := len(lines), 2; got != want {
 		t.Fatalf("expected %d lines, got %d: %q", want, got, params.LayerA1)
 	}
-	if !strings.HasPrefix(lines[0], "thr_1 ") {
+	if !strings.HasPrefix(lines[0], "thr_1 ") || !strings.Contains(lines[0], "[ACTIVE]") {
 		t.Errorf("first line: %q", lines[0])
 	}
-	if !strings.HasPrefix(lines[1], "thr_2 ") {
+	if !strings.HasPrefix(lines[1], "thr_2 ") || !strings.Contains(lines[1], "[WIP]") {
 		t.Errorf("second line: %q", lines[1])
-	}
-	if !strings.Contains(lines[0], "[ACTIVE]") {
-		t.Errorf("active state marker: %q", lines[0])
-	}
-	if !strings.Contains(lines[1], "[WIP]") {
-		t.Errorf("wip state marker: %q", lines[1])
-	}
-	if strings.Contains(params.LayerA1, "thr_99") {
-		t.Errorf("other-project record leaked: %q", params.LayerA1)
-	}
-}
-
-func TestComposeRequiresProjectID(t *testing.T) {
-	paths := newHome(t)
-	if _, err := Compose(State{Paths: paths, ActiveProject: memops.ProjectMeta{}}, ComposeOptions{}); err == nil {
-		t.Fatalf("expected error for empty ActiveProject.ID")
 	}
 }
 
@@ -150,168 +88,74 @@ func TestRenderSpineDisplay(t *testing.T) {
 	}
 }
 
-// TestStripFrontmatter exercises the YAML-frontmatter trimming used by
-// Layer E directive loading. Behaves like splitFrontmatter (in
-// store/thread_io.go) but tolerant: unmatched/missing frontmatter
-// returns the input unchanged.
-func TestStripFrontmatter(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{
-			name: "no frontmatter",
-			in:   "# heading\nbody\n",
-			want: "# heading\nbody\n",
+func TestLayerERendersDirectivesAndConventions(t *testing.T) {
+	in := Inputs{
+		ActiveProject: activeMeta,
+		Budget:        defaultBudget(),
+		Directives: []DirectiveSection{
+			{Header: "defaults", Body: "DEFAULTS_BODY\n"},
+			{Header: "user", Body: "USER_BODY\n"},
+			{Header: "project: alpha", Body: "PROJECT_BODY\n"},
 		},
-		{
-			name: "frontmatter stripped",
-			in:   "---\nfoo: bar\n---\nbody\n",
-			want: "body\n",
-		},
-		{
-			name: "frontmatter with blank line after close",
-			in:   "---\nfoo: bar\n---\n\nbody\n",
-			want: "body\n",
-		},
-		{
-			name: "leading delimiter without close",
-			in:   "---\nfoo: bar\nbody",
-			want: "---\nfoo: bar\nbody",
-		},
-		{
-			name: "embedded triple-dash in body left alone",
-			in:   "---\nfoo: bar\n---\nbody\n```\n---\n```\n",
-			want: "body\n```\n---\n```\n",
+		Conventions: []ConventionFile{
+			{Path: "/ws/AGENTS.md", Content: "CONVENTIONS_BODY\n"},
 		},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := stripFrontmatter(tc.in)
-			if got != tc.want {
-				t.Errorf("stripFrontmatter:\n got: %q\nwant: %q", got, tc.want)
-			}
-		})
-	}
-}
-
-// TestLayerEReadsAllSources seeds defaults.md, user.md, project
-// directive, and a ConventionsPaths file; verifies all four contribute.
-func TestLayerEReadsAllSources(t *testing.T) {
-	paths := newHome(t)
-	meta := memops.ProjectMeta{
-		ID:               "prj_1",
-		Name:             "alpha",
-		ConventionsPaths: nil,
-	}
-	if err := store.SaveProjectMeta(paths, meta); err != nil {
-		t.Fatalf("save meta: %v", err)
-	}
-
-	// Seed directives.
-	defaults := "---\nscope: defaults\n---\nDEFAULTS_BODY\n"
-	user := "USER_BODY_NO_FRONTMATTER\n"
-	projectDir := filepath.Join(paths.DirectivesDir, "prj_1")
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatalf("mkdir projectDir: %v", err)
-	}
-	projectMD := "---\nscope: project\n---\nPROJECT_BODY\n"
-	if err := os.WriteFile(filepath.Join(paths.DirectivesDir, "defaults.md"), []byte(defaults), 0o644); err != nil {
-		t.Fatalf("write defaults.md: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(paths.DirectivesDir, "user.md"), []byte(user), 0o644); err != nil {
-		t.Fatalf("write user.md: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectDir, "project.md"), []byte(projectMD), 0o644); err != nil {
-		t.Fatalf("write project.md: %v", err)
-	}
-
-	// Seed a conventions file outside the home (simulates a workspace
-	// AGENTS.md being pulled into Layer E).
-	conventionsDir := t.TempDir()
-	convPath := filepath.Join(conventionsDir, "AGENTS.md")
-	if err := os.WriteFile(convPath, []byte("CONVENTIONS_BODY\n"), 0o644); err != nil {
-		t.Fatalf("write conventions: %v", err)
-	}
-	meta.ConventionsPaths = []string{convPath}
-	if err := store.SaveProjectMeta(paths, meta); err != nil {
-		t.Fatalf("save meta with conventions: %v", err)
-	}
-
-	params, err := Compose(defaultCompose(State{Paths: paths, ActiveProject: meta}), ComposeOptions{})
+	params, err := Compose(in, ComposeOptions{})
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
 	}
-	for _, want := range []string{"DEFAULTS_BODY", "USER_BODY_NO_FRONTMATTER", "PROJECT_BODY", "CONVENTIONS_BODY"} {
+	for _, want := range []string{"DEFAULTS_BODY", "USER_BODY", "PROJECT_BODY", "CONVENTIONS_BODY"} {
 		if !strings.Contains(params.LayerE, want) {
 			t.Errorf("LayerE missing %q\ngot: %s", want, params.LayerE)
 		}
 	}
-	for _, header := range []string{"=== defaults ===", "=== user ===", "=== project: alpha ===", "=== conventions: " + convPath + " ==="} {
+	for _, header := range []string{
+		"=== defaults ===",
+		"=== user ===",
+		"=== project: alpha ===",
+		"=== conventions: /ws/AGENTS.md ===",
+	} {
 		if !strings.Contains(params.LayerE, header) {
 			t.Errorf("LayerE missing header %q\ngot: %s", header, params.LayerE)
 		}
 	}
 }
 
-func TestLayerEMissingConventionsFileLogged(t *testing.T) {
-	paths := newHome(t)
-	meta := memops.ProjectMeta{
-		ID:               "prj_1",
-		Name:             "alpha",
-		ConventionsPaths: []string{"/nonexistent/path/CONVENTIONS.md"},
+func TestLayerESkipsEmptyDirectives(t *testing.T) {
+	in := Inputs{
+		ActiveProject: activeMeta,
+		Budget:        defaultBudget(),
+		Directives: []DirectiveSection{
+			{Header: "defaults", Body: ""},
+			{Header: "user", Body: "real content\n"},
+		},
 	}
-	if err := store.SaveProjectMeta(paths, meta); err != nil {
-		t.Fatalf("save meta: %v", err)
+	params, _ := Compose(in, ComposeOptions{})
+	if strings.Contains(params.LayerE, "=== defaults ===") {
+		t.Errorf("empty defaults directive should not render: %q", params.LayerE)
 	}
-
-	var logs []string
-	logf := func(format string, args ...any) {
-		logs = append(logs, format)
-	}
-	if _, err := Compose(defaultCompose(State{Paths: paths, ActiveProject: meta}), ComposeOptions{Logger: logf}); err != nil {
-		t.Fatalf("Compose: %v", err)
-	}
-	found := false
-	for _, line := range logs {
-		if strings.Contains(line, "conventions") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected conventions warning in logs; got %v", logs)
+	if !strings.Contains(params.LayerE, "=== user ===") {
+		t.Errorf("expected user directive header: %q", params.LayerE)
 	}
 }
 
-// TestLayerA2RendersOtherProjects seeds two other projects with
-// digests; LayerA2 must list them sorted by LastActive desc.
-func TestLayerA2RendersOtherProjects(t *testing.T) {
-	paths := newHome(t)
-	active := memops.ProjectMeta{ID: "prj_1", Name: "active"}
-	if err := store.SaveProjectMeta(paths, active); err != nil {
-		t.Fatalf("save active: %v", err)
+func TestLayerA2OrdersByLastActiveDesc(t *testing.T) {
+	in := Inputs{
+		ActiveProject: activeMeta,
+		Budget:        defaultBudget(),
+		OtherProjects: []ProjectDigestEntry{
+			{
+				Meta:   memops.ProjectMeta{ID: "prj_2", Name: "older", LastActive: "2026-04-01T00:00:00Z"},
+				Digest: memops.ProjectDigest{Project: "prj_2", OneLineSummary: "older summary", RecentAnchors: []string{"a", "b", "c", "d", "e", "f"}},
+			},
+			{
+				Meta:   memops.ProjectMeta{ID: "prj_3", Name: "newer", LastActive: "2026-05-01T00:00:00Z"},
+				Digest: memops.ProjectDigest{Project: "prj_3", OneLineSummary: "newer summary", RecentAnchors: []string{"x", "y"}},
+			},
+		},
 	}
-	older := memops.ProjectMeta{ID: "prj_2", Name: "older", LastActive: "2026-04-01T00:00:00Z"}
-	if err := store.SaveProjectMeta(paths, older); err != nil {
-		t.Fatalf("save older: %v", err)
-	}
-	newer := memops.ProjectMeta{ID: "prj_3", Name: "newer", LastActive: "2026-05-01T00:00:00Z"}
-	if err := store.SaveProjectMeta(paths, newer); err != nil {
-		t.Fatalf("save newer: %v", err)
-	}
-	writeDigest(t, paths, memops.ProjectDigest{
-		Project: "prj_2", DisplayName: "older",
-		ThreadCount: 2, RecentAnchors: []string{"a", "b", "c", "d", "e", "f"},
-		OneLineSummary: "older summary",
-	})
-	writeDigest(t, paths, memops.ProjectDigest{
-		Project: "prj_3", DisplayName: "newer",
-		ThreadCount: 1, RecentAnchors: []string{"x", "y"},
-		OneLineSummary: "newer summary",
-	})
-
-	params, err := Compose(defaultCompose(State{Paths: paths, ActiveProject: active}), ComposeOptions{})
+	params, err := Compose(in, ComposeOptions{})
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
 	}
@@ -319,60 +163,49 @@ func TestLayerA2RendersOtherProjects(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("expected 2 A2 lines; got %d: %q", len(lines), params.LayerA2)
 	}
-	// Newer project sorts first.
 	if !strings.HasPrefix(lines[0], "newer (prj_3)") {
-		t.Errorf("first A2 line should be prj_3; got %q", lines[0])
+		t.Errorf("newer (prj_3) should sort first; got %q", lines[0])
 	}
 	if !strings.HasPrefix(lines[1], "older (prj_2)") {
-		t.Errorf("second A2 line should be prj_2; got %q", lines[1])
-	}
-	// Active project must NOT appear.
-	if strings.Contains(params.LayerA2, "prj_1") {
-		t.Errorf("active project leaked into A2: %q", params.LayerA2)
+		t.Errorf("older (prj_2) should sort second; got %q", lines[1])
 	}
 	// Top-5 anchor cap.
-	if !strings.Contains(lines[0], "x, y") {
-		t.Errorf("expected newer's anchors in line: %q", lines[0])
-	}
 	if !strings.Contains(lines[1], "a, b, c, d, e") || strings.Contains(lines[1], ", f") {
 		t.Errorf("expected older's anchors capped at 5: %q", lines[1])
 	}
 }
 
 func TestLayerA2EmptyWhenNoOthers(t *testing.T) {
-	paths := newHome(t)
-	active := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
-	if err := store.SaveProjectMeta(paths, active); err != nil {
-		t.Fatalf("save active: %v", err)
-	}
-	params, err := Compose(defaultCompose(State{Paths: paths, ActiveProject: active}), ComposeOptions{})
-	if err != nil {
-		t.Fatalf("Compose: %v", err)
-	}
+	in := Inputs{ActiveProject: activeMeta, Budget: defaultBudget()}
+	params, _ := Compose(in, ComposeOptions{})
 	if params.LayerA2 != "" {
 		t.Errorf("expected empty A2; got %q", params.LayerA2)
 	}
 }
 
-// TestLayerBRespectsBTopK: 5 active threads with BTopK=3 → only the
-// first 3 are rendered.
 func TestLayerBRespectsBTopK(t *testing.T) {
-	paths := newHome(t)
-	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
-	if err := store.SaveProjectMeta(paths, meta); err != nil {
-		t.Fatalf("save meta: %v", err)
-	}
+	threads := make(map[string]ThreadData, 5)
+	ids := make([]string, 0, 5)
 	for i := 1; i <= 5; i++ {
-		seedThread(t, paths, fmt.Sprintf("thr_%d", i), meta.ID, fmt.Sprintf("thread %d body BBBBBBBBBB", i))
+		id := fmt.Sprintf("thr_%d", i)
+		ids = append(ids, id)
+		threads[id] = ThreadData{
+			Frontmatter: memops.ThreadFrontmatter{
+				ID: id, Project: "prj_1",
+				Anchors: []string{"alpha"},
+				Summary: id + " summary",
+				State:   memops.ThreadActive,
+			},
+			Body: fmt.Sprintf("thread %d body BBBBBBBBBB", i),
+		}
 	}
-	budget := memops.DefaultBudget()
-	state := State{
-		Paths:         paths,
-		ActiveProject: meta,
-		ActiveThreads: []string{"thr_1", "thr_2", "thr_3", "thr_4", "thr_5"},
-		Budget:        budget,
+	in := Inputs{
+		ActiveProject:    activeMeta,
+		Budget:           defaultBudget(),
+		ActiveThreads:    ids,
+		ActiveThreadData: threads,
 	}
-	params, err := Compose(state, ComposeOptions{})
+	params, err := Compose(in, ComposeOptions{})
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
 	}
@@ -388,91 +221,138 @@ func TestLayerBRespectsBTopK(t *testing.T) {
 	}
 }
 
-// TestLayerBOversizedThreadTruncates: a single thread with body longer
-// than its per-thread share is truncated and tagged with the marker.
 func TestLayerBOversizedThreadTruncates(t *testing.T) {
-	paths := newHome(t)
-	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
-	if err := store.SaveProjectMeta(paths, meta); err != nil {
-		t.Fatalf("save meta: %v", err)
-	}
 	huge := strings.Repeat("X", 100*1024)
-	seedThread(t, paths, "thr_1", meta.ID, huge)
-	budget := memops.DefaultBudget()
-	budget.LayerB = 1024 // tight
-	state := State{
-		Paths:         paths,
-		ActiveProject: meta,
-		ActiveThreads: []string{"thr_1"},
-		Budget:        budget,
+	id := "thr_1"
+	in := Inputs{
+		ActiveProject: activeMeta,
+		Budget: func() memops.Budget {
+			b := defaultBudget()
+			b.LayerB = 1024 // tight
+			return b
+		}(),
+		ActiveThreads: []string{id},
+		ActiveThreadData: map[string]ThreadData{
+			id: {
+				Frontmatter: memops.ThreadFrontmatter{ID: id, Anchors: []string{"alpha"}, Summary: "huge", State: memops.ThreadActive},
+				Body:        huge,
+			},
+		},
 	}
-	params, err := Compose(state, ComposeOptions{})
+	params, err := Compose(in, ComposeOptions{})
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
 	}
-	if len(params.LayerB) > budget.LayerB {
-		t.Errorf("LayerB exceeded budget: %d > %d", len(params.LayerB), budget.LayerB)
+	if len(params.LayerB) > in.Budget.LayerB {
+		t.Errorf("LayerB exceeded budget: %d > %d", len(params.LayerB), in.Budget.LayerB)
 	}
 	if !strings.Contains(params.LayerB, "truncated") {
 		t.Errorf("expected truncation marker in LayerB; got %q", params.LayerB)
 	}
 }
 
-func TestLayerBMissingThreadFileWarns(t *testing.T) {
-	paths := newHome(t)
-	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
-	if err := store.SaveProjectMeta(paths, meta); err != nil {
-		t.Fatalf("save meta: %v", err)
+func TestLayerBMissingThreadDataSilent(t *testing.T) {
+	// A thread id with no entry in ActiveThreadData is treated as
+	// substrate-missing — the adapter has already logged the warning;
+	// workset just skips it.
+	in := Inputs{
+		ActiveProject:    activeMeta,
+		Budget:           defaultBudget(),
+		ActiveThreads:    []string{"thr_missing"},
+		ActiveThreadData: map[string]ThreadData{},
 	}
-	var logs []string
-	logf := func(format string, args ...any) { logs = append(logs, format) }
-	state := State{
-		Paths:         paths,
-		ActiveProject: meta,
-		ActiveThreads: []string{"thr_does_not_exist"},
-		Budget:        memops.DefaultBudget(),
-	}
-	params, err := Compose(state, ComposeOptions{Logger: logf})
+	params, err := Compose(in, ComposeOptions{})
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
 	}
 	if params.LayerB != "" {
 		t.Errorf("LayerB should be empty when only thread is missing; got %q", params.LayerB)
 	}
-	if len(logs) == 0 {
-		t.Errorf("expected a warning log for missing thread")
+}
+
+func TestLayerBTrackedFilesSection(t *testing.T) {
+	// Hand-build a window covering current + diff + identifier kinds so
+	// the test is independent of dedup's anchor cadence.
+	window := []dedup.WindowEntry{
+		{Kind: "identifier", Version: 0, Text: "[chain anchor: see most-recent position]"},
+		{Kind: "diff", Version: 4, Text: "@@ -1 +1 @@\n-old\n+new\n"},
+		{Kind: "current", Version: 5, Text: "title\nrevision 5\nstable footer\n"},
+	}
+	id := "thr_1"
+	in := Inputs{
+		ActiveProject: activeMeta,
+		Budget:        defaultBudget(),
+		ActiveThreads: []string{id},
+		ActiveThreadData: map[string]ThreadData{
+			id: {
+				Frontmatter: memops.ThreadFrontmatter{ID: id, Anchors: []string{"alpha"}, Summary: "with files", State: memops.ThreadActive},
+				Body:        "thread body text",
+				TrackedFiles: []TrackedFile{{
+					Path:   "src/main.go",
+					Window: window,
+				}},
+			},
+		},
+	}
+	params, err := Compose(in, ComposeOptions{})
+	if err != nil {
+		t.Fatalf("Compose: %v", err)
+	}
+	for _, want := range []string{
+		"=== tracked files ===",
+		"--- src/main.go ---",
+		"revision 5",
+		"[version 4 diff]",
+		"see most-recent position",
+	} {
+		if !strings.Contains(params.LayerB, want) {
+			t.Errorf("LayerB missing %q\ngot: %s", want, params.LayerB)
+		}
+	}
+}
+
+func TestLayerBNoTrackedFilesSection(t *testing.T) {
+	id := "thr_1"
+	in := Inputs{
+		ActiveProject: activeMeta,
+		Budget:        defaultBudget(),
+		ActiveThreads: []string{id},
+		ActiveThreadData: map[string]ThreadData{
+			id: {
+				Frontmatter: memops.ThreadFrontmatter{ID: id, Summary: "plain", State: memops.ThreadActive},
+				Body:        "plain thread body",
+			},
+		},
+	}
+	params, _ := Compose(in, ComposeOptions{})
+	if strings.Contains(params.LayerB, "tracked files") {
+		t.Errorf("LayerB should have no tracked-files section; got %q", params.LayerB)
 	}
 }
 
 func TestLayerCRendersDormantSpineDisplays(t *testing.T) {
-	paths := newHome(t)
-	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
-	if err := store.SaveProjectMeta(paths, meta); err != nil {
-		t.Fatalf("save meta: %v", err)
-	}
-	for i := 1; i <= 3; i++ {
-		id := fmt.Sprintf("thr_%d", i)
-		if err := store.AppendSpineRecord(paths, memops.SpineRecord{
-			ID: id, Project: meta.ID,
+	dormant := make(map[string]memops.SpineRecord, 3)
+	ids := []string{"thr_1", "thr_2", "thr_3"}
+	for i, id := range ids {
+		dormant[id] = memops.SpineRecord{
+			ID: id, Project: "prj_1",
 			Anchors: []string{"a", "b", "c", "d"},
-			Summary: fmt.Sprintf("dormant %d", i),
+			Summary: fmt.Sprintf("dormant %d", i+1),
 			State:   memops.ThreadPaused,
-		}); err != nil {
-			t.Fatalf("append spine: %v", err)
 		}
 	}
-	state := State{
-		Paths:          paths,
-		ActiveProject:  meta,
-		DormantThreads: []string{"thr_1", "thr_2", "thr_3"},
-		Budget:         memops.DefaultBudget(),
+	in := Inputs{
+		ActiveProject:  activeMeta,
+		Budget:         defaultBudget(),
+		DormantThreads: ids,
+		DormantSpine:   dormant,
 	}
-	params, err := Compose(state, ComposeOptions{})
+	params, err := Compose(in, ComposeOptions{})
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
 	}
-	for i := 1; i <= 3; i++ {
-		want := fmt.Sprintf("thr_%d [a, b, c, d] — dormant %d [PAUSED]", i, i)
+	for i, id := range ids {
+		want := fmt.Sprintf("%s [a, b, c, d] — dormant %d [PAUSED]", id, i+1)
 		if !strings.Contains(params.LayerC, want) {
 			t.Errorf("LayerC missing %q\ngot: %s", want, params.LayerC)
 		}
@@ -480,34 +360,28 @@ func TestLayerCRendersDormantSpineDisplays(t *testing.T) {
 }
 
 func TestLayerCBudgetTruncates(t *testing.T) {
-	paths := newHome(t)
-	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
-	if err := store.SaveProjectMeta(paths, meta); err != nil {
-		t.Fatalf("save meta: %v", err)
-	}
 	const N = 50
-	dormant := make([]string, 0, N)
+	dormant := make(map[string]memops.SpineRecord, N)
+	ids := make([]string, 0, N)
 	for i := 1; i <= N; i++ {
 		id := fmt.Sprintf("thr_%d", i)
-		dormant = append(dormant, id)
-		if err := store.AppendSpineRecord(paths, memops.SpineRecord{
-			ID: id, Project: meta.ID,
+		ids = append(ids, id)
+		dormant[id] = memops.SpineRecord{
+			ID: id, Project: "prj_1",
 			Anchors: []string{"a-very-long-anchor-name", "another-long-anchor", "third-anchor", "fourth-anchor"},
 			Summary: strings.Repeat("dormant summary text ", 10),
 			State:   memops.ThreadPaused,
-		}); err != nil {
-			t.Fatalf("append spine: %v", err)
 		}
 	}
-	budget := memops.DefaultBudget()
+	budget := defaultBudget()
 	budget.LayerC = 256
-	state := State{
-		Paths:          paths,
-		ActiveProject:  meta,
-		DormantThreads: dormant,
+	in := Inputs{
+		ActiveProject:  activeMeta,
 		Budget:         budget,
+		DormantThreads: ids,
+		DormantSpine:   dormant,
 	}
-	params, err := Compose(state, ComposeOptions{})
+	params, err := Compose(in, ComposeOptions{})
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
 	}
@@ -516,92 +390,73 @@ func TestLayerCBudgetTruncates(t *testing.T) {
 	}
 }
 
-// TestComposeFullIntegration: 2 projects (active + 1 other), 5 threads
-// (3 active in B, 2 dormant in C), directives, conventions. Verifies
-// every layer is populated.
 func TestComposeFullIntegration(t *testing.T) {
-	paths := newHome(t)
-	active := memops.ProjectMeta{ID: "prj_1", Name: "active"}
-	if err := store.SaveProjectMeta(paths, active); err != nil {
-		t.Fatalf("save active: %v", err)
+	// All five layers populated.
+	dormantIDs := []string{"thr_4", "thr_5"}
+	dormant := map[string]memops.SpineRecord{}
+	for _, id := range dormantIDs {
+		dormant[id] = memops.SpineRecord{
+			ID: id, Project: "prj_1",
+			Anchors: []string{"alpha"},
+			Summary: id + " dormant",
+			State:   memops.ThreadPaused,
+		}
 	}
-	other := memops.ProjectMeta{
-		ID: "prj_2", Name: "other",
-		LastActive: "2026-04-01T00:00:00Z",
+	active := map[string]ThreadData{}
+	activeIDs := []string{"thr_3", "thr_2", "thr_1"}
+	for _, id := range activeIDs {
+		active[id] = ThreadData{
+			Frontmatter: memops.ThreadFrontmatter{ID: id, Summary: id, State: memops.ThreadActive},
+			Body:        "body of " + id,
+		}
 	}
-	if err := store.SaveProjectMeta(paths, other); err != nil {
-		t.Fatalf("save other: %v", err)
-	}
-	writeDigest(t, paths, memops.ProjectDigest{
-		Project: "prj_2", DisplayName: "other",
-		ThreadCount: 1, RecentAnchors: []string{"alpha", "beta"},
-		OneLineSummary: "other-summary",
-	})
-
-	// Directives.
-	if err := os.WriteFile(filepath.Join(paths.DirectivesDir, "defaults.md"),
-		[]byte("---\nscope: defaults\n---\nDEFAULTS\n"), 0o644); err != nil {
-		t.Fatalf("write defaults.md: %v", err)
-	}
-
-	// Conventions file.
-	convDir := t.TempDir()
-	convPath := filepath.Join(convDir, "AGENTS.md")
-	if err := os.WriteFile(convPath, []byte("WORKSPACE_AGENTS\n"), 0o644); err != nil {
-		t.Fatalf("write conv: %v", err)
-	}
-	active.ConventionsPaths = []string{convPath}
-	if err := store.SaveProjectMeta(paths, active); err != nil {
-		t.Fatalf("save active+conv: %v", err)
-	}
-
-	// Threads: thr_1..thr_5 in active project. Spine + thread file.
+	spineRecs := make([]memops.SpineRecord, 0, 5)
 	for i := 1; i <= 5; i++ {
-		id := fmt.Sprintf("thr_%d", i)
-		if err := store.AppendSpineRecord(paths, memops.SpineRecord{
-			ID: id, Project: active.ID,
-			Anchors: []string{"alpha", "beta", "gamma", "delta"},
+		spineRecs = append(spineRecs, memops.SpineRecord{
+			ID:      fmt.Sprintf("thr_%d", i),
+			Project: "prj_1",
+			Anchors: []string{"alpha"},
 			Summary: fmt.Sprintf("thread %d summary", i),
 			State:   memops.ThreadActive,
-		}); err != nil {
-			t.Fatalf("append %s: %v", id, err)
-		}
-		seedThread(t, paths, id, active.ID, fmt.Sprintf("body of thread %d", i))
+		})
 	}
-
-	state := State{
-		Paths:          paths,
-		ActiveProject:  active,
-		ActiveThreads:  []string{"thr_3", "thr_2", "thr_1"},
-		DormantThreads: []string{"thr_4", "thr_5"},
-		Budget:         memops.DefaultBudget(),
+	in := Inputs{
+		ActiveProject: activeMeta,
+		Budget:        defaultBudget(),
+		Directives: []DirectiveSection{
+			{Header: "defaults", Body: "DEFAULTS\n"},
+		},
+		Conventions: []ConventionFile{
+			{Path: "/ws/AGENTS.md", Content: "WORKSPACE_AGENTS\n"},
+		},
+		ActiveProjectSpine: spineRecs,
+		OtherProjects: []ProjectDigestEntry{{
+			Meta:   memops.ProjectMeta{ID: "prj_2", Name: "other", LastActive: "2026-04-01T00:00:00Z"},
+			Digest: memops.ProjectDigest{Project: "prj_2", OneLineSummary: "other-summary", RecentAnchors: []string{"alpha", "beta"}},
+		}},
+		ActiveThreads:    activeIDs,
+		ActiveThreadData: active,
+		DormantThreads:   dormantIDs,
+		DormantSpine:     dormant,
 	}
-	params, err := Compose(state, ComposeOptions{})
+	params, err := Compose(in, ComposeOptions{})
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
 	}
-
-	// Layer E.
 	if !strings.Contains(params.LayerE, "DEFAULTS") {
 		t.Errorf("LayerE missing defaults: %q", params.LayerE)
 	}
 	if !strings.Contains(params.LayerE, "WORKSPACE_AGENTS") {
 		t.Errorf("LayerE missing conventions: %q", params.LayerE)
 	}
-
-	// Layer A1: 5 spine records.
 	for i := 1; i <= 5; i++ {
 		if !strings.Contains(params.LayerA1, fmt.Sprintf("thr_%d ", i)) {
 			t.Errorf("LayerA1 missing thr_%d", i)
 		}
 	}
-
-	// Layer A2: prj_2 line.
 	if !strings.Contains(params.LayerA2, "(prj_2)") {
 		t.Errorf("LayerA2 missing prj_2: %q", params.LayerA2)
 	}
-
-	// Layer B: thr_3, thr_2, thr_1 (BTopK=3 ≥ 3 so all get rendered).
 	for _, want := range []string{"(thr_1)", "(thr_2)", "(thr_3)"} {
 		if !strings.Contains(params.LayerB, want) {
 			t.Errorf("LayerB missing %s", want)
@@ -612,8 +467,6 @@ func TestComposeFullIntegration(t *testing.T) {
 			t.Errorf("LayerB leaked dormant: %s", no)
 		}
 	}
-
-	// Layer C: thr_4, thr_5 spine displays.
 	for _, want := range []string{"thr_4 ", "thr_5 "} {
 		if !strings.Contains(params.LayerC, want) {
 			t.Errorf("LayerC missing %s", want)
@@ -621,107 +474,18 @@ func TestComposeFullIntegration(t *testing.T) {
 	}
 }
 
-// TestLayerBTrackedFilesSection seeds a .files.json sidecar for an
-// active thread and asserts renderThreadBody appends the §3.9.2
-// tracked-files section: a path header, the current literal, and older
-// versions as diffs / content-addressed identifiers.
-func TestLayerBTrackedFilesSection(t *testing.T) {
-	paths := newHome(t)
-	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
-	if err := store.SaveProjectMeta(paths, meta); err != nil {
-		t.Fatalf("save meta: %v", err)
+// TestPerThreadBudgetFloor pins the substrate-fetch contract: the
+// adapter uses PerThreadBudget to bound store.ReadThreadBody reads to
+// the same share workset will render at, so the floor enforcement here
+// matches the render-time floor exactly.
+func TestPerThreadBudgetFloor(t *testing.T) {
+	if got := PerThreadBudget(100, 0); got != 100 {
+		t.Errorf("n=0: got %d, want 100", got)
 	}
-	seedThread(t, paths, "thr_1", meta.ID, "thread body text")
-
-	// Build a tracked file with enough versions to produce both a diff
-	// and an identifier entry under the default 3-diff window.
-	tf := store.ThreadFiles{ThreadID: "thr_1", Files: map[string]*store.FileEntry{}}
-	for i := 0; i < 6; i++ {
-		body := fmt.Sprintf("title\nrevision %d\nstable footer\n", i)
-		tf.RecordWrite("src/main.go", body)
+	if got := PerThreadBudget(2048, 4); got != 512 {
+		t.Errorf("2048/4: got %d, want 512", got)
 	}
-	if err := store.SaveThreadFiles(paths, tf); err != nil {
-		t.Fatalf("save thread files: %v", err)
-	}
-
-	state := State{
-		Paths:         paths,
-		ActiveProject: meta,
-		ActiveThreads: []string{"thr_1"},
-		Budget:        memops.DefaultBudget(),
-	}
-	params, err := Compose(state, ComposeOptions{})
-	if err != nil {
-		t.Fatalf("Compose: %v", err)
-	}
-	for _, want := range []string{
-		"=== tracked files ===",
-		"--- src/main.go ---",
-		"revision 5",                // current literal
-		"[version 4 diff]",          // a recent-diff entry
-		"see most-recent position]", // an older-version identifier
-	} {
-		if !strings.Contains(params.LayerB, want) {
-			t.Errorf("LayerB missing %q\ngot: %s", want, params.LayerB)
-		}
-	}
-}
-
-// TestLayerBNoTrackedFilesSidecar confirms a thread with no .files.json
-// sidecar renders no tracked-files section at all.
-func TestLayerBNoTrackedFilesSidecar(t *testing.T) {
-	paths := newHome(t)
-	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha"}
-	if err := store.SaveProjectMeta(paths, meta); err != nil {
-		t.Fatalf("save meta: %v", err)
-	}
-	seedThread(t, paths, "thr_1", meta.ID, "plain thread body")
-
-	state := State{
-		Paths:         paths,
-		ActiveProject: meta,
-		ActiveThreads: []string{"thr_1"},
-		Budget:        memops.DefaultBudget(),
-	}
-	params, err := Compose(state, ComposeOptions{})
-	if err != nil {
-		t.Fatalf("Compose: %v", err)
-	}
-	if strings.Contains(params.LayerB, "tracked files") {
-		t.Errorf("LayerB should have no tracked-files section; got %q", params.LayerB)
-	}
-}
-
-// ---- helpers ----
-
-func writeDigest(t *testing.T, paths store.PersonantPaths, d memops.ProjectDigest) {
-	t.Helper()
-	dir := filepath.Join(paths.ProjectsDir, d.Project)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir digest dir: %v", err)
-	}
-	data, err := json.MarshalIndent(d, "", "  ")
-	if err != nil {
-		t.Fatalf("marshal digest: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "digest.json"), data, 0o644); err != nil {
-		t.Fatalf("write digest: %v", err)
-	}
-}
-
-func seedThread(t *testing.T, paths store.PersonantPaths, id, projectID, body string) {
-	t.Helper()
-	thr := memops.Thread{
-		Frontmatter: memops.ThreadFrontmatter{
-			ID:      id,
-			Project: projectID,
-			Anchors: []string{"alpha", "beta", "gamma", "delta"},
-			Summary: id + " summary",
-			State:   memops.ThreadActive,
-		},
-		Body: body,
-	}
-	if err := store.SeedThread(paths, thr); err != nil {
-		t.Fatalf("save thread %s: %v", id, err)
+	if got := PerThreadBudget(100, 10); got != 256 {
+		t.Errorf("floor: got %d, want 256", got)
 	}
 }

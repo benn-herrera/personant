@@ -6,18 +6,19 @@
 // bodies, C dormant thread summaries) with byte-budget-driven
 // truncation. v0.1 uses byte counts as a token proxy (§6.5).
 //
-// Layer composition is read-only; the §3.0.5 "no-bypass" contract is
-// preserved because Compose mutates no on-disk state. A failure on one
-// layer is logged via opts.Logger and that layer renders empty;
-// neighbouring layers proceed.
+// # Substrate-free
+//
+// Compose is a pure function over plain Go types (see Inputs). It does
+// no file I/O and imports no substrate packages — all substrate reads
+// live in the adapter (memops/fileadapter.ComposeWorkingSet) which
+// pre-fetches the data and hands it to Compose. This mirrors the
+// recall/scoring split (MAD C3 + T3-1): substrate access is the
+// adapter's responsibility; the application layer composes pure
+// content.
 package workset
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -25,25 +26,96 @@ import (
 	"personant/internal/dedup"
 	"personant/internal/memops"
 	"personant/internal/prompt"
-	"personant/internal/store"
 )
 
-// State carries the inputs Compose needs to render layer content.
+// Inputs is the per-turn input shape Compose consumes. Every field is
+// already-fetched plain data — Compose touches no substrate.
 //
-// ActiveThreads / DormantThreads are ordered: index 0 is most-recently
-// engaged. The turn package owns the LRU update path
-// (closeTurnAndUpdateEngagement); workset is read-only and trusts the
-// ordering it receives.
-type State struct {
-	Paths          store.PersonantPaths
+// ActiveThreads / DormantThreads are ordered: index 0 is the most
+// recently engaged thread. The turn package owns the LRU update path;
+// workset is read-only and trusts the ordering it receives.
+//
+// The substrate-fetch shape mirrors the order callers want rendered:
+//   - ActiveProjectSpine is filtered to the active project.
+//   - OtherProjects excludes the active project and the default project.
+//   - ActiveThreadData is keyed by thread id; entries absent from the
+//     map are treated as missing-on-substrate and skipped (the adapter
+//     handles the warning logging when it can't load one).
+//   - DormantSpine is likewise a lookup; missing ids skip.
+type Inputs struct {
 	ActiveProject  memops.ProjectMeta
-	ActiveThreads  []string // Layer B membership; most-recently-engaged first
-	DormantThreads []string // Layer C membership; most-recently-engaged first
+	ActiveThreads  []string
+	DormantThreads []string
 	Budget         memops.Budget
+
+	// Layer E: directive bodies (frontmatter already stripped by the
+	// adapter) and arbitrary convention-file bodies in render order.
+	Directives  []DirectiveSection
+	Conventions []ConventionFile
+
+	// Layer A1: spine records for the active project in canonical order
+	// (id ascending, matching store.SpineRecordsByProject).
+	ActiveProjectSpine []memops.SpineRecord
+
+	// Layer A2: other-project digests already filtered (no active, no
+	// default), each carrying meta + digest. Sorted by Compose.
+	OtherProjects []ProjectDigestEntry
+
+	// Layer B: full thread data for active threads. Map keyed by
+	// thread id; a missing key is treated as substrate-missing and
+	// silently skipped — the adapter has already logged the warning.
+	ActiveThreadData map[string]ThreadData
+
+	// Layer C: spine records for dormant threads, keyed by id. A
+	// missing key is treated as substrate-missing and silently skipped.
+	DormantSpine map[string]memops.SpineRecord
+}
+
+// DirectiveSection is one directive source rendered as a single Layer E
+// section. The adapter does the frontmatter stripping and decides
+// optional-vs-required policy before passing here.
+type DirectiveSection struct {
+	Header string // e.g. "defaults", "user", "project: alpha"
+	Body   string
+}
+
+// ConventionFile is one convention file's content with its source path
+// (the path is used as the section header in Layer E so the assistant
+// can attribute conventions to their origin).
+type ConventionFile struct {
+	Path    string
+	Content string
+}
+
+// ProjectDigestEntry pairs a project's meta with its digest for Layer
+// A2 rendering. Caller pre-filters (no active project, no default).
+type ProjectDigestEntry struct {
+	Meta   memops.ProjectMeta
+	Digest memops.ProjectDigest
+}
+
+// ThreadData is the per-thread input for Layer B rendering: frontmatter,
+// body (already recency-windowed + byte-budgeted by the adapter), and
+// tracked-file entries (already with the live-window pre-computed).
+type ThreadData struct {
+	Frontmatter  memops.ThreadFrontmatter
+	Body         string
+	TrackedFiles []TrackedFile
+}
+
+// TrackedFile is one §3.9.2 tracked-file block: path, commit pointer,
+// and the live diff/identifier window (oldest-first; last entry is
+// current). Substrate-free — dedup.WindowEntry is itself a pure value
+// type (dedup is dependency-leaf).
+type TrackedFile struct {
+	Path       string
+	LastCommit string
+	Window     []dedup.WindowEntry
 }
 
 // ComposeOptions tweaks rendering behavior. Logger receives non-fatal
-// warnings (a missing digest, an absent conventions file). nil → silent.
+// warnings (a layer that produces nothing despite inputs, a truncation
+// note). nil → silent.
 type ComposeOptions struct {
 	Logger func(format string, args ...any)
 }
@@ -52,39 +124,27 @@ type ComposeOptions struct {
 // rendered independently and truncated to its byte budget; A2 has a
 // per-project cap as well.
 //
-// If a renderer fails for one layer, that layer is empty and the
-// failure is logged via opts.Logger; other layers proceed. The only
-// hard error returned is an unset ActiveProject.ID — without it there
-// is no spine to render and downstream prompt assembly is malformed.
-func Compose(state State, opts ComposeOptions) (prompt.SystemPromptElements, error) {
-	if state.ActiveProject.ID == "" {
+// If a renderer cannot produce output for a layer, that layer is empty
+// — substrate-fetch warnings are the adapter's responsibility (it
+// already logged them on the way in). The only hard error returned is
+// an unset ActiveProject.ID — without it there is no spine to render
+// and downstream prompt assembly is malformed.
+func Compose(in Inputs, opts ComposeOptions) (prompt.SystemPromptElements, error) {
+	if in.ActiveProject.ID == "" {
 		return prompt.SystemPromptElements{}, fmt.Errorf("workset: ActiveProject.ID is empty")
 	}
-	logf := opts.Logger
-	if logf == nil {
-		logf = func(string, ...any) {}
-	}
-	budget := state.Budget
+	_ = opts.Logger // currently unused; reserved for future render-time warnings
+	budget := in.Budget
 	if budget.Total == 0 {
 		budget = memops.DefaultBudget()
 	}
 
-	layerE := renderLayerE(state, budget, logf)
-	layerA1, err := renderLayerA1(state, budget)
-	if err != nil {
-		logf("workset: render A1: %v", err)
-		layerA1 = ""
-	}
-	layerA2 := renderLayerA2(state, budget, logf)
-	layerB := renderLayerB(state, budget, logf)
-	layerC := renderLayerC(state, budget, logf)
-
 	return prompt.SystemPromptElements{
-		LayerE:  layerE,
-		LayerA1: layerA1,
-		LayerA2: layerA2,
-		LayerB:  layerB,
-		LayerC:  layerC,
+		LayerE:  renderLayerE(in, budget),
+		LayerA1: renderLayerA1(in, budget),
+		LayerA2: renderLayerA2(in, budget),
+		LayerB:  renderLayerB(in, budget),
+		LayerC:  renderLayerC(in, budget),
 	}, nil
 }
 
@@ -108,133 +168,31 @@ func RenderSpineDisplay(rec memops.SpineRecord) string {
 
 // ---------- Layer A1: current project's spine ----------
 
-func renderLayerA1(state State, budget memops.Budget) (string, error) {
-	records, err := store.SpineRecordsByProject(state.Paths, state.ActiveProject.ID)
-	if err != nil {
-		return "", fmt.Errorf("load spine: %w", err)
+func renderLayerA1(in Inputs, budget memops.Budget) string {
+	if len(in.ActiveProjectSpine) == 0 {
+		return ""
 	}
-	lines := make([]string, 0, len(records))
-	for _, rec := range records {
+	lines := make([]string, 0, len(in.ActiveProjectSpine))
+	for _, rec := range in.ActiveProjectSpine {
 		lines = append(lines, RenderSpineDisplay(rec))
 	}
-	return truncateToBudget(strings.Join(lines, "\n"), budget.LayerA1, "Layer A1"), nil
+	return truncateToBudget(strings.Join(lines, "\n"), budget.LayerA1, "Layer A1")
 }
 
 // ---------- Layer E: directives + conventions ----------
 
-func renderLayerE(state State, budget memops.Budget, logf func(string, ...any)) string {
+func renderLayerE(in Inputs, budget memops.Budget) string {
 	var b strings.Builder
-
-	directiveSources := []struct {
-		header string
-		path   string
-		// optional: only warn if absent
-		optional bool
-	}{
-		{"defaults", filepath.Join(state.Paths.DirectivesDir, "defaults.md"), true},
-		{"user", filepath.Join(state.Paths.DirectivesDir, "user.md"), true},
-		{
-			"project: " + state.ActiveProject.Name,
-			filepath.Join(state.Paths.DirectivesDir, state.ActiveProject.ID, "project.md"),
-			true,
-		},
-	}
-	for _, src := range directiveSources {
-		body, err := readDirectiveBody(src.path)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) && src.optional {
-				continue
-			}
-			logf("workset: layer E: read %s: %v", src.path, err)
+	for _, d := range in.Directives {
+		if d.Body == "" {
 			continue
 		}
-		if body == "" {
-			continue
-		}
-		writeSection(&b, src.header, body)
+		writeSection(&b, d.Header, d.Body)
 	}
-
-	for _, conv := range state.ActiveProject.ConventionsPaths {
-		data, err := os.ReadFile(conv)
-		if err != nil {
-			logf("workset: layer E: conventions %s: %v", conv, err)
-			continue
-		}
-		writeSection(&b, "conventions: "+conv, string(data))
+	for _, c := range in.Conventions {
+		writeSection(&b, "conventions: "+c.Path, c.Content)
 	}
-
 	return truncateToBudget(b.String(), budget.LayerE, "Layer E")
-}
-
-// readDirectiveBody loads a directive markdown file and returns its
-// body with any YAML frontmatter (between `---` lines at file head)
-// stripped. A file with no frontmatter returns its full content.
-//
-// Errors propagate; os.IsNotExist is the caller's signal for an
-// optional file that simply doesn't exist yet.
-func readDirectiveBody(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return stripFrontmatter(string(data)), nil
-}
-
-// stripFrontmatter returns content with a leading `---\n...\n---\n`
-// block removed. If no opening delimiter is found on the first line
-// (after optional whitespace), content is returned unchanged.
-//
-// The closing delimiter must be matched against an entire line — an
-// embedded `---` inside a code block in the body therefore stays put.
-func stripFrontmatter(content string) string {
-	// Tolerate leading whitespace.
-	trimmed := strings.TrimLeft(content, " \t\n\r")
-	if !strings.HasPrefix(trimmed, "---") {
-		return content
-	}
-	// Strip exactly the leading whitespace we just trimmed, then look at
-	// remaining lines.
-	rest := trimmed[len("---"):]
-	// The opening delimiter line must end here at a newline (not at a
-	// `---X` token).
-	if !strings.HasPrefix(rest, "\n") && !strings.HasPrefix(rest, "\r\n") && rest != "" {
-		return content
-	}
-	// Skip the rest of the opening delimiter line.
-	if i := strings.Index(rest, "\n"); i >= 0 {
-		rest = rest[i+1:]
-	} else {
-		// No newline after `---` — treat as no frontmatter.
-		return content
-	}
-	// Find the closing delimiter line.
-	for {
-		nl := strings.Index(rest, "\n")
-		var line string
-		if nl < 0 {
-			line = rest
-		} else {
-			line = rest[:nl]
-		}
-		if strings.TrimRight(line, " \t\r") == "---" {
-			if nl < 0 {
-				return ""
-			}
-			body := rest[nl+1:]
-			// One conventional blank line after the closing delimiter is
-			// stripped; everything else preserved verbatim.
-			if strings.HasPrefix(body, "\n") {
-				body = body[1:]
-			}
-			return body
-		}
-		if nl < 0 {
-			// No closing delimiter — treat the input as having no
-			// frontmatter rather than swallowing the whole file.
-			return content
-		}
-		rest = rest[nl+1:]
-	}
 }
 
 func writeSection(b *strings.Builder, header, body string) {
@@ -247,32 +205,23 @@ func writeSection(b *strings.Builder, header, body string) {
 
 // ---------- Layer A2: cross-project digests ----------
 
-func renderLayerA2(state State, budget memops.Budget, logf func(string, ...any)) string {
-	metas, err := store.ListProjects(state.Paths)
-	if err != nil {
-		logf("workset: layer A2: list projects: %v", err)
+func renderLayerA2(in Inputs, budget memops.Budget) string {
+	if len(in.OtherProjects) == 0 {
 		return ""
 	}
 	type projectLine struct {
 		lastActive string
 		line       string
 	}
-	others := make([]projectLine, 0, len(metas))
-	for _, m := range metas {
-		if m.ID == state.ActiveProject.ID || m.ID == store.DefaultProjectID {
-			continue
-		}
-		digest, ok := loadDigest(state.Paths, m.ID, logf)
-		if !ok {
-			continue
-		}
-		raw := renderDigestLine(m, digest)
+	others := make([]projectLine, 0, len(in.OtherProjects))
+	for _, p := range in.OtherProjects {
+		raw := renderDigestLine(p.Meta, p.Digest)
 		others = append(others, projectLine{
-			lastActive: m.LastActive,
+			lastActive: p.Meta.LastActive,
 			line:       truncateRunes(raw, budget.PerProjectDigestBytes),
 		})
 	}
-	// Sort by last_active desc; stable secondary by id ascending so
+	// Sort by last_active desc; stable secondary by line ascending so
 	// equal-LastActive projects render in a deterministic order.
 	sort.SliceStable(others, func(i, j int) bool {
 		if others[i].lastActive != others[j].lastActive {
@@ -280,34 +229,11 @@ func renderLayerA2(state State, budget memops.Budget, logf func(string, ...any))
 		}
 		return others[i].line < others[j].line
 	})
-	if len(others) == 0 {
-		return ""
-	}
 	lines := make([]string, len(others))
 	for i, p := range others {
 		lines[i] = p.line
 	}
 	return truncateToBudget(strings.Join(lines, "\n"), budget.LayerA2, "Layer A2")
-}
-
-// loadDigest reads <Home>/projects/<id>/digest.json. A missing digest
-// is a warning, not an error — the project simply contributes no A2
-// line. ok=false signals "skip this project."
-func loadDigest(paths store.PersonantPaths, id string, logf func(string, ...any)) (memops.ProjectDigest, bool) {
-	digestPath := filepath.Join(paths.ProjectsDir, id, "digest.json")
-	data, err := os.ReadFile(digestPath)
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			logf("workset: layer A2: read %s: %v", digestPath, err)
-		}
-		return memops.ProjectDigest{}, false
-	}
-	var d memops.ProjectDigest
-	if err := json.Unmarshal(data, &d); err != nil {
-		logf("workset: layer A2: parse %s: %v", digestPath, err)
-		return memops.ProjectDigest{}, false
-	}
-	return d, true
 }
 
 // renderDigestLine produces the per-project A2 line:
@@ -332,32 +258,26 @@ func renderDigestLine(meta memops.ProjectMeta, d memops.ProjectDigest) string {
 
 // ---------- Layer B: active thread bodies ----------
 
-func renderLayerB(state State, budget memops.Budget, logf func(string, ...any)) string {
-	if len(state.ActiveThreads) == 0 || budget.LayerB <= 0 {
+func renderLayerB(in Inputs, budget memops.Budget) string {
+	if len(in.ActiveThreads) == 0 || budget.LayerB <= 0 {
 		return ""
 	}
-	limit := len(state.ActiveThreads)
+	limit := len(in.ActiveThreads)
 	if budget.BTopK > 0 && limit > budget.BTopK {
 		limit = budget.BTopK
 	}
 	// Per-thread share. A single oversized thread is truncated to its
 	// share so it does not crowd out its peers.
-	perThread := budget.LayerB
-	if limit > 0 {
-		perThread = budget.LayerB / limit
-		if perThread < 256 {
-			perThread = 256 // floor: no thread renders empty just from arithmetic
-		}
-	}
+	perThread := PerThreadBudget(budget.LayerB, limit)
 
 	rendered := make([]string, 0, limit)
 	for i := 0; i < limit; i++ {
-		id := state.ActiveThreads[i]
-		body, err := renderThreadBody(state.Paths, id, perThread, logf)
-		if err != nil {
-			logf("workset: layer B: %s: %v", id, err)
+		id := in.ActiveThreads[i]
+		data, ok := in.ActiveThreadData[id]
+		if !ok {
 			continue
 		}
+		body := renderThreadBody(id, data)
 		rendered = append(rendered, truncateToBudget(body, perThread, "thread "+id))
 	}
 	if len(rendered) == 0 {
@@ -367,7 +287,29 @@ func renderLayerB(state State, budget memops.Budget, logf func(string, ...any)) 
 	return truncateToBudget(joined, budget.LayerB, "Layer B")
 }
 
-// renderThreadBody loads a thread and renders it as:
+// minPerThreadBudget is the floor for a single Layer B thread's per-thread
+// share. With LayerB / BTopK arithmetic, a tight overall budget could push
+// the share to zero; the floor keeps every selected thread visible
+// rather than dropping to "header only" or empty.
+const minPerThreadBudget = 256
+
+// PerThreadBudget is the per-thread byte share for Layer B given the
+// total Layer B budget and the number of threads chosen for rendering.
+// The adapter uses this to bound store.ReadThreadBody reads to the same
+// share the renderer will truncate to, so substrate I/O matches render
+// budget. n ≤ 0 returns the full budget unchanged.
+func PerThreadBudget(layerB, n int) int {
+	if n <= 0 {
+		return layerB
+	}
+	share := layerB / n
+	if share < minPerThreadBudget {
+		share = minPerThreadBudget
+	}
+	return share
+}
+
+// renderThreadBody renders one active thread as:
 //
 //	# <summary> (<id>) — <state>
 //	[anchors]: a, b, c, d
@@ -377,23 +319,10 @@ func renderLayerB(state State, budget memops.Budget, logf func(string, ...any)) 
 //	=== tracked files ===
 //	<one block per §3.9.2 tracked file>
 //
-// The body is assembled from the thread's recency-windowed turn-excerpt
-// files. byteBudget is passed to store.ReadThreadBody so only ~budget
-// worth of the most recent excerpts is read (newest-first), not all
-// retained turns — the outer truncateToBudget still trims the rendered
-// result, but the budget hint keeps the read itself bounded. The
-// tracked-files section is appended only when the thread has a
-// files.json sidecar with ≥1 entry; absent or empty sidecar renders
-// nothing extra, keeping no-tracked-file threads byte-identical.
-func renderThreadBody(paths store.PersonantPaths, id string, byteBudget int, logf func(string, ...any)) (string, error) {
-	fm, err := store.LoadThreadFrontmatter(paths, id)
-	if err != nil {
-		return "", err
-	}
-	body, err := store.ReadThreadBody(paths, id, byteBudget)
-	if err != nil {
-		return "", err
-	}
+// Body is supplied pre-windowed and pre-byte-budgeted by the caller;
+// tracked-file windows are likewise pre-computed.
+func renderThreadBody(id string, data ThreadData) string {
+	fm := data.Frontmatter
 	state := strings.ToUpper(string(fm.State))
 	if state == "" {
 		state = "UNKNOWN"
@@ -402,50 +331,43 @@ func renderThreadBody(paths store.PersonantPaths, id string, byteBudget int, log
 	b.WriteString("# ")
 	if fm.Summary != "" {
 		b.WriteString(fm.Summary)
-	} else {
+	} else if fm.ID != "" {
 		b.WriteString(fm.ID)
+	} else {
+		b.WriteString(id)
 	}
 	b.WriteString(" (")
-	b.WriteString(fm.ID)
+	if fm.ID != "" {
+		b.WriteString(fm.ID)
+	} else {
+		b.WriteString(id)
+	}
 	b.WriteString(") — ")
 	b.WriteString(state)
 	b.WriteString("\n[anchors]: ")
 	b.WriteString(strings.Join(fm.Anchors, ", "))
 	b.WriteString("\n\n")
-	b.WriteString(strings.TrimRight(body, "\n"))
+	b.WriteString(strings.TrimRight(data.Body, "\n"))
 
-	appendTrackedFiles(&b, paths, id, logf)
-	return b.String(), nil
+	appendTrackedFiles(&b, data.TrackedFiles)
+	return b.String()
 }
 
-// appendTrackedFiles appends the §3.9.2 tracked-files section to b for
-// thread id. A missing sidecar yields an empty store and the section is
-// omitted entirely. A LiveWindow failure on one file is logged via logf
-// and that file skipped (tolerate-and-continue, matching renderLayerB).
-func appendTrackedFiles(b *strings.Builder, paths store.PersonantPaths, id string, logf func(string, ...any)) {
-	tf, err := store.LoadThreadFiles(paths, id)
-	if err != nil {
-		logf("workset: layer B: %s: load tracked files: %v", id, err)
+// appendTrackedFiles appends the §3.9.2 tracked-files section to b. An
+// empty slice renders nothing (no header).
+func appendTrackedFiles(b *strings.Builder, files []TrackedFile) {
+	if len(files) == 0 {
 		return
 	}
-	if len(tf.Files) == 0 {
-		return
-	}
-	paths2 := make([]string, 0, len(tf.Files))
-	for p := range tf.Files {
-		paths2 = append(paths2, p)
-	}
-	sort.Strings(paths2)
+	// Caller hands us files in arbitrary order; render sorted by path
+	// so the layer output is deterministic across calls.
+	sorted := make([]TrackedFile, len(files))
+	copy(sorted, files)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Path < sorted[j].Path })
 
 	var section strings.Builder
-	for _, p := range paths2 {
-		entry := tf.Files[p]
-		window, err := entry.Chain.LiveWindow(dedup.LiveDiffWindow)
-		if err != nil {
-			logf("workset: layer B: %s: tracked file %s: %v", id, p, err)
-			continue
-		}
-		writeTrackedFile(&section, entry, window)
+	for _, f := range sorted {
+		writeTrackedFile(&section, f)
 	}
 	if section.Len() == 0 {
 		return
@@ -458,19 +380,19 @@ func appendTrackedFiles(b *strings.Builder, paths store.PersonantPaths, id strin
 // header (with the commit hash when committed), the current literal,
 // then the older entries oldest-first — diffs as labelled unified-diff
 // blocks, identifiers as their bracketed line.
-func writeTrackedFile(b *strings.Builder, entry *store.FileEntry, window []dedup.WindowEntry) {
+func writeTrackedFile(b *strings.Builder, f TrackedFile) {
 	b.WriteString("--- ")
-	b.WriteString(entry.Path)
-	if entry.LastCommit != "" {
+	b.WriteString(f.Path)
+	if f.LastCommit != "" {
 		b.WriteString(" [committed ")
-		b.WriteString(entry.LastCommit)
+		b.WriteString(f.LastCommit)
 		b.WriteString("]")
 	}
 	b.WriteString(" ---\n")
 
 	// window is oldest-first; the last entry is current. Render the
 	// current literal first, then the older history in temporal order.
-	for _, e := range window {
+	for _, e := range f.Window {
 		if e.Kind != "current" {
 			continue
 		}
@@ -479,7 +401,7 @@ func writeTrackedFile(b *strings.Builder, entry *store.FileEntry, window []dedup
 			b.WriteString("\n")
 		}
 	}
-	for _, e := range window {
+	for _, e := range f.Window {
 		switch e.Kind {
 		case "diff":
 			fmt.Fprintf(b, "[version %d diff]\n", e.Version)
@@ -496,19 +418,14 @@ func writeTrackedFile(b *strings.Builder, entry *store.FileEntry, window []dedup
 
 // ---------- Layer C: dormant thread summaries ----------
 
-func renderLayerC(state State, budget memops.Budget, logf func(string, ...any)) string {
-	if len(state.DormantThreads) == 0 || budget.LayerC <= 0 {
+func renderLayerC(in Inputs, budget memops.Budget) string {
+	if len(in.DormantThreads) == 0 || budget.LayerC <= 0 {
 		return ""
 	}
-	lines := make([]string, 0, len(state.DormantThreads))
-	for _, id := range state.DormantThreads {
-		rec, found, err := store.FindSpineRecord(state.Paths, id)
-		if err != nil {
-			logf("workset: layer C: find %s: %v", id, err)
-			continue
-		}
-		if !found {
-			logf("workset: layer C: %s: not in spine", id)
+	lines := make([]string, 0, len(in.DormantThreads))
+	for _, id := range in.DormantThreads {
+		rec, ok := in.DormantSpine[id]
+		if !ok {
 			continue
 		}
 		lines = append(lines, RenderSpineDisplay(rec))
