@@ -120,9 +120,24 @@ cover: build recall-madlibs
 # run for minutes to (at 6m) an hour; this is a deliberate, watched
 # invocation, so a runaway is the user's to Ctrl-C.
 #   make sim DURATION=1w   (1d|1w|1m|2m|6m or a Go duration like 168h)
+#
+# SIM_WRAP wraps the sim invocation on Darwin with caffeinate(8) +
+# taskpolicy(8) so a long run isn't penalized by idle-sleep transitions
+# or background-QoS demotion when the user steps away. caffeinate -i
+# blocks idle-sleep (display can still sleep — no side effects for the
+# user). taskpolicy -c user-initiated pins the process tree to a non-
+# throttled QoS class; on Apple Silicon this also keeps the work on
+# P-cores instead of being migrated to E-cores. Both are process-scoped
+# and self-clean when the wrapped command exits — no system-wide state
+# changes, nothing to undo. On non-Darwin SIM_WRAP is empty.
+ifeq ($(shell uname -s), Darwin)
+SIM_WRAP := caffeinate -i taskpolicy -c user-initiated
+else
+SIM_WRAP :=
+endif
 DURATION ?= 1w
 sim: build recall-madlibs
-	go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 -sim.duration=$(DURATION)
+	$(SIM_WRAP) go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 -sim.duration=$(DURATION)
 
 # integration-test runs the live-inference tests (build tag
 # `integration`) — they require the `reaper` provider reachable.
