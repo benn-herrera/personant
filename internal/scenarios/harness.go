@@ -272,6 +272,25 @@ type Scenario struct {
 	// Per-step Step.Invariants overrides bypass this cadence: when a step
 	// supplies an explicit invariant list, that exact list runs.
 	HeavyInvariantCadence time.Duration
+
+	// MemoryCapBytes, when > 0, arms the harness's heap watchdog: a
+	// goroutine that polls runtime.MemStats.HeapInuse every
+	// memWatchdogCheckInterval and, on cap exceed, captures a heap profile
+	// + goroutine dump under the rundata directory, flushes mem.jsonl, and
+	// panics. The panic produces a Go stack trace via the test harness —
+	// infinitely more useful for diagnosing a leak than a macOS SIGKILL.
+	//
+	// Zero value (the default) disables the watchdog, preserving the
+	// behavior unit tests have always seen. The six-month sim sets it to a
+	// value comfortably under the macOS jetsam threshold (~30 GB
+	// compressed on a 38 GB machine) so a runaway leak trips the cap
+	// before the OS pager kills the process.
+	//
+	// The mem.jsonl per-step sample stream (memTelemetry) writes
+	// regardless of this field — the file is the load-bearing forensic
+	// artifact; the watchdog is the trip-wire that converts a future
+	// SIGKILL into a stack trace.
+	MemoryCapBytes int64
 }
 
 // Harness owns the isolated test environment for one scenario run.
@@ -299,6 +318,24 @@ type Harness struct {
 	// to (post-Setup). Filled in before Setup runs so Setup may inspect
 	// it; tests may also override it before the first step.
 	MetricsPath string
+
+	// RunHome is the per-scenario rundata directory
+	// (<repo-root>/test/rundata/<scenario-name>/) that holds the metrics
+	// blob, the mem.jsonl telemetry, and any watchdog pprof drops. Stored
+	// on the harness so post-run inspection code does not have to
+	// reconstruct it from MetricsPath topology.
+	RunHome string
+
+	// mem is the per-step memory-telemetry writer. Opened in newHarness,
+	// sampled before each step in runStep, and closed via t.Cleanup so
+	// the file is released even on a test failure / panic. nil only on a
+	// telemetry open failure (which logs but does not fail the run — the
+	// run itself is the load-bearing artifact).
+	mem *memTelemetry
+
+	// watchdog, when non-nil, polls HeapInuse against Scenario.MemoryCapBytes
+	// on a separate goroutine. Owned by the harness; stopped via t.Cleanup.
+	watchdog *memWatchdog
 
 	// startedAt is the harness construction time; per-step durations
 	// are computed from monotonic now() reads, but startedAt is kept
@@ -615,6 +652,7 @@ defaultModel = "harness-mock"
 		Metrics:           run,
 		T:                 t,
 		MetricsPath:       mPath,
+		RunHome:           tmp,
 		startedAt:         clock.Profiling(),
 		pinnedClock:       pinned,
 		tailer:            newLogTailer(paths.LogsDir),
@@ -626,6 +664,37 @@ defaultModel = "harness-mock"
 		// at step 1 when nothing has happened yet. End-of-run always
 		// fires heavy regardless.
 		nextHeavyAt: pinned.Add(sc.HeavyInvariantCadence),
+	}
+
+	// Open the per-step memory telemetry. Every scenario gets a
+	// mem.jsonl — the file is the load-bearing diagnostic the harness
+	// was instrumented to produce, and a unit-test scenario's tiny file
+	// (a few KB) is harmless. A nil mem (open failure) degrades to
+	// no-op sampling, never to a halted run.
+	mem, err := newMemTelemetry(tmp)
+	if err != nil {
+		t.Logf("scenario %s: memtel open: %v (continuing without mem.jsonl)", sc.Name, err)
+	} else {
+		h.mem = mem
+	}
+	t.Cleanup(func() {
+		// Write a final sample so a clean run's mem.jsonl includes the
+		// endpoint of the curve. The watchdog (if any) is stopped first
+		// so its flush()-then-panic path cannot race the close.
+		if h.watchdog != nil {
+			h.watchdog.stopAndWait()
+		}
+		if h.mem != nil {
+			h.mem.sample(-1, h.pinnedClock)
+			h.mem.close()
+		}
+	})
+
+	// Arm the heap watchdog when the scenario opted in. cap > 0 is the
+	// opt-in: unit tests leave it zero and see no goroutine.
+	if sc.MemoryCapBytes > 0 {
+		h.watchdog = newMemWatchdog(uint64(sc.MemoryCapBytes), h.mem)
+		h.watchdog.start()
 	}
 
 	// Pin the clock so timestamps are deterministic — invariant checks
@@ -670,6 +739,16 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 	label := step.Annotation
 	if label == "" {
 		label = fmt.Sprintf("step %d", idx+1)
+	}
+
+	// Sample memory telemetry BEFORE the step executes so even a step
+	// that crashes is preceded on disk by its memory-state record. Sample
+	// at step 0 unconditionally (the run's baseline) and then every
+	// memSampleEveryNSteps; for short scenarios (handful of steps) this
+	// means only the baseline + a final sample at close, which is exactly
+	// what a smoke run wants.
+	if idx == 0 || idx%memSampleEveryNSteps == 0 {
+		h.mem.sample(idx, h.pinnedClock)
 	}
 
 	preSpine, _ := store.ReadSpine(h.Paths.Spine)

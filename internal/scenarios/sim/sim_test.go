@@ -156,6 +156,15 @@ const simDayDuration = 24 * time.Hour
 // generated Scenario — and therefore the run — reproducible.
 const simSeed = 0x5e1f
 
+// simMemoryCapBytes arms the harness's heap watchdog for sim rungs. The
+// 8 GiB value sits well under the 38 GiB development machine's RAM and
+// far below the macOS jetsam threshold (which has been observed firing
+// above ~30 GB compressed in prior incidents), so a runaway leak trips
+// the cap and gets a Go stack trace + heap profile before the OS pager
+// kills the process. Handwritten unit-test scenarios leave the field
+// zero and see no watchdog.
+const simMemoryCapBytes = 8 * 1024 * 1024 * 1024
+
 // simHeavyInvariantCadence is the simulated-time interval between
 // firings of the heavy invariants (full-spine sweeps:
 // VerifySpineIntegrity, VerifyIndexFresh,
@@ -263,6 +272,12 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// unchanged. Handwritten scenarios leave this zero and keep
 	// per-step heavy firing.
 	sc.HeavyInvariantCadence = simHeavyInvariantCadence
+
+	// Arm the heap watchdog. A leaking sim previously got SIGKILL'd by
+	// macOS memorystatus mid-run with no diagnostics; capping HeapInuse
+	// at 8 GiB converts that into a Go panic plus a heap profile under
+	// the rundata directory.
+	sc.MemoryCapBytes = simMemoryCapBytes
 
 	// Append a wall-clock timestamp suffix so each sim run gets its own
 	// forensic-data directory. GenerateWorkload keys sc.Name on
