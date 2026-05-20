@@ -8,67 +8,10 @@ import (
 	"personant/internal/memops"
 )
 
-// BootstrapStep identifies which branch of the waterfall produced a result.
-// The numeric value is for log/debug output; callers should switch on the
-// constants, not the integers.
-type BootstrapStep int
-
-const (
-	StepUnset             BootstrapStep = iota
-	StepExplicit                        // 1: --project flag matched a known project
-	StepRemoteMatch                     // 2: CWD git remote → known project
-	StepPathMatch                       // 3: CWD path → known project
-	StepNeedsConfirmation               // 4: last-active prompt to user
-	StepNeedsFallback                   // 5: caller offers create/switch/none
-)
-
-// String returns a human-readable form of the step (for log lines, not
-// user-facing UI).
-func (s BootstrapStep) String() string {
-	switch s {
-	case StepExplicit:
-		return "explicit"
-	case StepRemoteMatch:
-		return "remote-match"
-	case StepPathMatch:
-		return "path-match"
-	case StepNeedsConfirmation:
-		return "needs-confirmation"
-	case StepNeedsFallback:
-		return "needs-fallback"
-	default:
-		return "unset"
-	}
-}
-
-// BootstrapOptions controls ResolveActiveProject.
-type BootstrapOptions struct {
-	// ExplicitProject, if non-empty, short-circuits the waterfall. The
-	// resolver tries to interpret it first as a prj_<n> id, then as a
-	// memops.ProjectMeta.Name. Returns memops.ErrProjectNotFound on no match.
-	ExplicitProject string
-
-	// CWD is the directory used as the basis for the heuristic waterfall
-	// (steps 1 and 2). Callers typically pass os.Getwd(); the parameter
-	// is explicit so tests can pin a fixture path.
-	CWD string
-}
-
-// BootstrapResult conveys the outcome of the waterfall. Exactly one of:
-//   - Resolved is non-nil (waterfall succeeded; last-active and meta drift
-//     have been persisted).
-//   - Step == StepNeedsConfirmation and Candidate is non-nil (caller asks
-//     the user about resuming the last-active project).
-//   - Step == StepNeedsFallback (caller offers create/switch/no-project).
-type BootstrapResult struct {
-	Step      BootstrapStep
-	Resolved  *memops.ProjectMeta
-	Candidate *memops.ProjectMeta
-}
-
 // ResolveActiveProject runs the bootstrap waterfall described in spec
-// §4.5.7. Pure resolution: the prompt branches surface as Step values; the
-// caller (the chat REPL) implements the actual UI.
+// §4.5.7. Pure resolution: the prompt branches surface as
+// memops.BootstrapStep values; the caller (the chat REPL) implements the
+// actual UI.
 //
 // On Resolved (StepExplicit / StepRemoteMatch / StepPathMatch),
 // ResolveActiveProject persists drift updates to the project's meta and
@@ -80,59 +23,59 @@ type BootstrapResult struct {
 // drift-update — the user's --project flag specifies the project, not the
 // path, so silently rewriting current_root_path on top of an explicit
 // override would be surprising.
-func ResolveActiveProject(paths PersonantPaths, opts BootstrapOptions) (BootstrapResult, error) {
-	if opts.ExplicitProject != "" {
-		meta, err := resolveExplicit(paths, opts.ExplicitProject)
+func ResolveActiveProject(paths PersonantPaths, hints memops.BootstrapHints) (memops.BootstrapResult, error) {
+	if hints.ExplicitProject != "" {
+		meta, err := resolveExplicit(paths, hints.ExplicitProject)
 		if err != nil {
-			return BootstrapResult{}, err
+			return memops.BootstrapResult{}, err
 		}
 		if err := WriteLastActive(paths, meta.ID); err != nil {
-			return BootstrapResult{}, fmt.Errorf("bootstrap: write last-active: %w", err)
+			return memops.BootstrapResult{}, fmt.Errorf("bootstrap: write last-active: %w", err)
 		}
-		return BootstrapResult{Step: StepExplicit, Resolved: &meta}, nil
+		return memops.BootstrapResult{Step: memops.StepExplicit, Resolved: &meta}, nil
 	}
 
 	// Heuristic waterfall step 1: git remote match.
-	if opts.CWD != "" {
-		gitRoot, found, err := FindGitRoot(opts.CWD)
+	if hints.CWD != "" {
+		gitRoot, found, err := FindGitRoot(hints.CWD)
 		if err != nil {
-			return BootstrapResult{}, fmt.Errorf("bootstrap: %w", err)
+			return memops.BootstrapResult{}, fmt.Errorf("bootstrap: %w", err)
 		}
 		if found {
 			origin, err := GetGitOriginURL(gitRoot)
 			if err != nil {
-				return BootstrapResult{}, fmt.Errorf("bootstrap: %w", err)
+				return memops.BootstrapResult{}, fmt.Errorf("bootstrap: %w", err)
 			}
 			if origin != "" {
 				meta, ok, err := FindProjectByRemote(paths, origin)
 				if err != nil {
-					return BootstrapResult{}, fmt.Errorf("bootstrap: %w", err)
+					return memops.BootstrapResult{}, fmt.Errorf("bootstrap: %w", err)
 				}
 				if ok {
 					if err := driftUpdatePath(paths, &meta, gitRoot); err != nil {
-						return BootstrapResult{}, err
+						return memops.BootstrapResult{}, err
 					}
 					if err := WriteLastActive(paths, meta.ID); err != nil {
-						return BootstrapResult{}, fmt.Errorf("bootstrap: write last-active: %w", err)
+						return memops.BootstrapResult{}, fmt.Errorf("bootstrap: write last-active: %w", err)
 					}
-					return BootstrapResult{Step: StepRemoteMatch, Resolved: &meta}, nil
+					return memops.BootstrapResult{Step: memops.StepRemoteMatch, Resolved: &meta}, nil
 				}
 			}
 		}
 
 		// Step 2: CWD path match.
-		meta, ok, err := FindProjectByPath(paths, opts.CWD)
+		meta, ok, err := FindProjectByPath(paths, hints.CWD)
 		if err != nil {
-			return BootstrapResult{}, fmt.Errorf("bootstrap: %w", err)
+			return memops.BootstrapResult{}, fmt.Errorf("bootstrap: %w", err)
 		}
 		if ok {
-			if err := driftUpdatePath(paths, &meta, opts.CWD); err != nil {
-				return BootstrapResult{}, err
+			if err := driftUpdatePath(paths, &meta, hints.CWD); err != nil {
+				return memops.BootstrapResult{}, err
 			}
 			if err := WriteLastActive(paths, meta.ID); err != nil {
-				return BootstrapResult{}, fmt.Errorf("bootstrap: write last-active: %w", err)
+				return memops.BootstrapResult{}, fmt.Errorf("bootstrap: write last-active: %w", err)
 			}
-			return BootstrapResult{Step: StepPathMatch, Resolved: &meta}, nil
+			return memops.BootstrapResult{Step: memops.StepPathMatch, Resolved: &meta}, nil
 		}
 	}
 
@@ -141,21 +84,21 @@ func ResolveActiveProject(paths PersonantPaths, opts BootstrapOptions) (Bootstra
 	if err != nil {
 		// A malformed last-active is not fatal — fall through to fallback so
 		// the user can choose explicitly.
-		return BootstrapResult{Step: StepNeedsFallback}, nil
+		return memops.BootstrapResult{Step: memops.StepNeedsFallback}, nil
 	}
 	if last != "" {
 		meta, err := LoadProjectMeta(paths, last)
 		if err == nil {
-			return BootstrapResult{Step: StepNeedsConfirmation, Candidate: &meta}, nil
+			return memops.BootstrapResult{Step: memops.StepNeedsConfirmation, Candidate: &meta}, nil
 		}
 		if !errors.Is(err, memops.ErrProjectNotFound) {
-			return BootstrapResult{}, fmt.Errorf("bootstrap: %w", err)
+			return memops.BootstrapResult{}, fmt.Errorf("bootstrap: %w", err)
 		}
 		// last-active points at a project whose meta.json was deleted —
 		// fall through to fallback.
 	}
 
-	return BootstrapResult{Step: StepNeedsFallback}, nil
+	return memops.BootstrapResult{Step: memops.StepNeedsFallback}, nil
 }
 
 // resolveExplicit looks up a project either by id (matching ProjectIDPattern

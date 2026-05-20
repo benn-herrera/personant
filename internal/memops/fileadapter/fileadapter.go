@@ -574,14 +574,7 @@ func (a *FileAdapter) CheckDerivedState(ctx context.Context, opts memops.IndexBu
 	if err != nil {
 		return memops.CheckResult{}, fmt.Errorf("fileadapter: check derived state: %w", err)
 	}
-	out := memops.CheckResult{}
-	if len(result.Drifts) > 0 {
-		out.Drifts = make([]memops.Drift, len(result.Drifts))
-		for i, d := range result.Drifts {
-			out.Drifts[i] = memops.Drift{Path: d.Path, Status: d.Status, Detail: d.Detail}
-		}
-	}
-	return out, nil
+	return result, nil
 }
 
 func indexOptionsFromMemops(o memops.IndexBuildOptions) index.Options {
@@ -790,22 +783,7 @@ func (a *FileAdapter) Verify(ctx context.Context) (memops.VerifyReport, error) {
 	if err != nil {
 		return memops.VerifyReport{}, fmt.Errorf("fileadapter: verify: %w", err)
 	}
-	out := memops.VerifyReport{
-		Drift: report.Drift,
-	}
-	if len(report.Errors) > 0 {
-		out.Errors = make([]memops.VerifyFinding, len(report.Errors))
-		for i, f := range report.Errors {
-			out.Errors[i] = memops.VerifyFinding{Path: f.Path, Field: f.Field, Message: f.Message}
-		}
-	}
-	if len(report.Warnings) > 0 {
-		out.Warnings = make([]memops.VerifyFinding, len(report.Warnings))
-		for i, f := range report.Warnings {
-			out.Warnings[i] = memops.VerifyFinding{Path: f.Path, Field: f.Field, Message: f.Message}
-		}
-	}
-	return out, nil
+	return report, nil
 }
 
 // ResolveActiveProject runs the spec §4.5.7 bootstrap waterfall.
@@ -813,41 +791,11 @@ func (a *FileAdapter) ResolveActiveProject(ctx context.Context, hints memops.Boo
 	if err := ctx.Err(); err != nil {
 		return memops.BootstrapResult{}, err
 	}
-	res, err := store.ResolveActiveProject(a.paths, store.BootstrapOptions{
-		ExplicitProject: hints.ExplicitProject,
-		CWD:             hints.CWD,
-	})
+	res, err := store.ResolveActiveProject(a.paths, hints)
 	if err != nil {
 		return memops.BootstrapResult{}, fmt.Errorf("fileadapter: resolve active project: %w", err)
 	}
-	return memops.BootstrapResult{
-		Step:      bootstrapStepFromStore(res.Step),
-		Resolved:  res.Resolved,
-		Candidate: res.Candidate,
-	}, nil
-}
-
-// bootstrapStepFromStore maps the store-side BootstrapStep enum to its
-// memops twin. Both packages use the same iota order; the switch is
-// explicit to make the dependency obvious to readers and to fail loudly
-// if either side reorders.
-func bootstrapStepFromStore(s store.BootstrapStep) memops.BootstrapStep {
-	switch s {
-	case store.StepUnset:
-		return memops.StepUnset
-	case store.StepExplicit:
-		return memops.StepExplicit
-	case store.StepRemoteMatch:
-		return memops.StepRemoteMatch
-	case store.StepPathMatch:
-		return memops.StepPathMatch
-	case store.StepNeedsConfirmation:
-		return memops.StepNeedsConfirmation
-	case store.StepNeedsFallback:
-		return memops.StepNeedsFallback
-	default:
-		return memops.StepUnset
-	}
+	return res, nil
 }
 
 // ---------- Configuration ----------

@@ -374,7 +374,7 @@ func errSkipPhase(phase string) error { return skipPhaseErr{Phase: phase} }
 // formatFindings renders verify Findings into a single line for error
 // messages. Truncates at three findings; full detail lives in the
 // metrics blob.
-func formatFindings(fs []verify.Finding) string {
+func formatFindings(fs []memops.VerifyFinding) string {
 	if len(fs) == 0 {
 		return ""
 	}

@@ -42,6 +42,7 @@ import (
 
 	"personant/internal/clock"
 	"personant/internal/index"
+	"personant/internal/memops"
 	"personant/internal/store"
 	"personant/internal/verify"
 )
@@ -293,7 +294,7 @@ func runCheck(paths store.PersonantPaths, flag GitCheckFlags) error {
 	}
 }
 
-func summarizeDrifts(drifts []index.Drift) string {
+func summarizeDrifts(drifts []memops.Drift) string {
 	if len(drifts) == 0 {
 		return ""
 	}
@@ -311,7 +312,7 @@ func summarizeDrifts(drifts []index.Drift) string {
 	return strings.Join(parts, "; ") + suffix
 }
 
-func summarizeFindings(errs []verify.Finding, drift []string) string {
+func summarizeFindings(errs []memops.VerifyFinding, drift []string) string {
 	parts := make([]string, 0, 3)
 	for i, e := range errs {
 		if i >= 3 {

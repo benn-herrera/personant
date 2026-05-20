@@ -268,8 +268,7 @@ type IndexBuildOptions struct {
 	Warner func(format string, args ...any)
 }
 
-// CheckResult summarizes what CheckSymbolIndex found. Promoted from
-// index.CheckResult.
+// CheckResult summarizes what CheckSymbolIndex found.
 type CheckResult struct {
 	// Drifts lists derived-file discrepancies. Empty ⇔ all derived
 	// files match what RebuildSymbolIndex would produce.
@@ -279,7 +278,7 @@ type CheckResult struct {
 // OK reports whether the check found no drift.
 func (r CheckResult) OK() bool { return len(r.Drifts) == 0 }
 
-// Drift is one entry in a CheckResult. Promoted from index.Drift.
+// Drift is one entry in a CheckResult.
 type Drift struct {
 	// Path is the absolute path to the derived file.
 	Path string
@@ -291,8 +290,7 @@ type Drift struct {
 
 // ---------- Bootstrap ----------
 
-// BootstrapHints feeds ResolveActiveProject. Promoted from
-// store.BootstrapOptions.
+// BootstrapHints feeds ResolveActiveProject.
 type BootstrapHints struct {
 	// ExplicitProject, if non-empty, short-circuits the waterfall.
 	// The resolver tries to interpret it first as a prj_<n> id,
@@ -306,7 +304,7 @@ type BootstrapHints struct {
 }
 
 // BootstrapResult conveys the outcome of the resolve waterfall.
-// Promoted from store.BootstrapResult. Exactly one of:
+// Exactly one of:
 //   - Resolved is non-nil (waterfall succeeded; last-active and meta
 //     drift have been persisted).
 //   - Step == StepNeedsConfirmation and Candidate is non-nil (caller
@@ -325,7 +323,7 @@ type BootstrapResult struct {
 }
 
 // BootstrapStep identifies which branch of the bootstrap waterfall
-// produced a result. Promoted from store.BootstrapStep.
+// produced a result.
 type BootstrapStep int
 
 const (
@@ -349,6 +347,25 @@ const (
 	StepNeedsFallback
 )
 
+// String returns a human-readable form of the step (for log lines, not
+// user-facing UI).
+func (s BootstrapStep) String() string {
+	switch s {
+	case StepExplicit:
+		return "explicit"
+	case StepRemoteMatch:
+		return "remote-match"
+	case StepPathMatch:
+		return "path-match"
+	case StepNeedsConfirmation:
+		return "needs-confirmation"
+	case StepNeedsFallback:
+		return "needs-fallback"
+	default:
+		return "unset"
+	}
+}
+
 // ---------- Init and Verify ----------
 
 // InitOptions configures Init. Promoted from store.InitOptions.
@@ -359,9 +376,8 @@ type InitOptions struct {
 	Logger func(format string, args ...any)
 }
 
-// VerifyReport aggregates the result of a Verify run. Promoted from
-// verify.Report. Errors-or-drift drive non-zero exit codes; warnings
-// alone do not.
+// VerifyReport aggregates the result of a Verify run.
+// Errors-or-drift drive non-zero exit codes; warnings alone do not.
 type VerifyReport struct {
 	// Errors are schema/constraint violations.
 	Errors []VerifyFinding
@@ -379,8 +395,7 @@ func (r VerifyReport) HasErrors() bool {
 	return len(r.Errors) > 0 || len(r.Drift) > 0
 }
 
-// VerifyFinding is one schema/constraint violation. Promoted from
-// verify.Finding.
+// VerifyFinding is one schema/constraint violation.
 type VerifyFinding struct {
 	// Path locates the file or record (e.g. "spine.jsonl[42]" or
 	// "projects/prj_3/meta.json").

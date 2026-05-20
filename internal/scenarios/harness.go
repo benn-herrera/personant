@@ -1012,6 +1012,6 @@ func indexRebuild(paths store.PersonantPaths) error {
 	return index.Rebuild(paths, index.Options{Quiet: true})
 }
 
-func indexCheck(paths store.PersonantPaths) (index.CheckResult, error) {
+func indexCheck(paths store.PersonantPaths) (memops.CheckResult, error) {
 	return index.Check(paths, index.Options{Quiet: true})
 }

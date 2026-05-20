@@ -97,7 +97,7 @@ func rebuild(t *testing.T, paths store.PersonantPaths) {
 // run invokes Verify quietly and returns the report. Failures from
 // Verify itself (I/O errors) are fatal; schema/drift findings are the
 // caller's concern to inspect.
-func run(t *testing.T, paths store.PersonantPaths) Report {
+func run(t *testing.T, paths store.PersonantPaths) memops.VerifyReport {
 	t.Helper()
 	r, err := Verify(paths, VerifyOptions{Quiet: true})
 	if err != nil {
@@ -107,7 +107,7 @@ func run(t *testing.T, paths store.PersonantPaths) Report {
 }
 
 // errorsContain reports whether any Finding's Message contains substr.
-func errorsContain(r Report, substr string) bool {
+func errorsContain(r memops.VerifyReport, substr string) bool {
 	for _, f := range r.Errors {
 		if strings.Contains(f.Message, substr) {
 			return true
@@ -116,7 +116,7 @@ func errorsContain(r Report, substr string) bool {
 	return false
 }
 
-func warningsContain(r Report, substr string) bool {
+func warningsContain(r memops.VerifyReport, substr string) bool {
 	for _, f := range r.Warnings {
 		if strings.Contains(f.Message, substr) {
 			return true

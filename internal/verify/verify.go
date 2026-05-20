@@ -5,8 +5,9 @@
 // drift detection to internal/index.Check.
 //
 // Verify is non-mutating: it never writes a file, never invokes git,
-// and never touches the LLM. Findings are returned as a Report; the
-// caller (cmd/verify.go) decides on exit code and output formatting.
+// and never touches the LLM. Findings are returned as a
+// memops.VerifyReport; the caller (cmd/verify.go) decides on exit code
+// and output formatting.
 package verify
 
 import (
@@ -27,35 +28,6 @@ import (
 	"personant/internal/store"
 )
 
-// Finding is one schema/constraint violation. Path locates the file or
-// record (e.g. "spine.jsonl[42]" or "projects/prj_3/meta.json"); Field
-// names the offending field; Message is a human-readable explanation.
-type Finding struct {
-	Path    string
-	Field   string
-	Message string
-}
-
-// Report aggregates the result of a Verify run.
-//
-//   - Errors:   schema/constraint violations (cause non-zero exit)
-//   - Warnings: recoverable issues (missing meta.json, malformed
-//     directives) — informational, do not affect exit code
-//   - Drift:    pass-through descriptions from index.Check; treated as
-//     errors for the purpose of the exit code. A derived file out of
-//     sync with canonical state is a hard failure — autogit's
-//     CheckDerivedFresh post-flag enforces the same invariant at every
-//     state-changing git op in the home tree.
-type Report struct {
-	Errors   []Finding
-	Warnings []Finding
-	Drift    []string
-}
-
-// HasErrors reports whether the run found any error-grade issues
-// (schema violations or index drift). Warnings alone do not flip this.
-func (r Report) HasErrors() bool { return len(r.Errors) > 0 || len(r.Drift) > 0 }
-
 // VerifyOptions configures Verify. A nil Logger is silent; Quiet
 // suppresses logging regardless of Logger.
 type VerifyOptions struct {
@@ -68,20 +40,21 @@ type VerifyOptions struct {
 // or unparseable.
 const defaultEntryMaxChars = 200
 
-// Verify walks the canonical state at paths and returns a Report.
+// Verify walks the canonical state at paths and returns a
+// memops.VerifyReport.
 //
-// Errors-or-drift in the Report drive the caller's non-zero exit; the
+// Errors-or-drift in the report drive the caller's non-zero exit; the
 // returned error from Verify itself signals an I/O or programming
 // failure that prevented validation from completing (e.g. spine.jsonl
 // failed to read at all). A malformed-but-readable record produces an
 // Error finding, not a returned error.
-func Verify(paths store.PersonantPaths, opts VerifyOptions) (Report, error) {
+func Verify(paths store.PersonantPaths, opts VerifyOptions) (memops.VerifyReport, error) {
 	// opts.Logger is reserved for per-step progress reporting; nothing
 	// in the v0.1 implementation emits through it. Findings flow back
-	// through Report so the cobra layer owns presentation order.
+	// through VerifyReport so the cobra layer owns presentation order.
 	_ = opts
 
-	report := Report{}
+	report := memops.VerifyReport{}
 
 	entryMax, dirWarn := readEntryMaxChars(paths.DirectivesDir)
 	if dirWarn != nil {
@@ -91,7 +64,7 @@ func Verify(paths store.PersonantPaths, opts VerifyOptions) (Report, error) {
 	// Spine: read JSONL, validate per-record schema + cross-refs.
 	spine, err := store.ReadSpine(paths.Spine)
 	if err != nil {
-		return Report{}, fmt.Errorf("verify: read spine: %w", err)
+		return memops.VerifyReport{}, fmt.Errorf("verify: read spine: %w", err)
 	}
 
 	knownProjects := loadKnownProjects(paths.ProjectsDir)
@@ -109,7 +82,7 @@ func Verify(paths store.PersonantPaths, opts VerifyOptions) (Report, error) {
 	idxOpts := index.Options{Quiet: true}
 	chk, ierr := index.Check(paths, idxOpts)
 	if ierr != nil {
-		return Report{}, fmt.Errorf("verify: index check: %w", ierr)
+		return memops.VerifyReport{}, fmt.Errorf("verify: index check: %w", ierr)
 	}
 	for _, d := range chk.Drifts {
 		if d.Detail != "" {
@@ -124,7 +97,7 @@ func Verify(paths store.PersonantPaths, opts VerifyOptions) (Report, error) {
 
 // checkSpine validates each SpineRecord against the spec §2.2 hard
 // limits and accumulates Findings on report.
-func checkSpine(report *Report, spine []memops.SpineRecord, entryMax int, knownProjects map[string]bool) {
+func checkSpine(report *memops.VerifyReport, spine []memops.SpineRecord, entryMax int, knownProjects map[string]bool) {
 	seenIDs := make(map[string]int, len(spine)) // id → first line where seen
 	for i, rec := range spine {
 		loc := fmt.Sprintf("spine.jsonl[%d]", i+1)
@@ -132,13 +105,13 @@ func checkSpine(report *Report, spine []memops.SpineRecord, entryMax int, knownP
 		// id: regex + global uniqueness.
 		switch {
 		case rec.ID == "":
-			report.Errors = append(report.Errors, Finding{Path: loc, Field: "id", Message: "id is empty"})
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "id", Message: "id is empty"})
 		case !memops.ThreadIDPattern.MatchString(rec.ID):
-			report.Errors = append(report.Errors, Finding{Path: loc, Field: "id",
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "id",
 				Message: fmt.Sprintf("id %q does not match %s", rec.ID, memops.ThreadIDPattern.String())})
 		default:
 			if first, dup := seenIDs[rec.ID]; dup {
-				report.Errors = append(report.Errors, Finding{Path: loc, Field: "id",
+				report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "id",
 					Message: fmt.Sprintf("duplicate id %q (also at spine.jsonl[%d])", rec.ID, first)})
 			} else {
 				seenIDs[rec.ID] = i + 1
@@ -149,25 +122,25 @@ func checkSpine(report *Report, spine []memops.SpineRecord, entryMax int, knownP
 		// §2.5.1) and exempt from the strict /^prj_\d+$/ pattern.
 		switch {
 		case rec.Project == "":
-			report.Errors = append(report.Errors, Finding{Path: loc, Field: "project", Message: "project is empty"})
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "project", Message: "project is empty"})
 		case rec.Project == "prj_default":
 			// reserved; always valid as a reference.
 		case !memops.ProjectIDPattern.MatchString(rec.Project):
-			report.Errors = append(report.Errors, Finding{Path: loc, Field: "project",
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "project",
 				Message: fmt.Sprintf("project %q does not match %s", rec.Project, memops.ProjectIDPattern.String())})
 		case !knownProjects[rec.Project]:
 			// Mirror index.Check policy: missing meta.json is a warning, not an error.
-			report.Warnings = append(report.Warnings, Finding{Path: loc, Field: "project",
+			report.Warnings = append(report.Warnings, memops.VerifyFinding{Path: loc, Field: "project",
 				Message: fmt.Sprintf("missing meta.json for %s; using default display_name", rec.Project)})
 		}
 
 		// anchors cardinality.
 		switch {
 		case len(rec.Anchors) < 4:
-			report.Errors = append(report.Errors, Finding{Path: loc, Field: "anchors",
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "anchors",
 				Message: fmt.Sprintf("anchors length %d < 4", len(rec.Anchors))})
 		case len(rec.Anchors) > 8:
-			report.Errors = append(report.Errors, Finding{Path: loc, Field: "anchors",
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "anchors",
 				Message: fmt.Sprintf("anchors length %d > 8", len(rec.Anchors))})
 		}
 
@@ -175,11 +148,11 @@ func checkSpine(report *Report, spine []memops.SpineRecord, entryMax int, knownP
 		seenAnchors := make(map[string]struct{}, len(rec.Anchors))
 		for _, a := range rec.Anchors {
 			if n := len(a); n < 3 || n > 50 {
-				report.Errors = append(report.Errors, Finding{Path: loc, Field: "anchors",
+				report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "anchors",
 					Message: fmt.Sprintf("anchor %q length %d outside [3,50]", a, n)})
 			}
 			if _, dup := seenAnchors[a]; dup {
-				report.Errors = append(report.Errors, Finding{Path: loc, Field: "anchors",
+				report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "anchors",
 					Message: fmt.Sprintf("duplicate anchor %q within record", a)})
 			}
 			seenAnchors[a] = struct{}{}
@@ -191,13 +164,13 @@ func checkSpine(report *Report, spine []memops.SpineRecord, entryMax int, knownP
 
 		// summary length.
 		if len(rec.Summary) > entryMax {
-			report.Errors = append(report.Errors, Finding{Path: loc, Field: "summary",
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "summary",
 				Message: fmt.Sprintf("summary length %d > spine.entry-max-chars %d", len(rec.Summary), entryMax)})
 		}
 
 		// state enum.
 		if !validThreadState(rec.State) {
-			report.Errors = append(report.Errors, Finding{Path: loc, Field: "state",
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "state",
 				Message: fmt.Sprintf("state %q is not a valid ThreadState", rec.State)})
 		}
 
@@ -207,17 +180,17 @@ func checkSpine(report *Report, spine []memops.SpineRecord, entryMax int, knownP
 		lastEng, ok2 := parseRFC3339(rec.LastEngaged, loc, "last_engaged", report)
 		_, _ = parseRFC3339(rec.StateChanged, loc, "state_changed", report)
 		if ok1 && ok2 && created.After(lastEng) {
-			report.Errors = append(report.Errors, Finding{Path: loc, Field: "created",
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "created",
 				Message: fmt.Sprintf("created %s after last_engaged %s", rec.Created, rec.LastEngaged)})
 		}
 
 		// non-negative counters.
 		if rec.TurnCount < 0 {
-			report.Errors = append(report.Errors, Finding{Path: loc, Field: "turn_count",
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "turn_count",
 				Message: fmt.Sprintf("turn_count %d < 0", rec.TurnCount)})
 		}
 		if rec.RecallFires < 0 {
-			report.Errors = append(report.Errors, Finding{Path: loc, Field: "recall_fires",
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "recall_fires",
 				Message: fmt.Sprintf("recall_fires %d < 0", rec.RecallFires)})
 		}
 	}
@@ -230,7 +203,7 @@ func checkSpine(report *Report, spine []memops.SpineRecord, entryMax int, knownP
 // Phase 4 retirement may; surfacing it as a warning keeps that future
 // code landable. The recency-windowed turns/ directory is structural;
 // checkThreads does not read excerpt files.
-func checkThreads(report *Report, paths store.PersonantPaths, spine []memops.SpineRecord) {
+func checkThreads(report *memops.VerifyReport, paths store.PersonantPaths, spine []memops.SpineRecord) {
 	for i, rec := range spine {
 		if rec.ID == "" {
 			continue // already flagged by checkSpine
@@ -239,20 +212,20 @@ func checkThreads(report *Report, paths store.PersonantPaths, spine []memops.Spi
 		fm, err := store.LoadThreadFrontmatter(paths, rec.ID)
 		if err != nil {
 			if errors.Is(err, memops.ErrThreadFileNotFound) {
-				report.Warnings = append(report.Warnings, Finding{Path: loc,
+				report.Warnings = append(report.Warnings, memops.VerifyFinding{Path: loc,
 					Message: fmt.Sprintf("spine.jsonl[%d] %s has no thread.md", i+1, rec.ID)})
 				continue
 			}
-			report.Errors = append(report.Errors, Finding{Path: loc,
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc,
 				Message: fmt.Sprintf("thread.md unreadable or malformed: %v", err)})
 			continue
 		}
 		if fm.ID != rec.ID {
-			report.Errors = append(report.Errors, Finding{Path: loc, Field: "id",
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "id",
 				Message: fmt.Sprintf("frontmatter id %q != spine id %q", fm.ID, rec.ID)})
 		}
 		if fm.Project != rec.Project {
-			report.Errors = append(report.Errors, Finding{Path: loc, Field: "project",
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "project",
 				Message: fmt.Sprintf("frontmatter project %q != spine project %q", fm.Project, rec.Project)})
 		}
 	}
@@ -261,10 +234,10 @@ func checkThreads(report *Report, paths store.PersonantPaths, spine []memops.Spi
 // parseRFC3339 wraps time.Parse and emits a Finding on failure. Returns
 // the parsed time and a bool indicating whether parsing succeeded.
 // parseRFC3339 reports nothing if the value parses cleanly.
-func parseRFC3339(v, loc, field string, report *Report) (time.Time, bool) {
+func parseRFC3339(v, loc, field string, report *memops.VerifyReport) (time.Time, bool) {
 	t, err := time.Parse(time.RFC3339, v)
 	if err != nil {
-		report.Errors = append(report.Errors, Finding{Path: loc, Field: field,
+		report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: field,
 			Message: fmt.Sprintf("%s %q is not RFC3339: %v", field, v, err)})
 		return time.Time{}, false
 	}
@@ -317,13 +290,13 @@ func isProjectDirName(name string) bool {
 
 // checkProjectMetas validates each projects/prj_<n>/meta.json in turn.
 // Iterates in sorted order so output is deterministic.
-func checkProjectMetas(report *Report, projectsDir string) {
+func checkProjectMetas(report *memops.VerifyReport, projectsDir string) {
 	entries, err := os.ReadDir(projectsDir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return
 		}
-		report.Errors = append(report.Errors, Finding{Path: projectsDir, Field: "",
+		report.Errors = append(report.Errors, memops.VerifyFinding{Path: projectsDir, Field: "",
 			Message: fmt.Sprintf("read projects/: %v", err)})
 		return
 	}
@@ -339,7 +312,7 @@ func checkProjectMetas(report *Report, projectsDir string) {
 		if !isProjectDirName(name) {
 			// Out-of-pattern directories under projects/ are unusual
 			// but not strictly fatal — surface as a warning.
-			report.Warnings = append(report.Warnings, Finding{
+			report.Warnings = append(report.Warnings, memops.VerifyFinding{
 				Path:    filepath.Join("projects", name),
 				Field:   "",
 				Message: fmt.Sprintf("directory name %q does not match %s and is not the reserved prj_default", name, memops.ProjectIDPattern.String()),
@@ -354,7 +327,7 @@ func checkProjectMetas(report *Report, projectsDir string) {
 				// at cross-ref time (see checkSpine). No finding here.
 				continue
 			}
-			report.Errors = append(report.Errors, Finding{
+			report.Errors = append(report.Errors, memops.VerifyFinding{
 				Path:    filepath.Join("projects", name, "meta.json"),
 				Field:   "",
 				Message: fmt.Sprintf("read: %v", err),
@@ -363,7 +336,7 @@ func checkProjectMetas(report *Report, projectsDir string) {
 		}
 		var meta memops.ProjectMeta
 		if err := json.Unmarshal(data, &meta); err != nil {
-			report.Errors = append(report.Errors, Finding{
+			report.Errors = append(report.Errors, memops.VerifyFinding{
 				Path:    filepath.Join("projects", name, "meta.json"),
 				Field:   "",
 				Message: fmt.Sprintf("parse: %v", err),
@@ -374,24 +347,24 @@ func checkProjectMetas(report *Report, projectsDir string) {
 	}
 }
 
-func checkProjectMeta(report *Report, dirName string, meta memops.ProjectMeta) {
+func checkProjectMeta(report *memops.VerifyReport, dirName string, meta memops.ProjectMeta) {
 	loc := filepath.Join("projects", dirName, "meta.json")
 
 	// id: regex (or reserved handle) + matches directory name.
 	switch {
 	case meta.ID == "":
-		report.Errors = append(report.Errors, Finding{Path: loc, Field: "id", Message: "id is empty"})
+		report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "id", Message: "id is empty"})
 	case !isProjectDirName(meta.ID):
-		report.Errors = append(report.Errors, Finding{Path: loc, Field: "id",
+		report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "id",
 			Message: fmt.Sprintf("id %q does not match %s and is not prj_default", meta.ID, memops.ProjectIDPattern.String())})
 	case meta.ID != dirName:
-		report.Errors = append(report.Errors, Finding{Path: loc, Field: "id",
+		report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "id",
 			Message: fmt.Sprintf("id %q does not match directory name %q", meta.ID, dirName)})
 	}
 
 	// name regex.
 	if !memops.ProjectNamePattern.MatchString(meta.Name) {
-		report.Errors = append(report.Errors, Finding{Path: loc, Field: "name",
+		report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "name",
 			Message: fmt.Sprintf("name %q does not match %s", meta.Name, memops.ProjectNamePattern.String())})
 	}
 
@@ -400,7 +373,7 @@ func checkProjectMeta(report *Report, dirName string, meta memops.ProjectMeta) {
 	// prj_default carries an empty path by reservation (spec §2.5.1);
 	// allow that special case.
 	if meta.CurrentRootPath == "" && meta.ID != "prj_default" {
-		report.Errors = append(report.Errors, Finding{Path: loc, Field: "current_root_path",
+		report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "current_root_path",
 			Message: "current_root_path is empty"})
 	}
 
@@ -408,13 +381,13 @@ func checkProjectMeta(report *Report, dirName string, meta memops.ProjectMeta) {
 	created, ok1 := parseRFC3339(meta.Created, loc, "created", report)
 	lastActive, ok2 := parseRFC3339(meta.LastActive, loc, "last_active", report)
 	if ok1 && ok2 && created.After(lastActive) {
-		report.Errors = append(report.Errors, Finding{Path: loc, Field: "created",
+		report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "created",
 			Message: fmt.Sprintf("created %s after last_active %s", meta.Created, meta.LastActive)})
 	}
 
 	// thread_count non-negative.
 	if meta.ThreadCount < 0 {
-		report.Errors = append(report.Errors, Finding{Path: loc, Field: "thread_count",
+		report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "thread_count",
 			Message: fmt.Sprintf("thread_count %d < 0", meta.ThreadCount)})
 	}
 }
@@ -431,20 +404,20 @@ func checkProjectMeta(report *Report, dirName string, meta memops.ProjectMeta) {
 // TODO(phase-2-yaml): replace line-grep with a proper directives
 // loader once we have a YAML parser (or move directive params to TOML
 // per the project's data-format preference).
-func readEntryMaxChars(directivesDir string) (int, *Finding) {
+func readEntryMaxChars(directivesDir string) (int, *memops.VerifyFinding) {
 	defaultsPath := filepath.Join(directivesDir, "defaults.md")
 	f, err := os.Open(defaultsPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			// Treat missing defaults.md as a warning so the user knows
 			// something is off without failing the check.
-			return defaultEntryMaxChars, &Finding{
+			return defaultEntryMaxChars, &memops.VerifyFinding{
 				Path: filepath.Join("directives", "defaults.md"),
 				Message: fmt.Sprintf("not found; falling back to default spine.entry-max-chars=%d",
 					defaultEntryMaxChars),
 			}
 		}
-		return defaultEntryMaxChars, &Finding{
+		return defaultEntryMaxChars, &memops.VerifyFinding{
 			Path:    filepath.Join("directives", "defaults.md"),
 			Message: fmt.Sprintf("open: %v; falling back to default spine.entry-max-chars=%d", err, defaultEntryMaxChars),
 		}
@@ -466,7 +439,7 @@ func readEntryMaxChars(directivesDir string) (int, *Finding) {
 		}
 		n, err := strconv.Atoi(raw)
 		if err != nil || n <= 0 {
-			return defaultEntryMaxChars, &Finding{
+			return defaultEntryMaxChars, &memops.VerifyFinding{
 				Path:    filepath.Join("directives", "defaults.md"),
 				Field:   "spine.entry-max-chars",
 				Message: fmt.Sprintf("malformed value %q; falling back to default %d", raw, defaultEntryMaxChars),
@@ -475,13 +448,13 @@ func readEntryMaxChars(directivesDir string) (int, *Finding) {
 		return n, nil
 	}
 	if err := scanner.Err(); err != nil {
-		return defaultEntryMaxChars, &Finding{
+		return defaultEntryMaxChars, &memops.VerifyFinding{
 			Path:    filepath.Join("directives", "defaults.md"),
 			Message: fmt.Sprintf("scan: %v; falling back to default spine.entry-max-chars=%d", err, defaultEntryMaxChars),
 		}
 	}
 	// Key not found at all — warn and fall back.
-	return defaultEntryMaxChars, &Finding{
+	return defaultEntryMaxChars, &memops.VerifyFinding{
 		Path:    filepath.Join("directives", "defaults.md"),
 		Field:   "spine.entry-max-chars",
 		Message: fmt.Sprintf("key not present; falling back to default %d", defaultEntryMaxChars),

@@ -41,12 +41,12 @@ func TestResolveActiveProject_ExplicitByID(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	res, err := ResolveActiveProject(paths, BootstrapOptions{ExplicitProject: "prj_1"})
+	res, err := ResolveActiveProject(paths, memops.BootstrapHints{ExplicitProject: "prj_1"})
 	if err != nil {
 		t.Fatalf("ResolveActiveProject: %v", err)
 	}
-	if res.Step != StepExplicit {
-		t.Errorf("step: got %v, want StepExplicit", res.Step)
+	if res.Step != memops.StepExplicit {
+		t.Errorf("step: got %v, want memops.StepExplicit", res.Step)
 	}
 	if res.Resolved == nil || res.Resolved.ID != "prj_1" {
 		t.Fatalf("Resolved: %+v", res.Resolved)
@@ -66,12 +66,12 @@ func TestResolveActiveProject_ExplicitByName(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	res, err := ResolveActiveProject(paths, BootstrapOptions{ExplicitProject: "gamma"})
+	res, err := ResolveActiveProject(paths, memops.BootstrapHints{ExplicitProject: "gamma"})
 	if err != nil {
 		t.Fatalf("ResolveActiveProject: %v", err)
 	}
-	if res.Step != StepExplicit {
-		t.Errorf("step: got %v, want StepExplicit", res.Step)
+	if res.Step != memops.StepExplicit {
+		t.Errorf("step: got %v, want memops.StepExplicit", res.Step)
 	}
 	if res.Resolved == nil || res.Resolved.ID != "prj_7" {
 		t.Fatalf("Resolved: %+v", res.Resolved)
@@ -80,7 +80,7 @@ func TestResolveActiveProject_ExplicitByName(t *testing.T) {
 
 func TestResolveActiveProject_ExplicitUnknown(t *testing.T) {
 	paths := bootstrapPaths(t)
-	_, err := ResolveActiveProject(paths, BootstrapOptions{ExplicitProject: "ghost"})
+	_, err := ResolveActiveProject(paths, memops.BootstrapHints{ExplicitProject: "ghost"})
 	if !errors.Is(err, memops.ErrProjectNotFound) {
 		t.Fatalf("expected memops.ErrProjectNotFound, got %v", err)
 	}
@@ -114,12 +114,12 @@ func TestResolveActiveProject_RemoteMatch(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	res, err := ResolveActiveProject(paths, BootstrapOptions{CWD: repo})
+	res, err := ResolveActiveProject(paths, memops.BootstrapHints{CWD: repo})
 	if err != nil {
 		t.Fatalf("ResolveActiveProject: %v", err)
 	}
-	if res.Step != StepRemoteMatch {
-		t.Errorf("step: got %v, want StepRemoteMatch", res.Step)
+	if res.Step != memops.StepRemoteMatch {
+		t.Errorf("step: got %v, want memops.StepRemoteMatch", res.Step)
 	}
 	if res.Resolved == nil || res.Resolved.ID != "prj_1" {
 		t.Fatalf("Resolved: %+v", res.Resolved)
@@ -166,12 +166,12 @@ func TestResolveActiveProject_RemoteMatch_Historical(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	res, err := ResolveActiveProject(paths, BootstrapOptions{CWD: repo})
+	res, err := ResolveActiveProject(paths, memops.BootstrapHints{CWD: repo})
 	if err != nil {
 		t.Fatalf("ResolveActiveProject: %v", err)
 	}
-	if res.Step != StepRemoteMatch {
-		t.Errorf("step: got %v, want StepRemoteMatch", res.Step)
+	if res.Step != memops.StepRemoteMatch {
+		t.Errorf("step: got %v, want memops.StepRemoteMatch", res.Step)
 	}
 	if res.Resolved == nil || res.Resolved.ID != "prj_1" {
 		t.Fatalf("Resolved: %+v", res.Resolved)
@@ -190,12 +190,12 @@ func TestResolveActiveProject_PathMatch_Current(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	res, err := ResolveActiveProject(paths, BootstrapOptions{CWD: cwd})
+	res, err := ResolveActiveProject(paths, memops.BootstrapHints{CWD: cwd})
 	if err != nil {
 		t.Fatalf("ResolveActiveProject: %v", err)
 	}
-	if res.Step != StepPathMatch {
-		t.Errorf("step: got %v, want StepPathMatch", res.Step)
+	if res.Step != memops.StepPathMatch {
+		t.Errorf("step: got %v, want memops.StepPathMatch", res.Step)
 	}
 	if res.Resolved == nil || res.Resolved.ID != "prj_1" {
 		t.Fatalf("Resolved: %+v", res.Resolved)
@@ -216,12 +216,12 @@ func TestResolveActiveProject_PathMatch_Historical_DriftUpdate(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	res, err := ResolveActiveProject(paths, BootstrapOptions{CWD: newCWD})
+	res, err := ResolveActiveProject(paths, memops.BootstrapHints{CWD: newCWD})
 	if err != nil {
 		t.Fatalf("ResolveActiveProject: %v", err)
 	}
-	if res.Step != StepPathMatch {
-		t.Errorf("step: got %v, want StepPathMatch", res.Step)
+	if res.Step != memops.StepPathMatch {
+		t.Errorf("step: got %v, want memops.StepPathMatch", res.Step)
 	}
 
 	stored, err := LoadProjectMeta(paths, "prj_1")
@@ -257,7 +257,7 @@ func TestResolveActiveProject_LastActiveConfirmation(t *testing.T) {
 
 	// CWD that does not match any project.
 	bareCWD := t.TempDir()
-	res, err := ResolveActiveProject(paths, BootstrapOptions{CWD: bareCWD})
+	res, err := ResolveActiveProject(paths, memops.BootstrapHints{CWD: bareCWD})
 	if err != nil {
 		t.Fatalf("ResolveActiveProject: %v", err)
 	}
@@ -268,8 +268,8 @@ func TestResolveActiveProject_LastActiveConfirmation(t *testing.T) {
 	// either NeedsConfirmation fired (the documented branch) or the
 	// remote-match silently passed without any configured remote (which
 	// shouldn't happen in this fixture).
-	if res.Step != StepNeedsConfirmation {
-		t.Fatalf("step: got %v, want StepNeedsConfirmation; resolved=%+v", res.Step, res.Resolved)
+	if res.Step != memops.StepNeedsConfirmation {
+		t.Fatalf("step: got %v, want memops.StepNeedsConfirmation; resolved=%+v", res.Step, res.Resolved)
 	}
 	if res.Candidate == nil || res.Candidate.ID != "prj_1" {
 		t.Errorf("Candidate: %+v", res.Candidate)
@@ -286,24 +286,24 @@ func TestResolveActiveProject_LastActiveStaleFallsThrough(t *testing.T) {
 	}
 
 	bareCWD := t.TempDir()
-	res, err := ResolveActiveProject(paths, BootstrapOptions{CWD: bareCWD})
+	res, err := ResolveActiveProject(paths, memops.BootstrapHints{CWD: bareCWD})
 	if err != nil {
 		t.Fatalf("ResolveActiveProject: %v", err)
 	}
-	if res.Step != StepNeedsFallback {
-		t.Errorf("step: got %v, want StepNeedsFallback", res.Step)
+	if res.Step != memops.StepNeedsFallback {
+		t.Errorf("step: got %v, want memops.StepNeedsFallback", res.Step)
 	}
 }
 
 func TestResolveActiveProject_FreshHomeNeedsFallback(t *testing.T) {
 	paths := bootstrapPaths(t)
 	bareCWD := t.TempDir()
-	res, err := ResolveActiveProject(paths, BootstrapOptions{CWD: bareCWD})
+	res, err := ResolveActiveProject(paths, memops.BootstrapHints{CWD: bareCWD})
 	if err != nil {
 		t.Fatalf("ResolveActiveProject: %v", err)
 	}
-	if res.Step != StepNeedsFallback {
-		t.Errorf("step: got %v, want StepNeedsFallback", res.Step)
+	if res.Step != memops.StepNeedsFallback {
+		t.Errorf("step: got %v, want memops.StepNeedsFallback", res.Step)
 	}
 	if res.Resolved != nil || res.Candidate != nil {
 		t.Errorf("expected no resolved/candidate, got resolved=%+v candidate=%+v", res.Resolved, res.Candidate)
@@ -322,15 +322,15 @@ func TestResolveActiveProject_ExplicitDoesNotDriftPath(t *testing.T) {
 	}
 
 	someCWD := t.TempDir()
-	res, err := ResolveActiveProject(paths, BootstrapOptions{
+	res, err := ResolveActiveProject(paths, memops.BootstrapHints{
 		ExplicitProject: "prj_1",
 		CWD:             someCWD, // should be ignored on the explicit path
 	})
 	if err != nil {
 		t.Fatalf("ResolveActiveProject: %v", err)
 	}
-	if res.Step != StepExplicit {
-		t.Fatalf("step: got %v, want StepExplicit", res.Step)
+	if res.Step != memops.StepExplicit {
+		t.Fatalf("step: got %v, want memops.StepExplicit", res.Step)
 	}
 
 	// stored meta must not have been rewritten — the explicit path
@@ -349,12 +349,12 @@ func TestResolveActiveProject_ExplicitDoesNotDriftPath(t *testing.T) {
 
 func TestResolveActiveProject_DefaultProjectIDExplicit(t *testing.T) {
 	paths := bootstrapPaths(t)
-	res, err := ResolveActiveProject(paths, BootstrapOptions{ExplicitProject: DefaultProjectID})
+	res, err := ResolveActiveProject(paths, memops.BootstrapHints{ExplicitProject: DefaultProjectID})
 	if err != nil {
 		t.Fatalf("ResolveActiveProject default: %v", err)
 	}
-	if res.Step != StepExplicit {
-		t.Errorf("step: got %v, want StepExplicit", res.Step)
+	if res.Step != memops.StepExplicit {
+		t.Errorf("step: got %v, want memops.StepExplicit", res.Step)
 	}
 	if res.Resolved == nil || res.Resolved.ID != DefaultProjectID {
 		t.Fatalf("Resolved: %+v", res.Resolved)
