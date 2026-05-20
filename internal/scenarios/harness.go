@@ -257,13 +257,14 @@ type Scenario struct {
 	MetricsPath string
 
 	// HeavyInvariantCadence relaxes per-step invariant firing for long
-	// simulations: when > 0, the heavy invariants (full-substrate sweeps —
-	// VerifySpineIntegrity, VerifyIndexFresh,
-	// VerifyThreadFrontmatterMatchesSpine) fire only when the harness's
-	// simulated clock has advanced past the next-due tick. Cheap
-	// invariants (O(1) or O(touched-this-step)) still fire every step.
-	// The heavy set always fires once at end-of-run regardless of cadence,
-	// so the acceptance-gate behavior is preserved.
+	// simulations: when > 0, the heavy invariants (substrate-scale checks —
+	// VerifySpineIntegrity, VerifyIndexFresh, VerifyProjectReferences,
+	// VerifyThreadFrontmatterMatchesSpine, VerifyThreadAccounting) fire
+	// only when the harness's simulated clock has advanced past the
+	// next-due tick. Cheap invariants (strictly O(1) or
+	// O(touched-this-step)) still fire every step. The heavy set always
+	// fires once at end-of-run regardless of cadence, so the
+	// acceptance-gate behavior is preserved.
 	//
 	// Zero value = fire heavy invariants every step (the legacy behavior,
 	// what handwritten scenarios still get). Only opt-in scenarios — the

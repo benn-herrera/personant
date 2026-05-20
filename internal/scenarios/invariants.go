@@ -41,17 +41,19 @@ type InvariantCheck func(h *Harness) error
 // ...)) keep the same full-suite semantics they always had.
 var DefaultInvariants = append(append([]InvariantCheck{}, cheapDefaultInvariants...), heavyDefaultInvariants...)
 
-// cheapDefaultInvariants are the per-step-safe checks: O(1) or
-// O(touched-this-step) cost, no full-spine rebuild/verify passes. Safe
-// to fire on every step in any scenario, including the six-month sim.
+// cheapDefaultInvariants are the per-step-safe checks: strictly O(1) or
+// O(touched-this-step) cost. No full-spine reads, no project enumeration,
+// no folds over cumulative state that grows with the run. Safe to fire on
+// every step in any scenario, including the six-month sim, without
+// contributing to per-step wall-time growth.
 var cheapDefaultInvariants = []InvariantCheck{
-	VerifyProjectReferences,
 	VerifyLastActiveValid,
-	VerifyThreadAccounting,
 }
 
-// heavyDefaultInvariants are the full-substrate sweeps: each one does
-// at least one O(threads-on-disk) pass (and VerifyIndexFresh does two).
+// heavyDefaultInvariants are the substrate-scale checks: each one does
+// at least one O(threads-on-disk) pass, and several do more
+// (VerifyIndexFresh does two; VerifyThreadAccounting folds the
+// monotonically-growing created/archived sets AND reads the spine).
 // They make per-step invariant firing super-linear in a long simulation.
 // A scenario may opt into a time-cadenced firing via
 // Scenario.HeavyInvariantCadence; they always fire once at end-of-run
@@ -59,7 +61,9 @@ var cheapDefaultInvariants = []InvariantCheck{
 var heavyDefaultInvariants = []InvariantCheck{
 	VerifySpineIntegrity,
 	VerifyIndexFresh,
+	VerifyProjectReferences,
 	VerifyThreadFrontmatterMatchesSpine,
+	VerifyThreadAccounting,
 }
 
 // VerifySpineIntegrity wraps verify.Verify and surfaces any errors.
