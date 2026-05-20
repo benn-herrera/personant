@@ -125,13 +125,17 @@ cover: build recall-madlibs
 # taskpolicy(8) so a long run isn't penalized by idle-sleep transitions
 # or background-QoS demotion when the user steps away. caffeinate -i
 # blocks idle-sleep (display can still sleep — no side effects for the
-# user). taskpolicy -c user-initiated pins the process tree to a non-
-# throttled QoS class; on Apple Silicon this also keeps the work on
-# P-cores instead of being migrated to E-cores. Both are process-scoped
-# and self-clean when the wrapped command exits — no system-wide state
-# changes, nothing to undo. On non-Darwin SIM_WRAP is empty.
+# user). taskpolicy -t 0 -l 0 pins the process tree to the highest
+# throughput tier and lowest latency tier (highest scheduling priority);
+# on Apple Silicon this also keeps the work on P-cores. (The earlier
+# `-c user-initiated` form is rejected on macOS 26.5 as "Could not parse
+# 'user-initiated' as a QoS clamp" — using tier flags instead, which
+# work in wrap mode across macOS versions.) Both wrappers are
+# process-scoped and self-clean when the wrapped command exits — no
+# system-wide state changes, nothing to undo. On non-Darwin SIM_WRAP is
+# empty.
 ifeq ($(shell uname -s), Darwin)
-SIM_WRAP := caffeinate -i taskpolicy -c user-initiated
+SIM_WRAP := caffeinate -i taskpolicy -t 0 -l 0
 else
 SIM_WRAP :=
 endif
