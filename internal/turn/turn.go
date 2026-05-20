@@ -624,18 +624,32 @@ func fetchThreadForReprompt(ctx context.Context, state *State, thrID string) boo
 // dormantThreadsCap. Used by the §5.5 mid-turn fetch and by the §3.4
 // recall-accept path (Part B).
 func promoteToLayerB(state *State, thrID string) {
+	touchActiveLRU(state, thrID)
+}
+
+// touchActiveLRU is the §3.1 Layer B/C LRU primitive: lift thrID to the
+// front of state.ActiveThreads, demoting any Budget.BTopK overflow to
+// the head of state.DormantThreads, and cap the dormant slice at
+// dormantThreadsCap. The single-id operation shared by both the
+// per-engagement loop in updateLayerLRU and the single-promotion
+// callers (promoteToLayerB).
+func touchActiveLRU(state *State, thrID string) {
 	bTopK := state.Budget.BTopK
 	if bTopK <= 0 {
 		bTopK = workset.DefaultBTopK
 	}
+	// Drop from current positions in either layer.
 	state.ActiveThreads = removeString(state.ActiveThreads, thrID)
 	state.DormantThreads = removeString(state.DormantThreads, thrID)
+	// Insert at the front of ActiveThreads.
 	state.ActiveThreads = append([]string{thrID}, state.ActiveThreads...)
+	// Overflow: tail of ActiveThreads demotes to head of DormantThreads.
 	for len(state.ActiveThreads) > bTopK {
 		demoted := state.ActiveThreads[len(state.ActiveThreads)-1]
 		state.ActiveThreads = state.ActiveThreads[:len(state.ActiveThreads)-1]
 		state.DormantThreads = append([]string{demoted}, state.DormantThreads...)
 	}
+	// Cap DormantThreads by count.
 	if len(state.DormantThreads) > dormantThreadsCap {
 		state.DormantThreads = state.DormantThreads[:dormantThreadsCap]
 	}
@@ -793,32 +807,13 @@ func applyFileEdits(ctx context.Context, state *State, threadID string) {
 // counter; eviction is bounded by budget pressure"). DormantThreads
 // is capped by count to keep the slice bounded across a long session.
 func updateLayerLRU(state *State, engaged []string) {
-	bTopK := state.Budget.BTopK
-	if bTopK <= 0 {
-		bTopK = workset.DefaultBTopK
-	}
 	for _, id := range engaged {
 		// An engaged thread has started a fresh idle clock; any
 		// §3.5 defer-suppression grace from a prior idle episode is
 		// now meaningless, so prune it to avoid wrongly suppressing a
 		// future legitimate re-prompt.
 		delete(state.closureDeferUntil, id)
-		// Drop from current positions in either layer.
-		state.ActiveThreads = removeString(state.ActiveThreads, id)
-		state.DormantThreads = removeString(state.DormantThreads, id)
-		// Insert at the front of ActiveThreads.
-		state.ActiveThreads = append([]string{id}, state.ActiveThreads...)
-		// Overflow: tail of ActiveThreads demotes to head of
-		// DormantThreads.
-		for len(state.ActiveThreads) > bTopK {
-			demoted := state.ActiveThreads[len(state.ActiveThreads)-1]
-			state.ActiveThreads = state.ActiveThreads[:len(state.ActiveThreads)-1]
-			state.DormantThreads = append([]string{demoted}, state.DormantThreads...)
-		}
-	}
-	// Cap DormantThreads by count.
-	if len(state.DormantThreads) > dormantThreadsCap {
-		state.DormantThreads = state.DormantThreads[:dormantThreadsCap]
+		touchActiveLRU(state, id)
 	}
 }
 
