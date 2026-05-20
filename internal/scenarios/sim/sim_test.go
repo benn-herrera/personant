@@ -248,6 +248,21 @@ func TestSim(t *testing.T) {
 	}
 }
 
+// withRunTimestampSuffix appends a wall-clock suffix to a sim
+// scenario's Name so each `go test` invocation gets its own rundata
+// directory. The harness's runDataHome RemoveAll's the per-scenario
+// home at run start; without a unique suffix, two sim runs in one test
+// invocation collide, and stragglers (working-set writer, autogit ops,
+// log appenders) from the prior run race with the new RemoveAll —
+// surfacing as "directory not empty", "log shrank", or spurious
+// invariant failures (MAD review #56 burn-down).
+//
+// clock.Profiling() is the real wall-clock; it is unaffected by the
+// Timeline override the harness installs during a run.
+func withRunTimestampSuffix(name string) string {
+	return name + "." + clock.Profiling().Format("060102150405")
+}
+
 // runSimRung is the shared run-and-report logic for every rung of the
 // six-month simulation rung walk. It generates a deterministic workload
 // of simulated span d, drives it through the scenario harness, asserts
@@ -285,9 +300,7 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// (seed, duration) only, so two runs of the same duration would
 	// otherwise reuse one test/rundata/<name>/ directory and the
 	// harness's runDataHome RemoveAll would destroy the prior run's data.
-	// clock.Profiling() is the real wall-clock; it is unaffected by the
-	// Timeline override the harness installs during a run.
-	sc.Name += "." + clock.Profiling().Format("060102150405")
+	sc.Name = withRunTimestampSuffix(sc.Name)
 
 	// The workload is generated on demand — the harness pulls one step
 	// at a time from sc.StepSource — so the turn count is not knowable
@@ -482,6 +495,12 @@ func TestSim_DormantResumptionDrivesMidTurnFetch(t *testing.T) {
 		Duration: simDayDuration,
 		Corpus:   corpus,
 	})
+
+	// Timestamp suffix prevents rundata directory collision with prior
+	// tests in the same `go test` invocation; see MAD review #56
+	// burn-down. Without it, this test reuses the all-zeros sentinel
+	// suffix and races with stragglers from a prior sim run.
+	sc.Name = withRunTimestampSuffix(sc.Name)
 
 	h := scenarios.RunScenario(t, sc)
 
