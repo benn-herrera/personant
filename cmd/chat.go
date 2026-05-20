@@ -5,11 +5,9 @@ import (
 
 	"personant/internal/chat"
 	"personant/internal/memops/fileadapter"
-	"personant/internal/store"
 )
 
 var (
-	chatFlagHome     string
 	chatFlagProject  string
 	chatFlagProvider string
 	chatFlagModel    string
@@ -25,7 +23,7 @@ banner, and loops on stdin: slash commands ('/help', '/quit',
 ('$', '#'), and otherwise drives one full §3.0 turn through the
 turn-handler chain.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		paths, err := resolveChatPaths()
+		paths, err := resolvePaths()
 		if err != nil {
 			return err
 		}
@@ -39,15 +37,7 @@ turn-handler chain.`,
 	SilenceUsage: true,
 }
 
-func resolveChatPaths() (store.PersonantPaths, error) {
-	if chatFlagHome != "" {
-		return store.PathsForHome(chatFlagHome), nil
-	}
-	return store.ResolvePaths()
-}
-
 func init() {
-	chatCmd.Flags().StringVar(&chatFlagHome, "home", "", "override $PERSONANT_HOME for this invocation")
 	chatCmd.Flags().StringVar(&chatFlagProject, "project", "", "explicit active project (id or name); skips bootstrap heuristics")
 	chatCmd.Flags().StringVar(&chatFlagProvider, "provider", "", "override the default provider name")
 	chatCmd.Flags().StringVar(&chatFlagModel, "model", "", "override the provider's default model")

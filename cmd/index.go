@@ -10,11 +10,9 @@ import (
 	"personant/internal/log"
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
-	"personant/internal/store"
 )
 
 var (
-	indexFlagHome    string
 	indexFlagQuiet   bool
 	indexFlagVerbose bool
 )
@@ -34,7 +32,7 @@ var indexRebuildCmd = &cobra.Command{
 digest.json files atomically. Idempotent: a rebuild after a clean
 rebuild produces no changes.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		paths, err := resolveIndexPaths()
+		paths, err := resolvePaths()
 		if err != nil {
 			return err
 		}
@@ -55,7 +53,7 @@ disk. Prints any drift to stdout. Exits 0 when all derived files match
 the rebuild output; exits 1 when drift is detected. Never writes
 anything.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		paths, err := resolveIndexPaths()
+		paths, err := resolvePaths()
 		if err != nil {
 			return err
 		}
@@ -91,13 +89,6 @@ anything.`,
 	SilenceErrors: false,
 }
 
-func resolveIndexPaths() (store.PersonantPaths, error) {
-	if indexFlagHome != "" {
-		return store.PathsForHome(indexFlagHome), nil
-	}
-	return store.ResolvePaths()
-}
-
 func stderrLogger() func(format string, args ...any) {
 	return func(format string, args ...any) {
 		log.Info(format, args...)
@@ -105,7 +96,6 @@ func stderrLogger() func(format string, args ...any) {
 }
 
 func init() {
-	indexCmd.PersistentFlags().StringVar(&indexFlagHome, "home", "", "override $PERSONANT_HOME for this invocation (testing)")
 	indexCmd.PersistentFlags().BoolVar(&indexFlagQuiet, "quiet", false, "suppress per-step output")
 	indexCheckCmd.Flags().BoolVarP(&indexFlagVerbose, "verbose", "v", false, "print confirmation when no drift is detected")
 

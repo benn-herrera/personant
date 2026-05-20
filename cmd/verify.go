@@ -9,13 +9,9 @@ import (
 
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
-	"personant/internal/store"
 )
 
-var (
-	verifyFlagHome  string
-	verifyFlagQuiet bool
-)
+var verifyFlagQuiet bool
 
 var verifyCmd = &cobra.Command{
 	Use:   "verify",
@@ -29,7 +25,7 @@ Output ordering is stable: errors first, warnings second, drift third,
 followed by a one-line summary. Exits 1 if any error or drift entry is
 reported, 0 otherwise.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		paths, err := resolveVerifyPaths()
+		paths, err := resolvePaths()
 		if err != nil {
 			return err
 		}
@@ -48,13 +44,6 @@ reported, 0 otherwise.`,
 	},
 	SilenceUsage:  true,
 	SilenceErrors: false,
-}
-
-func resolveVerifyPaths() (store.PersonantPaths, error) {
-	if verifyFlagHome != "" {
-		return store.PathsForHome(verifyFlagHome), nil
-	}
-	return store.ResolvePaths()
 }
 
 // printReport emits the report to stdout in the spec's stable order.
@@ -101,7 +90,6 @@ func formatFinding(f memops.VerifyFinding) string {
 }
 
 func init() {
-	verifyCmd.Flags().StringVar(&verifyFlagHome, "home", "", "override $PERSONANT_HOME for this invocation (testing)")
 	verifyCmd.Flags().BoolVar(&verifyFlagQuiet, "quiet", false, "suppress report output; exit code still reflects errors")
 	rootCmd.AddCommand(verifyCmd)
 }

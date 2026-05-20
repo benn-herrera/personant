@@ -6,13 +6,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/ping"
-	"personant/internal/store"
 )
 
 var (
-	pingFlagHome     string
 	pingFlagProvider string
 	pingFlagPrompt   string
 	pingFlagModel    string
@@ -29,7 +28,7 @@ from $PERSONANT_HOME/providers.toml, sends a single user prompt to the
 named provider, and prints the response body to stdout. A one-line
 summary (provider, model, tokens, elapsed) is written to stderr.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		paths, err := resolvePingPaths()
+		paths, err := resolvePaths()
 		if err != nil {
 			return err
 		}
@@ -46,16 +45,8 @@ summary (provider, model, tokens, elapsed) is written to stderr.`,
 	SilenceUsage: true,
 }
 
-func resolvePingPaths() (store.PersonantPaths, error) {
-	if pingFlagHome != "" {
-		return store.PathsForHome(pingFlagHome), nil
-	}
-	return store.ResolvePaths()
-}
-
 func init() {
-	pingCmd.Flags().StringVar(&pingFlagHome, "home", "", "override $PERSONANT_HOME for this invocation")
-	pingCmd.Flags().StringVar(&pingFlagProvider, "provider", "local", "provider name from providers.toml")
+	pingCmd.Flags().StringVar(&pingFlagProvider, "provider", memops.LocalProviderName, "provider name from providers.toml")
 	pingCmd.Flags().StringVar(&pingFlagPrompt, "prompt", defaultPingPrompt, "prompt to send")
 	pingCmd.Flags().StringVar(&pingFlagModel, "model", "", "override the provider's default model")
 	pingCmd.Flags().DurationVar(&pingFlagTimeout, "timeout", 30*time.Second, "request timeout")

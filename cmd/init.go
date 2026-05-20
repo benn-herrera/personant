@@ -8,13 +8,9 @@ import (
 	"personant/internal/log"
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
-	"personant/internal/store"
 )
 
-var (
-	initFlagHome  string
-	initFlagQuiet bool
-)
+var initFlagQuiet bool
 
 var initCmd = &cobra.Command{
 	Use:   "init",
@@ -24,7 +20,7 @@ var initCmd = &cobra.Command{
 directives, providers.toml stub, README, .gitignore, git init, and an
 initial commit. Re-running over an existing home is a near no-op.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		paths, err := resolveInitPaths()
+		paths, err := resolvePaths()
 		if err != nil {
 			return err
 		}
@@ -39,17 +35,7 @@ initial commit. Re-running over an existing home is a near no-op.`,
 	},
 }
 
-// resolveInitPaths honors --home for tests; otherwise uses the standard
-// $PERSONANT_HOME / ~/.personant resolution.
-func resolveInitPaths() (store.PersonantPaths, error) {
-	if initFlagHome != "" {
-		return store.PathsForHome(initFlagHome), nil
-	}
-	return store.ResolvePaths()
-}
-
 func init() {
-	initCmd.Flags().StringVar(&initFlagHome, "home", "", "override $PERSONANT_HOME for this invocation (testing)")
 	initCmd.Flags().BoolVar(&initFlagQuiet, "quiet", false, "suppress per-step output")
 	rootCmd.AddCommand(initCmd)
 }

@@ -11,6 +11,11 @@ import (
 	"personant/internal/store"
 )
 
+// flagHome backs the shared --home persistent flag declared on rootCmd.
+// All subcommands inherit it; resolvePaths consults it before falling
+// back to $PERSONANT_HOME / ~/.personant resolution.
+var flagHome string
+
 var rootCmd = &cobra.Command{
 	Use:   "personant",
 	Short: "a persistent-context ai agent",
@@ -21,13 +26,26 @@ indexing, verification, and provider-connectivity smoke tests.`,
 	// Bare invocation drops into the chat REPL with default options.
 	// '--help'/'-h' still prints help (cobra short-circuits before RunE).
 	RunE: func(cmd *cobra.Command, args []string) error {
-		paths, err := store.ResolvePaths()
+		paths, err := resolvePaths()
 		if err != nil {
 			return err
 		}
 		return chat.Run(chat.Options{Ops: fileadapter.NewFileAdapter(paths)})
 	},
 	SilenceUsage: true,
+}
+
+// resolvePaths honors --home for tests; otherwise uses the standard
+// $PERSONANT_HOME / ~/.personant resolution.
+func resolvePaths() (store.PersonantPaths, error) {
+	if flagHome != "" {
+		return store.PathsForHome(flagHome), nil
+	}
+	return store.ResolvePaths()
+}
+
+func init() {
+	rootCmd.PersistentFlags().StringVar(&flagHome, "home", "", "override $PERSONANT_HOME for this invocation (testing)")
 }
 
 func main() {
