@@ -18,8 +18,8 @@ import (
 type InvariantCheck func(h *Harness) error
 
 // DefaultInvariants is the suite that runs after every step (and after
-// the last step, when FinalInvariants is empty). Cheap, always
-// applicable, and covers the spec §11.5 baseline.
+// the last step, when FinalInvariants is empty). Covers the spec §11.5
+// baseline.
 //
 // VerifyClosedThreadConsistency is deliberately excluded: it inspects
 // the in-memory session's ActiveThreads/DormantThreads, which is only
@@ -27,13 +27,39 @@ type InvariantCheck func(h *Harness) error
 // every non-closure scenario assert a property about a working set that
 // closure never touched — true but vacuous. Closure scenarios opt it in
 // explicitly.
-var DefaultInvariants = []InvariantCheck{
-	VerifySpineIntegrity,
-	VerifyIndexFresh,
+//
+// Internally DefaultInvariants is partitioned into a cheap subset (run
+// every step) and a heavy subset (run every step by default, but a
+// Scenario may opt into a time-cadenced firing of the heavy checks via
+// Scenario.HeavyInvariantCadence — useful for long-running simulations
+// where the heavy checks' full-spine sweeps make per-step firing the
+// dominant wall-time cost). End-of-run always runs the full suite, so
+// the acceptance-gate behavior is preserved regardless of cadence.
+//
+// The exported DefaultInvariants concatenates the two so callers that
+// embed it as a baseline (e.g. FinalInvariants: append(DefaultInvariants,
+// ...)) keep the same full-suite semantics they always had.
+var DefaultInvariants = append(append([]InvariantCheck{}, cheapDefaultInvariants...), heavyDefaultInvariants...)
+
+// cheapDefaultInvariants are the per-step-safe checks: O(1) or
+// O(touched-this-step) cost, no full-spine rebuild/verify passes. Safe
+// to fire on every step in any scenario, including the six-month sim.
+var cheapDefaultInvariants = []InvariantCheck{
 	VerifyProjectReferences,
 	VerifyLastActiveValid,
-	VerifyThreadFrontmatterMatchesSpine,
 	VerifyThreadAccounting,
+}
+
+// heavyDefaultInvariants are the full-substrate sweeps: each one does
+// at least one O(threads-on-disk) pass (and VerifyIndexFresh does two).
+// They make per-step invariant firing super-linear in a long simulation.
+// A scenario may opt into a time-cadenced firing via
+// Scenario.HeavyInvariantCadence; they always fire once at end-of-run
+// (the FinalInvariants path) regardless of cadence.
+var heavyDefaultInvariants = []InvariantCheck{
+	VerifySpineIntegrity,
+	VerifyIndexFresh,
+	VerifyThreadFrontmatterMatchesSpine,
 }
 
 // VerifySpineIntegrity wraps verify.Verify and surfaces any errors.

@@ -156,6 +156,18 @@ const simDayDuration = 24 * time.Hour
 // generated Scenario — and therefore the run — reproducible.
 const simSeed = 0x5e1f
 
+// simHeavyInvariantCadence is the simulated-time interval between
+// firings of the heavy invariants (full-spine sweeps:
+// VerifySpineIntegrity, VerifyIndexFresh,
+// VerifyThreadFrontmatterMatchesSpine) during a sim run. Cheap
+// invariants still fire every step, and the heavy set always fires once
+// at end-of-run regardless of cadence, so end-of-run substrate
+// well-formedness is unchanged. Per-step firing made the heavy checks
+// the dominant wall-time cost of long sim rungs; daily cadence catches
+// a substrate break within a reasonable window while keeping per-step
+// cost O(1)-ish.
+const simHeavyInvariantCadence = 24 * time.Hour
+
 // simDuration selects the simulation span at run time. The default
 // `1d` keeps `make test` (which passes no flag) on the ~27 s 1-day
 // smoke rung; longer rungs are run via `make sim DURATION=…`.
@@ -242,6 +254,15 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 		Duration: d,
 		Corpus:   corpus,
 	})
+
+	// Relax the heavy-invariant cadence to sim-daily. The sim's per-step
+	// heavy-invariant sweeps were super-linear in turn count and ate the
+	// wall budget on long rungs; the cheap subset still fires per step
+	// and the heavy set still fires once at end-of-run, so a substrate
+	// break is caught within ~one sim-day and the acceptance gate is
+	// unchanged. Handwritten scenarios leave this zero and keep
+	// per-step heavy firing.
+	sc.HeavyInvariantCadence = simHeavyInvariantCadence
 
 	// Append a wall-clock timestamp suffix so each sim run gets its own
 	// forensic-data directory. GenerateWorkload keys sc.Name on

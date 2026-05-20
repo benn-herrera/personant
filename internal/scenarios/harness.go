@@ -255,6 +255,23 @@ type Scenario struct {
 	// location. Default: <home>/<scenario-name>.metrics.json, inside the
 	// persistent test/rundata/<name>/ run home.
 	MetricsPath string
+
+	// HeavyInvariantCadence relaxes per-step invariant firing for long
+	// simulations: when > 0, the heavy invariants (full-substrate sweeps —
+	// VerifySpineIntegrity, VerifyIndexFresh,
+	// VerifyThreadFrontmatterMatchesSpine) fire only when the harness's
+	// simulated clock has advanced past the next-due tick. Cheap
+	// invariants (O(1) or O(touched-this-step)) still fire every step.
+	// The heavy set always fires once at end-of-run regardless of cadence,
+	// so the acceptance-gate behavior is preserved.
+	//
+	// Zero value = fire heavy invariants every step (the legacy behavior,
+	// what handwritten scenarios still get). Only opt-in scenarios — the
+	// six-month sim — set this.
+	//
+	// Per-step Step.Invariants overrides bypass this cadence: when a step
+	// supplies an explicit invariant list, that exact list runs.
+	HeavyInvariantCadence time.Duration
 }
 
 // Harness owns the isolated test environment for one scenario run.
@@ -311,6 +328,18 @@ type Harness struct {
 	// in — only the per-step match-fire set is window-sensitive.
 	createdThreadIDs  map[string]struct{}
 	archivedThreadIDs map[string]struct{}
+
+	// heavyCadence is the Scenario.HeavyInvariantCadence the run was
+	// started with. Zero = fire heavy invariants every step (legacy
+	// behavior).
+	heavyCadence time.Duration
+
+	// nextHeavyAt is the simulated time at which the next heavy-invariant
+	// firing is due, when heavyCadence > 0. runStep fires the heavy
+	// invariants iff h.pinnedClock >= h.nextHeavyAt, then advances
+	// h.nextHeavyAt by h.heavyCadence. Unused (and meaningless) when
+	// heavyCadence == 0.
+	nextHeavyAt time.Time
 }
 
 // foldEventLines folds a batch of tailed log lines into the harness's
@@ -576,6 +605,7 @@ defaultModel = "harness-mock"
 
 	run := metrics.New(map[string]string{"scenario": sc.Name})
 
+	pinned := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	h := &Harness{
 		Paths:             paths,
 		Ops:               ops,
@@ -586,10 +616,16 @@ defaultModel = "harness-mock"
 		T:                 t,
 		MetricsPath:       mPath,
 		startedAt:         clock.Profiling(),
-		pinnedClock:       time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC),
+		pinnedClock:       pinned,
 		tailer:            newLogTailer(paths.LogsDir),
 		createdThreadIDs:  map[string]struct{}{},
 		archivedThreadIDs: map[string]struct{}{},
+		heavyCadence:      sc.HeavyInvariantCadence,
+		// Schedule the first heavy firing one cadence-tick after the
+		// start: this puts the first firing well into the run rather than
+		// at step 1 when nothing has happened yet. End-of-run always
+		// fires heavy regardless.
+		nextHeavyAt: pinned.Add(sc.HeavyInvariantCadence),
 	}
 
 	// Pin the clock so timestamps are deterministic — invariant checks
@@ -707,11 +743,7 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 
 	_ = body // body is the streamed text; harness keeps it in History via turn.Run.
 
-	invs := step.Invariants
-	if len(invs) == 0 {
-		invs = DefaultInvariants
-	}
-	runInvariants(t, h, invs, label)
+	runInvariants(t, h, perStepInvariants(h, step), label)
 
 	return StepFeedback{
 		Index:            idx,
@@ -797,6 +829,35 @@ func closureResolverFor(ack *ClosureAck) turn.ClosureResolver {
 	return func(_ context.Context, _ turn.ClosureOffer) (turn.ClosureResolution, error) {
 		return turn.ClosureResolution{Outcome: ack.Outcome}, nil
 	}
+}
+
+// perStepInvariants resolves the invariant list to run after a step,
+// applying the heavy-cadence policy when the scenario opted into it.
+//
+//   - A step with an explicit Step.Invariants list bypasses the policy
+//     entirely: that exact list runs (the step is expressing a precise
+//     intent, e.g. "run only VerifyClosedThreadConsistency here").
+//   - Otherwise, when Scenario.HeavyInvariantCadence is zero, the full
+//     DefaultInvariants suite fires (legacy behavior — handwritten
+//     scenarios are short and want the per-step assurance).
+//   - Otherwise the cheap subset fires every step; the heavy subset
+//     fires only when the simulated clock has advanced past the
+//     next-due tick. nextHeavyAt advances by exactly one cadence per
+//     firing (not "snap to now") so a long gap between turns does not
+//     suppress heavy firings — the catch-up effectively folds into the
+//     subsequent firings.
+func perStepInvariants(h *Harness, step Step) []InvariantCheck {
+	if len(step.Invariants) > 0 {
+		return step.Invariants
+	}
+	if h.heavyCadence == 0 {
+		return DefaultInvariants
+	}
+	if !h.pinnedClock.Before(h.nextHeavyAt) {
+		h.nextHeavyAt = h.nextHeavyAt.Add(h.heavyCadence)
+		return DefaultInvariants
+	}
+	return cheapDefaultInvariants
 }
 
 // runInvariants executes every check, calling t.Errorf on failure.
