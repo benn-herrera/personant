@@ -200,7 +200,7 @@ func TestRecallMadlibs_AdversarialBehavior(t *testing.T) {
 	}
 }
 
-// metricsBlob is the subset of the §9.6 metrics JSON the recall-madlibs
+// metricsBlob is the subset of the §9.4 metrics JSON the recall-madlibs
 // tests inspect.
 type metricsBlob struct {
 	Counters   map[string]int64     `json:"counters"`
@@ -270,7 +270,7 @@ func seedMadlibsThreads(doc madlibsDoc) func(*Harness) error {
 				return fmt.Errorf("seedMadlibsThreads: AppendSpineRecord %s: %w", rec.ID, err)
 			}
 			thr := memops.Thread{
-				Frontmatter: memops.ThreadMeta{
+				Meta: memops.ThreadMeta{
 					ID:           rec.ID,
 					Project:      rec.Project,
 					Anchors:      append([]string(nil), rec.Anchors...),

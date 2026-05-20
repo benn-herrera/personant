@@ -1,5 +1,5 @@
 // Package sim is a deterministic, seeded synthetic-workload generator
-// for the Personant scenario harness (spec §9.1, §9.10).
+// for the Personant scenario harness (spec §9.1, §9.4).
 //
 // GenerateWorkload turns a WorkloadConfig into a scenarios.Scenario: a
 // stream of synthetic turns modelling a user moving among a handful of
@@ -1198,7 +1198,7 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 	// engaging userInput on a recall opportunity is the slot's full
 	// UserInput (5 #-tags including any loose cells), and on a
 	// thread-creation turn that pollutes the new thread's coalesced
-	// anchors with the loose terms via §1 symbol extraction — defeating
+	// anchors with the loose terms via §3.3 symbol extraction — defeating
 	// the loose-filter on anchorTags. The dormant first-family-member
 	// still surfaces as the sibling on later continue/switch/resume
 	// turns; we drop at most one recall opportunity per family pair
@@ -1238,7 +1238,7 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 	// filtered anchors. Otherwise a plain engaging line mentioning a
 	// couple of the tags so the turn still extracts on-topic symbols —
 	// and on the new-thread case the #-prefixed mention must be a
-	// NON-LOOSE tag, so the §1 symbol extraction does not slip a loose
+	// NON-LOOSE tag, so the §3.3 symbol extraction does not slip a loose
 	// term into the new thread's spine anchors via coalesce.
 	var userInput string
 	if len(recallIDs) > 0 {

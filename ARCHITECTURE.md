@@ -6,10 +6,10 @@
 |---|---|
 | `ARCHITECTURE.md` (you are here) | principles, patterns, mechanisms, mental models — read first |
 | `AGENTS.md` | house rules for AI agents working in this repo |
-| `spec.md` | operational *specification* — field-level schemas, algorithms, APIs |
+| `SPEC.md` | operational *specification* — field-level schemas, algorithms, APIs |
 | `README.md` | user-facing description; getting started |
 
-Read this file first. Descend into `spec.md` for execution detail; `AGENTS.md` for the contract on agent behavior.
+Read this file first. Descend into `SPEC.md` for execution detail; `AGENTS.md` for the contract on agent behavior.
 
 **Reading time:** ~12 minutes.
 
@@ -245,7 +245,7 @@ Layers E and A are the *recognition* surface; Layer B is *active engagement*. Th
 
 ## Mechanisms
 
-Brief design-rationale notes for the major mechanisms. Schemas and algorithms live in `spec.md`; this section captures the *why*.
+Brief design-rationale notes for the major mechanisms. Schemas and algorithms live in `SPEC.md`; this section captures the *why*.
 
 ### Thread lifecycle
 
@@ -559,10 +559,10 @@ If you see one of these proposed (or are about to write it), stop and surface th
 |---|---|
 | Architecture orientation | `ARCHITECTURE.md` (this file) |
 | House rules for AI agents | `AGENTS.md` |
-| Field-level schemas + algorithms + APIs | `spec.md` |
+| Field-level schemas + algorithms + APIs | `SPEC.md` |
 | User-facing description, getting started | `README.md` |
 | Substrate-level decision history | persistent memory: `project_personant_substrate.md` |
-| v0.1 acceptance criteria | `spec.md` §9.1 |
+| v0.1 acceptance criteria | `SPEC.md` §9.1 |
 
 ---
 
@@ -598,7 +598,7 @@ If you internalize one thing from this document, make it this:
 
 > The runtime is the canonical-state holder. The LLM is a narrow judgment instrument. The human appears at three high-leverage moments. Every working-window mutation goes through the §3.0 chain. Every dependency earns its keep with a real consumer. Testing is the lab bench, not a quality gate. Constraints are load-bearing.
 
-Recognize these patterns, push back on violations, and you'll be on safe ground. Read `spec.md` for execution detail.
+Recognize these patterns, push back on violations, and you'll be on safe ground. Read `SPEC.md` for execution detail.
 
 ---
 

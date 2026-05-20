@@ -49,7 +49,7 @@ order, before proposing structural changes:
    patterns, mechanisms, anti-patterns, navigation. Compressed
    ~12-minute read covering everything an agent needs to ground
    itself in the project's thinking style. **Read first.**
-2. [`spec.md`](spec.md) — field-level schemas, algorithms, surface
+2. [`SPEC.md`](SPEC.md) — field-level schemas, algorithms, surface
    APIs. The execution-level detail.
 
 If a question of design comes up, ARCHITECTURE.md and the spec are
@@ -133,7 +133,7 @@ In progress:
   - **C.1 (done):** harness extension —
     `Step.ExpectedRecallMatches []string` + `recall_fidelity_*`
     precision/recall/F1 histograms and measured/unmeasured-step
-    counters in the §9.6 metrics blob; strict-set assertion via
+    counters in the §9.4 metrics blob; strict-set assertion via
     `t.Errorf` on mismatch.
   - **C.2 (done):** mad-libs query generator. Hand-crafted topic
     templates + `generate.py` (Python stdlib, seeded) under
@@ -250,7 +250,7 @@ internal/{eventlog,metrics,
   index,verify,clock,
   ping,modellist,log}/      supporting subsystems
 ARCHITECTURE.md             orientation (read first)
-spec.md                     operational spec
+SPEC.md                     operational spec
 README.md                   user-facing
 AGENTS.md                   this file
 Makefile                    build + agents-submodule pinning +

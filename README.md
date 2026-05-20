@@ -10,7 +10,7 @@ cross-project recognition.
 **v0.1, in active development.** Phase 1 (storage scaffold) is complete; Phase 2 (turn loop, chat REPL, working-set composition, scenario harness) is substantially landed. The canonical sources are:
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — orientation for AI agents and contributors; principles, patterns, mechanisms, anti-patterns. Read first.
-- [`spec.md`](spec.md) — field-level schemas, algorithms, surface APIs.
+- [`SPEC.md`](SPEC.md) — field-level schemas, algorithms, surface APIs.
 - [`AGENTS.md`](AGENTS.md) — house rules for agents working in this repo.
 
 Read ARCHITECTURE.md first for the shape of the system; read the spec when you need to write code that conforms to it.
@@ -32,7 +32,7 @@ recoverability, and history come for free.
 
 By default Personant uses `~/.personant/` (override with `$PERSONANT_HOME`).
 The directory is git-init'd on first run. See
-[`spec.md` §2.1](spec.md) for the full layout; a sketch:
+[`SPEC.md` §2.1](SPEC.md) for the full layout; a sketch:
 
 ```
 ~/.personant/

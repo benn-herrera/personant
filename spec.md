@@ -22,16 +22,6 @@ This spec is the *what and how*: schemas, algorithms, surface APIs. Tables and d
 
 ---
 
-## 1. System overview
-
-Personant is a single-user, single-agent runtime for managing an AI assistant's working memory across arbitrary projects with continuity. The agent has one continuous career — unified persistent memory, no session boundaries, no compaction-driven information loss, cross-project recognition. Role: **research assistant**, not general-capability agent.
-
-For orientation (the architectural thesis, recurring patterns, layer model, tool surface, permission tiers, etc.), see `ARCHITECTURE.md`. This spec assumes that orientation and goes directly to operational detail.
-
-**Operationalized acceptance (v0.1):** the system must pass a **six-month simulated workload** (§9.1) — sustained continuity of memory quality, zero out-of-context-space events, measured runtime costs for recall / retirement / archival / resurrection within bounds. After six simulated months the system must be in a state demonstrating it could run another six months without degradation. This is what makes "months-long continuity" a proven property rather than an aspiration.
-
----
-
 ## 2. Data model
 
 ### 2.1 Storage layout
@@ -1210,10 +1200,7 @@ ARCHITECTURE.md "No speculative prefetch").
 
 ## 6. Tool surface and permissions
 
-Personant is a **research-assistant runtime**, not a general-capability
-agent. A research assistant **reads and thinks** rather than **builds
-and runs** (see ARCHITECTURE.md for the full role framing); the
-external tool surface follows from that role.
+See ARCHITECTURE.md §"Tool surface (bounded, role-shaped)" for the design rationale; this section specifies the contract.
 
 ### 6.1 External tool surface
 
@@ -1445,13 +1432,6 @@ current-turn budget. Default policy:
 
 ---
 
-## 7. Go package layout
-
-Current package layout is documented in `AGENTS.md` (Repo state); the
-internal-package map there is the authoritative current shape.
-
----
-
 ## 8. Bootstrap and lifecycle
 
 ### 8.1 First-run scaffolding (`personant init`)
@@ -1607,10 +1587,10 @@ lab bench.
 The v0.1 acceptance criterion:
 
 - **Simulate six continuous months** of realistic usage via a synthetic
-  workload (§9.8) running against the real runtime with a mock LLM
+  workload (§9.4) running against the real runtime with a mock LLM
   (§9.2) supplying canned responses.
 - **Memory quality maintained** throughout, measured via the metrics
-  emitted at every event (§9.6): recall hit rate, engagement accuracy,
+  emitted at every event (§9.4): recall hit rate, engagement accuracy,
   retirement timing, round-trip information-preservation through
   retire→archive→recover.
 - **Zero out-of-context-space events.** The layered budget (E/A1/A2/B/C)
@@ -1663,194 +1643,23 @@ Standard Go `testing` patterns over `internal/store/`,
 - No mock LLM needed at this layer; tests don't exercise the turn
   loop.
 
-### 9.4 Scenario testing
+### 9.4 Measurement regime (v0.1 in progress)
 
-Named lifecycle flows demonstrated end-to-end through the real
-`onContextDelta` chain (§3.0). Each test is a story:
-"thread A is created → engaged for 5 turns → retired → archived →
-recovered → re-retired."
+The measurement regime drives four test layers — scenario, churn, calibration, and the six-month simulation — all running against the mock LLM client (§9.2) with logical-clock acceleration so the full simulation completes in minutes. Every test layer emits a machine-readable metrics blob (`internal/testing/metrics/`) with a stable JSON schema for cross-version comparison. Working artifacts live in `internal/scenarios/` and the `mem.jsonl` telemetry; the detailed mechanics evolve with the implementation.
 
-Scenarios drive the synthetic turn driver (`internal/testing/turn/`)
-which pumps user-prompt + mock-LLM-response + faked tool-results
-through production code paths. After each turn (or operation): assert
-invariants from §9.5; emit metrics from §9.6.
+**v0.1 acceptance metrics** (normative; must hold through the six-month simulation):
 
-Scenarios worth covering explicitly (initial set):
+- **Recall fidelity:** precision/recall/F1 measured per scenario step against `Step.ExpectedRecallMatches` ground truth. `RecallStrict` mode fails the test on mismatch; `RecallMeasureOnly` mode records adversarial probes without failing. Regressions tracked via baseline comparison against `testdata/baselines/<scenario>.json`. Metric series: `recall_fidelity_{precision,recall,f1}` and `recall_fidelity_adversarial_{precision,recall,f1}`.
+- **Engagement accuracy:** tagged-engaged threads match canonical-by-construction ground truth in synthetic scenarios.
+- **Heap bounded / zero overflow:** `VerifyNoBudgetOverflow` — no layer exceeds its allocation cap across any turn in the simulation.
+- **Steady-state trajectory:** working-set size, spine cardinality, and per-operation latency (P50/P95/P99) are flat after six simulated months — not creeping upward.
+- **Round-trip fidelity:** archive → recover → diff against original; information-preservation rate measured.
+- **Operation latency within bounds:** engagement update, spine match, thread fetch, retirement, archival, recovery, index rebuild, index check — all stable as accumulated state grows.
 
-- **Single-thread lifecycle.** Create → engage 5 turns → retire →
-  archive → recover → engage → re-retire → re-archive. Verify content
-  survives the round-trip.
-- **Multi-thread interleaving.** 5 threads alive simultaneously,
-  alternating engagement; verify per-thread `turn_count` and
-  `last_engaged` match the operation log.
-- **Project switching.** Thread in project A → `/cd-project` to B →
-  engage in B → switch back to A → re-engage. Project tags stay
-  consistent.
-- **Heavy retirement.** 50 threads, 30 retired, 20 archived, 10
-  recovered. Verify spine cardinality, archive integrity, no orphan
-  files.
-- **Same-anchor collision.** Two threads with overlapping anchors;
-  one retires; the other engages later via the shared anchor.
-  Verify recall semantics.
-- **Transient shell-capture content.** Several normal turns interleaved
-  with `user.shell-capture` events carrying 1–2 pages of unique
-  transient content (simulated `# cat ...`-style captures). Verify the
-  transient content does not appear in any spine record's anchors /
-  summary, does not bloat any thread's history_symbols (transient ≠
-  anchored), and evicts cleanly from working-window layers under
-  budget pressure. Same shape covers `tool.result` deltas with large
-  payloads (`fs.read` of a long file, `web.fetch` of a long page).
-- **Cross-boundary recovery.** Project remote URL added → identity
-  promoted → original local-only project state preserved.
+**Invariant validators** (`internal/testing/invariants/`) run after every operation in churn sequences and at key checkpoints in scenario tests: `VerifySpineIntegrity`, `VerifyIndexFresh`, `VerifyEngagementConsistency`, `VerifyArchiveResolvable`, `VerifyProjectReferences`, `VerifyLastActiveValid`, `VerifyNoBudgetOverflow`, `VerifyDedupConsistency`.
 
-### 9.5 Invariant validators
+**Named scenario set** (initial): single-thread lifecycle, multi-thread interleaving, project switching, heavy retirement (50 threads), same-anchor collision, transient shell-capture content, cross-boundary recovery. Churn sequences are randomized-but-seeded (80% engage / 10% create / 5% retire / 5% switch); failures dump operation log + seed for replay. Calibration sweeps a directive parameter across a range and emit a metrics matrix — this is how §2.6.1 bootstrap defaults earn their numbers.
 
-Standalone validators (`internal/testing/invariants/`) callable from
-any test:
-
-- `VerifySpineIntegrity` — wraps `verify`; asserts exit 0.
-- `VerifyIndexFresh` — wraps `index check`; asserts exit 0 (no drift
-  between canonical and derived).
-- `VerifyEngagementConsistency` — replay the operation log;
-  reconstruct expected `turn_count` and `last_engaged`; compare.
-- `VerifyArchiveResolvable` — every `archive/index.jsonl` entry's
-  `commit_hash` resolves via `git show`, and the recovered blob
-  matches the recorded `blob_hash`.
-- `VerifyProjectReferences` — every `spine.project` resolves to a
-  known `prj_<n>` or `prj_default`.
-- `VerifyLastActiveValid` — `last-active` points to a known project.
-- `VerifyNoBudgetOverflow` — replay turn-by-turn; assert no layer
-  exceeded its allocation cap.
-- `VerifyDedupConsistency` — content reachable via identifier
-  references reconstructs to its canonical form.
-
-Invariants are non-optional after every operation in churn tests
-(§9.7); selectively after key checkpoints in scenario tests (§9.4).
-
-### 9.6 Metrics emission
-
-Every test (scenario, churn, calibration, simulation) emits a
-machine-readable metrics blob (`internal/testing/metrics/`). Stable
-JSON schema so cross-version comparison works.
-
-Metrics worth capturing:
-
-- **Recall fidelity.** Of N expected matches, how many fired?
-  Precision/recall/F1 per measured step.
-  - Ground truth: `Step.ExpectedRecallMatches []string` (scenarios
-    harness); `nil` → step unmeasured.
-  - Counters: `recall_fidelity_measured_steps`,
-    `recall_fidelity_unmeasured_steps` (every step contributes
-    exactly one).
-  - Histograms (one observation per measured step):
-    `recall_fidelity_precision`, `recall_fidelity_recall`,
-    `recall_fidelity_f1`. Empty-set conventions: (E=∅, A=∅) → 1/1/1;
-    (E=∅, A≠∅) → 0/1/0; (E≠∅, A=∅) → 1/0/0.
-  - Mode: `Step.RecallMode` selects enforcement.
-    - `RecallStrict` (default) — clean ground truth. Strict-set
-      comparison; on mismatch the harness calls `t.Errorf` with the
-      false-positive and false-negative sets so both precision and
-      recall regressions surface in test logs. Feeds the
-      `recall_fidelity_*` series above.
-    - `RecallMeasureOnly` — adversarial probes (vocabulary drift,
-      stop-word leak, false-friend pairs) whose under- or
-      mis-firing is the measurement, not a defect. Records
-      `recall_fidelity_adversarial_{precision,recall,f1}` histograms
-      and the `recall_fidelity_adversarial_steps` counter; never
-      fails the test. Regressions in these numbers surface through
-      §9.9 baseline comparison, not a red unit test. Kept in a
-      separate series so adversarial scores never dilute the clean
-      aggregate.
-- **Engagement accuracy.** Were tagged-engaged threads the actual
-  active threads? (Compared against canonical-by-construction ground
-  truth in synthetic scenarios.)
-- **Retirement timing.** Lag between "thread effectively complete"
-  (scenario marker) and "retirement prompt fired."
-- **Budget pressure profile.** Peak fill, eviction count, layer
-  displacement events.
-- **Round-trip fidelity.** Archive → recover → diff against original.
-  Information-preservation rate.
-- **Dedup compression ratio.** Literal bytes vs. encoded bytes.
-- **Symbol-extraction yield.** Deterministic-pass hits vs.
-  model-emitted vs. curator-selected.
-- **Operation latency** (per type): P50, P95, P99 wall-clock.
-
-Metrics emit from every test run from the outset — they are
-infrastructure, not instrumentation bolted on afterwards.
-
-### 9.7 Churn testing
-
-Randomized but seeded operation sequences
-(`internal/testing/churn/`). A driver picks valid operations from a
-weighted distribution (e.g., 80% engage existing, 10% create new, 5%
-retire, 5% project switch); after each operation, the invariant suite
-(§9.5) runs. Failures dump the operation log + seed for replay.
-
-Churn drives generate sequences that exercise retirement, archival,
-recovery, project switching, and cross-project recall as those
-mechanisms come online.
-
-### 9.8 Calibration testing
-
-Same scenario, different parameter values
-(`internal/testing/calibration/`). The harness sweeps a directive-file
-parameter across a configured range and emits a metrics matrix:
-
-```
-calibrate recall.symbolic-threshold ∈ [0.3, 0.4, 0.5, 0.6]
-          on scenario "cross-project-recall-100-turns"
-→ metrics matrix (one row per threshold value)
-→ best operating point identified by the metric we're optimizing for
-```
-
-This is how the bootstrap-default values in §2.6.1
-(`recall.symbolic-threshold: 0.4`, `engagement.decay-turns: 8`, etc.)
-earn their numbers empirically rather than by guess. The
-directive-accrual mechanism (§2.6) and calibration scenarios are the
-two ends of the same feedback loop: directives let the running system
-learn from one user; calibration scenarios let the *project* learn
-from canonical workloads.
-
-### 9.9 Cross-run baseline comparison
-
-`personant test report` (or equivalent CLI tool):
-
-- Reads metrics output from a test run.
-- Compares against a stored baseline (`testdata/baselines/<scenario>.json`).
-- Highlights regressions and improvements.
-- Optionally fails CI when key metrics regress beyond a threshold.
-
-Baselines are git-tracked so the project's improvement trajectory is
-itself version-controlled. This is what makes "iterating on the
-techniques" actually work: every change is measured against the prior
-baseline.
-
-### 9.10 Six-month simulation harness
-
-The capstone test (§9.1). Implementation
-(`internal/testing/sixmonth/`):
-
-- **Synthetic workload generator.** Realistic patterns of turn arrival
-  (bursty with quiet periods), thread creation/engagement/retirement
-  rates, cross-project workflow, configurable workload "shape"
-  (researcher, software-engineer, mixed).
-- **Logical-clock acceleration.** Six months of wall-clock time can't
-  run in six months of test time. The simulation uses a logical clock
-  that advances at a configurable rate (e.g., one simulated hour per
-  100ms of real time). All time-based logic
-  (`engagement.decay-time`, retirement triggers) consults the logical
-  clock. Tests run in minutes.
-- **Steady-state assertions.** Working-set size trajectory plateaus,
-  not climbs. Spine cardinality grows but plateaus as retirement →
-  archival keeps pace. Per-operation latency stays stable as
-  accumulated state grows. The full-test pass criterion is in §9.1.
-- **Operation-cost profiling.** Per-operation wall-clock latency
-  histogram across the full simulation. Particularly: archival cost
-  (git ops), recovery cost (git fetch + spine update), index rebuild
-  cost as state grows.
-
-Output: a single comprehensive metrics JSON + a human-readable
-summary (`make six-month-sim` or similar). Pass/fail per §9.1
-criteria.
+**Six-month simulation harness** (`internal/testing/sixmonth/`): synthetic workload generator with configurable "shape" (researcher / software-engineer / mixed), logical-clock acceleration (e.g. one simulated hour per 100ms real time), steady-state assertions, and per-operation cost profiling. Output: comprehensive metrics JSON + human-readable summary (`make six-month-sim`). Pass/fail per §9.1 criteria.
 
 

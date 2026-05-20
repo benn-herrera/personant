@@ -79,7 +79,7 @@ type Step struct {
 	//                     step is measured: emits 1/1/1 on agreement.
 	//   - non-nil set   → exact-set expectation. The harness records
 	//                     per-step precision / recall / F1 into the
-	//                     §9.6 metrics blob. Whether a mismatch fails
+	//                     §9.4 metrics blob. Whether a mismatch fails
 	//                     the test depends on RecallMode.
 	ExpectedRecallMatches []string
 
@@ -152,7 +152,7 @@ const (
 	// recall_fidelity_adversarial_* series and never fails the test.
 	// For C.3 adversarial probes (vocabulary drift, stop-word leak,
 	// false friends) whose underperformance is the measurement, not a
-	// defect — the §9.9 baseline comparison is where regressions in
+	// defect — the §9.4 baseline comparison is where regressions in
 	// these numbers surface.
 	RecallMeasureOnly
 )
@@ -259,7 +259,7 @@ type Scenario struct {
 	// HeavyInvariantCadence relaxes per-step invariant firing for long
 	// simulations: when > 0, the heavy invariants (substrate-scale checks —
 	// VerifySpineIntegrity, VerifyIndexFresh, VerifyProjectReferences,
-	// VerifyThreadFrontmatterMatchesSpine, VerifyThreadAccounting) fire
+	// VerifyThreadMetaMatchesSpine, VerifyThreadAccounting) fire
 	// only when the harness's simulated clock has advanced past the
 	// next-due tick. Cheap invariants (strictly O(1) or
 	// O(touched-this-step)) still fire every step. The heavy set always
@@ -723,8 +723,8 @@ type scriptedCurator struct{}
 
 func (scriptedCurator) DraftClosure(_ context.Context, thread memops.Thread) (curator.ClosureDraft, error) {
 	return curator.ClosureDraft{
-		Summary: "scripted closure summary for " + thread.Frontmatter.ID,
-		Anchors: append([]string(nil), thread.Frontmatter.Anchors...),
+		Summary: "scripted closure summary for " + thread.Meta.ID,
+		Anchors: append([]string(nil), thread.Meta.Anchors...),
 	}, nil
 }
 
