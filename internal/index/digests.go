@@ -10,7 +10,6 @@ package index
 // with an LLM-curated form later.
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -230,7 +229,10 @@ func WriteDigest(projectsDir, projectID string, digest memops.ProjectDigest) err
 	if err != nil {
 		return fmt.Errorf("write digest %s: encode: %w", projectID, err)
 	}
-	return writeBytesAtomic(path, ".digest-*.tmp", encoded)
+	if err := store.WriteFileAtomic(path, encoded); err != nil {
+		return fmt.Errorf("write digest %s: %w", projectID, err)
+	}
+	return nil
 }
 
 // encodeDigestJSON returns the canonical on-disk byte form of a digest.
@@ -277,41 +279,3 @@ func encodeSymbolsJSONL(records []store.SymbolRecord) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// writeBytesAtomic writes data to path via a temp file in the same
-// directory, fsync, rename. Pattern matches store.WriteJSONL.
-func writeBytesAtomic(path, tmpPattern string, data []byte) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, tmpPattern)
-	if err != nil {
-		return fmt.Errorf("write %s: create temp: %w", path, err)
-	}
-	tmpPath := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	w := bufio.NewWriter(tmp)
-	if _, err := w.Write(data); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write %s: write: %w", path, err)
-	}
-	if err := w.Flush(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write %s: flush: %w", path, err)
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write %s: fsync: %w", path, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("write %s: close temp: %w", path, err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("write %s: rename: %w", path, err)
-	}
-	cleanup = false
-	return nil
-}

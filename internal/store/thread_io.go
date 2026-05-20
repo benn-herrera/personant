@@ -284,7 +284,7 @@ func SaveThreadFrontmatter(paths PersonantPaths, threadID string, fm memops.Thre
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("save thread frontmatter %s: mkdir %s: %w", fm.ID, dir, err)
 	}
-	return atomicWrite(dir, ThreadMetaPath(paths, threadID), ".thread-meta-*.tmp", buf.Bytes())
+	return WriteFileAtomic(ThreadMetaPath(paths, threadID), buf.Bytes())
 }
 
 // SeedThread materializes a whole thread in one call: it writes
@@ -322,7 +322,7 @@ func SeedThread(paths PersonantPaths, thr memops.Thread) error {
 			body += "\n"
 		}
 		path := filepath.Join(turnsDir, turnFileName(n))
-		if err := atomicWrite(turnsDir, path, ".turn-*.tmp", []byte(body)); err != nil {
+		if err := WriteFileAtomic(path, []byte(body)); err != nil {
 			return fmt.Errorf("seed thread %s: %w", thr.Frontmatter.ID, err)
 		}
 	}
@@ -443,7 +443,7 @@ func AppendThreadTurn(paths PersonantPaths, threadID string, turnNumber int, exc
 		body += "\n"
 	}
 	path := filepath.Join(turnsDir, turnFileName(turnNumber))
-	if err := atomicWrite(turnsDir, path, ".turn-*.tmp", []byte(body)); err != nil {
+	if err := WriteFileAtomic(path, []byte(body)); err != nil {
 		return fmt.Errorf("append thread turn %s: %w", threadID, err)
 	}
 
@@ -489,39 +489,6 @@ func turnFileNumbers(turnsDir string) ([]int, error) {
 	}
 	sort.Ints(nums)
 	return nums, nil
-}
-
-// atomicWrite writes data to dst via a temp file in dir (matching
-// pattern), fsync, and rename. dir must already exist.
-func atomicWrite(dir, dst, pattern string, data []byte) error {
-	tmp, err := os.CreateTemp(dir, pattern)
-	if err != nil {
-		return fmt.Errorf("create temp: %w", err)
-	}
-	tmpPath := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write temp: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("fsync: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temp: %w", err)
-	}
-	if err := os.Rename(tmpPath, dst); err != nil {
-		return fmt.Errorf("rename: %w", err)
-	}
-	cleanup = false
-	return nil
 }
 
 // splitFrontmatter scans data for the opening `---\n` delimiter, then

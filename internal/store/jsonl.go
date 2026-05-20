@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 
 	"personant/internal/memops"
@@ -81,43 +80,16 @@ func WriteJSONL[T any](path string, records []T, keyFn func(T) string) error {
 		seen[k] = struct{}{}
 	}
 
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".jsonl-*.tmp")
-	if err != nil {
-		return fmt.Errorf("write %s: create temp: %w", path, err)
-	}
-	tmpPath := tmp.Name()
-	// Best-effort cleanup if anything below fails before rename.
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	w := bufio.NewWriter(tmp)
-	enc := json.NewEncoder(w)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	for _, r := range sorted {
 		if err := enc.Encode(r); err != nil {
-			tmp.Close()
 			return fmt.Errorf("write %s: encode key %q: %w", path, keyFn(r), err)
 		}
 	}
-	if err := w.Flush(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write %s: flush: %w", path, err)
+	if err := WriteFileAtomic(path, buf.Bytes()); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
 	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write %s: fsync: %w", path, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("write %s: close temp: %w", path, err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("write %s: rename: %w", path, err)
-	}
-	cleanup = false
 	return nil
 }
 

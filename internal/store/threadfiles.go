@@ -1,7 +1,7 @@
 package store
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -109,40 +109,15 @@ func SaveThreadFiles(paths PersonantPaths, tf ThreadFiles) error {
 	}
 	path := ThreadFilesPath(paths, tf.ThreadID)
 
-	tmp, err := os.CreateTemp(dir, ".threadfiles-*.tmp")
-	if err != nil {
-		return fmt.Errorf("save thread files %s: create temp: %w", tf.ThreadID, err)
-	}
-	tmpPath := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	w := bufio.NewWriter(tmp)
-	enc := json.NewEncoder(w)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(tf); err != nil {
-		tmp.Close()
 		return fmt.Errorf("save thread files %s: encode: %w", tf.ThreadID, err)
 	}
-	if err := w.Flush(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("save thread files %s: flush: %w", tf.ThreadID, err)
+	if err := WriteFileAtomic(path, buf.Bytes()); err != nil {
+		return fmt.Errorf("save thread files %s: %w", tf.ThreadID, err)
 	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("save thread files %s: fsync: %w", tf.ThreadID, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("save thread files %s: close temp: %w", tf.ThreadID, err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("save thread files %s: rename: %w", tf.ThreadID, err)
-	}
-	cleanup = false
 	return nil
 }
 

@@ -18,13 +18,12 @@
 package fileadapter
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -461,43 +460,18 @@ func (a *FileAdapter) SaveWorkingSet(ctx context.Context, activeThreads, dormant
 		return errors.New("fileadapter: save working set: PersonantPaths.Home is empty")
 	}
 
-	tmp, err := os.CreateTemp(a.paths.Home, ".working-set-*.tmp")
-	if err != nil {
-		return fmt.Errorf("fileadapter: save working set: create temp: %w", err)
-	}
-	tmpPath := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	w := bufio.NewWriter(tmp)
-	enc := json.NewEncoder(w)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(workingSetFile{
 		ActiveThreads:  activeThreads,
 		DormantThreads: dormantThreads,
 	}); err != nil {
-		tmp.Close()
 		return fmt.Errorf("fileadapter: save working set: encode: %w", err)
 	}
-	if err := w.Flush(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("fileadapter: save working set: flush: %w", err)
+	if err := store.WriteFileAtomic(a.paths.WorkingSet, buf.Bytes()); err != nil {
+		return fmt.Errorf("fileadapter: save working set: %w", err)
 	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("fileadapter: save working set: fsync: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("fileadapter: save working set: close temp: %w", err)
-	}
-	if err := os.Rename(tmpPath, a.paths.WorkingSet); err != nil {
-		return fmt.Errorf("fileadapter: save working set: rename %s: %w", filepath.Base(a.paths.WorkingSet), err)
-	}
-	cleanup = false
 	return nil
 }
 

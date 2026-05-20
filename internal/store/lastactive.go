@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"personant/internal/memops"
@@ -57,32 +56,8 @@ func WriteLastActive(paths PersonantPaths, projectID string) error {
 		return errors.New("write last-active: PersonantPaths.Home is empty")
 	}
 
-	tmp, err := os.CreateTemp(paths.Home, ".last-active-*.tmp")
-	if err != nil {
-		return fmt.Errorf("write last-active: create temp: %w", err)
+	if err := WriteFileAtomic(paths.LastActive, []byte(projectID+"\n")); err != nil {
+		return fmt.Errorf("write last-active: %w", err)
 	}
-	tmpPath := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	if _, err := tmp.WriteString(projectID + "\n"); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write last-active: write: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write last-active: fsync: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("write last-active: close: %w", err)
-	}
-	if err := os.Rename(tmpPath, paths.LastActive); err != nil {
-		return fmt.Errorf("write last-active: rename %s: %w", filepath.Base(paths.LastActive), err)
-	}
-	cleanup = false
 	return nil
 }

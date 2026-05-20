@@ -1,7 +1,7 @@
 package store
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -62,40 +62,15 @@ func SaveProjectMeta(paths PersonantPaths, meta memops.ProjectMeta) error {
 	}
 	metaPath := filepath.Join(dir, "meta.json")
 
-	tmp, err := os.CreateTemp(dir, ".meta-*.tmp")
-	if err != nil {
-		return fmt.Errorf("save project %s: create temp: %w", meta.ID, err)
-	}
-	tmpPath := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	w := bufio.NewWriter(tmp)
-	enc := json.NewEncoder(w)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(meta); err != nil {
-		tmp.Close()
 		return fmt.Errorf("save project %s: encode: %w", meta.ID, err)
 	}
-	if err := w.Flush(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("save project %s: flush: %w", meta.ID, err)
+	if err := WriteFileAtomic(metaPath, buf.Bytes()); err != nil {
+		return fmt.Errorf("save project %s: %w", meta.ID, err)
 	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("save project %s: fsync: %w", meta.ID, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("save project %s: close temp: %w", meta.ID, err)
-	}
-	if err := os.Rename(tmpPath, metaPath); err != nil {
-		return fmt.Errorf("save project %s: rename: %w", meta.ID, err)
-	}
-	cleanup = false
 	return nil
 }
 

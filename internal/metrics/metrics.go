@@ -8,12 +8,11 @@ package metrics
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"personant/internal/clock"
+	"personant/internal/store"
 )
 
 // Run is one measurement session: a set of named counters, histograms
@@ -108,34 +107,9 @@ func (r *Run) WriteJSON(path string) error {
 		return fmt.Errorf("metrics: marshal: %w", err)
 	}
 
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".metrics-*.json.tmp")
-	if err != nil {
-		return fmt.Errorf("metrics: temp: %w", err)
+	if err := store.WriteFileAtomic(path, body); err != nil {
+		return fmt.Errorf("metrics: %w", err)
 	}
-	tmpPath := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	if _, err := tmp.Write(body); err != nil {
-		tmp.Close()
-		return fmt.Errorf("metrics: write: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("metrics: fsync: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("metrics: close: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("metrics: rename: %w", err)
-	}
-	cleanup = false
 	return nil
 }
 
