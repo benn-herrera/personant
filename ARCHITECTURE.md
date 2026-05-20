@@ -353,6 +353,38 @@ The premise is that a transformer has finite parameter capacity, and "baking mem
 
 **Not v0.1, not v1.0, not v2.0** — depends on mature local fine-tuning infrastructure, accumulated outcome-labeled substrate at scale, and a tested eval methodology. Captured here because the architecture has a clean place to land it and because the framing — *substrate-as-canonical, weights-as-instinct, outcome-history-as-signal* — is the kind of design call that's much easier to commit to early than to retrofit later. Adjacent to the "sleep cycle" above: same offline-consolidation framing, different consolidation target (model weights instead of substrate organization).
 
+### Submind via clone — isolated exploration and frontier-model collaboration (future consideration)
+
+Personant's substrate is a git tree already; a **submind** is a subdirectory clone of that tree, with the primary's home as the submind's `origin`. The submind operates as a full personant on a named branch in its local clone — its own spine, its own threads, its own working-set discipline — and integrates back via standard git push + merge. Branch isolation means the submind never collides with the primary until merge; the existing substrate machinery handles the rest.
+
+**Why subminds earn their architectural slot:**
+
+- **Speculative exploration with a commit boundary.** Try a thought experiment in a submind; decide whether the result is worth integrating. The primary's belief state isn't disturbed by the exploration.
+- **Specialization without context-switch cost.** A submind focused on one task continues while the primary continues with the broader context.
+- **Parallel triangulation.** Two submind subdirectories pursuing variant hypotheses of the same problem are just two subdirectories; the user (or the primary) decides at merge time which to integrate.
+- **Naming discipline via universal mind_id suffix.** Every personant has a `mind_id`; every autonomically-generated identifier in that personant is suffixed. Suffixes are flat (`<generation>-<timestamp>`), not chained; immediate-parent provenance is held in metadata. Cross-submind name collisions are impossible by construction; the merge is git-trivial on the namespaced substrate.
+
+**Submind as the natural home for frontier-model collaboration.** A submind can run a *two-model* configuration: a local **liaison model** (gemma family — E4B for swarm-cheap, 26B-A4B for default judgment quality) handling all family-stable infrastructural prompts (topic-tagging, symbol extraction, recall scoring, closure summaries), and a **guest model** (a frontier model — Claude / GPT / Gemini / etc.) providing the actual reasoning content. Inside the submind:
+
+- The liaison model handles every surface where family-stable consistency matters (substrate metadata, recall behavior, closure decisions).
+- The guest model produces the conversational content — what goes into threads, turn excerpts, hot state.
+- Substrate stays gemma-shaped (infrastructural); content is guest-shaped.
+- The submind's branch identity carries the provenance — no per-symbol provenance tags, no per-turn guest-engagement aggregator needed. Which submind contained the work *is* the provenance.
+
+This isolation is what makes frontier-model collaboration architecturally safe rather than a cross-family contamination risk. The main personant's substrate stays family-stable (per the [model-family-as-platform](#model-family-as-platform-v10-platform-coupling) principle below — every infrastructural prompt belongs to one family); the submind container bounds the foreign model's behavioral influence to where its capability is wanted (the content surface) and away from where family-stability is load-bearing (the infrastructural surface). Eval-by-comparison falls out for free: spawn a submind with `guest=Claude`, another with `guest=gemma-31B-local`, compare at merge time — same task, same substrate format, two perspectives.
+
+**Distinguished from concurrent sessions (below).** Subminds are *isolated clones with a merge integration point*. Concurrent sessions are *interleaved multitasking on shared canonical state*. They answer different questions: subminds give you a commit boundary ("explore divergent hypotheses without bleeding belief state"); concurrent sessions give you simultaneous live attention on the same memory ("two coordinated tasks at once"). They can coexist; they are not substitutes.
+
+**Merge semantics.** The viable spectrum, captured for design completeness:
+
+- **Archive-only minimal path:** submind archives its own active work before merge; primary git-merges only the append-only archive. Eliminates running-state conflicts by construction; primary never reconciles a hot thread, only absorbs frozen archive entries. Tradeoff: belief-state from divergent thought doesn't silently flow back; combining a submind's version of a topic with the primary's is a manual review-and-incorporate operation. Most conservative.
+- **Structural merge:** once names are globally unique (suffix scheme above), the submind's live spine entries, thread directories, and working-set membership can travel back as-is. `git merge` handles the append-only files via union driver; suffix-disjoint namespaces avoid conflict. Pre-clone threads are read-only inside the submind; continuations create a new namespaced thread (`thr_42-S1` with `derived_from: thr_42` frontmatter) — the same topic now has two threads in the merged primary, and both surface naturally on the same recall query.
+- **Communication channel during life.** Pub/sub IPC between subminds and primary while the submind is active — status events, queries, results — *not* substrate read/write across the boundary. Merge is by definition a *termination*; there is no continuing submind activity after merge.
+
+**Nested subminds.** The architecture is naturally recursive — a submind IS a personant; by symmetry it can spawn its own submind. Suffix composition (`thr_42-S1-S2`) gives unambiguous provenance at any depth. Merge propagates one level at a time. No structural depth limit; the real bound is the user's review-budget at each merge gate.
+
+Future consideration, post-v0.1; plausibly v2.0. The frontier-collaboration use case may end up being the primary motivator for prioritizing submind work — it turns submind from "speculative isolation mechanism" into "the natural home for inviting frontier reasoning without sacrificing family-stable substrate."
+
 ### Concurrent sessions — multitasking one career (future consideration)
 
 A user routinely interleaves work — two tasks open at once, attention alternating. CWD-scoped agents (Claude Code, opencode, …) get this for free: each working directory is its own isolated context. Personant cannot take that shortcut — its premise is a **single unified awareness and career**, so a separate context per directory would fragment the very thing the system exists to keep whole. Personant must instead genuinely **multitask**: multiple live conversations open against one shared memory.
@@ -479,6 +511,7 @@ These are not "v0.2 / v0.3" — they are role-bounded.
 - Deep cold archival via git (v0.2)
 - Offline memory-consolidation cycle — the "sleep" cycle (future; see Mechanisms)
 - Weight-baked instinct from outcome history — personal alignment LoRA from substrate's outcome record (far-future; see Mechanisms)
+- Submind via clone — isolated exploration and frontier-model collaboration (future; see Mechanisms)
 - Concurrent sessions — one user multitasking across multiple live conversations (future; see Mechanisms)
 - REPL line editing + history (v0.1 polish)
 - Shell escape (`$`/`#`) implementation with long-lived `$SHELL -i` subprocess (v0.1 polish; PTY mode-handoff for nested apps held until empirical pressure)
