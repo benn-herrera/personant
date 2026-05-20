@@ -328,6 +328,31 @@ The intended remedy is an offline **consolidation cycle** — the system's equiv
 
 This is a future consideration, not v0.1 — but the v0.1 six-month simulation already supplies the hook: the day-off is a real idle window in the workload model, and closure (§3.5) / archival (§3.8) are exactly the mechanisms a consolidation pass would tidy.
 
+### Weight-baked instinct from outcome history (far-future consideration)
+
+A second, longer-horizon kind of consolidation: once local fine-tuning is mature and stable, the system's *outcome record* — not its content — becomes a training signal for a personal alignment adapter on the underlying model. **Substrate stays recall; weights become instinct.**
+
+The premise is that a transformer has finite parameter capacity, and "baking memories" by tuning a model on raw substrate content is a bad trade: it displaces pretrained factual capacity for narrow recall the substrate already holds verifiably. The smarter move is to *not* train on facts at all. Train on the *shape of what worked and what failed* — the latent outcome distribution across long substrate history.
+
+**Signal sources, all already latent in a mature substrate:**
+
+- **Decision durability.** Threads that closed cleanly accomplishing what they set out to do vs. threads abandoned. Architectural calls that survived in later commits vs. ones reversed. Cited decisions (load-bearing) vs. uncited (noise) — adjacent to the §3.0 transient-data lifecycle's decision-vs-task classification.
+- **Estimate calibration.** Where estimates exist alongside actuals, the delta is signal.
+- **External durability.** For project repos the personant assisted on: code that survived refactors vs. code that got deleted. Git history of the workspace, not just the substrate.
+- **User correction patterns.** Repeat pushback on the same shape of suggestion — the model's prior is misaligned for this user in a recoverable, low-rank way.
+
+**The training shape is not SFT on substrate content.** It's preference-pair learning (DPO/IPO-style) over `(situation, approach_taken, observed_outcome)` triples, with outcomes drawn from the signal sources above. The product is a small, low-rank LoRA targeting later layers and alignment-relevant attention heads — empirically the locus where "style and instruction-following" already live in current models.
+
+**What the consolidated model contributes is taste, not knowledge.** The base model already knows the best-practice patterns; what it doesn't have is the *shape of when patterns apply and when they fail in this user's domain* — the prior that distinguishes a senior partner from a junior reciter. That kind of contribution ("this architectural move tends to ossify under load; I've seen that fail three ways") is the kind of partnership the founding tenet — AI with humans, not by humans alone — actually cashes out to at the cognition-shape level rather than the conversation-shape level.
+
+**Hard constraints carried over from the substrate-as-canonical thesis:**
+
+- Substrate remains source of truth. Weights are an optimization on instinct, never a replacement for recall. Lose the substrate and you must still have an auditable, correctable record of what happened.
+- Each training pass is gated, reviewed, and reversible. Pre-tuned model preserved; new LoRA tagged with the substrate snapshot hash it was trained from; eval pass (recall-fidelity + general-capability probes) gates promotion; failed evals roll back.
+- Substrate items used in a training pass get annotated (`consolidated_at:`) — don't bake the same thing twice; supports later forensic queries on what shaped the model.
+
+**Not v0.1, not v1.0, not v2.0** — depends on mature local fine-tuning infrastructure, accumulated outcome-labeled substrate at scale, and a tested eval methodology. Captured here because the architecture has a clean place to land it and because the framing — *substrate-as-canonical, weights-as-instinct, outcome-history-as-signal* — is the kind of design call that's much easier to commit to early than to retrofit later. Adjacent to the "sleep cycle" above: same offline-consolidation framing, different consolidation target (model weights instead of substrate organization).
+
 ### Concurrent sessions — multitasking one career (future consideration)
 
 A user routinely interleaves work — two tasks open at once, attention alternating. CWD-scoped agents (Claude Code, opencode, …) get this for free: each working directory is its own isolated context. Personant cannot take that shortcut — its premise is a **single unified awareness and career**, so a separate context per directory would fragment the very thing the system exists to keep whole. Personant must instead genuinely **multitask**: multiple live conversations open against one shared memory.
@@ -453,6 +478,7 @@ These are not "v0.2 / v0.3" — they are role-bounded.
 - Computational research workflow — Python only (v1.0; *not* polyglot)
 - Deep cold archival via git (v0.2)
 - Offline memory-consolidation cycle — the "sleep" cycle (future; see Mechanisms)
+- Weight-baked instinct from outcome history — personal alignment LoRA from substrate's outcome record (far-future; see Mechanisms)
 - Concurrent sessions — one user multitasking across multiple live conversations (future; see Mechanisms)
 - REPL line editing + history (v0.1 polish)
 - Shell escape (`$`/`#`) implementation with long-lived `$SHELL -i` subprocess (v0.1 polish; PTY mode-handoff for nested apps held until empirical pressure)
