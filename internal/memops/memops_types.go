@@ -47,11 +47,7 @@ const (
 // receives Deltas from the application-layer §3.0 chain; the adapter
 // records them on the substrate side.
 //
-// Mirrors internal/turn.Delta but carries the Retention field for
-// transient-data lifecycle awareness. (turn.Delta will become an alias
-// for memops.Delta when callers migrate in step A.2 / the transient-
-// data work; defining the canonical form here keeps the port
-// self-contained.)
+// Canonical Delta type used by both the port and internal/turn.
 type Delta struct {
 	// Source is the dotted §3.0.1 event name
 	// ("user.prompt", "model.response", "tool.result", ...).

@@ -11,23 +11,15 @@ import (
 	"personant/internal/prompt"
 )
 
-// Delta is one context-modification event (spec §3.0.1). Source is the
-// dotted event name from the §3.0.1 vocabulary (e.g. "user.prompt",
-// "model.response", "tool.result"). Content is the raw delta text.
-// Meta carries source-specific metadata; nil-safe.
-//
-// Retention is the provisional retention class (§3.0 transient-data
-// lifecycle). When empty, onContextDelta fills it in via
-// provisionalRetention(Source). Callers may set it explicitly to
-// override the source-driven default — the v0.1 use case is the future
-// `##` / `/keep` shell-capture override that escalates a task-class
-// source to RetentionDecision.
-type Delta struct {
-	Source    string
-	Content   string
-	Meta      map[string]string
-	Retention memops.RetentionClass
-}
+// Delta is an alias for memops.Delta — the canonical context-
+// modification event type lives at the port (§3.0.1). The alias keeps
+// existing turn-package call sites (and tests) using turn.Delta while
+// eliminating the parallel struct declaration. Field semantics: Source
+// is the dotted §3.0.1 event name, Content is the raw delta text, Meta
+// is source-specific metadata (nil-safe), Retention is the provisional
+// retention class — when empty, onContextDelta fills it in via
+// provisionalRetention(Source).
+type Delta = memops.Delta
 
 // fileEditKind discriminates the two §3.9 buffered file-edit operations:
 // a content write (from fs.read or fs.write) or a git-commit pointer
