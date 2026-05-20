@@ -58,8 +58,8 @@ func validSpine(id, project string) memops.SpineRecord {
 	}
 }
 
-func validFrontmatter(rec memops.SpineRecord) memops.ThreadFrontmatter {
-	return memops.ThreadFrontmatter{
+func validFrontmatter(rec memops.SpineRecord) memops.ThreadMeta {
+	return memops.ThreadMeta{
 		ID:           rec.ID,
 		Project:      rec.Project,
 		Anchors:      rec.Anchors,

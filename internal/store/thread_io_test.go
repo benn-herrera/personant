@@ -23,8 +23,8 @@ func newThreadHome(t *testing.T) PersonantPaths {
 	return paths
 }
 
-func sampleFrontmatter() memops.ThreadFrontmatter {
-	return memops.ThreadFrontmatter{
+func sampleFrontmatter() memops.ThreadMeta {
+	return memops.ThreadMeta{
 		ID:           "thr_42",
 		Project:      "prj_3",
 		Anchors:      []string{"trefoil", "unknot", "body-topology", "electron-shape"},
@@ -368,10 +368,10 @@ func TestSaveThreadFrontmatterAtomicNoTempLeftBehind(t *testing.T) {
 
 func TestSaveThreadFrontmatterRequiresIDAndProject(t *testing.T) {
 	paths := newThreadHome(t)
-	if err := SaveThreadFrontmatter(paths, "", memops.ThreadFrontmatter{}); err == nil {
+	if err := SaveThreadFrontmatter(paths, "", memops.ThreadMeta{}); err == nil {
 		t.Errorf("expected error for empty id")
 	}
-	if err := SaveThreadFrontmatter(paths, "thr_1", memops.ThreadFrontmatter{ID: "thr_1"}); err == nil {
+	if err := SaveThreadFrontmatter(paths, "thr_1", memops.ThreadMeta{ID: "thr_1"}); err == nil {
 		t.Errorf("expected error for missing project")
 	}
 }

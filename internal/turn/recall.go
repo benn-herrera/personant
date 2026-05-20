@@ -53,7 +53,7 @@ type RecallResolver func(ctx context.Context, offer RecallOffer) (RecallResoluti
 // log-only (the harness default for unmeasured steps).
 //
 // On accept, applyRecallResolution increments SpineRecord.RecallFires
-// (and the mirrored ThreadFrontmatter.RecallFires) via
+// (and the mirrored ThreadMeta.RecallFires) via
 // MemoryOps.RecordRecallFire — the §2.2 "matches that resulted in
 // fetch" counter. A counter-write failure is logged and swallowed; it
 // never aborts turn close.

@@ -3,7 +3,7 @@ package memops
 // This file holds the operation-supporting types referenced by the
 // MemoryOps interface — filters, options, working-set inputs, bootstrap
 // and verification result shapes. The domain data-model types
-// (SpineRecord, ThreadFrontmatter, Thread, ProjectMeta, Provider, the
+// (SpineRecord, ThreadMeta, Thread, ProjectMeta, Provider, the
 // symbol/state enums, the sentinel errors, ParseModelRef/ValidateConfig)
 // are real definitions in memops_model.go: the port owns its domain
 // types outright. internal/store and the adapters depend on memops for
@@ -98,7 +98,7 @@ type ThreadWrite struct {
 
 	// Frontmatter is the in-file metadata block. Always written to the
 	// thread's thread.md frontmatter by the adapter.
-	Frontmatter ThreadFrontmatter
+	Frontmatter ThreadMeta
 
 	// TurnExcerpt is the terse operational excerpt for the turn this
 	// write records. The adapter appends it as a new turn-excerpt file

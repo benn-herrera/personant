@@ -63,7 +63,7 @@ func seedThread(t *testing.T, h *Harness, rec memops.SpineRecord) {
 		t.Fatalf("AppendSpineRecord: %v", err)
 	}
 	thr := memops.Thread{
-		Frontmatter: memops.ThreadFrontmatter{
+		Frontmatter: memops.ThreadMeta{
 			ID:           rec.ID,
 			Project:      rec.Project,
 			Anchors:      append([]string(nil), rec.Anchors...),
@@ -163,7 +163,7 @@ func TestVerifyProjectReferences_FailsOnUnknownProject(t *testing.T) {
 		t.Fatalf("AppendSpineRecord: %v", err)
 	}
 	thr := memops.Thread{
-		Frontmatter: memops.ThreadFrontmatter{
+		Frontmatter: memops.ThreadMeta{
 			ID:      rec.ID,
 			Project: rec.Project,
 			Anchors: rec.Anchors, Summary: rec.Summary, State: rec.State,

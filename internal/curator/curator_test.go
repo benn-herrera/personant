@@ -20,12 +20,12 @@ func hsym(norm string, count, firstSeen int) memops.HistorySymbol {
 func TestSelectAnchors(t *testing.T) {
 	tests := []struct {
 		name string
-		fm   memops.ThreadFrontmatter
+		fm   memops.ThreadMeta
 		want []string
 	}{
 		{
 			name: "ranked by count descending",
-			fm: memops.ThreadFrontmatter{
+			fm: memops.ThreadMeta{
 				HistorySymbols: []memops.HistorySymbol{
 					hsym("low", 1, 1), hsym("high", 9, 1),
 					hsym("mid", 5, 1), hsym("top", 12, 1),
@@ -36,7 +36,7 @@ func TestSelectAnchors(t *testing.T) {
 		},
 		{
 			name: "tie on count broken by first-seen ascending (older first)",
-			fm: memops.ThreadFrontmatter{
+			fm: memops.ThreadMeta{
 				HistorySymbols: []memops.HistorySymbol{
 					hsym("a", 3, 10), hsym("b", 3, 2),
 					hsym("c", 3, 7), hsym("d", 3, 1),
@@ -47,7 +47,7 @@ func TestSelectAnchors(t *testing.T) {
 		},
 		{
 			name: "capped at eight",
-			fm: memops.ThreadFrontmatter{
+			fm: memops.ThreadMeta{
 				HistorySymbols: []memops.HistorySymbol{
 					hsym("s1", 10, 1), hsym("s2", 9, 1), hsym("s3", 8, 1),
 					hsym("s4", 7, 1), hsym("s5", 6, 1), hsym("s6", 5, 1),
@@ -59,7 +59,7 @@ func TestSelectAnchors(t *testing.T) {
 		},
 		{
 			name: "thin history falls back to existing anchors",
-			fm: memops.ThreadFrontmatter{
+			fm: memops.ThreadMeta{
 				HistorySymbols: []memops.HistorySymbol{hsym("only", 5, 1)},
 				Anchors:        []string{"alpha", "beta", "gamma", "delta"},
 			},
@@ -67,7 +67,7 @@ func TestSelectAnchors(t *testing.T) {
 		},
 		{
 			name: "empty normalized symbols skipped, then fallback",
-			fm: memops.ThreadFrontmatter{
+			fm: memops.ThreadMeta{
 				HistorySymbols: []memops.HistorySymbol{
 					hsym("", 9, 1), hsym("real", 3, 1),
 				},
@@ -95,7 +95,7 @@ func TestDraftClosure_SummaryFromModel(t *testing.T) {
 	c := NewHTTPCurator(mock, "test-model")
 
 	thr := memops.Thread{
-		Frontmatter: memops.ThreadFrontmatter{
+		Frontmatter: memops.ThreadMeta{
 			ID:      "thr_7",
 			Anchors: []string{"anchor-a", "anchor-b", "anchor-c", "anchor-d"},
 			HistorySymbols: []memops.HistorySymbol{

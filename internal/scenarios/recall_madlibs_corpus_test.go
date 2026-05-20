@@ -41,10 +41,10 @@ var corpusQueriesPath = filepath.Join("testdata", "recall_madlibs", "corpus_quer
 // lexically-fixed stored substrate the matcher scans. Built once and
 // reused for every query, which is the whole point of the direct-call
 // design.
-func corpusIndex(doc madlibsDoc) (spine []memops.SpineRecord, threads []memops.ThreadFrontmatter, threadID map[string]string) {
+func corpusIndex(doc madlibsDoc) (spine []memops.SpineRecord, threads []memops.ThreadMeta, threadID map[string]string) {
 	threadID = make(map[string]string, len(doc.Topics))
 	spine = make([]memops.SpineRecord, 0, len(doc.Topics))
-	threads = make([]memops.ThreadFrontmatter, 0, len(doc.Topics))
+	threads = make([]memops.ThreadMeta, 0, len(doc.Topics))
 	for i, tp := range doc.Topics {
 		id := fmt.Sprintf("thr_%d", i+1)
 		threadID[tp.Name] = id
@@ -55,7 +55,7 @@ func corpusIndex(doc madlibsDoc) (spine []memops.SpineRecord, threads []memops.T
 			Anchors: anchors,
 			State:   memops.ThreadActive,
 		})
-		threads = append(threads, memops.ThreadFrontmatter{
+		threads = append(threads, memops.ThreadMeta{
 			ID:      id,
 			Project: "prj_1",
 			Anchors: anchors,

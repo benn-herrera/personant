@@ -562,7 +562,7 @@ func TestRunExistingThreadAppendsExcerpt(t *testing.T) {
 
 	// Seed: a thread file from a prior turn, plus its spine record.
 	prior := memops.Thread{
-		Frontmatter: memops.ThreadFrontmatter{
+		Frontmatter: memops.ThreadMeta{
 			ID:           "thr_42",
 			Project:      meta.ID,
 			Anchors:      []string{"trefoil", "unknot", "body-topology", "electron-shape"},
@@ -800,7 +800,7 @@ func seedThreadAndSpine(t *testing.T, paths store.PersonantPaths, project, thrID
 		t.Fatalf("seed spine %s: %v", thrID, err)
 	}
 	thr := memops.Thread{
-		Frontmatter: memops.ThreadFrontmatter{
+		Frontmatter: memops.ThreadMeta{
 			ID:           rec.ID,
 			Project:      rec.Project,
 			Anchors:      rec.Anchors,

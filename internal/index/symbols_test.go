@@ -20,11 +20,11 @@ func mkSpine(id, project string, recallFires int, anchors ...string) memops.Spin
 	}
 }
 
-// mkThread builds a minimal ThreadFrontmatter with the given ID and
+// mkThread builds a minimal ThreadMeta with the given ID and
 // history_symbols. Other required fields are stubbed; tests that
 // exercise spine ordering provide the matching SpineRecord separately.
-func mkThread(id, project string, history ...memops.HistorySymbol) memops.ThreadFrontmatter {
-	return memops.ThreadFrontmatter{
+func mkThread(id, project string, history ...memops.HistorySymbol) memops.ThreadMeta {
+	return memops.ThreadMeta{
 		ID: id, Project: project,
 		Summary: "s", State: memops.ThreadActive,
 		Created: "2026-05-01T00:00:00Z", LastEngaged: "2026-05-01T00:00:00Z", StateChanged: "2026-05-01T00:00:00Z",
@@ -138,7 +138,7 @@ func TestBuildSymbolsCombinesAnchorsAndHistory(t *testing.T) {
 	spine := []memops.SpineRecord{
 		mkSpine("thr_1", "prj_1", 0, "alpha", "beta"),
 	}
-	threads := []memops.ThreadFrontmatter{
+	threads := []memops.ThreadMeta{
 		mkThread("thr_1", "prj_1", mkHistorySym("gamma", memops.SourceModel)),
 	}
 	got := BuildSymbols(spine, threads)
@@ -191,7 +191,7 @@ func TestBuildSymbolsDominantSourceAggregation(t *testing.T) {
 		mkSpine("thr_1", "prj_1", 5, "alpha"),
 		mkSpine("thr_2", "prj_1", 1), // no anchors, just engagement bookkeeping
 	}
-	threads := []memops.ThreadFrontmatter{
+	threads := []memops.ThreadMeta{
 		mkThread("thr_2", "prj_1", mkHistorySym("alpha", memops.SourceUser)),
 	}
 	got := BuildSymbols(spine, threads)
@@ -224,7 +224,7 @@ func TestBuildSymbolsHistoryOnlyMultiThread(t *testing.T) {
 		mkSpine("thr_1", "prj_1", 2),
 		mkSpine("thr_2", "prj_1", 9),
 	}
-	threads := []memops.ThreadFrontmatter{
+	threads := []memops.ThreadMeta{
 		mkThread("thr_1", "prj_1", mkHistorySym("zeta", memops.SourceDeterministic)),
 		mkThread("thr_2", "prj_1", mkHistorySym("zeta", memops.SourceModel)),
 	}
@@ -251,7 +251,7 @@ func TestBuildSymbolsHistoryOnlyMultiThread(t *testing.T) {
 // bucket; index building tolerates it by skipping.
 func TestBuildSymbolsHistorySymbolWithEmptyNormalizedIsIgnored(t *testing.T) {
 	spine := []memops.SpineRecord{mkSpine("thr_1", "prj_1", 0)}
-	threads := []memops.ThreadFrontmatter{
+	threads := []memops.ThreadMeta{
 		mkThread("thr_1", "prj_1",
 			memops.HistorySymbol{Raw: "junk", Normalized: "", Source: memops.SourceModel}),
 	}
@@ -280,7 +280,7 @@ func TestRebuildSymbolsRoundtrips(t *testing.T) {
 	}
 
 	thr1 := memops.Thread{
-		Frontmatter: memops.ThreadFrontmatter{
+		Frontmatter: memops.ThreadMeta{
 			ID: "thr_1", Project: "prj_1",
 			Anchors: []string{"alpha", "beta"},
 			Summary: "s", State: memops.ThreadActive,
@@ -294,7 +294,7 @@ func TestRebuildSymbolsRoundtrips(t *testing.T) {
 		Body: "body\n",
 	}
 	thr2 := memops.Thread{
-		Frontmatter: memops.ThreadFrontmatter{
+		Frontmatter: memops.ThreadMeta{
 			ID: "thr_2", Project: "prj_1",
 			Anchors: []string{"gamma"},
 			Summary: "s", State: memops.ThreadActive,
@@ -378,7 +378,7 @@ func TestLoadAllThreadFrontmatterTolerantOnParseError(t *testing.T) {
 	// Two well-formed threads.
 	for _, id := range []string{"thr_1", "thr_2"} {
 		th := memops.Thread{
-			Frontmatter: memops.ThreadFrontmatter{
+			Frontmatter: memops.ThreadMeta{
 				ID: id, Project: "prj_1",
 				Summary: "s", State: memops.ThreadActive,
 				Created: "2026-05-01T00:00:00Z", LastEngaged: "2026-05-01T00:00:00Z", StateChanged: "2026-05-01T00:00:00Z",

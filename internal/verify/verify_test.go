@@ -67,7 +67,7 @@ func writeSpine(t *testing.T, paths store.PersonantPaths, recs []memops.SpineRec
 		if !memops.ThreadIDPattern.MatchString(rec.ID) || rec.Project == "" {
 			continue
 		}
-		fm := memops.ThreadFrontmatter{
+		fm := memops.ThreadMeta{
 			ID:           rec.ID,
 			Project:      rec.Project,
 			Anchors:      rec.Anchors,

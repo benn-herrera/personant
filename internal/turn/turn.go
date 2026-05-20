@@ -1044,7 +1044,7 @@ func createNewThread(ctx context.Context, state *State, userInput, responseBody,
 		LastEngagedTurn: state.TurnNumber,
 	}
 
-	frontmatter := ThreadFrontmatter{
+	frontmatter := ThreadMeta{
 		ID:              newID,
 		Project:         rec.Project,
 		Anchors:         append([]string(nil), anchors...),
@@ -1074,18 +1074,17 @@ func createNewThread(ctx context.Context, state *State, userInput, responseBody,
 	return newID, nil
 }
 
-// ThreadFrontmatter is a local alias to avoid a long-form type literal in
-// the createNewThread frontmatter construction. Kept at package scope so
-// the literal in the function body reads naturally.
-type ThreadFrontmatter = memops.ThreadFrontmatter
+// ThreadMeta is a local alias to avoid the memops-qualified type literal
+// in the createNewThread frontmatter construction. Kept at package scope
+// so the literal in the function body reads naturally.
+type ThreadMeta = memops.ThreadMeta
 
-
-// frontmatterFromSpine builds a minimal-but-valid ThreadFrontmatter from
-// a SpineRecord. Used when a thread's on-disk file is missing while its
+// frontmatterFromSpine builds a minimal-but-valid ThreadMeta from a
+// SpineRecord. Used when a thread's on-disk file is missing while its
 // spine entry persists — the engagement update synthesizes a fresh file
 // rather than failing the turn.
-func frontmatterFromSpine(rec memops.SpineRecord) ThreadFrontmatter {
-	return ThreadFrontmatter{
+func frontmatterFromSpine(rec memops.SpineRecord) ThreadMeta {
+	return ThreadMeta{
 		ID:              rec.ID,
 		Project:         rec.Project,
 		Anchors:         append([]string(nil), rec.Anchors...),

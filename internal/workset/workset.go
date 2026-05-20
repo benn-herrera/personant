@@ -98,7 +98,7 @@ type ProjectDigestEntry struct {
 // body (already recency-windowed + byte-budgeted by the adapter), and
 // tracked-file entries (already with the live-window pre-computed).
 type ThreadData struct {
-	Frontmatter  memops.ThreadFrontmatter
+	Frontmatter  memops.ThreadMeta
 	Body         string
 	TrackedFiles []TrackedFile
 }

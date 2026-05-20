@@ -27,10 +27,9 @@
 // In short: method names and parameter types on MemoryOps describe
 // abstract operations (load a thread's metadata, list spine records,
 // engage a thread). Names tied to a specific storage format — paths,
-// file extensions, on-disk layout — stay on the adapter side. Concessions
-// to substrate-specific terminology at the port surface are explicit
-// exceptions, not implicit drift; the ThreadFrontmatter type name is a
-// known exception currently queued for cleanup (MAD review item D-1).
+// file extensions, on-disk layout — stay on the adapter side.
+// Concessions to substrate-specific terminology at the port surface are
+// explicit exceptions, not implicit drift.
 //
 // # Design rationale and the larger queued workstream
 //
@@ -63,7 +62,7 @@
 //
 // # Data-model types
 //
-// SpineRecord, ThreadFrontmatter, Thread, ProjectMeta, Provider, the
+// SpineRecord, ThreadMeta, Thread, ProjectMeta, Provider, the
 // thread/symbol enums, the sentinel errors — these are real definitions
 // in memops_model.go. The port owns its domain types outright;
 // internal/store and the adapters depend on memops for them, so the
@@ -153,7 +152,7 @@ type MemoryOps interface {
 	// turn excerpt without ever loading the prior body. Folds in
 	// store.LoadThreadFrontmatter; ErrThreadFileNotFound semantics match
 	// LoadThread.
-	LoadThreadFrontmatter(ctx context.Context, threadID string) (ThreadFrontmatter, error)
+	LoadThreadFrontmatter(ctx context.Context, threadID string) (ThreadMeta, error)
 
 	// FindThread looks up the spine record for threadID. The second
 	// return is false when no record exists. Folds in

@@ -144,13 +144,13 @@ func (a *FileAdapter) LoadThread(ctx context.Context, threadID string) (memops.T
 
 // LoadThreadFrontmatter reads only the thread's thread.md metadata,
 // skipping the turn-excerpt directory.
-func (a *FileAdapter) LoadThreadFrontmatter(ctx context.Context, threadID string) (memops.ThreadFrontmatter, error) {
+func (a *FileAdapter) LoadThreadFrontmatter(ctx context.Context, threadID string) (memops.ThreadMeta, error) {
 	if err := ctx.Err(); err != nil {
-		return memops.ThreadFrontmatter{}, err
+		return memops.ThreadMeta{}, err
 	}
 	fm, err := store.LoadThreadFrontmatter(a.paths, threadID)
 	if err != nil {
-		return memops.ThreadFrontmatter{}, fmt.Errorf("fileadapter: load thread frontmatter: %w", err)
+		return memops.ThreadMeta{}, fmt.Errorf("fileadapter: load thread frontmatter: %w", err)
 	}
 	return fm, nil
 }

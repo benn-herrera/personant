@@ -270,7 +270,7 @@ func seedMadlibsThreads(doc madlibsDoc) func(*Harness) error {
 				return fmt.Errorf("seedMadlibsThreads: AppendSpineRecord %s: %w", rec.ID, err)
 			}
 			thr := memops.Thread{
-				Frontmatter: memops.ThreadFrontmatter{
+				Frontmatter: memops.ThreadMeta{
 					ID:           rec.ID,
 					Project:      rec.Project,
 					Anchors:      append([]string(nil), rec.Anchors...),

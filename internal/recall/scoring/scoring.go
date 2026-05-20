@@ -8,7 +8,7 @@
 // layers 2 and 3) are not invoked from here.
 //
 // The package is substrate-free: it depends only on the memops domain
-// model (SpineRecord, ThreadFrontmatter). Application-side recall that
+// model (SpineRecord, ThreadMeta). Application-side recall that
 // needs to talk to the substrate lives in recall/measure and uses the
 // memops.MemoryOps port.
 package scoring
@@ -76,7 +76,7 @@ type Options struct {
 //  4. Drop scores below opts.Threshold (inclusive >=).
 //  5. Sort: score desc → recall_fires desc → thread ID asc.
 //  6. Apply Limit.
-func ProposeFromIndex(spine []memops.SpineRecord, threads []memops.ThreadFrontmatter, query []string, opts Options) []Candidate {
+func ProposeFromIndex(spine []memops.SpineRecord, threads []memops.ThreadMeta, query []string, opts Options) []Candidate {
 	threshold := opts.Threshold
 	if threshold == 0 {
 		threshold = DefaultThreshold
@@ -91,7 +91,7 @@ func ProposeFromIndex(spine []memops.SpineRecord, threads []memops.ThreadFrontma
 		return nil
 	}
 
-	fmIndex := make(map[string]memops.ThreadFrontmatter, len(threads))
+	fmIndex := make(map[string]memops.ThreadMeta, len(threads))
 	for i := range threads {
 		fmIndex[threads[i].ID] = threads[i]
 	}
@@ -183,7 +183,7 @@ func uniqueNonEmpty(in []string) []string {
 // surface — the spine is canonical for anchors).
 //
 // Returns a sorted, deduplicated slice; empty strings dropped.
-func buildThreadSet(rec memops.SpineRecord, fm memops.ThreadFrontmatter, haveFM bool) []string {
+func buildThreadSet(rec memops.SpineRecord, fm memops.ThreadMeta, haveFM bool) []string {
 	cap := len(rec.Anchors)
 	if haveFM {
 		cap += len(fm.HistorySymbols)

@@ -87,12 +87,19 @@ type HistorySymbol struct {
 	Source        SymbolSource `json:"source" yaml:"source"`
 }
 
-// ThreadFrontmatter is the YAML frontmatter for threads/thr_<id>.md
-// (spec §2.3). Mirrors SpineRecord plus per-thread symbol history.
+// ThreadMeta is the per-thread metadata record at the memops port.
+// In the file-substrate adapter, ThreadMeta is serialized as the YAML
+// frontmatter of thread.md per spec §2.3; other substrates would
+// serialize equivalently in their native shapes. The port name
+// describes the abstract concept (per-thread metadata); the spec's
+// "frontmatter" vocabulary correctly describes the file-substrate
+// storage slot where ThreadMeta lives on disk. See ARCHITECTURE.md
+// "Port abstraction policy" for the design rule this rename honors.
 //
-// Both JSON and YAML tags are present so a future YAML helper is a one-line
-// change; no YAML dependency is added at this stage.
-type ThreadFrontmatter struct {
+// Mirrors SpineRecord plus per-thread symbol history. Both JSON and
+// YAML tags are present so a future YAML helper is a one-line change;
+// no YAML dependency is added at this stage.
+type ThreadMeta struct {
 	ID      string      `json:"id" yaml:"id"`
 	Project string      `json:"project" yaml:"project"`
 	Anchors []string    `json:"anchors" yaml:"anchors"`
@@ -120,7 +127,7 @@ type ThreadFrontmatter struct {
 // operational content (turn excerpts, curator-summarized milestones at
 // retirement). Per spec §2.3.
 type Thread struct {
-	Frontmatter ThreadFrontmatter
+	Frontmatter ThreadMeta
 	Body        string // markdown body; trailing newline preserved
 }
 

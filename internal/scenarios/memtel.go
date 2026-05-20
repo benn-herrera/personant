@@ -33,14 +33,14 @@ const memTelemetryFilename = "mem.jsonl"
 // memSample is one JSONL record. Field names are stable: the file is a
 // forensic-data artifact a future leak hunt will grep and chart.
 type memSample struct {
-	Step            int   `json:"step"`
-	SimClockNs      int64 `json:"sim_clock_ns"`
-	WallNs          int64 `json:"wall_ns"`
+	Step            int    `json:"step"`
+	SimClockNs      int64  `json:"sim_clock_ns"`
+	WallNs          int64  `json:"wall_ns"`
 	AllocBytes      uint64 `json:"alloc_bytes"`
 	HeapInUseBytes  uint64 `json:"heap_in_use_bytes"`
 	HeapObjects     uint64 `json:"heap_objects"`
 	SysBytes        uint64 `json:"sys_bytes"`
-	NumGoroutine    int   `json:"num_goroutine"`
+	NumGoroutine    int    `json:"num_goroutine"`
 	GCPauseNsRecent uint64 `json:"gc_pause_ns_recent"`
 }
 

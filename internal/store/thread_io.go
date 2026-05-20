@@ -102,7 +102,7 @@ func ListThreadIDs(paths PersonantPaths) ([]string, error) {
 // files. A nil logf is silent.
 //
 // A missing ThreadsDir returns (nil, nil) — fresh-init state.
-func LoadAllThreadFrontmatter(paths PersonantPaths, logf func(format string, args ...any)) ([]memops.ThreadFrontmatter, error) {
+func LoadAllThreadFrontmatter(paths PersonantPaths, logf func(format string, args ...any)) ([]memops.ThreadMeta, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -113,7 +113,7 @@ func LoadAllThreadFrontmatter(paths PersonantPaths, logf func(format string, arg
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	out := make([]memops.ThreadFrontmatter, 0, len(ids))
+	out := make([]memops.ThreadMeta, 0, len(ids))
 	for _, id := range ids {
 		fm, err := LoadThreadFrontmatter(paths, id)
 		if err != nil {
@@ -141,30 +141,30 @@ func LoadAllThreadFrontmatter(paths PersonantPaths, logf func(format string, arg
 // thread.md is absent. Returns a wrapped error when the frontmatter
 // delimiters are missing, the YAML fails to parse, or required fields
 // (id/project) are unset.
-func LoadThreadFrontmatter(paths PersonantPaths, threadID string) (memops.ThreadFrontmatter, error) {
+func LoadThreadFrontmatter(paths PersonantPaths, threadID string) (memops.ThreadMeta, error) {
 	path := ThreadMetaPath(paths, threadID)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return memops.ThreadFrontmatter{}, fmt.Errorf("load thread %s: %w", threadID, memops.ErrThreadFileNotFound)
+			return memops.ThreadMeta{}, fmt.Errorf("load thread %s: %w", threadID, memops.ErrThreadFileNotFound)
 		}
-		return memops.ThreadFrontmatter{}, fmt.Errorf("load thread %s: read: %w", threadID, err)
+		return memops.ThreadMeta{}, fmt.Errorf("load thread %s: read: %w", threadID, err)
 	}
 
 	fmBytes, _, err := splitFrontmatter(data)
 	if err != nil {
-		return memops.ThreadFrontmatter{}, fmt.Errorf("load thread %s: %w", threadID, err)
+		return memops.ThreadMeta{}, fmt.Errorf("load thread %s: %w", threadID, err)
 	}
 
-	var fm memops.ThreadFrontmatter
+	var fm memops.ThreadMeta
 	if err := yaml.Unmarshal(fmBytes, &fm); err != nil {
-		return memops.ThreadFrontmatter{}, fmt.Errorf("load thread %s: parse yaml: %w", threadID, err)
+		return memops.ThreadMeta{}, fmt.Errorf("load thread %s: parse yaml: %w", threadID, err)
 	}
 	if fm.ID == "" {
-		return memops.ThreadFrontmatter{}, fmt.Errorf("load thread %s: frontmatter missing required field: id", threadID)
+		return memops.ThreadMeta{}, fmt.Errorf("load thread %s: frontmatter missing required field: id", threadID)
 	}
 	if fm.Project == "" {
-		return memops.ThreadFrontmatter{}, fmt.Errorf("load thread %s: frontmatter missing required field: project", threadID)
+		return memops.ThreadMeta{}, fmt.Errorf("load thread %s: frontmatter missing required field: project", threadID)
 	}
 	return fm, nil
 }
@@ -251,7 +251,7 @@ func LoadThread(paths PersonantPaths, threadID string) (memops.Thread, error) {
 //
 // This rewrites only the small bounded metadata file; the turn-excerpt
 // directory is untouched.
-func SaveThreadFrontmatter(paths PersonantPaths, threadID string, fm memops.ThreadFrontmatter) error {
+func SaveThreadFrontmatter(paths PersonantPaths, threadID string, fm memops.ThreadMeta) error {
 	if fm.ID == "" {
 		return fmt.Errorf("save thread frontmatter: id is empty")
 	}
@@ -586,7 +586,7 @@ func lineStartingWith(data []byte, start int, prefix string) int {
 // marshalFrontmatter encodes f as YAML. yaml.v3 honors struct
 // declaration order, so the on-disk field sequence is stable across
 // writes — git diffs stay record-grain.
-func marshalFrontmatter(f memops.ThreadFrontmatter) ([]byte, error) {
+func marshalFrontmatter(f memops.ThreadMeta) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)

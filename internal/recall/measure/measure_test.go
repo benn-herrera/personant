@@ -37,7 +37,7 @@ func seedThread(t *testing.T, paths store.PersonantPaths, id string, anchors []s
 		t.Fatalf("seed spine %s: %v", id, err)
 	}
 	thr := memops.Thread{
-		Frontmatter: memops.ThreadFrontmatter{
+		Frontmatter: memops.ThreadMeta{
 			ID: id, Project: "prj_1", Anchors: anchors, Summary: id,
 			State: memops.ThreadActive, Created: ts, LastEngaged: ts,
 			StateChanged: ts, TurnCount: 1,

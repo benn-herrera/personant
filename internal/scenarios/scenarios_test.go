@@ -961,7 +961,7 @@ func seedActiveThread(h *Harness, threadID string, lastEngagedTurn int, lastEnga
 		return fmt.Errorf("seedActiveThread: append spine: %w", err)
 	}
 	thr := memops.Thread{
-		Frontmatter: memops.ThreadFrontmatter{
+		Frontmatter: memops.ThreadMeta{
 			ID:              rec.ID,
 			Project:         rec.Project,
 			Anchors:         rec.Anchors,

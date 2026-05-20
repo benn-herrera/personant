@@ -115,7 +115,7 @@ func (c *HTTPCurator) consult(ctx context.Context, req model.Request) (string, e
 //
 // Exported so the deterministic selection can be unit-tested without a
 // live model.
-func SelectAnchors(fm memops.ThreadFrontmatter) []string {
+func SelectAnchors(fm memops.ThreadMeta) []string {
 	syms := append([]memops.HistorySymbol(nil), fm.HistorySymbols...)
 	sort.SliceStable(syms, func(i, j int) bool {
 		if syms[i].Count != syms[j].Count {

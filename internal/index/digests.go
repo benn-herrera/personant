@@ -278,4 +278,3 @@ func encodeSymbolsJSONL(records []store.SymbolRecord) ([]byte, error) {
 	}
 	return buf.Bytes(), nil
 }
-

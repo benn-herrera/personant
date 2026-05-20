@@ -190,7 +190,7 @@ func TestLayerBRespectsBTopK(t *testing.T) {
 		id := fmt.Sprintf("thr_%d", i)
 		ids = append(ids, id)
 		threads[id] = ThreadData{
-			Frontmatter: memops.ThreadFrontmatter{
+			Frontmatter: memops.ThreadMeta{
 				ID: id, Project: "prj_1",
 				Anchors: []string{"alpha"},
 				Summary: id + " summary",
@@ -234,7 +234,7 @@ func TestLayerBOversizedThreadTruncates(t *testing.T) {
 		ActiveThreads: []string{id},
 		ActiveThreadData: map[string]ThreadData{
 			id: {
-				Frontmatter: memops.ThreadFrontmatter{ID: id, Anchors: []string{"alpha"}, Summary: "huge", State: memops.ThreadActive},
+				Frontmatter: memops.ThreadMeta{ID: id, Anchors: []string{"alpha"}, Summary: "huge", State: memops.ThreadActive},
 				Body:        huge,
 			},
 		},
@@ -285,7 +285,7 @@ func TestLayerBTrackedFilesSection(t *testing.T) {
 		ActiveThreads: []string{id},
 		ActiveThreadData: map[string]ThreadData{
 			id: {
-				Frontmatter: memops.ThreadFrontmatter{ID: id, Anchors: []string{"alpha"}, Summary: "with files", State: memops.ThreadActive},
+				Frontmatter: memops.ThreadMeta{ID: id, Anchors: []string{"alpha"}, Summary: "with files", State: memops.ThreadActive},
 				Body:        "thread body text",
 				TrackedFiles: []TrackedFile{{
 					Path:   "src/main.go",
@@ -319,7 +319,7 @@ func TestLayerBNoTrackedFilesSection(t *testing.T) {
 		ActiveThreads: []string{id},
 		ActiveThreadData: map[string]ThreadData{
 			id: {
-				Frontmatter: memops.ThreadFrontmatter{ID: id, Summary: "plain", State: memops.ThreadActive},
+				Frontmatter: memops.ThreadMeta{ID: id, Summary: "plain", State: memops.ThreadActive},
 				Body:        "plain thread body",
 			},
 		},
@@ -406,7 +406,7 @@ func TestComposeFullIntegration(t *testing.T) {
 	activeIDs := []string{"thr_3", "thr_2", "thr_1"}
 	for _, id := range activeIDs {
 		active[id] = ThreadData{
-			Frontmatter: memops.ThreadFrontmatter{ID: id, Summary: id, State: memops.ThreadActive},
+			Frontmatter: memops.ThreadMeta{ID: id, Summary: id, State: memops.ThreadActive},
 			Body:        "body of " + id,
 		}
 	}

@@ -8,7 +8,7 @@
 // canonical inputs:
 //
 //   - spine.jsonl       — SpineRecord.Anchors per thread (curator picks)
-//   - threads/thr_<n>.md — ThreadFrontmatter.HistorySymbols per thread
+//   - threads/thr_<n>.md — ThreadMeta.HistorySymbols per thread
 //
 // For each emitted SymbolRecord (spec §2.4):
 //
@@ -46,7 +46,7 @@ import (
 // source seen across its history-symbol emissions. A symbol observed
 // only as an anchor appears with anchor_in == threads and
 // source_dominant == SourceCurator.
-func BuildSymbols(spine []memops.SpineRecord, threads []memops.ThreadFrontmatter) []store.SymbolRecord {
+func BuildSymbols(spine []memops.SpineRecord, threads []memops.ThreadMeta) []store.SymbolRecord {
 	// recall_fires lookup for ordering threads within a SymbolRecord.
 	// Built from spine records (the canonical source for engagement
 	// counters); thread frontmatter mirrors the same value but spine is
