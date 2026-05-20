@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"personant/internal/log"
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/store"
@@ -82,7 +83,7 @@ anything.`,
 			os.Exit(1)
 		}
 		if indexFlagVerbose && !indexFlagQuiet {
-			fmt.Fprintln(os.Stderr, "index: check ok")
+			log.Info("index: check ok")
 		}
 		return nil
 	},
@@ -99,7 +100,7 @@ func resolveIndexPaths() (store.PersonantPaths, error) {
 
 func stderrLogger() func(format string, args ...any) {
 	return func(format string, args ...any) {
-		fmt.Fprintf(os.Stderr, format+"\n", args...)
+		log.Info(format, args...)
 	}
 }
 

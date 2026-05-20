@@ -2,11 +2,10 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
+	"personant/internal/log"
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/store"
@@ -33,7 +32,7 @@ initial commit. Re-running over an existing home is a near no-op.`,
 		opts := memops.InitOptions{
 			Quiet: initFlagQuiet,
 			Logger: func(format string, args ...any) {
-				fmt.Fprintf(os.Stderr, format+"\n", args...)
+				log.Info(format, args...)
 			},
 		}
 		return ops.Init(context.Background(), opts)

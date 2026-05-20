@@ -1,12 +1,12 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 
 	"personant/internal/chat"
+	"personant/internal/log"
 )
 
 var rootCmd = &cobra.Command{
@@ -26,7 +26,7 @@ indexing, verification, and provider-connectivity smoke tests.`,
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		log.Error("%v", err)
 		os.Exit(1)
 	}
 }
