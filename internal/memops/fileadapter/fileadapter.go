@@ -600,7 +600,7 @@ func (a *FileAdapter) ComposeWorkingSet(ctx context.Context, in memops.WorksetIn
 		ActiveProject:  in.ActiveProject,
 		ActiveThreads:  in.ActiveThreads,
 		DormantThreads: in.DormantThreads,
-		Budget:         worksetBudgetFromMemops(in.Budget),
+		Budget:         in.Budget,
 	}
 	opts := workset.ComposeOptions{
 		Logger: func(format string, args ...any) {
@@ -638,20 +638,6 @@ func sanitizeWorksetDetail(s string) string {
 		r = append(r, c)
 	}
 	return string(r)
-}
-
-func worksetBudgetFromMemops(b memops.Budget) workset.Budget {
-	return workset.Budget{
-		Total:                 b.Total,
-		LayerE:                b.LayerE,
-		LayerA1:               b.LayerA1,
-		LayerA2:               b.LayerA2,
-		LayerB:                b.LayerB,
-		LayerC:                b.LayerC,
-		CurrentTurn:           b.CurrentTurn,
-		BTopK:                 b.BTopK,
-		PerProjectDigestBytes: b.PerProjectDigestBytes,
-	}
 }
 
 // ---------- Event log ----------

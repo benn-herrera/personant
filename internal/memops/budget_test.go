@@ -1,4 +1,4 @@
-package workset
+package memops
 
 import "testing"
 

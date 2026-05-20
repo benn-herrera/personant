@@ -19,7 +19,6 @@ import (
 	"personant/internal/model"
 	"personant/internal/prompt"
 	"personant/internal/recall"
-	"personant/internal/workset"
 )
 
 // State is the per-session mutable runtime state passed to Run. Most
@@ -97,9 +96,9 @@ type State struct {
 	DormantThreads []string
 
 	// Budget is the byte budget composed into the working set. Defaults
-	// to workset.DefaultBudget() at NewState; future directive plumbing
+	// to memops.DefaultBudget() at NewState; future directive plumbing
 	// (Phase 3+) will recompute this per-turn.
-	Budget workset.Budget
+	Budget memops.Budget
 
 	// turn-scoped state
 	coalesce *coalesceBuffer
@@ -168,7 +167,7 @@ func NewState(ops memops.MemoryOps, project memops.ProjectMeta, provider memops.
 		ActiveProject:     project,
 		Provider:          provider,
 		Client:            client,
-		Budget:            workset.DefaultBudget(),
+		Budget:            memops.DefaultBudget(),
 		coalesce:          newCoalesceBuffer(),
 		staging:           newStagingBuffer(),
 		closureDeferUntil: make(map[string]int),
@@ -304,14 +303,14 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 
 	// Step 2: compose working-set and assemble the system prompt.
 	if state.Budget.Total == 0 {
-		state.Budget = workset.DefaultBudget()
+		state.Budget = memops.DefaultBudget()
 	}
 	buildSystemPrompt := func() (string, error) {
 		ws, err := state.Ops.ComposeWorkingSet(ctx, memops.WorksetInput{
 			ActiveProject:  state.ActiveProject,
 			ActiveThreads:  state.ActiveThreads,
 			DormantThreads: state.DormantThreads,
-			Budget:         memopsBudgetFromWorkset(state.Budget),
+			Budget:         state.Budget,
 		})
 		if err != nil {
 			return "", err
@@ -668,7 +667,7 @@ func promoteToLayerB(state *State, thrID string) {
 func touchActiveLRU(state *State, thrID string) {
 	bTopK := state.Budget.BTopK
 	if bTopK <= 0 {
-		bTopK = workset.DefaultBTopK
+		bTopK = memops.DefaultBTopK
 	}
 	// Drop from current positions in either layer.
 	state.ActiveThreads = removeString(state.ActiveThreads, thrID)
@@ -1080,22 +1079,6 @@ func createNewThread(ctx context.Context, state *State, userInput, responseBody,
 // the literal in the function body reads naturally.
 type ThreadFrontmatter = memops.ThreadFrontmatter
 
-// memopsBudgetFromWorkset projects the local workset.Budget value onto the
-// memops.Budget shape carried across the port. Field-for-field identical;
-// the conversion is a no-op except for the named type.
-func memopsBudgetFromWorkset(b workset.Budget) memops.Budget {
-	return memops.Budget{
-		Total:                 b.Total,
-		LayerE:                b.LayerE,
-		LayerA1:               b.LayerA1,
-		LayerA2:               b.LayerA2,
-		LayerB:                b.LayerB,
-		LayerC:                b.LayerC,
-		CurrentTurn:           b.CurrentTurn,
-		BTopK:                 b.BTopK,
-		PerProjectDigestBytes: b.PerProjectDigestBytes,
-	}
-}
 
 // frontmatterFromSpine builds a minimal-but-valid ThreadFrontmatter from
 // a SpineRecord. Used when a thread's on-disk file is missing while its

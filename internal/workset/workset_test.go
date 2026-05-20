@@ -30,7 +30,7 @@ func newHome(t *testing.T) store.PersonantPaths {
 
 func defaultCompose(state State) State {
 	if state.Budget.Total == 0 {
-		state.Budget = DefaultBudget()
+		state.Budget = memops.DefaultBudget()
 	}
 	return state
 }
@@ -365,7 +365,7 @@ func TestLayerBRespectsBTopK(t *testing.T) {
 	for i := 1; i <= 5; i++ {
 		seedThread(t, paths, fmt.Sprintf("thr_%d", i), meta.ID, fmt.Sprintf("thread %d body BBBBBBBBBB", i))
 	}
-	budget := DefaultBudget()
+	budget := memops.DefaultBudget()
 	state := State{
 		Paths:         paths,
 		ActiveProject: meta,
@@ -398,7 +398,7 @@ func TestLayerBOversizedThreadTruncates(t *testing.T) {
 	}
 	huge := strings.Repeat("X", 100*1024)
 	seedThread(t, paths, "thr_1", meta.ID, huge)
-	budget := DefaultBudget()
+	budget := memops.DefaultBudget()
 	budget.LayerB = 1024 // tight
 	state := State{
 		Paths:         paths,
@@ -430,7 +430,7 @@ func TestLayerBMissingThreadFileWarns(t *testing.T) {
 		Paths:         paths,
 		ActiveProject: meta,
 		ActiveThreads: []string{"thr_does_not_exist"},
-		Budget:        DefaultBudget(),
+		Budget:        memops.DefaultBudget(),
 	}
 	params, err := Compose(state, ComposeOptions{Logger: logf})
 	if err != nil {
@@ -465,7 +465,7 @@ func TestLayerCRendersDormantSpineDisplays(t *testing.T) {
 		Paths:          paths,
 		ActiveProject:  meta,
 		DormantThreads: []string{"thr_1", "thr_2", "thr_3"},
-		Budget:         DefaultBudget(),
+		Budget:         memops.DefaultBudget(),
 	}
 	params, err := Compose(state, ComposeOptions{})
 	if err != nil {
@@ -499,7 +499,7 @@ func TestLayerCBudgetTruncates(t *testing.T) {
 			t.Fatalf("append spine: %v", err)
 		}
 	}
-	budget := DefaultBudget()
+	budget := memops.DefaultBudget()
 	budget.LayerC = 256
 	state := State{
 		Paths:          paths,
@@ -574,7 +574,7 @@ func TestComposeFullIntegration(t *testing.T) {
 		ActiveProject:  active,
 		ActiveThreads:  []string{"thr_3", "thr_2", "thr_1"},
 		DormantThreads: []string{"thr_4", "thr_5"},
-		Budget:         DefaultBudget(),
+		Budget:         memops.DefaultBudget(),
 	}
 	params, err := Compose(state, ComposeOptions{})
 	if err != nil {
@@ -648,7 +648,7 @@ func TestLayerBTrackedFilesSection(t *testing.T) {
 		Paths:         paths,
 		ActiveProject: meta,
 		ActiveThreads: []string{"thr_1"},
-		Budget:        DefaultBudget(),
+		Budget:        memops.DefaultBudget(),
 	}
 	params, err := Compose(state, ComposeOptions{})
 	if err != nil {
@@ -681,7 +681,7 @@ func TestLayerBNoTrackedFilesSidecar(t *testing.T) {
 		Paths:         paths,
 		ActiveProject: meta,
 		ActiveThreads: []string{"thr_1"},
-		Budget:        DefaultBudget(),
+		Budget:        memops.DefaultBudget(),
 	}
 	params, err := Compose(state, ComposeOptions{})
 	if err != nil {

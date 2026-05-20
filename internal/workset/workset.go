@@ -39,7 +39,7 @@ type State struct {
 	ActiveProject  memops.ProjectMeta
 	ActiveThreads  []string // Layer B membership; most-recently-engaged first
 	DormantThreads []string // Layer C membership; most-recently-engaged first
-	Budget         Budget
+	Budget         memops.Budget
 }
 
 // ComposeOptions tweaks rendering behavior. Logger receives non-fatal
@@ -66,7 +66,7 @@ func Compose(state State, opts ComposeOptions) (prompt.SystemPromptElements, err
 	}
 	budget := state.Budget
 	if budget.Total == 0 {
-		budget = DefaultBudget()
+		budget = memops.DefaultBudget()
 	}
 
 	layerE := renderLayerE(state, budget, logf)
@@ -108,7 +108,7 @@ func RenderSpineDisplay(rec memops.SpineRecord) string {
 
 // ---------- Layer A1: current project's spine ----------
 
-func renderLayerA1(state State, budget Budget) (string, error) {
+func renderLayerA1(state State, budget memops.Budget) (string, error) {
 	records, err := store.SpineRecordsByProject(state.Paths, state.ActiveProject.ID)
 	if err != nil {
 		return "", fmt.Errorf("load spine: %w", err)
@@ -122,7 +122,7 @@ func renderLayerA1(state State, budget Budget) (string, error) {
 
 // ---------- Layer E: directives + conventions ----------
 
-func renderLayerE(state State, budget Budget, logf func(string, ...any)) string {
+func renderLayerE(state State, budget memops.Budget, logf func(string, ...any)) string {
 	var b strings.Builder
 
 	directiveSources := []struct {
@@ -247,7 +247,7 @@ func writeSection(b *strings.Builder, header, body string) {
 
 // ---------- Layer A2: cross-project digests ----------
 
-func renderLayerA2(state State, budget Budget, logf func(string, ...any)) string {
+func renderLayerA2(state State, budget memops.Budget, logf func(string, ...any)) string {
 	metas, err := store.ListProjects(state.Paths)
 	if err != nil {
 		logf("workset: layer A2: list projects: %v", err)
@@ -332,7 +332,7 @@ func renderDigestLine(meta memops.ProjectMeta, d memops.ProjectDigest) string {
 
 // ---------- Layer B: active thread bodies ----------
 
-func renderLayerB(state State, budget Budget, logf func(string, ...any)) string {
+func renderLayerB(state State, budget memops.Budget, logf func(string, ...any)) string {
 	if len(state.ActiveThreads) == 0 || budget.LayerB <= 0 {
 		return ""
 	}
@@ -496,7 +496,7 @@ func writeTrackedFile(b *strings.Builder, entry *store.FileEntry, window []dedup
 
 // ---------- Layer C: dormant thread summaries ----------
 
-func renderLayerC(state State, budget Budget, logf func(string, ...any)) string {
+func renderLayerC(state State, budget memops.Budget, logf func(string, ...any)) string {
 	if len(state.DormantThreads) == 0 || budget.LayerC <= 0 {
 		return ""
 	}

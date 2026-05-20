@@ -15,7 +15,6 @@ import (
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
 	"personant/internal/store"
-	"personant/internal/workset"
 )
 
 // newTestHome scaffolds the minimum home layout the turn package needs:
@@ -362,7 +361,7 @@ func TestRunActiveThreadsBTopKOverflow(t *testing.T) {
 // up to ActiveThreads (and not to both layers simultaneously).
 func TestUpdateLayerLRUDormantPromotionDeduplication(t *testing.T) {
 	state := &State{
-		Budget:         workset.DefaultBudget(),
+		Budget:         memops.DefaultBudget(),
 		ActiveThreads:  []string{"thr_3", "thr_2"},
 		DormantThreads: []string{"thr_1"},
 	}
@@ -379,7 +378,7 @@ func TestUpdateLayerLRUDormantPromotionDeduplication(t *testing.T) {
 // dormantThreadsCap.
 func TestUpdateLayerLRUDormantCap(t *testing.T) {
 	state := &State{
-		Budget: workset.Budget{BTopK: 3},
+		Budget: memops.Budget{BTopK: 3},
 	}
 	// Engage many threads in sequence, far exceeding the cap.
 	count := dormantThreadsCap + 10

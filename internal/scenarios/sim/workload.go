@@ -856,7 +856,7 @@ func (g *generator) runDayOff() {
 	g.pendingGap = off
 }
 
-// layerBCap mirrors workset.DefaultBTopK (spec §2.6.1 layer.b-top-k):
+// layerBCap mirrors memops.DefaultBTopK (spec §2.6.1 layer.b-top-k):
 // the runtime keeps the 3 most-recently-engaged threads in Layer B,
 // fully present in the working set. A topic tag naming a thr_N NOT in
 // Layer B triggers the §5.5 mid-turn fetch + re-prompt. The generator

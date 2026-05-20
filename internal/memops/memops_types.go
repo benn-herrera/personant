@@ -225,8 +225,16 @@ type WorksetLayers struct {
 }
 
 // Budget is the per-layer byte allocation for the working set
-// (spec §3.1, parameters from §2.6.1). Promoted from workset.Budget;
-// field semantics are identical.
+// (spec §3.1, parameters from §2.6.1).
+//
+// v0.1 uses bytes as a token proxy. Real tokenizer integration is
+// deferred until empirical pressure requires it (see §6.5).
+//
+// Total = LayerE + LayerA1 + LayerA2 + LayerB + LayerC + CurrentTurn.
+// CurrentTurn is the user-input + model-response budget, not part of
+// the system prompt; it is tracked here for accounting symmetry with
+// §2.6.1's `layer.budget.percentages` and is not consumed by
+// workset.Compose.
 type Budget struct {
 	// Total is the overall context byte budget.
 	Total int
@@ -251,6 +259,52 @@ type Budget struct {
 	// PerProjectDigestBytes caps a single project's A2 line
 	// (§2.6.1: cross-project.digest-per-project-bytes; default 150).
 	PerProjectDigestBytes int
+}
+
+// DefaultByteBudget is the v0.1 total context byte-budget. ~16K tokens
+// at ~4 chars/token. Will be exposed to the directive layer as
+// `context.byte-budget` once directive plumbing lands in Phase 3+.
+const DefaultByteBudget = 65536
+
+// Default percentage allocations for each layer (§2.6.1
+// layer.budget.percentages). LayerA2 is "variable" in the spec; we
+// allocate the residue (100% - sum of fixed layers) to A2 so the layers
+// total exactly DefaultByteBudget.
+const (
+	defaultPctLayerE      = 8
+	defaultPctLayerA1     = 8
+	defaultPctLayerB      = 50
+	defaultPctLayerC      = 15
+	defaultPctCurrentTurn = 15
+	// A2 is the residue: 100 - 8 - 8 - 50 - 15 - 15 = 4%.
+	defaultPctLayerA2 = 100 - defaultPctLayerE - defaultPctLayerA1 -
+		defaultPctLayerB - defaultPctLayerC - defaultPctCurrentTurn
+
+	// DefaultBTopK matches §2.6.1's layer.b-top-k.
+	DefaultBTopK = 3
+
+	// DefaultPerProjectDigestBytes matches §2.6.1's
+	// cross-project.digest-per-project-bytes.
+	DefaultPerProjectDigestBytes = 150
+)
+
+// DefaultBudget returns a Budget computed from DefaultByteBudget at the
+// §2.6.1 percentages. Rounding is integer truncation; the layers sum
+// to ≤ Total (any rounding remainder is discarded rather than padded
+// onto an arbitrary layer, so the budget never overshoots).
+func DefaultBudget() Budget {
+	total := DefaultByteBudget
+	return Budget{
+		Total:                 total,
+		LayerE:                total * defaultPctLayerE / 100,
+		LayerA1:               total * defaultPctLayerA1 / 100,
+		LayerA2:               total * defaultPctLayerA2 / 100,
+		LayerB:                total * defaultPctLayerB / 100,
+		LayerC:                total * defaultPctLayerC / 100,
+		CurrentTurn:           total * defaultPctCurrentTurn / 100,
+		BTopK:                 DefaultBTopK,
+		PerProjectDigestBytes: DefaultPerProjectDigestBytes,
+	}
 }
 
 // ---------- Symbol index ----------
