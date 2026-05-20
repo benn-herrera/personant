@@ -206,6 +206,7 @@ func TestMockCallsAccumulates(t *testing.T) {
 		{Content: "b"},
 		{Content: "c"},
 	})
+	m.RecordCalls = true
 	for i := 0; i < 4; i++ {
 		_, _ = m.Consult(context.Background(), Request{Model: "test"})
 	}

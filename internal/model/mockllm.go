@@ -58,6 +58,14 @@ type MockClient struct {
 
 	calls []MockCall
 
+	// RecordCalls — when true, every Consult call is appended to the
+	// internal calls log (inspectable via Calls()). Default false —
+	// recording is opt-in to prevent unbounded growth in long-running
+	// tests/scenarios where each Request retains its Messages slice
+	// (full history), producing O(N²) memory at scale. Tests that
+	// inspect Calls() must set this true at construction.
+	RecordCalls bool
+
 	// chunks is the per-response chunk count for ConsultStream. 0 →
 	// DefaultMockChunks. Set via SetMockChunks.
 	chunks int
@@ -191,12 +199,14 @@ func (m *MockClient) Consult(ctx context.Context, req Request) (Response, error)
 		err = fmt.Errorf("model: MockClient constructed without a mode")
 	}
 
-	m.calls = append(m.calls, MockCall{
-		Request:  req,
-		Response: resp,
-		Err:      err,
-		At:       clock.Timeline(),
-	})
+	if m.RecordCalls {
+		m.calls = append(m.calls, MockCall{
+			Request:  req,
+			Response: resp,
+			Err:      err,
+			At:       clock.Timeline(),
+		})
+	}
 	return resp, err
 }
 

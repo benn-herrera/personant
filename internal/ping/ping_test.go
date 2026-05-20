@@ -76,6 +76,7 @@ func TestRunWithClientNoTopicTagFilter(t *testing.T) {
 // should carry the documented sampling defaults.
 func TestRunWithClientUsesDefaultRequest(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{{Content: "ok", FinishReason: "stop"}}, nil)
+	mock.RecordCalls = true
 	var stdout, stderr bytes.Buffer
 	if err := runWithClient(mock, Options{
 		Provider: "test",

@@ -744,6 +744,7 @@ func TestRunRePromptFiresForMissingThread(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_42 [a, b, c, d]*\nBODY."},
 	}, nil)
+	mock.RecordCalls = true
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
@@ -786,6 +787,7 @@ func TestRunRePromptSkippedWhenFetchFails(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_99 [a, b, c, d]*\nFIRST."},
 	}, nil)
+	mock.RecordCalls = true
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
@@ -818,6 +820,7 @@ func TestRunRePromptCappedAtOnePerTurn(t *testing.T) {
 		{Content: "*topic: thr_99 [a, b, c, d]*\nFIRST."},
 		{Content: "*topic: thr_88 [a, b, c, d]*\nSECOND."},
 	})
+	mock.RecordCalls = true
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
@@ -848,6 +851,7 @@ func TestRunNoRePromptWhenTagThreadsAlreadyActive(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_42 [a, b, c, d]*\nbody."},
 	}, nil)
+	mock.RecordCalls = true
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	state.ActiveThreads = []string{"thr_42"}
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
