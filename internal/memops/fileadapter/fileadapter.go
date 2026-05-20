@@ -525,21 +525,29 @@ func (a *FileAdapter) LoadWorkingSet(ctx context.Context) ([]string, []string, e
 
 // ---------- Symbol index / recall ----------
 
-// ProposeRecall runs the §3.4 layer-1 symbolic Jaccard pre-filter.
+// ProposeRecall runs the §3.4 layer-1 symbolic Jaccard pre-filter. The
+// adapter loads spine + per-thread frontmatter from its substrate, then
+// hands off to recall.ProposeFromIndex (a pure function over the memops
+// domain model). The recall package itself never touches the substrate
+// — that is this adapter's responsibility.
 func (a *FileAdapter) ProposeRecall(ctx context.Context, query []string, opts memops.RecallOptions) ([]memops.RecallCandidate, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	recallOpts := recall.Options{
+	spine, err := store.ReadSpine(a.paths.Spine)
+	if err != nil {
+		return nil, fmt.Errorf("fileadapter: propose recall: read spine: %w", err)
+	}
+	threads, err := store.LoadAllThreadFrontmatter(a.paths, nil)
+	if err != nil {
+		return nil, fmt.Errorf("fileadapter: propose recall: load thread frontmatter: %w", err)
+	}
+	cands := recall.ProposeFromIndex(spine, threads, query, recall.Options{
 		Threshold: opts.Threshold,
 		Project:   opts.Project,
 		Exclude:   opts.Exclude,
 		Limit:     opts.Limit,
-	}
-	cands, err := recall.Propose(a.paths, query, recallOpts)
-	if err != nil {
-		return nil, fmt.Errorf("fileadapter: propose recall: %w", err)
-	}
+	})
 	out := make([]memops.RecallCandidate, len(cands))
 	for i, c := range cands {
 		out[i] = memops.RecallCandidate{

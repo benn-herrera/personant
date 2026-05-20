@@ -1,13 +1,10 @@
 package recall
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 
 	"personant/internal/memops"
-	"personant/internal/store"
 )
 
 // makeSpine is a helper that constructs a SpineRecord with the fields
@@ -262,64 +259,7 @@ func TestProposeFromIndex_ZeroIntersectionDropped(t *testing.T) {
 	}
 }
 
-func TestPropose_IntegrationLoadsFromDisk(t *testing.T) {
-	tmp := t.TempDir()
-	paths := store.PathsForHome(tmp)
-	if err := os.MkdirAll(paths.ThreadsDir, 0o755); err != nil {
-		t.Fatalf("mkdir threads: %v", err)
-	}
-
-	rec := memops.SpineRecord{
-		ID:          "thr_1",
-		Project:     "prj_1",
-		Anchors:     []string{"alpha", "beta", "gamma", "delta"},
-		Summary:     "test",
-		State:       memops.ThreadActive,
-		Created:     "2026-05-10T00:00:00Z",
-		LastEngaged: "2026-05-10T00:00:00Z",
-	}
-	if err := store.WriteSpine(paths.Spine, []memops.SpineRecord{rec}); err != nil {
-		t.Fatalf("write spine: %v", err)
-	}
-	thread := memops.Thread{
-		Frontmatter: memops.ThreadFrontmatter{
-			ID:           "thr_1",
-			Project:      "prj_1",
-			Anchors:      []string{"alpha", "beta", "gamma", "delta"},
-			Summary:      "test",
-			State:        memops.ThreadActive,
-			Created:      "2026-05-10T00:00:00Z",
-			LastEngaged:  "2026-05-10T00:00:00Z",
-			StateChanged: "2026-05-10T00:00:00Z",
-		},
-		Body: "body\n",
-	}
-	if err := store.SeedThread(paths, thread); err != nil {
-		t.Fatalf("save thread: %v", err)
-	}
-
-	got, err := Propose(paths, []string{"alpha", "beta"}, Options{Project: "prj_1"})
-	if err != nil {
-		t.Fatalf("Propose: %v", err)
-	}
-	if len(got) != 1 || got[0].ThreadID != "thr_1" {
-		t.Fatalf("expected one thr_1 candidate; got %#v", got)
-	}
-	if got[0].Score != 0.5 {
-		t.Fatalf("expected score 0.5; got %v", got[0].Score)
-	}
-
-	// Sanity: Propose tolerates a missing spine path (empty-state).
-	emptyHome := t.TempDir()
-	emptyPaths := store.PathsForHome(emptyHome)
-	if err := os.MkdirAll(filepath.Dir(emptyPaths.Spine), 0o755); err != nil {
-		t.Fatalf("mkdir empty home: %v", err)
-	}
-	got, err = Propose(emptyPaths, []string{"alpha"}, Options{})
-	if err != nil {
-		t.Fatalf("Propose on empty home: %v", err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("expected empty on empty home; got %#v", got)
-	}
-}
+// Integration coverage of the disk-loading path lives in
+// fileadapter.TestProposeRecall_PassThrough — substrate I/O is the
+// adapter's concern, not this package's, once the port migration (MAD
+// C3) landed.

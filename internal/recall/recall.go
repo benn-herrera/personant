@@ -2,22 +2,22 @@
 // pre-filter for opportunistic thread recall (spec §3.4 layer 1).
 //
 // Given a set of query symbols and the current spine + thread index,
-// Propose returns candidate threads ranked by Jaccard similarity of
-// their symbol set against the query. This is the cheap layer; the
-// embedding-similarity and model-judgment layers (§3.4 layers 2 and 3)
-// are not implemented in v0.1 and are not invoked from here.
+// ProposeFromIndex returns candidate threads ranked by Jaccard
+// similarity of their symbol set against the query. This is the cheap
+// layer; the embedding-similarity and model-judgment layers (§3.4
+// layers 2 and 3) are not implemented in v0.1 and are not invoked from
+// here.
 //
-// The package is a pure library: no I/O is performed by
-// ProposeFromIndex. Propose is a thin wrapper that loads the spine and
-// thread frontmatter from disk and delegates.
+// The package is substrate-free: it depends only on the memops domain
+// model (SpineRecord, ThreadFrontmatter). Application-side recall that
+// needs to talk to the substrate (recall.Service, recall.Recaller) does
+// so via the memops.MemoryOps port, never via internal/store.
 package recall
 
 import (
-	"fmt"
 	"sort"
 
 	"personant/internal/memops"
-	"personant/internal/store"
 )
 
 // Defaults from spec §2.6.1. The 0.4 threshold mirrors
@@ -62,27 +62,9 @@ type Options struct {
 	Limit int
 }
 
-// Propose returns recall candidates sorted by descending score. It is a
-// thin I/O wrapper around ProposeFromIndex: spine + thread frontmatter
-// are loaded from disk, then the pure form does the work.
-//
-// `query` is the set of query symbols, already normalized by the turn
-// coalesce pass.
-func Propose(paths store.PersonantPaths, query []string, opts Options) ([]Candidate, error) {
-	spine, err := store.ReadSpine(paths.Spine)
-	if err != nil {
-		return nil, fmt.Errorf("recall propose: read spine: %w", err)
-	}
-	threads, err := store.LoadAllThreadFrontmatter(paths, nil)
-	if err != nil {
-		return nil, fmt.Errorf("recall propose: load thread frontmatter: %w", err)
-	}
-	return ProposeFromIndex(spine, threads, query, opts), nil
-}
-
-// ProposeFromIndex is the pure-function form of Propose. The caller
-// supplies pre-loaded spine + thread frontmatter. Useful for tests and
-// for callers (turn loop) that already have the data in memory.
+// ProposeFromIndex is the §3.4 layer-1 symbolic Jaccard matcher. The
+// caller supplies pre-loaded spine + thread frontmatter; the function
+// is pure and substrate-free.
 //
 // Algorithm (spec §3.4 layer 1):
 //
