@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"personant/internal/clock"
+	"personant/internal/prompt"
 )
 
 // MockClient implements Client without crossing the network. Two backing
@@ -303,7 +304,7 @@ func (m *MockClient) synthesize() Response {
 // generated content remains regex-parseable but doesn't pretend to
 // reference real state.
 func (m *MockClient) makeTopicTag() string {
-	thread := "*new-topic*"
+	thread := prompt.NewTopicLiteral
 	if len(m.genOpts.ThreadPool) > 0 {
 		thread = m.genOpts.ThreadPool[m.rng.Intn(len(m.genOpts.ThreadPool))]
 	}

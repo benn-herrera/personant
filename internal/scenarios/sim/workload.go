@@ -80,6 +80,7 @@ import (
 	"strings"
 	"time"
 
+	"personant/internal/prompt"
 	"personant/internal/scenarios"
 	"personant/internal/turn"
 )
@@ -1303,7 +1304,7 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 	// engaged thread's thr_N id.
 	var threads []string
 	if isNew {
-		threads = []string{"*new-topic*"}
+		threads = []string{prompt.NewTopicLiteral}
 	} else {
 		threads = []string{thr.threadID()}
 	}

@@ -604,7 +604,7 @@ func missingFromActiveB(threads, active []string) []string {
 	}
 	var out []string
 	for _, t := range threads {
-		if t == "*new-topic*" {
+		if t == prompt.NewTopicLiteral {
 			continue
 		}
 		if _, ok := have[t]; ok {
@@ -786,7 +786,7 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 	engaged := make([]string, 0, len(state.coalesce.threads))
 
 	for _, threadID := range state.coalesce.threadList() {
-		if threadID == "*new-topic*" {
+		if threadID == prompt.NewTopicLiteral {
 			newID, err := createNewThread(ctx, state, userInput, responseBody, now, turnSymbols, turnAnchors)
 			if err != nil {
 				return err

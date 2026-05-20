@@ -1,6 +1,9 @@
 package prompt
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // SystemPromptElements carries the inputs needed to assemble the system
 // prompt. Layer fields are pre-rendered strings produced by the working-set
@@ -30,7 +33,11 @@ the current turn.`
 // topic tag emitted at response start (spec §5.1). Exposed so tests can
 // assert verbatim presence and so a future hot-reload mechanism (§5.1.3)
 // has a stable identifier to swap.
-const TopicTagDirective = `TOPIC TAG REQUIREMENT
+//
+// Built at package init from [NewTopicLiteral] so the wire-protocol
+// sentinel has a single source of truth — a typo in the directive would
+// otherwise silently mis-teach the model.
+var TopicTagDirective = fmt.Sprintf(`TOPIC TAG REQUIREMENT
 
 Begin every response with a topic tag in this exact form, on its own line:
 
@@ -39,7 +46,7 @@ Begin every response with a topic tag in this exact form, on its own line:
 where:
   - <thread-list> is a comma-separated list of one or more thread IDs of the
     form "thr_<n>" referring to threads from the spine (above), OR the literal
-    "*new-topic*" if you are starting a new line of work.
+    %q if you are starting a new line of work.
   - <anchor-list> is a comma-separated list of 4 to 8 short symbols that
     capture what this turn is about. Symbols are typically lowercase and
     hyphenated for multi-word concepts (e.g. "body-topology", "electron-shape");
@@ -49,10 +56,10 @@ Examples:
 
     *topic: thr_42 [trefoil, unknot, body-topology, electron-shape]*
     *topic: thr_42, thr_88 [trefoil, neutrino, helical-screw, oscillation]*
-    *topic: *new-topic* [neutrino, oscillation, mass-hierarchy, beta-decay]*
+    *topic: %s [neutrino, oscillation, mass-hierarchy, beta-decay]*
 
 After the tag, write your response normally. The runtime parses the tag
-deterministically; getting the format exactly right matters.`
+deterministically; getting the format exactly right matters.`, NewTopicLiteral, NewTopicLiteral)
 
 // layerSection holds one layer's header and rendered content. The order of
 // sections in the assembled prompt is fixed by the slice order in

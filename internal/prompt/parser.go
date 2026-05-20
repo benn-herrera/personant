@@ -27,10 +27,15 @@ var ErrNoTopicTag = errors.New("prompt: no valid topic tag found")
 // anchor list (between `[` and `]`).
 var topicTagRE = regexp.MustCompile(`(?m)^\s*\*topic:\s*([^\[]+?)\s*\[([^\]]*)\]\s*\*\s*$`)
 
-// newTopicLiteral is the literal token a model emits to indicate a new
+// NewTopicLiteral is the literal token a model emits to indicate a new
 // thread should be created (spec §5.1.1). It is matched as a whole token
-// after thread-list comma-splitting.
-const newTopicLiteral = "*new-topic*"
+// after thread-list comma-splitting. Exported as the single source of
+// truth for the wire-protocol sentinel: callers across the runtime
+// (turn dispatch, mock LLM, scenario sim, prompt template) reference
+// this constant instead of duplicating the literal — a typo in any
+// consumer would otherwise silently break the new-topic protocol with
+// no compile-time signal.
+const NewTopicLiteral = "*new-topic*"
 
 // TopicTag is the parsed form of a single topic-tag line. Threads contains
 // either canonical "thr_<n>" identifiers (matching memops.ThreadIDPattern)
@@ -134,7 +139,7 @@ func parseThreadList(raw string) ([]string, bool) {
 			// An empty entry (e.g. trailing comma) fails the §5.1.2 alternation.
 			return nil, false
 		}
-		if t == newTopicLiteral || memops.ThreadIDPattern.MatchString(t) {
+		if t == NewTopicLiteral || memops.ThreadIDPattern.MatchString(t) {
 			out = append(out, t)
 			continue
 		}
