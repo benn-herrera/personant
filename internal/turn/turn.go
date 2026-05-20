@@ -956,7 +956,7 @@ func updateExistingThread(ctx context.Context, state *State, threadID, userInput
 	// recovery: EngageThread recreates the directory when the spine
 	// record exists but the on-disk thread is absent, so we don't
 	// special-case ErrThreadFileNotFound here.
-	fm, err := state.Ops.LoadThreadFrontmatter(ctx, threadID)
+	fm, err := state.Ops.LoadThreadMeta(ctx, threadID)
 	if err != nil && !errors.Is(err, memops.ErrThreadFileNotFound) {
 		return fmt.Errorf("load thread %s: %w", threadID, err)
 	}
@@ -1004,7 +1004,7 @@ func updateExistingThread(ctx context.Context, state *State, threadID, userInput
 	rec.TurnCount = newTurnCount
 	if err := state.Ops.EngageThread(ctx, memops.ThreadWrite{
 		Spine:       rec,
-		Frontmatter: fm,
+		Meta:        fm,
 		TurnExcerpt: excerpt,
 	}); err != nil {
 		return fmt.Errorf("engage thread %s: %w", threadID, err)
@@ -1062,7 +1062,7 @@ func createNewThread(ctx context.Context, state *State, userInput, responseBody,
 
 	if err := state.Ops.CreateThread(ctx, memops.ThreadWrite{
 		Spine:       rec,
-		Frontmatter: frontmatter,
+		Meta:        frontmatter,
 		TurnExcerpt: excerpt,
 	}); err != nil {
 		return "", fmt.Errorf("create thread %s: %w", newID, err)

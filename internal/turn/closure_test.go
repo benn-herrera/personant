@@ -26,11 +26,11 @@ type stubCurator struct {
 func (s stubCurator) DraftClosure(_ context.Context, thread memops.Thread) (curator.ClosureDraft, error) {
 	summary := s.summary
 	if summary == "" {
-		summary = "stub summary for " + thread.Frontmatter.ID
+		summary = "stub summary for " + thread.Meta.ID
 	}
 	anchors := s.anchors
 	if anchors == nil {
-		anchors = thread.Frontmatter.Anchors
+		anchors = thread.Meta.Anchors
 	}
 	return curator.ClosureDraft{Summary: summary, Anchors: anchors}, nil
 }
@@ -64,7 +64,7 @@ func seedClosureThread(t *testing.T, paths store.PersonantPaths, project, thrID 
 		t.Fatalf("seed spine %s: %v", thrID, err)
 	}
 	thr := memops.Thread{
-		Frontmatter: memops.ThreadMeta{
+		Meta: memops.ThreadMeta{
 			ID:              rec.ID,
 			Project:         rec.Project,
 			Anchors:         rec.Anchors,

@@ -122,13 +122,13 @@ type ThreadMeta struct {
 	HistorySymbols []HistorySymbol `json:"history_symbols" yaml:"history_symbols"`
 }
 
-// Thread is the in-memory shape of a thread file: frontmatter plus
-// markdown body. The frontmatter is canonical for metadata; the body is
-// operational content (turn excerpts, curator-summarized milestones at
-// retirement). Per spec §2.3.
+// Thread is the in-memory shape of a thread: metadata plus markdown
+// body. The metadata is canonical; the body is operational content
+// (turn excerpts, curator-summarized milestones at retirement). Per
+// spec §2.3.
 type Thread struct {
-	Frontmatter ThreadMeta
-	Body        string // markdown body; trailing newline preserved
+	Meta ThreadMeta
+	Body string // markdown body; trailing newline preserved
 }
 
 // ---------- Project records ----------

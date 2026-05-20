@@ -62,7 +62,7 @@ var heavyDefaultInvariants = []InvariantCheck{
 	VerifySpineIntegrity,
 	VerifyIndexFresh,
 	VerifyProjectReferences,
-	VerifyThreadFrontmatterMatchesSpine,
+	VerifyThreadMetaMatchesSpine,
 	VerifyThreadAccounting,
 }
 
@@ -154,26 +154,26 @@ func VerifyLastActiveValid(h *Harness) error {
 	return nil
 }
 
-// VerifyThreadFrontmatterMatchesSpine: for each spine record, load the
+// VerifyThreadMetaMatchesSpine: for each spine record, load the
 // corresponding thread file and assert the canonical-overlap fields
 // agree exactly. A missing thread file is logged as a warning via
 // h.T.Logf rather than failing — v0.1 has no archival path that would
 // legitimately strand a spine record without a file, but Phase 4
 // retirement may; surfacing the case as a warning lets future code
 // land without a flood of false-positive failures here.
-func VerifyThreadFrontmatterMatchesSpine(h *Harness) error {
+func VerifyThreadMetaMatchesSpine(h *Harness) error {
 	recs, err := store.ReadSpine(h.Paths.Spine)
 	if err != nil {
-		return fmt.Errorf("VerifyThreadFrontmatterMatchesSpine: read spine: %w", err)
+		return fmt.Errorf("VerifyThreadMetaMatchesSpine: read spine: %w", err)
 	}
 	for i, r := range recs {
 		fm, err := store.LoadThreadFrontmatter(h.Paths, r.ID)
 		if err != nil {
 			if errors.Is(err, memops.ErrThreadFileNotFound) {
-				h.T.Logf("VerifyThreadFrontmatterMatchesSpine: spine[%d] %s has no thread file (suspicious in v0.1)", i+1, r.ID)
+				h.T.Logf("VerifyThreadMetaMatchesSpine: spine[%d] %s has no thread file (suspicious in v0.1)", i+1, r.ID)
 				continue
 			}
-			return fmt.Errorf("VerifyThreadFrontmatterMatchesSpine: load %s: %w", r.ID, err)
+			return fmt.Errorf("VerifyThreadMetaMatchesSpine: load %s: %w", r.ID, err)
 		}
 		if fm.ID != r.ID {
 			return fmt.Errorf("frontmatter id %q != spine id %q (record %d)", fm.ID, r.ID, i+1)

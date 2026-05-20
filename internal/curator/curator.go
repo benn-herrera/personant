@@ -78,7 +78,7 @@ func (c *HTTPCurator) DraftClosure(ctx context.Context, thread memops.Thread) (C
 	}
 	return ClosureDraft{
 		Summary: strings.TrimSpace(summary),
-		Anchors: SelectAnchors(thread.Frontmatter),
+		Anchors: SelectAnchors(thread.Meta),
 	}, nil
 }
 

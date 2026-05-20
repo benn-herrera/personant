@@ -86,7 +86,7 @@ func TestCreateThread_WritesSpineAndFile(t *testing.T) {
 	rec := validSpine("thr_1", "prj_1")
 	w := memops.ThreadWrite{
 		Spine:       rec,
-		Frontmatter: validFrontmatter(rec),
+		Meta: validFrontmatter(rec),
 		TurnExcerpt: "## Turn 1\n\ninitial body\n",
 	}
 	if err := a.CreateThread(ctx, w); err != nil {
@@ -121,7 +121,7 @@ func TestCreateThread_DuplicateIDFails(t *testing.T) {
 	ctx := context.Background()
 
 	rec := validSpine("thr_1", "prj_1")
-	w := memops.ThreadWrite{Spine: rec, Frontmatter: validFrontmatter(rec), TurnExcerpt: "## Turn 1\n\nfirst\n"}
+	w := memops.ThreadWrite{Spine: rec, Meta: validFrontmatter(rec), TurnExcerpt: "## Turn 1\n\nfirst\n"}
 	if err := a.CreateThread(ctx, w); err != nil {
 		t.Fatalf("first CreateThread: %v", err)
 	}
@@ -137,14 +137,14 @@ func TestEngageThread_UpdatesSpineAndFile(t *testing.T) {
 
 	rec := validSpine("thr_1", "prj_1")
 	rec.TurnCount = 1
-	w := memops.ThreadWrite{Spine: rec, Frontmatter: validFrontmatter(rec), TurnExcerpt: "## Turn 1\n\nv1\n"}
+	w := memops.ThreadWrite{Spine: rec, Meta: validFrontmatter(rec), TurnExcerpt: "## Turn 1\n\nv1\n"}
 	if err := a.CreateThread(ctx, w); err != nil {
 		t.Fatalf("seed CreateThread: %v", err)
 	}
 
 	rec.TurnCount = 7
 	rec.Summary = "engaged"
-	w = memops.ThreadWrite{Spine: rec, Frontmatter: validFrontmatter(rec), TurnExcerpt: "## Turn 7\n\nv2\n"}
+	w = memops.ThreadWrite{Spine: rec, Meta: validFrontmatter(rec), TurnExcerpt: "## Turn 7\n\nv2\n"}
 	if err := a.EngageThread(ctx, w); err != nil {
 		t.Fatalf("EngageThread: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestEngageThread_MissingFileFallback(t *testing.T) {
 	// Seed spine record only by going through CreateThread, then delete
 	// the thread file out from under us to simulate drift.
 	rec := validSpine("thr_1", "prj_1")
-	w := memops.ThreadWrite{Spine: rec, Frontmatter: validFrontmatter(rec), TurnExcerpt: "## Turn 1\n\nv1\n"}
+	w := memops.ThreadWrite{Spine: rec, Meta: validFrontmatter(rec), TurnExcerpt: "## Turn 1\n\nv1\n"}
 	if err := a.CreateThread(ctx, w); err != nil {
 		t.Fatalf("seed CreateThread: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestEngageThread_MissingFileFallback(t *testing.T) {
 	// EngageThread should materialize the file from the supplied
 	// frontmatter and body, not fail with ErrThreadFileNotFound.
 	rec.TurnCount = 3
-	w = memops.ThreadWrite{Spine: rec, Frontmatter: validFrontmatter(rec), TurnExcerpt: "## Turn 3\n\nrebuilt\n"}
+	w = memops.ThreadWrite{Spine: rec, Meta: validFrontmatter(rec), TurnExcerpt: "## Turn 3\n\nrebuilt\n"}
 	if err := a.EngageThread(ctx, w); err != nil {
 		t.Fatalf("EngageThread: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestEngageThread_MissingSpineErrors(t *testing.T) {
 	ctx := context.Background()
 
 	rec := validSpine("thr_99", "prj_1")
-	w := memops.ThreadWrite{Spine: rec, Frontmatter: validFrontmatter(rec)}
+	w := memops.ThreadWrite{Spine: rec, Meta: validFrontmatter(rec)}
 	err := a.EngageThread(ctx, w)
 	if !errors.Is(err, memops.ErrThreadNotFound) {
 		t.Fatalf("expected ErrThreadNotFound; got %v", err)
@@ -215,7 +215,7 @@ func TestListThreads_FilterByProject(t *testing.T) {
 
 	create := func(id, project string) {
 		rec := validSpine(id, project)
-		w := memops.ThreadWrite{Spine: rec, Frontmatter: validFrontmatter(rec)}
+		w := memops.ThreadWrite{Spine: rec, Meta: validFrontmatter(rec)}
 		if err := a.CreateThread(ctx, w); err != nil {
 			t.Fatalf("seed %s: %v", id, err)
 		}
@@ -243,7 +243,7 @@ func TestProposeRecall_PassThrough(t *testing.T) {
 	ctx := context.Background()
 
 	rec := validSpine("thr_1", "prj_1")
-	w := memops.ThreadWrite{Spine: rec, Frontmatter: validFrontmatter(rec)}
+	w := memops.ThreadWrite{Spine: rec, Meta: validFrontmatter(rec)}
 	if err := a.CreateThread(ctx, w); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestComposeWorkingSet_PassThrough(t *testing.T) {
 		t.Fatalf("CreateProject: %v", err)
 	}
 	rec := validSpine("thr_1", "prj_1")
-	w := memops.ThreadWrite{Spine: rec, Frontmatter: validFrontmatter(rec)}
+	w := memops.ThreadWrite{Spine: rec, Meta: validFrontmatter(rec)}
 	if err := a.CreateThread(ctx, w); err != nil {
 		t.Fatalf("seed thread: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestArchiveThread_DeletesSpineAndFileAndLogs(t *testing.T) {
 	body := "the thread body\n"
 	w := memops.ThreadWrite{
 		Spine:       rec,
-		Frontmatter: validFrontmatter(rec),
+		Meta: validFrontmatter(rec),
 		TurnExcerpt: body,
 	}
 	if err := a.CreateThread(ctx, w); err != nil {
@@ -414,7 +414,7 @@ func TestArchiveThread_MissingFileSizeZero(t *testing.T) {
 	ctx := context.Background()
 
 	rec := validSpine("thr_1", "prj_1")
-	w := memops.ThreadWrite{Spine: rec, Frontmatter: validFrontmatter(rec), TurnExcerpt: "## Turn 1\n\nx\n"}
+	w := memops.ThreadWrite{Spine: rec, Meta: validFrontmatter(rec), TurnExcerpt: "## Turn 1\n\nx\n"}
 	if err := a.CreateThread(ctx, w); err != nil {
 		t.Fatalf("seed CreateThread: %v", err)
 	}

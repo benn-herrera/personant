@@ -280,7 +280,7 @@ func TestRebuildSymbolsRoundtrips(t *testing.T) {
 	}
 
 	thr1 := memops.Thread{
-		Frontmatter: memops.ThreadMeta{
+		Meta: memops.ThreadMeta{
 			ID: "thr_1", Project: "prj_1",
 			Anchors: []string{"alpha", "beta"},
 			Summary: "s", State: memops.ThreadActive,
@@ -294,7 +294,7 @@ func TestRebuildSymbolsRoundtrips(t *testing.T) {
 		Body: "body\n",
 	}
 	thr2 := memops.Thread{
-		Frontmatter: memops.ThreadMeta{
+		Meta: memops.ThreadMeta{
 			ID: "thr_2", Project: "prj_1",
 			Anchors: []string{"gamma"},
 			Summary: "s", State: memops.ThreadActive,
@@ -378,7 +378,7 @@ func TestLoadAllThreadFrontmatterTolerantOnParseError(t *testing.T) {
 	// Two well-formed threads.
 	for _, id := range []string{"thr_1", "thr_2"} {
 		th := memops.Thread{
-			Frontmatter: memops.ThreadMeta{
+			Meta: memops.ThreadMeta{
 				ID: id, Project: "prj_1",
 				Summary: "s", State: memops.ThreadActive,
 				Created: "2026-05-01T00:00:00Z", LastEngaged: "2026-05-01T00:00:00Z", StateChanged: "2026-05-01T00:00:00Z",

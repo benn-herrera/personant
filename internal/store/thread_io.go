@@ -240,7 +240,7 @@ func LoadThread(paths PersonantPaths, threadID string) (memops.Thread, error) {
 	if err != nil {
 		return memops.Thread{}, err
 	}
-	return memops.Thread{Frontmatter: fm, Body: body}, nil
+	return memops.Thread{Meta: fm, Body: body}, nil
 }
 
 // SaveThreadFrontmatter writes a thread's thread.md atomically (temp +
@@ -301,16 +301,16 @@ func SaveThreadFrontmatter(paths PersonantPaths, threadID string, fm memops.Thre
 // future bulk-import path. The turn-excerpt FIFO window is NOT applied
 // here: a seed is expected to be within the window already.
 func SeedThread(paths PersonantPaths, thr memops.Thread) error {
-	if err := SaveThreadFrontmatter(paths, thr.Frontmatter.ID, thr.Frontmatter); err != nil {
+	if err := SaveThreadFrontmatter(paths, thr.Meta.ID, thr.Meta); err != nil {
 		return err
 	}
 	blocks := splitTurnBlocks(thr.Body)
 	if len(blocks) == 0 {
 		return nil
 	}
-	turnsDir := ThreadTurnsDir(paths, thr.Frontmatter.ID)
+	turnsDir := ThreadTurnsDir(paths, thr.Meta.ID)
 	if err := os.MkdirAll(turnsDir, 0o755); err != nil {
-		return fmt.Errorf("seed thread %s: mkdir %s: %w", thr.Frontmatter.ID, turnsDir, err)
+		return fmt.Errorf("seed thread %s: mkdir %s: %w", thr.Meta.ID, turnsDir, err)
 	}
 	for i, b := range blocks {
 		n := b.turn
@@ -323,7 +323,7 @@ func SeedThread(paths PersonantPaths, thr memops.Thread) error {
 		}
 		path := filepath.Join(turnsDir, turnFileName(n))
 		if err := WriteFileAtomic(path, []byte(body)); err != nil {
-			return fmt.Errorf("seed thread %s: %w", thr.Frontmatter.ID, err)
+			return fmt.Errorf("seed thread %s: %w", thr.Meta.ID, err)
 		}
 	}
 	return nil

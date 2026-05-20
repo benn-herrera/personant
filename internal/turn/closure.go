@@ -240,7 +240,7 @@ func applyClosureResolution(ctx context.Context, state *State, threadID string, 
 	if !found {
 		return fmt.Errorf("closure: thread %s not in spine", threadID)
 	}
-	fm, err := state.Ops.LoadThreadFrontmatter(ctx, threadID)
+	fm, err := state.Ops.LoadThreadMeta(ctx, threadID)
 	if err != nil {
 		return fmt.Errorf("closure: load thread %s: %w", threadID, err)
 	}
@@ -259,10 +259,10 @@ func applyClosureResolution(ctx context.Context, state *State, threadID string, 
 		newState = s
 	}
 
-	// Mirror the spine and frontmatter so they stay in sync (the
+	// Mirror the spine and metadata so they stay in sync (the
 	// updateExistingThread pattern). Closure records no new turn — it is
-	// a frontmatter-only update, so ThreadWrite.TurnExcerpt is empty and
-	// the turns/ directory is left untouched.
+	// a meta-only update, so ThreadWrite.TurnExcerpt is empty and the
+	// turns/ directory is left untouched.
 	anchors := append([]string(nil), draft.Anchors...)
 	rec.State = newState
 	rec.Summary = draft.Summary
@@ -282,8 +282,8 @@ func applyClosureResolution(ctx context.Context, state *State, threadID string, 
 	fm.RecallFires = rec.RecallFires
 
 	if err := state.Ops.EngageThread(ctx, memops.ThreadWrite{
-		Spine:       rec,
-		Frontmatter: fm,
+		Spine: rec,
+		Meta:  fm,
 	}); err != nil {
 		return fmt.Errorf("closure: write thread %s: %w", threadID, err)
 	}

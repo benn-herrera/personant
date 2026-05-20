@@ -50,6 +50,7 @@ The directory is git-init'd on first run. See
 make                  # build bin/personant
 make test             # go vet + go test
 make integration-test # run integration tests
+make sim DURATION=<1d|1w|1m|2m|6m> # run long-endurance usage simulation test (6m takes ~1hr)
 make clean            # remove the binary
 ```
 

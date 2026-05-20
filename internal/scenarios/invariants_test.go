@@ -63,7 +63,7 @@ func seedThread(t *testing.T, h *Harness, rec memops.SpineRecord) {
 		t.Fatalf("AppendSpineRecord: %v", err)
 	}
 	thr := memops.Thread{
-		Frontmatter: memops.ThreadMeta{
+		Meta: memops.ThreadMeta{
 			ID:           rec.ID,
 			Project:      rec.Project,
 			Anchors:      append([]string(nil), rec.Anchors...),
@@ -163,7 +163,7 @@ func TestVerifyProjectReferences_FailsOnUnknownProject(t *testing.T) {
 		t.Fatalf("AppendSpineRecord: %v", err)
 	}
 	thr := memops.Thread{
-		Frontmatter: memops.ThreadMeta{
+		Meta: memops.ThreadMeta{
 			ID:      rec.ID,
 			Project: rec.Project,
 			Anchors: rec.Anchors, Summary: rec.Summary, State: rec.State,
@@ -226,15 +226,15 @@ func TestVerifyLastActiveValid_FailsOnMalformed(t *testing.T) {
 	}
 }
 
-func TestVerifyThreadFrontmatterMatchesSpine_Pass(t *testing.T) {
+func TestVerifyThreadMetaMatchesSpine_Pass(t *testing.T) {
 	h := invariantHarness(t)
 	seedThread(t, h, validRecord())
-	if err := VerifyThreadFrontmatterMatchesSpine(h); err != nil {
+	if err := VerifyThreadMetaMatchesSpine(h); err != nil {
 		t.Fatalf("expected pass, got %v", err)
 	}
 }
 
-func TestVerifyThreadFrontmatterMatchesSpine_FailsOnDivergedTurnCount(t *testing.T) {
+func TestVerifyThreadMetaMatchesSpine_FailsOnDivergedTurnCount(t *testing.T) {
 	h := invariantHarness(t)
 	rec := validRecord()
 	seedThread(t, h, rec)
@@ -243,7 +243,7 @@ func TestVerifyThreadFrontmatterMatchesSpine_FailsOnDivergedTurnCount(t *testing
 	if err := store.UpdateSpineRecord(h.Paths, rec); err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if err := VerifyThreadFrontmatterMatchesSpine(h); err == nil {
+	if err := VerifyThreadMetaMatchesSpine(h); err == nil {
 		t.Fatalf("expected fail on diverged turn_count; passed")
 	}
 }

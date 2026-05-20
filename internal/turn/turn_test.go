@@ -512,17 +512,17 @@ func TestRunNewTopicWritesThreadFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadThread: %v", err)
 	}
-	if thr.Frontmatter.ID != "thr_1" {
-		t.Errorf("frontmatter id: got %q want thr_1", thr.Frontmatter.ID)
+	if thr.Meta.ID != "thr_1" {
+		t.Errorf("frontmatter id: got %q want thr_1", thr.Meta.ID)
 	}
-	if thr.Frontmatter.Project != meta.ID {
-		t.Errorf("frontmatter project: got %q want %q", thr.Frontmatter.Project, meta.ID)
+	if thr.Meta.Project != meta.ID {
+		t.Errorf("frontmatter project: got %q want %q", thr.Meta.Project, meta.ID)
 	}
-	if thr.Frontmatter.State != memops.ThreadActive {
-		t.Errorf("frontmatter state: got %q want active", thr.Frontmatter.State)
+	if thr.Meta.State != memops.ThreadActive {
+		t.Errorf("frontmatter state: got %q want active", thr.Meta.State)
 	}
-	if thr.Frontmatter.TurnCount != 1 {
-		t.Errorf("frontmatter turn_count: got %d want 1", thr.Frontmatter.TurnCount)
+	if thr.Meta.TurnCount != 1 {
+		t.Errorf("frontmatter turn_count: got %d want 1", thr.Meta.TurnCount)
 	}
 	if !strings.Contains(thr.Body, "## Turn 1") {
 		t.Errorf("body missing turn 1 excerpt:\n%s", thr.Body)
@@ -538,7 +538,7 @@ func TestRunNewTopicWritesThreadFile(t *testing.T) {
 	}
 	// All four anchors should be reflected in history_symbols.
 	gotHist := map[string]memops.SymbolSource{}
-	for _, h := range thr.Frontmatter.HistorySymbols {
+	for _, h := range thr.Meta.HistorySymbols {
 		gotHist[h.Normalized] = h.Source
 	}
 	for _, want := range []string{"foo", "bar", "baz", "qux"} {
@@ -562,7 +562,7 @@ func TestRunExistingThreadAppendsExcerpt(t *testing.T) {
 
 	// Seed: a thread file from a prior turn, plus its spine record.
 	prior := memops.Thread{
-		Frontmatter: memops.ThreadMeta{
+		Meta: memops.ThreadMeta{
 			ID:           "thr_42",
 			Project:      meta.ID,
 			Anchors:      []string{"trefoil", "unknot", "body-topology", "electron-shape"},
@@ -582,15 +582,15 @@ func TestRunExistingThreadAppendsExcerpt(t *testing.T) {
 		t.Fatalf("seed save: %v", err)
 	}
 	if err := store.AppendSpineRecord(paths, memops.SpineRecord{
-		ID:           prior.Frontmatter.ID,
-		Project:      prior.Frontmatter.Project,
-		Anchors:      prior.Frontmatter.Anchors,
-		Summary:      prior.Frontmatter.Summary,
-		State:        prior.Frontmatter.State,
-		Created:      prior.Frontmatter.Created,
-		LastEngaged:  prior.Frontmatter.LastEngaged,
-		StateChanged: prior.Frontmatter.StateChanged,
-		TurnCount:    prior.Frontmatter.TurnCount,
+		ID:           prior.Meta.ID,
+		Project:      prior.Meta.Project,
+		Anchors:      prior.Meta.Anchors,
+		Summary:      prior.Meta.Summary,
+		State:        prior.Meta.State,
+		Created:      prior.Meta.Created,
+		LastEngaged:  prior.Meta.LastEngaged,
+		StateChanged: prior.Meta.StateChanged,
+		TurnCount:    prior.Meta.TurnCount,
 	}); err != nil {
 		t.Fatalf("seed spine: %v", err)
 	}
@@ -614,11 +614,11 @@ func TestRunExistingThreadAppendsExcerpt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadThread: %v", err)
 	}
-	if thr.Frontmatter.TurnCount != 8 {
-		t.Errorf("frontmatter turn_count: got %d want 8", thr.Frontmatter.TurnCount)
+	if thr.Meta.TurnCount != 8 {
+		t.Errorf("frontmatter turn_count: got %d want 8", thr.Meta.TurnCount)
 	}
-	if thr.Frontmatter.LastEngaged != now.Format(time.RFC3339) {
-		t.Errorf("frontmatter last_engaged: got %q want %q", thr.Frontmatter.LastEngaged, now.Format(time.RFC3339))
+	if thr.Meta.LastEngaged != now.Format(time.RFC3339) {
+		t.Errorf("frontmatter last_engaged: got %q want %q", thr.Meta.LastEngaged, now.Format(time.RFC3339))
 	}
 	if !strings.Contains(thr.Body, "**user:** earlier prompt") {
 		t.Errorf("prior excerpt lost from body:\n%s", thr.Body)
@@ -640,11 +640,11 @@ func TestRunExistingThreadAppendsExcerpt(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("find: %v found=%v", err, found)
 	}
-	if rec.TurnCount != thr.Frontmatter.TurnCount {
-		t.Errorf("spine turn_count %d != frontmatter %d", rec.TurnCount, thr.Frontmatter.TurnCount)
+	if rec.TurnCount != thr.Meta.TurnCount {
+		t.Errorf("spine turn_count %d != frontmatter %d", rec.TurnCount, thr.Meta.TurnCount)
 	}
-	if rec.LastEngaged != thr.Frontmatter.LastEngaged {
-		t.Errorf("spine last_engaged %q != frontmatter %q", rec.LastEngaged, thr.Frontmatter.LastEngaged)
+	if rec.LastEngaged != thr.Meta.LastEngaged {
+		t.Errorf("spine last_engaged %q != frontmatter %q", rec.LastEngaged, thr.Meta.LastEngaged)
 	}
 }
 
@@ -680,15 +680,15 @@ func TestRunHistorySymbolsAccumulation(t *testing.T) {
 		t.Fatalf("LoadThread: %v", err)
 	}
 	var alpha *memops.HistorySymbol
-	for i := range thr.Frontmatter.HistorySymbols {
-		h := &thr.Frontmatter.HistorySymbols[i]
+	for i := range thr.Meta.HistorySymbols {
+		h := &thr.Meta.HistorySymbols[i]
 		if h.Normalized == "alpha" {
 			alpha = h
 			break
 		}
 	}
 	if alpha == nil {
-		t.Fatalf("history_symbols missing alpha; got %+v", thr.Frontmatter.HistorySymbols)
+		t.Fatalf("history_symbols missing alpha; got %+v", thr.Meta.HistorySymbols)
 	}
 	if alpha.Count != 2 {
 		t.Errorf("alpha count: got %d want 2", alpha.Count)
@@ -800,7 +800,7 @@ func seedThreadAndSpine(t *testing.T, paths store.PersonantPaths, project, thrID
 		t.Fatalf("seed spine %s: %v", thrID, err)
 	}
 	thr := memops.Thread{
-		Frontmatter: memops.ThreadMeta{
+		Meta: memops.ThreadMeta{
 			ID:           rec.ID,
 			Project:      rec.Project,
 			Anchors:      rec.Anchors,

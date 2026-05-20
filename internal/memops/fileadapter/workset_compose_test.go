@@ -158,7 +158,7 @@ func TestComposeWorkingSet_LayerB_TrackedFiles(t *testing.T) {
 	rec := validSpine("thr_1", "prj_1")
 	if err := a.CreateThread(ctx, memops.ThreadWrite{
 		Spine:       rec,
-		Frontmatter: validFrontmatter(rec),
+		Meta: validFrontmatter(rec),
 		TurnExcerpt: "## Turn 1\n\nthread body text\n",
 	}); err != nil {
 		t.Fatalf("CreateThread: %v", err)

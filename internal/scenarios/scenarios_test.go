@@ -61,7 +61,7 @@ func assertHistorySymbolsContain(threadID, normalized string, minCount int) Inva
 		if err != nil {
 			return fmt.Errorf("assertHistorySymbolsContain: load %s: %w", threadID, err)
 		}
-		for _, hs := range thr.Frontmatter.HistorySymbols {
+		for _, hs := range thr.Meta.HistorySymbols {
 			if hs.Normalized == normalized {
 				if hs.Count < minCount {
 					return fmt.Errorf("assertHistorySymbolsContain: %s.%s count %d < %d",
@@ -131,7 +131,7 @@ func assertHistorySymbolsCap(threadID string, cap int) InvariantCheck {
 		if err != nil {
 			return fmt.Errorf("assertHistorySymbolsCap: load %s: %w", threadID, err)
 		}
-		if n := len(thr.Frontmatter.HistorySymbols); n > cap {
+		if n := len(thr.Meta.HistorySymbols); n > cap {
 			return fmt.Errorf("assertHistorySymbolsCap: %s history_symbols=%d > cap=%d", threadID, n, cap)
 		}
 		return nil
@@ -692,7 +692,7 @@ func assertThreadHistorySymbolsExclude(threadID string, symbols []string) Invari
 			return fmt.Errorf("assertThreadHistorySymbolsExclude: load %s: %w", threadID, err)
 		}
 		for _, s := range symbols {
-			for _, hs := range thr.Frontmatter.HistorySymbols {
+			for _, hs := range thr.Meta.HistorySymbols {
 				if hs.Normalized == s {
 					return fmt.Errorf("assertThreadHistorySymbolsExclude: %s history_symbols contains %q (should have been evicted)",
 						threadID, s)
@@ -961,7 +961,7 @@ func seedActiveThread(h *Harness, threadID string, lastEngagedTurn int, lastEnga
 		return fmt.Errorf("seedActiveThread: append spine: %w", err)
 	}
 	thr := memops.Thread{
-		Frontmatter: memops.ThreadMeta{
+		Meta: memops.ThreadMeta{
 			ID:              rec.ID,
 			Project:         rec.Project,
 			Anchors:         rec.Anchors,

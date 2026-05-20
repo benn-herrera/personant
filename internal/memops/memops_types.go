@@ -76,19 +76,18 @@ type Delta struct {
 // ---------- Thread write payload ----------
 
 // ThreadWrite bundles the three pieces of state needed to materialize a
-// thread on the substrate: the spine index entry, the in-file
-// frontmatter (which mirrors the spine fields), and the new turn's
-// excerpt.
+// thread on the substrate: the spine index entry, the metadata block
+// (which mirrors the spine fields), and the new turn's excerpt.
 //
 // The three are kept distinct on the port surface because they map to
 // different substrate concerns in the file adapter (spine.jsonl vs
-// thread.md frontmatter vs one turns/ excerpt file), and callers in
+// thread.md metadata vs one turns/ excerpt file), and callers in
 // internal/turn build them up side-by-side during turn close. Bundling
 // them into one struct at the call site is what eliminates the
 // historical three-parameter signature; the adapter's job is to
 // materialize the bundle atomically.
 //
-// Invariant: Spine.ID == Frontmatter.ID. The adapter does not enforce
+// Invariant: Spine.ID == Meta.ID. The adapter does not enforce
 // this; callers are responsible for keeping the two in sync at
 // construction.
 type ThreadWrite struct {
@@ -96,17 +95,17 @@ type ThreadWrite struct {
 	// to spine.jsonl by the adapter.
 	Spine SpineRecord
 
-	// Frontmatter is the in-file metadata block. Always written to the
-	// thread's thread.md frontmatter by the adapter.
-	Frontmatter ThreadMeta
+	// Meta is the thread metadata block. Always written to the
+	// thread's metadata slot by the adapter (thread.md frontmatter in
+	// the file adapter).
+	Meta ThreadMeta
 
 	// TurnExcerpt is the terse operational excerpt for the turn this
 	// write records. The adapter appends it as a new turn-excerpt file
-	// numbered by Frontmatter.TurnCount (the recency-windowed turns/
+	// numbered by Meta.TurnCount (the recency-windowed turns/
 	// directory; see store.AppendThreadTurn). An empty TurnExcerpt is a
-	// frontmatter-only update — it appends no turn file. The closure
-	// path uses the empty form to rewrite frontmatter without recording
-	// a turn.
+	// meta-only update — it appends no turn file. The closure path uses
+	// the empty form to rewrite metadata without recording a turn.
 	TurnExcerpt string
 }
 

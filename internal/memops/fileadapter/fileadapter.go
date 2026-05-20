@@ -93,7 +93,7 @@ func (a *FileAdapter) CreateThread(ctx context.Context, w memops.ThreadWrite) er
 // EngageThread rewrites thread.md and appends one turn excerpt, then
 // updates the spine record. Owns the missing-thread-dir recovery: if the
 // spine record exists but the thread directory is absent (drift state),
-// SaveThreadFrontmatter recreates the directory — no special case
+// store.SaveThreadFrontmatter recreates the directory — no special case
 // needed.
 func (a *FileAdapter) EngageThread(ctx context.Context, w memops.ThreadWrite) error {
 	if err := ctx.Err(); err != nil {
@@ -115,15 +115,15 @@ func (a *FileAdapter) EngageThread(ctx context.Context, w memops.ThreadWrite) er
 
 // writeThread persists a ThreadWrite to the substrate: it rewrites the
 // bounded thread.md frontmatter file, then appends w.TurnExcerpt as turn
-// w.Frontmatter.TurnCount (a no-op when the excerpt is empty — the
-// closure path's frontmatter-only update). The turn-excerpt directory is
-// FIFO-windowed by store.AppendThreadTurn. Shared by CreateThread and
-// EngageThread; the only difference between the two is the spine op.
+// w.Meta.TurnCount (a no-op when the excerpt is empty — the closure
+// path's meta-only update). The turn-excerpt directory is FIFO-windowed
+// by store.AppendThreadTurn. Shared by CreateThread and EngageThread;
+// the only difference between the two is the spine op.
 func writeThread(paths store.PersonantPaths, w memops.ThreadWrite) error {
-	if err := store.SaveThreadFrontmatter(paths, w.Frontmatter.ID, w.Frontmatter); err != nil {
+	if err := store.SaveThreadFrontmatter(paths, w.Meta.ID, w.Meta); err != nil {
 		return fmt.Errorf("save thread.md: %w", err)
 	}
-	if err := store.AppendThreadTurn(paths, w.Frontmatter.ID, w.Frontmatter.TurnCount, w.TurnExcerpt); err != nil {
+	if err := store.AppendThreadTurn(paths, w.Meta.ID, w.Meta.TurnCount, w.TurnExcerpt); err != nil {
 		return fmt.Errorf("append turn excerpt: %w", err)
 	}
 	return nil
@@ -142,15 +142,15 @@ func (a *FileAdapter) LoadThread(ctx context.Context, threadID string) (memops.T
 	return thr, nil
 }
 
-// LoadThreadFrontmatter reads only the thread's thread.md metadata,
-// skipping the turn-excerpt directory.
-func (a *FileAdapter) LoadThreadFrontmatter(ctx context.Context, threadID string) (memops.ThreadMeta, error) {
+// LoadThreadMeta reads only the thread's metadata block, skipping the
+// turn-excerpt directory.
+func (a *FileAdapter) LoadThreadMeta(ctx context.Context, threadID string) (memops.ThreadMeta, error) {
 	if err := ctx.Err(); err != nil {
 		return memops.ThreadMeta{}, err
 	}
 	fm, err := store.LoadThreadFrontmatter(a.paths, threadID)
 	if err != nil {
-		return memops.ThreadMeta{}, fmt.Errorf("fileadapter: load thread frontmatter: %w", err)
+		return memops.ThreadMeta{}, fmt.Errorf("fileadapter: load thread meta: %w", err)
 	}
 	return fm, nil
 }

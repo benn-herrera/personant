@@ -285,8 +285,8 @@ func TestLoadThreadAssemblesBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadThread: %v", err)
 	}
-	if thr.Frontmatter.ID != fm.ID {
-		t.Errorf("frontmatter ID = %q, want %q", thr.Frontmatter.ID, fm.ID)
+	if thr.Meta.ID != fm.ID {
+		t.Errorf("frontmatter ID = %q, want %q", thr.Meta.ID, fm.ID)
 	}
 	if !strings.Contains(thr.Body, "Turn 1") {
 		t.Errorf("assembled body missing turn 1:\n%s", thr.Body)
@@ -298,7 +298,7 @@ func TestSeedThreadSplitsBodyIntoTurns(t *testing.T) {
 	fm := sampleFrontmatter()
 	fm.ID = "thr_1"
 	thr := memops.Thread{
-		Frontmatter: fm,
+		Meta: fm,
 		Body:        "# title\n\n" + turnExcerpt(7) + "\n" + turnExcerpt(8),
 	}
 	if err := SeedThread(paths, thr); err != nil {

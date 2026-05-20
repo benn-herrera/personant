@@ -97,8 +97,8 @@ type MemoryOps interface {
 	// ---------- Thread operations ----------
 
 	// CreateThread atomically creates a new thread: the adapter creates
-	// the thread directory, writes thread.md from w.Frontmatter, appends
-	// w.TurnExcerpt as turn w.Frontmatter.TurnCount, and appends the
+	// the thread directory, writes thread.md from w.Meta, appends
+	// w.TurnExcerpt as turn w.Meta.TurnCount, and appends the
 	// spine record. Folds in the createNewThread path currently
 	// open-coded in internal/turn/turn.go.
 	//
@@ -116,43 +116,42 @@ type MemoryOps interface {
 	CreateThread(ctx context.Context, w ThreadWrite) error
 
 	// EngageThread atomically updates an existing thread: the adapter
-	// rewrites thread.md from w.Frontmatter, appends w.TurnExcerpt as
-	// turn w.Frontmatter.TurnCount (FIFO-windowed in the turns/
+	// rewrites thread.md from w.Meta, appends w.TurnExcerpt as
+	// turn w.Meta.TurnCount (FIFO-windowed in the turns/
 	// directory), and updates the spine record. An empty w.TurnExcerpt
-	// is a frontmatter-only update (the closure path). Folds in the
+	// is a meta-only update (the closure path). Folds in the
 	// updateExistingThread path currently open-coded in
 	// internal/turn/turn.go.
 	//
 	// Adapter owns the missing-thread-dir recovery. When `w.Spine.ID`
 	// exists in the spine but the thread directory is missing (drift
-	// state), the adapter materializes the directory from w.Frontmatter
+	// state), the adapter materializes the directory from w.Meta
 	// rather than failing. The application never sees this recovery path
-	// — it doesn't synthesize frontmatter from spine, doesn't deal with
+	// — it doesn't synthesize meta from spine, doesn't deal with
 	// ErrThreadFileNotFound on engagement.
 	//
 	// Returns ErrThreadNotFound (sentinel) only when the spine itself
 	// has no record matching `w.Spine.ID`.
 	EngageThread(ctx context.Context, w ThreadWrite) error
 
-	// LoadThread returns the full thread (frontmatter + recency-windowed
+	// LoadThread returns the full thread (metadata + recency-windowed
 	// body) for the given ID. Folds in store.LoadThread.
 	// ErrThreadFileNotFound is returned (via errors.Is) when no on-disk
 	// thread exists for the ID; callers distinguish "fresh thread about
 	// to be created" from a parse failure.
 	//
 	// LoadThread assembles the body from every retained turn-excerpt
-	// file. For callers that only need metadata, LoadThreadFrontmatter
+	// file. For callers that only need metadata, LoadThreadMeta
 	// is the cheaper choice — it never touches the turns/ directory.
 	LoadThread(ctx context.Context, threadID string) (Thread, error)
 
-	// LoadThreadFrontmatter returns only the thread's frontmatter
-	// metadata — it reads the small bounded thread.md and skips the
-	// turn-excerpt directory entirely. This is the workhorse for the
-	// engagement-update path, which rewrites frontmatter and appends one
-	// turn excerpt without ever loading the prior body. Folds in
-	// store.LoadThreadFrontmatter; ErrThreadFileNotFound semantics match
+	// LoadThreadMeta returns only the thread's metadata block — it reads
+	// the small bounded thread metadata slot and skips the turn-excerpt
+	// directory entirely. This is the workhorse for the engagement-update
+	// path, which rewrites metadata and appends one turn excerpt without
+	// ever loading the prior body. ErrThreadFileNotFound semantics match
 	// LoadThread.
-	LoadThreadFrontmatter(ctx context.Context, threadID string) (ThreadMeta, error)
+	LoadThreadMeta(ctx context.Context, threadID string) (ThreadMeta, error)
 
 	// FindThread looks up the spine record for threadID. The second
 	// return is false when no record exists. Folds in
@@ -178,7 +177,7 @@ type MemoryOps interface {
 
 	// RecordRecallFire increments the RecallFires counter for threadID —
 	// a recall match that the user accepted into the working set (spec
-	// §2.2). Updates the spine record and the thread file's frontmatter
+	// §2.2). Updates the spine record and the thread's metadata block
 	// together so the two stay in sync. Returns ErrThreadNotFound if no
 	// spine record exists for threadID.
 	RecordRecallFire(ctx context.Context, threadID string) error
@@ -247,9 +246,9 @@ type MemoryOps interface {
 	// ---------- Symbol index operations ----------
 
 	// ProposeRecall runs the §3.4 layer-1 symbolic Jaccard pre-filter
-	// over the spine and per-thread frontmatter symbol sets. Folds in
+	// over the spine and per-thread metadata symbol sets. Folds in
 	// recall.Propose (which is itself a thin wrapper around
-	// recall.ProposeFromIndex once spine + frontmatter are loaded).
+	// recall.ProposeFromIndex once spine + thread metadata are loaded).
 	//
 	// `query` is the set of query symbols, already normalized by the
 	// caller. Empty query → empty result, no error.

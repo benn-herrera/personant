@@ -56,7 +56,7 @@ func seedThreadWithAnchors(t *testing.T, paths store.PersonantPaths, project, th
 		t.Fatalf("seed spine %s: %v", thrID, err)
 	}
 	thr := memops.Thread{
-		Frontmatter: memops.ThreadMeta{
+		Meta: memops.ThreadMeta{
 			ID:           rec.ID,
 			Project:      rec.Project,
 			Anchors:      rec.Anchors,

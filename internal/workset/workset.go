@@ -94,11 +94,11 @@ type ProjectDigestEntry struct {
 	Digest memops.ProjectDigest
 }
 
-// ThreadData is the per-thread input for Layer B rendering: frontmatter,
+// ThreadData is the per-thread input for Layer B rendering: metadata,
 // body (already recency-windowed + byte-budgeted by the adapter), and
 // tracked-file entries (already with the live-window pre-computed).
 type ThreadData struct {
-	Frontmatter  memops.ThreadMeta
+	Meta         memops.ThreadMeta
 	Body         string
 	TrackedFiles []TrackedFile
 }
@@ -322,7 +322,7 @@ func PerThreadBudget(layerB, n int) int {
 // Body is supplied pre-windowed and pre-byte-budgeted by the caller;
 // tracked-file windows are likewise pre-computed.
 func renderThreadBody(id string, data ThreadData) string {
-	fm := data.Frontmatter
+	fm := data.Meta
 	state := strings.ToUpper(string(fm.State))
 	if state == "" {
 		state = "UNKNOWN"

@@ -95,7 +95,7 @@ func TestDraftClosure_SummaryFromModel(t *testing.T) {
 	c := NewHTTPCurator(mock, "test-model")
 
 	thr := memops.Thread{
-		Frontmatter: memops.ThreadMeta{
+		Meta: memops.ThreadMeta{
 			ID:      "thr_7",
 			Anchors: []string{"anchor-a", "anchor-b", "anchor-c", "anchor-d"},
 			HistorySymbols: []memops.HistorySymbol{

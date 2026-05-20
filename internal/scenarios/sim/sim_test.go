@@ -169,7 +169,7 @@ const simMemoryCapBytes = 8 * 1024 * 1024 * 1024
 // simHeavyInvariantCadence is the simulated-time interval between
 // firings of the heavy invariants (full-spine sweeps:
 // VerifySpineIntegrity, VerifyIndexFresh,
-// VerifyThreadFrontmatterMatchesSpine) during a sim run. Cheap
+// VerifyThreadMetaMatchesSpine) during a sim run. Cheap
 // invariants still fire every step, and the heavy set always fires once
 // at end-of-run regardless of cadence, so end-of-run substrate
 // well-formedness is unchanged. Per-step firing made the heavy checks
