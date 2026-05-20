@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"personant/internal/recall"
+	"personant/internal/recall/measure"
 )
 
 // recallOfferK is the number of recall candidates surfaced to the user
@@ -28,7 +28,7 @@ const (
 // ranked best-first and capped at recallOfferK. Indexes into Candidates
 // are stable for a RecallResolution to reference.
 type RecallOffer struct {
-	Candidates []recall.Result
+	Candidates []measure.Result
 }
 
 // RecallResolution is the user's (or scripted harness's) verdict on a
@@ -58,7 +58,7 @@ type RecallResolver func(ctx context.Context, offer RecallOffer) (RecallResoluti
 // fetch" counter. A counter-write failure is logged and swallowed; it
 // never aborts turn close.
 //
-// Recall runs entirely behind the recall.Recaller interface — this
+// Recall runs entirely behind the measure.Recaller interface — this
 // function knows nothing of symbolic Jaccard, embedding cosine, or the
 // embedding index. It hands the Recaller the turn's symbols and text
 // and logs whatever merged candidates come back, per layer.
@@ -71,7 +71,7 @@ func surfaceRecallCandidates(ctx context.Context, state *State, userInput string
 	if state.Recaller == nil {
 		return nil
 	}
-	results, err := state.Recaller.Recall(ctx, recall.Request{
+	results, err := state.Recaller.Recall(ctx, measure.Request{
 		QuerySymbols: state.coalesce.symbolList(),
 		QueryText:    userInput,
 		Project:      state.ActiveProject.ID,

@@ -24,7 +24,7 @@ import (
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
-	"personant/internal/recall"
+	"personant/internal/recall/measure"
 	"personant/internal/store"
 	"personant/internal/turn"
 	"personant/internal/workset"
@@ -218,14 +218,14 @@ func Run(opts Options) error {
 		ep, em, _ := memops.ParseModelRef(cfg.Embedding.Model)
 		embProvider := providers[ep]
 		embedder := model.NewHTTPEmbedder(embProvider, em, cfg.Embedding.VectorLength)
-		state.Recaller = recall.NewService(ops, embedder)
+		state.Recaller = measure.NewService(ops, embedder)
 	}
 	// Index-build failure (e.g. the embedding endpoint unreachable)
 	// degrades gracefully to symbolic-only recall — never blocks the
 	// session. Prepare on the default symbolic-only Service is a no-op.
 	if err := state.Recaller.Prepare(ctx); err != nil {
 		fmt.Fprintf(opts.Stderr, "warn: embedding recall unavailable: %v\n", err)
-		state.Recaller = recall.NewService(ops, nil)
+		state.Recaller = measure.NewService(ops, nil)
 	}
 
 	// §3.4 recall UI surface (Part B): install an interactive resolver

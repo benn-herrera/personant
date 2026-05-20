@@ -3,7 +3,7 @@
 // Live integration test for embedding recall through the Recaller.
 // Build-tag isolated (`integration`), run via `make integration-test`;
 // needs the `reaper` provider reachable. It exercises the real
-// HTTPEmbedder end to end — recall.Service.Prepare builds the index
+// HTTPEmbedder end to end — measure.Service.Prepare builds the index
 // over seeded threads, then Recall cosine-matches — confirming the
 // runtime path works against an actual embedding model, not the mock.
 
@@ -18,7 +18,7 @@ import (
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
-	"personant/internal/recall"
+	"personant/internal/recall/measure"
 )
 
 func reaperProvider() memops.Provider {
@@ -62,13 +62,13 @@ func TestEmbeddingRecall_Live(t *testing.T) {
 			"changes lepton flavor as it propagates, implying nonzero neutrino mass.")
 	ops := fileadapter.NewFileAdapter(paths)
 
-	svc := recall.NewService(ops, model.NewHTTPEmbedder(provider, reaperEmbeddingModel, 0))
+	svc := measure.NewService(ops, model.NewHTTPEmbedder(provider, reaperEmbeddingModel, 0))
 	if err := svc.Prepare(context.Background()); err != nil {
 		skipIfUnreachable(t, err)
 		return
 	}
 
-	results, err := svc.Recall(context.Background(), recall.Request{
+	results, err := svc.Recall(context.Background(), measure.Request{
 		QueryText: "tell me about knots and their crossing number",
 	})
 	if err != nil {

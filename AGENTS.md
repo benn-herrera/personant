@@ -233,7 +233,11 @@ internal/autogit/           go-git-backed autonomic git wrapper with
 internal/turn/              §3.0 chain, turn loop, per-turn coalescing,
                             transient-data staging buffer, §3.4 recall
                             surface, §3.5 decay-triggered closure flow
-internal/recall/            symbolic Jaccard recall matcher
+internal/recall/scoring/    pure Jaccard/cosine recall primitives
+                            (substrate-free, memops domain model only)
+internal/recall/measure/    application-side recall stack (Service,
+                            Recaller) — uses memops port for substrate
+                            access; composes scoring primitives
 internal/curator/           closure-summary drafting (§3.5/§5.2):
                             model-backed summary + anchor selection
 internal/chat/              REPL, slash dispatch, bootstrap UX
@@ -281,7 +285,7 @@ Go 1.26.1+.
     + scope grounds — see substrate-decisions memory for the revisit
     conditions.
 - **Application code talks to `MemoryOps`, not to the substrate directly.**
-  `internal/turn`, `internal/chat`, `internal/recall`, `internal/workset`,
+  `internal/turn`, `internal/chat`, `internal/recall/measure`, `internal/workset`,
   cmd/*, and the scenarios harness all depend on the port (`memops.MemoryOps`).
   Pure helpers (`store.Normalize`, `store.DominantSource`) and data-type
   aliases stay direct because they're not substrate operations. Tests

@@ -10,7 +10,7 @@ import (
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
-	"personant/internal/recall"
+	"personant/internal/recall/measure"
 	"personant/internal/store"
 )
 
@@ -49,12 +49,12 @@ func seedThreadWithBody(t *testing.T, paths store.PersonantPaths, project, thrID
 }
 
 // embeddingState builds a turn State whose Recaller is embedding-enabled
-// (a recall.Service over a MockEmbedder), with its index prepared.
+// (a measure.Service over a MockEmbedder), with its index prepared.
 func embeddingState(t *testing.T, paths store.PersonantPaths, meta memops.ProjectMeta) *State {
 	t.Helper()
 	ops := fileadapter.NewFileAdapter(paths)
 	state := NewState(ops, meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
-	state.Recaller = recall.NewService(ops, model.NewMockEmbedder())
+	state.Recaller = measure.NewService(ops, model.NewMockEmbedder())
 	if err := state.Recaller.Prepare(context.Background()); err != nil {
 		t.Fatalf("Recaller.Prepare: %v", err)
 	}

@@ -1,4 +1,4 @@
-package recall_test
+package measure_test
 
 import (
 	"context"
@@ -7,13 +7,13 @@ import (
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
-	"personant/internal/recall"
+	"personant/internal/recall/measure"
 	"personant/internal/store"
 )
 
 // newRecallHome initialises an isolated personant home and returns a
-// fileadapter over it. External test package (recall_test) so it may
-// import the fileadapter, which itself imports internal/recall.
+// fileadapter over it. External test package (measure_test) so it may
+// import the fileadapter, which itself depends on recall/scoring.
 func newRecallHome(t *testing.T) (store.PersonantPaths, *fileadapter.FileAdapter) {
 	t.Helper()
 	paths := store.PathsForHome(t.TempDir())
@@ -49,13 +49,13 @@ func seedThread(t *testing.T, paths store.PersonantPaths, id string, anchors []s
 	}
 }
 
-func findResult(results []recall.Result, id string) (recall.Result, bool) {
+func findResult(results []measure.Result, id string) (measure.Result, bool) {
 	for _, r := range results {
 		if r.ThreadID == id {
 			return r, true
 		}
 	}
-	return recall.Result{}, false
+	return measure.Result{}, false
 }
 
 // TestService_SymbolicOnly: a Service with no embedder runs layer 1
@@ -64,11 +64,11 @@ func TestService_SymbolicOnly(t *testing.T) {
 	paths, ops := newRecallHome(t)
 	seedThread(t, paths, "thr_1", []string{"alpha", "beta", "gamma", "delta"}, "# thr_1")
 
-	svc := recall.NewService(ops, nil)
+	svc := measure.NewService(ops, nil)
 	if err := svc.Prepare(context.Background()); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	results, err := svc.Recall(context.Background(), recall.Request{
+	results, err := svc.Recall(context.Background(), measure.Request{
 		QuerySymbols: []string{"alpha", "beta", "gamma", "delta"},
 		QueryText:    "anything",
 	})
@@ -94,11 +94,11 @@ func TestService_EmbeddingFires(t *testing.T) {
 	seedThread(t, paths, "thr_1", []string{"thr_1"}, "trefoil knot topology invariant chirality")
 	seedThread(t, paths, "thr_2", []string{"thr_2"}, "neutrino oscillation flavor lepton boson")
 
-	svc := recall.NewService(ops, model.NewMockEmbedder())
+	svc := measure.NewService(ops, model.NewMockEmbedder())
 	if err := svc.Prepare(context.Background()); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	results, err := svc.Recall(context.Background(), recall.Request{
+	results, err := svc.Recall(context.Background(), measure.Request{
 		QueryText: "trefoil knot topology invariant chirality",
 	})
 	if err != nil {
@@ -121,11 +121,11 @@ func TestService_MergesLayers(t *testing.T) {
 		[]string{"trefoil", "knot", "topology", "invariant"},
 		"trefoil knot topology invariant chirality")
 
-	svc := recall.NewService(ops, model.NewMockEmbedder())
+	svc := measure.NewService(ops, model.NewMockEmbedder())
 	if err := svc.Prepare(context.Background()); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	results, err := svc.Recall(context.Background(), recall.Request{
+	results, err := svc.Recall(context.Background(), measure.Request{
 		QuerySymbols: []string{"trefoil", "knot", "topology", "invariant"},
 		QueryText:    "trefoil knot topology invariant chirality",
 	})
@@ -150,11 +150,11 @@ func TestService_Exclude(t *testing.T) {
 	paths, ops := newRecallHome(t)
 	seedThread(t, paths, "thr_1", []string{"alpha", "beta", "gamma", "delta"}, "alpha beta gamma delta")
 
-	svc := recall.NewService(ops, model.NewMockEmbedder())
+	svc := measure.NewService(ops, model.NewMockEmbedder())
 	if err := svc.Prepare(context.Background()); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	results, err := svc.Recall(context.Background(), recall.Request{
+	results, err := svc.Recall(context.Background(), measure.Request{
 		QuerySymbols: []string{"alpha", "beta", "gamma", "delta"},
 		QueryText:    "alpha beta gamma delta",
 		Exclude:      map[string]struct{}{"thr_1": {}},

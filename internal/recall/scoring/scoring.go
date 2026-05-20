@@ -1,18 +1,17 @@
-// Package recall implements the within-project symbolic Jaccard
+// Package scoring implements the within-project symbolic Jaccard
 // pre-filter for opportunistic thread recall (spec §3.4 layer 1).
 //
 // Given a set of query symbols and the current spine + thread index,
 // ProposeFromIndex returns candidate threads ranked by Jaccard
 // similarity of their symbol set against the query. This is the cheap
 // layer; the embedding-similarity and model-judgment layers (§3.4
-// layers 2 and 3) are not implemented in v0.1 and are not invoked from
-// here.
+// layers 2 and 3) are not invoked from here.
 //
 // The package is substrate-free: it depends only on the memops domain
 // model (SpineRecord, ThreadFrontmatter). Application-side recall that
-// needs to talk to the substrate (recall.Service, recall.Recaller) does
-// so via the memops.MemoryOps port, never via internal/store.
-package recall
+// needs to talk to the substrate lives in recall/measure and uses the
+// memops.MemoryOps port.
+package scoring
 
 import (
 	"sort"

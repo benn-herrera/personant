@@ -1,8 +1,8 @@
 // Package fileadapter implements memops.MemoryOps against personant's
 // canonical file substrate (JSONL + markdown + YAML frontmatter + TOML
 // providers + git on ~/.personant/). Delegates to internal/store,
-// internal/index, internal/recall, internal/workset, internal/verify,
-// and internal/eventlog.
+// internal/index, internal/recall/scoring, internal/workset,
+// internal/verify, and internal/eventlog.
 //
 // This is the v0.1 adapter. Future substrate adapters (SQLite,
 // network-backed, in-memory simulation) implement memops.MemoryOps from
@@ -12,8 +12,9 @@
 // # Caller migration is out of scope here (Phase A.2)
 //
 // This package is added alongside the existing application packages
-// (internal/turn, internal/recall, internal/workset, internal/chat) that
-// still call internal/store directly. Caller migration happens in A.3+.
+// (internal/turn, internal/recall/measure, internal/workset,
+// internal/chat) that still call internal/store directly. Caller
+// migration happens in A.3+.
 package fileadapter
 
 import (
@@ -31,7 +32,7 @@ import (
 	"personant/internal/eventlog"
 	"personant/internal/index"
 	"personant/internal/memops"
-	"personant/internal/recall"
+	"personant/internal/recall/scoring"
 	"personant/internal/store"
 	"personant/internal/verify"
 	"personant/internal/workset"
@@ -527,8 +528,8 @@ func (a *FileAdapter) LoadWorkingSet(ctx context.Context) ([]string, []string, e
 
 // ProposeRecall runs the §3.4 layer-1 symbolic Jaccard pre-filter. The
 // adapter loads spine + per-thread frontmatter from its substrate, then
-// hands off to recall.ProposeFromIndex (a pure function over the memops
-// domain model). The recall package itself never touches the substrate
+// hands off to scoring.ProposeFromIndex (a pure function over the memops
+// domain model). The scoring package itself never touches the substrate
 // — that is this adapter's responsibility.
 func (a *FileAdapter) ProposeRecall(ctx context.Context, query []string, opts memops.RecallOptions) ([]memops.RecallCandidate, error) {
 	if err := ctx.Err(); err != nil {
@@ -542,7 +543,7 @@ func (a *FileAdapter) ProposeRecall(ctx context.Context, query []string, opts me
 	if err != nil {
 		return nil, fmt.Errorf("fileadapter: propose recall: load thread frontmatter: %w", err)
 	}
-	cands := recall.ProposeFromIndex(spine, threads, query, recall.Options{
+	cands := scoring.ProposeFromIndex(spine, threads, query, scoring.Options{
 		Threshold: opts.Threshold,
 		Project:   opts.Project,
 		Exclude:   opts.Exclude,

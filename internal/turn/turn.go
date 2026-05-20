@@ -18,7 +18,7 @@ import (
 	"personant/internal/memops"
 	"personant/internal/model"
 	"personant/internal/prompt"
-	"personant/internal/recall"
+	"personant/internal/recall/measure"
 )
 
 // State is the per-session mutable runtime state passed to Run. Most
@@ -30,13 +30,13 @@ type State struct {
 	Provider      memops.Provider
 	Client        model.Client
 
-	// Recaller is the §3.4 recall stack (recall.Recaller). NewState
+	// Recaller is the §3.4 recall stack (measure.Recaller). NewState
 	// installs a default symbolic-only Service; callers that have an
 	// embedding provider replace it with an embedding-enabled Service
 	// post-construction, then call Recaller.Prepare. The turn loop and
 	// the recall UI surface depend only on the interface — recall
 	// internals are insulated behind it.
-	Recaller recall.Recaller
+	Recaller measure.Recaller
 
 	// RecallResolver resolves the §3.4 recall offer surfaced at turn
 	// close into accept/decline decisions. nil → recall stays log-only
@@ -173,7 +173,7 @@ func NewState(ops memops.MemoryOps, project memops.ProjectMeta, provider memops.
 		closureDeferUntil: make(map[string]int),
 		// Default to symbolic-only recall; callers with an embedding
 		// provider replace this with an embedding-enabled Service.
-		Recaller: recall.NewService(ops, nil),
+		Recaller: measure.NewService(ops, nil),
 	}
 }
 

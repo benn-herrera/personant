@@ -1,4 +1,14 @@
-package recall
+// Package measure is the application-side §3.4 recall stack — the
+// substrate-coupled glue that the experience layer uses to drive
+// recall during a turn.
+//
+// It depends on the memops.MemoryOps port for substrate access (thread
+// listing, body loading, log writes) and on the substrate-free
+// scoring primitives in recall/scoring for the actual Jaccard and
+// cosine math. The split is the architectural boundary called out in
+// the MAD architecture-and-standards review: scoring is pure / testable
+// without any substrate; measure is the substrate-aware composition.
+package measure
 
 import (
 	"context"
@@ -7,6 +17,7 @@ import (
 
 	"personant/internal/memops"
 	"personant/internal/model"
+	"personant/internal/recall/scoring"
 )
 
 // maxEmbedChars caps the text sent to the embedder for one thread or
@@ -83,7 +94,7 @@ func (r Result) Layers() []string {
 type Service struct {
 	ops      memops.MemoryOps
 	embedder model.Embedder // nil → symbolic-only recall
-	index    []ThreadVector
+	index    []scoring.ThreadVector
 }
 
 // NewService constructs a Service. A nil embedder yields a
@@ -125,9 +136,9 @@ func (s *Service) Prepare(ctx context.Context) error {
 	if len(vecs) != len(recs) {
 		return fmt.Errorf("recall: %d vectors for %d threads", len(vecs), len(recs))
 	}
-	idx := make([]ThreadVector, len(recs))
+	idx := make([]scoring.ThreadVector, len(recs))
 	for i := range recs {
-		idx[i] = ThreadVector{ThreadID: recs[i].ID, Vector: vecs[i]}
+		idx[i] = scoring.ThreadVector{ThreadID: recs[i].ID, Vector: vecs[i]}
 	}
 	s.index = idx
 	return nil
@@ -194,7 +205,7 @@ func (s *Service) Recall(ctx context.Context, req Request) ([]Result, error) {
 // embeddingCandidates runs layer 2. Returns nil (no candidates) when
 // no embedder, an empty index, or an empty query — and on an embedding
 // call failure, which it logs and swallows.
-func (s *Service) embeddingCandidates(ctx context.Context, req Request) []EmbeddingCandidate {
+func (s *Service) embeddingCandidates(ctx context.Context, req Request) []scoring.EmbeddingCandidate {
 	if s.embedder == nil || len(s.index) == 0 || req.QueryText == "" {
 		return nil
 	}
@@ -206,7 +217,7 @@ func (s *Service) embeddingCandidates(ctx context.Context, req Request) []Embedd
 		_ = s.ops.Log(ctx, "recall", "embed-error", err.Error())
 		return nil
 	}
-	return ProposeEmbedding(vecs[0], s.index, EmbeddingOptions{Exclude: req.Exclude})
+	return scoring.ProposeEmbedding(vecs[0], s.index, scoring.EmbeddingOptions{Exclude: req.Exclude})
 }
 
 // truncateForEmbed bounds text sent to the embedder. Byte truncation
