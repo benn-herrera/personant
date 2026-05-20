@@ -66,10 +66,21 @@ type State struct {
 	Temperature float64
 	MaxTokens   int
 
-	// History accumulates assistant/user messages across the session so the
-	// model sees prior turns. The system prompt is recomputed every turn
-	// from working-set state (the spine may have changed); only the
+	// History accumulates user/assistant messages across the session so
+	// the model sees prior turns. The system prompt is recomputed every
+	// turn from working-set state (the spine may have changed); only the
 	// user/assistant exchange is replayed from History.
+	//
+	// Bounded by sessionHistoryCapTurns turn pairs (FIFO): when a turn
+	// close appends a pair that pushes the slice past the cap, the oldest
+	// turn pair is evicted from the front. Eviction is always pair-
+	// aligned (user+assistant together) so History always alternates
+	// user/assistant cleanly. Per MAD architecture review burn-down item
+	// B1 (= T1-2): before this cap, History grew unbounded → linear input
+	// growth per turn → production context-window exhaustion in long
+	// sessions. Token-byte budget enforcement is intentionally NOT added
+	// here; turn-pair count is the v0.1 cap. A byte/token budget can
+	// layer on later if measurement justifies it.
 	History []model.Message
 
 	// ActiveThreads is Layer B membership: thread IDs the working set
@@ -137,6 +148,16 @@ type State struct {
 // layer can plumb actual byte counts to the LRU update path (Phase
 // 3+), the count cap goes away.
 const dormantThreadsCap = 20
+
+// sessionHistoryCapTurns bounds State.History to N user/assistant turn
+// pairs (i.e. up to 2*N messages). Picked to match the v0.1
+// working-set discipline of dormantThreadsCap=20: a coarse count cap
+// that keeps a long session from growing linearly without committing
+// to a token-aware budget. At realistic ~1-3 KB/message this caps
+// replayed context at ~40-120 KB, well under common 128k-200k
+// context-window limits. See the State.History godoc and MAD
+// architecture-review burn-down item B1 for the rationale.
+const sessionHistoryCapTurns = 20
 
 // NewState constructs a State for a chat session. The coalesce buffer
 // is initialized empty; Client must be non-nil (the chat REPL passes
@@ -457,11 +478,22 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 	}
 	body = strings.TrimRight(body, "\n")
 
-	// Append to History so the next turn sees the exchange.
+	// Append to History so the next turn sees the exchange, then enforce
+	// the sessionHistoryCapTurns FIFO bound (MAD B1). History is always
+	// appended as a user+assistant pair, so post-append the slice has
+	// even length; eviction is pair-aligned (2 messages at a time from
+	// the front) and the LLM-protocol invariant of alternating
+	// user/assistant roles is preserved.
 	state.History = append(state.History,
 		model.Message{Role: "user", Content: userInput},
 		model.Message{Role: "assistant", Content: full.Content},
 	)
+	if cap := 2 * sessionHistoryCapTurns; len(state.History) > cap {
+		drop := len(state.History) - cap
+		// Drop is always even because both the append above and any
+		// prior trim leave History even-length, and cap is even.
+		state.History = append(state.History[:0:0], state.History[drop:]...)
+	}
 
 	return body, nil
 }

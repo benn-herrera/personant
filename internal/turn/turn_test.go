@@ -390,6 +390,94 @@ func TestUpdateLayerLRUDormantCap(t *testing.T) {
 	}
 }
 
+// TestRunHistoryCapTurnPairFIFO drives the State through more than
+// sessionHistoryCapTurns turn pairs and asserts:
+//   - History length stays at or below 2*sessionHistoryCapTurns
+//   - the most-recent sessionHistoryCapTurns pairs are present
+//   - oldest pairs evicted FIFO (in order), and the slice still
+//     alternates user/assistant with no orphan
+//
+// Per MAD architecture-review burn-down item B1 (= T1-2).
+func TestRunHistoryCapTurnPairFIFO(t *testing.T) {
+	paths, meta := newTestHome(t)
+
+	// Seed an existing thread so every scripted turn engages the same
+	// thread tag — keeps the turn loop on the steady-state path
+	// (existing-thread update) without exercising new-topic anchor
+	// validation for every iteration.
+	existing := memops.SpineRecord{
+		ID:           "thr_1",
+		Project:      meta.ID,
+		Anchors:      []string{"alpha", "beta", "gamma", "delta"},
+		Summary:      "history-cap-fixture",
+		State:        memops.ThreadActive,
+		Created:      "2026-04-01T00:00:00Z",
+		LastEngaged:  "2026-04-01T00:00:00Z",
+		StateChanged: "2026-04-01T00:00:00Z",
+		TurnCount:    1,
+	}
+	if err := store.AppendSpineRecord(paths, existing); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	mock := model.NewScriptedMock(nil, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
+
+	const turns = sessionHistoryCapTurns + 5
+	for i := 0; i < turns; i++ {
+		mock.SetResponse(model.Response{
+			Content: "*topic: thr_1 [alpha, beta, gamma, delta]*\nassistant-" + itoa(i),
+		})
+		userInput := "user-" + itoa(i)
+		if _, err := Run(context.Background(), state, userInput, io.Discard); err != nil {
+			t.Fatalf("Run turn %d: %v", i, err)
+		}
+	}
+
+	wantLen := 2 * sessionHistoryCapTurns
+	if got := len(state.History); got != wantLen {
+		t.Fatalf("History len: got %d want %d", got, wantLen)
+	}
+
+	// History should hold the LAST sessionHistoryCapTurns pairs, in
+	// order, alternating user/assistant. After `turns` total runs, the
+	// oldest surviving pair is turn index (turns - sessionHistoryCapTurns).
+	firstSurviving := turns - sessionHistoryCapTurns
+	for p := 0; p < sessionHistoryCapTurns; p++ {
+		idx := turn2idx(firstSurviving + p)
+		userMsg := state.History[2*p]
+		asstMsg := state.History[2*p+1]
+		if userMsg.Role != "user" {
+			t.Errorf("pair %d user role: got %q want user", p, userMsg.Role)
+		}
+		if asstMsg.Role != "assistant" {
+			t.Errorf("pair %d assistant role: got %q want assistant", p, asstMsg.Role)
+		}
+		if want := "user-" + itoa(idx); userMsg.Content != want {
+			t.Errorf("pair %d user content: got %q want %q", p, userMsg.Content, want)
+		}
+		// The assistant Content includes the topic-tag preamble; check
+		// the body suffix to confirm FIFO ordering.
+		if want := "assistant-" + itoa(idx); !strings.HasSuffix(asstMsg.Content, want) {
+			t.Errorf("pair %d assistant content: got %q want suffix %q", p, asstMsg.Content, want)
+		}
+	}
+
+	// Sanity: the oldest evicted pair (turn 0) must not be present
+	// anywhere in History.
+	for i, m := range state.History {
+		if strings.Contains(m.Content, "user-0") || strings.Contains(m.Content, "assistant-0") {
+			t.Errorf("evicted turn 0 leaked at index %d: %q", i, m.Content)
+		}
+	}
+}
+
+// turn2idx is an identity helper that exists only to make the index
+// math in TestRunHistoryCapTurnPairFIFO read as intent rather than
+// arithmetic.
+func turn2idx(n int) int { return n }
+
 func itoaThreadID(n int) string { return "thr_" + itoa(n) }
 
 func sliceEqual(a, b []string) bool {
