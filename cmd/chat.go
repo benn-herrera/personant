@@ -4,6 +4,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"personant/internal/chat"
+	"personant/internal/memops/fileadapter"
+	"personant/internal/store"
 )
 
 var (
@@ -23,14 +25,25 @@ banner, and loops on stdin: slash commands ('/help', '/quit',
 ('$', '#'), and otherwise drives one full §3.0 turn through the
 turn-handler chain.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		paths, err := resolveChatPaths()
+		if err != nil {
+			return err
+		}
 		return chat.Run(chat.Options{
+			Ops:             fileadapter.NewFileAdapter(paths),
 			ExplicitProject: chatFlagProject,
-			HomeOverride:    chatFlagHome,
 			ProviderName:    chatFlagProvider,
 			Model:           chatFlagModel,
 		})
 	},
 	SilenceUsage: true,
+}
+
+func resolveChatPaths() (store.PersonantPaths, error) {
+	if chatFlagHome != "" {
+		return store.PathsForHome(chatFlagHome), nil
+	}
+	return store.ResolvePaths()
 }
 
 func init() {

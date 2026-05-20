@@ -134,6 +134,12 @@ type ProjectPattern struct {
 	Category SymbolCategory `json:"category"`
 }
 
+// DefaultProjectID is the reserved id for the no-project escape hatch
+// described in spec §2.1 / §2.5.1. The default project always exists
+// (synthesized on demand by the substrate when no meta.json has been
+// written) so callers never need to special-case "no active project".
+const DefaultProjectID = "prj_default"
+
 // ProjectMeta is projects/prj_<n>/meta.json (spec §2.5.1). Canonical
 // project metadata; the storage key is ID, the display label is Name.
 type ProjectMeta struct {

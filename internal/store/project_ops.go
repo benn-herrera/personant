@@ -15,9 +15,10 @@ import (
 	"personant/internal/memops"
 )
 
-// DefaultProjectID is the reserved id for the no-project escape hatch
-// described in spec §2.1 / §2.5.1.
-const DefaultProjectID = "prj_default"
+// DefaultProjectID re-exports memops.DefaultProjectID so substrate code
+// that already imports store can keep using it without an extra import.
+// The canonical definition lives in package memops (the domain layer).
+const DefaultProjectID = memops.DefaultProjectID
 
 // LoadProjectMeta reads projects/<id>/meta.json and returns the parsed
 // metadata.

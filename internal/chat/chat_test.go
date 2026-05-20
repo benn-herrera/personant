@@ -8,9 +8,16 @@ import (
 	"testing"
 
 	"personant/internal/memops"
+	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
 	"personant/internal/store"
 )
+
+// newOps constructs the substrate adapter for chat tests rooted at the
+// scaffolded home. Equivalent to what cmd/chat.go does for the CLI.
+func newOps(paths store.PersonantPaths) memops.MemoryOps {
+	return fileadapter.NewFileAdapter(paths)
+}
 
 // scaffoldHome stands up enough of the personant home for the chat
 // REPL to bootstrap: directory tree, empty spine, providers.toml with
@@ -55,8 +62,8 @@ func TestRunExplicitProjectThenQuit(t *testing.T) {
 	in := strings.NewReader("/quit\n")
 
 	if err := Run(Options{
+		Ops:             newOps(paths),
 		ExplicitProject: "prj_1",
-		HomeOverride:    paths.Home,
 		Stdin:           in,
 		Stdout:          &stdout,
 		Stderr:          &stderr,
@@ -81,11 +88,11 @@ func TestRunFallbackChoosesDefault(t *testing.T) {
 	in := strings.NewReader("n\n/quit\n")
 
 	if err := Run(Options{
-		HomeOverride: paths.Home,
-		Stdin:        in,
-		Stdout:       &stdout,
-		Stderr:       &stderr,
-		Client:       mock,
+		Ops:    newOps(paths),
+		Stdin:  in,
+		Stdout: &stdout,
+		Stderr: &stderr,
+		Client: mock,
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -121,11 +128,11 @@ func TestRunConfirmationYResumes(t *testing.T) {
 	in := strings.NewReader("y\n/quit\n")
 
 	if err := Run(Options{
-		HomeOverride: paths.Home,
-		Stdin:        in,
-		Stdout:       &stdout,
-		Stderr:       &stderr,
-		Client:       mock,
+		Ops:    newOps(paths),
+		Stdin:  in,
+		Stdout: &stdout,
+		Stderr: &stderr,
+		Client: mock,
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -144,8 +151,8 @@ func TestRunUnknownSlashContinues(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	in := strings.NewReader("/bogus\n/quit\n")
 	if err := Run(Options{
+		Ops:             newOps(paths),
 		ExplicitProject: "prj_1",
-		HomeOverride:    paths.Home,
 		Stdin:           in,
 		Stdout:          &stdout,
 		Stderr:          &stderr,
@@ -166,8 +173,8 @@ func TestRunShellEscapeStubbed(t *testing.T) {
 	in := strings.NewReader("$ ls\n# pwd\n/quit\n")
 
 	if err := Run(Options{
+		Ops:             newOps(paths),
 		ExplicitProject: "prj_1",
-		HomeOverride:    paths.Home,
 		Stdin:           in,
 		Stdout:          &stdout,
 		Stderr:          &stderr,
@@ -191,8 +198,8 @@ func TestRunEmptyInputBenign(t *testing.T) {
 	in := strings.NewReader("\n   \n/quit\n")
 
 	if err := Run(Options{
+		Ops:             newOps(paths),
 		ExplicitProject: "prj_1",
-		HomeOverride:    paths.Home,
 		Stdin:           in,
 		Stdout:          &stdout,
 		Stderr:          &stderr,
@@ -217,8 +224,8 @@ func TestRunOneTurnPrintsBody(t *testing.T) {
 	in := strings.NewReader("hello\n/quit\n")
 
 	if err := Run(Options{
+		Ops:             newOps(paths),
 		ExplicitProject: "prj_1",
-		HomeOverride:    paths.Home,
 		Stdin:           in,
 		Stdout:          &stdout,
 		Stderr:          &stderr,
@@ -256,10 +263,10 @@ func TestRunNoProvidersIsFatal(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	in := strings.NewReader("")
 	err := Run(Options{
-		HomeOverride: tmp,
-		Stdin:        in,
-		Stdout:       &stdout,
-		Stderr:       &stderr,
+		Ops:    newOps(paths),
+		Stdin:  in,
+		Stdout: &stdout,
+		Stderr: &stderr,
 	})
 	if err == nil {
 		t.Fatalf("expected error for missing providers")

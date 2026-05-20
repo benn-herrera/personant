@@ -7,6 +7,8 @@ import (
 
 	"personant/internal/chat"
 	"personant/internal/log"
+	"personant/internal/memops/fileadapter"
+	"personant/internal/store"
 )
 
 var rootCmd = &cobra.Command{
@@ -19,7 +21,11 @@ indexing, verification, and provider-connectivity smoke tests.`,
 	// Bare invocation drops into the chat REPL with default options.
 	// '--help'/'-h' still prints help (cobra short-circuits before RunE).
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return chat.Run(chat.Options{})
+		paths, err := store.ResolvePaths()
+		if err != nil {
+			return err
+		}
+		return chat.Run(chat.Options{Ops: fileadapter.NewFileAdapter(paths)})
 	},
 	SilenceUsage: true,
 }

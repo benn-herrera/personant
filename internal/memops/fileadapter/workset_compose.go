@@ -256,7 +256,7 @@ func (a *FileAdapter) loadOtherProjectDigests(activeID string, logf func(string,
 	}
 	out := make([]workset.ProjectDigestEntry, 0, len(metas))
 	for _, m := range metas {
-		if m.ID == activeID || m.ID == store.DefaultProjectID {
+		if m.ID == activeID || m.ID == memops.DefaultProjectID {
 			continue
 		}
 		digest, ok := loadProjectDigest(a.paths, m.ID, logf)

@@ -22,18 +22,24 @@ import (
 	"personant/internal/clock"
 	"personant/internal/curator"
 	"personant/internal/memops"
-	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
 	"personant/internal/recall/measure"
-	"personant/internal/store"
 	"personant/internal/turn"
 	"personant/internal/workset"
 )
 
 // Options carries the knobs the cobra layer passes through.
 type Options struct {
+	// Ops is the substrate port the REPL drives. Required.
+	//
+	// Constructing the adapter (and resolving $PERSONANT_HOME paths) is the
+	// caller's responsibility — cmd/chat.go does this for the CLI, tests
+	// build a fileadapter rooted at t.TempDir(). Keeping path resolution
+	// out of chat is the architectural rule: application packages never
+	// see PersonantPaths, only the port.
+	Ops memops.MemoryOps
+
 	ExplicitProject string // --project flag; "" → run the §4.5.7 waterfall
-	HomeOverride    string // --home flag
 	ProviderName    string // optional override of the default provider name
 	Model           string // optional override of the provider's default model
 
@@ -77,14 +83,12 @@ func Run(opts Options) error {
 	if opts.Stderr == nil {
 		opts.Stderr = os.Stderr
 	}
-
-	paths, err := resolvePaths(opts.HomeOverride)
-	if err != nil {
-		return fmt.Errorf("chat: resolve paths: %w", err)
+	if opts.Ops == nil {
+		return errors.New("chat: Options.Ops is required")
 	}
 
 	ctx := context.Background()
-	ops := fileadapter.NewFileAdapter(paths)
+	ops := opts.Ops
 
 	// Idempotent home scaffold. If the home is already initialized this is
 	// a near-noop; if it's a bare directory (e.g. user manually created
@@ -105,7 +109,7 @@ func Run(opts Options) error {
 		fmt.Fprintf(opts.Stderr, "warn: provider %q unavailable: %s\n", fault.Name, fault.Reason)
 	}
 	if len(providers) == 0 {
-		return fmt.Errorf("chat: no providers configured in %s; edit it to add one (see spec §8.2.1)", paths.Providers)
+		return errors.New("chat: no providers configured in providers.toml; edit it to add one (see spec §8.2.1)")
 	}
 
 	cfg, err := ops.LoadConfig(ctx)
@@ -149,7 +153,7 @@ func Run(opts Options) error {
 		// If the conventional default isn't there, pick the first by name.
 		provider, providerName = firstProvider(providers)
 		if providerName == "" {
-			return fmt.Errorf("chat: provider %q not found in %s", opts.ProviderName, paths.Providers)
+			return fmt.Errorf("chat: provider %q not found in providers.toml", opts.ProviderName)
 		}
 	}
 
@@ -259,13 +263,6 @@ func Run(opts Options) error {
 		fmt.Fprintf(opts.Stderr, "warn: log session.end: %v\n", err)
 	}
 	return nil
-}
-
-func resolvePaths(homeOverride string) (store.PersonantPaths, error) {
-	if homeOverride != "" {
-		return store.PathsForHome(homeOverride), nil
-	}
-	return store.ResolvePaths()
 }
 
 func firstProvider(providers map[string]memops.Provider) (memops.Provider, string) {
@@ -599,11 +596,11 @@ func promptFallback(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd st
 			}
 			return meta, nil
 		case "n":
-			meta, err := ops.LoadProject(ctx, store.DefaultProjectID)
+			meta, err := ops.LoadProject(ctx, memops.DefaultProjectID)
 			if err != nil {
 				return memops.ProjectMeta{}, fmt.Errorf("chat: load default: %w", err)
 			}
-			if err := ops.SetLastActiveProject(ctx, store.DefaultProjectID); err != nil {
+			if err := ops.SetLastActiveProject(ctx, memops.DefaultProjectID); err != nil {
 				return memops.ProjectMeta{}, fmt.Errorf("chat: write last-active: %w", err)
 			}
 			return meta, nil
