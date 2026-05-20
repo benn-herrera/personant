@@ -56,3 +56,8 @@ test/tools/madlibs_candidates/
 # subdirectory per scenario. Forensic data — persists after the test
 # for post-run inspection, regenerated on every run, never committed.
 test/rundata*/
+
+# agent process temp storage
+mad-review*/
+mad-design*/
+guest-session*/
