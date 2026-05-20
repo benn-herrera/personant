@@ -692,6 +692,28 @@ func touchActiveLRU(state *State, thrID string) {
 // the cap is a constant.
 const historyCapPerThread = 40
 
+// Topic-tag protocol violation surface (MAD B2 / T1-3). When an LLM emits
+// fs.write tool calls without a same-turn topic tag, the workspace file is
+// already written (OS-level fs.write is irreversible) but no engaged thread
+// exists to bind the canonical §3.9 sidecar entry against. The runtime
+// fails the turn loudly: substrate state does not advance, the unsynced
+// paths are logged for human reconciliation, and the error names the
+// paths so an upstream tutoring system can surface the violation.
+//
+// Future hardening: enforce topic-tag-first at stream parse time so the
+// fs.write tool call can be rejected before the OS-level write. Out of
+// scope for B2 — see MAD T1-3 follow-up.
+const (
+	logCatFS                          = "fs"
+	logActUnsyncedNoTopicTag          = "unsynced-no-topic-tag"
+	errMsgFileEditWithoutTopicTagHead = "turn aborted: fs.write without topic tag (spec §3.0/§3.3 protocol violation); substrate state not advanced; unsynced paths: "
+)
+
+// ErrFileEditWithoutTopicTag is returned by closeTurnAndUpdateEngagement
+// when a turn buffers file edits but engages no thread. Callers and
+// tests can match via errors.Is.
+var ErrFileEditWithoutTopicTag = errors.New("fs.write without topic tag")
+
 // closeTurnAndUpdateEngagement fires after the model.response delta.
 // Per §3.0.4: engagement updates fire once per affected thread with
 // the turn's coalesced symbol set as input.
@@ -729,11 +751,29 @@ const historyCapPerThread = 40
 // the next turn's prompt includes them.
 func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, responseBody string) error {
 	if len(state.coalesce.threads) == 0 {
-		// No thread was engaged this turn. Any buffered §3.9 file edits
-		// have no thread to attach to — log and drop rather than crash.
+		// No thread was engaged this turn. If §3.9 file edits are buffered,
+		// the LLM has violated the spec §3.0/§3.3 topic-tag protocol: a
+		// canonical workspace write must travel with a topic tag so the
+		// edit binds to a thread's tracked-file sidecar. The workspace file
+		// already exists on disk (OS-level fs.write is irreversible) but
+		// the substrate has no thread to attach to. Silently dropping the
+		// edit would mask the violation, so fail the turn loudly: do not
+		// advance substrate state, log each unsynced path so a human can
+		// reconcile, and return an error naming the paths.
+		//
+		// Future: enforce topic-tag-first at stream parse time to reject
+		// the fs.write tool call before the OS-level write — see MAD T1-3
+		// follow-up.
 		if len(state.fileEdits) > 0 {
-			_ = state.Ops.Log(ctx, "fs", "orphan-edit",
-				"count="+itoa(len(state.fileEdits))+" reason=no-engaged-thread")
+			paths := unsyncedEditPaths(state.fileEdits)
+			for _, p := range paths {
+				_ = state.Ops.Log(ctx, logCatFS, logActUnsyncedNoTopicTag,
+					"path="+sanitizeDetail(p)+" reason=no-engaged-thread")
+			}
+			return fmt.Errorf("%s%s: %w",
+				errMsgFileEditWithoutTopicTagHead,
+				strings.Join(paths, ", "),
+				ErrFileEditWithoutTopicTag)
 		}
 		return nil
 	}
@@ -794,6 +834,23 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 		// Non-fatal: opportunistic recall failure does not abort the turn.
 	}
 	return nil
+}
+
+// unsyncedEditPaths returns the de-duplicated, insertion-ordered list of
+// file paths in edits. Used by the fail-loud topic-tag-protocol branch in
+// closeTurnAndUpdateEngagement so each path is logged exactly once and the
+// returned error names paths in the order they were buffered.
+func unsyncedEditPaths(edits []fileEdit) []string {
+	out := make([]string, 0, len(edits))
+	seen := make(map[string]struct{}, len(edits))
+	for _, fe := range edits {
+		if _, ok := seen[fe.path]; ok {
+			continue
+		}
+		seen[fe.path] = struct{}{}
+		out = append(out, fe.path)
+	}
+	return out
 }
 
 // applyFileEdits flushes this turn's buffered §3.9 file-edit events into

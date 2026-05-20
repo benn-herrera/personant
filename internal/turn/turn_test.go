@@ -3,6 +3,7 @@ package turn
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -1069,5 +1070,112 @@ func TestRunFileCommitUntrackedIsNonFatal(t *testing.T) {
 	}
 	if _, ok := tf.Entry("never-written.go"); ok {
 		t.Error("untracked commit should not have created a file entry")
+	}
+}
+
+// TestRunFileEditWithoutTopicTagFailsLoud — MAD B2 / T1-3 fail-loud
+// branch. When fs.write is buffered but the model emits NO topic tag,
+// the turn must abort with ErrFileEditWithoutTopicTag, no spine record
+// must be appended, no thread sidecar must be created, and the
+// unsynced workspace paths must be logged via internal/log.
+//
+// The workspace file itself is out of scope here — fs.write at the
+// tool-call layer is OS-level and irreversible; the substrate's
+// contract is only that the canonical record does not silently absorb
+// the edit.
+func TestRunFileEditWithoutTopicTagFailsLoud(t *testing.T) {
+	paths, meta := newTestHome(t)
+
+	mock := model.NewScriptedMock([]model.Response{
+		{Content: "Just a plain response with no topic tag."},
+	}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	pinClock(t, time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC))
+
+	pre := []Delta{
+		{Source: "fs.write", Content: "v1", Meta: map[string]string{"path": "src/a.go"}},
+		{Source: "fs.write", Content: "v1", Meta: map[string]string{"path": "src/b.go"}},
+	}
+	_, err := RunWithDeltas(context.Background(), state, pre, "edit it", io.Discard)
+	if err == nil {
+		t.Fatal("RunWithDeltas must return an error when fs.write is buffered without a topic tag")
+	}
+	if !errors.Is(err, ErrFileEditWithoutTopicTag) {
+		t.Errorf("error = %v; want errors.Is ErrFileEditWithoutTopicTag", err)
+	}
+	// The error message must name the unsynced paths so an upstream
+	// tutoring/diagnostic layer can teach the model what it omitted.
+	msg := err.Error()
+	for _, want := range []string{"src/a.go", "src/b.go"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q missing path %q", msg, want)
+		}
+	}
+
+	// Substrate state must NOT have advanced: no spine records, no
+	// thread sidecar for either path. The workspace file itself is not
+	// the substrate's responsibility — only the canonical record is
+	// asserted here.
+	records, rerr := store.ReadSpine(paths.Spine)
+	if rerr != nil {
+		t.Fatalf("read spine: %v", rerr)
+	}
+	if len(records) != 0 {
+		t.Errorf("spine must not advance on protocol-violation abort; got %d records", len(records))
+	}
+
+	// Log surface: one unsynced-no-topic-tag line per distinct path,
+	// so a human can reconcile the workspace if they care.
+	entries, lerr := os.ReadDir(paths.LogsDir)
+	if lerr != nil {
+		t.Fatalf("read logs dir: %v", lerr)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("logs dir entries: got %d want 1 (%v)", len(entries), entries)
+	}
+	data, rerr := os.ReadFile(paths.LogsDir + "/" + entries[0].Name())
+	if rerr != nil {
+		t.Fatalf("read log: %v", rerr)
+	}
+	logBody := string(data)
+	for _, want := range []string{
+		"unsynced-no-topic-tag path=src/a.go",
+		"unsynced-no-topic-tag path=src/b.go",
+	} {
+		if !strings.Contains(logBody, want) {
+			t.Errorf("log missing %q:\n%s", want, logBody)
+		}
+	}
+}
+
+// TestRunFileEditWithTopicTagSucceeds — companion to the fail-loud
+// path above. With a valid topic tag in the same turn as an fs.write,
+// the turn must succeed and the §3.9 sidecar must absorb the edit.
+// This is the baseline that TestRunBuffersFileEditsIntoThreadStore
+// already exercises end-to-end; we re-assert the contract here in the
+// vocabulary of the MAD B2 fix (error nil, sidecar populated) so a
+// regression on the fail-loud branch cannot silently flip this case.
+func TestRunFileEditWithTopicTagSucceeds(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedThreadAndSpine(t, paths, meta.ID, "thr_42")
+
+	mock := model.NewScriptedMock([]model.Response{
+		{Content: "*topic: thr_42 [a, b, c, d]*\nDone."},
+	}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	pinClock(t, time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC))
+
+	pre := []Delta{
+		{Source: "fs.write", Content: "v1", Meta: map[string]string{"path": "src/a.go"}},
+	}
+	if _, err := RunWithDeltas(context.Background(), state, pre, "edit it", io.Discard); err != nil {
+		t.Fatalf("RunWithDeltas with topic tag must succeed: %v", err)
+	}
+	tf, err := store.LoadThreadFiles(paths, "thr_42")
+	if err != nil {
+		t.Fatalf("LoadThreadFiles: %v", err)
+	}
+	if _, ok := tf.Entry("src/a.go"); !ok {
+		t.Error("src/a.go must be tracked when fs.write rides a valid topic tag")
 	}
 }
