@@ -92,12 +92,12 @@ interface SpineRecord {
 
   // timestamps (RFC3339)
   created: string;
-  last_engaged: string;
+  last_engaged: string;             // required because (a) closure auto-prompt compares it against `engagement.decay-time` [§3.5], (b) dormant-thread eviction order is oldest-`last_engaged` first [§3.1], and (c) cross-project digest `recent_anchors` selection uses it [§3.7]
   state_changed: string;
 
   // bookkeeping
   turn_count: number;               // total turns this thread has been engaged in
-  recall_fires: number;             // count of recall matches that resulted in fetch (for anchor quality tuning)
+  recall_fires: number;             // count of recall matches that resulted in fetch; required because (a) the symbol index sorts candidate threads by this count so high-recall threads naturally surface first [§2.4], and (b) the anchor-quality tuning loop uses the distribution to decide when anchor replacement is warranted
 }
 ```
 
@@ -107,7 +107,7 @@ interface SpineRecord {
 |---|---|
 | `id` | regex `/^thr_\d+$/`, globally unique |
 | `project` | regex `/^prj_\d+$/`, references an existing project (or `prj_default`) |
-| `anchors.length` | between 4 and 8 inclusive |
+| `anchors.length` | between 4 and 8 inclusive; the [4,8] range is calibrated against the Jaccard operating point: fewer than 4 collapse threshold discrimination; more than 8 dilute specificity below the precision floor established in Phase C.6 |
 | `anchors[i]` | normalized form (see §2.7); 3-50 chars |
 | `summary.length` | ≤ `spine.entry-max-chars` directive value |
 | `state` | one of `ThreadState` enum values |
@@ -200,7 +200,7 @@ One turn-excerpt file, `turns/0000024.md`:
 **agent:** [terse response excerpt, topic tag stripped]
 ```
 
-**FIFO recency window.** The `turns/` directory retains at most `ThreadTurnWindow` excerpt files (currently 512; a calibratable count). Appending a new excerpt past that bound deletes the lowest-numbered files until the count is back within the window. The live thread body — what the working-set assembler reads — is therefore **recency-windowed**: it holds the last `ThreadTurnWindow` turn-excerpts. Older operational detail is not lost: it remains recoverable from the §2.8 event log, and the distilled symbol memory persists in frontmatter `history_symbols`. The body assembled for a prompt is read newest-first up to a byte budget, then joined oldest→newest so it reads naturally top-to-bottom.
+**FIFO recency window.** The `turns/` directory retains at most `ThreadTurnWindow` excerpt files (currently 512; a calibratable count). 512 is calibrated against the Layer B budget: at `b-top-k = 3`, each thread's excerpt window must stay within LayerB/3 bytes; `history_symbols` in frontmatter is the explicit compensating mechanism — symbol memory that survives FIFO eviction. Appending a new excerpt past that bound deletes the lowest-numbered files until the count is back within the window. The live thread body — what the working-set assembler reads — is therefore **recency-windowed**: it holds the last `ThreadTurnWindow` turn-excerpts. Older operational detail is not lost: it remains recoverable from the §2.8 event log, and the distilled symbol memory persists in frontmatter `history_symbols`. The body assembled for a prompt is read newest-first up to a byte budget, then joined oldest→newest so it reads naturally top-to-bottom.
 
 **Body content guidelines:**
 - This is operational, not pedagogical. Terse; machine-friendly.
@@ -221,7 +221,7 @@ interface HistorySymbol {
 type SymbolSource = "deterministic" | "model" | "user" | "curator";
 ```
 
-`history_symbols` is hard-capped at `history.cap-per-thread` directive value (default 40). When the cap is exceeded, eviction policy is lowest cumulative weight: lowest `count` first, ties broken by lowest `first_seen_turn`.
+`history_symbols` is hard-capped at `history.cap-per-thread` directive value (default 40). When the cap is exceeded, eviction policy is lowest cumulative weight: lowest `count` first, ties broken by lowest `first_seen_turn`. Symbols with low cumulative count and early `first_seen_turn` represent brief noise rather than persistent signal; retaining them dilutes the Jaccard matching set and degrades recall precision [§3.4].
 
 ### 2.4 Symbol index schema (`symbols.jsonl`)
 
@@ -298,13 +298,13 @@ interface ProjectDigest {
   project: string;                  // project id ("prj_<n>"), matching ProjectMeta.id
   display_name: string;             // resolved at render time; cached for the digest's consumers
   thread_count: number;
-  recent_anchors: string[];         // top N anchors aggregated across N most-recently-engaged threads
+  recent_anchors: string[];         // top N anchors aggregated across N most-recently-engaged threads; this is the Layer A2 cross-project recognition surface — the mechanism by which the model recognizes a prior cross-project topic without needing to load any thread body [§3.1, §3.4]
   one_line_summary: string;         // ≤ 80 chars; auto-generated from recent thread summaries
   byte_size: number;                // for budget accounting; should be ≤ cross-project.digest-per-project-bytes
 }
 ```
 
-`one_line_summary` is generated by frequency-weighted concatenation of symbols across the project's recent threads.
+`one_line_summary` is a comma-joined list of `recent_anchors`, truncated to the field's 80-char length budget. Reserved for revisit if v0.1 sim metrics show this simple form is inadequate for the cross-project recognition signal.
 
 ### 2.6 Directive file format (`directives/*.md`)
 
@@ -422,7 +422,7 @@ Plain-text, append-only, one event per line. Free-form details after a fixed pre
 
 No JSON schema in v0.1. Promote individual event types to structured form when query patterns become repetitive enough that grep/awk friction matters.
 
-**Initial event vocabulary** (will grow during implementation):
+**Initial event vocabulary** (will grow during implementation). The event vocabulary is the minimum required to satisfy §9 measurement contracts and the directive-accrual feedback loop. Events absent from this vocabulary cannot be measured; any new mechanism that emits a decision event must add a corresponding entry here before the mechanism is considered measurable.
 
 | Category | Events |
 |---|---|
@@ -549,6 +549,8 @@ proxy (see §6.5).
 | B    | `threads/<id>.md` for each id in the runtime's `ActiveThreads` LRU | Up to `layer.b-top-k` threads, most-recently-engaged first; each rendered as a heading + frontmatter line + body. Per-thread share = `LayerB / k`; oversized threads are individually truncated. |
 | C    | `spine.jsonl` records for each id in the runtime's `DormantThreads` LRU | One §2.2.2 display line per record. |
 
+The layer percentages (`layer.budget.percentages` in §2.6.1) are calibration starting points, not constants: A1+A2+E percentages reflect the recognition-surface minimum required every turn; B=50% reflects the empirical finding that active thread bodies dominate prompt value; C=15% is the dormant-summary buffer that enables re-engagement recognition. The simulation sweep (§9.4) is how these numbers earn their values.
+
 **LRU update rule** (driven by the §3.0.4 turn-close path):
 
 After per-turn engagements commit, for each engaged thread id:
@@ -557,7 +559,7 @@ After per-turn engagements commit, for each engaged thread id:
 - If `len(ActiveThreads) > layer.b-top-k`, demote the tail to the head
   of `DormantThreads`.
 
-`DormantThreads` is bounded by a count cap (default 20).
+`DormantThreads` is bounded by a count cap (default 20). 20 is calibrated against the Layer C byte budget: at max summary length (200 chars per §2.2) × 20 ≈ 4 KB, within the 15% C allocation at the default 64 KB context budget (`context.byte-budget` in §2.6.1).
 
 **Truncation policy:** each layer's rendered string is truncated to its
 byte budget at a UTF-8 rune boundary, with a marker
@@ -645,6 +647,10 @@ Trigger detection (engagement decay or `/done`) → curator-drafted summary
 B/C eviction. Deep cold archival (§3.8) is the next stage past closure
 when spine cardinality pressure builds.
 
+Engagement decay fires when `last_engaged` exceeds `engagement.decay-turns` OR `engagement.decay-time` (§2.6.1). OR semantics is deliberate: `decay-time` catches extended user absence (no turns at all); `decay-turns` catches low-frequency engagement in a busy session. AND semantics would let threads outlive their usefulness in either pattern.
+
+The curator-drafted summary targets 100–150 chars. This balances two constraints: summary + anchors must fit within the Layer A1 budget at realistic spine cardinality (~400 threads × ~200 chars ≈ 80 KB, within the 8% A1 share at 64 KB context); the gist must also be sufficient for the model to recognize prior engagement without fetching the thread body.
+
 ### 3.6 Fallback dissection
 
 Budget-pressure trigger → dissector LLM clusters the oldest content →
@@ -655,7 +661,7 @@ batch retirement → ack flow.
 `projects/<id>/digest.json` regenerates whenever any thread in the
 project is updated. Each project's digest is capped at
 `cross-project.digest-per-project-bytes`; recent anchors are selected
-from the N most-recently-engaged threads.
+from the N most-recently-engaged threads. Eager regeneration ensures Layer A2 always reflects the current cross-project recognition surface; `most-recently-engaged` selection is the heuristic that engagement-recency is a proxy for ongoing relevance, maximizing the probability that a cross-project match is actionable.
 
 ### 3.8 Deep cold archival
 
