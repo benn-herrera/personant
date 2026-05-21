@@ -80,6 +80,7 @@ import (
 	"strings"
 	"time"
 
+	"personant/internal/model"
 	"personant/internal/prompt"
 	"personant/internal/scenarios"
 	"personant/internal/turn"
@@ -1132,12 +1133,77 @@ func jitter(rng *rand.Rand, base time.Duration) time.Duration {
 // the Layer-B LRU). TimeDelta is filled in by the caller. The returned
 // bufStep carries the generator-side metadata (slot index, engaged
 // thread index) the refinement loop reads on emission.
+//
+// The function is the orchestration spine: pick the engaged thread,
+// compute the recall oracle, choose the user input (with the
+// user-dictated variant overlay), attach a work-turn read/modify/write
+// cycle, and stamp the recall-opportunity declaration. Each phase is a
+// dedicated helper so the spine stays readable; rng draw ordering is
+// preserved exactly across helpers — the canonical (zero-feedback) step
+// stream remains a pure function of (Seed, Duration, Corpus).
 func (g *generator) buildStep(tt turnType, act action) bufStep {
-	var (
-		idx   int // index of the engaged thread
-		isNew bool
-	)
+	idx, isNew := g.selectEngagedThread(act)
+	thr := g.threads[idx]
+	slot := g.model.slots[thr.slotIdx]
 
+	recallIDs := g.recallExpectedFor(idx, thr.slotIdx, isNew)
+	recallOpp := len(recallIDs) > 0
+
+	// anchorTags drops loose-cell positions on every step regardless of
+	// action — see nonLooseTags for the asymmetry this preserves.
+	anchorTags := nonLooseTags(slot)
+	userInput := defaultUserInput(slot, recallOpp)
+	userDictated := false
+	if udInput, ok := g.maybeUserDictated(tt, isNew, recallOpp, idx, slot); ok {
+		userInput = udInput
+		userDictated = true
+	}
+
+	annotation := fmt.Sprintf("turn %d: %s %s (%s)",
+		g.stepIndex+1, turnTypeName(tt), actionName(act), slot.Topic)
+	if userDictated {
+		annotation += " [user-dictated]"
+	}
+	step := scenarios.Step{
+		UserInput:    userInput,
+		MockResponse: buildMockResponse(isNew, thr.threadID(), anchorTags, slot),
+		Annotation:   annotation,
+		// Closure is set on EVERY step: any thread that decay-closes
+		// during the run is resolved, and a nil ClosureAck would
+		// disable closure detection that step. RecallAck is always
+		// decline-all (the generator cannot predict the runtime's
+		// offer set, so accepting nothing is the only contract-safe
+		// choice — recall is *measured* here, not acted on).
+		ClosureAck: &scenarios.ClosureAck{Outcome: turn.ClosureResolved},
+		RecallAck:  &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
+	}
+
+	if tt == turnWork {
+		step.PreEvents = g.buildWorkPreEvents(idx, slot, userDictated)
+	}
+
+	// On a recall opportunity, declare the ground-truth match set so
+	// the harness records per-step recall fidelity. RecallMeasureOnly:
+	// a recall miss must not fail this smoke rung.
+	if recallOpp {
+		step.ExpectedRecallMatches = recallIDs
+		step.RecallMode = scenarios.RecallMeasureOnly
+	}
+
+	// Update the Layer-B LRU and last-engaged bookkeeping to reflect
+	// this turn's engagement. g.stepIndex is this turn's 0-based index.
+	g.engage(idx, g.stepIndex)
+	return bufStep{step: step, slotIdx: thr.slotIdx, engagedIdx: idx}
+}
+
+// selectEngagedThread picks the thread the upcoming step engages,
+// dispatching on the per-turn action. actNew appends a fresh thread to
+// g.threads with a deterministic corpus-slot binding; actSwitch and
+// actResume consume one rng draw each from g.rng. actContinue and
+// actNew make no rng draws — preserving the original rng draw ordering
+// is what keeps buildStep's output a pure function of (Seed, Duration,
+// Corpus).
+func (g *generator) selectEngagedThread(act action) (idx int, isNew bool) {
 	switch act {
 	case actNew:
 		idx = len(g.threads)
@@ -1174,227 +1240,183 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 		cands := g.resumeCandidates(g.stepIndex)
 		idx = cands[g.rng.Intn(len(cands))]
 	}
+	return idx, isNew
+}
 
-	thr := g.threads[idx]
-	slot := g.model.slots[thr.slotIdx]
-
-	// Recall-opportunity oracle: a dormant thread (not in Layer B, not
-	// the one engaged this turn) bound to the SAME corpus slot is
-	// anchored on the slot's NON-LOOSE tags. The engaging turn's symbol
-	// set Q is the slot's full UserInput tags (loose cells included);
-	// the sibling's symbol set T is the filtered subset that drops loose
-	// positions, so the §3.4 Jaccard layer's score is (5-L) / (|T|+L)
-	// where L = #loose cells in this slot — a hit when L is small, a
-	// probabilistic miss when L is large enough to push the score below
-	// the 0.4 threshold (the §2.2 anchor-cap padding from 5-L up to 4
-	// inflates the union and makes L≥3 a clean miss). With FamilySize=2
-	// there is still at most one such dormant sibling, so the
-	// expected-match set is small and well-defined; what changed is
-	// that the sibling can now legitimately miss, exercising the
-	// miss→refinement loop. Collected in ascending creation order for
-	// determinism.
-	//
-	// New-thread turns suppress the recall-opportunity emission: the
-	// engaging userInput on a recall opportunity is the slot's full
-	// UserInput (5 #-tags including any loose cells), and on a
-	// thread-creation turn that pollutes the new thread's coalesced
-	// anchors with the loose terms via §3.3 symbol extraction — defeating
-	// the loose-filter on anchorTags. The dormant first-family-member
-	// still surfaces as the sibling on later continue/switch/resume
-	// turns; we drop at most one recall opportunity per family pair
-	// (the creation turn of the second member), which costs a handful
-	// of samples even on the long rungs.
-	var recallIDs []string
-	if !isNew {
-		for _, cand := range g.threads {
-			if cand.order == idx || g.inLayerB(cand.order) {
-				continue
-			}
-			if cand.slotIdx == thr.slotIdx {
-				recallIDs = append(recallIDs, cand.threadID())
-			}
+// recallExpectedFor computes the recall-opportunity oracle for the
+// engaging turn: dormant threads (not in Layer B, not the engaged
+// thread) bound to the same corpus slot, in ascending creation order.
+//
+// A same-slot dormant thread is anchored on the slot's NON-LOOSE tags;
+// the engaging turn's symbol set Q is the slot's full UserInput tags
+// (loose cells included), so the §3.4 Jaccard layer's score is
+// (5-L) / (|T|+L) where L = #loose cells in this slot — a hit when L
+// is small, a probabilistic miss when L is large enough to push the
+// score below the 0.4 threshold (the §2.2 anchor-cap padding from
+// 5-L up to 4 inflates the union and makes L≥3 a clean miss). With
+// FamilySize=2 there is still at most one such dormant sibling, so the
+// expected-match set is small and well-defined; what changed is that
+// the sibling can now legitimately miss, exercising the
+// miss→refinement loop.
+//
+// New-thread turns suppress the recall-opportunity emission: the
+// engaging userInput on a recall opportunity is the slot's full
+// UserInput (5 #-tags including any loose cells), and on a
+// thread-creation turn that pollutes the new thread's coalesced
+// anchors with the loose terms via §3.3 symbol extraction — defeating
+// the loose-filter on anchorTags. The dormant first-family-member
+// still surfaces as the sibling on later continue/switch/resume
+// turns; we drop at most one recall opportunity per family pair
+// (the creation turn of the second member), which costs a handful of
+// samples even on the long rungs.
+func (g *generator) recallExpectedFor(idx, slotIdx int, isNew bool) []string {
+	if isNew {
+		return nil
+	}
+	var ids []string
+	for _, cand := range g.threads {
+		if cand.order == idx || g.inLayerB(cand.order) {
+			continue
+		}
+		if cand.slotIdx == slotIdx {
+			ids = append(ids, cand.threadID())
 		}
 	}
+	return ids
+}
 
-	// Anchors declared in the §5.1 topic tag are ALWAYS the slot's tags
-	// FILTERED to drop loose-cell positions, on every step regardless
-	// of action. The runtime's §3.3 model-response extractor folds the
-	// declared anchors into coalesce, which then feeds (a) the new
-	// thread's spine anchors on creation and (b) every engaged thread's
-	// `history_symbols` on update. Declaring the filtered list keeps
-	// the loose term out of those persistent symbol sets — the
-	// asymmetry that lets a same-slot recall query (whose user input
-	// brings the loose term in for THAT turn only) sometimes fail to
-	// overlap the sibling enough to clear the §3.4 0.4 threshold. A
-	// dormant sibling's symbol set thus stabilises at the non-loose
-	// substrate, and the recall opportunity's query (Q) differs from
-	// the sibling's set (T) by the slot's loose positions.
-	anchorTags := nonLooseTags(slot)
-
-	// UserInput: on a recall opportunity, re-issue the slot's mad-libs
-	// query verbatim — its #-prefixed tags (loose cells included) drive
-	// the runtime's symbol extraction, and the coalesced query set is
-	// the full slot.Tags, firing recall against the dormant sibling's
-	// filtered anchors. Otherwise a plain engaging line mentioning a
-	// couple of the tags so the turn still extracts on-topic symbols —
-	// and on the new-thread case the #-prefixed mention must be a
-	// NON-LOOSE tag, so the §3.3 symbol extraction does not slip a loose
-	// term into the new thread's spine anchors via coalesce.
-	var userInput string
-	if len(recallIDs) > 0 {
-		userInput = slot.UserInput
-	} else {
-		mention := firstNonLooseTag(slot)
-		second := slot.Tags[1%len(slot.Tags)]
-		userInput = fmt.Sprintf("working on #%s and %s", mention, second)
+// defaultUserInput returns the engaging line for a non-user-dictated
+// turn: on a recall opportunity, the slot's mad-libs query verbatim —
+// its #-prefixed tags (loose cells included) drive the runtime's
+// symbol extraction, and the coalesced query set is the full
+// slot.Tags, firing recall against the dormant sibling's filtered
+// anchors. Otherwise a plain engaging line mentioning a couple of the
+// tags so the turn still extracts on-topic symbols — and on the
+// new-thread case the #-prefixed mention must be a NON-LOOSE tag, so
+// the §3.3 symbol extraction does not slip a loose term into the new
+// thread's spine anchors via coalesce.
+func defaultUserInput(slot CorpusSlot, recallOpp bool) string {
+	if recallOpp {
+		return slot.UserInput
 	}
+	mention := firstNonLooseTag(slot)
+	second := slot.Tags[1%len(slot.Tags)]
+	return fmt.Sprintf("working on #%s and %s", mention, second)
+}
 
-	// Realism C — user-dictated file content. On an *eligible* work
-	// turn (non-recall-opportunity, non-new, work-class), draw against
-	// userDictatedPct to decide whether this turn is the user-dictated
-	// variant. The draw must happen unconditionally inside the
-	// eligibility gate so the rng sequence is determined by buildStep's
-	// inputs alone — same (Seed, Duration, Corpus) → same draws.
-	//
-	// Eligibility:
-	//   - recall opportunity: UserInput is reserved for the slot's
-	//     verbatim mad-libs query; replacing it would break recall
-	//     measurement.
-	//   - new-thread: user-prompt symbol extraction on a creation turn
-	//     feeds the new thread's spine anchors via §3.3 → coalesce, and
-	//     embedding a file path / arbitrary literal would pollute those
-	//     anchors with non-topical noise.
-	//   - non-work: there is no fs.write to share the literal with.
-	//
-	// What the variant exercises (canonical spec §3.9 paragraph in
-	// ARCHITECTURE.md):
-	//   (a) user-prompt symbol extraction on file-content literals — the
-	//       prompt embeds the file path, which the deterministic pass on
-	//       user.prompt extracts as an identifier symbol.
-	//   (b) §3.0 transient-data classification — the same prompt
-	//       plausibly carries decision-class (high-level #-tag intent)
-	//       AND task-class (literal value via the file path arriving
-	//       through fs.read/fs.write).
-	//   (c) §3.9.2/§3.9.4 live-window — the literal line text appears in
-	//       both the user.prompt content and the fs.write content,
-	//       exercising dedup across delta sources.
-	//
-	// The variant flag is consulted again below to align the fs.write
-	// modify line with the literal embedded in the prompt — same
-	// literal in both deltas is the live-window case.
-	userDictated := false
-	if tt == turnWork && !isNew && len(recallIDs) == 0 {
-		if g.rng.Intn(userDictatedSelector) < userDictatedPct {
-			userDictated = true
-			mention := firstNonLooseTag(slot)
-			// pendingWriteCount is the writeCount the upcoming fs.write
-			// will use — workFile + writeCount++ happen later, so peek
-			// the current value and add one. This keeps the literal in
-			// the prompt byte-identical to what the modify step appends.
-			fs := g.workFile(idx)
-			pendingWriteCount := fs.writeCount + 1
-			userInput = fmt.Sprintf(
-				"append this exact line to %s: // edit %d: %s — #%s",
-				fs.path, pendingWriteCount, slot.Topic, mention)
-			g.userDictatedCount++
-		}
+// maybeUserDictated draws against userDictatedPct on an *eligible*
+// work turn (non-recall-opportunity, non-new, work-class) to decide
+// whether this turn is the Realism C "user-dictated file content"
+// variant. On a true draw it returns the variant's user input — a
+// prompt embedding the literal line the upcoming fs.write will
+// append — and ok=true; otherwise (ineligible or draw missed)
+// it returns ok=false and the caller keeps the default input.
+//
+// The draw must happen unconditionally inside the eligibility gate so
+// the rng sequence is determined by buildStep's inputs alone — same
+// (Seed, Duration, Corpus) → same draws.
+//
+// Eligibility:
+//   - recall opportunity: UserInput is reserved for the slot's
+//     verbatim mad-libs query; replacing it would break recall
+//     measurement.
+//   - new-thread: user-prompt symbol extraction on a creation turn
+//     feeds the new thread's spine anchors via §3.3 → coalesce, and
+//     embedding a file path / arbitrary literal would pollute those
+//     anchors with non-topical noise.
+//   - non-work: there is no fs.write to share the literal with.
+//
+// What the variant exercises (canonical spec §3.9 paragraph in
+// ARCHITECTURE.md):
+//
+//	(a) user-prompt symbol extraction on file-content literals — the
+//	    prompt embeds the file path, which the deterministic pass on
+//	    user.prompt extracts as an identifier symbol.
+//	(b) §3.0 transient-data classification — the same prompt
+//	    plausibly carries decision-class (high-level #-tag intent)
+//	    AND task-class (literal value via the file path arriving
+//	    through fs.read/fs.write).
+//	(c) §3.9.2/§3.9.4 live-window — the literal line text appears in
+//	    both the user.prompt content and the fs.write content,
+//	    exercising dedup across delta sources.
+//
+// The ok return is consulted by buildWorkPreEvents to align the
+// fs.write modify line with the literal embedded in the prompt — same
+// literal in both deltas is the live-window case.
+func (g *generator) maybeUserDictated(tt turnType, isNew, recallOpp bool, idx int, slot CorpusSlot) (string, bool) {
+	if tt != turnWork || isNew || recallOpp {
+		return "", false
 	}
+	if g.rng.Intn(userDictatedSelector) >= userDictatedPct {
+		return "", false
+	}
+	mention := firstNonLooseTag(slot)
+	// pendingWriteCount is the writeCount the upcoming fs.write will
+	// use — workFile + writeCount++ happen later in buildWorkPreEvents,
+	// so peek the current value and add one. This keeps the literal in
+	// the prompt byte-identical to what the modify step appends.
+	fs := g.workFile(idx)
+	pendingWriteCount := fs.writeCount + 1
+	g.userDictatedCount++
+	return fmt.Sprintf(
+		"append this exact line to %s: // edit %d: %s — #%s",
+		fs.path, pendingWriteCount, slot.Topic, mention), true
+}
 
-	// MockResponse threads: *new-topic* for a new thread, else the
-	// engaged thread's thr_N id.
-	var threads []string
+// buildMockResponse builds the §5.1-tagged mock response: *new-topic*
+// for a new thread, else the engaged thread's thr_N id. The body is a
+// deterministic on-topic line keyed off the slot's first two tags.
+func buildMockResponse(isNew bool, threadID string, anchorTags []string, slot CorpusSlot) model.Response {
+	threads := []string{threadID}
 	if isNew {
 		threads = []string{prompt.NewTopicLiteral}
-	} else {
-		threads = []string{thr.threadID()}
 	}
 	body := fmt.Sprintf("Working through %s — %s.",
 		slot.Topic, strings.Join(slot.Tags[:min(2, len(slot.Tags))], ", "))
-	resp := scenarios.NewMockResponseWithTag(threads, anchorTags, body)
+	return scenarios.NewMockResponseWithTag(threads, anchorTags, body)
+}
 
-	annotation := fmt.Sprintf("turn %d: %s %s (%s)",
-		g.stepIndex+1, turnTypeName(tt), actionName(act), slot.Topic)
+// buildWorkPreEvents constructs a work turn's §3.9 read/modify/write
+// cycle to exercise the working-set content-dedup integration on the
+// heavy turns: fs.read of the file's current content, a deterministic
+// modify, then fs.write of the new content. Every commitEvery-th write
+// also emits an fs.commit with a deterministic synthetic hash.
+//
+// On a user-dictated turn the appended line is the literal the user
+// already named in the prompt — the same byte sequence appears in
+// both deltas, exercising the §3.9.2/§3.9.4 live-window dedup path.
+// Otherwise the agentic-edit default line is used. Mutates the
+// thread's fileState (content, writeCount).
+func (g *generator) buildWorkPreEvents(idx int, slot CorpusSlot, userDictated bool) []turn.Delta {
+	fs := g.workFile(idx)
+	preEvents := []turn.Delta{{
+		Source:  "fs.read",
+		Content: fs.content,
+		Meta:    map[string]string{"path": fs.path},
+	}}
+	fs.writeCount++
 	if userDictated {
-		annotation += " [user-dictated]"
+		fs.content += fmt.Sprintf("\n// edit %d: %s — #%s\n",
+			fs.writeCount, slot.Topic, firstNonLooseTag(slot))
+	} else {
+		fs.content += fmt.Sprintf("\n// edit %d: %s\n",
+			fs.writeCount, slot.Topic)
 	}
-	step := scenarios.Step{
-		UserInput:    userInput,
-		MockResponse: resp,
-		Annotation:   annotation,
-		// Closure is set on EVERY step: any thread that decay-closes
-		// during the run is resolved, and a nil ClosureAck would
-		// disable closure detection that step.
-		ClosureAck: &scenarios.ClosureAck{Outcome: turn.ClosureResolved},
-	}
-
-	// work turns carry a real §3.9 read/modify/write cycle to exercise
-	// the working-set content-dedup integration on the heavy turns:
-	// fs.read of the file's current content, a deterministic modify, then
-	// fs.write of the new content. Every commitEvery-th write also emits
-	// an fs.commit with a deterministic synthetic hash. rapid turns have
-	// no PreEvents.
-	if tt == turnWork {
-		fs := g.workFile(idx)
-		// fs.read: the file's content as it stands before this turn's edit.
-		preEvents := []turn.Delta{{
-			Source:  "fs.read",
-			Content: fs.content,
-			Meta:    map[string]string{"path": fs.path},
-		}}
-		// Modify: append a deterministic line keyed off the topic and the
-		// write count so successive writes produce real diffs. On a
-		// user-dictated turn the appended line is the literal the user
-		// already named in the prompt — the same byte sequence appears in
-		// both deltas, exercising the §3.9.2/§3.9.4 live-window dedup
-		// path. Otherwise the agentic-edit default line is used.
-		fs.writeCount++
-		if userDictated {
-			fs.content += fmt.Sprintf("\n// edit %d: %s — #%s\n",
-				fs.writeCount, slot.Topic, firstNonLooseTag(slot))
-		} else {
-			fs.content += fmt.Sprintf("\n// edit %d: %s\n",
-				fs.writeCount, slot.Topic)
-		}
-		// fs.write: the new content.
+	preEvents = append(preEvents, turn.Delta{
+		Source:  "fs.write",
+		Content: fs.content,
+		Meta:    map[string]string{"path": fs.path},
+	})
+	if fs.writeCount%commitEvery == 0 {
 		preEvents = append(preEvents, turn.Delta{
-			Source:  "fs.write",
-			Content: fs.content,
-			Meta:    map[string]string{"path": fs.path},
+			Source: "fs.commit",
+			Meta: map[string]string{
+				"path": fs.path,
+				"hash": syntheticHash(fs.content),
+			},
 		})
-		// Every commitEvery-th write commits to the user's project git.
-		if fs.writeCount%commitEvery == 0 {
-			preEvents = append(preEvents, turn.Delta{
-				Source: "fs.commit",
-				Meta: map[string]string{
-					"path": fs.path,
-					"hash": syntheticHash(fs.content),
-				},
-			})
-		}
-		step.PreEvents = preEvents
 	}
-
-	// RecallAck is set on every step (a nil ack would disable the
-	// recall resolver for the step). It is always a decline-all: the
-	// harness's recall resolver fails the test if an accepted thread ID
-	// was not in the runtime's recall offer, and the generator cannot
-	// predict the runtime's offer set — so accepting nothing is the
-	// only contract-safe choice. Recall is *measured* here, not
-	// acted on.
-	step.RecallAck = &scenarios.RecallAck{Reason: turn.DeclineNotRelevant}
-
-	// On a recall opportunity, declare the ground-truth match set so
-	// the harness records per-step recall fidelity. RecallMeasureOnly:
-	// a recall miss must not fail this smoke rung.
-	if len(recallIDs) > 0 {
-		step.ExpectedRecallMatches = recallIDs
-		step.RecallMode = scenarios.RecallMeasureOnly
-	}
-
-	// Update the Layer-B LRU and last-engaged bookkeeping to reflect
-	// this turn's engagement. g.stepIndex is this turn's 0-based index.
-	g.engage(idx, g.stepIndex)
-	return bufStep{step: step, slotIdx: thr.slotIdx, engagedIdx: idx}
+	return preEvents
 }
 
 // syntheticHash returns a short deterministic hex digest of content, used
