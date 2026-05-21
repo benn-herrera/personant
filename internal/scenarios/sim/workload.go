@@ -281,12 +281,31 @@ func (m corpusModel) slotFor(order int) int {
 	return (order / m.familySize) % len(m.slots)
 }
 
+// stubAnchorPrefix is the inert synthetic-anchor token prefix the
+// harness pads a sub-floor NEW-thread tag with to meet the §5.1
+// 4-anchor floor. It is deliberately not a corpus term: every recall
+// query (slot.UserInput) is built only from real Wikipedia-derived
+// slot.Tags, so a stub-anchor-<n> token can never overlap a query term.
+// That inertness is load-bearing — padding from dropped real/loose tags
+// instead would close the query-vs-thread Jaccard gap and collapse
+// drift to recall=1.0. See newThreadAnchorTags.
+const stubAnchorPrefix = "stub-anchor-"
+
 // nonLooseTags returns the slot's tags with loose-cell positions
 // dropped, preserving order. A slot whose LooseMask is nil (no column
 // ground truth available) yields a copy of Tags unchanged — the prior
 // all-tags-are-anchors binding. If every position is loose (vanishingly
-// rare under Binomial(5, 1/5)) the result is nil; callers downstream
-// handle that via the spec §2.2 anchor-cap padding path.
+// rare under Binomial(5, 1/5)) the result is nil.
+//
+// This is the raw drift set: it is NOT padded to the §5.1 floor here.
+// The asymmetry is deliberate. Existing-thread engagement and
+// refinement tags carry this set verbatim — production does not
+// re-validate anchor cardinality on engagement (only at thread
+// creation), and merging the loose-filtered set into an existing
+// thread's history_symbols is exactly the vocabulary drift the recall
+// gap measures. Only the NEW-thread emission must be brought up to the
+// 4-anchor floor (production enforces the contract at creation); that
+// padding lives in newThreadAnchorTags, which pads with inert stubs.
 func nonLooseTags(slot CorpusSlot) []string {
 	if len(slot.LooseMask) != len(slot.Tags) {
 		return append([]string(nil), slot.Tags...)
@@ -296,6 +315,32 @@ func nonLooseTags(slot CorpusSlot) []string {
 		if !slot.LooseMask[i] {
 			out = append(out, t)
 		}
+	}
+	return out
+}
+
+// newThreadAnchorTags is the anchor set the harness emits in a
+// *new-topic* topic tag: nonLooseTags padded with inert synthetic stubs
+// up to the §5.1 floor (memops.MinAnchorsPerThread).
+//
+// The harness plays the model-in-the-loop, so a new-thread tag must be
+// contract-compliant (4–8 anchors). Production enforces that contract
+// and hard-errors on a sub-4 (or over-8) emission — it never synthesizes
+// anchors. Thin-real-anchor drift is modeled by dropping loose tags
+// (nonLooseTags); when that leaves fewer than the floor, we pad inert
+// stubs (stubAnchorPrefix + index) HERE so the emission is valid.
+//
+// The stubs are clearly-synthetic tokens that never match a mad-libs
+// query term, so the query-vs-thread Jaccard gap (and thus recall
+// misses) is preserved exactly — padding from dropped real/loose tags
+// would close the gap and collapse drift to recall=1.0. Padding ONLY
+// the new-thread emission (not engagement/refinement) keeps the drift
+// behavior of existing-thread turns byte-identical to the pre-T1-2
+// production-padding baseline.
+func newThreadAnchorTags(slot CorpusSlot) []string {
+	out := nonLooseTags(slot)
+	for i := len(out); i < memops.MinAnchorsPerThread; i++ {
+		out = append(out, fmt.Sprintf("%s%d", stubAnchorPrefix, i+1))
 	}
 	return out
 }
@@ -1151,8 +1196,15 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 	recallOpp := len(recallIDs) > 0
 
 	// anchorTags drops loose-cell positions on every step regardless of
-	// action — see nonLooseTags for the asymmetry this preserves.
+	// action — see nonLooseTags for the asymmetry this preserves. A
+	// *new-topic* turn must additionally be padded to the §5.1 4-anchor
+	// floor with inert stubs (production hard-errors on a sub-4 creation
+	// emission); engagement/refinement tags carry the raw drift set, as
+	// production does not re-validate cardinality on engagement.
 	anchorTags := nonLooseTags(slot)
+	if isNew {
+		anchorTags = newThreadAnchorTags(slot)
+	}
 	userInput := defaultUserInput(slot, recallOpp)
 	userDictated := false
 	if udInput, ok := g.maybeUserDictated(tt, isNew, recallOpp, idx, slot); ok {
@@ -1253,8 +1305,9 @@ func (g *generator) selectEngagedThread(act action) (idx int, isNew bool) {
 // (loose cells included), so the §3.4 Jaccard layer's score is
 // (5-L) / (|T|+L) where L = #loose cells in this slot — a hit when L
 // is small, a probabilistic miss when L is large enough to push the
-// score below the 0.4 threshold (the §2.2 anchor-cap padding from
-// 5-L up to 4 inflates the union and makes L≥3 a clean miss). With
+// score below the 0.4 threshold (when 5-L < 4 the new-thread tag's
+// inert stub padding up to 4 — see newThreadAnchorTags — inflates the
+// union and makes the deepest-drift slots a clean miss). With
 // FamilySize=2 there is still at most one such dormant sibling, so the
 // expected-match set is small and well-defined; what changed is that
 // the sibling can now legitimately miss, exercising the

@@ -218,7 +218,14 @@ func TestRunNoTopicTagIsNonFatal(t *testing.T) {
 	}
 }
 
-func TestRunNewTopicAnchorCardinalityOutOfRange(t *testing.T) {
+// TestRunNewTopicAnchorCardinalityFailsLoud — the "4–8 anchors per
+// thread" rule (§2.2 / §5.1) is a contract on the model's topic-tag
+// emission. Production ENFORCES it and never synthesizes anchors: a
+// sub-4 (here, two-anchor) *new-topic* emission is a hard protocol
+// violation. The turn must abort with ErrAnchorCardinalityViolation, no
+// spine record may be appended, no thread sidecar created, and the
+// violation logged — mirroring the B2 fail-loud path.
+func TestRunNewTopicAnchorCardinalityFailsLoud(t *testing.T) {
 	paths, meta := newTestHome(t)
 
 	// Two anchors only — under the §2.2 hard range
@@ -229,23 +236,37 @@ func TestRunNewTopicAnchorCardinalityOutOfRange(t *testing.T) {
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
-	if _, err := Run(context.Background(), state, "ping", io.Discard); err != nil {
-		// Note: prompt.Parse rejects this tag because anchor count <4 emits
-		// a warning but is still a valid match. The package treats the count
-		// as a warning, not a parse failure, so we should still get a
-		// new-thread create.
-		t.Fatalf("Run: %v", err)
+	_, err := Run(context.Background(), state, "ping", io.Discard)
+	if err == nil {
+		t.Fatal("Run must return an error on a sub-4 anchor *new-topic* emission")
 	}
-	records, err := store.ReadSpine(paths.Spine)
-	if err != nil {
-		t.Fatalf("read spine: %v", err)
+	if !errors.Is(err, ErrAnchorCardinalityViolation) {
+		t.Errorf("error = %v; want errors.Is ErrAnchorCardinalityViolation", err)
 	}
-	if len(records) != 1 {
-		t.Fatalf("expected 1 spine record; got %d", len(records))
+
+	// Substrate must NOT have advanced: no spine record, no thread.
+	records, rerr := store.ReadSpine(paths.Spine)
+	if rerr != nil {
+		t.Fatalf("read spine: %v", rerr)
 	}
-	r := records[0]
-	if got := len(r.Anchors); got != memops.MinAnchorsPerThread {
-		t.Errorf("padded anchor count: got %d want %d", got, memops.MinAnchorsPerThread)
+	if len(records) != 0 {
+		t.Errorf("spine must not advance on contract-violation abort; got %d records", len(records))
+	}
+
+	// The violation is logged for forensics/diagnostics.
+	entries, lerr := os.ReadDir(paths.LogsDir)
+	if lerr != nil {
+		t.Fatalf("read logs dir: %v", lerr)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("logs dir entries: got %d want 1 (%v)", len(entries), entries)
+	}
+	data, rerr := os.ReadFile(paths.LogsDir + "/" + entries[0].Name())
+	if rerr != nil {
+		t.Fatalf("read log: %v", rerr)
+	}
+	if logBody := string(data); !strings.Contains(logBody, "anchor-cardinality-violation") {
+		t.Errorf("log missing anchor-cardinality-violation:\n%s", logBody)
 	}
 }
 

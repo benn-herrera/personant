@@ -108,7 +108,7 @@ interface SpineRecord {
 |---|---|
 | `id` | regex `/^thr_\d+$/`, globally unique |
 | `project` | regex `/^prj_\d+$/`, references an existing project (or `prj_default`) |
-| `anchors.length` | between 4 and 8 inclusive; the [4,8] range is calibrated against the Jaccard operating point: fewer than 4 collapse threshold discrimination; more than 8 dilute specificity below the precision floor established in Phase C.6 |
+| `anchors.length` | between 4 and 8 inclusive; the [4,8] range is calibrated against the Jaccard operating point: fewer than 4 collapse threshold discrimination; more than 8 dilute specificity below the precision floor established in Phase C.6. This is a hard contract: production rejects out-of-range anchor sets at thread creation (no padding, no truncation, no synthetic anchors) and `personant verify` also enforces it. Synthetic anchors are never written by production. |
 | `anchors[i]` | normalized form (see §2.7); 3-50 chars |
 | `summary.length` | ≤ `spine.entry-max-chars` directive value |
 | `state` | one of `ThreadState` enum values |
@@ -1332,6 +1332,13 @@ declares which threads the turn engages, but the runtime decides
 - **mixed** (`[thr_N, *new-topic*]`): the existing `thr_N` owns; the new
   thread is created **metadata-only** (`turn_count = 0`, no excerpt, with
   its `description` set per §2.3).
+
+The 4–8 anchor count (§2.2) is a contract on the model's tag emission.
+Emitting fewer than 4 or more than 8 anchors for a thread is a contract
+violation: the runtime fails the turn loud — substrate state does not
+advance, no thread is created, the violation is logged — consistent with
+the topic-tag-protocol fail-loud handling (§3.0/§3.3). The runtime never
+pads or truncates to recover; the contract is the model's to satisfy.
 
 The single-line form is deliberate: no multi-line state for the parser
 to track, no envelope syntax that varies across providers, no JSON
