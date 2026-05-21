@@ -121,6 +121,38 @@ def load_template(path):
                         f"its topic (use mode=measure-only for drift cells)"
                     )
 
+    # A query draws one cell per column, and the drawn cells become the
+    # query's anchor tags. If a value repeats within a column, or is
+    # shared across two columns, a single query can sample it twice — so
+    # N columns emit fewer than N distinct anchors. The runtime counts
+    # DISTINCT-normalized anchors and hard-errors below the spec §2.2
+    # floor of 4, so a collision here silently sinks a thread mid-sim.
+    # Enforcing within-column uniqueness AND pairwise-column disjointness
+    # at authoring time guarantees every query yields n_cols distinct
+    # anchors. This is the authoring rule for new templates.
+    for col_idx, column in enumerate(tpl["columns"]):
+        seen = set()
+        for cell in column:
+            if cell in seen:
+                raise ValueError(
+                    f"{path.name}: column {col_idx} lists cell {cell!r} "
+                    f"more than once; a column's cells must be distinct so "
+                    f"every query yields one anchor per column"
+                )
+            seen.add(cell)
+    columns = tpl["columns"]
+    for i in range(len(columns)):
+        set_i = set(columns[i])
+        for j in range(i + 1, len(columns)):
+            shared = set_i & set(columns[j])
+            if shared:
+                raise ValueError(
+                    f"{path.name}: columns {i} and {j} share cell value(s) "
+                    f"{sorted(shared)}; columns must be pairwise-disjoint so a "
+                    f"single query cannot sample the same anchor from two "
+                    f"columns and fall below the spec §2.2 distinct-anchor floor"
+                )
+
     n_cols = len(tpl["columns"])
     for sent in tpl["sentence_templates"]:
         slots = {int(m) for m in PLACEHOLDER_RE.findall(sent)}
