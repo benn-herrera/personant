@@ -3,6 +3,7 @@ package eventlog
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -88,7 +89,7 @@ func TestLogConcurrentWritersDoNotTear(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < perWriter; j++ {
-				if err := Log(paths, "test", "concurrent", "w="+itoa(i)+" j="+itoa(j)); err != nil {
+				if err := Log(paths, "test", "concurrent", "w="+strconv.Itoa(i)+" j="+strconv.Itoa(j)); err != nil {
 					t.Errorf("Log: %v", err)
 					return
 				}
@@ -154,17 +155,3 @@ func TestLogRejectsBadInput(t *testing.T) {
 	}
 }
 
-// itoa avoids fmt import in the goroutine-heavy hot path.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(buf[i:])
-}
