@@ -1953,7 +1953,7 @@ Standard Go `testing` patterns over `internal/store/`,
 
 ### 9.4 Measurement regime (v0.1 in progress)
 
-The measurement regime drives four test layers — scenario, churn, calibration, and the six-month simulation — all running against the mock LLM client (§9.2) with logical-clock acceleration so the full simulation completes in minutes. Every test layer emits a machine-readable metrics blob (`internal/testing/metrics/`) with a stable JSON schema for cross-version comparison. Working artifacts live in `internal/scenarios/` and the `mem.jsonl` telemetry; the detailed mechanics evolve with the implementation.
+The measurement regime drives four test layers — scenario, churn, calibration, and the six-month simulation — all running against the mock LLM client (§9.2) with logical-clock acceleration so the full simulation completes in minutes. Every test layer emits a machine-readable metrics blob (`internal/metrics/`) with a stable JSON schema for cross-version comparison. Working artifacts live in `internal/scenarios/` and the `mem.jsonl` telemetry; the detailed mechanics evolve with the implementation.
 
 **v0.1 acceptance metrics** (normative; must hold through the six-month simulation):
 
@@ -1964,10 +1964,10 @@ The measurement regime drives four test layers — scenario, churn, calibration,
 - **Round-trip fidelity:** archive → recover → diff against original; information-preservation rate measured.
 - **Operation latency within bounds:** engagement update, spine match, thread fetch, retirement, archival, recovery, index rebuild, index check — all stable as accumulated state grows.
 
-**Invariant validators** (`internal/testing/invariants/`) run after every operation in churn sequences and at key checkpoints in scenario tests: `VerifySpineIntegrity`, `VerifyIndexFresh`, `VerifyEngagementConsistency`, `VerifyArchiveResolvable`, `VerifyProjectReferences`, `VerifyLastActiveValid`, `VerifyNoBudgetOverflow`, `VerifyDedupConsistency`.
+**Invariant validators** (`internal/scenarios/invariants.go`) run after every operation in churn sequences and at key checkpoints in scenario tests: `VerifySpineIntegrity`, `VerifyIndexFresh`, `VerifyEngagementConsistency`, `VerifyArchiveResolvable`, `VerifyProjectReferences`, `VerifyLastActiveValid`, `VerifyNoBudgetOverflow`, `VerifyDedupConsistency`.
 
 **Named scenario set** (initial): single-thread lifecycle, multi-thread interleaving, project switching, heavy retirement (50 threads), same-anchor collision, transient shell-capture content, cross-boundary recovery. Churn sequences are randomized-but-seeded (80% engage / 10% create / 5% retire / 5% switch); failures dump operation log + seed for replay. Calibration sweeps a directive parameter across a range and emit a metrics matrix — this is how §2.6.1 bootstrap defaults earn their numbers.
 
-**Six-month simulation harness** (`internal/testing/sixmonth/`): synthetic workload generator with configurable "shape" (researcher / software-engineer / mixed), logical-clock acceleration (e.g. one simulated hour per 100ms real time), steady-state assertions, and per-operation cost profiling. Output: comprehensive metrics JSON + human-readable summary (`make six-month-sim`). Pass/fail per §9.1 criteria.
+**Six-month simulation harness** (`internal/scenarios/sim/`, `TestSim`): a deterministic seeded workload generator (the recall-madlibs corpus-slot model, §9.4) with logical-clock acceleration, steady-state assertions, and per-operation cost profiling. Run at a chosen span via `make sim DURATION=<1d|1w|1m|2m|6m>` (the rung walk; `make test` runs the default `1d` rung). Output: metrics JSON + human-readable summary. Pass/fail per §9.1 criteria.
 
 
