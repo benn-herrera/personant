@@ -38,9 +38,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
 
-	"personant/internal/clock"
 	"personant/internal/index"
 	"personant/internal/memops"
 	"personant/internal/store"
@@ -95,7 +93,7 @@ func Commit(ctx context.Context, paths store.PersonantPaths, msg string, preFlag
 		return fmt.Errorf("autogit.Commit: worktree: %w", err)
 	}
 
-	opts := &git.CommitOptions{Author: defaultSignature(repo)}
+	opts := &git.CommitOptions{Author: store.CommitSignature(repo)}
 	if _, err := wt.Commit(msg, opts); err != nil {
 		return fmt.Errorf("autogit.Commit: commit: %w", err)
 	}
@@ -329,23 +327,3 @@ func summarizeFindings(errs []memops.VerifyFinding, drift []string) string {
 	return strings.Join(parts, "; ")
 }
 
-// defaultSignature returns a Signature for commit author/committer.
-// When the repo's git config has user.name + user.email both set,
-// those are used (preserving user identity). Otherwise the personant
-// fallback identity ("personant" <personant@localhost>) is used so a
-// fresh tempdir with no git config still produces a valid commit.
-func defaultSignature(repo *git.Repository) *object.Signature {
-	cfg, err := repo.Config()
-	if err == nil && cfg.User.Name != "" && cfg.User.Email != "" {
-		return &object.Signature{
-			Name:  cfg.User.Name,
-			Email: cfg.User.Email,
-			When:  clock.Timeline(),
-		}
-	}
-	return &object.Signature{
-		Name:  "personant",
-		Email: "personant@localhost",
-		When:  clock.Timeline(),
-	}
-}
