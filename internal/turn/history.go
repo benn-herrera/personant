@@ -69,7 +69,7 @@ func mergeHistorySymbols(existing []memops.HistorySymbol, turnSymbols []coalesce
 	for _, sym := range turnSorted {
 		if i, ok := idx[sym.Normalized]; ok {
 			out[i].Count++
-			out[i].Source = upgradeSource(out[i].Source, sym.Source)
+			out[i].Source = memops.DominantSource(out[i].Source, sym.Source)
 			continue
 		}
 		raw := sym.Raw
@@ -90,16 +90,6 @@ func mergeHistorySymbols(existing []memops.HistorySymbol, turnSymbols []coalesce
 		return out
 	}
 	return evictLowestWeight(out, historyCapPerThread)
-}
-
-// upgradeSource is the persistent-history analogue of the per-turn
-// coalesce path — same §2.7.3 precedence rule
-// (curator > user > model > deterministic), applied on cumulative
-// history when merging an incoming observation into an existing
-// HistorySymbol entry. Delegates to memops.DominantSource so the rule
-// has exactly one definition site.
-func upgradeSource(existing, incoming memops.SymbolSource) memops.SymbolSource {
-	return memops.DominantSource(existing, incoming)
 }
 
 // evictLowestWeight returns out with the lowest-cumulative-weight entries

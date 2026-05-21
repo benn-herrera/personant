@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"personant/internal/curator"
@@ -377,7 +378,7 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 			if fetched > 0 {
 				_ = sr.Close()
 				_ = state.Ops.Log(ctx, memops.LogCategoryTopic, "re-prompt",
-					"fetched="+itoa(fetched)+" attempt="+itoa(attempt+1))
+					"fetched="+strconv.Itoa(fetched)+" attempt="+strconv.Itoa(attempt+1))
 				systemPrompt, err = buildSystemPrompt()
 				if err != nil {
 					return "", fmt.Errorf("turn: recompose working set: %w", err)

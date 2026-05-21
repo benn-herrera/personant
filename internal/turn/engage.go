@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -276,7 +277,7 @@ func updateExistingThread(ctx context.Context, state *State, threadID, userInput
 		return fmt.Errorf("engage thread %s: %w", threadID, err)
 	}
 	return state.Ops.Log(ctx, memops.LogCategoryThread, "engaged",
-		threadID+" turn_count="+itoa(rec.TurnCount))
+		threadID+" turn_count="+strconv.Itoa(rec.TurnCount))
 }
 
 func createNewThread(ctx context.Context, state *State, userInput, responseBody, now string, turnSymbols []coalescedSymbol, turnAnchors []string) (string, error) {
@@ -291,7 +292,7 @@ func createNewThread(ctx context.Context, state *State, userInput, responseBody,
 	anchors := state.coalesce.symbolList()
 	if len(anchors) < memops.MinAnchorsPerThread || len(anchors) > memops.MaxAnchorsPerThread {
 		_ = state.Ops.Log(ctx, memops.LogCategoryThread, "anchor-cardinality",
-			"new-thread anchors="+itoa(len(anchors))+" using-first-"+itoa(memops.MinAnchorsPerThread)+"-with-padding")
+			"new-thread anchors="+strconv.Itoa(len(anchors))+" using-first-"+strconv.Itoa(memops.MinAnchorsPerThread)+"-with-padding")
 		anchors = padOrTruncateAnchors(anchors, memops.MinAnchorsPerThread)
 	}
 
@@ -334,7 +335,7 @@ func createNewThread(ctx context.Context, state *State, userInput, responseBody,
 		return "", fmt.Errorf("create thread %s: %w", newID, err)
 	}
 	if err := state.Ops.Log(ctx, memops.LogCategoryThread, "created",
-		newID+" anchors="+itoa(len(anchors))+" project="+state.ActiveProject.ID); err != nil {
+		newID+" anchors="+strconv.Itoa(len(anchors))+" project="+state.ActiveProject.ID); err != nil {
 		return "", err
 	}
 	return newID, nil

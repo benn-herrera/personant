@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 
 	"personant/internal/memops"
 	"personant/internal/prompt"
@@ -201,7 +202,7 @@ func extractSymbols(ctx context.Context, state *State, delta Delta) error {
 			if errors.Is(err, prompt.ErrNoTopicTag) {
 				// §5.1.2: missing tag is a warning, not a fatal — log and continue.
 				_ = state.Ops.Log(ctx, memops.LogCategoryTopic, "tag-missing",
-					"source=model.response bytes="+itoa(len(delta.Content)))
+					"source=model.response bytes="+strconv.Itoa(len(delta.Content)))
 				return nil
 			}
 			return err
@@ -231,27 +232,3 @@ func extractSymbols(ctx context.Context, state *State, delta Delta) error {
 	}
 }
 
-// itoa is a tiny helper to avoid pulling fmt for one int format on a hot
-// path that runs once per delta; matches the pattern used in eventlog
-// tests.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if neg {
-		i--
-		buf[i] = '-'
-	}
-	return string(buf[i:])
-}
