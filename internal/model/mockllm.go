@@ -279,6 +279,21 @@ func (m *MockClient) Calls() []MockCall {
 	return out
 }
 
+// WithPreamble returns a copy of resp whose Content has preamble prepended
+// ahead of the original (which carries the topic tag on its first line).
+// It models the real-model shape the mock otherwise never produces: a
+// `<think>…</think>` reasoning block, conversational filler, or a code
+// fence emitted BEFORE the §5.1.2 topic tag, so the tag is no longer on
+// the literal first line. Use it to drive the bounded-preamble-scan paths
+// (mid-turn fetch, stream-filter suppression). preamble should end with a
+// newline so the tag still occupies its own line; callers that pass a
+// `<think>` block include the closing `</think>\n` themselves.
+func WithPreamble(resp Response, preamble string) Response {
+	out := resp
+	out.Content = preamble + resp.Content
+	return out
+}
+
 // synthesize builds one generated response. The mu lock is already held
 // by the caller (Consult).
 func (m *MockClient) synthesize() Response {

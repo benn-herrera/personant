@@ -289,6 +289,61 @@ func TestParseBodyPreservesContent(t *testing.T) {
 	}
 }
 
+func TestPreambleScanFirstLineTag(t *testing.T) {
+	buf := []byte("*topic: thr_1 [a, b, c, d]*\nbody")
+	start, end, found, done := PreambleScan(buf)
+	if !found || !done {
+		t.Fatalf("found=%v done=%v, want both true", found, done)
+	}
+	if got := string(buf[start:end]); got != "*topic: thr_1 [a, b, c, d]*" {
+		t.Errorf("span: got %q", got)
+	}
+}
+
+func TestPreambleScanTagAfterThinkBlock(t *testing.T) {
+	buf := []byte("<think>\nreasoning about thr_5\n</think>\n*topic: thr_5 [a, b, c, d]*\nbody")
+	start, end, found, done := PreambleScan(buf)
+	if !found || !done {
+		t.Fatalf("found=%v done=%v, want both true", found, done)
+	}
+	if got := string(buf[start:end]); got != "*topic: thr_5 [a, b, c, d]*" {
+		t.Errorf("span: got %q", got)
+	}
+}
+
+func TestPreambleScanUnterminatedTagUndecided(t *testing.T) {
+	// A tag line whose terminating newline has not yet streamed must not
+	// resolve — more bytes might extend the line.
+	buf := []byte("filler\n*topic: thr_5 [a, b, c, d]*")
+	_, _, found, done := PreambleScan(buf)
+	if found || done {
+		t.Fatalf("found=%v done=%v, want both false (unterminated tag)", found, done)
+	}
+}
+
+func TestPreambleScanPartialUndecided(t *testing.T) {
+	buf := []byte("<think>\nstill reasoning")
+	_, _, found, done := PreambleScan(buf)
+	if found || done {
+		t.Fatalf("found=%v done=%v, want both false (more may arrive)", found, done)
+	}
+}
+
+func TestPreambleScanLineCapExhausted(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < PreambleScanLineCap+1; i++ {
+		b.WriteString("noise\n")
+	}
+	b.WriteString("*topic: thr_5 [a, b, c, d]*\n")
+	_, _, found, done := PreambleScan([]byte(b.String()))
+	if found {
+		t.Errorf("tag past the line cap should not be found")
+	}
+	if !done {
+		t.Errorf("scan past the line cap must be done")
+	}
+}
+
 // hasWarningContaining is a test helper that returns true if any of the
 // strings in ws contains the substring sub.
 func hasWarningContaining(ws []string, sub string) bool {

@@ -998,6 +998,81 @@ func TestRunRePromptLogsThreadFetchedDelta(t *testing.T) {
 	}
 }
 
+// TestRunPreambleBeforeTagDrivesFetchSuppressEngage — MAD T1-1. A model
+// response whose topic tag is NOT on the first line (a <think> block or
+// conversational filler precedes it, as real models emit) must still:
+//
+//	(a) fire the §5.5 mid-turn fetch for a referenced not-in-Layer-B thread,
+//	(b) NOT leak the *topic:…* line to the terminal,
+//	(c) record engagement (spine TurnCount increments),
+//	(d) NOT reject the turn.
+//
+// Before the bounded-preamble-scan fix, the first-line-only readPreamble
+// missed the tag (no fetch) and the first-line-only stream filter leaked
+// it. The mock always emitted the tag as the literal first line, masking
+// all three defects; model.WithPreamble produces the real-model shape.
+func TestRunPreambleBeforeTagDrivesFetchSuppressEngage(t *testing.T) {
+	cases := []struct {
+		name     string
+		preamble string
+	}{
+		{"think-block", "<think>\nThe user is asking about thr_42; let me recall it.\n</think>\n"},
+		{"filler-line", "Sure — here's what I know.\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			paths, meta := newTestHome(t)
+			// thr_42 exists on disk with a known TurnCount but is NOT in
+			// ActiveThreads, so the tag reference must trigger a mid-turn fetch.
+			seedThreadAndSpine(t, paths, meta.ID, "thr_42") // TurnCount seeded at 1
+
+			base := model.Response{Content: "*topic: thr_42 [a, b, c, d]*\nANSWER-BODY."}
+			mock := model.NewScriptedMock(
+				[]model.Response{model.WithPreamble(base, tc.preamble)}, nil)
+			mock.RecordCalls = true
+			state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+			now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+			pinClock(t, now)
+
+			var out bytes.Buffer
+			body, err := Run(context.Background(), state, "ask about thr_42", &out)
+			// (d) turn not rejected.
+			if err != nil {
+				t.Fatalf("Run rejected the turn: %v", err)
+			}
+
+			// (a) mid-turn fetch fired: a second consult + thr_42 in Layer B.
+			if got := len(mock.Calls()); got != 2 {
+				t.Errorf("mock call count: got %d want 2 (first stream + re-prompt)", got)
+			}
+			if len(state.ActiveThreads) == 0 || state.ActiveThreads[0] != "thr_42" {
+				t.Errorf("ActiveThreads: got %v want [thr_42, ...] (fetch did not fire)", state.ActiveThreads)
+			}
+			// (b) tag not leaked to the terminal; preamble + body did stream.
+			if strings.Contains(out.String(), "*topic:") {
+				t.Errorf("topic tag leaked to terminal: %q", out.String())
+			}
+			if !strings.Contains(out.String(), "ANSWER-BODY.") {
+				t.Errorf("body not streamed to terminal: %q", out.String())
+			}
+			if strings.Contains(body, "*topic:") {
+				t.Errorf("returned body still carries the tag: %q", body)
+			}
+			// (c) engagement recorded: thr_42's TurnCount advanced past its seed.
+			rec, found, ferr := store.FindSpineRecord(paths, "thr_42")
+			if ferr != nil || !found {
+				t.Fatalf("find spine thr_42: err=%v found=%v", ferr, found)
+			}
+			if rec.TurnCount != 2 {
+				t.Errorf("engagement not recorded: TurnCount got %d want 2", rec.TurnCount)
+			}
+			if rec.LastEngaged != now.Format(time.RFC3339) {
+				t.Errorf("last_engaged: got %q want %q", rec.LastEngaged, now.Format(time.RFC3339))
+			}
+		})
+	}
+}
+
 // TestRunBuffersFileEditsIntoThreadStore — the §3.9 checkpoint 5c path:
 // fs.read / fs.write / fs.commit PreEvents are buffered during the turn
 // and applied to the engaged thread's tracked-file sidecar at close.
