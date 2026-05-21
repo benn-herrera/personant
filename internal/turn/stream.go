@@ -1,7 +1,6 @@
 package turn
 
 import (
-	"bytes"
 	"errors"
 	"io"
 
@@ -32,31 +31,40 @@ func streamThroughFilter(sr model.StreamReader, filter io.Writer) error {
 }
 
 // preambleResult bundles the bytes accumulated from a streaming response
-// up through the first newline (head), bytes that arrived in the same
-// chunk after that newline (tail), and a parsed topic tag if head was
-// recognized as one (per §5.1.2). ended==true signals the stream EOF'd
-// before any newline was seen — head holds whatever bytes did arrive,
-// tail is empty.
+// up through the point the topic tag was located (or the bounded preamble
+// scan gave up). head holds the accumulated preamble bytes — the caller
+// re-writes them through the stream filter, which independently locates
+// and suppresses the tag line within the same bounded region. tag is the parsed §5.1.2 tag if one was located
+// anywhere in the scanned preamble. ended==true signals EOF arrived before
+// the scan resolved — head holds whatever bytes did arrive.
 //
 // readPreamble + classifyPreamble are split so the unit tests can
 // exercise the classification in isolation from the StreamReader pump.
 type preambleResult struct {
-	head  []byte           // first line up to and including its trailing \n
-	tail  []byte           // bytes after that \n in the chunk that contained it
-	tag   *prompt.TopicTag // non-nil iff head parsed as a §5.1.2 topic tag
-	ended bool             // true when EOF arrived before any \n
+	head  []byte           // accumulated preamble bytes (re-fed to the filter)
+	tag   *prompt.TopicTag // non-nil iff a §5.1.2 topic tag was located in head
+	ended bool             // true when EOF arrived before the scan resolved
 }
 
-// readPreamble loops over chunks from sr until either the first newline
-// arrives or the stream ends. Returned head/tail point into freshly
-// allocated buffers — the caller owns them across subsequent sr.Next()
-// calls. Errors other than io.EOF are surfaced verbatim.
+// readPreamble accumulates chunks from sr until the bounded preamble scan
+// (prompt.PreambleScan) locates a topic tag, rules one out (scan bound
+// reached), or the stream ends — whichever comes first. This generalizes
+// the prior "read to the first newline" behavior so a tag that follows a
+// `<think>…</think>` reasoning block or conversational filler (real-model
+// shapes the mock never produced) is still detected, driving the §5.5
+// mid-turn fetch decision. The scan is bounded (prompt.PreambleScanLineCap
+// / PreambleScanByteCap) so streaming latency stays bounded: the worst-case
+// hold before bytes flow downstream is one of those caps.
+//
+// Returned head points into a freshly allocated buffer — the caller owns
+// it across subsequent sr.Next() calls. Errors other than io.EOF are
+// surfaced verbatim.
 func readPreamble(sr model.StreamReader) (preambleResult, error) {
 	var buf []byte
 	for {
 		chunk, err := sr.Next()
 		if errors.Is(err, io.EOF) {
-			return classifyPreamble(buf, nil, true), nil
+			return classifyPreamble(buf, true), nil
 		}
 		if err != nil {
 			return preambleResult{}, err
@@ -65,32 +73,33 @@ func readPreamble(sr model.StreamReader) (preambleResult, error) {
 			continue
 		}
 		buf = append(buf, chunk.Content...)
-		if i := bytes.IndexByte(buf, '\n'); i >= 0 {
-			head := append([]byte(nil), buf[:i+1]...)
-			tail := append([]byte(nil), buf[i+1:]...)
-			return classifyPreamble(head, tail, false), nil
+		if _, _, _, done := prompt.PreambleScan(buf); done {
+			return classifyPreamble(append([]byte(nil), buf...), false), nil
 		}
 	}
 }
 
-// classifyPreamble inspects head and reports a parsed topic tag if it
-// matches §5.1.2 with a non-empty thread list. tail and ended are
-// passed through unchanged. head may or may not include a trailing
-// newline (it does when readPreamble found one; it doesn't when the
-// stream ended early); prompt.Parse is multi-line anchored so we feed
-// it head as-is plus a synthetic newline only if absent.
-func classifyPreamble(head, tail []byte, ended bool) preambleResult {
-	res := preambleResult{head: head, tail: tail, ended: ended}
+// classifyPreamble locates a §5.1.2 topic tag anywhere within the bounded
+// preamble head and, if found, parses it (requiring a non-empty thread
+// list per §5.1.2). ended is passed through unchanged. The located tag
+// line is fed to prompt.Parse so the parsed TopicTag (threads + anchors)
+// matches what the full-body parse would yield, keeping the §5.5 fetch
+// decision and the engagement parse consistent.
+func classifyPreamble(head []byte, ended bool) preambleResult {
+	res := preambleResult{head: head, ended: ended}
 	if len(head) == 0 {
 		return res
 	}
-	candidate := head
-	if candidate[len(candidate)-1] != '\n' {
-		c := make([]byte, len(candidate)+1)
-		copy(c, candidate)
-		c[len(c)-1] = '\n'
-		candidate = c
+	start, end, found, _ := prompt.PreambleScan(head)
+	if !found {
+		return res
 	}
+	// Feed the located tag line (plus a synthetic newline so the
+	// multi-line-anchored regex matches) to Parse for full validation.
+	line := head[start:end]
+	candidate := make([]byte, 0, len(line)+1)
+	candidate = append(candidate, line...)
+	candidate = append(candidate, '\n')
 	pr, err := prompt.Parse(string(candidate))
 	if err != nil {
 		return res

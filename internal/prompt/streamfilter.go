@@ -1,27 +1,34 @@
 package prompt
 
 import (
-	"bytes"
 	"io"
 )
 
-// StreamFilter wraps an io.Writer and suppresses a topic-tag-shaped first
-// line. Subsequent writes pass through unchanged. Buffered content is
-// flushed once the first complete line is observed and classified.
+// StreamFilter wraps an io.Writer and suppresses the §5.1.2 topic-tag line
+// wherever it appears within the bounded leading region of the stream —
+// not just on the first line. Real models emit a `<think>…</think>`
+// reasoning block, conversational filler, or a code fence before the tag,
+// so first-line-only suppression leaks the tag to the terminal once the
+// non-tag first line flushes. Detection is via the shared bounded scan
+// (PreambleScan): the surrounding preamble text is forwarded, the tag line
+// (and its terminating newline) is suppressed.
 //
-// The classification is deferred until the first newline is seen (or
-// Close, whichever comes first). Until then, bytes accumulate in an
-// internal buffer; downstream sees nothing. This is correct behavior:
-// streaming a topic tag verbatim to the user before the runtime can
-// strip it would briefly leak `*topic: thr_42 [...]*` to the terminal.
+// Suppression is deferred until the scan resolves — a tag line is located,
+// or the scan bound (PreambleScanLineCap / PreambleScanByteCap) is reached
+// without one, or Close arrives. Until then, bytes accumulate in an
+// internal buffer; downstream sees nothing. This bounds the hold: a tag
+// streamed verbatim before the runtime can strip it would leak
+// `*topic: thr_42 [...]*` to the terminal, and the bound caps how long the
+// preamble is held before flushing.
 type StreamFilter struct {
 	w       io.Writer
-	buffer  []byte // pre-classification buffer
-	flushed bool   // true once we have decided what to do with the first line
+	buffer  []byte // pre-resolution buffer
+	flushed bool   // true once the tag (if any) has been located and the preamble flushed
 }
 
 // NewStreamFilter wraps w. Writes to the filter forward bytes to w except
-// for a topic-tag-shaped first line, which is suppressed.
+// for a topic-tag-shaped line within the bounded preamble, which is
+// suppressed.
 func NewStreamFilter(w io.Writer) *StreamFilter {
 	return &StreamFilter{w: w}
 }
@@ -36,42 +43,57 @@ func (f *StreamFilter) Write(p []byte) (int, error) {
 		}
 		return len(p), nil
 	}
-	// Append, then look for the first newline that terminates the
-	// first line. Any data after that newline passes through.
 	f.buffer = append(f.buffer, p...)
-	nl := bytes.IndexByte(f.buffer, '\n')
-	if nl < 0 {
-		// First line not yet complete. Hold everything.
+	start, end, found, done := PreambleScan(f.buffer)
+	if !done {
+		// Scan unresolved — more bytes may locate a tag or hit the bound.
+		// Hold everything to avoid leaking a tag that has not arrived yet.
 		return len(p), nil
 	}
-	first := f.buffer[:nl]
-	rest := f.buffer[nl+1:]
-	if isTopicTagLine(first) {
-		// Suppress the tag and its terminating newline; forward whatever
-		// followed the newline.
-		if len(rest) > 0 {
-			if _, err := f.w.Write(rest); err != nil {
-				f.flushed = true
-				f.buffer = nil
-				return 0, err
-			}
-		}
-	} else {
-		// Not a tag — forward the whole buffered content unchanged.
-		if _, err := f.w.Write(f.buffer); err != nil {
-			f.flushed = true
-			f.buffer = nil
-			return 0, err
-		}
+	if err := f.resolve(start, end, found); err != nil {
+		f.flushed = true
+		f.buffer = nil
+		return 0, err
 	}
 	f.flushed = true
 	f.buffer = nil
 	return len(p), nil
 }
 
-// Close flushes any remaining buffered content. If the entire stream was
-// a single line and it didn't match the topic-tag regex, that line is
-// flushed to the underlying writer here. Idempotent.
+// resolve forwards the buffered preamble, suppressing the located tag line
+// span (and the single newline that terminates it) when found. When no tag
+// was found within the bound, the whole buffer is forwarded unchanged.
+func (f *StreamFilter) resolve(start, end int, found bool) error {
+	if !found {
+		_, err := f.w.Write(f.buffer)
+		return err
+	}
+	// Forward everything before the tag line.
+	if start > 0 {
+		if _, err := f.w.Write(f.buffer[:start]); err != nil {
+			return err
+		}
+	}
+	// Skip the tag span [start:end] and its terminating newline, if present.
+	rest := end
+	if rest < len(f.buffer) && f.buffer[rest] == '\r' {
+		rest++
+	}
+	if rest < len(f.buffer) && f.buffer[rest] == '\n' {
+		rest++
+	}
+	if rest < len(f.buffer) {
+		if _, err := f.w.Write(f.buffer[rest:]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Close flushes any remaining buffered content. If the stream ended before
+// the preamble scan resolved (e.g. a single unterminated tag line, or a
+// short preamble that never hit the bound), the buffer is classified here:
+// a located tag line is suppressed, anything else is flushed. Idempotent.
 func (f *StreamFilter) Close() error {
 	if f.flushed {
 		return nil
@@ -81,8 +103,17 @@ func (f *StreamFilter) Close() error {
 		return nil
 	}
 	defer func() { f.buffer = nil }()
+	// At Close the stream is complete: a tag on the trailing (unterminated)
+	// line is now classifiable. Run the bounded scan one final time; treat
+	// the buffer as the whole preamble.
+	start, end, found, _ := PreambleScan(f.buffer)
+	if found {
+		return f.resolve(start, end, found)
+	}
+	// No within-bound tag, or a trailing tag line PreambleScan declined for
+	// lack of a terminator — fall back to the single-line check so a
+	// newline-less trailing tag is still suppressed.
 	if isTopicTagLine(f.buffer) {
-		// Single-line topic tag with no trailing newline — suppress.
 		return nil
 	}
 	_, err := f.w.Write(f.buffer)

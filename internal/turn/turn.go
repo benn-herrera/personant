@@ -388,16 +388,12 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 		}
 
 		// No re-prompt — drain the stream through the filter, starting
-		// with the buffered preamble.
+		// with the buffered preamble. The filter independently locates and
+		// suppresses the tag line within the same bounded preamble region
+		// while forwarding the surrounding text.
 		if _, werr := filter.Write(pre.head); werr != nil {
 			_ = sr.Close()
 			return "", fmt.Errorf("turn: filter write head: %w", werr)
-		}
-		if len(pre.tail) > 0 {
-			if _, werr := filter.Write(pre.tail); werr != nil {
-				_ = sr.Close()
-				return "", fmt.Errorf("turn: filter write tail: %w", werr)
-			}
 		}
 		var streamErr error
 		if !pre.ended {

@@ -127,6 +127,50 @@ func TestStreamFilterPassThroughAfterClassification(t *testing.T) {
 	}
 }
 
+func TestStreamFilterSuppressesTagAfterThinkBlock(t *testing.T) {
+	// A real model emits a reasoning block before the tag. The block's
+	// text must reach the user; the tag line must not.
+	var buf bytes.Buffer
+	f := NewStreamFilter(&buf)
+	in := "<think>\nLet me consider thr_42.\n</think>\n*topic: thr_42 [a, b, c, d]*\nthe answer body"
+	if _, err := f.Write([]byte(in)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	got := buf.String()
+	if strings.Contains(got, "*topic:") {
+		t.Errorf("tag leaked to terminal: %q", got)
+	}
+	if !strings.Contains(got, "<think>") || !strings.Contains(got, "the answer body") {
+		t.Errorf("preamble or body dropped: %q", got)
+	}
+}
+
+func TestStreamFilterSuppressesTagAfterFillerLine(t *testing.T) {
+	// A conversational-filler first line precedes the tag. The filler must
+	// reach the user; the tag must not.
+	var buf bytes.Buffer
+	f := NewStreamFilter(&buf)
+	in := "Sure, let me help with that.\n*topic: thr_7 [a, b, c, d]*\nbody text"
+	for _, r := range in { // one rune at a time to exercise the buffering path
+		if _, err := f.Write([]byte(string(r))); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	got := buf.String()
+	if strings.Contains(got, "*topic:") {
+		t.Errorf("tag leaked to terminal: %q", got)
+	}
+	if !strings.Contains(got, "Sure, let me help") || !strings.Contains(got, "body text") {
+		t.Errorf("preamble or body dropped: %q", got)
+	}
+}
+
 func TestStreamFilterMultipleTagShapesOnlyFirstStripped(t *testing.T) {
 	// The filter only inspects the first line. Subsequent tag-shaped content
 	// (which would be unusual but possible) passes through; full-document
