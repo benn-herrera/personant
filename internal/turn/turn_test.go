@@ -782,6 +782,118 @@ func TestMergeHistorySymbolsCountWeightedEviction(t *testing.T) {
 	}
 }
 
+// TestEvictProtectsHighSpecificity is the MAD B11 acceptance test: a
+// thread whose history holds many high-Count generic entities plus a few
+// Count=1 high-specificity identifiers (hex ID, file path, URL) must, on
+// eviction to the cap, drop the generic-but-high-Count entities and KEEP
+// the rare identifiers — because Count is anti-correlated with recall
+// discrimination. Specificity is re-derived from the persisted Raw
+// (memops.IsHighSpecificity), not from Source.
+func TestEvictProtectsHighSpecificity(t *testing.T) {
+	// 40 generic entities, all with very high Count (they appear in every
+	// thread — high Count, near-zero discrimination). Raw forms are plain
+	// words, so none are high-specificity.
+	var existing []memops.HistorySymbol
+	for i := range historyCapPerThread {
+		existing = append(existing, memops.HistorySymbol{
+			Raw:           "word" + strconv.Itoa(i),
+			Normalized:    "word" + strconv.Itoa(i),
+			FirstSeenTurn: i + 1,
+			Count:         100, // generic words rack up Count
+			Source:        memops.SourceModel,
+		})
+	}
+	// Four Count=1 high-specificity identifiers — exactly the symbols that
+	// make THIS thread recallable. One each of hex ID, file path, URL, and
+	// a deeper path. Source is upgraded to SourceModel to prove the
+	// classifier keys off Raw, not Source.
+	rare := []memops.HistorySymbol{
+		{Raw: "deadbeefcafe123", Normalized: "deadbeefcafe123", FirstSeenTurn: 500, Count: 1, Source: memops.SourceModel},
+		{Raw: "internal/turn/history.go", Normalized: "internal/turn/history.go", FirstSeenTurn: 501, Count: 1, Source: memops.SourceModel},
+		{Raw: "https://example.com/spec#2.3", Normalized: "https://example.com/spec#2.3", FirstSeenTurn: 502, Count: 1, Source: memops.SourceModel},
+		{Raw: "./cmd/personant/main.go", Normalized: "./cmd/personant/main.go", FirstSeenTurn: 503, Count: 1, Source: memops.SourceModel},
+	}
+	existing = append(existing, rare...)
+
+	// 44 entries, cap 40: four must be evicted. Pure Count-eviction would
+	// drop the four Count=1 rare identifiers. B11 must instead drop four
+	// generic Count=100 words and keep all four rare identifiers.
+	merged := mergeHistorySymbols(existing, nil, 600)
+	if len(merged) != historyCapPerThread {
+		t.Fatalf("len after merge: got %d want %d", len(merged), historyCapPerThread)
+	}
+	present := map[string]struct{}{}
+	for _, h := range merged {
+		present[h.Normalized] = struct{}{}
+	}
+	for _, r := range rare {
+		if _, ok := present[r.Normalized]; !ok {
+			t.Errorf("high-specificity %q evicted; should survive (B11)", r.Normalized)
+		}
+	}
+	// Exactly four generic words must have been dropped to make room.
+	droppedGeneric := 0
+	for i := range historyCapPerThread {
+		if _, ok := present["word"+strconv.Itoa(i)]; !ok {
+			droppedGeneric++
+		}
+	}
+	if droppedGeneric != len(rare) {
+		t.Errorf("expected %d generic words evicted; got %d", len(rare), droppedGeneric)
+	}
+}
+
+// TestEvictGracefulDegradationProtectedOverflow exercises the B11
+// graceful-degradation path: when the high-specificity set ALONE exceeds
+// the cap, the cap is a hard storage bound — it must still be respected,
+// with eviction falling back to the Count / FirstSeenTurn rule among the
+// protected symbols.
+func TestEvictGracefulDegradationProtectedOverflow(t *testing.T) {
+	// 50 high-specificity file paths, all distinct, with ascending Count
+	// so the weight rule is unambiguous. Path i has Count=i+1.
+	var existing []memops.HistorySymbol
+	const n = 50
+	for i := range n {
+		existing = append(existing, memops.HistorySymbol{
+			Raw:           "pkg/mod" + strconv.Itoa(i) + "/file.go",
+			Normalized:    "pkg/mod" + strconv.Itoa(i) + "/file.go",
+			FirstSeenTurn: i + 1,
+			Count:         i + 1,
+			Source:        memops.SourceDeterministic,
+		})
+	}
+	// Sanity: every entry is high-specificity, so the protected set == 50.
+	for _, h := range existing {
+		if !memops.IsHighSpecificity(h.Raw) {
+			t.Fatalf("test setup: %q expected high-specificity", h.Raw)
+		}
+	}
+
+	merged := mergeHistorySymbols(existing, nil, 100)
+	// Hard cap respected even though all entries are protected.
+	if len(merged) != historyCapPerThread {
+		t.Fatalf("cap must hold under protected overflow: got %d want %d", len(merged), historyCapPerThread)
+	}
+	// The 10 lowest-Count paths (mod0..mod9, Count 1..10) must be the ones
+	// evicted; the 40 highest-Count survive.
+	present := map[string]struct{}{}
+	for _, h := range merged {
+		present[h.Normalized] = struct{}{}
+	}
+	for i := range 10 {
+		key := "pkg/mod" + strconv.Itoa(i) + "/file.go"
+		if _, ok := present[key]; ok {
+			t.Errorf("expected lowest-Count protected %q evicted under degradation", key)
+		}
+	}
+	for i := 10; i < n; i++ {
+		key := "pkg/mod" + strconv.Itoa(i) + "/file.go"
+		if _, ok := present[key]; !ok {
+			t.Errorf("expected high-Count protected %q to survive", key)
+		}
+	}
+}
+
 // seedThreadAndSpine writes a minimal-but-valid thread file plus the
 // matching spine record for thrID. Returns nothing — t.Fatalf on any
 // error so tests fail fast at setup.

@@ -3,49 +3,18 @@ package turn
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"personant/internal/memops"
 )
 
-// urlRE matches an http(s) URL. The terminating character class is
-// permissive — surrounding punctuation that often hugs URLs in prose
-// (`,`, `.`, `;`, `:`, `!`, `?`, `'`, `"`) is kept on the match here
-// and trimmed below; explicit closers `)` and `]` are excluded so a
-// parenthesized URL like `(see https://x/y)` doesn't capture the
-// closing paren.
-var urlRE = regexp.MustCompile(`https?://[^\s)\]]+`)
-
-// filePathRE matches tokens that look like file paths and end in one
-// of the curated extensions below. Two accept shapes per §3.3:
-//
-//   - any non-whitespace token containing at least one `/`
-//     (e.g. `internal/turn/turn.go`, `/etc/foo.toml`); or
-//   - a token starting with `./` or `~/`, even without a further `/`
-//     (e.g. `./README.md`, `~/.config/foo.yaml`).
-//
-// The character class excludes whitespace and the quote/angle-bracket
-// runes that mark line-noise contexts (HTML fragments, quoted
-// strings).
-//
-// Extension list is intentionally narrow — broadening it later is a
-// change with low risk; over-matching now would pollute the symbol
-// store with false positives.
-var filePathRE = regexp.MustCompile(
-	`(?:` +
-		`(?:\./|~/)[^\s<>"']*` + // ./README.md or ~/.config/foo.yaml
-		`|` +
-		`[^\s<>"']*/[^\s<>"']+` + // internal/turn/turn.go, /etc/foo.toml
-		`)` +
-		`\.(?:go|md|jsonl?|ya?ml|toml|txt|sh|py|c|h|cpp|hpp|rs|tsx|ts|jsx|js|html|css)\b`,
-)
-
-// hexIDRE matches a git-SHA-shaped lowercase hex run of 7..40 chars.
-// Word boundaries on both sides keep it from snipping the middle of a
-// longer hex run; rejection of `0x...` and `#...` neighborhoods
-// happens in the caller because Go's regexp doesn't have lookbehind.
-var hexIDRE = regexp.MustCompile(`\b[0-9a-f]{7,40}\b`)
+// The high-specificity identifier patterns (URL / file path / hex ID)
+// used by this deterministic pass live in memops as
+// memops.URLProseRE / memops.FilePathProseRE / memops.HexIDProseRE.
+// They were lifted there so the same single definition backs both this
+// extractor and the history-eviction specificity classifier
+// (memops.IsHighSpecificity), per the §2.7 DRY rule — see
+// memops_symbols.go.
 
 // urlTrailingPunct is the set of trailing prose-punctuation runes
 // stripped from a captured URL before emit.
@@ -65,17 +34,17 @@ const urlTrailingPunct = `.,;:!?'"`
 // bounded by content size which is bounded by §6.5's per-delta cap.
 func deterministicExtract(ctx context.Context, state *State, delta Delta) {
 	content := delta.Content
-	for _, m := range urlRE.FindAllString(content, -1) {
+	for _, m := range memops.URLProseRE.FindAllString(content, -1) {
 		raw := strings.TrimRight(m, urlTrailingPunct)
 		if raw == "" {
 			continue
 		}
 		emitIdentifier(ctx, state, delta, raw)
 	}
-	for _, m := range filePathRE.FindAllString(content, -1) {
+	for _, m := range memops.FilePathProseRE.FindAllString(content, -1) {
 		emitIdentifier(ctx, state, delta, m)
 	}
-	for _, idx := range hexIDRE.FindAllStringIndex(content, -1) {
+	for _, idx := range memops.HexIDProseRE.FindAllStringIndex(content, -1) {
 		start, end := idx[0], idx[1]
 		// Reject hex literals embedded in source: `0x<hex>` or color/
 		// fragment-id `#<hex>` shapes. Go's regexp has no lookbehind, so

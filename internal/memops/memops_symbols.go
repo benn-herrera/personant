@@ -20,6 +20,83 @@ var (
 	ProjectNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 )
 
+// High-specificity identifier patterns. These are the §2.7.1 /
+// §3.3-pass-1 deterministic identifier shapes — URLs, file paths, and
+// git-SHA-shaped hex IDs — that the extractor finds *within* prose
+// content. They live here, in the memops domain layer, so the single
+// definition is shared by two consumers: the turn-package extractor
+// (which scans prose for these shapes) and the history-eviction logic
+// (which classifies an already-extracted symbol's Raw surface form to
+// protect high-discrimination identifiers from Count-based eviction).
+//
+// URLProseRE and FilePathProseRE are intentionally NOT anchored so the
+// extractor can FindAllString over a content blob. HexIDProseRE carries
+// \b word boundaries for the same reason. The whole-token classifier
+// IsHighSpecificity anchors each match itself (see below), so a symbol's
+// Raw must match end-to-end to count as high-specificity — a generic
+// word that merely contains a hex-shaped substring does not qualify.
+var (
+	// URLProseRE matches an http(s) URL. The terminating character
+	// class is permissive — surrounding prose punctuation is kept on
+	// the match and trimmed by the caller; explicit closers `)` and
+	// `]` are excluded so a parenthesized URL doesn't capture them.
+	URLProseRE = regexp.MustCompile(`https?://[^\s)\]]+`)
+
+	// FilePathProseRE matches tokens that look like file paths ending
+	// in one of the curated extensions. Two accept shapes per §3.3:
+	// any non-whitespace token containing at least one `/`, or a token
+	// starting with `./` or `~/`. The extension list is intentionally
+	// narrow; broadening later is low-risk, over-matching now pollutes
+	// the symbol store.
+	FilePathProseRE = regexp.MustCompile(
+		`(?:` +
+			`(?:\./|~/)[^\s<>"']*` + // ./README.md or ~/.config/foo.yaml
+			`|` +
+			`[^\s<>"']*/[^\s<>"']+` + // internal/turn/turn.go, /etc/foo.toml
+			`)` +
+			`\.(?:go|md|jsonl?|ya?ml|toml|txt|sh|py|c|h|cpp|hpp|rs|tsx|ts|jsx|js|html|css)\b`,
+	)
+
+	// HexIDProseRE matches a git-SHA-shaped lowercase hex run of 7..40
+	// chars. Word boundaries on both sides keep it from snipping the
+	// middle of a longer hex run; rejection of `0x...`/`#...`
+	// neighborhoods happens in the extractor caller (Go regexp has no
+	// lookbehind).
+	HexIDProseRE = regexp.MustCompile(`\b[0-9a-f]{7,40}\b`)
+)
+
+// IsHighSpecificity reports whether raw is a high-discrimination
+// identifier surface form — a URL, file path, or git-SHA-shaped hex ID.
+// It is the classification predicate shared with the extractor's pattern
+// set (URLProseRE / FilePathProseRE / HexIDProseRE), re-derived from the
+// symbol's persisted Raw rather than its Source: Source is provenance and
+// is upgraded toward higher authority by DominantSource (§2.7.3), so a
+// discriminative path the model also anchored becomes SourceModel and the
+// specificity signal is erased. Authority is not specificity; the surface
+// form is the durable signal.
+//
+// Matching is whole-token: the entire raw string must match a pattern,
+// not merely contain one. A generic word that happens to embed a
+// hex-shaped substring (e.g. "deadbeef" inside prose) is reached here as
+// an already-isolated token, so anchoring guards against a free word
+// being mistaken for an ID. Empty input is not high-specificity.
+func IsHighSpecificity(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	return matchWhole(URLProseRE, raw) ||
+		matchWhole(FilePathProseRE, raw) ||
+		matchWhole(HexIDProseRE, raw)
+}
+
+// matchWhole reports whether re matches raw end-to-end. The prose
+// patterns are unanchored (so the extractor can scan a blob), so the
+// classifier checks that the located match spans the entire token.
+func matchWhole(re *regexp.Regexp, raw string) bool {
+	loc := re.FindStringIndex(raw)
+	return loc != nil && loc[0] == 0 && loc[1] == len(raw)
+}
+
 // canonicalEntityStopWords is the spec §2.7.2 multi-word entity stop-word
 // set. Project-scoped additions (ProjectMeta.IgnoreSymbols) are applied at
 // the call site, not here.

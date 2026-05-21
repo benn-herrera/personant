@@ -93,34 +93,58 @@ func mergeHistorySymbols(existing []memops.HistorySymbol, turnSymbols []coalesce
 }
 
 // evictLowestWeight returns out with the lowest-cumulative-weight entries
-// removed until len == cap. Weight = count alone in v0.1; ties broken by
-// lowest first_seen_turn (evict oldest among lowest-count). Stable
-// ordering of the survivors is preserved.
+// removed until len == cap, while protecting high-specificity identifiers
+// (MAD B11). Weight = count alone in v0.1; ties broken by highest
+// first_seen_turn (newest survives when counts tie). Stable ordering of
+// the survivors is preserved.
+//
+// B11: within-thread Count is anti-correlated with recall discrimination
+// — generic words ("system", "data") accrue high Count yet appear in every
+// thread (near-zero discrimination), while a specific identifier (a UUID,
+// file path, URL, git SHA) appears once (low Count) but nowhere else
+// (maximal discrimination). Pure Count-eviction therefore discards exactly
+// the symbols that make THIS thread recallable. The fix partitions on
+// re-derived specificity (memops.IsHighSpecificity over the persisted Raw,
+// NOT Source — see that function's doc) and evicts the evictable set
+// first. Only if the protected set alone exceeds the cap do we evict among
+// protected by the same Count/FirstSeenTurn rule: the cap is a hard
+// storage bound (§2.3) and is never exceeded.
 func evictLowestWeight(out []memops.HistorySymbol, cap int) []memops.HistorySymbol {
 	if len(out) <= cap {
 		return out
 	}
-	type indexed struct {
-		idx int
-		ref *memops.HistorySymbol
-	}
-	scored := make([]indexed, len(out))
+
+	// Partition original indices into protected (high-specificity Raw)
+	// and evictable. Iterate over out to keep partitions in insertion
+	// order, which preserves stable survivor ordering at the end.
+	var protected, evictable []int
 	for i := range out {
-		scored[i] = indexed{idx: i, ref: &out[i]}
-	}
-	// Sort: highest count first; ties broken by highest first_seen_turn
-	// (newest survives when counts tie).
-	sort.SliceStable(scored, func(i, j int) bool {
-		a, b := scored[i].ref, scored[j].ref
-		if a.Count != b.Count {
-			return a.Count > b.Count
+		if memops.IsHighSpecificity(out[i].Raw) {
+			protected = append(protected, i)
+		} else {
+			evictable = append(evictable, i)
 		}
-		return a.FirstSeenTurn > b.FirstSeenTurn
-	})
-	keepIdx := make(map[int]struct{}, cap)
-	for i := range cap {
-		keepIdx[scored[i].idx] = struct{}{}
 	}
+
+	keepIdx := make(map[int]struct{}, cap)
+	if len(protected) >= cap {
+		// Graceful degradation: protected alone overflows the cap. Keep
+		// the highest-weight protected entries and drop the rest; the
+		// evictable set is discarded entirely.
+		for _, i := range topByWeight(out, protected, cap) {
+			keepIdx[i] = struct{}{}
+		}
+	} else {
+		// Keep all protected, then fill remaining slots with the
+		// highest-weight evictable entries.
+		for _, i := range protected {
+			keepIdx[i] = struct{}{}
+		}
+		for _, i := range topByWeight(out, evictable, cap-len(protected)) {
+			keepIdx[i] = struct{}{}
+		}
+	}
+
 	survivors := make([]memops.HistorySymbol, 0, cap)
 	for i := range out {
 		if _, ok := keepIdx[i]; ok {
@@ -128,4 +152,25 @@ func evictLowestWeight(out []memops.HistorySymbol, cap int) []memops.HistorySymb
 		}
 	}
 	return survivors
+}
+
+// topByWeight returns the n original indices from idxs whose entries rank
+// highest by the v0.1 weight rule: highest Count first, ties broken by
+// highest FirstSeenTurn (newest survives). If n >= len(idxs) all are
+// returned. The returned slice is the kept-index set; survivor ordering is
+// re-established by the caller scanning out in insertion order.
+func topByWeight(out []memops.HistorySymbol, idxs []int, n int) []int {
+	if n >= len(idxs) {
+		return idxs
+	}
+	ranked := make([]int, len(idxs))
+	copy(ranked, idxs)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		a, b := &out[ranked[i]], &out[ranked[j]]
+		if a.Count != b.Count {
+			return a.Count > b.Count
+		}
+		return a.FirstSeenTurn > b.FirstSeenTurn
+	})
+	return ranked[:n]
 }

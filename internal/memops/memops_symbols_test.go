@@ -124,3 +124,38 @@ func TestDominantSource(t *testing.T) {
 		})
 	}
 }
+
+func TestIsHighSpecificity(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		// High-specificity: whole-token matches.
+		{"git sha", "deadbeefcafe123", true},
+		{"min hex run", "0a1b2c3", true},
+		{"url", "https://example.com/spec#2.3", true},
+		{"http url", "http://x.test/a/b", true},
+		{"rooted path", "internal/turn/history.go", true},
+		{"abs path", "/etc/foo.toml", true},
+		{"dot-slash path", "./cmd/personant/main.go", true},
+		{"tilde path", "~/.config/foo.yaml", true},
+
+		// Generic / non-identifier: must NOT be protected.
+		{"plain word", "system", false},
+		{"plain word data", "data", false},
+		{"empty", "", false},
+		{"short hex below floor", "abc12", false},
+		{"hex with uppercase", "DEADBEEF1", false}, // pattern is lowercase-only
+		{"word containing hex substring", "x deadbeef y", false}, // not whole-token
+		{"bare filename no slash", "history.go", false},          // needs a path separator
+		{"non-curated extension", "internal/x/foo.exe", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsHighSpecificity(tc.raw); got != tc.want {
+				t.Errorf("IsHighSpecificity(%q) = %v, want %v", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
