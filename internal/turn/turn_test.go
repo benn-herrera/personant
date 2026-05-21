@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -428,9 +429,9 @@ func TestRunHistoryCapTurnPairFIFO(t *testing.T) {
 	const turns = sessionHistoryCapTurns + 5
 	for i := 0; i < turns; i++ {
 		mock.SetResponse(model.Response{
-			Content: "*topic: thr_1 [alpha, beta, gamma, delta]*\nassistant-" + itoa(i),
+			Content: "*topic: thr_1 [alpha, beta, gamma, delta]*\nassistant-" + strconv.Itoa(i),
 		})
-		userInput := "user-" + itoa(i)
+		userInput := "user-" + strconv.Itoa(i)
 		if _, err := Run(context.Background(), state, userInput, io.Discard); err != nil {
 			t.Fatalf("Run turn %d: %v", i, err)
 		}
@@ -455,12 +456,12 @@ func TestRunHistoryCapTurnPairFIFO(t *testing.T) {
 		if asstMsg.Role != "assistant" {
 			t.Errorf("pair %d assistant role: got %q want assistant", p, asstMsg.Role)
 		}
-		if want := "user-" + itoa(idx); userMsg.Content != want {
+		if want := "user-" + strconv.Itoa(idx); userMsg.Content != want {
 			t.Errorf("pair %d user content: got %q want %q", p, userMsg.Content, want)
 		}
 		// The assistant Content includes the topic-tag preamble; check
 		// the body suffix to confirm FIFO ordering.
-		if want := "assistant-" + itoa(idx); !strings.HasSuffix(asstMsg.Content, want) {
+		if want := "assistant-" + strconv.Itoa(idx); !strings.HasSuffix(asstMsg.Content, want) {
 			t.Errorf("pair %d assistant content: got %q want suffix %q", p, asstMsg.Content, want)
 		}
 	}
@@ -479,7 +480,7 @@ func TestRunHistoryCapTurnPairFIFO(t *testing.T) {
 // arithmetic.
 func turn2idx(n int) int { return n }
 
-func itoaThreadID(n int) string { return "thr_" + itoa(n) }
+func itoaThreadID(n int) string { return "thr_" + strconv.Itoa(n) }
 
 func sliceEqual(a, b []string) bool {
 	if len(a) != len(b) {
@@ -713,8 +714,8 @@ func TestMergeHistorySymbolsCapAndEvict(t *testing.T) {
 	existing := make([]memops.HistorySymbol, historyCapPerThread)
 	for i := range historyCapPerThread {
 		existing[i] = memops.HistorySymbol{
-			Raw:           "s" + itoa(i+1),
-			Normalized:    "s" + itoa(i+1),
+			Raw:           "s" + strconv.Itoa(i+1),
+			Normalized:    "s" + strconv.Itoa(i+1),
 			FirstSeenTurn: i + 1,
 			Count:         1,
 			Source:        memops.SourceModel,
@@ -758,8 +759,8 @@ func TestMergeHistorySymbolsCountWeightedEviction(t *testing.T) {
 	}
 	for i := range historyCapPerThread {
 		existing = append(existing, memops.HistorySymbol{
-			Raw:           "young" + itoa(i),
-			Normalized:    "young" + itoa(i),
+			Raw:           "young" + strconv.Itoa(i),
+			Normalized:    "young" + strconv.Itoa(i),
 			FirstSeenTurn: 100 + i,
 			Count:         1,
 			Source:        memops.SourceModel,

@@ -2,6 +2,7 @@ package turn
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"personant/internal/memops"
@@ -56,7 +57,7 @@ func renderTurnExcerpt(turnN int, when string, anchors []string, userInput, resp
 	var b strings.Builder
 	b.Grow(len(userInput) + len(responseBody) + 64)
 	b.WriteString("## Turn ")
-	b.WriteString(itoa(turnN))
+	b.WriteString(strconv.Itoa(turnN))
 	b.WriteString(" · ")
 	b.WriteString(when)
 	b.WriteString(" · [")

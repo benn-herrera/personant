@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -589,8 +590,8 @@ func TestPruneStaging_NoopWithinWindow(t *testing.T) {
 	state := &State{staging: newStagingBuffer(), TurnNumber: 3}
 	for _, sa := range []int{1, 2, 3} {
 		state.staging.add(stagedSymbol{
-			Normalized: "s" + itoa(sa),
-			Raw:        "s" + itoa(sa),
+			Normalized: "s" + strconv.Itoa(sa),
+			Raw:        "s" + strconv.Itoa(sa),
 			Source:     memops.SourceDeterministic,
 			StagedAt:   sa,
 		})
@@ -610,8 +611,8 @@ func TestPruneStaging_EvictsAtWindowClose(t *testing.T) {
 	state := &State{staging: newStagingBuffer(), TurnNumber: 4}
 	for _, sa := range []int{1, 2, 3} {
 		state.staging.add(stagedSymbol{
-			Normalized: "s" + itoa(sa),
-			Raw:        "s" + itoa(sa),
+			Normalized: "s" + strconv.Itoa(sa),
+			Raw:        "s" + strconv.Itoa(sa),
 			Source:     memops.SourceDeterministic,
 			StagedAt:   sa,
 		})
@@ -636,8 +637,8 @@ func TestPruneStaging_EvictsMultiple(t *testing.T) {
 	state := &State{staging: newStagingBuffer(), TurnNumber: 10}
 	for _, sa := range []int{1, 5, 8, 10} {
 		state.staging.add(stagedSymbol{
-			Normalized: "s" + itoa(sa),
-			Raw:        "s" + itoa(sa),
+			Normalized: "s" + strconv.Itoa(sa),
+			Raw:        "s" + strconv.Itoa(sa),
 			Source:     memops.SourceDeterministic,
 			StagedAt:   sa,
 		})
