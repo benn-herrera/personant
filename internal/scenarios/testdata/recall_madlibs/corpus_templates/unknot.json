@@ -6,8 +6,8 @@
   "description": "Recall test for the unknot as the trivial knot and its characterizing invariants.",
   "anchors": ["unknot", "trivial-knot", "seifert-genus", "knot-group", "hard-unknot"],
   "columns": [
-    ["unknot","trivial-knot","not-knot","unlinked-loop","the-plain-loop-thats-not-really-knotted"],
-    ["trivial-knot","unknot","unknotted-loop","trivially-embedded-circle","the-not-actually-a-knot-knot"],
+    ["unknot","not-knot","unlinked-loop","the-plain-loop-thats-not-really-knotted"],
+    ["trivial-knot","unknotted-loop","trivially-embedded-circle","the-not-actually-a-knot-knot"],
     ["seifert-genus","knot-genus","genus-of-knot","minimal-genus","how-twisty-the-unknot-isnt"],
     ["knot-group","fundamental-group-of-complement","knot-fundamental-group","pi1-of-complement","the-group-from-the-loops-surroundings"],
     ["hard-unknot","difficult-unknot-diagram","complex-unknot-diagram","hard-to-simplify-unknot","an-unknot-thats-a-pain-to-untangle"]

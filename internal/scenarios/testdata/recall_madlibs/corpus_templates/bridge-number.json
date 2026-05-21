@@ -6,8 +6,8 @@
   "description": "Recall test for the bridge number knot invariant and related concepts.",
   "anchors": ["bridge-number", "bridge-index", "2-bridge-knot", "connected-sum", "local-maxima"],
   "columns": [
-    ["bridge-number", "bridge-index", "bridge-count", "crossing-bridge-count", "how-many-overpasses-the-knot-needs"],
-    ["bridge-index", "bridge-number", "min-bridge-count", "bridge-invariant", "the-fewest-arches-you-can-get-away-with"],
+    ["bridge-number", "bridge-count", "crossing-bridge-count", "how-many-overpasses-the-knot-needs"],
+    ["bridge-index", "min-bridge-count", "bridge-invariant", "the-fewest-arches-you-can-get-away-with"],
     ["2-bridge-knot", "rational-knot", "two-bridge-knot", "2-bridge-link", "the-simple-two-arch-kind-of-knot"],
     ["connected-sum", "knot-sum", "composition-of-knots", "knot-composition", "tying-two-knots-end-to-end"],
     ["local-maxima", "local-max-count", "height-maxima", "projection-maxima", "the-top-bumps-when-you-stand-it-up"]
