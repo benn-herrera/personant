@@ -20,6 +20,11 @@ import (
 // The canonical definition lives in package memops (the domain layer).
 const DefaultProjectID = memops.DefaultProjectID
 
+// ProjectMetaFileName is the per-project metadata filename inside each
+// projects/<id>/ directory. The full path is constructed via
+// filepath.Join(paths.ProjectsDir, projectID, ProjectMetaFileName).
+const ProjectMetaFileName = "meta.json"
+
 // LoadProjectMeta reads projects/<id>/meta.json and returns the parsed
 // metadata.
 //
@@ -31,7 +36,7 @@ const DefaultProjectID = memops.DefaultProjectID
 // For any other project, a missing directory or meta.json yields
 // memops.ErrProjectNotFound (wrapped with the project id in the message).
 func LoadProjectMeta(paths PersonantPaths, projectID string) (memops.ProjectMeta, error) {
-	metaPath := filepath.Join(paths.ProjectsDir, projectID, "meta.json")
+	metaPath := filepath.Join(paths.ProjectsDir, projectID, ProjectMetaFileName)
 	data, err := os.ReadFile(metaPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -60,7 +65,7 @@ func SaveProjectMeta(paths PersonantPaths, meta memops.ProjectMeta) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("save project %s: mkdir: %w", meta.ID, err)
 	}
-	metaPath := filepath.Join(dir, "meta.json")
+	metaPath := filepath.Join(dir, ProjectMetaFileName)
 
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -99,7 +104,7 @@ func ListProjects(paths PersonantPaths) ([]memops.ProjectMeta, error) {
 		if id != DefaultProjectID && !memops.ProjectIDPattern.MatchString(id) {
 			continue
 		}
-		metaPath := filepath.Join(paths.ProjectsDir, id, "meta.json")
+		metaPath := filepath.Join(paths.ProjectsDir, id, ProjectMetaFileName)
 		if _, err := os.Stat(metaPath); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				// Directory exists but no meta.json yet — skip silently. In

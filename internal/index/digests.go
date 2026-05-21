@@ -86,11 +86,11 @@ func BuildDigests(spine []memops.SpineRecord, projectsDir string, warnf func(for
 // recoverable — we never fail the rebuild on it.
 func readDisplayName(projectsDir, projectID string, warnf func(format string, args ...any)) string {
 	fallback := projectID
-	if projectID == "prj_default" {
+	if projectID == memops.DefaultProjectID {
 		fallback = "default"
 	}
 
-	metaPath := filepath.Join(projectsDir, projectID, "meta.json")
+	metaPath := filepath.Join(projectsDir, projectID, store.ProjectMetaFileName)
 	data, err := os.ReadFile(metaPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

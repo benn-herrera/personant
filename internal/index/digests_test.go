@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"personant/internal/memops"
+	"personant/internal/store"
 )
 
 func mkSpineEngaged(id, project, lastEngaged string, anchors ...string) memops.SpineRecord {
@@ -158,7 +159,7 @@ func TestBuildDigestsReadsMetaName(t *testing.T) {
 	}
 	meta := memops.ProjectMeta{ID: "prj_3", Name: "ave-kb"}
 	metaBytes, _ := json.Marshal(meta)
-	if err := os.WriteFile(filepath.Join(projectDir, "meta.json"), metaBytes, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, store.ProjectMetaFileName), metaBytes, 0o644); err != nil {
 		t.Fatalf("write meta: %v", err)
 	}
 	spine := []memops.SpineRecord{
