@@ -1,11 +1,9 @@
 package turn
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
-	"personant/internal/memops"
 	"personant/internal/prompt"
 )
 
@@ -18,21 +16,6 @@ func turnAnchorList(responseBody string, fallback []string) []string {
 		return append([]string(nil), pr.Tag.Anchors...)
 	}
 	return append([]string(nil), fallback...)
-}
-
-// padOrTruncateAnchors enforces the §2.2 hard range [4, 8] — see
-// memops.MinAnchorsPerThread / memops.MaxAnchorsPerThread. If the input
-// has fewer than min entries, append "anchor-<n>" placeholders. If it
-// has more than the maximum, take the first MaxAnchorsPerThread.
-func padOrTruncateAnchors(in []string, min int) []string {
-	out := append([]string(nil), in...)
-	if len(out) > memops.MaxAnchorsPerThread {
-		out = out[:memops.MaxAnchorsPerThread]
-	}
-	for i := len(out); i < min; i++ {
-		out = append(out, fmt.Sprintf("anchor-%d", i+1))
-	}
-	return out
 }
 
 // renderTurnExcerpt renders a single per-turn excerpt block — the unit

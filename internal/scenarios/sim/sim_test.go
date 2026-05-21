@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"personant/internal/clock"
+	"personant/internal/memops"
 	"personant/internal/scenarios"
 	"personant/internal/store"
 )
@@ -657,5 +658,66 @@ func assertThreadIDsWellFormed(t *testing.T, h *scenarios.Harness) {
 			continue
 		}
 		seen[n] = true
+	}
+}
+
+// TestNewThreadAnchorTagsPadsInertStubsToFloor — the harness plays the
+// model-in-the-loop and must emit contract-compliant *new-topic* topic
+// tags (≥4 anchors, §5.1). When dropping loose tags leaves fewer than
+// the floor, newThreadAnchorTags pads inert synthetic stubs up to
+// memops.MinAnchorsPerThread. The stubs must carry the stubAnchorPrefix
+// form and must never equal a query term — that inertness is what
+// preserves the query-vs-thread Jaccard gap (and thus recall misses).
+//
+// nonLooseTags itself must NOT pad: engagement/refinement tags carry the
+// raw drift set, so the existing-thread drift behavior stays identical
+// to the pre-T1-2 baseline.
+func TestNewThreadAnchorTagsPadsInertStubsToFloor(t *testing.T) {
+	// Five real tags, four marked loose → only one real anchor survives
+	// the loose-filter, below the floor of 4.
+	query := "alpha appears with beta in the text"
+	slot := CorpusSlot{
+		Topic:     "physics",
+		Tags:      []string{"alpha", "beta", "gamma", "delta", "epsilon"},
+		LooseMask: []bool{false, true, true, true, true},
+		UserInput: query,
+	}
+
+	// nonLooseTags is the raw drift set — one real tag, NO padding.
+	if raw := nonLooseTags(slot); len(raw) != 1 || raw[0] != "alpha" {
+		t.Fatalf("nonLooseTags must not pad: got %v want [alpha]", raw)
+	}
+
+	out := newThreadAnchorTags(slot)
+	if len(out) != memops.MinAnchorsPerThread {
+		t.Fatalf("anchor count: got %d want floor %d", len(out), memops.MinAnchorsPerThread)
+	}
+	if out[0] != "alpha" {
+		t.Errorf("first anchor: got %q want surviving real tag %q", out[0], "alpha")
+	}
+
+	queryTerms := map[string]bool{}
+	for _, w := range strings.Fields(query) {
+		queryTerms[w] = true
+	}
+	stubs := 0
+	for _, a := range out[1:] {
+		if !strings.HasPrefix(a, stubAnchorPrefix) {
+			t.Errorf("pad anchor %q lacks inert stub prefix %q", a, stubAnchorPrefix)
+		}
+		if queryTerms[a] {
+			t.Errorf("stub %q matches a query term — not inert, would collapse drift", a)
+		}
+		stubs++
+	}
+	if want := memops.MinAnchorsPerThread - 1; stubs != want {
+		t.Errorf("stub count: got %d want %d", stubs, want)
+	}
+
+	// A slot with no loose mask is already in range (5 tags) — no padding,
+	// no stubs, on either function.
+	plain := CorpusSlot{Tags: []string{"a", "b", "c", "d", "e"}}
+	if got := newThreadAnchorTags(plain); len(got) != 5 {
+		t.Errorf("unmasked slot: got %d anchors want 5 (no padding)", len(got))
 	}
 }
