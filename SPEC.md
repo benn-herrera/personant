@@ -474,7 +474,10 @@ Each context-modification event runs the chain, in this order:
 1. **Symbol extraction** (§3.3) — deterministic regex pass over the
    delta's content extracts identifiers (file paths, URLs, claim IDs,
    user `#`-tags). Model-emitted symbols (in `topic` blocks) are also
-   parsed here.
+   parsed here. Class-conditional routing per the delta's retention
+   class (§3.10.1) follows immediately: decision-class extractions go
+   to the per-turn coalesce buffer; task-class extractions enter the
+   staging buffer (§3.10.2).
 2. **Engagement signal** (§3.2) — does the delta's symbol set overlap
    any active thread's anchors above threshold? If so, fire engagement
    for those threads. Engagement updates are coalesced per-turn (see
@@ -597,6 +600,8 @@ Three passes per §3.0.2 step 1, ordered cheapest first:
 1. **Deterministic** — regex over the delta (file paths, URLs, claim IDs, `#`-tags).
 2. **Model-emitted** — anchors from the topic tag (§5.1) are folded in directly.
 3. **Curator** — at retirement, the curator selects the final anchor set (§3.5) from the accumulated `history_symbols`.
+
+For task-class deltas (§3.10.1), extracted symbols enter the staging buffer (§3.10.2) instead of feeding the coalesce buffer directly; they reach `symbols.jsonl` only on citation-window promotion (§3.10.4).
 
 ### 3.4 Recall matching
 
