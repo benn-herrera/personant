@@ -278,7 +278,7 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 	// delta so a same-turn citation cannot accidentally observe (and
 	// promote) an entry that was just supposed to expire.
 	if n := pruneStaging(state); n > 0 {
-		_ = state.Ops.Log(ctx, "staging", "evicted",
+		_ = state.Ops.Log(ctx, memops.LogCategoryStaging, "evicted",
 			fmt.Sprintf("count=%d turn=%d", n, state.TurnNumber))
 	}
 
@@ -293,7 +293,7 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 	}
 
 	// Step 1: user.prompt delta.
-	if err := onContextDelta(ctx, state, Delta{Source: "user.prompt", Content: userInput}); err != nil {
+	if err := onContextDelta(ctx, state, Delta{Source: memops.SourceUserPrompt, Content: userInput}); err != nil {
 		return "", err
 	}
 
@@ -376,7 +376,7 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 			}
 			if fetched > 0 {
 				_ = sr.Close()
-				_ = state.Ops.Log(ctx, "topic", "re-prompt",
+				_ = state.Ops.Log(ctx, memops.LogCategoryTopic, "re-prompt",
 					"fetched="+itoa(fetched)+" attempt="+itoa(attempt+1))
 				systemPrompt, err = buildSystemPrompt()
 				if err != nil {
@@ -416,7 +416,7 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 		if closeErr != nil {
 			// Close-after-EOF errors are usually benign (e.g. the body was
 			// already drained); surface them but don't lose the response.
-			_ = state.Ops.Log(ctx, "model", "stream-close-warn", closeErr.Error())
+			_ = state.Ops.Log(ctx, memops.LogCategoryModel, "stream-close-warn", closeErr.Error())
 		}
 		full = sr.Final()
 		break
@@ -424,7 +424,7 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 
 	// Step 4: model.response delta with the full accumulated body —
 	// fired once, not per chunk (spec §3.0.5).
-	if err := onContextDelta(ctx, state, Delta{Source: "model.response", Content: full.Content}); err != nil {
+	if err := onContextDelta(ctx, state, Delta{Source: memops.SourceModelResponse, Content: full.Content}); err != nil {
 		return "", err
 	}
 
@@ -440,7 +440,7 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 	// behind closeTurnAndUpdateEngagement's no-engagement early return.
 	// Opportunistic, like recall: a failure is logged and swallowed.
 	if err := surfaceClosureCandidates(ctx, state); err != nil {
-		_ = state.Ops.Log(ctx, "retire", "error", sanitizeDetail(err.Error()))
+		_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "error", memops.SanitizeDetail(err.Error()))
 	}
 
 	// Step 5c: §3.8 cardinality-pressure archival scan. Like closure, it
@@ -448,7 +448,7 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 	// this turn's activity) and is opportunistic — a failure is logged and
 	// swallowed, never aborting the turn.
 	if err := surfaceArchivalCandidates(ctx, state); err != nil {
-		_ = state.Ops.Log(ctx, "archive", "error", sanitizeDetail(err.Error()))
+		_ = state.Ops.Log(ctx, memops.LogCategoryArchive, "error", memops.SanitizeDetail(err.Error()))
 	}
 
 	// Step 5d: persist the updated Layer B/C working-set membership so a
@@ -462,7 +462,7 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 	// failure is non-fatal: log and continue, consistent with the other
 	// close-time substrate calls (AgeFileChains, recall).
 	if err := state.Ops.SaveWorkingSet(ctx, state.ActiveThreads, state.DormantThreads); err != nil {
-		_ = state.Ops.Log(ctx, "session", "working-set-save-error", sanitizeDetail(err.Error()))
+		_ = state.Ops.Log(ctx, memops.LogCategorySession, "working-set-save-error", memops.SanitizeDetail(err.Error()))
 	}
 
 	// Step 6: derive the topic-tag-stripped body for the return value.

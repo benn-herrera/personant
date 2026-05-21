@@ -146,7 +146,7 @@ func addExtractedSymbol(ctx context.Context, state *State, delta Delta, raw, nor
 	// Instrumentation for window-K calibration and recall-fidelity
 	// measurement. A log-write failure must not fail the chain —
 	// promotion is internal bookkeeping, not user-visible.
-	_ = state.Ops.Log(ctx, "staging", "promoted",
+	_ = state.Ops.Log(ctx, memops.LogCategoryStaging, "promoted",
 		fmt.Sprintf("normalized=%s staged_at=%d cited_at=%d turn_span=%d",
 			normalized, staged.StagedAt, state.TurnNumber, state.TurnNumber-staged.StagedAt))
 }

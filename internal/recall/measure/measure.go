@@ -214,7 +214,7 @@ func (s *Service) embeddingCandidates(ctx context.Context, req Request) []scorin
 		if err == nil {
 			err = fmt.Errorf("embedder returned %d vectors for 1 input", len(vecs))
 		}
-		_ = s.ops.Log(ctx, "recall", "embed-error", err.Error())
+		_ = s.ops.Log(ctx, memops.LogCategoryRecall, "embed-error", err.Error())
 		return nil
 	}
 	return scoring.ProposeEmbedding(vecs[0], s.index, scoring.EmbeddingOptions{Exclude: req.Exclude})

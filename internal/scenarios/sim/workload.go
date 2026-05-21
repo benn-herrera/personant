@@ -80,6 +80,7 @@ import (
 	"strings"
 	"time"
 
+	"personant/internal/memops"
 	"personant/internal/model"
 	"personant/internal/prompt"
 	"personant/internal/scenarios"
@@ -1390,7 +1391,7 @@ func buildMockResponse(isNew bool, threadID string, anchorTags []string, slot Co
 func (g *generator) buildWorkPreEvents(idx int, slot CorpusSlot, userDictated bool) []turn.Delta {
 	fs := g.workFile(idx)
 	preEvents := []turn.Delta{{
-		Source:  "fs.read",
+		Source:  memops.SourceFSRead,
 		Content: fs.content,
 		Meta:    map[string]string{"path": fs.path},
 	}}
@@ -1403,13 +1404,13 @@ func (g *generator) buildWorkPreEvents(idx int, slot CorpusSlot, userDictated bo
 			fs.writeCount, slot.Topic)
 	}
 	preEvents = append(preEvents, turn.Delta{
-		Source:  "fs.write",
+		Source:  memops.SourceFSWrite,
 		Content: fs.content,
 		Meta:    map[string]string{"path": fs.path},
 	})
 	if fs.writeCount%commitEvery == 0 {
 		preEvents = append(preEvents, turn.Delta{
-			Source: "fs.commit",
+			Source: memops.SourceFSCommit,
 			Meta: map[string]string{
 				"path": fs.path,
 				"hash": syntheticHash(fs.content),

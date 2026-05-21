@@ -38,7 +38,7 @@ func (a *FileAdapter) ComposeWorkingSet(ctx context.Context, in memops.WorksetIn
 		return memops.WorksetLayers{}, err
 	}
 	logf := func(format string, args ...any) {
-		_ = a.Log(ctx, "workset", "warning", sanitizeWorksetDetail(fmt.Sprintf(format, args...)))
+		_ = a.Log(ctx, memops.LogCategoryWorkset, "warning", memops.SanitizeDetail(fmt.Sprintf(format, args...)))
 		if a.Logger != nil {
 			a.Logger(format, args...)
 		}
@@ -344,19 +344,3 @@ func (a *FileAdapter) loadDormantSpine(ids []string, logf func(string, ...any)) 
 	return out
 }
 
-// sanitizeWorksetDetail strips newlines and tabs from a workset warning
-// before it lands in a one-per-line event-log entry. Local twin of
-// internal/turn.sanitizeDetail so this package keeps its narrow import
-// graph (no cross-import into the turn-loop side of the application).
-func sanitizeWorksetDetail(s string) string {
-	r := make([]byte, 0, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == '\n' || c == '\r' || c == '\t' {
-			r = append(r, ' ')
-			continue
-		}
-		r = append(r, c)
-	}
-	return string(r)
-}

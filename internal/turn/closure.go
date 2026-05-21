@@ -174,7 +174,7 @@ func surfaceClosureCandidates(ctx context.Context, state *State) error {
 	})
 
 	for _, c := range eligible {
-		if err := state.Ops.Log(ctx, "retire", "prompt",
+		if err := state.Ops.Log(ctx, memops.LogCategoryRetire, "prompt",
 			"thr="+c.rec.ID+" inactivity="+c.detail); err != nil {
 			return fmt.Errorf("closure: log retire.prompt: %w", err)
 		}
@@ -183,15 +183,15 @@ func surfaceClosureCandidates(ctx context.Context, state *State) error {
 		if err != nil {
 			// Distinct from curator-error: the curator was never
 			// consulted; the substrate load failed before it.
-			_ = state.Ops.Log(ctx, "retire", "load-error",
-				"thr="+c.rec.ID+" err="+sanitizeDetail(err.Error()))
+			_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "load-error",
+				"thr="+c.rec.ID+" err="+memops.SanitizeDetail(err.Error()))
 			continue
 		}
 
 		draft, err := state.Curator.DraftClosure(ctx, thr)
 		if err != nil {
-			_ = state.Ops.Log(ctx, "retire", "curator-error",
-				"thr="+c.rec.ID+" err="+sanitizeDetail(err.Error()))
+			_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "curator-error",
+				"thr="+c.rec.ID+" err="+memops.SanitizeDetail(err.Error()))
 			continue
 		}
 
@@ -203,14 +203,14 @@ func surfaceClosureCandidates(ctx context.Context, state *State) error {
 		}
 		resolution, err := state.ClosureResolver(ctx, offer)
 		if err != nil {
-			_ = state.Ops.Log(ctx, "retire", "resolver-error",
-				"thr="+c.rec.ID+" err="+sanitizeDetail(err.Error()))
+			_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "resolver-error",
+				"thr="+c.rec.ID+" err="+memops.SanitizeDetail(err.Error()))
 			continue
 		}
 
 		if err := applyClosureResolution(ctx, state, c.rec.ID, draft, resolution); err != nil {
-			_ = state.Ops.Log(ctx, "retire", "apply-error",
-				"thr="+c.rec.ID+" err="+sanitizeDetail(err.Error()))
+			_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "apply-error",
+				"thr="+c.rec.ID+" err="+memops.SanitizeDetail(err.Error()))
 			continue
 		}
 	}
@@ -230,7 +230,7 @@ func surfaceClosureCandidates(ctx context.Context, state *State) error {
 func applyClosureResolution(ctx context.Context, state *State, threadID string, draft curator.ClosureDraft, res ClosureResolution) error {
 	if res.Outcome == ClosureDefer {
 		state.closureDeferUntil[threadID] = state.TurnNumber + decayTurns
-		return state.Ops.Log(ctx, "retire", "defer", "thr="+threadID)
+		return state.Ops.Log(ctx, memops.LogCategoryRetire, "defer", "thr="+threadID)
 	}
 
 	rec, found, err := state.Ops.FindThread(ctx, threadID)
@@ -301,9 +301,9 @@ func applyClosureResolution(ctx context.Context, state *State, threadID string, 
 		if len(state.DormantThreads) > dormantThreadsCap {
 			state.DormantThreads = state.DormantThreads[:dormantThreadsCap]
 		}
-		return state.Ops.Log(ctx, "retire", "ack", "thr="+threadID+" resolution=wip")
+		return state.Ops.Log(ctx, memops.LogCategoryRetire, "ack", "thr="+threadID+" resolution=wip")
 	}
 
-	return state.Ops.Log(ctx, "retire", "complete",
+	return state.Ops.Log(ctx, memops.LogCategoryRetire, "complete",
 		"thr="+threadID+" resolution="+string(newState))
 }

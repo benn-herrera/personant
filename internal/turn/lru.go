@@ -22,17 +22,17 @@ import (
 func fetchThreadForReprompt(ctx context.Context, state *State, thrID string) bool {
 	thr, err := state.Ops.LoadThread(ctx, thrID)
 	if err != nil {
-		_ = state.Ops.Log(ctx, "thread", "fetch-miss",
-			"thr="+thrID+" err="+sanitizeDetail(err.Error()))
+		_ = state.Ops.Log(ctx, memops.LogCategoryThread, "fetch-miss",
+			"thr="+thrID+" err="+memops.SanitizeDetail(err.Error()))
 		return false
 	}
 	if err := onContextDelta(ctx, state, Delta{
-		Source:  "thread.fetched",
+		Source:  memops.SourceThreadFetched,
 		Content: thr.Body,
 		Meta:    map[string]string{"thr": thrID},
 	}); err != nil {
-		_ = state.Ops.Log(ctx, "thread", "fetch-miss",
-			"thr="+thrID+" err="+sanitizeDetail(err.Error()))
+		_ = state.Ops.Log(ctx, memops.LogCategoryThread, "fetch-miss",
+			"thr="+thrID+" err="+memops.SanitizeDetail(err.Error()))
 		return false
 	}
 

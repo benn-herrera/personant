@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"personant/internal/memops"
 	"personant/internal/recall/measure"
 )
 
@@ -91,14 +92,14 @@ func surfaceRecallCandidates(ctx context.Context, state *State, userInput string
 			details := fmt.Sprintf("%s score=%.2f matched=%s query_size=%d",
 				r.ThreadID, r.Symbolic.Score,
 				strings.Join(r.Symbolic.MatchedSymbols, ","), querySize)
-			if err := state.Ops.Log(ctx, "spine", "match-fire", details); err != nil {
+			if err := state.Ops.Log(ctx, memops.LogCategorySpine, "match-fire", details); err != nil {
 				return fmt.Errorf("log spine.match-fire: %w", err)
 			}
 		}
 		if r.Embedding != nil {
 			details := fmt.Sprintf("%s score=%.3f query_chars=%d",
 				r.ThreadID, r.Embedding.Score, queryChars)
-			if err := state.Ops.Log(ctx, "spine", "embed-match-fire", details); err != nil {
+			if err := state.Ops.Log(ctx, memops.LogCategorySpine, "embed-match-fire", details); err != nil {
 				return fmt.Errorf("log spine.embed-match-fire: %w", err)
 			}
 		}
@@ -108,7 +109,7 @@ func surfaceRecallCandidates(ctx context.Context, state *State, userInput string
 		return nil
 	}
 	offer := RecallOffer{Candidates: results[:min(len(results), recallOfferK)]}
-	if err := state.Ops.Log(ctx, "recall", "offer", fmt.Sprintf("count=%d", len(offer.Candidates))); err != nil {
+	if err := state.Ops.Log(ctx, memops.LogCategoryRecall, "offer", fmt.Sprintf("count=%d", len(offer.Candidates))); err != nil {
 		return fmt.Errorf("log recall.offer: %w", err)
 	}
 	resolution, err := state.RecallResolver(ctx, offer)
@@ -133,7 +134,7 @@ func applyRecallResolution(ctx context.Context, state *State, offer RecallOffer,
 	for i, c := range offer.Candidates {
 		if accepted[i] {
 			promoteToLayerB(state, c.ThreadID)
-			if err := state.Ops.Log(ctx, "recall", "accept",
+			if err := state.Ops.Log(ctx, memops.LogCategoryRecall, "accept",
 				fmt.Sprintf("thr=%s layers=%s", c.ThreadID, strings.Join(c.Layers(), "+"))); err != nil {
 				return fmt.Errorf("log recall.accept: %w", err)
 			}
@@ -141,8 +142,8 @@ func applyRecallResolution(ctx context.Context, state *State, offer RecallOffer,
 			// A counter-write failure must not abort turn close or skip
 			// the remaining accepted threads: log it and continue.
 			if err := state.Ops.RecordRecallFire(ctx, c.ThreadID); err != nil {
-				_ = state.Ops.Log(ctx, "recall", "fire-error",
-					"thr="+c.ThreadID+" err="+sanitizeDetail(err.Error()))
+				_ = state.Ops.Log(ctx, memops.LogCategoryRecall, "fire-error",
+					"thr="+c.ThreadID+" err="+memops.SanitizeDetail(err.Error()))
 			}
 			continue
 		}
@@ -150,7 +151,7 @@ func applyRecallResolution(ctx context.Context, state *State, offer RecallOffer,
 		if reason == "" {
 			reason = DeclineNotRelevant
 		}
-		if err := state.Ops.Log(ctx, "recall", "decline",
+		if err := state.Ops.Log(ctx, memops.LogCategoryRecall, "decline",
 			fmt.Sprintf("thr=%s reason=%s", c.ThreadID, reason)); err != nil {
 			return fmt.Errorf("log recall.decline: %w", err)
 		}
