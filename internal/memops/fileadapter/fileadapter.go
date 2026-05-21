@@ -18,9 +18,7 @@
 package fileadapter
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -439,62 +437,31 @@ func (a *FileAdapter) GetLastActiveProject(ctx context.Context) (string, error) 
 
 // ---------- Session working set ----------
 
-// workingSetFile is the on-disk shape of the persisted session
-// working-set artifact (<Home>/working-set.json). Only the two ordered
-// ID lists are stored; session-volatile state is deliberately omitted.
-type workingSetFile struct {
-	ActiveThreads  []string `json:"active_threads"`
-	DormantThreads []string `json:"dormant_threads"`
-}
-
 // SaveWorkingSet persists Layer B/C membership to <Home>/working-set.json.
-// The artifact is volatile session state — it is gitignored in the home
-// tree (see store.Init's seedGitignore), so the per-turn rewrite does not
-// dirty the substrate's git repo. Atomic: encode to a temp file in the
-// home directory, fsync, rename — the same pattern as SaveProjectMeta.
+// Format and atomic-write live in store.SaveWorkingSet; this is the
+// substrate-routing pass-through.
 func (a *FileAdapter) SaveWorkingSet(ctx context.Context, activeThreads, dormantThreads []string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if a.paths.Home == "" {
-		return errors.New("fileadapter: save working set: PersonantPaths.Home is empty")
-	}
-
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(workingSetFile{
-		ActiveThreads:  activeThreads,
-		DormantThreads: dormantThreads,
-	}); err != nil {
-		return fmt.Errorf("fileadapter: save working set: encode: %w", err)
-	}
-	if err := store.WriteFileAtomic(a.paths.WorkingSet, buf.Bytes()); err != nil {
-		return fmt.Errorf("fileadapter: save working set: %w", err)
+	if err := store.SaveWorkingSet(a.paths, activeThreads, dormantThreads); err != nil {
+		return fmt.Errorf("fileadapter: %w", err)
 	}
 	return nil
 }
 
-// LoadWorkingSet reads <Home>/working-set.json. A nonexistent file
-// yields (nil, nil, nil) — the fresh-launch state — mirroring how
-// GetLastActiveProject treats an absent marker. A present but malformed
-// file yields an error.
+// LoadWorkingSet reads <Home>/working-set.json. A nonexistent file yields
+// (nil, nil, nil) — the fresh-launch state. Format and parsing live in
+// store.LoadWorkingSet.
 func (a *FileAdapter) LoadWorkingSet(ctx context.Context) ([]string, []string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	data, err := os.ReadFile(a.paths.WorkingSet)
+	active, dormant, err := store.LoadWorkingSet(a.paths)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil, nil
-		}
-		return nil, nil, fmt.Errorf("fileadapter: load working set: %w", err)
+		return nil, nil, fmt.Errorf("fileadapter: %w", err)
 	}
-	var ws workingSetFile
-	if err := json.Unmarshal(data, &ws); err != nil {
-		return nil, nil, fmt.Errorf("fileadapter: load working set: parse %s: %w", a.paths.WorkingSet, err)
-	}
-	return ws.ActiveThreads, ws.DormantThreads, nil
+	return active, dormant, nil
 }
 
 // ---------- Symbol index / recall ----------
