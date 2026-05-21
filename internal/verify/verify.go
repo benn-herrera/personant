@@ -123,7 +123,7 @@ func checkSpine(report *memops.VerifyReport, spine []memops.SpineRecord, entryMa
 		switch {
 		case rec.Project == "":
 			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "project", Message: "project is empty"})
-		case rec.Project == "prj_default":
+		case rec.Project == memops.DefaultProjectID:
 			// reserved; always valid as a reference.
 		case !memops.ProjectIDPattern.MatchString(rec.Project):
 			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "project",
@@ -273,7 +273,7 @@ func loadKnownProjects(projectsDir string) map[string]bool {
 		if !isProjectDirName(e.Name()) {
 			continue
 		}
-		metaPath := filepath.Join(projectsDir, e.Name(), "meta.json")
+		metaPath := filepath.Join(projectsDir, e.Name(), store.ProjectMetaFileName)
 		if _, err := os.Stat(metaPath); err == nil {
 			out[e.Name()] = true
 		}
@@ -285,7 +285,7 @@ func loadKnownProjects(projectsDir string) map[string]bool {
 // directory under projects/. Accepts both /^prj_\d+$/ and the reserved
 // "prj_default" handle (spec §2.5.1).
 func isProjectDirName(name string) bool {
-	return name == "prj_default" || memops.ProjectIDPattern.MatchString(name)
+	return name == memops.DefaultProjectID || memops.ProjectIDPattern.MatchString(name)
 }
 
 // checkProjectMetas validates each projects/prj_<n>/meta.json in turn.
@@ -319,7 +319,7 @@ func checkProjectMetas(report *memops.VerifyReport, projectsDir string) {
 			})
 			continue
 		}
-		metaPath := filepath.Join(projectsDir, name, "meta.json")
+		metaPath := filepath.Join(projectsDir, name, store.ProjectMetaFileName)
 		data, err := os.ReadFile(metaPath)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
@@ -328,7 +328,7 @@ func checkProjectMetas(report *memops.VerifyReport, projectsDir string) {
 				continue
 			}
 			report.Errors = append(report.Errors, memops.VerifyFinding{
-				Path:    filepath.Join("projects", name, "meta.json"),
+				Path:    filepath.Join("projects", name, store.ProjectMetaFileName),
 				Field:   "",
 				Message: fmt.Sprintf("read: %v", err),
 			})
@@ -337,7 +337,7 @@ func checkProjectMetas(report *memops.VerifyReport, projectsDir string) {
 		var meta memops.ProjectMeta
 		if err := json.Unmarshal(data, &meta); err != nil {
 			report.Errors = append(report.Errors, memops.VerifyFinding{
-				Path:    filepath.Join("projects", name, "meta.json"),
+				Path:    filepath.Join("projects", name, store.ProjectMetaFileName),
 				Field:   "",
 				Message: fmt.Sprintf("parse: %v", err),
 			})
@@ -348,7 +348,7 @@ func checkProjectMetas(report *memops.VerifyReport, projectsDir string) {
 }
 
 func checkProjectMeta(report *memops.VerifyReport, dirName string, meta memops.ProjectMeta) {
-	loc := filepath.Join("projects", dirName, "meta.json")
+	loc := filepath.Join("projects", dirName, store.ProjectMetaFileName)
 
 	// id: regex (or reserved handle) + matches directory name.
 	switch {
@@ -372,7 +372,7 @@ func checkProjectMeta(report *memops.VerifyReport, dirName string, meta memops.P
 	// (file-move detection is /cd-project's domain — spec §4.5.5).
 	// prj_default carries an empty path by reservation (spec §2.5.1);
 	// allow that special case.
-	if meta.CurrentRootPath == "" && meta.ID != "prj_default" {
+	if meta.CurrentRootPath == "" && meta.ID != memops.DefaultProjectID {
 		report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "current_root_path",
 			Message: "current_root_path is empty"})
 	}

@@ -328,7 +328,7 @@ func writeMeta(t *testing.T, paths store.PersonantPaths, dir string, meta memops
 	if err != nil {
 		t.Fatalf("marshal meta: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(d, "meta.json"), data, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(d, store.ProjectMetaFileName), data, 0o644); err != nil {
 		t.Fatalf("write meta: %v", err)
 	}
 }
