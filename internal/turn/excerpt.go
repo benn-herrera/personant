@@ -72,6 +72,24 @@ func renderTurnExcerpt(turnN int, when string, anchors []string, userInput, resp
 	return b.String()
 }
 
+// descriptionFromNewThread derives a thread's Description (spec §2.3):
+// the triggering utterance — the user prompt that spawned the thread.
+// v0.1 sets it deterministically (no LLM paraphrase): collapse the
+// userInput's whitespace and truncate to the same length bound as the
+// summary so the field stays within the §2.2 spine budget. Distinct
+// from summarizeForNewThread, which derives from the response body.
+func descriptionFromNewThread(userInput string) string {
+	const maxLen = 120
+	s := strings.Join(strings.Fields(userInput), " ")
+	if s == "" {
+		return "(new topic)"
+	}
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
+}
+
 // summarizeForNewThread takes the response body's stripped form (tag
 // already removed by the caller-provided string, or the raw body) and
 // returns a short summary. v0.1 keeps it crude: first 120 chars,

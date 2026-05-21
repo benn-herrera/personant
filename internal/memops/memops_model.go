@@ -63,6 +63,13 @@ type SpineRecord struct {
 	Summary string      `json:"summary"`
 	State   ThreadState `json:"state"`
 
+	// Description is the triggering utterance — the user prompt that
+	// spawned the thread — set once at creation and never rewritten
+	// (spec §2.3). Distinct from Summary, which is the curator's closure
+	// gist set at retirement. A missing field in old JSON decodes empty
+	// (back-compatible; no migration).
+	Description string `json:"description"`
+
 	Created      string `json:"created"`
 	LastEngaged  string `json:"last_engaged"`
 	StateChanged string `json:"state_changed"`
@@ -105,6 +112,12 @@ type ThreadMeta struct {
 	Anchors []string    `json:"anchors" yaml:"anchors"`
 	Summary string      `json:"summary" yaml:"summary"`
 	State   ThreadState `json:"state" yaml:"state"`
+
+	// Description is the triggering utterance — the user prompt that
+	// spawned the thread — set once at creation and never rewritten
+	// (spec §2.3). Distinct from Summary, the curator's closure gist.
+	// A missing field in old YAML decodes empty (back-compatible).
+	Description string `json:"description" yaml:"description"`
 
 	Created      string `json:"created" yaml:"created"`
 	LastEngaged  string `json:"last_engaged" yaml:"last_engaged"`
