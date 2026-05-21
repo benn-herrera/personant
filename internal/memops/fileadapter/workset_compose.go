@@ -165,81 +165,22 @@ func readDirectiveBody(path string) (string, error) {
 }
 
 // stripFrontmatter returns content with a leading `---\n...\n---\n`
-// block removed. If no opening delimiter is found on the first line
-// (after optional whitespace), content is returned unchanged.
+// block removed. If the content has no well-formed frontmatter
+// (missing opening or closing delimiter), content is returned
+// unchanged.
 //
-// The closing delimiter must be matched against an entire line — an
-// embedded `---` inside a code block in the body therefore stays put.
+// This is the lenient companion to store.SplitFrontmatter: directive
+// markdown files treat frontmatter as optional, so a parse failure
+// here means "no frontmatter present" rather than a hard error. The
+// underlying line-by-line scan and closing-delimiter handling — and
+// thus the embedded-triple-dash-in-a-code-block behavior — come from
+// store.SplitFrontmatter.
 func stripFrontmatter(content string) string {
-	// Tolerate leading whitespace.
-	trimmed := trimLeftWS(content)
-	if !hasPrefix(trimmed, "---") {
+	_, body, err := store.SplitFrontmatter([]byte(content))
+	if err != nil {
 		return content
 	}
-	rest := trimmed[len("---"):]
-	// The opening delimiter line must end at a newline (not a `---X`).
-	if !hasPrefix(rest, "\n") && !hasPrefix(rest, "\r\n") && rest != "" {
-		return content
-	}
-	// Skip the rest of the opening delimiter line.
-	nl := indexByte(rest, '\n')
-	if nl < 0 {
-		return content
-	}
-	rest = rest[nl+1:]
-	for {
-		nl := indexByte(rest, '\n')
-		var line string
-		if nl < 0 {
-			line = rest
-		} else {
-			line = rest[:nl]
-		}
-		if trimRightWS(line) == "---" {
-			if nl < 0 {
-				return ""
-			}
-			body := rest[nl+1:]
-			// One conventional blank line after the closing delimiter is
-			// stripped; everything else preserved verbatim.
-			if len(body) > 0 && body[0] == '\n' {
-				body = body[1:]
-			}
-			return body
-		}
-		if nl < 0 {
-			// No closing delimiter — treat the input as having no
-			// frontmatter rather than swallowing the whole file.
-			return content
-		}
-		rest = rest[nl+1:]
-	}
-}
-
-// minimal byte helpers — avoids dragging in strings for the hot path
-// while keeping the helper local to the substrate-format code.
-func hasPrefix(s, p string) bool { return len(s) >= len(p) && s[:len(p)] == p }
-func indexByte(s string, c byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == c {
-			return i
-		}
-	}
-	return -1
-}
-func trimLeftWS(s string) string {
-	i := 0
-	for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r') {
-		i++
-	}
-	return s[i:]
-}
-func trimRightWS(s string) string {
-	j := len(s)
-	for j > 0 && (s[j-1] == ' ' || s[j-1] == '\t' || s[j-1] == '\r') {
-		j--
-	}
-	return s[:j]
+	return body
 }
 
 // ---------- Layer A2 fetch ----------

@@ -151,7 +151,7 @@ func LoadThreadFrontmatter(paths PersonantPaths, threadID string) (memops.Thread
 		return memops.ThreadMeta{}, fmt.Errorf("load thread %s: read: %w", threadID, err)
 	}
 
-	fmBytes, _, err := splitFrontmatter(data)
+	fmBytes, _, err := SplitFrontmatter(data)
 	if err != nil {
 		return memops.ThreadMeta{}, fmt.Errorf("load thread %s: %w", threadID, err)
 	}
@@ -491,7 +491,7 @@ func turnFileNumbers(turnsDir string) ([]int, error) {
 	return nums, nil
 }
 
-// splitFrontmatter scans data for the opening `---\n` delimiter, then
+// SplitFrontmatter scans data for the opening `---\n` delimiter, then
 // for the matching closing `---\n` delimiter. Returns the frontmatter
 // bytes (excluding the delimiters) and the body bytes that follow. A
 // single leading newline immediately after the closing delimiter is
@@ -500,7 +500,12 @@ func turnFileNumbers(turnsDir string) ([]int, error) {
 //
 // The closing delimiter must be matched against an entire line; an
 // embedded `---` inside a code block is therefore safe.
-func splitFrontmatter(data []byte) (fm []byte, body string, err error) {
+//
+// SplitFrontmatter is strict: a missing opening or closing delimiter is
+// returned as an error. Callers that treat frontmatter as optional
+// (e.g. directive markdown loaders) should fall back to the original
+// content when this returns a non-nil error.
+func SplitFrontmatter(data []byte) (fm []byte, body string, err error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 
