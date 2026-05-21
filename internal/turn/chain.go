@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strings"
 
 	"personant/internal/memops"
 	"personant/internal/prompt"
@@ -102,7 +101,7 @@ func onContextDelta(ctx context.Context, state *State, delta Delta) error {
 	// not duplicated into the log. The buffered entry keeps the full
 	// content untouched — only this logged copy is summarized.
 	logContent := delta.Content
-	if delta.Source == "fs.read" || delta.Source == "fs.write" {
+	if delta.Source == memops.SourceFSRead || delta.Source == memops.SourceFSWrite {
 		logContent = fmt.Sprintf("%s path=%s bytes=%d",
 			delta.Source, delta.Meta["path"], len(delta.Content))
 	}
@@ -126,23 +125,23 @@ func onContextDelta(ctx context.Context, state *State, delta Delta) error {
 // Non-fs delta sources are ignored.
 func bufferFileEdit(ctx context.Context, state *State, delta Delta) error {
 	switch delta.Source {
-	case "fs.read", "fs.write", "fs.commit":
+	case memops.SourceFSRead, memops.SourceFSWrite, memops.SourceFSCommit:
 	default:
 		return nil
 	}
 	path := delta.Meta["path"]
 	if path == "" {
-		return state.Ops.Log(ctx, "fs", "edit-no-path",
+		return state.Ops.Log(ctx, memops.LogCategoryFS, "edit-no-path",
 			"source="+delta.Source+" reason=missing-meta-path")
 	}
 	switch delta.Source {
-	case "fs.read", "fs.write":
+	case memops.SourceFSRead, memops.SourceFSWrite:
 		state.fileEdits = append(state.fileEdits, fileEdit{
 			kind:    fileEditWrite,
 			path:    path,
 			content: delta.Content,
 		})
-	case "fs.commit":
+	case memops.SourceFSCommit:
 		state.fileEdits = append(state.fileEdits, fileEdit{
 			kind: fileEditCommit,
 			path: path,
@@ -160,15 +159,15 @@ func bufferFileEdit(ctx context.Context, state *State, delta Delta) error {
 // silently drop content).
 func provisionalRetention(source string) memops.RetentionClass {
 	switch source {
-	case "tool.result", "user.shell-capture",
-		"fs.read", "fs.write", "fs.commit":
+	case memops.SourceToolResult, memops.SourceUserShellCapture,
+		memops.SourceFSRead, memops.SourceFSWrite, memops.SourceFSCommit:
 		// §3.9 file-edit events are task-class: the durable home of file
 		// content is the per-thread tracked-file store, not the delta
 		// event log — the event-log line is just the event record.
 		return memops.RetentionTask
-	case "user.prompt", "model.response",
-		"thread.fetched", "digest.refresh",
-		"slash.injected", "directive.reloaded":
+	case memops.SourceUserPrompt, memops.SourceModelResponse,
+		memops.SourceThreadFetched, memops.SourceDigestRefresh,
+		memops.SourceSlashInjected, memops.SourceDirectiveReloaded:
 		return memops.RetentionDecision
 	default:
 		return memops.RetentionDecision
@@ -188,7 +187,7 @@ func extractSymbols(ctx context.Context, state *State, delta Delta) error {
 	deterministicExtract(ctx, state, delta)
 
 	switch delta.Source {
-	case "user.prompt":
+	case memops.SourceUserPrompt:
 		for _, tag := range userTagRE.FindAllStringSubmatch(delta.Content, -1) {
 			raw := tag[1]
 			normalized := memops.Normalize(raw, memops.SymbolTag)
@@ -196,12 +195,12 @@ func extractSymbols(ctx context.Context, state *State, delta Delta) error {
 		}
 		return nil
 
-	case "model.response":
+	case memops.SourceModelResponse:
 		result, err := prompt.Parse(delta.Content)
 		if err != nil {
 			if errors.Is(err, prompt.ErrNoTopicTag) {
 				// §5.1.2: missing tag is a warning, not a fatal — log and continue.
-				_ = state.Ops.Log(ctx, "topic", "tag-missing",
+				_ = state.Ops.Log(ctx, memops.LogCategoryTopic, "tag-missing",
 					"source=model.response bytes="+itoa(len(delta.Content)))
 				return nil
 			}
@@ -220,7 +219,7 @@ func extractSymbols(ctx context.Context, state *State, delta Delta) error {
 		// symbols; warning lines are surfaced so a calibration pass can
 		// catch malformed-tag drift.
 		for _, w := range result.Warnings {
-			_ = state.Ops.Log(ctx, "topic", "warning", "source=model.response detail="+sanitizeDetail(w))
+			_ = state.Ops.Log(ctx, memops.LogCategoryTopic, "warning", "source=model.response detail="+memops.SanitizeDetail(w))
 		}
 		return nil
 
@@ -230,16 +229,6 @@ func extractSymbols(ctx context.Context, state *State, delta Delta) error {
 		// digest.refresh, directive.reloaded, user.shell-capture.
 		return nil
 	}
-}
-
-// sanitizeDetail trims newlines and control chars from a free-form detail
-// string before it lands in a log line. Log lines are one per event;
-// embedded newlines would split them.
-func sanitizeDetail(s string) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", " ")
-	s = strings.ReplaceAll(s, "\t", " ")
-	return s
 }
 
 // itoa is a tiny helper to avoid pulling fmt for one int format on a hot

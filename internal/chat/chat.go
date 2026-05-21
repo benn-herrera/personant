@@ -189,7 +189,7 @@ func Run(opts Options) error {
 		return err
 	}
 
-	if err := ops.Log(ctx, "system", "bootstrap",
+	if err := ops.Log(ctx, memops.LogCategorySystem, "bootstrap",
 		fmt.Sprintf("active=%s provider=%s", project.ID, providerName)); err != nil {
 		fmt.Fprintf(opts.Stderr, "warn: log session.start: %v\n", err)
 	}
@@ -255,7 +255,7 @@ func Run(opts Options) error {
 		return err
 	}
 
-	if err := ops.Log(ctx, "session", "ended", "active="+project.ID); err != nil {
+	if err := ops.Log(ctx, memops.LogCategorySession, "ended", "active="+project.ID); err != nil {
 		fmt.Fprintf(opts.Stderr, "warn: log session.end: %v\n", err)
 	}
 	return nil
@@ -635,7 +635,7 @@ func createNewProject(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd 
 	if err := ops.SetLastActiveProject(ctx, id); err != nil {
 		return memops.ProjectMeta{}, fmt.Errorf("chat: write last-active: %w", err)
 	}
-	if err := ops.Log(ctx, "project", "created", "id="+id+" name="+name); err != nil {
+	if err := ops.Log(ctx, memops.LogCategoryProject, "created", "id="+id+" name="+name); err != nil {
 		fmt.Fprintf(opts.Stderr, "warn: log project.created: %v\n", err)
 	}
 	return meta, nil

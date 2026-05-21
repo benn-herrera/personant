@@ -88,8 +88,8 @@ func surfaceArchivalCandidates(ctx context.Context, state *State) error {
 			break
 		}
 		if err := state.Ops.ArchiveThread(ctx, rec.ID); err != nil {
-			_ = state.Ops.Log(ctx, "archive", "error",
-				"thr="+rec.ID+" err="+sanitizeDetail(err.Error()))
+			_ = state.Ops.Log(ctx, memops.LogCategoryArchive, "error",
+				"thr="+rec.ID+" err="+memops.SanitizeDetail(err.Error()))
 			continue
 		}
 		archived++
@@ -102,7 +102,7 @@ func surfaceArchivalCandidates(ctx context.Context, state *State) error {
 	// relieve, exactly what the six-month sim must detect, so it gets a
 	// distinct log line.
 	if archived < target {
-		_ = state.Ops.Log(ctx, "archive", "under-drain",
+		_ = state.Ops.Log(ctx, memops.LogCategoryArchive, "under-drain",
 			fmt.Sprintf("spine=%d low-water=%d wanted=%d archived=%d retired-exhausted",
 				len(recs)-archived, archiveLowWater, target, archived))
 	}
@@ -117,7 +117,7 @@ func surfaceArchivalCandidates(ctx context.Context, state *State) error {
 	}
 	if err := state.Ops.RegenerateDerivedState(ctx, memops.IndexBuildOptions{Quiet: true}); err != nil {
 		state.derivedIndexStale = true
-		_ = state.Ops.Log(ctx, "archive", "regen-error", sanitizeDetail(err.Error()))
+		_ = state.Ops.Log(ctx, memops.LogCategoryArchive, "regen-error", memops.SanitizeDetail(err.Error()))
 		return nil
 	}
 	state.derivedIndexStale = false

@@ -88,7 +88,7 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 			paths := unsyncedEditPaths(state.fileEdits)
 			for _, p := range paths {
 				_ = state.Ops.Log(ctx, logCatFS, logActUnsyncedNoTopicTag,
-					"path="+sanitizeDetail(p)+" reason=no-engaged-thread")
+					"path="+memops.SanitizeDetail(p)+" reason=no-engaged-thread")
 			}
 			return fmt.Errorf("%s%s: %w",
 				errMsgFileEditWithoutTopicTagHead,
@@ -138,8 +138,8 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 	// close-time substrate calls).
 	for _, id := range engaged {
 		if _, _, err := state.Ops.AgeFileChains(ctx, id, state.TurnNumber); err != nil {
-			_ = state.Ops.Log(ctx, "dedup", "error",
-				"thr="+id+" chain-age "+sanitizeDetail(err.Error()))
+			_ = state.Ops.Log(ctx, memops.LogCategoryDedup, "error",
+				"thr="+id+" chain-age "+memops.SanitizeDetail(err.Error()))
 		}
 	}
 
@@ -150,7 +150,7 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 		engagedSet[id] = struct{}{}
 	}
 	if err := surfaceRecallCandidates(ctx, state, userInput, engagedSet); err != nil {
-		_ = state.Ops.Log(ctx, "recall", "error", sanitizeDetail(err.Error()))
+		_ = state.Ops.Log(ctx, memops.LogCategoryRecall, "error", memops.SanitizeDetail(err.Error()))
 		// Non-fatal: opportunistic recall failure does not abort the turn.
 	}
 	return nil
@@ -185,13 +185,13 @@ func applyFileEdits(ctx context.Context, state *State, threadID string) {
 		switch fe.kind {
 		case fileEditWrite:
 			if err := state.Ops.RecordFileWrite(ctx, threadID, fe.path, fe.content); err != nil {
-				_ = state.Ops.Log(ctx, "fs", "write-error",
-					"thr="+threadID+" path="+fe.path+" err="+sanitizeDetail(err.Error()))
+				_ = state.Ops.Log(ctx, memops.LogCategoryFS, "write-error",
+					"thr="+threadID+" path="+fe.path+" err="+memops.SanitizeDetail(err.Error()))
 			}
 		case fileEditCommit:
 			if err := state.Ops.RecordFileCommit(ctx, threadID, fe.path, fe.hash, state.TurnNumber); err != nil {
-				_ = state.Ops.Log(ctx, "fs", "commit-untracked",
-					"thr="+threadID+" path="+fe.path+" err="+sanitizeDetail(err.Error()))
+				_ = state.Ops.Log(ctx, memops.LogCategoryFS, "commit-untracked",
+					"thr="+threadID+" path="+fe.path+" err="+memops.SanitizeDetail(err.Error()))
 			}
 		}
 	}
@@ -206,13 +206,13 @@ func updateExistingThread(ctx context.Context, state *State, threadID, userInput
 		// The model named a thread that does not exist. v0.1 logs and
 		// continues; future phases may surface this as a recall miss or a
 		// hallucination signal.
-		return state.Ops.Log(ctx, "thread", "engaged-miss",
+		return state.Ops.Log(ctx, memops.LogCategoryThread, "engaged-miss",
 			"thr="+threadID+" reason=not-in-spine")
 	}
 	if rec.Project != "" && rec.Project != state.ActiveProject.ID {
 		// Cross-project engagement is reserved for Phase 5; v0.1 warns and
 		// declines to mutate a record that belongs to another project.
-		return state.Ops.Log(ctx, "thread", "engaged-cross-project",
+		return state.Ops.Log(ctx, memops.LogCategoryThread, "engaged-cross-project",
 			"thr="+threadID+" project="+rec.Project+" active="+state.ActiveProject.ID)
 	}
 
@@ -275,7 +275,7 @@ func updateExistingThread(ctx context.Context, state *State, threadID, userInput
 	}); err != nil {
 		return fmt.Errorf("engage thread %s: %w", threadID, err)
 	}
-	return state.Ops.Log(ctx, "thread", "engaged",
+	return state.Ops.Log(ctx, memops.LogCategoryThread, "engaged",
 		threadID+" turn_count="+itoa(rec.TurnCount))
 }
 
@@ -289,10 +289,10 @@ func createNewThread(ctx context.Context, state *State, userInput, responseBody,
 	}
 
 	anchors := state.coalesce.symbolList()
-	if len(anchors) < 4 || len(anchors) > 8 {
-		_ = state.Ops.Log(ctx, "thread", "anchor-cardinality",
-			"new-thread anchors="+itoa(len(anchors))+" using-first-4-with-padding")
-		anchors = padOrTruncateAnchors(anchors, 4)
+	if len(anchors) < memops.MinAnchorsPerThread || len(anchors) > memops.MaxAnchorsPerThread {
+		_ = state.Ops.Log(ctx, memops.LogCategoryThread, "anchor-cardinality",
+			"new-thread anchors="+itoa(len(anchors))+" using-first-"+itoa(memops.MinAnchorsPerThread)+"-with-padding")
+		anchors = padOrTruncateAnchors(anchors, memops.MinAnchorsPerThread)
 	}
 
 	summary := summarizeForNewThread(responseBody)
@@ -333,7 +333,7 @@ func createNewThread(ctx context.Context, state *State, userInput, responseBody,
 	}); err != nil {
 		return "", fmt.Errorf("create thread %s: %w", newID, err)
 	}
-	if err := state.Ops.Log(ctx, "thread", "created",
+	if err := state.Ops.Log(ctx, memops.LogCategoryThread, "created",
 		newID+" anchors="+itoa(len(anchors))+" project="+state.ActiveProject.ID); err != nil {
 		return "", err
 	}
