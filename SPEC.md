@@ -108,7 +108,7 @@ interface SpineRecord {
 |---|---|
 | `id` | regex `/^thr_\d+$/`, globally unique |
 | `project` | regex `/^prj_\d+$/`, references an existing project (or `prj_default`) |
-| `anchors.length` | between 4 and 8 inclusive; the [4,8] range is calibrated against the Jaccard operating point: fewer than 4 collapse threshold discrimination; more than 8 dilute specificity below the precision floor established in Phase C.6. This is a hard contract: production rejects out-of-range anchor sets at thread creation (no padding, no truncation, no synthetic anchors) and `personant verify` also enforces it. Synthetic anchors are never written by production. |
+| `anchors.length` | between 4 and 8 inclusive; the [4,8] range is calibrated against the Jaccard operating point: fewer than 4 collapse threshold discrimination; more than 8 dilute specificity below the precision floor established in Phase C.6. This is a hard contract: production rejects out-of-range anchor sets at thread creation (no padding, no truncation, no synthetic anchors) and `personant verify` also enforces it. Synthetic anchors are never written by production. **⚠ Under active redesign — do not treat as settled:** the anchors-frozen-at-creation model and the 4-minimum floor are slated to be replaced by an evolving-anchor model (anchors as a re-derived projection of the thread's accreting symbol set; a vague new thread legitimately starts with 0 anchors; superseded premises retained-not-evicted). See §9.1's realism backlog. Do not build new dependencies on the immutable-4-floor semantics without checking that work's status. |
 | `anchors[i]` | normalized form (see §2.7); 3-50 chars |
 | `summary.length` | ≤ `spine.entry-max-chars` directive value |
 | `state` | one of `ThreadState` enum values |
@@ -1283,6 +1283,22 @@ operational (per §2.1: runtime-managed, not git-tracked, not
 canonical), single-line, plain text, fast to read. Rewriting on every
 active-project change is fine; the write volume is trivial.
 
+#### 4.5.8 Startup recovery after unclean shutdown
+
+A v0.1 substrate requirement, distinct from the deep-cold *archival*
+recovery of §3.8 (which recovers retired threads via `git show`): the
+runtime may be hard-terminated (crash, SIGKILL, power loss) mid-turn,
+leaving derived state (the symbol index, working-set membership, the
+`last-active` file) inconsistent with canonical (`spine.jsonl`, thread
+files, logs). On startup the runtime must **reconcile derived state
+against canonical** — detect that a prior session did not shut down
+cleanly, and rebuild/repair the stale derived artifacts (cf. `personant
+index rebuild`, §2.1) rather than trusting them. The normal
+shutdown→resume cycle must also be exercised, not only the crash path.
+Status: queued for v0.1; not yet implemented. (The honest-coverage rule
+of §9.1 applies — this is a known substrate obligation, tracked, not
+forgotten.)
+
 ---
 
 ## 5. Model interaction
@@ -1339,6 +1355,9 @@ violation: the runtime fails the turn loud — substrate state does not
 advance, no thread is created, the violation is logged — consistent with
 the topic-tag-protocol fail-loud handling (§3.0/§3.3). The runtime never
 pads or truncates to recover; the contract is the model's to satisfy.
+(⚠ The 4-minimum is under active redesign — see the §2.2 note and §9.1's
+realism backlog; a vague new thread may legitimately emit 0 anchors under
+the planned evolving-anchor model.)
 
 The single-line form is deliberate: no multi-line state for the parser
 to track, no envelope syntax that varies across providers, no JSON
@@ -1834,6 +1853,69 @@ The v0.1 acceptance criterion:
   criterion is "the system is in a state from which it could run
   another six months without degradation," not "the system has
   survived six months."
+
+**The gate is realism CONVERGENCE, not a single run.** "Survived six
+months in whatever shape the workload happens to be in" is form, not
+function. The criterion is six months passed with *every identified
+element of realism accounted for* — including elements surfaced by prior
+runs. It is a converging loop: each run exposes a missing realism
+behavior (or a latent defect the previous incoherence masked), which is
+addressed before the next run; the gate is met only at the fixed point
+where a run surfaces **no new realism gap**.
+
+"Accounted for" does not require "simulated." A realism element is
+accounted for by one of, in descending preference:
+
+1. **Simulated** in the workload — exercised end-to-end (gold standard).
+2. **Modeled and attempted** — a written model of its expected effect, a
+   solution implemented against that model, and unit tests over whatever
+   sub-parts decompose, when faithful simulation costs more than
+   predicting the effect.
+3. **Known unknown, deferred to empirical human-use data** — when the
+   honest answer requires real human use. Labeling it a parked
+   known-unknown is correct; implementing on guesswork wastes effort and
+   bakes in a wrong assumption. The data arrives from the front-end U/X
+   phase (below), which closes these items in a later substrate
+   iteration — iterative, not circular-blocking.
+
+The standard is *as much diligence as is honestly practical* — not
+perfect knowledge, which is unattainable. **Honesty clause:** the
+acceptance claim must document its own coverage (what is simulated vs.
+modeled vs. parked-as-known-unknown), so the green check never
+overclaims. A forgotten realism element is the failure; a documented
+deferral is not.
+
+**Open realism backlog** (the convergence checklist as of 2026-05-21 —
+each item must be accounted-for before the gate is met; this list grows
+as runs surface new gaps):
+
+- **Workload incoherence / interleaving.** The current single-topic-per-
+  thread workload is unrealistically tidy; humans jump between loosely-
+  related threads, abandon and resume, and emit non-sequiturs. Remedy:
+  interleave excerpts + queries from several unrelated topics within a
+  session. Until done, recall/precision numbers describe a too-coherent
+  stream.
+- **Evolving anchors / anchor-lifecycle redesign.** Threads drift far
+  from their creation topic without any single jump sharp enough to cut
+  a new thread (and premises invert). Drives the §2.2/§5.1 anchor
+  redesign noted there.
+- **New thread as synthesis** of multiple prior threads (multi-parent
+  provenance at the symbol level).
+- **Topic clustering / deep dives, metronomic edit cadence, cold start**
+  (the sim-vs-reality review's Lens-B gaps).
+- **Transient-data lifecycle (§3.10)** fidelity — a prerequisite to an
+  *honest* recall-fidelity measurement.
+
+**Two version lines.** The substrate (this spec's runtime + the
+`MemoryOps` API) and the front end (U/X + feature logic atop it) are
+versioned independently. The six-month gate converges the *substrate*;
+it says nothing about the front end, which is earned by a separate human
+U/X phase. Current state: **substrate v0.1.0** (earned through the test
+rigor to date), **front end v0.0.1** (REPL loop closed, untested by any
+direct human means, missing much minimally-required interactive
+behavior). Substrate **v0.5.0 is the realism-convergence milestone**, at
+which work switches gears to front-end logic; the front end reaches
+**v0.1.0** once a minimum interactive feature set exists in any form.
 
 This is the load-bearing test. Phase-1 unit tests, Phase-2 scenario
 tests, and Phase-3 churn tests all build toward enabling this

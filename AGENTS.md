@@ -102,6 +102,24 @@ accumulate a pip dependency surface.
 
 ## Repo state
 
+**Versioning & acceptance (read before judging "done").** Two
+independently-versioned tracks: the **substrate** (this runtime + the
+`MemoryOps` API; currently **v0.1.0**) and the **front end** (U/X +
+feature logic; currently **v0.0.1**, REPL-closed but untested by direct
+human means). The six-month simulation gate converges the *substrate*
+toward **v0.5.0** — and it is a *realism-convergence* gate, not a
+one-shot pass: "done" means six months with **every identified realism
+element accounted for** (simulated, OR modeled-and-attempted with unit
+tests, OR honestly parked as a known-unknown pending real-use data),
+converging to a run that surfaces no new gap. A green sim run on a tidy
+workload is *form*, not *function* — do not report acceptance on it. The
+honesty clause is binding: state coverage (simulated vs. modeled vs.
+parked); a forgotten realism element is the failure, a documented
+deferral is not. Normative definition: **SPEC.md §9.1**. At substrate
+v0.5.0, work switches to front-end logic (which then earns its own
+v0.1.0 via a human U/X phase and supplies the empirical data that closes
+parked substrate known-unknowns).
+
 Complete:
 - Phase 1: skeleton + storage scaffold.
 - Phase 2: turn loop, topic-tag parsing, chat REPL, layered working-set
@@ -206,6 +224,18 @@ Queued:
   spine state transitions).
 - Phase 5: cross-project digest, fallback dissection, directive
   accrual.
+- Startup recovery after unclean shutdown (v0.1 substrate requirement,
+  SPEC §4.5.8): reconcile/rebuild stale derived state on open after a
+  crash; exercise the normal shutdown→resume cycle. Distinct from
+  §3.8 archival recovery.
+- Anchor-lifecycle redesign (SPEC §2.2 ⚠ note): replace the
+  frozen-at-creation / 4-minimum anchor model with evolving anchors
+  (re-derived projection; 0-anchor vague threads; superseded-retained,
+  not evicted). Revises §2.2 / §3.4 / §5.1.
+- Realism-convergence backlog (SPEC §9.1): the open list of realism
+  elements gating substrate v0.5.0 — workload interleaving/incoherence,
+  evolving anchors, thread-as-synthesis, the Lens-B gaps, transient-data
+  fidelity.
 - v0.2: deep cold archival via git; working-set content dedup;
   shell escape `$`/`#` with long-lived subprocess; transient-data
   event-log compaction + class-aware tool-output budget.
