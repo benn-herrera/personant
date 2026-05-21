@@ -87,7 +87,8 @@ interface SpineRecord {
 
   // recall material
   anchors: string[];                // 4-8 normalized anchor symbols (see §2.7)
-  summary: string;                  // 100-150 char gist; ≤ spine.entry-max-chars (default 200)
+  summary: string;                  // 100-150 char gist; ≤ spine.entry-max-chars (default 200); curator-drafted at retirement (§3.5)
+  description: string;              // triggering utterance; set once at creation, never rewritten (§2.3). Distinct from summary. Decodes empty on old records.
   state: ThreadState;               // see §2.2.1
 
   // timestamps (RFC3339)
@@ -176,6 +177,7 @@ last_engaged: 2026-05-08T03:12:00-07:00
 state_changed: 2026-05-07T19:42:00-07:00
 turn_count: 24
 recall_fires: 3
+description: how does the trefoil's body topology constrain electron shape?
 anchors:
   - trefoil
   - unknot
@@ -201,6 +203,10 @@ One turn-excerpt file, `turns/0000024.md`:
 ```
 
 **FIFO recency window.** The `turns/` directory retains at most `ThreadTurnWindow` excerpt files (currently 512; a calibratable count). 512 is calibrated against the Layer B budget: at `b-top-k = 3`, each thread's excerpt window must stay within LayerB/3 bytes; `history_symbols` in frontmatter is the explicit compensating mechanism — symbol memory that survives FIFO eviction. Appending a new excerpt past that bound deletes the lowest-numbered files until the count is back within the window. The live thread body — what the working-set assembler reads — is therefore **recency-windowed**: it holds the last `ThreadTurnWindow` turn-excerpts. Older operational detail is not lost: it remains recoverable from the §2.8 event log, and the distilled symbol memory persists in frontmatter `history_symbols`. The body assembled for a prompt is read newest-first up to a byte budget, then joined oldest→newest so it reads naturally top-to-bottom.
+
+**`description` vs `summary`.** `description` is the *triggering utterance* — the user prompt that spawned the thread — set once at creation and never rewritten. `summary` is the curator's closure *gist*, set at retirement (§3.5). A live thread has a `description` but no `summary`; a retired thread has both. v0.1 sets `description` deterministically (a whitespace-collapsed copy of the spawning prompt, truncated to the same length bound the new-thread summary uses); no LLM paraphrase is involved.
+
+**No parent.** A thread belongs to no parent thread — the model is flat (§3.2). Lineage/provenance between threads is reserved, not built: there is no parent field and none is synthesized.
 
 **Body content guidelines:**
 - This is operational, not pedagogical. Terse; machine-friendly.
@@ -538,9 +544,11 @@ per affected thread with the union as input. This prevents
 N-tool-call turns from inflating `turn_count` for every thread mentioned
 in any tool result.
 
-`last_engaged` updates to the *latest* delta's timestamp; `turn_count`
-increments by 1 per turn per affected thread, regardless of how many
-deltas in the turn touched its anchors.
+`last_engaged` updates to the *latest* delta's timestamp. `turn_count`
+increments by 1 only for the turn's **owner** thread (§3.2) — the single
+thread that received the turn's excerpt — regardless of how many deltas
+touched its anchors. An engaged-but-not-owner thread had no turn added to
+it, so its `turn_count` is unchanged.
 
 #### 3.0.5 Implementation contract
 
@@ -608,6 +616,27 @@ cap reached, that thread enters `ActiveThreads` at close, not via
 Topic-tag parsing is detailed in §5.1.2; the engagement-update model is
 the §3.0.2 step-2 hook fired with the per-turn coalesced symbol set
 (§3.0.4).
+
+**Turn-single-owner invariant.** A thread belongs to no parent, but a
+**turn belongs to exactly one thread** — its *owner*. A turn may *engage*
+several threads; only the owner receives the turn's excerpt. The
+excerpt-bearing write fires for exactly one thread per turn; a second
+excerpt-write for the same turn is a structural error
+(`ErrTurnAlreadyOwned`). Ownership *assignment* is a runtime decision —
+the topic tag (§5.1.1) is advisory input, not a directive.
+
+**Owner vs engaged.** For each turn:
+- the **owner** gets the turn excerpt, `turn_count++`, recency
+  (`last_engaged` / `last_engaged_turn`), `history_symbols` merge, and
+  state→active resurrection (§2.2.1). A new-thread owner is created with
+  the excerpt, `turn_count = 1`, and its `description` (§2.3).
+- an **engaged-but-not-owner** thread gets recency, `history_symbols`
+  merge, and state→active resurrection — but **no excerpt** and **no
+  `turn_count++`** (no turn was added to it).
+
+The Layer B/C LRU (§3.1) and recall surfacing operate over all engaged
+threads (owner + non-owner); only excerpt and `turn_count` ownership is
+restricted. The §3.9 file-edit application binds to the owner.
 
 ### 3.3 Symbol extraction (three passes)
 
@@ -1288,6 +1317,21 @@ Examples:
 *topic: thr_42, thr_88 [trefoil, neutrino, helical-screw]*
 *topic: *new-topic* [neutrino, oscillation]*
 ```
+
+The topic tag is **advisory** input to the runtime, not a directive: it
+declares which threads the turn engages, but the runtime decides
+*ownership* (§3.2). Owner selection from the thread-list:
+- **multi-existing** (`[thr_N, thr_M, ...]`): the first-listed existing
+  thread owns; the rest are engaged-but-not-owner. The coalesce buffer
+  (§3.0.4) is a map and does not preserve tag order, so v0.1 uses the
+  **lowest `thr_N` id** among referenced existing threads as the
+  deterministic stand-in for "first-listed". The requirement is
+  determinism + single ownership, not literal type order.
+- **pure `*new-topic*`** (no existing thread referenced): the new thread
+  owns the turn (genesis turn — the only available owner).
+- **mixed** (`[thr_N, *new-topic*]`): the existing `thr_N` owns; the new
+  thread is created **metadata-only** (`turn_count = 0`, no excerpt, with
+  its `description` set per §2.3).
 
 The single-line form is deliberate: no multi-line state for the parser
 to track, no envelope syntax that varies across providers, no JSON

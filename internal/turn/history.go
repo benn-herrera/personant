@@ -26,6 +26,7 @@ func frontmatterFromSpine(rec memops.SpineRecord) ThreadMeta {
 		Project:         rec.Project,
 		Anchors:         append([]string(nil), rec.Anchors...),
 		Summary:         rec.Summary,
+		Description:     rec.Description,
 		State:           rec.State,
 		Created:         rec.Created,
 		LastEngaged:     rec.LastEngaged,

@@ -100,6 +100,14 @@ type State struct {
 	// turn-scoped state
 	coalesce *coalesceBuffer
 
+	// turnOwner is the in-flight single-owner stamp for this turn (spec
+	// §3.2): the one thread that received this turn's excerpt. Empty
+	// before ownership is assigned. claimTurnOwner sets it exactly once;
+	// a second claim returns ErrTurnAlreadyOwned — a structural guard
+	// against a future bug double-writing one turn's content to two
+	// threads. Reset at the top of every Run alongside coalesce.
+	turnOwner string
+
 	// fileEdits buffers §3.9 file-edit events (fs.read / fs.write /
 	// fs.commit) observed across the deltas of one turn. File-edit deltas
 	// arrive before the turn's engaged thread is known (engagement is
@@ -267,6 +275,9 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 	// §3.9 file-edit buffer is per-turn — clear it alongside coalesce so a
 	// prior turn's buffered edits cannot leak into this turn's close.
 	state.fileEdits = state.fileEdits[:0]
+	// The single-owner stamp is per-turn — clear it so the prior turn's
+	// owner cannot trip this turn's claim guard.
+	state.turnOwner = ""
 	// Bump the turn counter BEFORE any chain step fires so the user.prompt
 	// delta and the model.response delta both observe the same
 	// TurnNumber. The transient-data lifecycle B.4 window-close GC keys

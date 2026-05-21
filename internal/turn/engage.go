@@ -35,6 +35,28 @@ const (
 // tests can match via errors.Is.
 var ErrFileEditWithoutTopicTag = errors.New("fs.write without topic tag")
 
+// ErrTurnAlreadyOwned is returned by claimTurnOwner when a second thread
+// attempts to take ownership of a turn whose excerpt has already been
+// written. A turn belongs to exactly one thread (spec §3.2); the
+// excerpt-bearing write fires for exactly one thread per turn. This is a
+// structural guard — the reworked engage loop writes the excerpt once;
+// the guard ensures a future bug cannot double-write one turn's content
+// to two threads.
+var ErrTurnAlreadyOwned = errors.New("turn: excerpt already owned by another thread")
+
+// claimTurnOwner records threadID as this turn's single owner. It
+// succeeds once per turn; a second claim by a different thread returns
+// ErrTurnAlreadyOwned. A repeat claim by the same thread is idempotent
+// (the recovery-resynthesis path may re-enter for the same owner). The
+// stamp is turn-scoped (State.turnOwner), reset at the top of every Run.
+func claimTurnOwner(state *State, threadID string) error {
+	if state.turnOwner == "" || state.turnOwner == threadID {
+		state.turnOwner = threadID
+		return nil
+	}
+	return fmt.Errorf("%w: owner=%s attempted=%s", ErrTurnAlreadyOwned, state.turnOwner, threadID)
+}
+
 // closeTurnAndUpdateEngagement fires after the model.response delta.
 // Per §3.0.4: engagement updates fire once per affected thread with
 // the turn's coalesced symbol set as input.
@@ -103,20 +125,54 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 	turnSymbols := state.coalesce.coalescedList()
 	turnAnchors := turnAnchorList(responseBody, state.coalesce.symbolList())
 
-	// Engaged thread IDs in this turn — includes resolved IDs for the
-	// *new-topic* sentinel. Used to update the Layer B/C LRU below.
-	engaged := make([]string, 0, len(state.coalesce.threads))
+	// Determine this turn's single owner (spec §3.2). A turn belongs to
+	// exactly one thread — the one that receives the excerpt and the
+	// turn_count++. Every other referenced thread is engaged-but-not-
+	// owner: it gets recency + history_symbols, no excerpt, no count.
+	//
+	// Owner-selection rule (§5.1.1, advisory tag → runtime decision):
+	//   - ≥1 existing thread referenced: the lowest-id existing thread
+	//     owns. The coalesce buffer is a map, so tag order is not
+	//     preserved; lowest thr_N id is the deterministic tiebreak
+	//     standing in for "first-listed".
+	//   - pure *new-topic* (no existing referenced): the new thread owns
+	//     (genesis turn — the only available owner).
+	//   - mixed [thr_N, *new-topic*]: the existing thr_N owns; the new
+	//     thread is created metadata-only.
+	ids := state.coalesce.threadList()
+	ownerExisting := lowestExistingThreadID(ids)
 
-	for _, threadID := range state.coalesce.threadList() {
+	// Engaged thread IDs in this turn — includes resolved IDs for the
+	// *new-topic* sentinel. Used to update the Layer B/C LRU below. The
+	// owner is placed at index 0 so the §3.9 file-edit application binds
+	// to it (applyFileEdits keys off engaged[0]).
+	engaged := make([]string, 0, len(ids))
+
+	// Owner first.
+	if ownerExisting != "" {
+		if err := updateExistingThread(ctx, state, ownerExisting, true, userInput, responseBody, now, turnSymbols, turnAnchors); err != nil {
+			return err
+		}
+		engaged = append(engaged, ownerExisting)
+	}
+
+	for _, threadID := range ids {
 		if threadID == prompt.NewTopicLiteral {
-			newID, err := createNewThread(ctx, state, userInput, responseBody, now, turnSymbols, turnAnchors)
+			// The new thread owns only when no existing thread was
+			// referenced (pure *new-topic*). In the mixed case the
+			// existing thread already owns, so the new thread is created
+			// metadata-only (no excerpt, TurnCount 0).
+			newID, err := createNewThread(ctx, state, ownerExisting == "", userInput, responseBody, now, turnSymbols, turnAnchors)
 			if err != nil {
 				return err
 			}
 			engaged = append(engaged, newID)
 			continue
 		}
-		if err := updateExistingThread(ctx, state, threadID, userInput, responseBody, now, turnSymbols, turnAnchors); err != nil {
+		if threadID == ownerExisting {
+			continue // already handled as owner
+		}
+		if err := updateExistingThread(ctx, state, threadID, false, userInput, responseBody, now, turnSymbols, turnAnchors); err != nil {
 			return err
 		}
 		engaged = append(engaged, threadID)
@@ -198,7 +254,51 @@ func applyFileEdits(ctx context.Context, state *State, threadID string) {
 	}
 }
 
-func updateExistingThread(ctx context.Context, state *State, threadID, userInput, responseBody, now string, turnSymbols []coalescedSymbol, turnAnchors []string) error {
+// lowestExistingThreadID returns the deterministic owner among the
+// turn's referenced thread IDs: the existing thr_<n> with the lowest
+// numeric n. The *new-topic* sentinel is ignored. Returns "" when no
+// thr_<n> id is present (a pure *new-topic* turn). The coalesce buffer
+// is a map, so the model's tag order is not preserved — lowest-id is the
+// documented, deterministic stand-in for "first-listed" (spec §5.1.1).
+func lowestExistingThreadID(ids []string) string {
+	owner := ""
+	ownerN := -1
+	for _, id := range ids {
+		if id == prompt.NewTopicLiteral {
+			continue
+		}
+		n, ok := threadIDNum(id)
+		if !ok {
+			continue
+		}
+		if owner == "" || n < ownerN {
+			owner, ownerN = id, n
+		}
+	}
+	return owner
+}
+
+// threadIDNum parses the numeric suffix of a "thr_<n>" id. ok is false
+// when the id does not match that shape.
+func threadIDNum(id string) (int, bool) {
+	const prefix = "thr_"
+	if !strings.HasPrefix(id, prefix) {
+		return 0, false
+	}
+	n, err := strconv.Atoi(id[len(prefix):])
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// updateExistingThread applies this turn's engagement to an existing
+// thread. When owner is true the thread receives the turn excerpt and a
+// turn_count++ (it owns this turn's content per spec §3.2); when false
+// it is engaged-but-not-owner — recency (last_engaged / last_engaged_turn)
+// and history_symbols merge and state→active resurrection apply, but NO
+// excerpt is written and turn_count is left unchanged.
+func updateExistingThread(ctx context.Context, state *State, threadID string, owner bool, userInput, responseBody, now string, turnSymbols []coalescedSymbol, turnAnchors []string) error {
 	rec, found, err := state.Ops.FindThread(ctx, threadID)
 	if err != nil {
 		return err
@@ -231,13 +331,19 @@ func updateExistingThread(ctx context.Context, state *State, threadID, userInput
 		fm = frontmatterFromSpine(rec)
 	}
 
-	// Bookkeeping update on the in-memory record. The new turn_count is
-	// the value used for the per-turn excerpt header and as
-	// first_seen_turn for any newly introduced history symbols.
-	newTurnCount := rec.TurnCount + 1
+	// Bookkeeping update on the in-memory record. turn_count increments
+	// ONLY for the owner — an engaged-but-not-owner thread had no turn
+	// added to it (spec §3.2). The merge turn index (used as
+	// first_seen_turn for newly introduced history symbols, and as the
+	// owner's excerpt-header turn number) is the post-increment count for
+	// the owner and the unchanged count for a non-owner.
+	mergeTurn := rec.TurnCount
+	if owner {
+		mergeTurn = rec.TurnCount + 1
+	}
 	fm.LastEngaged = now
 	fm.LastEngagedTurn = state.TurnNumber
-	fm.TurnCount = newTurnCount
+	fm.TurnCount = mergeTurn
 	// Re-engagement resurrects the thread per the §2.2.1 state-transition
 	// table (wip/paused/resolved/decided/abandoned → active). Engagement
 	// promotes to active unconditionally when not already active; an
@@ -253,6 +359,7 @@ func updateExistingThread(ctx context.Context, state *State, threadID, userInput
 	fm.Project = rec.Project
 	fm.Anchors = append([]string(nil), rec.Anchors...)
 	fm.Summary = rec.Summary
+	fm.Description = rec.Description
 	fm.State = rec.State
 	if fm.Created == "" {
 		fm.Created = rec.Created
@@ -263,12 +370,22 @@ func updateExistingThread(ctx context.Context, state *State, threadID, userInput
 	fm.StateChanged = rec.StateChanged
 	fm.RecallFires = rec.RecallFires
 
-	fm.HistorySymbols = mergeHistorySymbols(fm.HistorySymbols, turnSymbols, newTurnCount)
-	excerpt := renderTurnExcerpt(newTurnCount, now, turnAnchors, userInput, responseBody)
+	fm.HistorySymbols = mergeHistorySymbols(fm.HistorySymbols, turnSymbols, mergeTurn)
 
 	rec.LastEngaged = now
 	rec.LastEngagedTurn = state.TurnNumber
-	rec.TurnCount = newTurnCount
+	rec.TurnCount = mergeTurn
+
+	// The owner gets the turn excerpt + the single-owner claim; an
+	// engaged-but-not-owner thread gets a meta-only update (empty
+	// TurnExcerpt per the §2.3 ThreadWrite contract).
+	var excerpt string
+	if owner {
+		if err := claimTurnOwner(state, threadID); err != nil {
+			return err
+		}
+		excerpt = renderTurnExcerpt(mergeTurn, now, turnAnchors, userInput, responseBody)
+	}
 	if err := state.Ops.EngageThread(ctx, memops.ThreadWrite{
 		Spine:       rec,
 		Meta:        fm,
@@ -276,11 +393,23 @@ func updateExistingThread(ctx context.Context, state *State, threadID, userInput
 	}); err != nil {
 		return fmt.Errorf("engage thread %s: %w", threadID, err)
 	}
-	return state.Ops.Log(ctx, memops.LogCategoryThread, "engaged",
+	act := "engaged"
+	if !owner {
+		act = "engaged-non-owner"
+	}
+	return state.Ops.Log(ctx, memops.LogCategoryThread, act,
 		threadID+" turn_count="+strconv.Itoa(rec.TurnCount))
 }
 
-func createNewThread(ctx context.Context, state *State, userInput, responseBody, now string, turnSymbols []coalescedSymbol, turnAnchors []string) (string, error) {
+// createNewThread allocates a new thread for the *new-topic* sentinel.
+// When owner is true (pure *new-topic* turn) the new thread owns this
+// turn's content: it is created with the excerpt and TurnCount 1, and it
+// claims the single-owner stamp. When owner is false (mixed
+// [thr_N, *new-topic*] turn — an existing thread already owns) the new
+// thread is created metadata-only per spec §3.2: empty excerpt,
+// TurnCount 0, Description + anchors + history_symbols set, owning no
+// turn. Description is the triggering utterance either way (spec §2.3).
+func createNewThread(ctx context.Context, state *State, owner bool, userInput, responseBody, now string, turnSymbols []coalescedSymbol, turnAnchors []string) (string, error) {
 	// NextThreadID returns the next available thr_<n> id, scanning the
 	// full spine so a new id never collides with a thread in a sibling
 	// project.
@@ -297,17 +426,26 @@ func createNewThread(ctx context.Context, state *State, userInput, responseBody,
 	}
 
 	summary := summarizeForNewThread(responseBody)
+	description := descriptionFromNewThread(userInput)
+
+	// The owner records one turn; a metadata-only new thread owns no turn
+	// (TurnCount 0). history_symbols first_seen_turn uses the same count.
+	turnCount := 0
+	if owner {
+		turnCount = 1
+	}
 
 	rec := memops.SpineRecord{
 		ID:              newID,
 		Project:         state.ActiveProject.ID,
 		Anchors:         anchors,
 		Summary:         summary,
+		Description:     description,
 		State:           memops.ThreadActive,
 		Created:         now,
 		LastEngaged:     now,
 		StateChanged:    now,
-		TurnCount:       1,
+		TurnCount:       turnCount,
 		LastEngagedTurn: state.TurnNumber,
 	}
 
@@ -316,16 +454,24 @@ func createNewThread(ctx context.Context, state *State, userInput, responseBody,
 		Project:         rec.Project,
 		Anchors:         append([]string(nil), anchors...),
 		Summary:         summary,
+		Description:     description,
 		State:           memops.ThreadActive,
 		Created:         now,
 		LastEngaged:     now,
 		StateChanged:    now,
-		TurnCount:       1,
+		TurnCount:       turnCount,
 		RecallFires:     0,
 		LastEngagedTurn: state.TurnNumber,
-		HistorySymbols:  mergeHistorySymbols(nil, turnSymbols, 1),
+		HistorySymbols:  mergeHistorySymbols(nil, turnSymbols, turnCount),
 	}
-	excerpt := renderTurnExcerpt(1, now, turnAnchors, userInput, responseBody)
+
+	var excerpt string
+	if owner {
+		if err := claimTurnOwner(state, newID); err != nil {
+			return "", err
+		}
+		excerpt = renderTurnExcerpt(1, now, turnAnchors, userInput, responseBody)
+	}
 
 	if err := state.Ops.CreateThread(ctx, memops.ThreadWrite{
 		Spine:       rec,
@@ -334,7 +480,11 @@ func createNewThread(ctx context.Context, state *State, userInput, responseBody,
 	}); err != nil {
 		return "", fmt.Errorf("create thread %s: %w", newID, err)
 	}
-	if err := state.Ops.Log(ctx, memops.LogCategoryThread, "created",
+	act := "created"
+	if !owner {
+		act = "created-meta-only"
+	}
+	if err := state.Ops.Log(ctx, memops.LogCategoryThread, act,
 		newID+" anchors="+strconv.Itoa(len(anchors))+" project="+state.ActiveProject.ID); err != nil {
 		return "", err
 	}
