@@ -768,6 +768,15 @@ hash is retained as a recovery pointer. The forensic history of
 *committed* states is therefore bounded by what the project git repo
 already holds; uncommitted edit history is unaffected.
 
+**Symbol lifecycle for file-edit events.** `fs.read`, `fs.write`, and
+`fs.commit` deltas are task-class events (§3.10.1). Symbols extracted
+from them land in the staging buffer rather than the symbol index
+directly; they enter `symbols.jsonl` only if a subsequent decision delta
+cites them within the citation window K. `stagingWindowTurns` default 3
+reflects the empirical claim that a task-class symbol cited by a decision
+delta within 3 turns is likely signal; beyond that window, uncited
+symbols are noise. The window is a calibration target (§3.10.3).
+
 #### 3.9.2 Live context composition (working window)
 
 The working window's representation is more aggressive:
@@ -815,6 +824,145 @@ is far from where it's needed. The runtime tracks active engagement
 via the engaged thread's tool-call history: a file recently the
 subject of `fs.read` or `fs.propose_promote` keeps its literal in the
 active layers (B / C), regardless of how many references precede it.
+
+### 3.10 Transient-data lifecycle
+
+Task-class context (tool outputs, shell captures, file reads) has value
+for one span of turns and then drops to zero. Treating it the same as
+decision-class context (user prompts, model responses) would pollute the
+symbol index with transient noise, bloat persistent storage with
+discardable bytes, and degrade recall precision in §3.4. This section
+defines the two-stage mechanism that keeps task-class content discardable
+while preserving the symbols it produces when — and only when — a
+decision delta cites them.
+
+#### 3.10.1 Provisional classification at delta time
+
+Each delta entering the §3.0.2 chain is assigned a **retention class**
+before any hook fires. The class derives mechanically from the event
+source (§3.0.1); no content inspection is required.
+
+| Source | Provisional class |
+|---|---|
+| `tool.result`, `user.shell-capture`, `fs.read`, `fs.write`, `fs.commit` | `task` (provisional-transient) |
+| `user.prompt`, `model.response`, `thread.fetched`, `digest.refresh`, `slash.injected`, `directive.reloaded` | `decision` (provisional-persistent) |
+| unknown source | `decision` (safe default — unknown content is never silently dropped) |
+
+The classification is **provisional**: it governs where extracted symbols
+land (§3.10.2), not whether content ultimately persists — that is
+confirmed or discarded by the citation window (§3.10.3–§3.10.5).
+
+One user-controlled override: a `task`-source delta prefixed with the
+reference-material marker (`##` / `/keep`) is reclassified to `decision`
+at emit time. This is the path for explicitly retaining task-class
+content (e.g. a paper ingested for ongoing reference). The agent has no
+parallel override; agent-produced retention flows through decision-delta
+authorship as described in §3.10.4.
+
+#### 3.10.2 Staging buffer
+
+Symbol extraction (§3.3) runs on every delta regardless of retention
+class. Where extracted symbols land depends on the delta's class:
+
+- **Decision-class delta:** symbols enter the per-turn coalesce buffer
+  immediately. At turn close they are committed to the thread's
+  `history_symbols` and to `symbols.jsonl`.
+- **Task-class delta:** symbols are placed in the **staging buffer** —
+  a per-`State` map keyed by normalized symbol form (§2.7.2). They do
+  not enter `history_symbols` or `symbols.jsonl` at this point.
+
+The staging buffer persists **across turns**, unlike the coalesce buffer
+which resets at each turn boundary. Each entry holds:
+
+| Field | Description |
+|---|---|
+| `Normalized` | Canonical normalized form (§2.7.2); also the map key. |
+| `Raw` | Original surface form; preserved for user-facing display on promotion. |
+| `Source` | Symbol provenance (§2.7.3). |
+| `StagedAt` | `TurnNumber` when the entry was added. |
+
+When the same normalized form arrives from a later task-class delta,
+the existing entry is overwritten and `StagedAt` refreshed to the newer
+turn number — a recurring observation extends the citation window rather
+than accumulating duplicate entries.
+
+#### 3.10.3 Citation window K
+
+A staged symbol is eligible for promotion during the K turns following
+the turn it was staged: turns `StagedAt` through `StagedAt + K - 1`
+inclusive.
+
+**K = 3** (constant `stagingWindowTurns`). Rationale: a task-class
+symbol cited by a decision delta almost always appears within the very
+next model response (the model interprets the tool result immediately).
+K = 3 provides a generous window that covers same-turn citation,
+next-turn citation, and one additional turn for cases where a second
+tool call or clarification prompt intervenes. Task-class symbols that go
+uncited beyond three turns are treated as noise. K is a **calibration
+target**, not a hard constant: the recall-fidelity simulation (§9)
+is the instrument by which K = 3 earns its value. Future directive
+plumbing will expose it as `staging.window-turns`.
+
+#### 3.10.4 Promotion
+
+When a decision-class delta is processed, the §3.3 symbol extraction
+pass produces a set of candidates. For each candidate, the runtime
+checks whether a matching entry exists in the staging buffer (normalized
+form match). If it does:
+
+1. The staged symbol is **promoted**: moved from the staging buffer into
+   the coalesce buffer, where it joins the turn's decision-class symbols.
+2. At turn close the promoted symbol commits to `history_symbols` and
+   `symbols.jsonl` normally — anchored to the decision delta that cited
+   it.
+3. The raw bytes of the task-class delta that produced the symbol are
+   **not** promoted. Only the symbol crosses over; the task content
+   remains discardable.
+
+The cross-reference is normalized-form match only — no fuzzy matching.
+A promotion event is logged as `staging.promoted` with `normalized`,
+`staged_at`, `cited_at`, and `turn_span` fields.
+
+#### 3.10.5 Window-close eviction
+
+At the top of each turn (before any delta in the new turn is processed),
+`pruneStaging` evicts staging entries whose citation window has closed:
+any entry with `StagedAt < (currentTurn - K + 1)` is dropped. These
+symbols were never cited by a decision delta within the window; they are
+treated as noise and discarded. A nonzero eviction count is logged as
+`staging.evicted`.
+
+This eviction is deterministic and requires no LLM involvement.
+
+#### 3.10.6 What stays transient
+
+The following content is **never** written to persistent substrate:
+
+- Raw bytes of task-class deltas (file content from `fs.read`/`fs.write`,
+  tool output from `tool.result`, captured output from
+  `user.shell-capture`). These exist only in the turn-local context
+  window during their relevant turns; the event log records a
+  short metadata summary in their place (source, path, byte count).
+- Symbols extracted from task-class deltas that are not cited by any
+  decision delta within K turns. These are evicted from staging without
+  entering any persistent index.
+
+File content has a separate persistent home in the per-thread
+tracked-file store (§3.9.1, `files.json`); that mechanism is distinct
+from the symbol lifecycle and is not governed by this section.
+
+#### 3.10.7 Why this matters
+
+This mechanism allows personant to pull large task-class context into
+a turn — multi-MB file reads, verbose tool outputs, shell captures —
+without that content accumulating in the persistent symbol index or
+the event log. Without it, every `tool.result` line that happened to
+contain a file path or URL would inflate `history_symbols`, raise
+Jaccard's denominator, and degrade recall precision in §3.4. At
+simulation scale (§9.1), this pollution would compound turn-by-turn
+until recall measurements reflected noise level as much as signal. The
+transient-data lifecycle is therefore a prerequisite for meaningful
+execution of the recall-fidelity measurement regime (§9).
 
 ---
 
