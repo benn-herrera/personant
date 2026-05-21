@@ -397,6 +397,123 @@ func TestSurfaceClosure_CuratorErrorSwallowed(t *testing.T) {
 	}
 }
 
+// TestDecayEligible_VacationSuppression covers the B5/PRT3-F3 fix: wall-
+// clock decay must measure neglect relative to the system's most-recent
+// activity (systemReference), not raw calendar time, so a whole-system
+// absence does not make every active thread decay-eligible at once.
+//
+//	(a) idle 8d while the SYSTEM was also idle ~8d (vacation) → no fire.
+//	(b) idle 8d while the system was actively used on another thread in
+//	    that window → fire (genuine neglect).
+//	(c) turn-count decay fires independently of (a)/(b).
+func TestDecayEligible_VacationSuppression(t *testing.T) {
+	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	eightDaysAgo := now.Add(-8 * 24 * time.Hour).Format(time.RFC3339)
+	oneHourAgo := now.Add(-time.Hour).Format(time.RFC3339)
+
+	// (a) Vacation: every thread's last_engaged is ~8 days ago, so the
+	// system reference is also ~8 days ago — neglect relative to it is ~0.
+	t.Run("vacation: whole-system absence does not fire", func(t *testing.T) {
+		recs := []memops.SpineRecord{
+			{ID: "thr_1", State: memops.ThreadActive, LastEngaged: eightDaysAgo, LastEngagedTurn: 1},
+			{ID: "thr_2", State: memops.ThreadActive, LastEngaged: eightDaysAgo, LastEngagedTurn: 1},
+		}
+		sysRef := systemReference(recs, now)
+		for _, rec := range recs {
+			// turnNumber kept just under the turn threshold so only the
+			// wall-clock branch can fire — this isolates the fix.
+			if _, ok := decayEligible(rec, 1+decayTurns-1, sysRef); ok {
+				t.Errorf("%s became decay-eligible after a whole-system absence; want suppressed", rec.ID)
+			}
+		}
+	})
+
+	// (b) Genuine neglect: thr_old has been idle 8 days, but thr_active was
+	// engaged an hour ago, so the system was in active use that whole
+	// window. thr_old's neglect relative to that use is ~8 days → fires.
+	t.Run("genuine neglect during active use fires", func(t *testing.T) {
+		recs := []memops.SpineRecord{
+			{ID: "thr_old", State: memops.ThreadActive, LastEngaged: eightDaysAgo, LastEngagedTurn: 1},
+			{ID: "thr_active", State: memops.ThreadActive, LastEngaged: oneHourAgo, LastEngagedTurn: 50},
+		}
+		sysRef := systemReference(recs, now)
+		if _, ok := decayEligible(recs[0], 1+decayTurns-1, sysRef); !ok {
+			t.Errorf("thr_old neglected during active use did not fire; want decay-eligible")
+		}
+		// The recently-engaged thread is not eligible on either signal.
+		if _, ok := decayEligible(recs[1], 50, sysRef); ok {
+			t.Errorf("thr_active engaged an hour ago became decay-eligible; want not")
+		}
+	})
+
+	// (c) Turn-count decay is independent of the wall-clock suppression:
+	// even in the vacation arrangement (sysRef ~8d ago, wall-clock
+	// suppressed), a thread that is turn-idle past the threshold fires.
+	t.Run("turn-count decay fires independently of wall-clock", func(t *testing.T) {
+		recs := []memops.SpineRecord{
+			{ID: "thr_1", State: memops.ThreadActive, LastEngaged: eightDaysAgo, LastEngagedTurn: 1},
+		}
+		sysRef := systemReference(recs, now)
+		detail, ok := decayEligible(recs[0], 1+decayTurns, sysRef)
+		if !ok {
+			t.Fatalf("turn-count decay did not fire; want eligible")
+		}
+		if !strings.HasPrefix(detail, "turns=") {
+			t.Errorf("detail = %q, want a turns= signal (turn-count branch)", detail)
+		}
+	})
+}
+
+// TestSurfaceClosure_VacationSurfacesNoPrompt is the end-to-end companion
+// to TestDecayEligible_VacationSuppression: on resume after a whole-system
+// absence, the decay scan must not surface a closure prompt for a thread
+// idle only because the user was away (B5/PRT3-F3).
+func TestSurfaceClosure_VacationSurfacesNoPrompt(t *testing.T) {
+	paths, meta := newTestHome(t)
+	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	eightDaysAgo := now.Add(-8 * 24 * time.Hour).Format(time.RFC3339)
+
+	// Two active threads, both last engaged ~8 days ago (the vacation).
+	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, eightDaysAgo)
+	seedClosureThread(t, paths, meta.ID, "thr_2", memops.ThreadActive, 1, eightDaysAgo)
+
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	pinClock(t, now)
+	// TurnNumber 1 mimics a fresh post-resume session: turn-count decay
+	// cannot fire (1 < 1+decayTurns), so any prompt would be wall-clock.
+	state.TurnNumber = 1
+	state.Curator = stubCurator{}
+	prompts := 0
+	state.ClosureResolver = func(_ context.Context, _ ClosureOffer) (ClosureResolution, error) {
+		prompts++
+		return ClosureResolution{Outcome: ClosureDefer}, nil
+	}
+
+	if err := surfaceClosureCandidates(context.Background(), state); err != nil {
+		t.Fatalf("surfaceClosureCandidates: %v", err)
+	}
+	if prompts != 0 {
+		t.Errorf("vacation resume surfaced %d closure prompts; want 0", prompts)
+	}
+	// A retire.prompt is logged for every eligible candidate before the
+	// resolver runs, so any prompt would leave a retire.prompt line. Read
+	// the logs dir directly (it may be empty — readDayLog requires exactly
+	// one file).
+	entries, err := os.ReadDir(paths.LogsDir)
+	if err != nil {
+		t.Fatalf("read logs dir: %v", err)
+	}
+	for _, e := range entries {
+		data, err := os.ReadFile(filepath.Join(paths.LogsDir, e.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		if strings.Contains(string(data), "retire.prompt") {
+			t.Errorf("vacation resume logged a retire.prompt\n%s", string(data))
+		}
+	}
+}
+
 // containsString reports whether ss contains v.
 func containsString(ss []string, v string) bool {
 	for _, s := range ss {

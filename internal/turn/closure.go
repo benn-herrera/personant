@@ -87,14 +87,29 @@ func closeStateForOutcome(o ClosureOutcome) (memops.ThreadState, bool) {
 //     TurnNumber, so a stored value larger than the current turn means
 //     the record is from a prior session — skip the turn signal and rely
 //     on wall-clock.
-//   - Wall-clock: now - parse(rec.LastEngaged) >= decayTime. An empty or
-//     unparseable LastEngaged simply does not fire the wall-clock signal.
+//   - Wall-clock: sysRef - parse(rec.LastEngaged) >= decayTime. An empty
+//     or unparseable LastEngaged simply does not fire the wall-clock
+//     signal.
+//
+// sysRef (not now) is the wall-clock reference for the idle measure. It
+// is the most-recent activity across the system (max LastEngaged over
+// the scanned threads), so wall-clock decay measures neglect *relative
+// to the system's last use* rather than raw calendar time. This
+// suppresses the B5/PRT3-F3 vacation wave: after a multi-week whole-
+// system absence, every thread's last_engaged is ~vacation-ago, but so
+// is sysRef, so a thread idle only because the user was away does not
+// fire. A thread genuinely neglected while the user worked other threads
+// in that window still fires, because some other thread's recent
+// engagement pulls sysRef forward of it. The whole-system idle gap
+// (now - sysRef) is deliberately excluded — nobody was using the system
+// during it, so it is not thread-specific neglect. Turn-count decay is
+// unaffected (no turns occur during an absence, so it cannot inflate).
 //
 // This predicate assumes engagement for the current turn has already
 // been committed (closeTurnAndUpdateEngagement runs before the closure
 // scan): a thread engaged this turn has LastEngagedTurn == TurnNumber, so
 // its turn-based idle count is 0 and it cannot wrongly decay.
-func decayEligible(rec memops.SpineRecord, turnNumber int, now time.Time) (string, bool) {
+func decayEligible(rec memops.SpineRecord, turnNumber int, sysRef time.Time) (string, bool) {
 	if rec.State != memops.ThreadActive {
 		return "", false
 	}
@@ -110,12 +125,44 @@ func decayEligible(rec memops.SpineRecord, turnNumber int, now time.Time) (strin
 	}
 	if rec.LastEngaged != "" {
 		if t, err := time.Parse(time.RFC3339, rec.LastEngaged); err == nil {
-			if idle := now.Sub(t); idle >= decayTime {
+			if idle := sysRef.Sub(t); idle >= decayTime {
 				return fmt.Sprintf("idle=%s", idle.Round(time.Hour)), true
 			}
 		}
 	}
 	return "", false
+}
+
+// systemReference returns the wall-clock decay reference: the most-recent
+// activity across the scanned threads (max parseable LastEngaged),
+// clamped to not exceed now. Threads with an empty or unparseable
+// LastEngaged contribute nothing. When no thread carries a usable
+// timestamp the reference is now — i.e. no system-idle suppression, the
+// pre-fix behavior. The clamp guards against a clock skew or a future-
+// dated last_engaged pushing the reference past now (which would inflate,
+// not suppress, decay).
+//
+// This is the B5/PRT3-F3 system-idle signal: now - systemReference is the
+// whole-system absence gap, which decayEligible excludes from per-thread
+// wall-clock idle.
+func systemReference(recs []memops.SpineRecord, now time.Time) time.Time {
+	ref := time.Time{}
+	for _, rec := range recs {
+		if rec.LastEngaged == "" {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, rec.LastEngaged)
+		if err != nil {
+			continue
+		}
+		if t.After(ref) {
+			ref = t
+		}
+	}
+	if ref.IsZero() || ref.After(now) {
+		return now
+	}
+	return ref
 }
 
 // surfaceClosureCandidates runs the §3.5 decay-triggered closure scan
@@ -153,6 +200,11 @@ func surfaceClosureCandidates(ctx context.Context, state *State) error {
 	}
 
 	now := clock.Timeline()
+	// Wall-clock decay measures neglect relative to the system's most
+	// recent activity, not raw calendar time, so a whole-system absence
+	// (vacation) does not make every active thread decay-eligible at once.
+	// See decayEligible / systemReference (B5 / PRT3-F3).
+	sysRef := systemReference(recs, now)
 	type candidate struct {
 		rec    memops.SpineRecord
 		detail string
@@ -163,7 +215,7 @@ func surfaceClosureCandidates(ctx context.Context, state *State) error {
 		if until, deferred := state.closureDeferUntil[rec.ID]; deferred && state.TurnNumber < until {
 			continue
 		}
-		detail, ok := decayEligible(rec, state.TurnNumber, now)
+		detail, ok := decayEligible(rec, state.TurnNumber, sysRef)
 		if !ok {
 			continue
 		}

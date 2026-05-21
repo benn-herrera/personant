@@ -1054,7 +1054,18 @@ func TestScenario_WallClockDecayTriggeredClosure(t *testing.T) {
 		Setup: func(h *Harness) error {
 			// Seed thr_1 last-engaged at the harness's pinned-clock
 			// start (2026-05-01T12:00:00Z) with last_engaged_turn=0.
-			return seedActiveThread(h, "thr_1", 0, "2026-05-01T12:00:00Z")
+			if err := seedActiveThread(h, "thr_1", 0, "2026-05-01T12:00:00Z"); err != nil {
+				return err
+			}
+			// Seed thr_2 (a keep-alive) engaged 1h before turn 2's clock
+			// (2026-05-09T12:00:00Z). After the B5/PRT3-F3 fix wall-clock
+			// decay measures idle relative to the system's most-recent
+			// activity, not raw calendar time: this keep-alive thread is
+			// the system reference, so thr_1's 8-day idle is genuine
+			// neglect *while the system was in use*, not a whole-system
+			// absence (vacation), and correctly fires. Without it, a lone
+			// aged thread looks like a vacation and is suppressed.
+			return seedActiveThread(h, "thr_2", 0, "2026-05-09T11:00:00Z")
 		},
 		Steps: []Step{
 			{
