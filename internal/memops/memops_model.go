@@ -147,6 +147,18 @@ type ProjectPattern struct {
 // written) so callers never need to special-case "no active project".
 const DefaultProjectID = "prj_default"
 
+// MinAnchorsPerThread / MaxAnchorsPerThread are the spec §2.2 hard
+// bounds on a thread's anchor cardinality: anchors.length is between 4
+// and 8 inclusive, enforced by `personant verify` and consulted by every
+// site that creates, validates, or pads anchor sets. The range is
+// calibrated against the §3.4 Jaccard operating point — fewer than the
+// minimum collapses threshold discrimination, more than the maximum
+// dilutes specificity below the precision floor.
+const (
+	MinAnchorsPerThread = 4
+	MaxAnchorsPerThread = 8
+)
+
 // ProjectMeta is projects/prj_<n>/meta.json (spec §2.5.1). Canonical
 // project metadata; the storage key is ID, the display label is Name.
 type ProjectMeta struct {

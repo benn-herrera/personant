@@ -32,10 +32,13 @@ type Curator interface {
 }
 
 // closureAnchorMin / closureAnchorMax bound the deterministic anchor
-// selection (spec §2.2 hard range [4, 8]).
+// selection at retirement. They alias the §2.2 hard range
+// [memops.MinAnchorsPerThread, memops.MaxAnchorsPerThread] so the
+// curator's selection respects the single port-level invariant rather
+// than restating it locally.
 const (
-	closureAnchorMin = 4
-	closureAnchorMax = 8
+	closureAnchorMin = memops.MinAnchorsPerThread
+	closureAnchorMax = memops.MaxAnchorsPerThread
 )
 
 // HTTPCurator is the model-backed Curator. The summary is drafted by
@@ -139,7 +142,7 @@ func SelectAnchors(fm memops.ThreadMeta) []string {
 	}
 	if len(out) < closureAnchorMin {
 		// History symbols too thin — fall back to the thread's existing
-		// anchors, which the spine already holds in the [4,8] range.
+		// anchors, which the spine already holds in the §2.2 [4, 8] range.
 		return append([]string(nil), fm.Anchors...)
 	}
 	return out
