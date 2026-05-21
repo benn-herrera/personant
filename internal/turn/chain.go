@@ -88,7 +88,15 @@ func onContextDelta(ctx context.Context, state *State, delta Delta) error {
 	if err := bufferFileEdit(ctx, state, delta); err != nil {
 		return err
 	}
-	// Step 4: budget check — no-op in v0.1.
+	// Step 4: budget check — DOCUMENTED NO-OP in v0.1 (SPEC §3.0.2 step 4).
+	//   Turn-time budget enforcement is deliberately deferred past v0.1: no
+	//   eviction fires here. The only v0.1 budget protections are the FIFO
+	//   turn-pair cap (§2.3) and blind render-time truncation in
+	//   workset.Compose (§3.1) — neither acts at delta time. Attaching a
+	//   verbose real LLM risks silently starving Layer B/C (sim-vs-reality
+	//   MAD finding B7/T0-2). TestBudgetCheckIsExplicitNoOpV01 is a tripwire
+	//   that fails if this no-op is half-enabled without a deliberate
+	//   decision.
 	//   TODO(phase-2-budget): track byte counts when working-set composition
 	//   lands more layers (§2.e); evict to honor layer caps.
 	// Step 5: logging — record the context-modification event on the

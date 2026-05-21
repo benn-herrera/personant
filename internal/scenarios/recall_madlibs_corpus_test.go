@@ -141,9 +141,9 @@ func TestRecallMadlibs_CorpusReport(t *testing.T) {
 		t.Fatal("no corpus queries measured")
 	}
 
-	t.Logf("recall fidelity — %d corpus topics, %d queries (symbolic Jaccard, measure-only):",
+	t.Logf("symbolic-only recall (Jaccard) — %d corpus topics, %d queries (measure-only):",
 		len(order), oN)
-	t.Logf("  OVERALL  precision %.3f  recall %.3f  f1 %.3f  fired %d/%d",
+	t.Logf("  OVERALL  precision %.3f  symbolic-only recall %.3f  f1 %.3f  fired %d/%d",
 		oP/float64(oN), oR/float64(oN), oF/float64(oN), oFired, oN)
 	for _, topic := range order {
 		a := byTopic[topic]

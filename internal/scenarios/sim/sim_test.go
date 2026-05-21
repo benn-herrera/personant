@@ -384,13 +384,21 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// Recall fidelity is measured (RecallMeasureOnly), never pass/fail
 	// at this rung. The generator schedules every `switch` as a recall
 	// opportunity, so the adversarial series carries the samples.
+	//
+	// Truth-in-labeling (sim-vs-reality MAD T0-1): this figure measures
+	// ONLY the symbolic Jaccard layer. The acceptance run uses a nil
+	// embedder (embedding recall is off) and derives ground truth from
+	// slot-tag equality — the same signal Jaccard keys on. Reporting it
+	// as bare "recall" overstates what is validated, so it is labeled
+	// "symbolic-only recall" until embedding recall is actually measured
+	// (T2-1 live-inference mode + T3-1 embedding-fidelity metric).
 	if steps := m.Counters["recall_fidelity_adversarial_steps"]; steps > 0 {
-		t.Logf("recall fidelity:  measured over %d steps, mean recall=%.3f mean F1=%.3f",
+		t.Logf("symbolic-only recall (Jaccard):  measured over %d steps, mean symbolic-only recall=%.3f mean F1=%.3f",
 			steps,
 			mean(m.Histograms["recall_fidelity_adversarial_recall"]),
 			mean(m.Histograms["recall_fidelity_adversarial_f1"]))
 	} else {
-		t.Logf("recall fidelity:  no measured steps this run")
+		t.Logf("symbolic-only recall (Jaccard):  no measured steps this run")
 	}
 
 	// Miss → refinement episode summary. queries-to-hit is a per-episode

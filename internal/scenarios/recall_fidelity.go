@@ -159,6 +159,15 @@ func matchFireSet(lines []string) []string {
 // recallFidelity is the per-step measurement of the symbolic Jaccard
 // recall layer's behavior on a ground-truth-labeled step.
 //
+// Truth-in-labeling (sim-vs-reality MAD T0-1): the precision/recall/F1
+// this computes reflect ONLY the symbolic Jaccard layer. The acceptance
+// run uses a nil embedder, and the step's expected set is derived from
+// slot-tag equality — the same signal Jaccard keys on. The headline
+// figure is therefore reported as "symbolic-only recall", not bare
+// "recall", until embedding recall is measured (T2-1/T3-1). The
+// `recall_fidelity_*` metric keys keep their names for backward-
+// compatible parsing; the labeling is enforced at the report strings.
+//
 // Given the actual set of thread IDs that fired spine.match-fire and
 // the step's declared expected set, compute precision, recall, and F1
 // using the conventions:

@@ -213,10 +213,20 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 	}
 }
 
-// restartSession simulates a clean application shutdown→relaunch: it
-// pointer-caches the pre-shutdown turn.State as a full snapshot (nothing
-// mutates it after replacement), rebuilds a fresh State from the
-// substrate via turn.LoadSession exactly as a real process launch would,
+// restartSession simulates a CLEAN application shutdown→relaunch ONLY —
+// it is NOT a crash-recovery test. The restart fires at a clean step
+// boundary, after the previous turn fully committed both its thread file
+// and the spine; the substrate on disk is internally consistent. A
+// mid-write crash (thread file written but spine not yet, or vice versa)
+// is deliberately out of scope here and is tracked as queued
+// crash-recovery work (sim-vs-reality MAD finding B9 / T0-3). When that
+// work lands, its coverage belongs in a distinct scenario that injects a
+// torn write, not in this clean-lifecycle path.
+//
+// Mechanics: it pointer-caches the pre-shutdown turn.State as a full
+// snapshot (nothing mutates it after replacement), rebuilds a fresh State
+// from the substrate via turn.LoadSession exactly as a real process
+// launch would,
 // re-installs the harness's scripted Curator (newHarness installs it on
 // the original State; the rebuild needs the same), swaps it into the
 // harness, and asserts the should-survive subset was reconstructed via

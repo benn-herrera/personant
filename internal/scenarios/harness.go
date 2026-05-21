@@ -123,7 +123,12 @@ type Step struct {
 	// process launch would. The harness then asserts via AssertSessionRestored
 	// that the should-survive subset (Layer B/C membership, active project)
 	// was reconstructed correctly. The step's turn then runs against the
-	// rebuilt State. This exercises a *clean* lifecycle, not crash recovery.
+	// rebuilt State. This exercises a CLEAN shutdown/resume lifecycle ONLY,
+	// NOT crash recovery: the restart fires at a clean step boundary, after
+	// the prior turn fully committed (thread file AND spine both written). A
+	// mid-write crash — e.g. the thread file landing ahead of the spine —
+	// is NOT covered here and is tracked separately as queued crash-recovery
+	// work (sim-vs-reality MAD finding B9 / T0-3).
 	RestartSession bool
 }
 

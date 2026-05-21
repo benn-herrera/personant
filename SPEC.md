@@ -490,6 +490,22 @@ Each context-modification event runs the chain, in this order:
 4. **Budget check** (§3.1) — did the delta push the working window over
    its layer budget caps? Bump-eviction fires immediately so the budget
    is honored before the next event lands.
+
+   > **v0.1 non-goal (turn-time budget enforcement is deliberately
+   > deferred past v0.1).** This step is a documented no-op in v0.1
+   > (`internal/turn/chain.go`, `TODO(phase-2-budget)`); no eviction
+   > fires here. The only v0.1 budget protections are (a) the FIFO
+   > turn-pair cap on each thread's `turns/` window (§2.3,
+   > `ThreadTurnWindow`) and (b) blind, render-time byte truncation in
+   > `workset.Compose` (§3.1). Neither acts at delta time. Consequence
+   > (sim-vs-reality MAD finding B7/T0-2): attaching a *verbose* real
+   > LLM — one whose per-turn deltas can outrun the layer caps — risks
+   > silently starving Layer B/C, because nothing reclaims budget
+   > between deltas; the mock's bounded responses hide this. Enabling
+   > enforcement here is a separate, deliberate decision (deferred
+   > T3-3), not an incremental fill-in. A regression guard
+   > (`TestBudgetCheckIsExplicitNoOpV01`) trips if the no-op is half-
+   > enabled without that decision.
 5. **Logging** (§2.8) — emit the source-specific event (`tool.result`,
    `user.shell-capture`, etc.) plus a `context.modified` event if the
    delta materially changed window contents.
