@@ -251,7 +251,7 @@ func initialCommitIfEmpty(repo *git.Repository, logf func(format string, args ..
 		return fmt.Errorf("init: git add: %w", err)
 	}
 	if _, err := wt.Commit("personant init", &git.CommitOptions{
-		Author: commitSignature(repo),
+		Author: CommitSignature(repo),
 	}); err != nil {
 		return fmt.Errorf("init: git commit: %w", err)
 	}
@@ -259,13 +259,18 @@ func initialCommitIfEmpty(repo *git.Repository, logf func(format string, args ..
 	return nil
 }
 
-// commitSignature returns the author signature for the bootstrap
-// commit. If the repo's git config (including local + global scopes via
-// go-git's ConfigScoped) yields a user.name + user.email pair, those
-// are used. Otherwise the personant fallback identity ("personant"
-// <personant@localhost>) kicks in so a freshly-initialized tempdir
-// with no git config still produces a valid commit.
-func commitSignature(repo *git.Repository) *object.Signature {
+// CommitSignature returns the author/committer signature for commits
+// against repo. If the repo's git config (including local + global
+// scopes via go-git's ConfigScoped) yields a user.name + user.email
+// pair, those are used (preserving user identity). Otherwise the
+// personant fallback identity ("personant" <personant@localhost>)
+// kicks in so a freshly-initialized tempdir with no git config still
+// produces a valid commit.
+//
+// Used by store.Init for the bootstrap commit and by internal/autogit
+// for every subsequent commit; consolidating here keeps the default
+// identity defined in exactly one place.
+func CommitSignature(repo *git.Repository) *object.Signature {
 	cfg, err := repo.Config()
 	if err == nil && cfg.User.Name != "" && cfg.User.Email != "" {
 		return &object.Signature{
