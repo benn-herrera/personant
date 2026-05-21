@@ -64,9 +64,10 @@ type ParseResult struct {
 //     anchor list (after normalization, with empty entries dropped).
 //   - Subsequent valid tags become a warning naming the count of extras;
 //     they are not stripped from the body.
-//   - Anchor count outside the spec §2.2 hard range [4, 8] emits a warning
-//     but does not fail. Spine creation will reject if the count is
-//     unrecoverable; the parser's job is to surface it, not gate.
+//   - Anchor count outside the spec §2.2 hard range [4, 8]
+//     (memops.MinAnchorsPerThread / memops.MaxAnchorsPerThread) emits a
+//     warning but does not fail. Spine creation will reject if the count
+//     is unrecoverable; the parser's job is to surface it, not gate.
 //   - The chosen tag's exact line (and its trailing newline, if present)
 //     is removed from Body. Other whitespace is preserved.
 //   - If no valid tag is found, returns ErrNoTopicTag with Body equal to
@@ -103,8 +104,8 @@ func Parse(response string) (ParseResult, error) {
 		if chosenIdx == -1 {
 			chosen = TopicTag{Threads: threads, Anchors: anchors}
 			chosenIdx = i
-			if n := len(anchors); n < 4 || n > 8 {
-				warnings = append(warnings, fmt.Sprintf("anchor count %d outside spec range [4, 8]", n))
+			if n := len(anchors); n < memops.MinAnchorsPerThread || n > memops.MaxAnchorsPerThread {
+				warnings = append(warnings, fmt.Sprintf("anchor count %d outside spec range [%d, %d]", n, memops.MinAnchorsPerThread, memops.MaxAnchorsPerThread))
 			}
 		}
 	}

@@ -2,9 +2,12 @@ package prompt
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+
+	"personant/internal/memops"
 )
 
 func TestParseHappyPath(t *testing.T) {
@@ -78,31 +81,47 @@ func TestParseAnchorNormalization(t *testing.T) {
 }
 
 func TestParseAnchorCountWarningTooFew(t *testing.T) {
-	in := "*topic: thr_1 [a, b, c]*\nbody"
+	// One anchor below the hard minimum — boundary case for the §2.2 range.
+	want := memops.MinAnchorsPerThread - 1
+	in := makeAnchorTagInput(want)
 	got, err := Parse(in)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if len(got.Tag.Anchors) != 3 {
-		t.Errorf("Anchors len: got %d, want 3", len(got.Tag.Anchors))
+	if len(got.Tag.Anchors) != want {
+		t.Errorf("Anchors len: got %d, want %d", len(got.Tag.Anchors), want)
 	}
-	if !hasWarningContaining(got.Warnings, "anchor count 3") {
-		t.Errorf("expected warning naming count 3, got %v", got.Warnings)
+	if !hasWarningContaining(got.Warnings, fmt.Sprintf("anchor count %d", want)) {
+		t.Errorf("expected warning naming count %d, got %v", want, got.Warnings)
 	}
 }
 
 func TestParseAnchorCountWarningTooMany(t *testing.T) {
-	in := "*topic: thr_1 [a, b, c, d, e, f, g, h, i]*\nbody"
+	// One anchor above the hard maximum — boundary case for the §2.2 range.
+	want := memops.MaxAnchorsPerThread + 1
+	in := makeAnchorTagInput(want)
 	got, err := Parse(in)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if len(got.Tag.Anchors) != 9 {
-		t.Errorf("Anchors len: got %d, want 9", len(got.Tag.Anchors))
+	if len(got.Tag.Anchors) != want {
+		t.Errorf("Anchors len: got %d, want %d", len(got.Tag.Anchors), want)
 	}
-	if !hasWarningContaining(got.Warnings, "anchor count 9") {
-		t.Errorf("expected warning naming count 9, got %v", got.Warnings)
+	if !hasWarningContaining(got.Warnings, fmt.Sprintf("anchor count %d", want)) {
+		t.Errorf("expected warning naming count %d, got %v", want, got.Warnings)
 	}
+}
+
+// makeAnchorTagInput synthesizes a topic-tag line carrying n synthetic
+// anchor symbols ("a1, a2, ..."). Used by the anchor-cardinality
+// boundary tests so the inputs track memops.MinAnchorsPerThread /
+// MaxAnchorsPerThread rather than baking the bounds into the fixture.
+func makeAnchorTagInput(n int) string {
+	parts := make([]string, n)
+	for i := range parts {
+		parts[i] = fmt.Sprintf("a%d", i+1)
+	}
+	return "*topic: thr_1 [" + strings.Join(parts, ", ") + "]*\nbody"
 }
 
 func TestParseMultipleValidTagsFirstWins(t *testing.T) {

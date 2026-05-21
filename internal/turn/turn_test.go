@@ -97,7 +97,7 @@ func TestRunNewTopicCreatesSpineRecord(t *testing.T) {
 	if r.TurnCount != 1 {
 		t.Errorf("turn_count: got %d want 1", r.TurnCount)
 	}
-	if len(r.Anchors) < 4 || len(r.Anchors) > 8 {
+	if len(r.Anchors) < memops.MinAnchorsPerThread || len(r.Anchors) > memops.MaxAnchorsPerThread {
 		t.Errorf("anchor cardinality: got %d", len(r.Anchors))
 	}
 }
@@ -220,7 +220,8 @@ func TestRunNoTopicTagIsNonFatal(t *testing.T) {
 func TestRunNewTopicAnchorCardinalityOutOfRange(t *testing.T) {
 	paths, meta := newTestHome(t)
 
-	// Two anchors only — under the [4, 8] hard range.
+	// Two anchors only — under the §2.2 hard range
+	// [memops.MinAnchorsPerThread, memops.MaxAnchorsPerThread].
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [only-two, anchors]*\nBrief reply."},
 	}, nil)
@@ -242,8 +243,8 @@ func TestRunNewTopicAnchorCardinalityOutOfRange(t *testing.T) {
 		t.Fatalf("expected 1 spine record; got %d", len(records))
 	}
 	r := records[0]
-	if got := len(r.Anchors); got != 4 {
-		t.Errorf("padded anchor count: got %d want 4", got)
+	if got := len(r.Anchors); got != memops.MinAnchorsPerThread {
+		t.Errorf("padded anchor count: got %d want %d", got, memops.MinAnchorsPerThread)
 	}
 }
 
