@@ -3,6 +3,7 @@ package fileadapter
 import (
 	"context"
 	"reflect"
+	"slices"
 	"sort"
 	"testing"
 
@@ -161,6 +162,49 @@ func TestFMCache_AntiStalenessCoherence(t *testing.T) {
 		if m.ID == "thr_1" {
 			t.Fatal("after ArchiveThread, LoadAll still returned thr_1")
 		}
+	}
+}
+
+// TestFMCache_PutClonesCallerSlices proves the cache insulates its stored
+// entries from caller mutation: after Put, mutating the original Anchors /
+// HistorySymbols slices the caller still holds must NOT change the cached
+// value. Fails against aliasing Put (c.entries[id] = fm); passes once Put
+// deep-copies the reference-typed fields.
+func TestFMCache_PutClonesCallerSlices(t *testing.T) {
+	c := newFrontmatterCache()
+
+	anchors := []string{"alpha", "beta", "gamma"}
+	syms := []memops.HistorySymbol{
+		{Raw: "alpha", Normalized: "alpha", FirstSeenTurn: 1, Count: 2, Source: memops.SourceModel, Lifecycle: memops.LifecycleActive, EverCentral: true, LastActiveTurn: 1},
+		{Raw: "beta", Normalized: "beta", FirstSeenTurn: 2, Count: 1, Source: memops.SourceModel, Lifecycle: memops.LifecycleActive, LastActiveTurn: 2},
+	}
+	fm := memops.ThreadMeta{
+		ID:             "thr_1",
+		Project:        "prj_1",
+		Anchors:        anchors,
+		State:          memops.ThreadActive,
+		HistorySymbols: syms,
+	}
+
+	wantAnchors := slices.Clone(anchors)
+	wantSyms := slices.Clone(syms)
+
+	c.Put(fm)
+
+	// Mutate the slices the caller still holds, in place.
+	anchors[0] = "MUTATED"
+	syms[0].Normalized = "MUTATED"
+	syms[0].Count = 999
+
+	got, ok := c.entries["thr_1"]
+	if !ok {
+		t.Fatal("entry not stored")
+	}
+	if !reflect.DeepEqual(got.Anchors, wantAnchors) {
+		t.Fatalf("cached Anchors corrupted by caller mutation\nwant %v\ngot  %v", wantAnchors, got.Anchors)
+	}
+	if !reflect.DeepEqual(got.HistorySymbols, wantSyms) {
+		t.Fatalf("cached HistorySymbols corrupted by caller mutation\nwant %+v\ngot  %+v", wantSyms, got.HistorySymbols)
 	}
 }
 

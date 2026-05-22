@@ -1,6 +1,7 @@
 package fileadapter
 
 import (
+	"slices"
 	"sync"
 
 	"personant/internal/memops"
@@ -33,6 +34,20 @@ import (
 // project once (the reverted "Inc 6" symbols.jsonl candidate filter read a
 // stale on-disk index and regressed recall); this design exists to make
 // that class of bug impossible by construction.
+//
+// # Ownership / aliasing contract
+//
+// The cache OWNS its stored entries. Put deep-copies the reference-typed
+// fields of the supplied ThreadMeta (see cloneThreadMeta) so the stored
+// entry shares no backing array with the caller — a caller that mutates
+// its own slices in place after a write cannot corrupt cached state.
+//
+// The read side is the inverse: ThreadMeta values RETURNED by LoadAll
+// alias cache-owned state and MUST be treated read-only by callers. This
+// is deliberate — the sole consumer (scoring.ProposeFromIndex) is
+// read-only, and cloning on return would re-introduce the per-thread
+// allocations the cache exists to eliminate. The write side is defended
+// by construction; the read side by this contract.
 type frontmatterCache struct {
 	mu      sync.Mutex
 	entries map[string]memops.ThreadMeta
@@ -57,6 +72,11 @@ func newFrontmatterCache() *frontmatterCache {
 // On every call the cache evicts entries whose id is no longer in the
 // live set, so the map tracks the live thread count (bounded by archival)
 // rather than growing without limit.
+//
+// Returned ThreadMeta values alias cache-owned state and MUST be treated
+// read-only by callers (see the frontmatterCache aliasing contract). They
+// are NOT cloned on return — keeping the read path allocation-free is the
+// point of the cache.
 func (c *frontmatterCache) LoadAll(paths store.PersonantPaths, logf func(format string, args ...any)) ([]memops.ThreadMeta, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
@@ -101,13 +121,38 @@ func (c *frontmatterCache) LoadAll(paths store.PersonantPaths, logf func(format 
 // Put write-throughs fm keyed by fm.ID. A zero ID is ignored (there is
 // nothing to key on, and store.SaveThreadFrontmatter would have rejected
 // it anyway).
+//
+// fm's reference-typed fields are deep-copied before storage (see
+// cloneThreadMeta), so the stored entry shares no backing array with the
+// caller. Put receives caller-owned slices (e.g. w.Meta from
+// CreateThread/EngageThread); without the clone, a caller mutating those
+// slices in place after the write would silently corrupt cached recall
+// data. The clone closes that footgun by construction.
 func (c *frontmatterCache) Put(fm memops.ThreadMeta) {
 	if fm.ID == "" {
 		return
 	}
 	c.mu.Lock()
-	c.entries[fm.ID] = fm
+	c.entries[fm.ID] = cloneThreadMeta(fm)
 	c.mu.Unlock()
+}
+
+// cloneThreadMeta returns a copy of fm whose reference-typed fields share
+// no backing storage with fm. The struct copy already duplicates every
+// value-typed (scalar/string) field; this only needs to clone the slice
+// and map fields so the result is fully cache-owned.
+//
+// ThreadMeta's reference-typed fields (per memops_model.go): Anchors
+// []string and HistorySymbols []HistorySymbol. HistorySymbol is itself
+// all value-typed, so a shallow slices.Clone of HistorySymbols is a true
+// deep copy. ThreadMeta has no map fields. If a new slice/map field is
+// added to ThreadMeta, clone it HERE — this helper is the single point
+// that must stay in sync with the type's reference-typed field set.
+// (nil slices clone to nil; slices.Clone already guarantees this.)
+func cloneThreadMeta(fm memops.ThreadMeta) memops.ThreadMeta {
+	fm.Anchors = slices.Clone(fm.Anchors)
+	fm.HistorySymbols = slices.Clone(fm.HistorySymbols)
+	return fm
 }
 
 // Invalidate drops the entry for id (a no-op if absent), forcing the next
