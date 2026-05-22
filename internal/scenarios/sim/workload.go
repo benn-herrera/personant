@@ -291,6 +291,14 @@ func (m corpusModel) slotFor(order int) int {
 // drift to recall=1.0. See newThreadAnchorTags.
 const stubAnchorPrefix = "stub-anchor-"
 
+// simAnchorFloor is the harness-local new-thread anchor floor the
+// stub-padding pads up to. It replaces the deleted
+// memops.MinAnchorsPerThread (anchor-lifecycle Inc 1 removed the 4-floor
+// contract from production). The stub-padding scaffold this floor feeds
+// is itself removed in Increment 5, coupled to the new workload actions
+// — so this const is deliberately greppable and goes away with them.
+const simAnchorFloor = 4 // removed in Increment 5
+
 // nonLooseTags returns the slot's tags with loose-cell positions
 // dropped, preserving order. A slot whose LooseMask is nil (no column
 // ground truth available) yields a copy of Tags unchanged — the prior
@@ -321,7 +329,7 @@ func nonLooseTags(slot CorpusSlot) []string {
 
 // newThreadAnchorTags is the anchor set the harness emits in a
 // *new-topic* topic tag: nonLooseTags padded with inert synthetic stubs
-// up to the §5.1 floor (memops.MinAnchorsPerThread).
+// up to the harness-local simAnchorFloor.
 //
 // The harness plays the model-in-the-loop, so a new-thread tag must be
 // contract-compliant (4–8 anchors). Production enforces that contract
@@ -339,7 +347,7 @@ func nonLooseTags(slot CorpusSlot) []string {
 // production-padding baseline.
 func newThreadAnchorTags(slot CorpusSlot) []string {
 	out := nonLooseTags(slot)
-	for i := len(out); i < memops.MinAnchorsPerThread; i++ {
+	for i := len(out); i < simAnchorFloor; i++ {
 		out = append(out, fmt.Sprintf("%s%d", stubAnchorPrefix, i+1))
 	}
 	return out

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -62,6 +63,104 @@ func TestSaveLoadFrontmatterRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, in) {
 		t.Fatalf("frontmatter mismatch:\n got: %#v\nwant: %#v", got, in)
+	}
+}
+
+// TestNewLifecycleFieldsRoundTrip — anchor-lifecycle Inc 1 acceptance
+// gate. The new HistorySymbol fields (Lifecycle/EverCentral/
+// LastActiveTurn) survive the YAML frontmatter round-trip with non-zero
+// values, and the new SpineRecord.AnchorsProjectedAtTurn survives the
+// JSONL round-trip. The fields are inert this increment — the test only
+// proves they serialize and decode, not that anything consumes them.
+func TestNewLifecycleFieldsRoundTrip(t *testing.T) {
+	paths := newThreadHome(t)
+	in := sampleFrontmatter()
+	in.HistorySymbols = []memops.HistorySymbol{
+		{Raw: "active sym", Normalized: "active-sym", FirstSeenTurn: 10, Count: 5, Source: memops.SourceModel, Lifecycle: memops.LifecycleActive, EverCentral: true, LastActiveTurn: 24},
+		{Raw: "abandoned sym", Normalized: "abandoned-sym", FirstSeenTurn: 3, Count: 9, Source: memops.SourceUser, Lifecycle: memops.LifecycleSuperseded, EverCentral: true, LastActiveTurn: 12},
+	}
+
+	if err := SaveThreadFrontmatter(paths, in.ID, in); err != nil {
+		t.Fatalf("SaveThreadFrontmatter: %v", err)
+	}
+	got, err := LoadThreadFrontmatter(paths, in.ID)
+	if err != nil {
+		t.Fatalf("LoadThreadFrontmatter: %v", err)
+	}
+	if !reflect.DeepEqual(got, in) {
+		t.Fatalf("frontmatter mismatch:\n got: %#v\nwant: %#v", got, in)
+	}
+
+	// SpineRecord JSONL round-trip of the new watermark field.
+	spineIn := memops.SpineRecord{ID: "thr_42", Project: "prj_3", Anchors: []string{"a"}, State: memops.ThreadActive, AnchorsProjectedAtTurn: 151}
+	b, err := json.Marshal(spineIn)
+	if err != nil {
+		t.Fatalf("marshal spine: %v", err)
+	}
+	var spineOut memops.SpineRecord
+	if err := json.Unmarshal(b, &spineOut); err != nil {
+		t.Fatalf("unmarshal spine: %v", err)
+	}
+	if spineOut.AnchorsProjectedAtTurn != 151 {
+		t.Errorf("AnchorsProjectedAtTurn: got %d want 151", spineOut.AnchorsProjectedAtTurn)
+	}
+}
+
+// TestNewLifecycleFieldsZeroValueSemantics — an old-shape record (no
+// lifecycle fields written) decodes with the zero-value semantics the
+// design relies on: Lifecycle "" ≡ active, EverCentral false,
+// LastActiveTurn 0, AnchorsProjectedAtTurn 0. This is the
+// greenfield-posture guarantee (SOLUTION §8): no migration shim needed.
+func TestNewLifecycleFieldsZeroValueSemantics(t *testing.T) {
+	// A frontmatter whose history symbols carry only the legacy fields.
+	const legacy = `id: thr_7
+project: prj_1
+anchors: []
+summary: ""
+state: active
+description: ""
+created: ""
+last_engaged: ""
+state_changed: ""
+turn_count: 0
+recall_fires: 0
+last_engaged_turn: 0
+history_symbols:
+  - raw: legacy
+    normalized: legacy
+    first_seen_turn: 1
+    count: 2
+    source: model
+`
+	paths := newThreadHome(t)
+	dir := filepath.Dir(ThreadMetaPath(paths, "thr_7"))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	body := thrFrontmatterDelimiter + "\n" + legacy + thrFrontmatterDelimiter + "\n# thr_7\n"
+	if err := os.WriteFile(ThreadMetaPath(paths, "thr_7"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write thread.md: %v", err)
+	}
+
+	fm, err := LoadThreadFrontmatter(paths, "thr_7")
+	if err != nil {
+		t.Fatalf("LoadThreadFrontmatter: %v", err)
+	}
+	if len(fm.HistorySymbols) != 1 {
+		t.Fatalf("history symbols: got %d want 1", len(fm.HistorySymbols))
+	}
+	s := fm.HistorySymbols[0]
+	if s.Lifecycle != "" {
+		t.Errorf("Lifecycle: got %q want \"\" (≡ active)", s.Lifecycle)
+	}
+	if s.Lifecycle != "" && s.Lifecycle != memops.LifecycleActive {
+		t.Errorf("zero-value lifecycle must be active-equivalent, got %q", s.Lifecycle)
+	}
+	if s.EverCentral {
+		t.Errorf("EverCentral: got true want false")
+	}
+	if s.LastActiveTurn != 0 {
+		t.Errorf("LastActiveTurn: got %d want 0", s.LastActiveTurn)
 	}
 }
 

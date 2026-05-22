@@ -52,16 +52,51 @@ const (
 	SourceCurator       SymbolSource = "curator"
 )
 
+// SymbolLifecycle enumerates a history symbol's lifecycle state (spec
+// §2.3 / §2.7.x). It is the canonical source of truth for supersession
+// state: "evicted" is the *absence* of the entry, not a stored value.
+// The zero value "" is treated as LifecycleActive (back-compatible: an
+// old record with no lifecycle field decodes as active).
+type SymbolLifecycle string
+
+const (
+	// LifecycleActive marks a symbol currently in (or eligible for) the
+	// active anchor projection. "" decodes as active.
+	LifecycleActive SymbolLifecycle = "active"
+	// LifecycleSuperseded marks a once-central symbol that has fallen out
+	// of the top-AnchorProjectionMax projection (rank-dropout). It is
+	// retained-not-evicted so an abandoned premise stays a findable
+	// recall handle.
+	LifecycleSuperseded SymbolLifecycle = "superseded"
+)
+
 // ---------- Spine / thread records ----------
 
 // SpineRecord is one line of spine.jsonl (spec §2.2). The canonical record
 // of a thread's identity, recall surface, and engagement bookkeeping.
 type SpineRecord struct {
-	ID      string      `json:"id"`
-	Project string      `json:"project"`
-	Anchors []string    `json:"anchors"`
+	ID string `json:"id"`
+
+	Project string `json:"project"`
+
+	// Anchors is the thread's headline symbol set — [derived]: a
+	// deterministic re-derived projection of the thread's active
+	// history_symbols (spec §2.2 / §2.7.x), not a frozen birth
+	// certificate. Range 0..AnchorProjectionMax (the 4-floor is deleted;
+	// 0 is legal for a vague-start thread). Projected anchors ≤
+	// AnchorProjectionMax is a runtime self-assertion, not a model
+	// contract.
+	Anchors []string `json:"anchors"`
+
 	Summary string      `json:"summary"`
 	State   ThreadState `json:"state"`
+
+	// AnchorsProjectedAtTurn is the staleness watermark: the owner-turn
+	// index at which the Anchors projection last changed. It enables the
+	// idempotent-write guard — the spine line is treated as changed (and
+	// this field bumped) only when the projected anchor set actually
+	// moves. A missing field in old JSON decodes to 0.
+	AnchorsProjectedAtTurn int `json:"anchors_projected_at_turn"`
 
 	// Description is the triggering utterance — the user prompt that
 	// spawned the thread — set once at creation and never rewritten
@@ -92,6 +127,24 @@ type HistorySymbol struct {
 	FirstSeenTurn int          `json:"first_seen_turn" yaml:"first_seen_turn"`
 	Count         int          `json:"count" yaml:"count"`
 	Source        SymbolSource `json:"source" yaml:"source"`
+
+	// Lifecycle is the symbol's lifecycle state (spec §2.7.x). The zero
+	// value "" is treated as LifecycleActive — an old record with no
+	// lifecycle field decodes as active. Canonical source of truth for
+	// supersession state.
+	Lifecycle SymbolLifecycle `json:"lifecycle,omitempty" yaml:"lifecycle,omitempty"`
+
+	// EverCentral is latched true the first time the symbol enters the
+	// active anchor projection, and never cleared. It is the retention
+	// discriminator: an ever-central symbol is never capacity-evicted, so
+	// an abandoned premise stays a findable recall handle. Zero value
+	// false ≡ never-central.
+	EverCentral bool `json:"ever_central,omitempty" yaml:"ever_central,omitempty"`
+
+	// LastActiveTurn is the most recent turn the symbol was in the active
+	// projection — temporal ordering (with FirstSeenTurn) plus an
+	// eviction tiebreak. Zero value 0 ≡ never-active.
+	LastActiveTurn int `json:"last_active_turn,omitempty" yaml:"last_active_turn,omitempty"`
 }
 
 // ThreadMeta is the per-thread metadata record at the memops port.
@@ -160,17 +213,19 @@ type ProjectPattern struct {
 // written) so callers never need to special-case "no active project".
 const DefaultProjectID = "prj_default"
 
-// MinAnchorsPerThread / MaxAnchorsPerThread are the spec §2.2 hard
-// bounds on a thread's anchor cardinality: anchors.length is between 4
-// and 8 inclusive, enforced by `personant verify` and consulted by every
-// site that creates, validates, or pads anchor sets. The range is
-// calibrated against the §3.4 Jaccard operating point — fewer than the
-// minimum collapses threshold discrimination, more than the maximum
-// dilutes specificity below the precision floor.
-const (
-	MinAnchorsPerThread = 4
-	MaxAnchorsPerThread = 8
-)
+// AnchorProjectionMax is the hard ceiling on a thread's projected anchor
+// count (spec §2.2 / §2.7.x): the deterministic projection takes the
+// top-AnchorProjectionMax active history_symbols as the thread's headline
+// anchor set. The legacy 4-anchor floor is deleted — 0 anchors is legal
+// (a vague-start thread), and over-AnchorProjectionMax emissions fold
+// (the projection keeps the strongest; the model never aborts on count).
+// The bound is a runtime self-assertion the projection owns
+// deterministically, not a contract on the model's §5.1 emission.
+//
+// §9 calibration window: 8 inherits the Phase C.6 Jaccard dilution
+// ceiling and is re-confirmed under drift in the simulation — the value
+// is not final.
+const AnchorProjectionMax = 8
 
 // ProjectMeta is projects/prj_<n>/meta.json (spec §2.5.1). Canonical
 // project metadata; the storage key is ID, the display label is Name.

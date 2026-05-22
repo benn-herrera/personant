@@ -153,14 +153,16 @@ type ParseResult struct {
 //
 //   - The first fully valid tag in document order wins.
 //   - A "valid" tag has a non-empty thread list (each entry either matching
-//     memops.ThreadIDPattern or equal to "*new-topic*") and a non-empty
-//     anchor list (after normalization, with empty entries dropped).
+//     memops.ThreadIDPattern or equal to "*new-topic*"). The anchor list
+//     is advisory and MAY be empty: the tag's job is thread binding;
+//     anchors are the model's per-turn symbol contribution (spec §5.1 /
+//     §2.7.x). A tag whose anchor list normalizes to empty (0 anchors —
+//     a vague-start emission) is still a valid tag, not ErrNoTopicTag.
 //   - Subsequent valid tags become a warning naming the count of extras;
 //     they are not stripped from the body.
-//   - Anchor count outside the spec §2.2 hard range [4, 8]
-//     (memops.MinAnchorsPerThread / memops.MaxAnchorsPerThread) emits a
-//     warning but does not fail. Spine creation will reject if the count
-//     is unrecoverable; the parser's job is to surface it, not gate.
+//   - The anchor count is never gated. The §2.2 anchor projection owns
+//     the AnchorProjectionMax ceiling deterministically; the parser does
+//     not warn or fail on cardinality.
 //   - The chosen tag's exact line (and its trailing newline, if present)
 //     is removed from Body. Other whitespace is preserved.
 //   - If no valid tag is found, returns ErrNoTopicTag with Body equal to
@@ -188,18 +190,18 @@ func Parse(response string) (ParseResult, error) {
 			continue
 		}
 
+		// R1 reconciliation (anchor-lifecycle Inc 1): an anchor list that
+		// normalizes to empty is NOT a tag-validity failure. 0 anchors is
+		// legal (a vague-start emission, spec §5.1 / §2.7.x) — the tag's
+		// job is thread binding, which the valid thread list above already
+		// satisfies. Anchors are advisory, so an empty list yields a valid
+		// tag rather than falling through to ErrNoTopicTag.
 		anchors := parseAnchorList(anchorsRaw)
-		if len(anchors) == 0 {
-			continue
-		}
 
 		validCount++
 		if chosenIdx == -1 {
 			chosen = TopicTag{Threads: threads, Anchors: anchors}
 			chosenIdx = i
-			if n := len(anchors); n < memops.MinAnchorsPerThread || n > memops.MaxAnchorsPerThread {
-				warnings = append(warnings, fmt.Sprintf("anchor count %d outside spec range [%d, %d]", n, memops.MinAnchorsPerThread, memops.MaxAnchorsPerThread))
-			}
 		}
 	}
 

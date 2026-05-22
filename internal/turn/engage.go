@@ -28,20 +28,7 @@ const (
 	logCatFS                          = "fs"
 	logActUnsyncedNoTopicTag          = "unsynced-no-topic-tag"
 	errMsgFileEditWithoutTopicTagHead = "turn aborted: fs.write without topic tag (spec §3.0/§3.3 protocol violation); substrate state not advanced; unsynced paths: "
-
-	logActAnchorCardinalityViolation = "anchor-cardinality-violation"
 )
-
-// ErrAnchorCardinalityViolation is returned by createNewThread when the
-// new thread's anchor set falls outside the §2.2 hard range [4, 8] (see
-// memops.MinAnchorsPerThread / memops.MaxAnchorsPerThread). The "4–8
-// anchors per thread" rule is a contract on the model's §5.1 topic-tag
-// emission; production enforces it and never synthesizes anchors to
-// paper over a sub-4 (or over-8) emission. An out-of-range count is a
-// hard protocol violation: the turn aborts, no thread is created, and
-// substrate state does not advance — consistent with the B2
-// topic-tag-protocol fail-loud path (ErrFileEditWithoutTopicTag).
-var ErrAnchorCardinalityViolation = errors.New("topic-tag contract violation: anchor count out of §5.1 range [4,8]")
 
 // ErrFileEditWithoutTopicTag is returned by closeTurnAndUpdateEngagement
 // when a turn buffers file edits but engages no thread. Callers and
@@ -87,13 +74,11 @@ func claimTurnOwner(state *State, threadID string) error {
 // strand a spine entry pointing at a non-existent file. v0.1 accepts
 // the former trade-off and logs both errors with context.
 //
-// New-record creation requires the topic tag's anchors. v0.1 takes
-// them from state.coalesce.symbols (the union accumulated across the
-// turn). Anchor count must be 4–8 (§2.2 / §5.1 hard range); an
-// out-of-range count is a topic-tag contract violation. createNewThread
-// rejects it (ErrAnchorCardinalityViolation) — no padding, no
-// truncation, no thread written — and the error aborts the turn without
-// advancing substrate, consistent with the B2 fail-loud path.
+// New-record creation takes the topic tag's anchors from
+// state.coalesce.symbols (the union accumulated across the turn). The
+// anchor list is advisory: 0 anchors is legal (a vague-start thread),
+// and the count is never gated — the §2.2 projection owns the
+// AnchorProjectionMax ceiling deterministically.
 //
 // §5.5 mid-turn fetch (Phase 2.e-B) handles the common case where the
 // model's topic tag references a thr_<n> not in Layer B at
@@ -432,22 +417,12 @@ func createNewThread(ctx context.Context, state *State, owner bool, userInput, r
 	}
 
 	// The new thread's anchors come from the model's §5.1 topic-tag
-	// emission (coalesced this turn). "4–8 anchors per thread" (§2.2 /
-	// §5.1) is a contract ON the model — production ENFORCES it and must
-	// never synthesize or truncate anchors to paper over a malformed
-	// emission. An out-of-range count is a hard protocol violation: fail
-	// the turn loud, create no thread, advance no substrate — mirroring
-	// the B2 fs.write-without-topic-tag fail-loud path. createNewThread's
-	// error propagates through closeTurnAndUpdateEngagement → Run,
-	// aborting the turn before any spine/thread write.
+	// emission (coalesced this turn). The anchor list is advisory: 0
+	// anchors is legal (a vague-start thread, spec §5.1 / §2.7.x). The
+	// count is never gated — the §2.2 anchor projection owns the
+	// AnchorProjectionMax ceiling deterministically as a runtime
+	// self-assertion, not a contract on the model.
 	anchors := state.coalesce.symbolList()
-	if len(anchors) < memops.MinAnchorsPerThread || len(anchors) > memops.MaxAnchorsPerThread {
-		_ = state.Ops.Log(ctx, memops.LogCategoryThread, logActAnchorCardinalityViolation,
-			"new-thread anchors="+strconv.Itoa(len(anchors))+
-				" range=["+strconv.Itoa(memops.MinAnchorsPerThread)+","+strconv.Itoa(memops.MaxAnchorsPerThread)+
-				"] substrate-not-advanced")
-		return "", fmt.Errorf("create thread (anchors=%d): %w", len(anchors), ErrAnchorCardinalityViolation)
-	}
 
 	summary := summarizeForNewThread(responseBody)
 	description := descriptionFromNewThread(userInput)

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"personant/internal/clock"
-	"personant/internal/memops"
 	"personant/internal/scenarios"
 	"personant/internal/store"
 )
@@ -664,8 +663,8 @@ func assertThreadIDsWellFormed(t *testing.T, h *scenarios.Harness) {
 // TestNewThreadAnchorTagsPadsInertStubsToFloor — the harness plays the
 // model-in-the-loop and must emit contract-compliant *new-topic* topic
 // tags (≥4 anchors, §5.1). When dropping loose tags leaves fewer than
-// the floor, newThreadAnchorTags pads inert synthetic stubs up to
-// memops.MinAnchorsPerThread. The stubs must carry the stubAnchorPrefix
+// the floor, newThreadAnchorTags pads inert synthetic stubs up to the
+// harness-local simAnchorFloor. The stubs must carry the stubAnchorPrefix
 // form and must never equal a query term — that inertness is what
 // preserves the query-vs-thread Jaccard gap (and thus recall misses).
 //
@@ -689,8 +688,8 @@ func TestNewThreadAnchorTagsPadsInertStubsToFloor(t *testing.T) {
 	}
 
 	out := newThreadAnchorTags(slot)
-	if len(out) != memops.MinAnchorsPerThread {
-		t.Fatalf("anchor count: got %d want floor %d", len(out), memops.MinAnchorsPerThread)
+	if len(out) != simAnchorFloor {
+		t.Fatalf("anchor count: got %d want floor %d", len(out), simAnchorFloor)
 	}
 	if out[0] != "alpha" {
 		t.Errorf("first anchor: got %q want surviving real tag %q", out[0], "alpha")
@@ -710,7 +709,7 @@ func TestNewThreadAnchorTagsPadsInertStubsToFloor(t *testing.T) {
 		}
 		stubs++
 	}
-	if want := memops.MinAnchorsPerThread - 1; stubs != want {
+	if want := simAnchorFloor - 1; stubs != want {
 		t.Errorf("stub count: got %d want %d", stubs, want)
 	}
 

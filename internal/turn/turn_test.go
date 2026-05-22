@@ -98,8 +98,8 @@ func TestRunNewTopicCreatesSpineRecord(t *testing.T) {
 	if r.TurnCount != 1 {
 		t.Errorf("turn_count: got %d want 1", r.TurnCount)
 	}
-	if len(r.Anchors) < memops.MinAnchorsPerThread || len(r.Anchors) > memops.MaxAnchorsPerThread {
-		t.Errorf("anchor cardinality: got %d", len(r.Anchors))
+	if len(r.Anchors) > memops.AnchorProjectionMax {
+		t.Errorf("anchor cardinality: got %d, exceeds projection ceiling %d", len(r.Anchors), memops.AnchorProjectionMax)
 	}
 }
 
@@ -218,55 +218,38 @@ func TestRunNoTopicTagIsNonFatal(t *testing.T) {
 	}
 }
 
-// TestRunNewTopicAnchorCardinalityFailsLoud — the "4–8 anchors per
-// thread" rule (§2.2 / §5.1) is a contract on the model's topic-tag
-// emission. Production ENFORCES it and never synthesizes anchors: a
-// sub-4 (here, two-anchor) *new-topic* emission is a hard protocol
-// violation. The turn must abort with ErrAnchorCardinalityViolation, no
-// spine record may be appended, no thread sidecar created, and the
-// violation logged — mirroring the B2 fail-loud path.
-func TestRunNewTopicAnchorCardinalityFailsLoud(t *testing.T) {
+// TestRunNewTopicZeroAnchorsCreatesThread — anchor-lifecycle Inc 1
+// deletes the 4-floor cardinality contract. A *new-topic* emission whose
+// anchor list is empty (a vague-start thread, spec §5.1 / §2.7.x) is now
+// legal: the turn succeeds, a spine record is written with 0 anchors, and
+// no error is returned. The anchor count is advisory — the projection
+// owns the AnchorProjectionMax ceiling deterministically, and there is no
+// minimum.
+func TestRunNewTopicZeroAnchorsCreatesThread(t *testing.T) {
 	paths, meta := newTestHome(t)
 
-	// Two anchors only — under the §2.2 hard range
-	// [memops.MinAnchorsPerThread, memops.MaxAnchorsPerThread].
+	// Empty anchor list — a vague-start *new-topic* emission. The tag's
+	// thread list (*new-topic*) is valid; anchors normalize to empty.
 	mock := model.NewScriptedMock([]model.Response{
-		{Content: "*topic: *new-topic* [only-two, anchors]*\nBrief reply."},
+		{Content: "*topic: *new-topic* []*\nBrief reply."},
 	}, nil)
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
-	_, err := Run(context.Background(), state, "ping", io.Discard)
-	if err == nil {
-		t.Fatal("Run must return an error on a sub-4 anchor *new-topic* emission")
-	}
-	if !errors.Is(err, ErrAnchorCardinalityViolation) {
-		t.Errorf("error = %v; want errors.Is ErrAnchorCardinalityViolation", err)
+	if _, err := Run(context.Background(), state, "ping", io.Discard); err != nil {
+		t.Fatalf("Run on a 0-anchor *new-topic* emission must succeed: %v", err)
 	}
 
-	// Substrate must NOT have advanced: no spine record, no thread.
+	// Substrate advanced: exactly one spine record, with 0 anchors.
 	records, rerr := store.ReadSpine(paths.Spine)
 	if rerr != nil {
 		t.Fatalf("read spine: %v", rerr)
 	}
-	if len(records) != 0 {
-		t.Errorf("spine must not advance on contract-violation abort; got %d records", len(records))
+	if len(records) != 1 {
+		t.Fatalf("spine records: got %d want 1", len(records))
 	}
-
-	// The violation is logged for forensics/diagnostics.
-	entries, lerr := os.ReadDir(paths.LogsDir)
-	if lerr != nil {
-		t.Fatalf("read logs dir: %v", lerr)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("logs dir entries: got %d want 1 (%v)", len(entries), entries)
-	}
-	data, rerr := os.ReadFile(paths.LogsDir + "/" + entries[0].Name())
-	if rerr != nil {
-		t.Fatalf("read log: %v", rerr)
-	}
-	if logBody := string(data); !strings.Contains(logBody, "anchor-cardinality-violation") {
-		t.Errorf("log missing anchor-cardinality-violation:\n%s", logBody)
+	if got := len(records[0].Anchors); got != 0 {
+		t.Errorf("anchor count: got %d want 0 (vague-start thread)", got)
 	}
 }
 

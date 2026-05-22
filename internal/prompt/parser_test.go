@@ -80,48 +80,28 @@ func TestParseAnchorNormalization(t *testing.T) {
 	}
 }
 
-func TestParseAnchorCountWarningTooFew(t *testing.T) {
-	// One anchor below the hard minimum — boundary case for the §2.2 range.
-	want := memops.MinAnchorsPerThread - 1
-	in := makeAnchorTagInput(want)
-	got, err := Parse(in)
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if len(got.Tag.Anchors) != want {
-		t.Errorf("Anchors len: got %d, want %d", len(got.Tag.Anchors), want)
-	}
-	if !hasWarningContaining(got.Warnings, fmt.Sprintf("anchor count %d", want)) {
-		t.Errorf("expected warning naming count %d, got %v", want, got.Warnings)
-	}
-}
-
-func TestParseAnchorCountWarningTooMany(t *testing.T) {
-	// One anchor above the hard maximum — boundary case for the §2.2 range.
-	want := memops.MaxAnchorsPerThread + 1
-	in := makeAnchorTagInput(want)
-	got, err := Parse(in)
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if len(got.Tag.Anchors) != want {
-		t.Errorf("Anchors len: got %d, want %d", len(got.Tag.Anchors), want)
-	}
-	if !hasWarningContaining(got.Warnings, fmt.Sprintf("anchor count %d", want)) {
-		t.Errorf("expected warning naming count %d, got %v", want, got.Warnings)
-	}
-}
-
-// makeAnchorTagInput synthesizes a topic-tag line carrying n synthetic
-// anchor symbols ("a1, a2, ..."). Used by the anchor-cardinality
-// boundary tests so the inputs track memops.MinAnchorsPerThread /
-// MaxAnchorsPerThread rather than baking the bounds into the fixture.
-func makeAnchorTagInput(n int) string {
+// TestParseHighAnchorCountNoWarning — anchor-lifecycle Inc 1 deletes the
+// out-of-range cardinality warning. An over-AnchorProjectionMax anchor
+// list parses cleanly with no warning: the projection owns the ceiling
+// deterministically (the strongest fold in), so the parser does not gate
+// or warn on count.
+func TestParseHighAnchorCountNoWarning(t *testing.T) {
+	n := memops.AnchorProjectionMax + 1
 	parts := make([]string, n)
 	for i := range parts {
 		parts[i] = fmt.Sprintf("a%d", i+1)
 	}
-	return "*topic: thr_1 [" + strings.Join(parts, ", ") + "]*\nbody"
+	in := "*topic: thr_1 [" + strings.Join(parts, ", ") + "]*\nbody"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(got.Tag.Anchors) != n {
+		t.Errorf("Anchors len: got %d, want %d (parser does not truncate)", len(got.Tag.Anchors), n)
+	}
+	if len(got.Warnings) != 0 {
+		t.Errorf("expected no cardinality warning, got %v", got.Warnings)
+	}
 }
 
 func TestParseMultipleValidTagsFirstWins(t *testing.T) {
@@ -198,11 +178,26 @@ func TestParseEmptyThreadList(t *testing.T) {
 	}
 }
 
-func TestParseEmptyAnchorList(t *testing.T) {
+// TestParseEmptyAnchorListIsValid — anchor-lifecycle Inc 1 / Risk R1: a
+// tag whose anchor list normalizes to empty is now a VALID tag, not
+// ErrNoTopicTag. The tag's job is thread binding (the valid thr_42 list
+// satisfies it); anchors are an advisory per-turn contribution, and 0
+// anchors is legal (a vague-start emission, spec §5.1 / §2.7.x). This
+// reverses the prior tag-validity contract deliberately.
+func TestParseEmptyAnchorListIsValid(t *testing.T) {
 	in := "*topic: thr_42 []*\nbody"
-	_, err := Parse(in)
-	if !errors.Is(err, ErrNoTopicTag) {
-		t.Fatalf("expected ErrNoTopicTag for empty anchor list, got %v", err)
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("0-anchor tag with a valid thread list must parse, got %v", err)
+	}
+	if want := []string{"thr_42"}; !reflect.DeepEqual(got.Tag.Threads, want) {
+		t.Errorf("Threads: got %v, want %v", got.Tag.Threads, want)
+	}
+	if len(got.Tag.Anchors) != 0 {
+		t.Errorf("Anchors: got %v, want empty (advisory, 0 legal)", got.Tag.Anchors)
+	}
+	if got.Body != "body" {
+		t.Errorf("Body: got %q, want %q", got.Body, "body")
 	}
 }
 

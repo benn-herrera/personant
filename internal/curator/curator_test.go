@@ -15,8 +15,12 @@ func hsym(norm string, count, firstSeen int) memops.HistorySymbol {
 }
 
 // TestSelectAnchors covers the deterministic anchor selection: rank by
-// count descending, tie-break by first-seen ascending, the [4,8] bounds,
-// and the thin-history fallback to the thread's existing anchors.
+// count descending, tie-break by first-seen ascending, the
+// AnchorProjectionMax ceiling, and the empty-history fallback to the
+// thread's existing anchors. Anchor-lifecycle Inc 1 deletes the 4-floor:
+// a thin (but non-empty) history yields fewer than the ceiling rather
+// than triggering the fallback — the fallback fires only when there is
+// no history to project from at all.
 func TestSelectAnchors(t *testing.T) {
 	tests := []struct {
 		name string
@@ -58,22 +62,30 @@ func TestSelectAnchors(t *testing.T) {
 			want: []string{"s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"},
 		},
 		{
-			name: "thin history falls back to existing anchors",
+			name: "thin history yields its symbols (no floor, no fallback)",
 			fm: memops.ThreadMeta{
 				HistorySymbols: []memops.HistorySymbol{hsym("only", 5, 1)},
 				Anchors:        []string{"alpha", "beta", "gamma", "delta"},
 			},
-			want: []string{"alpha", "beta", "gamma", "delta"},
+			want: []string{"only"},
 		},
 		{
-			name: "empty normalized symbols skipped, then fallback",
+			name: "empty normalized symbols skipped; surviving symbol wins (no fallback)",
 			fm: memops.ThreadMeta{
 				HistorySymbols: []memops.HistorySymbol{
 					hsym("", 9, 1), hsym("real", 3, 1),
 				},
 				Anchors: []string{"a", "b", "c", "d", "e"},
 			},
-			want: []string{"a", "b", "c", "d", "e"},
+			want: []string{"real"},
+		},
+		{
+			name: "empty history falls back to existing anchors",
+			fm: memops.ThreadMeta{
+				HistorySymbols: nil,
+				Anchors:        []string{"alpha", "beta", "gamma", "delta"},
+			},
+			want: []string{"alpha", "beta", "gamma", "delta"},
 		},
 	}
 	for _, tt := range tests {

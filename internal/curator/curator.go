@@ -23,7 +23,7 @@ import (
 // ClosureDraft is the curator's output for a closing thread.
 type ClosureDraft struct {
 	Summary string   // 100–150 char gist of the thread's operational content (spec §5.2)
-	Anchors []string // final anchor set (4–8)
+	Anchors []string // final anchor set (0..AnchorProjectionMax — no floor; the projection owns the ceiling)
 }
 
 // Curator drafts the closure artifacts for a retiring thread.
@@ -31,15 +31,13 @@ type Curator interface {
 	DraftClosure(ctx context.Context, thread memops.Thread) (ClosureDraft, error)
 }
 
-// closureAnchorMin / closureAnchorMax bound the deterministic anchor
-// selection at retirement. They alias the §2.2 hard range
-// [memops.MinAnchorsPerThread, memops.MaxAnchorsPerThread] so the
-// curator's selection respects the single port-level invariant rather
-// than restating it locally.
-const (
-	closureAnchorMin = memops.MinAnchorsPerThread
-	closureAnchorMax = memops.MaxAnchorsPerThread
-)
+// closureAnchorMax bounds the deterministic anchor selection at
+// retirement. It aliases the §2.2 projection ceiling
+// memops.AnchorProjectionMax so the curator's selection respects the
+// single port-level invariant rather than restating it locally. There is
+// no minimum: the 4-floor is deleted (anchor-lifecycle Inc 1), so a thin
+// thread legitimately yields fewer than the ceiling.
+const closureAnchorMax = memops.AnchorProjectionMax
 
 // HTTPCurator is the model-backed Curator. The summary is drafted by
 // the LLM; the anchors are selected deterministically from the
@@ -112,13 +110,21 @@ func (c *HTTPCurator) consult(ctx context.Context, req model.Request) (string, e
 
 // SelectAnchors picks the final anchor set for a closing thread from
 // fm.HistorySymbols: rank by Count descending, tie-break by
-// FirstSeenTurn ascending (older first), take up to closureAnchorMax,
-// at least closureAnchorMin if available. If HistorySymbols is too thin
-// to yield closureAnchorMin entries, fall back to fm.Anchors.
+// FirstSeenTurn ascending (older first), take up to closureAnchorMax.
+// When HistorySymbols is empty (no symbol history to project from), fall
+// back to the thread's existing fm.Anchors. There is no minimum floor —
+// the 4-floor is deleted (anchor-lifecycle Inc 1), so a thin history
+// legitimately yields fewer than the ceiling.
 //
 // Exported so the deterministic selection can be unit-tested without a
 // live model.
 func SelectAnchors(fm memops.ThreadMeta) []string {
+	if len(fm.HistorySymbols) == 0 {
+		// No symbol history to project from — fall back to whatever
+		// anchors the thread already holds.
+		return append([]string(nil), fm.Anchors...)
+	}
+
 	syms := append([]memops.HistorySymbol(nil), fm.HistorySymbols...)
 	sort.SliceStable(syms, func(i, j int) bool {
 		if syms[i].Count != syms[j].Count {
@@ -139,11 +145,6 @@ func SelectAnchors(fm memops.ThreadMeta) []string {
 		if len(out) == closureAnchorMax {
 			break
 		}
-	}
-	if len(out) < closureAnchorMin {
-		// History symbols too thin — fall back to the thread's existing
-		// anchors, which the spine already holds in the §2.2 [4, 8] range.
-		return append([]string(nil), fm.Anchors...)
 	}
 	return out
 }
