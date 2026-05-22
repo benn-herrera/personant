@@ -86,7 +86,8 @@ interface SpineRecord {
   project: string;                  // stable project handle "prj_<n>" (see §2.5.1); display name dereferenced from project meta. "prj_default" reserved for unscoped threads.
 
   // recall material
-  anchors: string[];                // 4-8 normalized anchor symbols (see §2.7)
+  anchors: string[];                // [derived] 0..AnchorProjectionMax (default 8) normalized anchor symbols; a re-derived projection of active history_symbols (see §2.7.x), not a frozen birth certificate
+  anchors_projected_at_turn: number; // [derived] staleness watermark: owner-turn index at which the anchors projection last changed (idempotent-write guard, §3.2). Decodes 0 on old records.
   summary: string;                  // 100-150 char gist; ≤ spine.entry-max-chars (default 200); curator-drafted at retirement (§3.5)
   description: string;              // triggering utterance; set once at creation, never rewritten (§2.3). Distinct from summary. Decodes empty on old records.
   state: ThreadState;               // see §2.2.1
@@ -108,7 +109,7 @@ interface SpineRecord {
 |---|---|
 | `id` | regex `/^thr_\d+$/`, globally unique |
 | `project` | regex `/^prj_\d+$/`, references an existing project (or `prj_default`) |
-| `anchors.length` | between 4 and 8 inclusive; the [4,8] range is calibrated against the Jaccard operating point: fewer than 4 collapse threshold discrimination; more than 8 dilute specificity below the precision floor established in Phase C.6. This is a hard contract: production rejects out-of-range anchor sets at thread creation (no padding, no truncation, no synthetic anchors) and `personant verify` also enforces it. Synthetic anchors are never written by production. **⚠ Under active redesign — do not treat as settled:** the anchors-frozen-at-creation model and the 4-minimum floor are slated to be replaced by an evolving-anchor model (anchors as a re-derived projection of the thread's accreting symbol set; a vague new thread legitimately starts with 0 anchors; superseded premises retained-not-evicted). See §9.1's realism backlog. Do not build new dependencies on the immutable-4-floor semantics without checking that work's status. |
+| `anchors.length` | between 0 and `AnchorProjectionMax` (default 8) inclusive. **Anchors are `[derived]`, not a frozen birth certificate:** the field is a deterministic re-derived projection of the thread's *active* `history_symbols` (the lifecycle state machine in §2.7.x), recomputed every owner turn at close. 0 anchors is legal — a vague-start thread that has not yet accreted a headline topic. The 4-minimum floor is **deleted**. The upper bound is a runtime self-assertion the projection owns (it takes the top-`AnchorProjectionMax`); `personant verify` flags only an over-ceiling count (a substrate bug — the model never controls this count, per §5.1). `AnchorProjectionMax = 8` is a §9 calibration window (inherits the Phase C.6 Jaccard dilution ceiling; re-confirmed under drift in the sim — not final). |
 | `anchors[i]` | normalized form (see §2.7); 3-50 chars |
 | `summary.length` | ≤ `spine.entry-max-chars` directive value |
 | `state` | one of `ThreadState` enum values |
@@ -222,12 +223,18 @@ interface HistorySymbol {
   first_seen_turn: number;          // turn ID when first emitted
   count: number;                    // total emissions across all turns
   source: SymbolSource;             // see §2.7.2
+  lifecycle?: SymbolLifecycle;      // "active" | "superseded"; canonical source of truth for supersession state (see §2.7.x). Omitted ≡ "active".
+  ever_central?: boolean;           // latched true the first time the symbol enters the active anchor projection; never cleared. The retention discriminator. Omitted/false ≡ never-central.
+  last_active_turn?: number;        // most recent turn the symbol was in the active projection; temporal ordering + eviction tiebreak. Omitted/0 ≡ never-active.
 }
 
 type SymbolSource = "deterministic" | "model" | "user" | "curator";
+type SymbolLifecycle = "active" | "superseded";  // "evicted" is the *absence* of the entry, not a stored value
 ```
 
-`history_symbols` is hard-capped at `history.cap-per-thread` directive value (default 40). When the cap is exceeded, eviction policy is lowest cumulative weight: lowest `count` first, ties broken by lowest `first_seen_turn`. Symbols with low cumulative count and early `first_seen_turn` represent brief noise rather than persistent signal; retaining them dilutes the Jaccard matching set and degrades recall precision [§3.4].
+**Zero-value semantics (greenfield, no migration — §2.7.x).** The three lifecycle fields are added plainly; an old record decoding without them is well-formed: `lifecycle == ""` is treated as `active`, `ever_central` false ≡ never-central, `last_active_turn` 0 ≡ never-active. `verify`/index-rebuild regenerate the derived projection from canonical on first run.
+
+`history_symbols` is hard-capped at `history.cap-per-thread` directive value (default 40) — a hard *total* cap over both `active` and `superseded` entries. When the cap is exceeded, eviction operates over the **evictable** partition only: a symbol is evictable **iff** it is `NOT ever_central AND NOT a §2.7.2 high-specificity (B11) identifier` — the *union* of two protections (once-central premises stay a findable abandoned-premise handle; intrinsically discriminative identifiers stay matchable). Within the evictable set, lowest cumulative weight: lowest `count` first, ties broken by lowest `first_seen_turn`. **Graceful degradation:** if the protected set alone exceeds the cap, evict the lowest-`count` `superseded` entries first (an abandoned premise yields before a still-protected active one). Symbols with low cumulative count and early `first_seen_turn` represent brief noise rather than persistent signal; retaining them dilutes the Jaccard matching set and degrades recall precision [§3.4].
 
 ### 2.4 Symbol index schema (`symbols.jsonl`)
 
@@ -238,11 +245,12 @@ interface SymbolRecord {
   symbol: string;                   // normalized form
   threads: string[];                // thread IDs where symbol appears anywhere (anchor or history)
   anchor_in: string[];              // subset of `threads` where symbol is an anchor
+  superseded_in: string[];          // subset of `threads` where this symbol's history entry is lifecycle==superseded; the cheap-scan abandoned-premise surface (§3.4). [derived] from frontmatter lifecycle.
   source_dominant: SymbolSource;    // most common source across emissions
 }
 ```
 
-`threads` is sorted by descending `recall_fires` of the referenced thread (most-recalled first) so that opportunistic-match operations naturally surface high-recall threads first when ties exist.
+`threads` is sorted by descending `recall_fires` of the referenced thread (most-recalled first) so that opportunistic-match operations naturally surface high-recall threads first when ties exist. `superseded_in` is sorted the same way and is rebuilt from canonical (`BuildSymbols`, gated on `lifecycle == "superseded"`) — there is no second source of truth for supersession state, which is the frontmatter `lifecycle` field (§2.3).
 
 ### 2.5 Project metadata schema
 
@@ -356,8 +364,9 @@ layer.b-top-k: 3                    # max active threads in Layer B
 layer.budget.percentages: {E: 8, A1: 8, A2: variable, B: 50, C: 15, current_turn: 15}
 context.byte-budget: 65536          # total system-prompt byte budget; v0.1
                                     # uses bytes as a token proxy (see §6.5)
-anchors.cap-per-thread: 6           # max anchor symbols per thread (within [4,8] hard range)
+recall.superseded-weight: 1.0       # numerator weight for a matched symbol that is superseded in a thread (§3.4); §9 calibration window — 1.0 = no down-weight (today's behavior)
 history.cap-per-thread: 40          # max history symbols per thread
+anchor.projection-max: 8            # AnchorProjectionMax: top-N active history_symbols projected to spine anchors (§2.2/§2.7.4); §9 calibration window
 spine.entry-max-chars: 200          # hard cap for SpineRecord.summary
 cross-project.digest-per-project-bytes: 150
 dissect.pressure-threshold: 0.90    # budget-pressure fraction triggering fallback dissection
@@ -404,6 +413,39 @@ type SymbolSource =
 ```
 
 When a symbol is emitted by multiple sources, `source_dominant` in `SymbolRecord` is the most-frequent source across all its history entries; ties broken by `curator > user > model > deterministic`.
+
+#### 2.7.4 Symbol lifecycle and anchor projection
+
+A thread's evolving identity lives in `history_symbols` (§2.3): it accretes per turn, is weighted, is evictable with high-specificity (B11) protection, and is part of the recall match set. The spine `anchors` field (§2.2) is **not** a separate storage tier — it is a deterministic re-derived **projection** of that canonical set. Every state transition here is deterministic; **no LLM prompt is involved.**
+
+**Lifecycle states** (`HistorySymbol.lifecycle`):
+
+- `active` — currently in, or eligible for, the active anchor projection. The zero value `""` decodes as `active`.
+- `superseded` — a once-central symbol that has fallen out of the top-`AnchorProjectionMax` projection (rank-dropout). **Retained, not evicted** — it stays in `history_symbols`, so an abandoned premise remains a findable recall handle.
+- *evicted* is **not** a stored value — it is the *absence* of the entry (capacity eviction per §2.3).
+
+**The projection function** (`ProjectAnchors`). Over a thread's `active` history_symbols, rank by:
+
+1. **class** — a §2.7.2 high-specificity (B11) identifier (URL, file path, git SHA) ranks above an ordinary symbol of equal count;
+2. **count** descending;
+3. **recency** — `last_active_turn` then `first_seen_turn`, newest first;
+4. **normalized** ascending (stable final tiebreak).
+
+Take the top-`AnchorProjectionMax` as the active slice → `SpineRecord.anchors` (in rank order). Zero active symbols project to an empty anchor list (the legal vague start). **`ever_central` is deliberately not a ranking tier** — it is the eviction-retention discriminator only (below). If it boosted rank, a once-central premise could never be outranked and supersession (the inversion case) would be impossible.
+
+**State transitions** (deterministic; **no TTL** — a timer would wrongly demote still-valid anchors in a quiescent thread and would miss inversion):
+
+- a symbol that enters the active projection this turn latches `ever_central = true` (never cleared), sets `last_active_turn = turn`, and is `active`;
+- a symbol that *was* `ever_central` but falls out of the top-`AnchorProjectionMax` projection flips to `superseded` (rank-dropout supersession — captures a still-mentioned-but-outranked premise demoting);
+- a `superseded` symbol re-entering the projection returns to `active`.
+
+**Ever-central = projection-entry latch.** A symbol is "historically central" iff it has *ever* made the headline projection — not merely been mentioned often. This single latched bool (plus `last_active_turn`) is the whole representation; no peak-rank/peak-weight magnitude is stored (no algorithm consumes it; the eviction tiebreak uses `count`).
+
+**Capacity eviction predicate** (§2.3, restated): evictable **iff** `NOT ever_central AND NOT B11-high-specificity` — the union of protections. Within the evictable set, lowest `count`, ties by `first_seen_turn`. **Graceful degradation** when the protected set alone exceeds `history.cap-per-thread`: evict lowest-`count` `superseded` entries first. A symbol is never evicted while `ever_central` so long as the protected set fits the cap.
+
+**Ordering invariant** (per turn, before the spine/frontmatter write): **merge → project → evict.** Projection must run on the full merged set before eviction, so a symbol entering the projection this turn has its `ever_central` latch set *before* the eviction predicate reads it — otherwise a freshly-central symbol would be unprotected and could be wrongly evicted the same turn.
+
+**Steady-state bound.** `history.cap-per-thread` (40) remains the hard total cap (active + superseded); the projected slice is hard-bounded at `AnchorProjectionMax` (8). Ever-central count is bounded by the number of genuine central topic-shifts (tens, not hundreds); under pathological pressure graceful degradation evicts superseded-first. The empirical flatness of `history_len`/`ever_central_count` is the §9 sim's steady-state obligation, not a static guarantee.
 
 ### 2.8 Log event format (`logs/YYYY-MM-DD.log`)
 
@@ -638,6 +680,21 @@ The Layer B/C LRU (§3.1) and recall surfacing operate over all engaged
 threads (owner + non-owner); only excerpt and `turn_count` ownership is
 restricted. The §3.9 file-edit application binds to the owner.
 
+**Anchor projection at owner-turn close.** After the owner's
+`history_symbols` merge, the runtime re-derives the thread's `anchors`
+projection (§2.7.4) over the merged set, in the order **merge → project
+→ evict** (the eviction predicate must read the freshly-latched
+`ever_central` flags). The projection piggybacks the full-file spine
+rewrite that already happens on engagement (§2.3) — no separate spine
+pass. **Idempotent-write guard:** the spine line is treated as changed
+(and `anchors_projected_at_turn` bumped to the owner-turn index) **only
+when the projected anchor set actually differs** from the prior set.
+This keeps git diffs clean under any per-turn commit cadence without the
+staleness a TTL would carry. **Engaged-but-not-owner threads do not
+re-project** (no excerpt, no headline recompute). Closure (§3.5) runs a
+final authoritative projection from `history_symbols` (consistent with
+the same canonical source the curator anchor selection ranks).
+
 ### 3.3 Symbol extraction (three passes)
 
 Three passes per §3.0.2 step 1, ordered cheapest first:
@@ -689,6 +746,27 @@ insulated from caller code. Accepted candidates are promoted into
 Layer B; every offered candidate is logged `recall.accept` or
 `recall.decline` (the latter with a §4.3 reason). With no resolver
 installed, recall stays log-only.
+
+**Lifecycle-aware symbolic scorer.** The match target is unchanged —
+`T(thr) = anchors ∪ {h.normalized}` — so a `superseded` symbol, which
+stays in `history_symbols` (§2.7.4), remains matchable with no change to
+the match-set construction (abandoned-premise recall works for free).
+The Jaccard *numerator* is a **weighted sum** rather than a plain count:
+each matched symbol contributes `1.0` if it is `active` in that thread,
+`recall.superseded-weight` (default **1.0**) if it is `superseded`. A
+symbol that is also a projected anchor always counts as active (the
+headline takes precedence over a stale history entry). The
+superseded **label is canonical** — sourced from the thread's
+frontmatter `lifecycle` (§2.3), not the derived index. The denominator
+(union size) is unchanged in cardinality; at weight 1.0 the score is
+byte-identical to the plain-count scorer. `recall.superseded-weight` is
+a §9 calibration window — lowered below 1.0 only if the sim's
+`superseded_precision`/`abandoned_premise_recall` show abandoned threads
+crowding out focused ones. Separately, `symbols.jsonl.superseded_in`
+(§2.4) is the cheap-scan candidate-filter surface — answering "which
+threads abandoned premise X" in O(1) per query symbol without loading
+every thread's frontmatter; the candidate-filter rework that consumes it
+is a tracked follow-on, not part of the scorer.
 
 ### 3.5 Closure flow
 
@@ -1349,15 +1427,21 @@ declares which threads the turn engages, but the runtime decides
   thread is created **metadata-only** (`turn_count = 0`, no excerpt, with
   its `description` set per §2.3).
 
-The 4–8 anchor count (§2.2) is a contract on the model's tag emission.
-Emitting fewer than 4 or more than 8 anchors for a thread is a contract
-violation: the runtime fails the turn loud — substrate state does not
-advance, no thread is created, the violation is logged — consistent with
-the topic-tag-protocol fail-loud handling (§3.0/§3.3). The runtime never
-pads or truncates to recover; the contract is the model's to satisfy.
-(⚠ The 4-minimum is under active redesign — see the §2.2 note and §9.1's
-realism backlog; a vague new thread may legitimately emit 0 anchors under
-the planned evolving-anchor model.)
+The anchor-list is the model's **advisory per-turn symbol contribution**
+(`source = model`), folded into `history_symbols` — *not* a cardinality
+contract. There is no anchor count to satisfy: **0 anchors is legal** (a
+vague start), and an over-`AnchorProjectionMax` emission **folds** — the
+deterministic projection (§2.7.4) keeps the strongest `AnchorProjectionMax`
+and files the rest; the turn never aborts on count. The headline anchor
+count is owned by the runtime's projection, not the emission. The
+`≤ AnchorProjectionMax` bound is a runtime self-assertion (the projection
+enforces it), surfaced by `personant verify` as a substrate-bug check, not
+a model contract. **Deleted:** `ErrAnchorCardinalityViolation`,
+`MinAnchorsPerThread`, the 4-floor, and the over-8 abort. **Retained
+fail-loud:** `ErrFileEditWithoutTopicTag` (ownership binding) and
+synthetic-stub / malformed-tag rejection remain the only topic-tag
+fail-loud paths (§3.0/§3.3) — a file edit with no owning topic tag still
+fails the turn loud.
 
 The single-line form is deliberate: no multi-line state for the parser
 to track, no envelope syntax that varies across providers, no JSON
@@ -1380,8 +1464,11 @@ Group 2: anchor list (comma-split, trim whitespace, run §2.7.2
 normalization).
 
 If the response contains multiple matches, take the first; warn-log the
-rest. Empty thread list or empty anchor list → not a valid topic tag;
-warn-log and continue without engagement update for this delta.
+rest. An **empty thread list** → not a valid topic tag (the tag's job is
+thread binding); warn-log and continue without engagement update for this
+delta. An **empty anchor list is valid** — a 0-anchor vague-start emission
+(§2.7.4); anchors are advisory, so an anchor list that normalizes to empty
+does not invalidate an otherwise well-formed tag.
 
 #### 5.1.3 Prompt template
 
@@ -1885,7 +1972,22 @@ modeled vs. parked-as-known-unknown), so the green check never
 overclaims. A forgotten realism element is the failure; a documented
 deferral is not.
 
-**Open realism backlog** (the convergence checklist as of 2026-05-21 —
+**Accounted-for** (moved off the open backlog):
+
+- **Evolving anchors / anchor-lifecycle redesign** — *simulated.* Threads
+  drift far from their creation topic without any single jump sharp enough
+  to cut a new thread, and premises invert; an abandoned premise must stay
+  a findable handle. The evolving-anchor model (anchors as a re-derived
+  projection of active `history_symbols`, symbol lifecycle with
+  retained-not-evicted supersession, lifecycle-aware recall) is
+  implemented (§2.2/§2.3/§2.4/§2.7.4/§3.2/§3.4/§5.1) and exercised
+  end-to-end by the coupled `vague-new`/`drift`/`invert`/interleave
+  workload and its metrics (`drift_recall_origin`/`drift_recall_dest`,
+  `abandoned_premise_recall`, `superseded_precision`,
+  `ever_central_count`/`history_len`, `projection_churn`), which land in
+  the build's sim-workload increment.
+
+**Open realism backlog** (the convergence checklist as of 2026-05-22 —
 each item must be accounted-for before the gate is met; this list grows
 as runs surface new gaps):
 
@@ -1895,10 +1997,6 @@ as runs surface new gaps):
   interleave excerpts + queries from several unrelated topics within a
   session. Until done, recall/precision numbers describe a too-coherent
   stream.
-- **Evolving anchors / anchor-lifecycle redesign.** Threads drift far
-  from their creation topic without any single jump sharp enough to cut
-  a new thread (and premises invert). Drives the §2.2/§5.1 anchor
-  redesign noted there.
 - **New thread as synthesis** of multiple prior threads (multi-parent
   provenance at the symbol level).
 - **Topic clustering / deep dives, metronomic edit cadence, cold start**
