@@ -733,7 +733,10 @@ func TestMergeHistorySymbolsCapAndEvict(t *testing.T) {
 		{Normalized: "new1", Raw: "new1", Source: memops.SourceModel},
 		{Normalized: "new2", Raw: "new2", Source: memops.SourceModel},
 	}
-	merged := mergeHistorySymbols(existing, turn, 41)
+	// Merge no longer caps internally (anchor-lifecycle Inc 2: the owner-turn
+	// sequence is merge → project → evict); capHistorySymbols is the eviction
+	// step. Compose the two to exercise the cap-and-evict rule directly.
+	merged := capHistorySymbols(mergeHistorySymbols(existing, turn, 41))
 	if len(merged) != historyCapPerThread {
 		t.Fatalf("len after merge: got %d want %d", len(merged), historyCapPerThread)
 	}
@@ -770,7 +773,7 @@ func TestMergeHistorySymbolsCountWeightedEviction(t *testing.T) {
 			Source:        memops.SourceModel,
 		})
 	}
-	merged := mergeHistorySymbols(existing, nil, 200)
+	merged := capHistorySymbols(mergeHistorySymbols(existing, nil, 200))
 	if len(merged) != historyCapPerThread {
 		t.Fatalf("len after merge: got %d want %d", len(merged), historyCapPerThread)
 	}
@@ -822,7 +825,7 @@ func TestEvictProtectsHighSpecificity(t *testing.T) {
 	// 44 entries, cap 40: four must be evicted. Pure Count-eviction would
 	// drop the four Count=1 rare identifiers. B11 must instead drop four
 	// generic Count=100 words and keep all four rare identifiers.
-	merged := mergeHistorySymbols(existing, nil, 600)
+	merged := capHistorySymbols(mergeHistorySymbols(existing, nil, 600))
 	if len(merged) != historyCapPerThread {
 		t.Fatalf("len after merge: got %d want %d", len(merged), historyCapPerThread)
 	}
@@ -873,7 +876,7 @@ func TestEvictGracefulDegradationProtectedOverflow(t *testing.T) {
 		}
 	}
 
-	merged := mergeHistorySymbols(existing, nil, 100)
+	merged := capHistorySymbols(mergeHistorySymbols(existing, nil, 100))
 	// Hard cap respected even though all entries are protected.
 	if len(merged) != historyCapPerThread {
 		t.Fatalf("cap must hold under protected overflow: got %d want %d", len(merged), historyCapPerThread)

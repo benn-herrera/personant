@@ -63,6 +63,15 @@ func seedClosureThread(t *testing.T, paths store.PersonantPaths, project, thrID 
 	if err := store.AppendSpineRecord(paths, rec); err != nil {
 		t.Fatalf("seed spine %s: %v", thrID, err)
 	}
+	// Seed history_symbols matching the anchors so the closure projection
+	// (anchor-lifecycle Inc 2: closure stores a final authoritative
+	// projection from history_symbols, not the curator draft) has a
+	// deterministic canonical source. All count=1 / first_seen=1 / no
+	// class flags → the projection orders them by Normalized ascending.
+	hist := make([]memops.HistorySymbol, len(anchors))
+	for i, a := range anchors {
+		hist[i] = memops.HistorySymbol{Raw: a, Normalized: a, FirstSeenTurn: 1, Count: 1, Source: memops.SourceModel}
+	}
 	thr := memops.Thread{
 		Meta: memops.ThreadMeta{
 			ID:              rec.ID,
@@ -75,6 +84,7 @@ func seedClosureThread(t *testing.T, paths store.PersonantPaths, project, thrID 
 			StateChanged:    rec.StateChanged,
 			TurnCount:       rec.TurnCount,
 			LastEngagedTurn: rec.LastEngagedTurn,
+			HistorySymbols:  hist,
 		},
 		Body: "# " + thrID + "\n\n## Turn 1 · 2026-04-01T00:00:00Z · [" +
 			strings.Join(anchors, ", ") + "]\n\n**user:** seed\n\n**agent:** seed reply\n",
@@ -191,8 +201,13 @@ func TestSurfaceClosure_RetireWritesStateAndEvicts(t *testing.T) {
 	if rec.Summary != "the thread's gist" {
 		t.Errorf("spine summary = %q, want curator draft", rec.Summary)
 	}
-	if strings.Join(rec.Anchors, ",") != "x,y,z,w" {
-		t.Errorf("spine anchors = %v, want curator draft", rec.Anchors)
+	// R2 (anchor-lifecycle Inc 2): closure stores a final AUTHORITATIVE
+	// projection derived from history_symbols, NOT the curator's draft
+	// anchors (x,y,z,w). The seeded history (alpha/beta/gamma/delta, all
+	// count=1) projects in Normalized order. The curator draft remains the
+	// user-facing closure OFFER display, not the stored spine anchors.
+	if strings.Join(rec.Anchors, ",") != "alpha,beta,delta,gamma" {
+		t.Errorf("spine anchors = %v, want projected from history_symbols", rec.Anchors)
 	}
 	if containsString(state.ActiveThreads, "thr_1") {
 		t.Errorf("thr_1 retired but still in ActiveThreads: %v", state.ActiveThreads)

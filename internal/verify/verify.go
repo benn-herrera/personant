@@ -134,14 +134,16 @@ func checkSpine(report *memops.VerifyReport, spine []memops.SpineRecord, entryMa
 				Message: fmt.Sprintf("missing meta.json for %s; using default display_name", rec.Project)})
 		}
 
-		// anchors cardinality.
-		switch {
-		case len(rec.Anchors) < 4:
+		// anchors cardinality. The 4-floor is deleted (anchor-lifecycle):
+		// anchors are a [derived] projection in range 0..AnchorProjectionMax.
+		// 0 is legal (a vague-start thread); only an over-ceiling count is a
+		// violation (the projection owns the bound — an over count signals a
+		// substrate bug, not a model contract breach). The fuller §5.1 verify
+		// loosening + SPEC deltas land in anchor-lifecycle Inc 4; this is the
+		// cardinality rule that the Inc 2 projection forces.
+		if len(rec.Anchors) > memops.AnchorProjectionMax {
 			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "anchors",
-				Message: fmt.Sprintf("anchors length %d < 4", len(rec.Anchors))})
-		case len(rec.Anchors) > 8:
-			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "anchors",
-				Message: fmt.Sprintf("anchors length %d > 8", len(rec.Anchors))})
+				Message: fmt.Sprintf("anchors length %d > %d", len(rec.Anchors), memops.AnchorProjectionMax)})
 		}
 
 		// anchor length + duplicates.

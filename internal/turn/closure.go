@@ -315,7 +315,26 @@ func applyClosureResolution(ctx context.Context, state *State, threadID string, 
 	// updateExistingThread pattern). Closure records no new turn — it is
 	// a meta-only update, so ThreadWrite.TurnExcerpt is empty and the
 	// turns/ directory is left untouched.
-	anchors := append([]string(nil), draft.Anchors...)
+	//
+	// R2 (Build-Plan): closure runs a final AUTHORITATIVE projection for the
+	// STORED spine anchors (SOLUTION §2), derived from the thread's
+	// history_symbols via ProjectAnchors — the same canonical source the
+	// per-turn projection uses, so a closing thread's headline cannot
+	// silently diverge from its live headline. The curator's draft.Anchors
+	// (SelectAnchors) remains the user-facing closure OFFER display (the
+	// human-facing gist, surfaced in surfaceClosureCandidates); only the
+	// persisted anchors come from projection. This is the plan's defensible
+	// default for SOLUTION's "final authoritative projection" seam.
+	//
+	// Closure advances no turn; project at the thread's current turn count
+	// so LastActiveTurn stays monotone. The mutated symbols and the changed
+	// watermark are written back so a closing projection that shifts the
+	// headline is recorded.
+	anchors, projectedSyms, changed := projectAnchorsForTurn(ctx, state, fm.HistorySymbols, rec.TurnCount)
+	fm.HistorySymbols = capHistorySymbols(projectedSyms)
+	if changed {
+		rec.AnchorsProjectedAtTurn = rec.TurnCount
+	}
 	rec.State = newState
 	rec.Summary = draft.Summary
 	rec.Anchors = anchors

@@ -252,6 +252,31 @@ func applyFileEdits(ctx context.Context, state *State, threadID string) {
 	}
 }
 
+// logActAnchorOverflow is the runtime-self-assertion log act emitted when a
+// projection returns more than AnchorProjectionMax anchors. The bound is the
+// runtime's own invariant (the projection owns it deterministically), so a
+// violation is a substrate bug, not a model contract breach — it is LOGGED
+// for forensics, never aborts the turn (Build-Plan §Increment-2 invariant).
+const logActAnchorOverflow = "anchor-projection-overflow"
+
+// projectAnchorsForTurn runs ProjectAnchors and asserts the projected-count
+// invariant. It is the single owner-turn / creation projection entry point
+// so the merge → project → evict sequence and the self-assertion live in one
+// place. The returned slice / changed flag are passed straight through to
+// the caller, which writes them onto the spine + frontmatter and applies the
+// cap (capHistorySymbols) AFTER projection so eviction consumes the latched
+// EverCentral flags (Risk R5).
+func projectAnchorsForTurn(ctx context.Context, state *State, merged []memops.HistorySymbol, turn int) (anchors []string, updated []memops.HistorySymbol, changed bool) {
+	anchors, updated, changed = ProjectAnchors(merged, memops.AnchorProjectionMax, turn)
+	if len(anchors) > memops.AnchorProjectionMax {
+		// Runtime boundary self-assertion: the projection must never exceed
+		// its own ceiling. Log and proceed (do not abort the turn).
+		_ = state.Ops.Log(ctx, memops.LogCategoryThread, logActAnchorOverflow,
+			"count="+strconv.Itoa(len(anchors))+" max="+strconv.Itoa(memops.AnchorProjectionMax))
+	}
+	return anchors, updated, changed
+}
+
 // lowestExistingThreadID returns the deterministic owner among the
 // turn's referenced thread IDs: the existing thr_<n> with the lowest
 // numeric n. The *new-topic* sentinel is ignored. Returns "" when no
@@ -368,7 +393,26 @@ func updateExistingThread(ctx context.Context, state *State, threadID string, ow
 	fm.StateChanged = rec.StateChanged
 	fm.RecallFires = rec.RecallFires
 
-	fm.HistorySymbols = mergeHistorySymbols(fm.HistorySymbols, turnSymbols, mergeTurn)
+	merged := mergeHistorySymbols(fm.HistorySymbols, turnSymbols, mergeTurn)
+
+	// Merge → project → evict (Build-Plan Risk R5). Only the OWNER turn
+	// re-projects (SOLUTION §2: "Engaged-non-owner threads do not
+	// re-project"). The projection runs on the full merged set so its
+	// EverCentral latches are in place BEFORE eviction reads them; a symbol
+	// entering the projection this turn is thereby never evicted this turn.
+	// An engaged-non-owner thread skips projection but still enforces the
+	// hard cap on its merged history (the merge step no longer caps).
+	if owner {
+		projected, projectedSyms, changed := projectAnchorsForTurn(ctx, state, merged, mergeTurn)
+		fm.HistorySymbols = capHistorySymbols(projectedSyms)
+		rec.Anchors = projected
+		fm.Anchors = append([]string(nil), projected...)
+		if changed {
+			rec.AnchorsProjectedAtTurn = mergeTurn
+		}
+	} else {
+		fm.HistorySymbols = capHistorySymbols(merged)
+	}
 
 	rec.LastEngaged = now
 	rec.LastEngagedTurn = state.TurnNumber
@@ -416,14 +460,6 @@ func createNewThread(ctx context.Context, state *State, owner bool, userInput, r
 		return "", err
 	}
 
-	// The new thread's anchors come from the model's §5.1 topic-tag
-	// emission (coalesced this turn). The anchor list is advisory: 0
-	// anchors is legal (a vague-start thread, spec §5.1 / §2.7.x). The
-	// count is never gated — the §2.2 anchor projection owns the
-	// AnchorProjectionMax ceiling deterministically as a runtime
-	// self-assertion, not a contract on the model.
-	anchors := state.coalesce.symbolList()
-
 	summary := summarizeForNewThread(responseBody)
 	description := descriptionFromNewThread(userInput)
 
@@ -434,18 +470,32 @@ func createNewThread(ctx context.Context, state *State, owner bool, userInput, r
 		turnCount = 1
 	}
 
+	// A new thread runs its initial projection at creation: its merged
+	// history is this first turn's symbols. The anchor headline is the
+	// deterministic projection of that set (§2.2 / §2.7.x), NOT the raw
+	// model emission — the projection owns the AnchorProjectionMax ceiling
+	// and latches EverCentral. The anchor list is advisory: 0 symbols yields
+	// a 0-anchor (vague-start) thread, which is legal. Merge → project →
+	// evict ordering applies (Risk R5): project on the full merged set, then
+	// cap. A genuinely-new thread is always "changed", so the watermark is
+	// stamped at creation.
+	merged := mergeHistorySymbols(nil, turnSymbols, turnCount)
+	anchors, projectedSyms, _ := projectAnchorsForTurn(ctx, state, merged, turnCount)
+	historySymbols := capHistorySymbols(projectedSyms)
+
 	rec := memops.SpineRecord{
-		ID:              newID,
-		Project:         state.ActiveProject.ID,
-		Anchors:         anchors,
-		Summary:         summary,
-		Description:     description,
-		State:           memops.ThreadActive,
-		Created:         now,
-		LastEngaged:     now,
-		StateChanged:    now,
-		TurnCount:       turnCount,
-		LastEngagedTurn: state.TurnNumber,
+		ID:                     newID,
+		Project:                state.ActiveProject.ID,
+		Anchors:                anchors,
+		Summary:                summary,
+		Description:            description,
+		State:                  memops.ThreadActive,
+		Created:                now,
+		LastEngaged:            now,
+		StateChanged:           now,
+		TurnCount:              turnCount,
+		LastEngagedTurn:        state.TurnNumber,
+		AnchorsProjectedAtTurn: turnCount,
 	}
 
 	frontmatter := ThreadMeta{
@@ -461,7 +511,7 @@ func createNewThread(ctx context.Context, state *State, owner bool, userInput, r
 		TurnCount:       turnCount,
 		RecallFires:     0,
 		LastEngagedTurn: state.TurnNumber,
-		HistorySymbols:  mergeHistorySymbols(nil, turnSymbols, turnCount),
+		HistorySymbols:  historySymbols,
 	}
 
 	var excerpt string

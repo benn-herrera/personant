@@ -87,10 +87,29 @@ func mergeHistorySymbols(existing []memops.HistorySymbol, turnSymbols []coalesce
 		idx[sym.Normalized] = len(out) - 1
 	}
 
-	if len(out) <= historyCapPerThread {
-		return out
+	// NOTE: eviction is deliberately NOT performed here. Per the
+	// anchor-lifecycle ordering (SOLUTION §2 / Build-Plan Risk R5) the
+	// sequence at owner-turn close is merge → project → evict: ProjectAnchors
+	// must run on the FULL merged set first (latching EverCentral and
+	// flipping supersession), and only THEN may eviction consume the
+	// freshly-latched flags. A symbol that enters the projection this turn is
+	// thereby protected from eviction this turn. The owner-turn caller
+	// (engage.go) runs ProjectAnchors then capHistorySymbols. The merge step
+	// returns the uncapped set so it cannot strand a symbol the projection is
+	// about to make ever-central.
+	return out
+}
+
+// capHistorySymbols enforces the §2.6.1 hard total cap (default 40) over the
+// active+superseded set, applying the union-protection eviction predicate.
+// It is the post-projection step of the merge → project → evict sequence:
+// callers run ProjectAnchors first so the EverCentral flags eviction reads
+// are already latched for this turn (Build-Plan Risk R5).
+func capHistorySymbols(syms []memops.HistorySymbol) []memops.HistorySymbol {
+	if len(syms) <= historyCapPerThread {
+		return syms
 	}
-	return evictLowestWeight(out, historyCapPerThread)
+	return evictLowestWeight(syms, historyCapPerThread)
 }
 
 // evictLowestWeight returns out with the lowest-cumulative-weight entries
@@ -104,23 +123,33 @@ func mergeHistorySymbols(existing []memops.HistorySymbol, turnSymbols []coalesce
 // thread (near-zero discrimination), while a specific identifier (a UUID,
 // file path, URL, git SHA) appears once (low Count) but nowhere else
 // (maximal discrimination). Pure Count-eviction therefore discards exactly
-// the symbols that make THIS thread recallable. The fix partitions on
-// re-derived specificity (memops.IsHighSpecificity over the persisted Raw,
-// NOT Source — see that function's doc) and evicts the evictable set
-// first. Only if the protected set alone exceeds the cap do we evict among
-// protected by the same Count/FirstSeenTurn rule: the cap is a hard
-// storage bound (§2.3) and is never exceeded.
+// the symbols that make THIS thread recallable. The protection predicate is
+// the UNION EverCentral || IsHighSpecificity(Raw) (anchor-lifecycle Inc 2,
+// SOLUTION §2 A5+C3): a once-central premise (the abandoned-premise recall
+// handle) is retained alongside intrinsically discriminative identifiers.
+// IsHighSpecificity is re-derived from the persisted Raw, NOT Source (see
+// that function's doc — authority is not specificity). The evictable set is
+// dropped first. Only if the protected set alone exceeds the cap do we
+// degrade gracefully — evicting lowest-Count SUPERSEDED entries first (an
+// abandoned premise yields the cap before a still-protected active one),
+// then by the same Count/FirstSeenTurn rule: the cap is a hard storage
+// bound (§2.3) and is never exceeded.
+//
+// A symbol is NEVER evicted while EverCentral so long as the protected set
+// fits the cap; under the degradation branch the superseded-first rule
+// still preferentially keeps active ever-central symbols.
 func evictLowestWeight(out []memops.HistorySymbol, cap int) []memops.HistorySymbol {
 	if len(out) <= cap {
 		return out
 	}
 
-	// Partition original indices into protected (high-specificity Raw)
-	// and evictable. Iterate over out to keep partitions in insertion
-	// order, which preserves stable survivor ordering at the end.
+	// Partition original indices into protected (EverCentral OR
+	// high-specificity Raw — the union predicate) and evictable. Iterate
+	// over out to keep partitions in insertion order, which preserves stable
+	// survivor ordering at the end.
 	var protected, evictable []int
 	for i := range out {
-		if memops.IsHighSpecificity(out[i].Raw) {
+		if out[i].EverCentral || memops.IsHighSpecificity(out[i].Raw) {
 			protected = append(protected, i)
 		} else {
 			evictable = append(evictable, i)
@@ -129,10 +158,11 @@ func evictLowestWeight(out []memops.HistorySymbol, cap int) []memops.HistorySymb
 
 	keepIdx := make(map[int]struct{}, cap)
 	if len(protected) >= cap {
-		// Graceful degradation: protected alone overflows the cap. Keep
-		// the highest-weight protected entries and drop the rest; the
-		// evictable set is discarded entirely.
-		for _, i := range topByWeight(out, protected, cap) {
+		// Graceful degradation: protected alone overflows the cap. Evict
+		// lowest-Count superseded entries first (abandoned premises yield
+		// before active ever-central ones), then keep the highest-weight
+		// remainder. The evictable set is discarded entirely.
+		for _, i := range topProtected(out, protected, cap) {
 			keepIdx[i] = struct{}{}
 		}
 	} else {
@@ -156,10 +186,12 @@ func evictLowestWeight(out []memops.HistorySymbol, cap int) []memops.HistorySymb
 }
 
 // topByWeight returns the n original indices from idxs whose entries rank
-// highest by the v0.1 weight rule: highest Count first, ties broken by
-// highest FirstSeenTurn (newest survives). If n >= len(idxs) all are
-// returned. The returned slice is the kept-index set; survivor ordering is
-// re-established by the caller scanning out in insertion order.
+// highest by the shared ranking discipline (symbolRankLess in projection.go:
+// class → Count → recency → Normalized) — the same comparator the anchor
+// projection uses, so keep-the-strongest is one rule, not two (DRY). If
+// n >= len(idxs) all are returned. The returned slice is the kept-index set;
+// survivor ordering is re-established by the caller scanning out in
+// insertion order.
 func topByWeight(out []memops.HistorySymbol, idxs []int, n int) []int {
 	if n >= len(idxs) {
 		return idxs
@@ -167,11 +199,31 @@ func topByWeight(out []memops.HistorySymbol, idxs []int, n int) []int {
 	ranked := make([]int, len(idxs))
 	copy(ranked, idxs)
 	sort.SliceStable(ranked, func(i, j int) bool {
+		return symbolRankLess(&out[ranked[i]], &out[ranked[j]])
+	})
+	return ranked[:n]
+}
+
+// topProtected returns the n indices to KEEP under the graceful-degradation
+// branch, where the protected set alone exceeds the cap. The superseded-
+// first eviction sub-rule (SOLUTION §2 last sentence) means active
+// ever-central symbols are preferred over superseded ones: rank superseded
+// LAST regardless of weight, then by the shared discipline. Keeping the top
+// n of that ranking evicts the lowest-Count superseded entries first.
+func topProtected(out []memops.HistorySymbol, idxs []int, n int) []int {
+	if n >= len(idxs) {
+		return idxs
+	}
+	ranked := make([]int, len(idxs))
+	copy(ranked, idxs)
+	sort.SliceStable(ranked, func(i, j int) bool {
 		a, b := &out[ranked[i]], &out[ranked[j]]
-		if a.Count != b.Count {
-			return a.Count > b.Count
+		aSup := a.Lifecycle == memops.LifecycleSuperseded
+		bSup := b.Lifecycle == memops.LifecycleSuperseded
+		if aSup != bSup {
+			return !aSup // active sorts ahead of superseded
 		}
-		return a.FirstSeenTurn > b.FirstSeenTurn
+		return symbolRankLess(a, b)
 	})
 	return ranked[:n]
 }

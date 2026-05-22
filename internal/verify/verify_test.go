@@ -185,8 +185,11 @@ func TestVerifyAnchorsCardinality(t *testing.T) {
 		anchors []string
 		wantErr bool
 	}{
-		{"three-too-few", []string{"a1", "a2", "a3"}, true},
-		{"four-min-ok", []string{"a1", "a2", "a3", "a4"}, false},
+		// The 4-floor is deleted (anchor-lifecycle): anchors are a [derived]
+		// projection in 0..AnchorProjectionMax; 0 and a thin set are legal,
+		// only an over-ceiling count violates.
+		{"zero-ok", []string{}, false},
+		{"three-ok", []string{"a1", "a2", "a3"}, false},
 		{"eight-max-ok", []string{"a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8"}, false},
 		{"nine-too-many", []string{"a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9"}, true},
 	}
