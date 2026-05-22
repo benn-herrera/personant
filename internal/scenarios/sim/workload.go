@@ -170,16 +170,32 @@ type WorkloadConfig struct {
 	RapidWeight int
 	WorkWeight  int
 
-	// ContinueWeight / SwitchWeight / ResumeWeight / NewWeight bias the
-	// per-turn action selection. They need not sum to anything in
-	// particular. ResumeWeight drives dormant-thread resumption — a
-	// realistic user resumes earlier work far more often than starting
-	// fresh, so the seed weights make NewWeight a minority. These are
-	// seed values, to be tuned on the rung walk.
+	// ContinueWeight / SwitchWeight / ResumeWeight / NewWeight /
+	// CampaignWeight bias the per-turn action selection. They need not sum
+	// to anything in particular. ResumeWeight drives dormant-thread
+	// resumption — a realistic user resumes earlier work far more often than
+	// starting fresh, so the seed weights make NewWeight a minority.
+	// CampaignWeight drives the lifecycle ground-truth programs (vague /
+	// drift / invert); it is modest because each campaign spans many turns
+	// and one in flight at a time is enough to keep the lifecycle metrics
+	// fed. These are seed values, to be tuned on the rung walk.
 	ContinueWeight int
 	SwitchWeight   int
 	ResumeWeight   int
 	NewWeight      int
+	CampaignWeight int
+
+	// InterleaveStrength raises unrelated-topic distractor pressure within a
+	// session by biasing action selection AWAY from continue (same-thread
+	// clustering) and TOWARD switch/new (cross-topic moves): each switch/new
+	// weight is scaled up by this integer factor relative to continue. A
+	// session therefore mixes unrelated slots rather than dwelling on one
+	// topic, stressing the §3.4 recall layer against more same-symbol noise.
+	// It deliberately does NOT touch the deterministic corpus binding
+	// (slotFor) — the recall oracle keys on slot equality, so steering which
+	// SLOT a thread binds to would corrupt the ground truth. 0 → default of
+	// 1 (no extra bias). Seed value, tunable on the rung walk.
+	InterleaveStrength int
 
 	// ResumeWindowTurns bounds how far back a `resume` action may reach:
 	// only a thread that went dormant within the last ResumeWindowTurns
@@ -238,6 +254,12 @@ func (cfg WorkloadConfig) withDefaults() WorkloadConfig {
 	if cfg.NewWeight == 0 {
 		cfg.NewWeight = 5
 	}
+	if cfg.CampaignWeight == 0 {
+		cfg.CampaignWeight = 20
+	}
+	if cfg.InterleaveStrength == 0 {
+		cfg.InterleaveStrength = 2
+	}
 	if cfg.ResumeWindowTurns == 0 {
 		cfg.ResumeWindowTurns = 40
 	}
@@ -281,39 +303,22 @@ func (m corpusModel) slotFor(order int) int {
 	return (order / m.familySize) % len(m.slots)
 }
 
-// stubAnchorPrefix is the inert synthetic-anchor token prefix the
-// harness pads a sub-floor NEW-thread tag with to meet the §5.1
-// 4-anchor floor. It is deliberately not a corpus term: every recall
-// query (slot.UserInput) is built only from real Wikipedia-derived
-// slot.Tags, so a stub-anchor-<n> token can never overlap a query term.
-// That inertness is load-bearing — padding from dropped real/loose tags
-// instead would close the query-vs-thread Jaccard gap and collapse
-// drift to recall=1.0. See newThreadAnchorTags.
-const stubAnchorPrefix = "stub-anchor-"
-
-// simAnchorFloor is the harness-local new-thread anchor floor the
-// stub-padding pads up to. It replaces the deleted
-// memops.MinAnchorsPerThread (anchor-lifecycle Inc 1 removed the 4-floor
-// contract from production). The stub-padding scaffold this floor feeds
-// is itself removed in Increment 5, coupled to the new workload actions
-// — so this const is deliberately greppable and goes away with them.
-const simAnchorFloor = 4 // removed in Increment 5
-
 // nonLooseTags returns the slot's tags with loose-cell positions
 // dropped, preserving order. A slot whose LooseMask is nil (no column
 // ground truth available) yields a copy of Tags unchanged — the prior
 // all-tags-are-anchors binding. If every position is loose (vanishingly
 // rare under Binomial(5, 1/5)) the result is nil.
 //
-// This is the raw drift set: it is NOT padded to the §5.1 floor here.
-// The asymmetry is deliberate. Existing-thread engagement and
-// refinement tags carry this set verbatim — production does not
-// re-validate anchor cardinality on engagement (only at thread
-// creation), and merging the loose-filtered set into an existing
-// thread's history_symbols is exactly the vocabulary drift the recall
-// gap measures. Only the NEW-thread emission must be brought up to the
-// 4-anchor floor (production enforces the contract at creation); that
-// padding lives in newThreadAnchorTags, which pads with inert stubs.
+// This is the raw drift set; it is NEVER padded (anchor-lifecycle Inc 5
+// deleted the §5.1 4-anchor floor and its stub-padding scaffold). Every
+// emission — new-thread, engagement, refinement — carries this set
+// verbatim. 0 anchors is legal (vague start); the runtime's projection
+// owns the AnchorProjectionMax ceiling and latches EverCentral, so the
+// harness never synthesizes anchors. nonLooseTags still models per-turn
+// vocabulary drift by dropping the loose cells; the recall gap that drop
+// once created is now created by the lifecycle mechanics (drift/invert
+// supersession), not by a Jaccard asymmetry the old stub-padding
+// preserved.
 func nonLooseTags(slot CorpusSlot) []string {
 	if len(slot.LooseMask) != len(slot.Tags) {
 		return append([]string(nil), slot.Tags...)
@@ -323,32 +328,6 @@ func nonLooseTags(slot CorpusSlot) []string {
 		if !slot.LooseMask[i] {
 			out = append(out, t)
 		}
-	}
-	return out
-}
-
-// newThreadAnchorTags is the anchor set the harness emits in a
-// *new-topic* topic tag: nonLooseTags padded with inert synthetic stubs
-// up to the harness-local simAnchorFloor.
-//
-// The harness plays the model-in-the-loop, so a new-thread tag must be
-// contract-compliant (4–8 anchors). Production enforces that contract
-// and hard-errors on a sub-4 (or over-8) emission — it never synthesizes
-// anchors. Thin-real-anchor drift is modeled by dropping loose tags
-// (nonLooseTags); when that leaves fewer than the floor, we pad inert
-// stubs (stubAnchorPrefix + index) HERE so the emission is valid.
-//
-// The stubs are clearly-synthetic tokens that never match a mad-libs
-// query term, so the query-vs-thread Jaccard gap (and thus recall
-// misses) is preserved exactly — padding from dropped real/loose tags
-// would close the gap and collapse drift to recall=1.0. Padding ONLY
-// the new-thread emission (not engagement/refinement) keeps the drift
-// behavior of existing-thread turns byte-identical to the pre-T1-2
-// production-padding baseline.
-func newThreadAnchorTags(slot CorpusSlot) []string {
-	out := nonLooseTags(slot)
-	for i := len(out); i < simAnchorFloor; i++ {
-		out = append(out, fmt.Sprintf("%s%d", stubAnchorPrefix, i+1))
 	}
 	return out
 }
@@ -506,6 +485,50 @@ const (
 	actResume
 	// actNew spawns a brand-new thread.
 	actNew
+	// actCampaign advances the generator's active lifecycle campaign —
+	// the vague-new / drift / invert ground-truth program (anchor-lifecycle
+	// Inc 5). One actCampaign draw services one campaign turn; the campaign
+	// state machine (campaign.go region below) owns the dedicated thread and
+	// the phase progression. When no campaign is active the draw starts the
+	// next one (kind rotates deterministically); buildStep dispatches it
+	// before the ordinary action handling.
+	actCampaign
+)
+
+// campaignKind identifies which lifecycle program a campaign runs.
+type campaignKind int
+
+const (
+	// campaignVague creates a thread with 0 anchors for vagueTurns turns,
+	// then begins accreting its bound slot's tags. It is recall-unmatchable
+	// until accretion makes its first symbol central; the generator records
+	// the turn it becomes matchable (the actVagueNew oracle).
+	campaignVague campaignKind = iota
+	// campaignDrift walks a thread's emitted symbols origin→destination over
+	// driftTurns turns: it stops re-emitting the origin set and emits a fresh
+	// destination set every turn, climbing the destination Counts until the
+	// origin symbols are outranked out of the top-AnchorProjectionMax
+	// projection (Lifecycle=superseded, EverCentral retained). The origin set
+	// stays matchable via history_symbols (drift_recall_origin); the
+	// destination set is the active projection (drift_recall_dest).
+	campaignDrift
+	// campaignInvert is drift's premise-inversion sibling: a high-Count
+	// discovery (destination) set outranks the original anchors so the
+	// original premise supersedes while EverCentral stays true. An
+	// abandoned-premise query for the original set must still surface the
+	// thread (abandoned_premise_recall).
+	campaignInvert
+)
+
+// Campaign-phase turn budgets. Deliberately generous so the destination
+// Counts climb well past the origin Counts and the origin set is reliably
+// outranked out of the top-AnchorProjectionMax projection (origin symbols
+// keep their creation-turn Count while each destination turn increments the
+// destination Counts). Seed values, tunable on the rung walk.
+const (
+	vagueTurns  = 4  // turns a vague thread stays 0-anchor before accreting
+	driftTurns  = 12 // origin→destination walk length
+	invertTurns = 12 // discovery-set inversion length
 )
 
 // sessionActive is the turn-active simulated span of one session — the
@@ -538,7 +561,8 @@ func GenerateWorkload(cfg WorkloadConfig) scenarios.Scenario {
 			slots:      cfg.Corpus,
 			familySize: cfg.FamilySize,
 		},
-		files: map[int]*fileState{},
+		files:         map[int]*fileState{},
+		recallBuckets: map[string]*recallTally{},
 	}
 	return scenarios.Scenario{
 		Name:       fmt.Sprintf("sim-workload-seed%d-dur%s", cfg.Seed, cfg.Duration),
@@ -556,6 +580,27 @@ type bufStep struct {
 	step       scenarios.Step
 	slotIdx    int // corpus slot the step issued the query of
 	engagedIdx int // creation-order index of the engaged thread
+
+	// recallBucket names the lifecycle metric this step's recall outcome
+	// feeds, or "" for an ordinary (non-campaign) step. The generator reads
+	// it back off the just-run step's StepFeedback (RecallMatchFires vs
+	// RecallExpected) and tallies a hit/total into the named bucket — the
+	// drift_recall_origin / drift_recall_dest / abandoned_premise_recall
+	// oracles. Buckets are exposed post-run the way episodeQueriesToHit is.
+	recallBucket string
+
+	// suppressEpisode is set on a campaign recall step: the step still
+	// declares ExpectedRecallMatches (so the harness records match-fires and
+	// the feedback carries them for bucketing), but it must NOT open a
+	// miss→refinement episode. Refinement re-engages layerB[0] with a
+	// sibling slot, which would entangle and corrupt the campaign's
+	// controlled origin/dest measurement.
+	suppressEpisode bool
+
+	// vagueCampaignTurn is the 1-based campaign-turn index of a vague
+	// campaign's recall step, used to record the first matchable turn for
+	// the actVagueNew oracle. 0 when not a vague recall step.
+	vagueCampaignTurn int
 }
 
 // dayBuf is one generated calendar day's steps plus the global step
@@ -586,6 +631,31 @@ type dayBuf struct {
 // (Seed, Duration, Corpus) — the determinism contract drainSteps
 // relies on.
 func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool) {
+	// Tally the just-run step into its lifecycle recall bucket, if any. The
+	// hit predicate matches the episode loop's (observed match-fires meet
+	// the declared expected count). A zero-feedback drainSteps run reports
+	// RecallExpected==0, so the bucket total only advances under a real run
+	// — the buckets are observability, not part of the canonical stream.
+	if g.lastBucket != "" && feedback.RecallExpected > 0 {
+		tally := g.recallBuckets[g.lastBucket]
+		if tally == nil {
+			tally = &recallTally{}
+			g.recallBuckets[g.lastBucket] = tally
+		}
+		tally.total++
+		if feedback.RecallMatchFires >= feedback.RecallExpected {
+			tally.hits++
+			if g.lastVagueTurn > 0 && g.vagueArmed {
+				// Record only the FIRST matchable turn of this vague
+				// campaign; disarm so later accretion hits do not re-record.
+				g.vagueMatchTurns = append(g.vagueMatchTurns, g.lastVagueTurn)
+				g.vagueArmed = false
+			}
+		}
+	}
+	g.lastBucket = ""
+	g.lastVagueTurn = 0
+
 	// Process the just-completed step's outcome.
 	if g.recallEpisodeOpen && feedback.RecallExpected > 0 {
 		switch {
@@ -618,11 +688,19 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 	bs := g.ready.steps[g.readyPos]
 	g.readyPos++
 
+	// Arm the lifecycle-bucket feedback read for the NEXT Next() call. A
+	// campaign recall step carries a bucket name and (for vague) the
+	// campaign-turn index; the outcome is tallied when its feedback arrives.
+	g.lastBucket = bs.recallBucket
+	g.lastVagueTurn = bs.vagueCampaignTurn
+
 	// If this buffered step opens a new recall opportunity, start an
-	// episode. A new opportunity supersedes any still-open prior episode
-	// (the prior never got a clean close — record it as unresolved so
-	// it is not silently dropped from the count).
-	if len(bs.step.ExpectedRecallMatches) > 0 {
+	// episode — UNLESS it is a campaign step (suppressEpisode), whose
+	// controlled origin/dest measurement must not be entangled with the
+	// miss→refinement loop (refinement would re-engage layerB[0] with a
+	// sibling slot). A new opportunity supersedes any still-open prior
+	// episode (record the prior as unresolved so it is not silently lost).
+	if len(bs.step.ExpectedRecallMatches) > 0 && !bs.suppressEpisode {
 		if g.recallEpisodeOpen {
 			g.closeEpisodeUnresolved()
 		}
@@ -1015,7 +1093,60 @@ type generator struct {
 	// observability for the §3.9 / §3.0 live-window paths the variant
 	// exercises.
 	userDictatedCount int
+
+	// campaign is the in-flight lifecycle program (vague / drift / invert),
+	// or nil when none is running. One runs at a time: an actCampaign draw
+	// starts it if nil and advances it otherwise; it self-clears on
+	// completion and the next actCampaign draw starts the next kind in
+	// rotation. nextCampaignKind is the kind the next start will use.
+	campaign         *campaign
+	nextCampaignKind campaignKind
+
+	// lastBucket is the recallBucket of the most-recently-EMITTED buffered
+	// step (set in Next when a bufStep is handed out). The next Next() call
+	// reads it against that step's StepFeedback to tally a hit/total into
+	// the named lifecycle bucket. Refinement steps never set it.
+	lastBucket string
+
+	// lastVagueTurn carries the most-recently-emitted vague campaign recall
+	// step's campaign-turn index (0 when not such a step). On the next
+	// Next()'s feedback, a hit records this turn into vagueMatchTurns — the
+	// turn the vague thread first became matchable. vagueArmed gates that to
+	// the FIRST matchable hit per campaign (set when the campaign starts
+	// accreting, cleared on the first recorded match).
+	lastVagueTurn int
+	vagueArmed    bool
+
+	// recallBuckets accumulates per-bucket {hits, total} recall tallies for
+	// the lifecycle oracles (drift_recall_origin, drift_recall_dest,
+	// abandoned_premise_recall). A step counts toward `total` once its
+	// feedback arrives; toward `hits` when RecallMatchFires >= RecallExpected
+	// (the same hit predicate the episode loop uses). The test reads these
+	// post-run and writes the ratios into the metrics blob, keeping the
+	// generator metrics-package-free.
+	recallBuckets map[string]*recallTally
+
+	// vagueMatchTurns records, per completed vague campaign, the campaign
+	// turn index at which the vague thread first became recall-matchable
+	// (its first emitted recall opportunity that the runtime hit). The
+	// oracle: a vague thread is unmatchable for its first vagueTurns turns
+	// (0 anchors → empty match set) and matchable only after accretion.
+	// (ever-central / history-length / superseded-symbol counts are folded
+	// by the test from post-run frontmatter, not tracked on the generator.)
+	vagueMatchTurns []int
 }
+
+// recallTally is a {hits, total} pair for one lifecycle recall bucket.
+type recallTally struct {
+	hits, total int
+}
+
+// Recall bucket names — the lifecycle oracles fed off per-step feedback.
+const (
+	bucketDriftOrigin      = "drift_recall_origin"
+	bucketDriftDest        = "drift_recall_dest"
+	bucketAbandonedPremise = "abandoned_premise_recall"
+)
 
 // appendStep buffers one generated step plus its generator-side
 // metadata into the current day, and advances the global step counter.
@@ -1137,17 +1268,28 @@ func (g *generator) sampleAction(turn int) action {
 		act    action
 		weight int
 	}
+	// InterleaveStrength scales the cross-topic moves (switch/new) up
+	// relative to continue, raising unrelated-topic distractor pressure. It
+	// never touches the corpus binding, only the action mix.
+	xtopic := g.cfg.InterleaveStrength
+	if xtopic < 1 {
+		xtopic = 1
+	}
+
 	var opts []opt
 	if len(g.layerB) >= 1 {
 		opts = append(opts, opt{actContinue, g.cfg.ContinueWeight})
 	}
 	if len(g.layerB) >= 2 {
-		opts = append(opts, opt{actSwitch, g.cfg.SwitchWeight})
+		opts = append(opts, opt{actSwitch, g.cfg.SwitchWeight * xtopic})
 	}
 	if len(g.resumeCandidates(turn)) > 0 {
 		opts = append(opts, opt{actResume, g.cfg.ResumeWeight})
 	}
-	opts = append(opts, opt{actNew, g.cfg.NewWeight})
+	opts = append(opts, opt{actNew, g.cfg.NewWeight * xtopic})
+	// The lifecycle campaign is always selectable: starting one creates its
+	// own dedicated thread, so it needs no pre-existing population.
+	opts = append(opts, opt{actCampaign, g.cfg.CampaignWeight})
 
 	total := 0
 	for _, o := range opts {
@@ -1196,6 +1338,9 @@ func jitter(rng *rand.Rand, base time.Duration) time.Duration {
 // preserved exactly across helpers — the canonical (zero-feedback) step
 // stream remains a pure function of (Seed, Duration, Corpus).
 func (g *generator) buildStep(tt turnType, act action) bufStep {
+	if act == actCampaign {
+		return g.buildCampaignStep(tt)
+	}
 	idx, isNew := g.selectEngagedThread(act)
 	thr := g.threads[idx]
 	slot := g.model.slots[thr.slotIdx]
@@ -1204,15 +1349,12 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 	recallOpp := len(recallIDs) > 0
 
 	// anchorTags drops loose-cell positions on every step regardless of
-	// action — see nonLooseTags for the asymmetry this preserves. A
-	// *new-topic* turn must additionally be padded to the §5.1 4-anchor
-	// floor with inert stubs (production hard-errors on a sub-4 creation
-	// emission); engagement/refinement tags carry the raw drift set, as
-	// production does not re-validate cardinality on engagement.
+	// action (anchor-lifecycle Inc 5: the §5.1 4-floor and its stub-padding
+	// are gone). A new-topic turn now carries nonLooseTags verbatim — 0
+	// anchors is legal (vague start), and the runtime's projection owns the
+	// AnchorProjectionMax ceiling. Engagement/refinement tags carry the same
+	// raw drift set.
 	anchorTags := nonLooseTags(slot)
-	if isNew {
-		anchorTags = newThreadAnchorTags(slot)
-	}
 	userInput := defaultUserInput(slot, recallOpp)
 	userDictated := false
 	if udInput, ok := g.maybeUserDictated(tt, isNew, recallOpp, idx, slot); ok {
@@ -1255,6 +1397,304 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 	// this turn's engagement. g.stepIndex is this turn's 0-based index.
 	g.engage(idx, g.stepIndex)
 	return bufStep{step: step, slotIdx: thr.slotIdx, engagedIdx: idx}
+}
+
+// campaign is one in-flight lifecycle ground-truth program. It owns a
+// dedicated thread (threadIdx, created on the campaign's first turn) and
+// walks a deterministic phase sequence keyed off the 1-based turn counter.
+//
+// Origin and destination symbol sets are recorded as oracles: origin is
+// the dedicated thread's bound-slot nonLooseTags; dest is a disjoint set
+// of real tags drawn from two slots of a DIFFERENT topic — disjoint so the
+// destination Counts can climb past the origin Counts and outrank the
+// origin symbols out of the top-AnchorProjectionMax projection, flipping
+// them to superseded (EverCentral retained). drift and invert share this
+// supersession mechanic; they differ only in which recall the campaign
+// then measures (drift measures both origin-retained and dest-active;
+// invert measures the abandoned-premise origin query surfacing the
+// thread). vague accretes from 0 anchors and measures the became-matchable
+// turn.
+type campaign struct {
+	kind       campaignKind
+	threadIdx  int // creation order of the dedicated thread; -1 until created
+	originSlot int // the dedicated thread's bound corpus slot
+	destSlot   int // destination slot (a different topic than origin)
+	turn       int // 1-based campaign-internal turn counter
+	total      int // total turns this campaign runs
+}
+
+// destTags returns the campaign's destination symbol set: a single
+// different-topic slot's nonLooseTags (de-duplicated, stable order). One
+// slot (~4–5 disjoint real tags) is the deliberate calibration: combined
+// with the origin set (~4–5) it pushes the active count just past
+// AnchorProjectionMax (8), so the climbing destination Counts outrank the
+// LOWEST origin symbols out of the top-max projection (→ superseded) while
+// the rest of origin stays active. That partial supersession is what lets
+// the abandoned-premise / drift-origin query still clear the §3.4 Jaccard
+// threshold (the union stays tight) while genuine supersession still
+// occurs — a maximal destination flood would supersede ALL origin but
+// dilute the union so far that abandoned-premise recall collapses to 0,
+// the degenerate case the calibration avoids.
+func (g *generator) destTags(c *campaign) []string {
+	return nonLooseTags(g.model.slots[c.destSlot])
+}
+
+// startCampaign initializes the next campaign: it picks the dedicated
+// thread's origin slot and two destination slots of a DIFFERENT topic, all
+// deterministically from the corpus order and a single rng draw, then
+// rotates nextCampaignKind. The thread itself is created lazily on the
+// campaign's first emitted turn (so its creation order is the live
+// len(threads) at that moment, keeping the threadID mapping intact).
+func (g *generator) startCampaign() {
+	n := len(g.model.slots)
+	// One rng draw selects the origin slot; the destination slots are a
+	// fixed offset into a different topic so they never overlap origin.
+	origin := g.rng.Intn(n)
+	originTopic := g.model.slots[origin].Topic
+	dest := (origin + n/3) % n
+	for g.model.slots[dest].Topic == originTopic {
+		dest = (dest + 1) % n
+	}
+
+	total := map[campaignKind]int{
+		campaignVague:  vagueTurns + 4, // M vague turns + accrete + cooldown + recall
+		campaignDrift:  driftTurns + 4, // walk + cooldown + origin-recall + dest-recall
+		campaignInvert: invertTurns + 3,
+	}[g.nextCampaignKind]
+
+	g.campaign = &campaign{
+		kind:       g.nextCampaignKind,
+		threadIdx:  -1,
+		originSlot: origin,
+		destSlot:   dest,
+		total:      total,
+	}
+	g.nextCampaignKind = (g.nextCampaignKind + 1) % 3
+}
+
+// buildCampaignStep services one campaign turn, starting the campaign if
+// none is active. It is a pure function of generator state + one rng draw
+// in startCampaign + the per-turn gap draw the caller makes — no feedback
+// branch, so the canonical stream stays deterministic. On the campaign's
+// final turn the campaign clears so the next actCampaign draw starts the
+// next kind.
+func (g *generator) buildCampaignStep(tt turnType) bufStep {
+	if g.campaign == nil {
+		g.startCampaign()
+	}
+	c := g.campaign
+	c.turn++
+
+	var bs bufStep
+	switch c.kind {
+	case campaignVague:
+		bs = g.campaignVagueTurn(tt, c)
+	case campaignDrift:
+		bs = g.campaignDriftTurn(tt, c)
+	default:
+		bs = g.campaignInvertTurn(tt, c)
+	}
+
+	if c.turn >= c.total {
+		g.campaign = nil
+	}
+	return bs
+}
+
+// ensureCampaignThread creates the campaign's dedicated thread on first
+// use, bound to its origin slot, and returns its creation-order index.
+// Subsequent calls return the existing index.
+func (g *generator) ensureCampaignThread(c *campaign) int {
+	if c.threadIdx >= 0 {
+		return c.threadIdx
+	}
+	c.threadIdx = len(g.threads)
+	g.threads = append(g.threads, thread{order: c.threadIdx, slotIdx: c.originSlot})
+	return c.threadIdx
+}
+
+// campaignEngage builds an engagement step on the campaign thread emitting
+// the given anchor tags (the model's advisory symbol contribution). The
+// user input names the first tag so the user-prompt symbol path also fires;
+// when tags is empty the input is a generic vague line carrying no #-tag,
+// so the thread accretes nothing (the 0-anchor vague phase). It updates the
+// Layer-B LRU like buildStep does.
+func (g *generator) campaignEngage(tt turnType, c *campaign, anchorTags []string, label string) bufStep {
+	idx := g.ensureCampaignThread(c)
+	thr := g.threads[idx]
+	slot := g.model.slots[thr.slotIdx]
+	isNew := thr.order == idx && g.firstEngagement(idx)
+
+	var userInput string
+	if len(anchorTags) == 0 {
+		userInput = "still figuring out what this is about"
+	} else {
+		userInput = fmt.Sprintf("working on #%s", anchorTags[0])
+	}
+
+	threads := []string{thr.threadID()}
+	if isNew {
+		threads = []string{prompt.NewTopicLiteral}
+	}
+	body := fmt.Sprintf("%s — %s.", label, slot.Topic)
+
+	step := scenarios.Step{
+		UserInput:    userInput,
+		MockResponse: scenarios.NewMockResponseWithTag(threads, anchorTags, body),
+		Annotation:   fmt.Sprintf("turn %d: %s campaign-%s (%s)", g.stepIndex+1, turnTypeName(tt), label, slot.Topic),
+		ClosureAck:   &scenarios.ClosureAck{Outcome: turn.ClosureResolved},
+		RecallAck:    &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
+	}
+	if tt == turnWork {
+		step.PreEvents = g.buildWorkPreEvents(idx, slot, false)
+	}
+	g.engage(idx, g.stepIndex)
+	return bufStep{step: step, slotIdx: thr.slotIdx, engagedIdx: idx}
+}
+
+// firstEngagement reports whether thread idx has never been engaged (its
+// last-engaged turn is still the zero default and it is not yet in the LRU).
+// Used to drive the *new-topic* tag on a campaign thread's genesis turn.
+func (g *generator) firstEngagement(idx int) bool {
+	return !g.inLayerB(idx) && (idx >= len(g.lastEngagedTurn) || g.lastEngagedTurn[idx] == 0)
+}
+
+// campaignRecall builds a recall-opportunity step that issues querySymbols
+// (origin or destination tags) on a turn that engages a DIFFERENT thread,
+// declaring the campaign thread as the expected match. The campaign thread
+// is not engaged this turn, so the §3.4 recall scan can surface it; the
+// step carries bucket so the outcome is tallied post-feedback. suppressEpisode
+// keeps it out of the miss→refinement loop. vagueTurn (>0) records the
+// became-matchable turn for the vague oracle.
+func (g *generator) campaignRecall(tt turnType, c *campaign, querySymbols []string, bucket string, vagueTurn int) bufStep {
+	campIdx := c.threadIdx
+	// Engage a non-campaign thread: prefer an existing Layer-B head that is
+	// not the campaign thread, else spawn a throwaway new thread.
+	engageIdx := -1
+	for _, id := range g.layerB {
+		if id != campIdx {
+			engageIdx = id
+			break
+		}
+	}
+	isNew := false
+	if engageIdx < 0 {
+		engageIdx = len(g.threads)
+		g.threads = append(g.threads, thread{order: engageIdx, slotIdx: g.model.slotFor(engageIdx)})
+		isNew = true
+	}
+	engThr := g.threads[engageIdx]
+
+	// The query is a natural line mentioning the campaign's symbols as
+	// #-tags so the runtime extracts them and the §3.4 layer fires against
+	// the campaign thread's history.
+	var mentions strings.Builder
+	for i, s := range querySymbols {
+		if i > 0 {
+			mentions.WriteString(" ")
+		}
+		mentions.WriteString("#")
+		mentions.WriteString(s)
+	}
+	userInput := "revisiting " + mentions.String()
+
+	// The engaged thread's model tag re-emits the QUERY symbols (not its own
+	// slot tags), so the turn's coalesced query set Q is exactly the query
+	// symbols — user #-mentions and model anchors agree. Emitting the
+	// engaged thread's own unrelated tags would dilute Q with off-topic
+	// symbols and drop the §3.4 Jaccard score below threshold, masking the
+	// campaign thread's retained-symbol match. The engaged thread is a
+	// throwaway distractor, so accreting the query symbols onto it is
+	// harmless to the campaign measurement (it is excluded from the recall
+	// scan as the engaged thread).
+	threads := []string{engThr.threadID()}
+	if isNew {
+		threads = []string{prompt.NewTopicLiteral}
+	}
+	step := scenarios.Step{
+		UserInput:             userInput,
+		MockResponse:          scenarios.NewMockResponseWithTag(threads, querySymbols, "context revisit."),
+		Annotation:            fmt.Sprintf("turn %d: %s campaign-recall %s", g.stepIndex+1, turnTypeName(tt), bucket),
+		ExpectedRecallMatches: []string{g.threads[campIdx].threadID()},
+		RecallMode:            scenarios.RecallMeasureOnly,
+		ClosureAck:            &scenarios.ClosureAck{Outcome: turn.ClosureResolved},
+		RecallAck:             &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
+	}
+	g.engage(engageIdx, g.stepIndex)
+	return bufStep{
+		step:              step,
+		slotIdx:           engThr.slotIdx,
+		engagedIdx:        engageIdx,
+		recallBucket:      bucket,
+		suppressEpisode:   true,
+		vagueCampaignTurn: vagueTurn,
+	}
+}
+
+// campaignVagueTurn runs the vague-new program: 0-anchor turns, then
+// accretion, a cooldown (engaging others so the vague thread is dormant),
+// then a recall step whose first hit records the became-matchable turn.
+func (g *generator) campaignVagueTurn(tt turnType, c *campaign) bufStep {
+	switch {
+	case c.turn <= vagueTurns:
+		// 0-anchor vague turns — no symbols accrete (empty tag set).
+		return g.campaignEngage(tt, c, nil, "vague")
+	case c.turn == vagueTurns+1:
+		// Begin accreting the thread's bound-slot tags; arm the vague match
+		// oracle so the first subsequent recall hit records the turn.
+		g.vagueArmed = true
+		return g.campaignEngage(tt, c, nonLooseTags(g.model.slots[c.originSlot]), "accrete")
+	case c.turn <= c.total-1:
+		// Cooldown: keep accreting on the campaign thread (raises Count) —
+		// these are not recall steps.
+		return g.campaignEngage(tt, c, nonLooseTags(g.model.slots[c.originSlot]), "accrete")
+	default:
+		// Recall: the now-accreted thread should surface on its slot query.
+		return g.campaignRecall(tt, c, nonLooseTags(g.model.slots[c.originSlot]), bucketDriftDest, c.turn)
+	}
+}
+
+// campaignDriftTurn runs the drift program: create the thread on its origin
+// tags, then walk to the destination set (emitted every turn so its Counts
+// climb past origin and outrank origin out of the projection → origin
+// superseded-retained). It then measures origin recall (retained-but-lower)
+// and destination recall (active-high).
+func (g *generator) campaignDriftTurn(tt turnType, c *campaign) bufStep {
+	dest := g.destTags(c)
+	switch {
+	case c.turn == 1:
+		// Genesis on the origin tags — origin becomes ever-central.
+		return g.campaignEngage(tt, c, nonLooseTags(g.model.slots[c.originSlot]), "drift-origin")
+	case c.turn <= driftTurns:
+		// Walk: emit the destination set every turn; origin is never
+		// re-emitted, so its Count stays low and it is outranked.
+		return g.campaignEngage(tt, c, dest, "drift-dest")
+	case c.turn == driftTurns+1:
+		// Origin-recall: the abandoned origin premise stays matchable via
+		// the retained superseded symbols.
+		return g.campaignRecall(tt, c, nonLooseTags(g.model.slots[c.originSlot]), bucketDriftOrigin, 0)
+	default:
+		// Dest-recall: the active projection is the destination set.
+		return g.campaignRecall(tt, c, dest, bucketDriftDest, 0)
+	}
+}
+
+// campaignInvertTurn runs the invert program: same supersession mechanic as
+// drift, but the measured signal is the abandoned-premise query for the
+// ORIGINAL set surfacing the thread (EverCentral retention is what keeps it
+// findable after the premise inverted to the discovery set).
+func (g *generator) campaignInvertTurn(tt turnType, c *campaign) bufStep {
+	dest := g.destTags(c)
+	switch {
+	case c.turn == 1:
+		return g.campaignEngage(tt, c, nonLooseTags(g.model.slots[c.originSlot]), "invert-origin")
+	case c.turn <= invertTurns:
+		return g.campaignEngage(tt, c, dest, "invert-discovery")
+	default:
+		// Abandoned-premise recall: query the ORIGINAL set; the inverted
+		// thread must still surface.
+		return g.campaignRecall(tt, c, nonLooseTags(g.model.slots[c.originSlot]), bucketAbandonedPremise, 0)
+	}
 }
 
 // selectEngagedThread picks the thread the upcoming step engages,
@@ -1507,6 +1947,8 @@ func actionName(a action) string {
 		return "switch"
 	case actResume:
 		return "resume"
+	case actCampaign:
+		return "campaign"
 	default:
 		return "new"
 	}

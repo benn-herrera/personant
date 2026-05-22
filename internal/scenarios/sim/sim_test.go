@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"personant/internal/clock"
+	"personant/internal/memops"
 	"personant/internal/scenarios"
 	"personant/internal/store"
 )
@@ -333,6 +334,14 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	if gen.userDictatedCount > 0 {
 		h.Metrics.Counter("workload_user_dictated_turns", int64(gen.userDictatedCount))
 	}
+
+	// Fold the anchor-lifecycle (Inc 5) metrics: the generator-owned recall
+	// oracles (drift/dest/abandoned-premise buckets + vague became-matchable
+	// turn) and the post-run frontmatter-derived steady-state signals
+	// (ever-central / history-length / superseded-precision /
+	// projection-churn). These are the §9.4 instrument the redesign validates.
+	recordLifecycleMetrics(t, h, gen)
+
 	if err := h.Metrics.WriteJSON(h.MetricsPath); err != nil {
 		t.Fatalf("re-write metrics blob with episode stats: %v", err)
 	}
@@ -414,6 +423,38 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 		t.Logf("recall episodes:  no closed episodes this run")
 	}
 
+	// Anchor-lifecycle (Inc 5) metric summary — the redesign's instrument.
+	t.Logf("=== anchor-lifecycle metrics ===")
+	t.Logf("drift_recall_origin:      %.3f (%d obs) — abandoned origin premise still matchable",
+		m.Gauges["drift_recall_origin"], int(m.Gauges["drift_recall_origin_obs"]))
+	t.Logf("drift_recall_dest:        %.3f (%d obs) — active (destination) projection recall",
+		m.Gauges["drift_recall_dest"], int(m.Gauges["drift_recall_dest_obs"]))
+	t.Logf("abandoned_premise_recall: %.3f (%d obs) — inverted-premise thread surfaces on original query",
+		m.Gauges["abandoned_premise_recall"], int(m.Gauges["abandoned_premise_recall_obs"]))
+	t.Logf("superseded_precision:     %.3f — recall matches dominated by intended (not abandoned) threads",
+		m.Gauges["superseded_precision"])
+	t.Logf("ever_central_count:       total=%d mean/thread=%.2f max/thread=%d (steady-state: flat across rung length)",
+		int(m.Gauges["ever_central_count"]), m.Gauges["ever_central_mean"], int(m.Gauges["ever_central_max"]))
+	t.Logf("history_len:              total=%d mean/thread=%.2f max/thread=%d (cap=%d; flat = steady-state proof)",
+		int(m.Gauges["history_len_total"]), m.Gauges["history_len_mean"], int(m.Gauges["history_len_max"]), historyCapForReport)
+	t.Logf("superseded symbols:       total=%d (retained-not-evicted, ever-central protected)",
+		int(m.Gauges["superseded_count"]))
+	t.Logf("projection_churn:         %.3f (mean AnchorsProjectedAtTurn / TurnCount; idempotent-write guard keeps it bounded)",
+		m.Gauges["projection_churn"])
+	t.Logf("vague-new became-matchable turn: mean %.2f over %d campaigns (unmatchable before accretion)",
+		m.Gauges["vague_match_turn_mean"], int(m.Gauges["vague_match_campaigns"]))
+
+	// R6 (Build-Plan §4): history_len / ever_central must not blow past the
+	// hard cap. The cap is a storage invariant the runtime enforces; a
+	// max-per-thread above it at 1d would be an unbounded-growth design
+	// signal (surface it, do not paper over it). RunScenario's per-step
+	// invariants already assert substrate well-formedness; this is the
+	// metric-level tripwire the §9.4 instrument exists to provide.
+	if maxHist := int(m.Gauges["history_len_max"]); maxHist > historyCapForReport {
+		t.Errorf("R6 design signal: max history_len/thread %d exceeds hard cap %d — "+
+			"history is growing unbounded; investigate before tuning away", maxHist, historyCapForReport)
+	}
+
 	t.Logf("wall-clock runtime: %s", wall.Round(time.Millisecond))
 
 	// Headline output: a LOWER BOUND on the six-month simulation
@@ -431,6 +472,128 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 		"with spine size, so the actual run will exceed this)", floor.Round(time.Second))
 
 	return h
+}
+
+// historyCapForReport mirrors turn.historyCapPerThread (the §2.6.1 hard
+// total cap, default 40) for the rung-summary reporting + R6 tripwire. It
+// is duplicated here rather than imported because turn.historyCapPerThread
+// is unexported; if that default changes, update this in lockstep.
+const historyCapForReport = 40
+
+// recordLifecycleMetrics folds the anchor-lifecycle (Inc 5) §9.4 metrics
+// into the run's metrics blob. It draws from two sources, both
+// metrics-package-free at the generator boundary:
+//
+//   - generator-owned recall oracles: the drift-origin / drift-dest /
+//     abandoned-premise recall buckets (per-step hit/total tallied off
+//     StepFeedback) and the vague-new became-matchable turn. The generator
+//     exposes these as plain fields (gen.recallBuckets, gen.vagueMatchTurns)
+//     the way it already exposes episodeQueriesToHit.
+//   - post-run frontmatter + spine: per-thread ever-central count, history
+//     length, superseded-symbol count, and the projection-churn watermark
+//     ratio (AnchorsProjectedAtTurn / TurnCount). These are the steady-state
+//     signals SOLUTION §5 obliges the sim to show flat across rung length.
+//
+// superseded_precision reuses the harness's global adversarial precision
+// (mean over RecallMeasureOnly steps): low precision is the signal that
+// abandoned/superseded threads are crowding out focused ones — the
+// counterexample that would justify lowering recall.superseded-weight.
+func recordLifecycleMetrics(t *testing.T, h *scenarios.Harness, gen *generator) {
+	t.Helper()
+
+	// Generator-owned recall buckets → recall ratio + observation count.
+	for _, b := range []string{"drift_recall_origin", "drift_recall_dest", "abandoned_premise_recall"} {
+		tally := gen.recallBuckets[b]
+		ratio := 0.0
+		obs := 0
+		if tally != nil {
+			obs = tally.total
+			if tally.total > 0 {
+				ratio = float64(tally.hits) / float64(tally.total)
+			}
+		}
+		h.Metrics.Set(b, ratio)
+		h.Metrics.Set(b+"_obs", float64(obs))
+	}
+
+	// Vague-new oracle: mean became-matchable turn over completed campaigns.
+	if n := len(gen.vagueMatchTurns); n > 0 {
+		sum := 0
+		for _, v := range gen.vagueMatchTurns {
+			sum += v
+		}
+		h.Metrics.Set("vague_match_turn_mean", float64(sum)/float64(n))
+		h.Metrics.Set("vague_match_campaigns", float64(n))
+	}
+
+	// superseded_precision = mean global adversarial precision (already
+	// recorded per RecallMeasureOnly step by the harness).
+	m, err := readMetrics(h.MetricsPath)
+	if err != nil {
+		t.Fatalf("recordLifecycleMetrics: read metrics blob: %v", err)
+	}
+	h.Metrics.Set("superseded_precision", mean(m.Histograms["recall_fidelity_adversarial_precision"]))
+
+	// Post-run frontmatter + spine: per-thread lifecycle steady-state.
+	fms, err := store.LoadAllThreadFrontmatter(h.Paths, nil)
+	if err != nil {
+		t.Fatalf("recordLifecycleMetrics: load frontmatter: %v", err)
+	}
+	spine, err := store.ReadSpine(h.Paths.Spine)
+	if err != nil {
+		t.Fatalf("recordLifecycleMetrics: read spine: %v", err)
+	}
+	projectedAt := make(map[string]int, len(spine))
+	for _, r := range spine {
+		projectedAt[r.ID] = r.AnchorsProjectedAtTurn
+	}
+
+	var everCentralTotal, historyTotal, supersededTotal, everCentralMax, historyMax int
+	var churnSum float64
+	churnDenom := 0
+	for _, fm := range fms {
+		ec, hl, sup := 0, len(fm.HistorySymbols), 0
+		for _, hs := range fm.HistorySymbols {
+			if hs.EverCentral {
+				ec++
+			}
+			if hs.Lifecycle == memops.LifecycleSuperseded {
+				sup++
+			}
+		}
+		everCentralTotal += ec
+		historyTotal += hl
+		supersededTotal += sup
+		if ec > everCentralMax {
+			everCentralMax = ec
+		}
+		if hl > historyMax {
+			historyMax = hl
+		}
+		if fm.TurnCount > 0 {
+			churnSum += float64(projectedAt[fm.ID]) / float64(fm.TurnCount)
+			churnDenom++
+		}
+	}
+	n := len(fms)
+	meanOf := func(total int) float64 {
+		if n == 0 {
+			return 0
+		}
+		return float64(total) / float64(n)
+	}
+	h.Metrics.Set("ever_central_count", float64(everCentralTotal))
+	h.Metrics.Set("ever_central_mean", meanOf(everCentralTotal))
+	h.Metrics.Set("ever_central_max", float64(everCentralMax))
+	h.Metrics.Set("history_len_total", float64(historyTotal))
+	h.Metrics.Set("history_len_mean", meanOf(historyTotal))
+	h.Metrics.Set("history_len_max", float64(historyMax))
+	h.Metrics.Set("superseded_count", float64(supersededTotal))
+	churn := 0.0
+	if churnDenom > 0 {
+		churn = churnSum / float64(churnDenom)
+	}
+	h.Metrics.Set("projection_churn", churn)
 }
 
 // drainSteps pulls every step out of a scenario's on-demand StepSource,
@@ -660,63 +823,38 @@ func assertThreadIDsWellFormed(t *testing.T, h *scenarios.Harness) {
 	}
 }
 
-// TestNewThreadAnchorTagsPadsInertStubsToFloor — the harness plays the
-// model-in-the-loop and must emit contract-compliant *new-topic* topic
-// tags (≥4 anchors, §5.1). When dropping loose tags leaves fewer than
-// the floor, newThreadAnchorTags pads inert synthetic stubs up to the
-// harness-local simAnchorFloor. The stubs must carry the stubAnchorPrefix
-// form and must never equal a query term — that inertness is what
-// preserves the query-vs-thread Jaccard gap (and thus recall misses).
-//
-// nonLooseTags itself must NOT pad: engagement/refinement tags carry the
-// raw drift set, so the existing-thread drift behavior stays identical
-// to the pre-T1-2 baseline.
-func TestNewThreadAnchorTagsPadsInertStubsToFloor(t *testing.T) {
-	// Five real tags, four marked loose → only one real anchor survives
-	// the loose-filter, below the floor of 4.
-	query := "alpha appears with beta in the text"
+// TestNonLooseTagsNeverPads — anchor-lifecycle Inc 5 deleted the §5.1
+// 4-anchor floor and its stub-padding scaffold. Every emission now carries
+// nonLooseTags verbatim (new-thread, engagement, refinement alike); 0
+// anchors is legal (vague start) and the runtime's projection owns the
+// AnchorProjectionMax ceiling. This test pins that nonLooseTags drops the
+// loose cells and NEVER pads — the drift gap is now produced by the
+// lifecycle mechanics (drift/invert supersession), not by the dead
+// loose-tag-drop Jaccard asymmetry the stubs once preserved.
+func TestNonLooseTagsNeverPads(t *testing.T) {
+	// Five real tags, four marked loose → only one real anchor survives.
 	slot := CorpusSlot{
 		Topic:     "physics",
 		Tags:      []string{"alpha", "beta", "gamma", "delta", "epsilon"},
 		LooseMask: []bool{false, true, true, true, true},
-		UserInput: query,
+		UserInput: "alpha appears with beta in the text",
 	}
-
-	// nonLooseTags is the raw drift set — one real tag, NO padding.
 	if raw := nonLooseTags(slot); len(raw) != 1 || raw[0] != "alpha" {
-		t.Fatalf("nonLooseTags must not pad: got %v want [alpha]", raw)
+		t.Fatalf("nonLooseTags must drop loose cells and NOT pad: got %v want [alpha]", raw)
 	}
 
-	out := newThreadAnchorTags(slot)
-	if len(out) != simAnchorFloor {
-		t.Fatalf("anchor count: got %d want floor %d", len(out), simAnchorFloor)
+	// All-loose → empty (a legal 0-anchor emission), no padding.
+	allLoose := CorpusSlot{
+		Tags:      []string{"a", "b"},
+		LooseMask: []bool{true, true},
 	}
-	if out[0] != "alpha" {
-		t.Errorf("first anchor: got %q want surviving real tag %q", out[0], "alpha")
-	}
-
-	queryTerms := map[string]bool{}
-	for _, w := range strings.Fields(query) {
-		queryTerms[w] = true
-	}
-	stubs := 0
-	for _, a := range out[1:] {
-		if !strings.HasPrefix(a, stubAnchorPrefix) {
-			t.Errorf("pad anchor %q lacks inert stub prefix %q", a, stubAnchorPrefix)
-		}
-		if queryTerms[a] {
-			t.Errorf("stub %q matches a query term — not inert, would collapse drift", a)
-		}
-		stubs++
-	}
-	if want := simAnchorFloor - 1; stubs != want {
-		t.Errorf("stub count: got %d want %d", stubs, want)
+	if raw := nonLooseTags(allLoose); len(raw) != 0 {
+		t.Errorf("all-loose slot: got %v want [] (0 anchors legal, no padding)", raw)
 	}
 
-	// A slot with no loose mask is already in range (5 tags) — no padding,
-	// no stubs, on either function.
+	// No mask → all tags pass through unchanged.
 	plain := CorpusSlot{Tags: []string{"a", "b", "c", "d", "e"}}
-	if got := newThreadAnchorTags(plain); len(got) != 5 {
-		t.Errorf("unmasked slot: got %d anchors want 5 (no padding)", len(got))
+	if got := nonLooseTags(plain); len(got) != 5 {
+		t.Errorf("unmasked slot: got %d anchors want 5 (no filtering, no padding)", len(got))
 	}
 }
