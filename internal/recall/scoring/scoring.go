@@ -26,6 +26,11 @@ import (
 const (
 	DefaultThreshold = 0.4
 	DefaultLimit     = 10
+	// DefaultWeight is the superseded-symbol contribution when
+	// Options.SupersededWeight is left zero. 1.0 means superseded
+	// matches count identically to active matches — the legacy
+	// plain-count numerator (spec §3.4, recall.superseded-weight).
+	DefaultWeight = 1.0
 )
 
 // Candidate is one recall match: a thread, its Jaccard score against
@@ -59,6 +64,14 @@ type Options struct {
 	// Limit caps the number of returned candidates. 0 → DefaultLimit
 	// (10). Negative → unbounded.
 	Limit int
+
+	// SupersededWeight scales a matched symbol's contribution to the
+	// Jaccard numerator when that symbol is superseded in the thread
+	// (abandoned premise, still in history_symbols). 0 → DefaultWeight
+	// (1.0), which is byte-identical to the legacy plain-count scorer.
+	// The §9 sim's superseded_precision/abandoned_premise_recall sweep
+	// selects any value below 1.0 (spec §3.4, recall.superseded-weight).
+	SupersededWeight float64
 }
 
 // ProposeFromIndex is the §3.4 layer-1 symbolic Jaccard matcher. The
@@ -85,6 +98,10 @@ func ProposeFromIndex(spine []memops.SpineRecord, threads []memops.ThreadMeta, q
 	if limit == 0 {
 		limit = DefaultLimit
 	}
+	supersededWeight := opts.SupersededWeight
+	if supersededWeight == 0 {
+		supersededWeight = DefaultWeight
+	}
 
 	q := uniqueNonEmpty(query)
 	if len(q) == 0 {
@@ -107,7 +124,7 @@ func ProposeFromIndex(spine []memops.SpineRecord, threads []memops.ThreadMeta, q
 		}
 
 		fmRec, haveFM := fmIndex[rec.ID]
-		threadSet := buildThreadSet(rec, fmRec, haveFM)
+		threadSet, supersededSet := buildThreadSet(rec, fmRec, haveFM)
 		if len(threadSet) == 0 {
 			continue
 		}
@@ -117,8 +134,21 @@ func ProposeFromIndex(spine []memops.SpineRecord, threads []memops.ThreadMeta, q
 			// No overlap → no match, regardless of threshold setting.
 			continue
 		}
+		// Weighted numerator (spec §3.4): each matched symbol contributes
+		// 1.0 if active in this thread, supersededWeight if superseded.
+		// The superseded label is canonical — frontmatter Lifecycle, not
+		// the derived symbols.jsonl (R3). At weight 1.0 this equals the
+		// legacy plain count, so the score is byte-identical.
+		weighted := 0.0
+		for _, m := range matched {
+			if _, sup := supersededSet[m]; sup {
+				weighted += supersededWeight
+			} else {
+				weighted += 1.0
+			}
+		}
 		union := len(q) + len(threadSet) - len(matched)
-		score := float64(len(matched)) / float64(union)
+		score := weighted / float64(union)
 		if score < threshold {
 			continue
 		}
@@ -182,23 +212,45 @@ func uniqueNonEmpty(in []string) []string {
 // available; anchors-only when it isn't (degraded but still valid match
 // surface — the spine is canonical for anchors).
 //
-// Returns a sorted, deduplicated slice; empty strings dropped.
-func buildThreadSet(rec memops.SpineRecord, fm memops.ThreadMeta, haveFM bool) []string {
+// It also returns the subset of that set that is superseded in this
+// thread. The label source is canonical frontmatter Lifecycle (R3): a
+// symbol is superseded iff it has a history_symbol whose Lifecycle is
+// LifecycleSuperseded AND it is not also an anchor (the projected
+// anchor set counts as active, overriding a stale history label).
+//
+// The set is a sorted, deduplicated slice; empty strings dropped. The
+// superseded map is nil when nothing is superseded.
+func buildThreadSet(rec memops.SpineRecord, fm memops.ThreadMeta, haveFM bool) ([]string, map[string]struct{}) {
 	cap := len(rec.Anchors)
 	if haveFM {
 		cap += len(fm.HistorySymbols)
 	}
 	if cap == 0 {
-		return nil
+		return nil, nil
+	}
+	anchorSet := make(map[string]struct{}, len(rec.Anchors))
+	for _, a := range rec.Anchors {
+		anchorSet[a] = struct{}{}
 	}
 	combined := make([]string, 0, cap)
 	combined = append(combined, rec.Anchors...)
+	var superseded map[string]struct{}
 	if haveFM {
 		for _, h := range fm.HistorySymbols {
 			combined = append(combined, h.Normalized)
+			if h.Lifecycle != memops.LifecycleSuperseded || h.Normalized == "" {
+				continue
+			}
+			if _, isAnchor := anchorSet[h.Normalized]; isAnchor {
+				continue
+			}
+			if superseded == nil {
+				superseded = make(map[string]struct{})
+			}
+			superseded[h.Normalized] = struct{}{}
 		}
 	}
-	return uniqueNonEmpty(combined)
+	return uniqueNonEmpty(combined), superseded
 }
 
 // intersectSorted returns the intersection of two sorted, deduplicated

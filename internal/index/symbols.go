@@ -63,14 +63,16 @@ func BuildSymbols(spine []memops.SpineRecord, threads []memops.ThreadMeta) []sto
 	type bucket struct {
 		threads        map[string]struct{}
 		anchorIn       map[string]struct{}
+		supersededIn   map[string]struct{}
 		sourceDominant memops.SymbolSource
 	}
 	get := func(buckets map[string]*bucket, sym string) *bucket {
 		b, ok := buckets[sym]
 		if !ok {
 			b = &bucket{
-				threads:  make(map[string]struct{}),
-				anchorIn: make(map[string]struct{}),
+				threads:      make(map[string]struct{}),
+				anchorIn:     make(map[string]struct{}),
+				supersededIn: make(map[string]struct{}),
 			}
 			buckets[sym] = b
 		}
@@ -101,6 +103,9 @@ func BuildSymbols(spine []memops.SpineRecord, threads []memops.ThreadMeta) []sto
 			}
 			b := get(buckets, h.Normalized)
 			b.threads[t.ID] = struct{}{}
+			if h.Lifecycle == memops.LifecycleSuperseded {
+				b.supersededIn[t.ID] = struct{}{}
+			}
 			b.sourceDominant = memops.DominantSource(b.sourceDominant, h.Source)
 		}
 	}
@@ -109,10 +114,12 @@ func BuildSymbols(spine []memops.SpineRecord, threads []memops.ThreadMeta) []sto
 	for sym, b := range buckets {
 		threadIDs := sortedThreadIDs(b.threads, recallFires)
 		anchorIDs := sortedThreadIDs(b.anchorIn, recallFires)
+		supersededIDs := sortedThreadIDs(b.supersededIn, recallFires)
 		out = append(out, store.SymbolRecord{
 			Symbol:         sym,
 			Threads:        threadIDs,
 			AnchorIn:       anchorIDs,
+			SupersededIn:   supersededIDs,
 			SourceDominant: b.sourceDominant,
 		})
 	}

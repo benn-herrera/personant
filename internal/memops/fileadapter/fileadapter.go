@@ -484,10 +484,11 @@ func (a *FileAdapter) ProposeRecall(ctx context.Context, query []string, opts me
 		return nil, fmt.Errorf("fileadapter: propose recall: load thread frontmatter: %w", err)
 	}
 	cands := scoring.ProposeFromIndex(spine, threads, query, scoring.Options{
-		Threshold: opts.Threshold,
-		Project:   opts.Project,
-		Exclude:   opts.Exclude,
-		Limit:     opts.Limit,
+		Threshold:        opts.Threshold,
+		Project:          opts.Project,
+		Exclude:          opts.Exclude,
+		Limit:            opts.Limit,
+		SupersededWeight: opts.SupersededWeight,
 	})
 	out := make([]memops.RecallCandidate, len(cands))
 	for i, c := range cands {

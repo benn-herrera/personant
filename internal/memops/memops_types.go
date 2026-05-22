@@ -151,6 +151,12 @@ type RecallOptions struct {
 	// Limit caps the number of returned candidates. 0 → adapter
 	// default (10). Negative → unbounded.
 	Limit int
+
+	// SupersededWeight scales a matched superseded symbol's
+	// contribution to the Jaccard numerator. 0 → adapter default (1.0,
+	// = today's no-down-weight behavior; spec §3.4
+	// recall.superseded-weight).
+	SupersededWeight float64
 }
 
 // RecallCandidate is one match returned by ProposeRecall. Promoted

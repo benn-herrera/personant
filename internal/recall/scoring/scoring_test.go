@@ -263,3 +263,127 @@ func TestProposeFromIndex_ZeroIntersectionDropped(t *testing.T) {
 // fileadapter.TestProposeRecall_PassThrough — substrate I/O is the
 // adapter's concern, not this package's, once the port migration (MAD
 // C3) landed.
+
+// makeFMLifecycle constructs a ThreadMeta whose history symbols carry an
+// explicit lifecycle (active/superseded). Used by the lifecycle-aware
+// scorer tests.
+func makeFMLifecycle(id, project string, anchors []string, hist []memops.HistorySymbol) memops.ThreadMeta {
+	return memops.ThreadMeta{
+		ID:             id,
+		Project:        project,
+		Anchors:        anchors,
+		HistorySymbols: hist,
+	}
+}
+
+func supersededSym(norm string) memops.HistorySymbol {
+	return memops.HistorySymbol{Raw: norm, Normalized: norm, Lifecycle: memops.LifecycleSuperseded}
+}
+
+func activeSym(norm string) memops.HistorySymbol {
+	return memops.HistorySymbol{Raw: norm, Normalized: norm, Lifecycle: memops.LifecycleActive}
+}
+
+// TestProposeFromIndex_Weight1IsLegacyGolden proves the Increment-3
+// invariant: at SupersededWeight == 1.0 (and the zero default), the
+// lifecycle-aware scorer is byte-identical to the legacy plain-count
+// scorer regardless of how many matched symbols are superseded.
+func TestProposeFromIndex_Weight1IsLegacyGolden(t *testing.T) {
+	spine := []memops.SpineRecord{
+		makeSpine("thr_1", "prj_1", []string{"alpha"}, 7),
+	}
+	threads := []memops.ThreadMeta{
+		makeFMLifecycle("thr_1", "prj_1", []string{"alpha"}, []memops.HistorySymbol{
+			activeSym("alpha"),
+			supersededSym("beta"),
+			supersededSym("gamma"),
+		}),
+	}
+	query := []string{"alpha", "beta", "gamma"}
+
+	// Q = {alpha,beta,gamma}; T = {alpha,beta,gamma}; |Q∩T|=3, union=3.
+	want := []Candidate{
+		{ThreadID: "thr_1", Score: 1.0, MatchedSymbols: []string{"alpha", "beta", "gamma"}},
+	}
+
+	for _, opts := range []Options{
+		{},                      // zero → DefaultWeight 1.0
+		{SupersededWeight: 1.0}, // explicit 1.0
+	} {
+		got := ProposeFromIndex(spine, threads, query, opts)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("opts %+v: lifecycle-aware scorer != legacy golden:\n got: %#v\nwant: %#v", opts, got, want)
+		}
+	}
+}
+
+// TestProposeFromIndex_SupersededDownWeight covers the active /
+// superseded-only / mixed cases at weight 0.5.
+func TestProposeFromIndex_SupersededDownWeight(t *testing.T) {
+	const w = 0.5
+	cases := []struct {
+		name      string
+		anchors   []string
+		hist      []memops.HistorySymbol
+		query     []string
+		wantScore float64
+	}{
+		{
+			// Active-only match: down-weight has no effect.
+			// Q={alpha,beta}, T={alpha,beta}; weighted=2.0, union=2 → 1.0.
+			name:      "active match unchanged",
+			anchors:   []string{"alpha", "beta"},
+			hist:      []memops.HistorySymbol{activeSym("alpha"), activeSym("beta")},
+			query:     []string{"alpha", "beta"},
+			wantScore: 1.0,
+		},
+		{
+			// Superseded-only match: both matched symbols down-weighted.
+			// Q={beta,gamma}, T={beta,gamma}; weighted=1.0, union=2 → 0.5.
+			name:      "superseded-only down-weighted",
+			anchors:   nil,
+			hist:      []memops.HistorySymbol{supersededSym("beta"), supersededSym("gamma")},
+			query:     []string{"beta", "gamma"},
+			wantScore: 0.5,
+		},
+		{
+			// Mixed: one active (1.0) + one superseded (0.5).
+			// Q={alpha,beta}, T={alpha,beta}; weighted=1.5, union=2 → 0.75.
+			name:      "mixed active+superseded",
+			anchors:   []string{"alpha"},
+			hist:      []memops.HistorySymbol{activeSym("alpha"), supersededSym("beta")},
+			query:     []string{"alpha", "beta"},
+			wantScore: 0.75,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spine := []memops.SpineRecord{makeSpine("thr_1", "prj_1", tc.anchors, 0)}
+			threads := []memops.ThreadMeta{makeFMLifecycle("thr_1", "prj_1", tc.anchors, tc.hist)}
+			got := ProposeFromIndex(spine, threads, tc.query, Options{SupersededWeight: w, Threshold: 0.01})
+			if len(got) != 1 {
+				t.Fatalf("got %d candidates, want 1: %#v", len(got), got)
+			}
+			if got[0].Score != tc.wantScore {
+				t.Errorf("score = %v, want %v", got[0].Score, tc.wantScore)
+			}
+		})
+	}
+}
+
+// TestProposeFromIndex_AnchorOverridesSupersededLabel pins R3-adjacent
+// behavior: a symbol that is both an anchor (projected/active) and
+// carries a stale superseded history label counts as active.
+func TestProposeFromIndex_AnchorOverridesSupersededLabel(t *testing.T) {
+	spine := []memops.SpineRecord{makeSpine("thr_1", "prj_1", []string{"alpha"}, 0)}
+	threads := []memops.ThreadMeta{
+		makeFMLifecycle("thr_1", "prj_1", []string{"alpha"}, []memops.HistorySymbol{
+			supersededSym("alpha"), // stale history label; alpha is an anchor
+		}),
+	}
+	// Q={alpha}, T={alpha}; alpha is an anchor → active → weighted 1.0.
+	got := ProposeFromIndex(spine, threads, []string{"alpha"}, Options{SupersededWeight: 0.5, Threshold: 0.01})
+	if len(got) != 1 || got[0].Score != 1.0 {
+		t.Fatalf("anchor must override superseded label: got %#v, want score 1.0", got)
+	}
+}

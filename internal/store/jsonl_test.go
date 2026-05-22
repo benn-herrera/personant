@@ -49,6 +49,41 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSymbolRecordRoundTrip exercises symbols.jsonl write/read with the
+// Increment-3 superseded_in field, including an empty (non-superseded)
+// record.
+func TestSymbolRecordRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "symbols.jsonl")
+
+	in := []SymbolRecord{
+		{
+			Symbol:         "abandoned",
+			Threads:        []string{"thr_1", "thr_2"},
+			AnchorIn:       []string{},
+			SupersededIn:   []string{"thr_1", "thr_2"},
+			SourceDominant: memops.SourceModel,
+		},
+		{
+			Symbol:         "alpha",
+			Threads:        []string{"thr_1"},
+			AnchorIn:       []string{"thr_1"},
+			SupersededIn:   []string{},
+			SourceDominant: memops.SourceCurator,
+		},
+	}
+	if err := WriteSymbols(path, in); err != nil {
+		t.Fatalf("WriteSymbols: %v", err)
+	}
+	got, err := ReadSymbols(path)
+	if err != nil {
+		t.Fatalf("ReadSymbols: %v", err)
+	}
+	if !reflect.DeepEqual(got, in) {
+		t.Fatalf("symbols round-trip mismatch:\n got: %#v\nwant: %#v", got, in)
+	}
+}
+
 func TestWriteSortsByID(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "spine.jsonl")

@@ -8,5 +8,6 @@ type SymbolRecord struct {
 	Symbol         string              `json:"symbol"`
 	Threads        []string            `json:"threads"`
 	AnchorIn       []string            `json:"anchor_in"`
+	SupersededIn   []string            `json:"superseded_in"`
 	SourceDominant memops.SymbolSource `json:"source_dominant"`
 }

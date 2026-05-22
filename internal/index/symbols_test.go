@@ -43,6 +43,59 @@ func mkHistorySym(normalized string, source memops.SymbolSource) memops.HistoryS
 	}
 }
 
+func mkSupersededHistorySym(normalized string, source memops.SymbolSource) memops.HistorySymbol {
+	h := mkHistorySym(normalized, source)
+	h.Lifecycle = memops.LifecycleSuperseded
+	return h
+}
+
+// TestBuildSymbolsSupersededIn pins the Increment-3 inverse-index surface:
+// a history_symbol whose Lifecycle is superseded records its thread ID in
+// superseded_in (sorted by recall_fires like threads/anchor_in), while an
+// active symbol leaves superseded_in empty.
+func TestBuildSymbolsSupersededIn(t *testing.T) {
+	spine := []memops.SpineRecord{
+		mkSpine("thr_1", "prj_1", 9, "active1"),
+		mkSpine("thr_2", "prj_1", 3),
+	}
+	threads := []memops.ThreadMeta{
+		mkThread("thr_1", "prj_1",
+			mkHistorySym("active1", memops.SourceCurator),
+			mkSupersededHistorySym("abandoned", memops.SourceModel)),
+		mkThread("thr_2", "prj_1",
+			mkSupersededHistorySym("abandoned", memops.SourceUser)),
+	}
+	got := BuildSymbols(spine, threads)
+	bySym := make(map[string]store.SymbolRecord, len(got))
+	for _, r := range got {
+		bySym[r.Symbol] = r
+	}
+
+	// abandoned is superseded in both threads → superseded_in is the
+	// recall_fires-sorted union (thr_1 recall 9 before thr_2 recall 3).
+	abandoned, ok := bySym["abandoned"]
+	if !ok {
+		t.Fatal("missing symbol abandoned")
+	}
+	wantSup := []string{"thr_1", "thr_2"}
+	if !reflect.DeepEqual(abandoned.SupersededIn, wantSup) {
+		t.Errorf("abandoned.superseded_in = %v, want %v", abandoned.SupersededIn, wantSup)
+	}
+	// Superseded history symbols still record thread membership.
+	if !reflect.DeepEqual(abandoned.Threads, wantSup) {
+		t.Errorf("abandoned.threads = %v, want %v", abandoned.Threads, wantSup)
+	}
+
+	// active1 is active → superseded_in empty (non-nil for JSON shape).
+	active1, ok := bySym["active1"]
+	if !ok {
+		t.Fatal("missing symbol active1")
+	}
+	if len(active1.SupersededIn) != 0 {
+		t.Errorf("active1.superseded_in = %v, want empty", active1.SupersededIn)
+	}
+}
+
 func TestBuildSymbolsEmpty(t *testing.T) {
 	got := BuildSymbols(nil, nil)
 	if len(got) != 0 {
