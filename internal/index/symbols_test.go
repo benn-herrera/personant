@@ -456,7 +456,7 @@ func TestLoadAllThreadFrontmatterTolerantOnParseError(t *testing.T) {
 	logf := func(format string, args ...any) {
 		skipMessages = append(skipMessages, format)
 	}
-	got, err := store.LoadAllThreadFrontmatter(paths, logf)
+	got, err := store.LoadAllThreadFrontmatter(paths, nil, logf)
 	if err != nil {
 		t.Fatalf("LoadAllThreadFrontmatter: %v (must tolerate parse errors)", err)
 	}
@@ -473,7 +473,7 @@ func TestLoadAllThreadFrontmatterMissingDir(t *testing.T) {
 	paths := store.PathsForHome(tmp)
 	// Note: do NOT mkdir ThreadsDir — fresh init state.
 
-	got, err := store.LoadAllThreadFrontmatter(paths, nil)
+	got, err := store.LoadAllThreadFrontmatter(paths, nil, nil)
 	if err != nil {
 		t.Fatalf("LoadAllThreadFrontmatter: %v (missing dir is fresh-init, not error)", err)
 	}

@@ -535,7 +535,7 @@ func recordLifecycleMetrics(t *testing.T, h *scenarios.Harness, gen *generator) 
 	h.Metrics.Set("superseded_precision", mean(m.Histograms["recall_fidelity_adversarial_precision"]))
 
 	// Post-run frontmatter + spine: per-thread lifecycle steady-state.
-	fms, err := store.LoadAllThreadFrontmatter(h.Paths, nil)
+	fms, err := store.LoadAllThreadFrontmatter(h.Paths, nil, nil)
 	if err != nil {
 		t.Fatalf("recordLifecycleMetrics: load frontmatter: %v", err)
 	}

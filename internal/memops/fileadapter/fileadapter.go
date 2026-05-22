@@ -28,6 +28,7 @@ import (
 	"personant/internal/clock"
 	"personant/internal/eventlog"
 	"personant/internal/index"
+	"personant/internal/log"
 	"personant/internal/memops"
 	"personant/internal/recall/scoring"
 	"personant/internal/store"
@@ -471,6 +472,20 @@ func (a *FileAdapter) LoadWorkingSet(ctx context.Context) ([]string, []string, e
 // hands off to scoring.ProposeFromIndex (a pure function over the memops
 // domain model). The scoring package itself never touches the substrate
 // — that is this adapter's responsibility.
+//
+// Candidate filter (anchor-lifecycle Inc 6): symbols.jsonl is consulted
+// first as the cheap-scan inverse index. A thread can only match the
+// query if it shares at least one query symbol, which is exactly what a
+// SymbolRecord's threads ∪ superseded_in records — so the union of those
+// over the query symbols is a superset-correct candidate set, and only
+// that set's frontmatter is loaded (instead of every thread). This is a
+// pure performance narrowing: scores and candidates are identical to the
+// full scan because a thread outside the set has empty Q ∩ T and could
+// never have been a match.
+//
+// symbols.jsonl is derived. If it is missing, stale, or unreadable, the
+// candidate set is nil and the load falls back to the full scan — a
+// stale index degrades performance, never correctness.
 func (a *FileAdapter) ProposeRecall(ctx context.Context, query []string, opts memops.RecallOptions) ([]memops.RecallCandidate, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -479,7 +494,9 @@ func (a *FileAdapter) ProposeRecall(ctx context.Context, query []string, opts me
 	if err != nil {
 		return nil, fmt.Errorf("fileadapter: propose recall: read spine: %w", err)
 	}
-	threads, err := store.LoadAllThreadFrontmatter(a.paths, nil)
+	// candidateIDs is nil on any index miss → full scan (correctness-safe).
+	candidateIDs := a.recallCandidateIDs(query)
+	threads, err := store.LoadAllThreadFrontmatter(a.paths, candidateIDs, nil)
 	if err != nil {
 		return nil, fmt.Errorf("fileadapter: propose recall: load thread frontmatter: %w", err)
 	}
@@ -499,6 +516,55 @@ func (a *FileAdapter) ProposeRecall(ctx context.Context, query []string, opts me
 		}
 	}
 	return out, nil
+}
+
+// recallCandidateIDs reads symbols.jsonl and returns the union of
+// threads ∪ superseded_in across every query symbol — the set of threads
+// that share at least one query symbol and could therefore match. Both
+// fields are needed: threads holds active occurrences (including anchors),
+// superseded_in holds abandoned-premise occurrences that still match via
+// history_symbols. A symbol absent from the index contributes nothing.
+//
+// Returns nil — the full-scan signal — on any index miss: a missing or
+// empty index (fresh init, not yet rebuilt) or a read error. The index
+// is derived, so nil here is a performance fallback, never a correctness
+// risk; verify/rebuild regenerates it. An index that is present but
+// yields no candidate for the query returns a non-nil empty slice, which
+// LoadAllThreadFrontmatter treats as "load nothing" (the no-match fast
+// path) — distinct from the nil full-scan signal.
+func (a *FileAdapter) recallCandidateIDs(query []string) []string {
+	records, err := store.ReadSymbols(a.paths.Symbols)
+	if err != nil {
+		log.Warn("fileadapter: propose recall: read symbols index %s: %v — degrading to full scan", a.paths.Symbols, err)
+		return nil
+	}
+	if len(records) == 0 {
+		// Missing or empty index — fall back to a full scan rather than
+		// returning zero candidates from a not-yet-built index.
+		return nil
+	}
+	bySymbol := make(map[string]*store.SymbolRecord, len(records))
+	for i := range records {
+		bySymbol[records[i].Symbol] = &records[i]
+	}
+	seen := make(map[string]struct{})
+	for _, q := range query {
+		rec, ok := bySymbol[q]
+		if !ok {
+			continue
+		}
+		for _, id := range rec.Threads {
+			seen[id] = struct{}{}
+		}
+		for _, id := range rec.SupersededIn {
+			seen[id] = struct{}{}
+		}
+	}
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 // RegenerateDerivedState rebuilds every derived artifact from canonical

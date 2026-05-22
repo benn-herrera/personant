@@ -92,9 +92,16 @@ func ListThreadIDs(paths PersonantPaths) ([]string, error) {
 	return ids, nil
 }
 
-// LoadAllThreadFrontmatter reads every threads/thr_<n>/thread.md and
-// returns their parsed frontmatter (the body is not assembled —
-// frontmatter alone is enough for derived-index building).
+// LoadAllThreadFrontmatter reads threads/thr_<n>/thread.md and returns
+// their parsed frontmatter (the body is not assembled — frontmatter
+// alone is enough for derived-index building).
+//
+// onlyIDs restricts the load to the given thread IDs (the recall
+// candidate-filter path); a nil/empty onlyIDs loads every thread (the
+// full-scan path for index building and verify). IDs in onlyIDs that
+// have no thread.md on disk are skipped via the same tolerate-and-
+// continue policy as a parse failure — a derived index can name a thread
+// the directory no longer holds, and that is drift to tolerate, not fail.
 //
 // Tolerate-and-continue policy: a thread whose thread.md fails to read
 // or parse is logged via logf and skipped. Index building tolerates
@@ -102,13 +109,31 @@ func ListThreadIDs(paths PersonantPaths) ([]string, error) {
 // files. A nil logf is silent.
 //
 // A missing ThreadsDir returns (nil, nil) — fresh-init state.
-func LoadAllThreadFrontmatter(paths PersonantPaths, logf func(format string, args ...any)) ([]memops.ThreadMeta, error) {
+func LoadAllThreadFrontmatter(paths PersonantPaths, onlyIDs []string, logf func(format string, args ...any)) ([]memops.ThreadMeta, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	ids, err := ListThreadIDs(paths)
-	if err != nil {
-		return nil, err
+	var ids []string
+	if onlyIDs != nil {
+		// Candidate-filter path (non-nil, possibly empty): load only the
+		// requested IDs. An empty onlyIDs loads nothing — the no-match
+		// fast path, distinct from a nil onlyIDs (full scan). Skip a
+		// requested ID whose thread dir is absent (stale-index drift).
+		for _, id := range onlyIDs {
+			if _, err := os.Stat(ThreadMetaPath(paths, id)); err != nil {
+				if !errors.Is(err, os.ErrNotExist) {
+					logf("load thread frontmatter: stat %s: %v", ThreadMetaPath(paths, id), err)
+				}
+				continue
+			}
+			ids = append(ids, id)
+		}
+	} else {
+		all, err := ListThreadIDs(paths)
+		if err != nil {
+			return nil, err
+		}
+		ids = all
 	}
 	if len(ids) == 0 {
 		return nil, nil
