@@ -163,7 +163,7 @@ func RebuildSymbols(paths store.PersonantPaths) ([]store.SymbolRecord, error) {
 	if err != nil {
 		return nil, fmt.Errorf("rebuild symbols: read spine: %w", err)
 	}
-	threads, err := store.LoadAllThreadFrontmatter(paths, nil, nil)
+	threads, err := store.LoadAllThreadFrontmatter(paths, nil)
 	if err != nil {
 		return nil, fmt.Errorf("rebuild symbols: load threads: %w", err)
 	}

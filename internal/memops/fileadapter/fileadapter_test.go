@@ -16,7 +16,6 @@ import (
 
 	"personant/internal/clock"
 	"personant/internal/memops"
-	"personant/internal/recall/scoring"
 	"personant/internal/store"
 )
 
@@ -260,126 +259,6 @@ func TestProposeRecall_PassThrough(t *testing.T) {
 	}
 	if cands[0].Score < 0.4 {
 		t.Fatalf("score should clear default threshold; got %v", cands[0].Score)
-	}
-}
-
-// TestProposeRecall_IndexFilterEqualsFullScan is the Increment 6 gate:
-// the symbols.jsonl candidate-filter path must return byte-identical
-// candidates and scores to the full-scan path for any query. The index
-// is a superset-correct narrowing — a thread only enters threads ∪
-// superseded_in if it shares a query symbol, which is exactly the
-// precondition for a non-empty Q ∩ T — so narrowing the loaded
-// frontmatter can never drop a real match nor alter a score.
-//
-// Covers active-match, superseded-match (abandoned premise still in
-// history_symbols), and no-match queries against the same substrate.
-func TestProposeRecall_IndexFilterEqualsFullScan(t *testing.T) {
-	a := newAdapter(t)
-	ctx := context.Background()
-
-	// Three threads in prj_1 with distinct symbol surfaces:
-	//   thr_1: active anchors {alpha, beta} + active history {gamma}
-	//   thr_2: anchors {delta} + a SUPERSEDED history symbol {alpha}
-	//          (abandoned premise — still matchable via history_symbols)
-	//   thr_3: anchors {epsilon, zeta} — shares nothing with the queries
-	seed := func(id string, anchors []string, hist []memops.HistorySymbol) {
-		rec := validSpine(id, "prj_1")
-		rec.Anchors = anchors
-		fm := validFrontmatter(rec)
-		fm.HistorySymbols = hist
-		if err := a.CreateThread(ctx, memops.ThreadWrite{Spine: rec, Meta: fm}); err != nil {
-			t.Fatalf("seed %s: %v", id, err)
-		}
-	}
-	hist := func(norm string, lc memops.SymbolLifecycle) memops.HistorySymbol {
-		return memops.HistorySymbol{Raw: norm, Normalized: norm, Count: 1, Source: memops.SourceModel, Lifecycle: lc}
-	}
-	seed("thr_1", []string{"alpha", "beta"}, []memops.HistorySymbol{hist("gamma", memops.LifecycleActive)})
-	seed("thr_2", []string{"delta"}, []memops.HistorySymbol{hist("alpha", memops.LifecycleSuperseded)})
-	seed("thr_3", []string{"epsilon", "zeta"}, nil)
-
-	// Build symbols.jsonl so the candidate-filter path is exercised.
-	if err := a.RegenerateDerivedState(ctx, memops.IndexBuildOptions{Quiet: true}); err != nil {
-		t.Fatalf("RegenerateDerivedState: %v", err)
-	}
-
-	// Reference (full-scan) candidates: call the pure scorer directly over
-	// ALL frontmatter, identical options to ProposeRecall. This is the
-	// pre-Inc-6 behavior the index filter must reproduce exactly.
-	spine, err := store.ReadSpine(a.paths.Spine)
-	if err != nil {
-		t.Fatalf("ReadSpine: %v", err)
-	}
-	allFM, err := store.LoadAllThreadFrontmatter(a.paths, nil, nil)
-	if err != nil {
-		t.Fatalf("LoadAllThreadFrontmatter: %v", err)
-	}
-
-	cases := []struct {
-		name  string
-		query []string
-	}{
-		{"active-match", []string{"alpha", "beta"}},       // hits thr_1 (active) + thr_2 (superseded alpha)
-		{"superseded-only", []string{"alpha"}},            // thr_1 active alpha + thr_2 superseded alpha
-		{"anchor-only", []string{"delta"}},                // thr_2 via anchor
-		{"no-match", []string{"omega", "psi"}},            // no thread shares these
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			ref := scoring.ProposeFromIndex(spine, allFM, tc.query, scoring.Options{Project: "prj_1"})
-
-			got, err := a.ProposeRecall(ctx, tc.query, memops.RecallOptions{Project: "prj_1"})
-			if err != nil {
-				t.Fatalf("ProposeRecall: %v", err)
-			}
-			if len(got) != len(ref) {
-				t.Fatalf("candidate count: index-filtered %d, full-scan %d\n got=%+v\n ref=%+v",
-					len(got), len(ref), got, ref)
-			}
-			for i := range ref {
-				if got[i].ThreadID != ref[i].ThreadID {
-					t.Errorf("candidate[%d] thread: index-filtered %q, full-scan %q", i, got[i].ThreadID, ref[i].ThreadID)
-				}
-				if got[i].Score != ref[i].Score {
-					t.Errorf("candidate[%d] %s score: index-filtered %v, full-scan %v",
-						i, ref[i].ThreadID, got[i].Score, ref[i].Score)
-				}
-				if strings.Join(got[i].MatchedSymbols, ",") != strings.Join(ref[i].MatchedSymbols, ",") {
-					t.Errorf("candidate[%d] %s matched: index-filtered %v, full-scan %v",
-						i, ref[i].ThreadID, got[i].MatchedSymbols, ref[i].MatchedSymbols)
-				}
-			}
-		})
-	}
-}
-
-// TestProposeRecall_MissingIndexDegradesToFullScan asserts the
-// robustness contract: with no symbols.jsonl on disk, ProposeRecall
-// still returns the correct full-scan result rather than zero candidates
-// from an absent index. A derived index is never a correctness hazard.
-func TestProposeRecall_MissingIndexDegradesToFullScan(t *testing.T) {
-	a := newAdapter(t)
-	ctx := context.Background()
-
-	rec := validSpine("thr_1", "prj_1")
-	rec.Anchors = []string{"alpha", "beta", "gamma", "delta"}
-	if err := a.CreateThread(ctx, memops.ThreadWrite{Spine: rec, Meta: validFrontmatter(rec)}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-
-	// Deliberately do NOT regenerate symbols.jsonl, and remove any that
-	// store.Init may have laid down, so recallCandidateIDs sees a miss.
-	if err := os.Remove(a.paths.Symbols); err != nil && !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("remove symbols index: %v", err)
-	}
-
-	cands, err := a.ProposeRecall(ctx, []string{"alpha", "beta"}, memops.RecallOptions{Project: "prj_1"})
-	if err != nil {
-		t.Fatalf("ProposeRecall: %v", err)
-	}
-	if len(cands) != 1 || cands[0].ThreadID != "thr_1" {
-		t.Fatalf("missing index must degrade to full scan and still match thr_1; got %+v", cands)
 	}
 }
 
