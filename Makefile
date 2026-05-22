@@ -99,6 +99,18 @@ test: build recall-madlibs
 	go vet ./...
 	go test ./... --count=1
 
+# bench runs benchmarks only (no unit tests) for a package selected by
+# PKG, with a regexp selected by BENCH. Defaults target the recall hot
+# path the #93 frontmatter cache accelerates. allocs/op is the headline:
+# warm cache.LoadAll should sit far below the uncached
+# LoadAllThreadFrontmatter baseline.
+#   make bench
+#   make bench PKG=./internal/recall/scoring BENCH=.
+PKG ?= ./internal/memops/fileadapter
+BENCH ?= BenchmarkProposeRecall
+bench: build
+	go test $(PKG) -run '^$$' -bench '$(BENCH)' -benchmem --count=1
+
 # cover reports aggregate test coverage across all packages. -coverpkg
 # instruments every package for every test binary, so the number
 # reflects how much of the codebase the WHOLE suite exercises — not

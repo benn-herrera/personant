@@ -159,6 +159,31 @@ func BenchmarkProposeRecall_LoadAllThreadFrontmatter(b *testing.B) {
 	}
 }
 
+// BenchmarkProposeRecall_CacheLoadAllWarm times the warm-cache path that
+// REPLACES step 2 in production: a.fmCache.LoadAll over an already-populated
+// cache. The first iteration (b.ResetTimer is after one priming call) is a
+// full parse; every subsequent call is ListThreadIDs (readdir) + map
+// lookups, so the steady-state cost is allocs/op far below the ~650/thread
+// of the uncached BenchmarkProposeRecall_LoadAllThreadFrontmatter baseline.
+func BenchmarkProposeRecall_CacheLoadAllWarm(b *testing.B) {
+	for _, n := range benchThreadCounts {
+		b.Run(fmt.Sprintf("N=%d", n), func(b *testing.B) {
+			a := buildBenchSubstrate(b, n)
+			// Prime the cache so the timed loop is all hits.
+			if _, err := a.fmCache.LoadAll(a.paths, nil); err != nil {
+				b.Fatalf("prime LoadAll: %v", err)
+			}
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if _, err := a.fmCache.LoadAll(a.paths, nil); err != nil {
+					b.Fatalf("cache.LoadAll: %v", err)
+				}
+			}
+		})
+	}
+}
+
 // BenchmarkProposeRecall_ReadSpine times only step 1 — the single
 // spine.jsonl read+parse.
 func BenchmarkProposeRecall_ReadSpine(b *testing.B) {

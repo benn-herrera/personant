@@ -49,6 +49,13 @@ type FileAdapter struct {
 	// hook is for callers that want a live in-process tee (e.g. a CLI
 	// that prints warnings to stderr while a session is running).
 	Logger func(format string, args ...any)
+
+	// fmCache is the write-through parsed-frontmatter cache that backs the
+	// ProposeRecall hot path. Every thread.md frontmatter write site in
+	// this adapter keeps it coherent (write-through on create/engage/
+	// recall-fire, invalidate on archive). See fmcache.go for the
+	// sole-mutator correctness invariant.
+	fmCache *frontmatterCache
 }
 
 // NewFileAdapter constructs an adapter rooted at paths.Home. Caller
@@ -57,7 +64,7 @@ type FileAdapter struct {
 // pin a t.TempDir() and CLI code can honor --home flags without the
 // adapter being involved in the resolution.
 func NewFileAdapter(paths store.PersonantPaths) *FileAdapter {
-	return &FileAdapter{paths: paths}
+	return &FileAdapter{paths: paths, fmCache: newFrontmatterCache()}
 }
 
 // Compile-time assertion that FileAdapter satisfies the port.
@@ -82,6 +89,7 @@ func (a *FileAdapter) CreateThread(ctx context.Context, w memops.ThreadWrite) er
 	if err := writeThread(a.paths, w); err != nil {
 		return fmt.Errorf("fileadapter: create thread: %w", err)
 	}
+	a.fmCache.Put(w.Meta) // write-through: thread.md just written
 	if err := store.AppendSpineRecord(a.paths, w.Spine); err != nil {
 		return fmt.Errorf("fileadapter: append spine: %w", err)
 	}
@@ -105,6 +113,7 @@ func (a *FileAdapter) EngageThread(ctx context.Context, w memops.ThreadWrite) er
 	if err := writeThread(a.paths, w); err != nil {
 		return fmt.Errorf("fileadapter: engage thread: %w", err)
 	}
+	a.fmCache.Put(w.Meta) // write-through: thread.md just rewritten
 	if err := store.UpdateSpineRecord(a.paths, w.Spine); err != nil {
 		return fmt.Errorf("fileadapter: update spine: %w", err)
 	}
@@ -252,6 +261,7 @@ func (a *FileAdapter) RecordRecallFire(ctx context.Context, threadID string) err
 	if err := store.SaveThreadFrontmatter(a.paths, threadID, fm); err != nil {
 		return fmt.Errorf("fileadapter: save thread.md: %w", err)
 	}
+	a.fmCache.Put(fm) // write-through: thread.md just rewritten
 	return nil
 }
 
@@ -302,6 +312,7 @@ func (a *FileAdapter) ArchiveThread(ctx context.Context, threadID string) error 
 	if err := os.RemoveAll(store.ThreadDir(a.paths, threadID)); err != nil {
 		return fmt.Errorf("fileadapter: archive thread %s: remove dir: %w", threadID, err)
 	}
+	a.fmCache.Invalidate(threadID) // thread.md is gone
 	if err := store.RemoveSpineRecord(a.paths, threadID); err != nil {
 		return fmt.Errorf("fileadapter: archive thread %s: remove spine: %w", threadID, err)
 	}
@@ -479,7 +490,7 @@ func (a *FileAdapter) ProposeRecall(ctx context.Context, query []string, opts me
 	if err != nil {
 		return nil, fmt.Errorf("fileadapter: propose recall: read spine: %w", err)
 	}
-	threads, err := store.LoadAllThreadFrontmatter(a.paths, nil)
+	threads, err := a.fmCache.LoadAll(a.paths, a.Logger)
 	if err != nil {
 		return nil, fmt.Errorf("fileadapter: propose recall: load thread frontmatter: %w", err)
 	}
@@ -499,6 +510,28 @@ func (a *FileAdapter) ProposeRecall(ctx context.Context, query []string, opts me
 		}
 	}
 	return out, nil
+}
+
+// InvalidateThread drops the cached parsed frontmatter for threadID,
+// forcing the next ProposeRecall to re-read it from disk.
+//
+// This is the documented escape hatch for the cache-coherence invariant:
+// FileAdapter is the sole thread.md frontmatter mutator in production and
+// sim, so all in-adapter write sites keep the cache coherent automatically.
+// Any out-of-band writer that bypasses the adapter (store.SeedThread in
+// tests, future submind git-merge per #94) MUST call this — or
+// InvalidateAll — after writing, or ProposeRecall may return a stale parse.
+// No production caller invokes this today; it exists for those bypass paths.
+func (a *FileAdapter) InvalidateThread(id string) {
+	a.fmCache.Invalidate(id)
+}
+
+// InvalidateAll clears the entire parsed-frontmatter cache, forcing a full
+// re-parse on the next ProposeRecall. See InvalidateThread for the
+// coherence invariant; use this when an out-of-band writer touched an
+// unknown set of threads (e.g. a bulk git-merge).
+func (a *FileAdapter) InvalidateAll() {
+	a.fmCache.Reset()
 }
 
 // RegenerateDerivedState rebuilds every derived artifact from canonical
