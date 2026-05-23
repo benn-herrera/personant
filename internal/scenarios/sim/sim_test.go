@@ -1013,3 +1013,63 @@ func TestNonLooseTagsNeverPads(t *testing.T) {
 		t.Errorf("unmasked slot: got %d anchors want 5 (no filtering, no padding)", len(got))
 	}
 }
+
+// TestSaltSymbolNotHighSpecificity pins design risk #3: the per-thread
+// salt symbol must NOT trip memops.IsHighSpecificity. A salt classed as
+// high-specificity would carry a projection-class boost and distort
+// anchor ranking. The `t<N>z` form is a plain lowercase identifier — not
+// a URL, file path, or SHA-shaped hex run — so it must classify as
+// ordinary. Checked across a spread of creation orders (including the
+// boundary forms whose digit run could resemble a short hex token).
+func TestSaltSymbolNotHighSpecificity(t *testing.T) {
+	for _, order := range []int{0, 1, 7, 42, 255, 1000, 123456, 9999999} {
+		sym := saltSymbol(order)
+		if memops.IsHighSpecificity(sym) {
+			t.Errorf("saltSymbol(%d)=%q classed high-specificity; salt must be ordinary", order, sym)
+		}
+	}
+}
+
+// TestSimJaccardMatchesScorer pins the shadow-set oracle's scoring rule
+// to the runtime scorer's plain set Jaccard (scoring.go: |matched| /
+// (|q|+|threadSet|-|matched|)) at the default superseded-weight. It also
+// pins the family-sibling coherence case (§2.3): a query of the slot's
+// tags against a sibling carrying {nonLooseTags} ∪ {salt} clears the
+// threshold, while a non-sibling sharing no symbols does not.
+func TestSimJaccardMatchesScorer(t *testing.T) {
+	set := func(xs ...string) map[string]struct{} {
+		m := map[string]struct{}{}
+		for _, x := range xs {
+			m[x] = struct{}{}
+		}
+		return m
+	}
+	tags := []string{"alpha", "beta", "gamma", "delta", "epsilon"}
+
+	// Sibling: same 5 topical tags + one private salt. Jaccard = 5/6.
+	sibling := set("alpha", "beta", "gamma", "delta", "epsilon", saltSymbol(3))
+	if got := simJaccard(tags, sibling); got < simRecallThreshold {
+		t.Errorf("family sibling Jaccard=%.4f below threshold %.2f; sibling must still fire", got, simRecallThreshold)
+	}
+	if want := 5.0 / 6.0; absDiff(simJaccard(tags, sibling), want) > 1e-9 {
+		t.Errorf("sibling Jaccard=%.6f want %.6f", simJaccard(tags, sibling), want)
+	}
+
+	// Non-sibling on a disjoint slot: no topical overlap, own salt. → 0.
+	nonSibling := set("zeta", "eta", "theta", "iota", "kappa", saltSymbol(9))
+	if got := simJaccard(tags, nonSibling); got >= simRecallThreshold {
+		t.Errorf("disjoint non-sibling Jaccard=%.4f >= threshold; must not fire", got)
+	}
+
+	// Empty inputs score 0.
+	if simJaccard(nil, sibling) != 0 || simJaccard(tags, nil) != 0 {
+		t.Error("empty query or empty set must score 0")
+	}
+}
+
+func absDiff(a, b float64) float64 {
+	if a > b {
+		return a - b
+	}
+	return b - a
+}

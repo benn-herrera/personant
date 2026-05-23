@@ -83,9 +83,40 @@ import (
 	"personant/internal/memops"
 	"personant/internal/model"
 	"personant/internal/prompt"
+	"personant/internal/recall/scoring"
 	"personant/internal/scenarios"
 	"personant/internal/turn"
 )
+
+// simRecallThreshold is the minimum symbolic-Jaccard score for the
+// shadow-set recall oracle (§4.2) to declare a dormant thread an
+// expected match. It is set to the PRODUCTION threshold constant rather
+// than a copied literal so the oracle and the runtime's §3.4 layer-1
+// matcher cannot silently diverge: if scoring.DefaultThreshold moves,
+// the oracle moves with it. This is the one permitted coupling — the
+// oracle shares the scoring rule's THRESHOLD and the symbol-set UNION
+// DEFINITION (a contract), while re-deriving set membership
+// independently from the generator's own emission log.
+const simRecallThreshold = scoring.DefaultThreshold
+
+// saltSymbol returns the per-thread unique salt symbol for a thread of
+// creation order `order` (§2.2). It is pure and deterministic — derived
+// from creation order alone, no rng — so the canonical step stream
+// stays a pure function of (Seed, Duration, Corpus).
+//
+// The salt is emitted as an extra model anchor tag on every emission
+// for the thread, so it folds into the runtime's history_symbols and
+// the thread's retained-symbol set. Its sole job: inflate each thread's
+// retained-set union denominator with a private token so that two
+// NON-sibling threads' Jaccard drops below the unrelated-collision
+// regime as the population scales — without ever being a match symbol
+// (the salt is never placed in a recall query Q). The `t%dz` form is a
+// plain lowercase identifier and does NOT trip memops.IsHighSpecificity
+// (it is neither a URL, file path, nor SHA-shaped hex), so it carries
+// no projection-class boost (design risk #3).
+func saltSymbol(order int) string {
+	return fmt.Sprintf("t%dz", order)
+}
 
 // CorpusSlot is one distinguishable recall_madlibs query slot a thread
 // can be bound to. Tags is the slot's fixed mad-libs symbol set (5
@@ -563,6 +594,7 @@ func GenerateWorkload(cfg WorkloadConfig) scenarios.Scenario {
 		},
 		files:         map[int]*fileState{},
 		recallBuckets: map[string]*recallTally{},
+		emittedSyms:   map[int]map[string]struct{}{},
 	}
 	return scenarios.Scenario{
 		Name:       fmt.Sprintf("sim-workload-seed%d-dur%s", cfg.Seed, cfg.Duration),
@@ -778,21 +810,22 @@ func (g *generator) buildRefinementStep() scenarios.Step {
 	newSlotIdx := topicSlots[(pos+1)%len(topicSlots)]
 	g.currentRecallSlotIdx = newSlotIdx
 	slot := g.model.slots[newSlotIdx]
-
-	// Recall oracle for the refinement: dormant threads (not in Layer B,
-	// not the engaged primary) bound to the NEW slot. Same algorithm as
-	// canonical buildStep — only the slot-index differs.
-	var recallIDs []string
-	for _, cand := range g.threads {
-		if cand.order == idx || g.inLayerB(cand.order) {
-			continue
-		}
-		if cand.slotIdx == newSlotIdx {
-			recallIDs = append(recallIDs, cand.threadID())
-		}
-	}
-
 	thr := g.threads[idx]
+
+	// The refining thread emits the new slot's non-loose tags plus its own
+	// salt; record that emission into the shadow set so the oracle stays
+	// coherent with the runtime's accretion.
+	anchorTags := append(nonLooseTags(slot), saltSymbol(thr.order))
+	g.recordEmission(idx, anchorTags)
+
+	// Recall oracle for the refinement: the shadow-set Jaccard rule against
+	// the new slot's query (same rule as canonical buildStep — DRY). Q
+	// mirrors the runtime's coalesced query set: the slot tags PLUS the
+	// engaged (refining) thread's salt, which it emits as a model anchor
+	// this turn (see buildStep's Q note).
+	Q := append(append([]string(nil), slot.Tags...), saltSymbol(thr.order))
+	recallIDs := g.recallExpectedFor(idx, Q, false)
+
 	step := scenarios.Step{
 		// The refinement's TimeDelta is a small jittered rapid gap — the
 		// user issuing a re-phrased follow-up moments later. This
@@ -805,7 +838,7 @@ func (g *generator) buildRefinementStep() scenarios.Step {
 		// new-topic; refinements never spawn).
 		MockResponse: scenarios.NewMockResponseWithTag(
 			[]string{thr.threadID()},
-			nonLooseTags(slot),
+			anchorTags,
 			fmt.Sprintf("Refining %s — %s.",
 				slot.Topic, strings.Join(slot.Tags[:min(2, len(slot.Tags))], ", ")),
 		),
@@ -1026,6 +1059,24 @@ type generator struct {
 	model corpusModel
 
 	threads []thread // by creation order
+
+	// emittedSyms[idx] is the generator's independent shadow of thread
+	// idx's retained symbol set: the union of every model anchor tag the
+	// generator has emitted for that thread (topical slot tags + the
+	// thread's salt). It is the §4.2/§4.3 "shadow retained set" the recall
+	// oracle scores against. Because the runtime's recall match set is the
+	// eviction-free union (anchors ⊆ history_symbols) and the generator's
+	// threads stay far under the 40-symbol eviction cap, this union equals
+	// the runtime's T(thr) by construction — no projection ranking or
+	// active/superseded labeling is needed at the default superseded-weight
+	// of 1.0 (§4.3). It is advanced only by recordEmission (pure, no rng),
+	// so it does not affect the canonical step stream's determinism.
+	//
+	// For increment 1 (monotonic threads) a thread's set is just
+	// {nonLooseTags(slot)} ∪ {salt}; the per-thread accumulator is built as
+	// a general union so increment 2's wander accretion extends it without
+	// changing the oracle.
+	emittedSyms map[int]map[string]struct{}
 
 	// layerB is the generator's model of the runtime's Layer B: thread
 	// indices, most-recently-engaged first, capped at layerBCap. The
@@ -1423,7 +1474,23 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 	thr := g.threads[idx]
 	slot := g.model.slots[thr.slotIdx]
 
-	recallIDs := g.recallExpectedFor(idx, thr.slotIdx, isNew)
+	// Q is the engaging turn's query symbol set as the RUNTIME builds it:
+	// the slot's topical mad-libs tags PLUS the engaged thread's own salt.
+	// The runtime coalesces the turn's user-prompt symbols AND its model
+	// anchor tags into one query set (turn/recall.go:76 →
+	// coalesce.symbolList()), and the engaged thread emits its salt as a
+	// model anchor this turn — so the salt lands in Q at the runtime. The
+	// oracle must mirror that exactly or it manufactures false misses:
+	// omitting the engaged salt makes the oracle's union one smaller than
+	// the runtime's, so on loose-heavy slots the oracle predicts a hit the
+	// runtime (with the larger union) misses. Including it keeps oracle and
+	// runtime coherent. The salt still suppresses NON-sibling collisions —
+	// the engaged salt is in neither a sibling nor a non-sibling, and each
+	// candidate carries its OWN distinct salt in the union (§2.2/§2.3) — so
+	// the density mechanism is intact; the salt is simply also a query
+	// symbol, contrary to the design's §3.4 assumption (SURPRISE; report).
+	Q := append(append([]string(nil), slot.Tags...), saltSymbol(thr.order))
+	recallIDs := g.recallExpectedFor(idx, Q, isNew)
 	recallOpp := len(recallIDs) > 0
 
 	// anchorTags drops loose-cell positions on every step regardless of
@@ -1431,8 +1498,11 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 	// are gone). A new-topic turn now carries nonLooseTags verbatim — 0
 	// anchors is legal (vague start), and the runtime's projection owns the
 	// AnchorProjectionMax ceiling. Engagement/refinement tags carry the same
-	// raw drift set.
-	anchorTags := nonLooseTags(slot)
+	// raw drift set. The thread's per-thread salt symbol (§2.2) is appended
+	// so the runtime folds it into history_symbols — it is a model anchor,
+	// never a query symbol.
+	anchorTags := append(nonLooseTags(slot), saltSymbol(thr.order))
+	g.recordEmission(idx, anchorTags)
 	userInput := defaultUserInput(slot, recallOpp)
 	userDictated := false
 	if udInput, ok := g.maybeUserDictated(tt, isNew, recallOpp, idx, slot); ok {
@@ -1609,6 +1679,18 @@ func (g *generator) campaignEngage(tt turnType, c *campaign, anchorTags []string
 	} else {
 		userInput = fmt.Sprintf("working on #%s", anchorTags[0])
 	}
+
+	// Append the thread's salt (§2.2/§3.4) and record the emission into the
+	// shadow retained set so campaign threads share the same oracle
+	// bookkeeping as normal threads (DRY: one emission path). The salt
+	// follows any topical tags so anchorTags[0] above stays a topical tag
+	// (the user-prompt #-mention must be topical, not the salt). On a
+	// 0-anchor vague turn the only emitted symbol is the salt — that is
+	// correct: a vague thread accretes nothing topical, but it still owns a
+	// private salt token, which never appears in any query Q so it cannot
+	// make the thread spuriously matchable.
+	anchorTags = append(append([]string(nil), anchorTags...), saltSymbol(thr.order))
+	g.recordEmission(idx, anchorTags)
 
 	threads := []string{thr.threadID()}
 	if isNew {
@@ -1822,34 +1904,113 @@ func (g *generator) selectEngagedThread(act action) (idx int, isNew bool) {
 	return idx, isNew
 }
 
-// recallExpectedFor computes the recall-opportunity oracle for the
-// engaging turn: dormant threads (not in Layer B, not the engaged
-// thread) bound to the same corpus slot, in ascending creation order.
+// recordEmission folds the model anchor tags emitted for thread idx on
+// one turn into that thread's shadow retained set (§4.2). It is the
+// generator's independent bookkeeping of what the runtime accretes into
+// history_symbols — fed ONLY by what the generator emits, never by a
+// runtime read. Pure (no rng); called from every emission path
+// (buildStep, campaignEngage) so the oracle and the runtime see the
+// same accretion. The salt is appended by the emission caller, so tags
+// already includes it.
 //
-// A same-slot dormant thread is anchored on the slot's NON-LOOSE tags;
-// the engaging turn's symbol set Q is the slot's full UserInput tags
-// (loose cells included), so the §3.4 Jaccard layer's score is
-// (5-L) / (|T|+L) where L = #loose cells in this slot — a hit when L
-// is small, a probabilistic miss when L is large enough to push the
-// score below the 0.4 threshold (when 5-L < 4 the new-thread tag's
-// inert stub padding up to 4 — see newThreadAnchorTags — inflates the
-// union and makes the deepest-drift slots a clean miss). With
-// FamilySize=2 there is still at most one such dormant sibling, so the
-// expected-match set is small and well-defined; what changed is that
-// the sibling can now legitimately miss, exercising the
-// miss→refinement loop.
+// For increment 1 the union grows monotonically (threads never wander),
+// but the accumulator is a general union so increment 2's wander
+// accretion rides the same path.
+func (g *generator) recordEmission(idx int, tags []string) {
+	set := g.emittedSyms[idx]
+	if set == nil {
+		set = map[string]struct{}{}
+		g.emittedSyms[idx] = set
+	}
+	for _, t := range tags {
+		set[t] = struct{}{}
+	}
+}
+
+// shadowRetainedSet returns thread idx's shadow retained symbol set: the
+// union of every tag the generator has emitted for it, with the thread's
+// salt unioned in defensively (recordEmission already includes it, but a
+// thread that has not yet emitted still carries its salt by definition).
+// This mirrors the runtime's T(thr) = active ∪ superseded-retained ∪
+// salt (§4.3) at the default superseded-weight, where the eviction-free
+// union collapses the active/superseded distinction.
+func (g *generator) shadowRetainedSet(idx int) map[string]struct{} {
+	src := g.emittedSyms[idx]
+	out := make(map[string]struct{}, len(src)+1)
+	for s := range src {
+		out[s] = struct{}{}
+	}
+	out[saltSymbol(g.threads[idx].order)] = struct{}{}
+	return out
+}
+
+// simJaccard computes the set Jaccard of query symbols q against a
+// thread's retained symbol set t: |q ∩ t| / |q ∪ t|. It mirrors the
+// runtime scorer's score at the default superseded-weight 1.0
+// (scoring.go:150-151: |matched| / (|q| + |threadSet| - |matched|)),
+// computed independently from the generator's shadow set. Empty q or t
+// scores 0. Duplicate symbols in q are de-duplicated to match the
+// runtime's set semantics.
+func simJaccard(q []string, t map[string]struct{}) float64 {
+	if len(q) == 0 || len(t) == 0 {
+		return 0
+	}
+	qset := make(map[string]struct{}, len(q))
+	for _, s := range q {
+		qset[s] = struct{}{}
+	}
+	inter := 0
+	for s := range qset {
+		if _, ok := t[s]; ok {
+			inter++
+		}
+	}
+	union := len(qset) + len(t) - inter
+	if union == 0 {
+		return 0
+	}
+	return float64(inter) / float64(union)
+}
+
+// recallExpectedFor computes the recall-opportunity oracle for the
+// engaging turn (§4.2): the dormant threads (not in Layer B, not the
+// engaged thread) whose shadow retained symbol set clears the
+// symbolic-Jaccard threshold against the query Q. The caller passes Q as
+// the runtime builds it — the slot's topical mad-libs tags plus the
+// engaged thread's own salt (the runtime coalesces the turn's model
+// anchor tags into the query set, so the engaged salt lands in Q; see
+// buildStep). The salt still suppresses non-sibling false positives:
+// each candidate carries its own distinct salt in the union and neither
+// shares the engaged salt, so the density mechanism holds (§2.2/§2.3).
+// Returns thread IDs in ascending creation order.
+//
+// This replaces the old O(1) slot-equality rule, which was valid only
+// while every thread was monotonic. It is independent of the runtime
+// (no ProposeFromIndex / ProjectAnchors / store call) — it scores the
+// generator's own emission log — yet coherent with the runtime by
+// construction: same union definition (eviction-free retained-symbol
+// set, anchors ⊆ history_symbols, §4.3), same threshold constant
+// (simRecallThreshold = scoring.DefaultThreshold), and the generator's
+// threads stay far under the 40-symbol eviction cap so no eviction
+// modeling is needed.
+//
+// For a monotonic family sibling: Q = slot tags, the sibling's set =
+// {nonLooseTags(slot)} ∪ {salt}. With no loose cells, Jaccard =
+// |tags| / (|tags|+1) ≈ 5/6 ≫ threshold → the sibling still fires
+// comfortably. A loose-heavy slot (L large) lowers the numerator and
+// can drop below threshold — a legitimate miss the runtime also makes,
+// exercising the miss→refinement loop. A non-sibling on a different
+// slot shares at most incidental cross-topic synonyms and carries its
+// own salt in the union, so its Jaccard sits well below threshold.
 //
 // New-thread turns suppress the recall-opportunity emission: the
 // engaging userInput on a recall opportunity is the slot's full
-// UserInput (5 #-tags including any loose cells), and on a
-// thread-creation turn that pollutes the new thread's coalesced
-// anchors with the loose terms via §3.3 symbol extraction — defeating
-// the loose-filter on anchorTags. The dormant first-family-member
-// still surfaces as the sibling on later continue/switch/resume
-// turns; we drop at most one recall opportunity per family pair
-// (the creation turn of the second member), which costs a handful of
-// samples even on the long rungs.
-func (g *generator) recallExpectedFor(idx, slotIdx int, isNew bool) []string {
+// UserInput (#-tags including any loose cells), and on a
+// thread-creation turn that pollutes the new thread's coalesced anchors
+// with the loose terms via §3.3 symbol extraction — defeating the
+// loose-filter on anchorTags. The dormant first-family-member still
+// surfaces as the sibling on later continue/switch/resume turns.
+func (g *generator) recallExpectedFor(idx int, Q []string, isNew bool) []string {
 	if isNew {
 		return nil
 	}
@@ -1858,7 +2019,7 @@ func (g *generator) recallExpectedFor(idx, slotIdx int, isNew bool) []string {
 		if cand.order == idx || g.inLayerB(cand.order) {
 			continue
 		}
-		if cand.slotIdx == slotIdx {
+		if simJaccard(Q, g.shadowRetainedSet(cand.order)) >= simRecallThreshold {
 			ids = append(ids, cand.threadID())
 		}
 	}
