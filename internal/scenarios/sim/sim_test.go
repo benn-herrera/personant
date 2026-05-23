@@ -183,12 +183,13 @@ const simHeavyInvariantCadence = 24 * time.Hour
 // `1d` keeps `make test` (which passes no flag) on the ~27 s 1-day
 // smoke rung; longer rungs are run via `make sim DURATION=…`.
 var simDuration = flag.String("sim.duration", "1d",
-	"simulation span: 1d|1w|1m|2m|6m, or a Go duration like 168h")
+	"simulation span: 1d|1w|1m|2m|6m, or `<N>d` calendar days like 30d, or a Go duration like 168h")
 
 // parseSimDuration maps the -sim.duration flag value to a span. The
-// named rungs (1d/1w/1m/2m/6m) are the six-month rung walk; any other
-// value falls through to time.ParseDuration so an ad-hoc span like
-// `72h` still works.
+// named rungs (1d/1w/1m/2m/6m) are convenience aliases on the six-month
+// rung walk. A bare `<N>d` form (e.g. 30d, 120d) parses as N calendar
+// days, since time.ParseDuration has no day unit. Any other value falls
+// through to time.ParseDuration so an ad-hoc span like `72h` still works.
 func parseSimDuration(s string) (time.Duration, error) {
 	switch s {
 	case "1d":
@@ -202,7 +203,44 @@ func parseSimDuration(s string) (time.Duration, error) {
 	case "6m":
 		return 180 * 24 * time.Hour, nil
 	default:
+		// Whole-day `<N>d` form: time.ParseDuration has no day unit, so
+		// parse N ourselves. Fractional days (1.5d) are intentionally
+		// unsupported — use the `h` form for sub-day spans.
+		if rest, ok := strings.CutSuffix(s, "d"); ok {
+			if n, err := strconv.Atoi(rest); err == nil && n > 0 {
+				return time.Duration(n) * 24 * time.Hour, nil
+			}
+		}
 		return time.ParseDuration(s)
+	}
+}
+
+func TestParseSimDuration(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    time.Duration
+		wantErr bool
+	}{
+		{"named 1d", "1d", 24 * time.Hour, false},
+		{"general 15d", "15d", 360 * time.Hour, false},
+		{"general 30d", "30d", 720 * time.Hour, false},
+		{"general 120d", "120d", 2880 * time.Hour, false},
+		{"go duration 168h", "168h", 168 * time.Hour, false},
+		{"empty", "", 0, true},
+		{"non-numeric day", "xyzd", 0, true},
+		{"zero days", "0d", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseSimDuration(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("parseSimDuration(%q) err = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Fatalf("parseSimDuration(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -216,7 +254,7 @@ func parseSimDuration(s string) (time.Duration, error) {
 func TestSim(t *testing.T) {
 	d, err := parseSimDuration(*simDuration)
 	if err != nil {
-		t.Fatalf("invalid -sim.duration %q: %v (use 1d|1w|1m|2m|6m or a Go duration like 168h)",
+		t.Fatalf("invalid -sim.duration %q: %v (use 1d|1w|1m|2m|6m, or `<N>d` calendar days like 30d, or a Go duration like 168h)",
 			*simDuration, err)
 	}
 
@@ -754,7 +792,9 @@ func mean(xs []float64) float64 {
 }
 
 // closureCount counts `retire.complete` events in the harness's event
-// log — one per thread closed during the run. It reads h.Paths.LogsDir
+// log — one per closure event: a thread may close, resume, and close
+// again, so this can exceed the number of distinct threads created. It
+// reads h.Paths.LogsDir
 // directly: the harness exposes the substrate paths it actually wrote
 // to, so there is no reliance on undocumented testing.TempDir
 // sibling-directory topology.
