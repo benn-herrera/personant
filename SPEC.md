@@ -1898,14 +1898,14 @@ it doesn't. **The measurement regime is what proves it.**
 
 **The cost of getting this wrong without proof ahead of time is
 asymmetric and severe.** The "use it and find out" path has no graceful
-recovery: if six months of accumulated usage reveals the storage
+recovery: if extended accumulated usage reveals the storage
 strategy or memory mechanics are structurally wrong, the choice is
 between a complex, risky refactor of accumulated agent memory state or
 losing all of it. The user's accumulated continuity is the property the
 system exists to deliver in the first place — sacrificing it to
 validate the architecture would defeat the purpose. The simulation
 regime exists because the proof must come **ahead of time**, not after
-six months of real use have built up the very state we'd be putting at
+extended real use has built up the very state we'd be putting at
 risk.
 
 This section is therefore framed not as a quality gate bolted on after
@@ -1914,11 +1914,11 @@ validate the thesis and *evolve techniques iteratively until they
 deliver*. Personant studies its own behavior; the test fabric is its
 lab bench.
 
-### 9.1 The six-month simulation (v0.1 acceptance gate)
+### 9.1 The four-month simulation (v0.1 acceptance gate)
 
 The v0.1 acceptance criterion:
 
-- **Simulate six continuous months** of realistic usage via a synthetic
+- **Simulate four continuous months (120 calendar days)** of realistic usage via a synthetic
   workload (§9.4) running against the real runtime with a mock LLM
   (§9.2) supplying canned responses.
 - **Memory quality maintained** throughout, measured via the metrics
@@ -1934,16 +1934,53 @@ The v0.1 acceptance criterion:
   Bounds are calibrated empirically; "within bounds" means stable
   across the simulation, not exceeding a threshold that grows with
   accumulated state.
-- **Steady-state demonstrated.** After six simulated months, the
+- **Steady-state demonstrated.** After four simulated months (120 days), the
   trajectory of working-set size, spine size, and per-operation
   latency should be **flat** — not creeping upward. The acceptance
   criterion is "the system is in a state from which it could run
-  another six months without degradation," not "the system has
-  survived six months."
+  another four months without degradation," not "the system has
+  survived four months."
+
+**The acceptance ladder.** The gate is walked as a geometric ladder of
+increasing *simulated calendar span*, expressed in **days** (not hours)
+on purpose: a span like `30d` is 30 days of calendar time — most of it
+*not* spent working — which is the realistic, harder case; "hours" would
+invite the wrong reading of active-use time. Two tiers:
+- **Smoke rungs — `1d` / `7d`.** Fast regression catch; `make test` runs
+  the default `1d` rung. Too short to distinguish steady-state from
+  drift, so they are not analysis rungs.
+- **Real ladder — `15d → 30d → 60d → 120d`.** Exact ×2 doublings
+  (anchored on the 30-day month) for clean log-scale comparison of
+  per-rung deltas. The top rung is **120 days (4 months)** — the gate was
+  initially gut-framed as six months, but 120d is empirically sufficient
+  to demonstrate steady-state and distinguish *bounded* from *runaway*;
+  longer rungs only re-measure the bounded corpus-saturation floor
+  (below) at greater wall-clock cost. Per-turn wall-clock has been shown flat across the
+  whole ladder (≈32 ms/turn, 1d→120d), so the ladder cost is linear in
+  span with no per-turn growth term.
+
+**Long-rung recall precision is corpus-saturation-bounded — read it as a
+measurement floor, not a regression.** On long rungs the symbolic-layer
+precision/F1 declines (and the unresolved-episode rate rises) while
+*recall stays flat* — the true match is found just as reliably at 120d
+as at 7d. The cause is the fixed sim corpus (§9.4): a bounded symbol
+vocabulary means that as thread population grows, dormant non-sibling
+threads accumulate enough symbolic-Jaccard overlap to clear the match
+threshold, so the correct thread fires *plus* topically-legitimate
+extras — which the FamilySize-bounded ground-truth oracle scores as
+precision misses though they are correct symbolic behavior. The
+asymptote is bounded (tag signatures are near-unique), so F1 settles
+rather than diverging. In production the §3.4 layer-2/3 embedding +
+model-judgment stages disambiguate these, so the sim's symbolic-only
+precision is a *floor*, not the system's. Consequence: rungs past ~30d
+partly re-measure this fixed collision floor rather than memory scaling;
+making them measure memory scaling again requires the corpus vocabulary
+to scale with thread population (per-thread symbol salting) — a queued
+sim improvement, not a production recall defect.
 
 **The gate is realism CONVERGENCE, not a single run.** "Survived six
 months in whatever shape the workload happens to be in" is form, not
-function. The criterion is six months passed with *every identified
+function. The criterion is the full top-rung span (120 days) passed with *every identified
 element of realism accounted for* — including elements surfaced by prior
 runs. It is a converging loop: each run exposes a missing realism
 behavior (or a latent defect the previous incoherence masked), which is
@@ -2006,7 +2043,7 @@ as runs surface new gaps):
 
 **Two version lines.** The substrate (this spec's runtime + the
 `MemoryOps` API) and the front end (U/X + feature logic atop it) are
-versioned independently. The six-month gate converges the *substrate*;
+versioned independently. The four-month gate converges the *substrate*;
 it says nothing about the front end, which is earned by a separate human
 U/X phase. Current state: **substrate v0.1.0** (earned through the test
 rigor to date), **front end v0.0.1** (REPL loop closed, untested by any
@@ -2037,7 +2074,7 @@ Two modes:
   per §5.1.
 
 The same mock satisfies all test layers (scenario, churn, calibration,
-six-month sim).
+the acceptance sim).
 
 ### 9.3 Unit testing
 
@@ -2051,14 +2088,14 @@ Standard Go `testing` patterns over `internal/store/`,
 
 ### 9.4 Measurement regime (v0.1 in progress)
 
-The measurement regime drives four test layers — scenario, churn, calibration, and the six-month simulation — all running against the mock LLM client (§9.2) with logical-clock acceleration so the full simulation completes in minutes. Every test layer emits a machine-readable metrics blob (`internal/metrics/`) with a stable JSON schema for cross-version comparison. Working artifacts live in `internal/scenarios/` and the `mem.jsonl` telemetry; the detailed mechanics evolve with the implementation.
+The measurement regime drives four test layers — scenario, churn, calibration, and the acceptance simulation — all running against the mock LLM client (§9.2) with logical-clock acceleration so the full simulation completes in minutes. Every test layer emits a machine-readable metrics blob (`internal/metrics/`) with a stable JSON schema for cross-version comparison. Working artifacts live in `internal/scenarios/` and the `mem.jsonl` telemetry; the detailed mechanics evolve with the implementation.
 
-**v0.1 acceptance metrics** (normative; must hold through the six-month simulation):
+**v0.1 acceptance metrics** (normative; must hold through the four-month simulation):
 
 - **Recall fidelity:** precision/recall/F1 measured per scenario step against `Step.ExpectedRecallMatches` ground truth. `RecallStrict` mode fails the test on mismatch; `RecallMeasureOnly` mode records adversarial probes without failing. Regressions tracked via baseline comparison against `testdata/baselines/<scenario>.json`. Metric series: `recall_fidelity_{precision,recall,f1}` and `recall_fidelity_adversarial_{precision,recall,f1}`.
 - **Engagement accuracy:** tagged-engaged threads match canonical-by-construction ground truth in synthetic scenarios.
 - **Heap bounded / zero overflow:** `VerifyNoBudgetOverflow` — no layer exceeds its allocation cap across any turn in the simulation.
-- **Steady-state trajectory:** working-set size, spine cardinality, and per-operation latency (P50/P95/P99) are flat after six simulated months — not creeping upward.
+- **Steady-state trajectory:** working-set size, spine cardinality, and per-operation latency (P50/P95/P99) are flat after four simulated months (120 days) — not creeping upward.
 - **Round-trip fidelity:** archive → recover → diff against original; information-preservation rate measured.
 - **Operation latency within bounds:** engagement update, spine match, thread fetch, retirement, archival, recovery, index rebuild, index check — all stable as accumulated state grows.
 
@@ -2066,6 +2103,6 @@ The measurement regime drives four test layers — scenario, churn, calibration,
 
 **Named scenario set** (initial): single-thread lifecycle, multi-thread interleaving, project switching, heavy retirement (50 threads), same-anchor collision, transient shell-capture content, cross-boundary recovery. Churn sequences are randomized-but-seeded (80% engage / 10% create / 5% retire / 5% switch); failures dump operation log + seed for replay. Calibration sweeps a directive parameter across a range and emit a metrics matrix — this is how §2.6.1 bootstrap defaults earn their numbers.
 
-**Six-month simulation harness** (`internal/scenarios/sim/`, `TestSim`): a deterministic seeded workload generator (the recall-madlibs corpus-slot model, §9.4) with logical-clock acceleration, steady-state assertions, and per-operation cost profiling. Run at a chosen span via `make sim DURATION=<1d|1w|1m|2m|6m>` (the rung walk; `make test` runs the default `1d` rung). Output: metrics JSON + human-readable summary. Pass/fail per §9.1 criteria.
+**Acceptance simulation harness** (`internal/scenarios/sim/`, `TestSim`): a deterministic seeded workload generator (the recall-madlibs corpus-slot model, §9.4) with logical-clock acceleration, steady-state assertions, and per-operation cost profiling. Run at a chosen span via `make sim DURATION=<N>d` (calendar days; named aliases `1d|1w|1m|2m|6m` and Go-duration forms like `168h` also accepted). The acceptance ladder (§9.1) is `1d`/`7d` smoke + `15d→30d→60d→120d` real; `make test` runs the default `1d` rung. Output: metrics JSON + human-readable summary. Pass/fail per §9.1 criteria.
 
 

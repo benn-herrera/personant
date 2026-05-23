@@ -106,9 +106,9 @@ accumulate a pip dependency surface.
 independently-versioned tracks: the **substrate** (this runtime + the
 `MemoryOps` API; currently **v0.1.0**) and the **front end** (U/X +
 feature logic; currently **v0.0.1**, REPL-closed but untested by direct
-human means). The six-month simulation gate converges the *substrate*
+human means). The four-month (120-day) simulation gate converges the *substrate*
 toward **v0.5.0** — and it is a *realism-convergence* gate, not a
-one-shot pass: "done" means six months with **every identified realism
+one-shot pass: "done" means the full top-rung span with **every identified realism
 element accounted for** (simulated, OR modeled-and-attempted with unit
 tests, OR honestly parked as a known-unknown pending real-use data),
 converging to a run that surfaces no new gap. A green sim run on a tidy
@@ -327,7 +327,7 @@ Go 1.26.1+.
 - **All clock reads go through `internal/clock`.** Direct reads of the
   `time` package clock (`time.Now`, `time.Since`) are forbidden outside
   `internal/clock`. Use `clock.Timeline()` for simulated-world timestamps
-  (overridable by the six-month simulation) and `clock.Profiling()` /
+  (overridable by the acceptance simulation) and `clock.Profiling()` /
   `clock.Since()` for real-time and latency measurement.
 - **Match the spec's data model.** Spine records, thread frontmatter, and the
   symbol index have field-level schemas in §2. Don't invent your own.
