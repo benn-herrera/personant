@@ -165,8 +165,20 @@ verbatim (Q = current slot tags), preserving the existing `defaultUserInput` rec
 ### 3.4 Salt on emissions
 
 Every emission also carries `saltSymbol(thr.order)` as a model anchor tag (§2.2). It accretes
-into history_symbols but, being a single low-Count token never re-emitted as a *query*, it
-does not enter or distort the top-8 topical projection meaningfully and never appears in Q.
+into history_symbols and, being a single low-Count token, does not distort the top-8 topical
+projection meaningfully.
+
+**CORRECTION (increment 1, commit 90044d9):** the original claim that the salt "never appears
+in Q" was WRONG about runtime behavior. The runtime coalesces the *engaged turn's* model anchor
+tags into the recall query set (`turn/recall.go` → `coalesce.symbolList()`), so the engaged
+thread's OWN salt lands in Q. The oracle MUST mirror this exactly — `Q = slot tags ∪
+{saltSymbol(engagedThread)}` — or it manufactures false misses on borderline-loose slots (the
+oracle's Q would be one symbol smaller than the runtime's union). The density mechanism is
+unaffected: each *candidate* thread carries its own DISTINCT salt in its retained set, so the
+engaged thread's salt-in-Q matches only the engaged thread itself (never a recall candidate),
+while every candidate's private salt still inflates its union denominator. This is a worked
+example of invariant #2 (oracle coherence) requiring the oracle to track the runtime's ACTUAL
+query construction, not an idealized one.
 
 ## 4. The oracle redesign — THE CRUX
 
