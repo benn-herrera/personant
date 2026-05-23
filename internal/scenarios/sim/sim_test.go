@@ -380,6 +380,13 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// projection-churn). These are the §9.4 instrument the redesign validates.
 	recordLifecycleMetrics(t, h, gen)
 
+	// Fold the within-session interleaving telemetry (SPEC §9.1 "too
+	// coherent" concern, measured rather than asserted): distinct
+	// slots/threads per session, turns per session, and topic dwell
+	// run-length. Pure post-emission bookkeeping accumulated by the
+	// generator; no rng, no control-flow influence.
+	recordInterleaveMetrics(h, gen)
+
 	if err := h.Metrics.WriteJSON(h.MetricsPath); err != nil {
 		t.Fatalf("re-write metrics blob with episode stats: %v", err)
 	}
@@ -481,6 +488,22 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 		m.Gauges["projection_churn"])
 	t.Logf("vague-new became-matchable turn: mean %.2f over %d campaigns (unmatchable before accretion)",
 		m.Gauges["vague_match_turn_mean"], int(m.Gauges["vague_match_campaigns"]))
+
+	// Within-session interleaving (SPEC §9.1). Low mean dwell + high
+	// distinct-slots ⇒ highly interleaved; high dwell + low distinct ⇒
+	// coherent/clustered. Measures the concern instead of asserting it.
+	slots := m.Histograms[metricSessionDistinctSlots]
+	threadsPer := m.Histograms[metricSessionDistinctThreads]
+	turnsPer := m.Histograms[metricSessionTurns]
+	dwell := m.Histograms[metricTopicDwellRunlen]
+	t.Logf("=== workload interleaving ===")
+	t.Logf("distinct slots/session:   mean %.2f max %d (within-session topic diversity)",
+		mean(slots), int(maxOf(slots)))
+	t.Logf("distinct threads/session: mean %.2f max %d",
+		mean(threadsPer), int(maxOf(threadsPer)))
+	t.Logf("turns/session:            mean %.2f", mean(turnsPer))
+	t.Logf("topic dwell run-length:   mean %.2f (consecutive turns on one thread before a cross-topic move)",
+		mean(dwell))
 
 	// R6 (Build-Plan §4): history_len / ever_central must not blow past the
 	// hard cap. The cap is a storage invariant the runtime enforces; a
@@ -683,6 +706,66 @@ func TestGenerateWorkload_Deterministic(t *testing.T) {
 	}
 }
 
+// TestWorkloadInterleaveMetrics_Invariants drains a small deterministic
+// workload and asserts the within-session interleaving telemetry (SPEC
+// §9.1) is populated and structurally consistent. It checks invariants,
+// not exact values (which would be brittle): the four per-session series
+// have equal length (one sample per non-empty session); within each
+// session distinct-thread count ≤ turns and ≥ 1; and the dwell run-length
+// samples partition the turns (their sum equals total turns).
+func TestWorkloadInterleaveMetrics_Invariants(t *testing.T) {
+	corpus := loadCorpusSlots(t)
+	cfg := WorkloadConfig{Seed: simSeed, Duration: simDayDuration, Corpus: corpus}
+	sc := GenerateWorkload(cfg)
+	gen := sc.StepSource.(*generator)
+
+	// Draining the on-demand stream runs every session, populating the
+	// generator's interleaving slices as a side effect.
+	steps := drainSteps(sc)
+	if len(steps) == 0 {
+		t.Fatal("no steps emitted; cannot exercise interleaving telemetry")
+	}
+
+	n := len(gen.sessionTurns)
+	if n == 0 {
+		t.Fatal("sessionTurns empty; interleaving telemetry not populated")
+	}
+	if len(gen.sessionDistinctSlots) != n || len(gen.sessionDistinctThreads) != n {
+		t.Fatalf("per-session series length mismatch: turns=%d slots=%d threads=%d",
+			n, len(gen.sessionDistinctSlots), len(gen.sessionDistinctThreads))
+	}
+
+	// Per-session structural invariants.
+	totalTurns := 0
+	for i := 0; i < n; i++ {
+		turns := gen.sessionTurns[i]
+		totalTurns += turns
+		if turns < 1 {
+			t.Errorf("session %d: turns=%d, want >=1 (only non-empty sessions push samples)", i, turns)
+		}
+		if dt := gen.sessionDistinctThreads[i]; dt < 1 || dt > turns {
+			t.Errorf("session %d: distinct threads=%d not in [1,%d]", i, dt, turns)
+		}
+		if ds := gen.sessionDistinctSlots[i]; ds < 1 || ds > turns {
+			t.Errorf("session %d: distinct slots=%d not in [1,%d]", i, ds, turns)
+		}
+	}
+
+	// Dwell runs partition the emitted turns: every step belongs to
+	// exactly one maximal same-thread run, so the run lengths sum to the
+	// total turn count and each is >=1.
+	dwellSum := 0
+	for i, r := range gen.topicDwellRuns {
+		if r < 1 {
+			t.Errorf("dwell run %d: length=%d, want >=1", i, r)
+		}
+		dwellSum += r
+	}
+	if dwellSum != totalTurns {
+		t.Errorf("dwell run-lengths sum to %d, want total turns %d", dwellSum, totalTurns)
+	}
+}
+
 // TestSim_DormantResumptionDrivesMidTurnFetch proves the coverage gap
 // the package doc used to flag as untested is now exercised: a
 // generated workload schedules `resume` actions onto recently-dormant
@@ -789,6 +872,38 @@ func mean(xs []float64) float64 {
 		sum += x
 	}
 	return sum / float64(len(xs))
+}
+
+// maxOf returns the largest sample, or 0 for an empty series.
+func maxOf(xs []float64) float64 {
+	var m float64
+	for _, x := range xs {
+		if x > m {
+			m = x
+		}
+	}
+	return m
+}
+
+// recordInterleaveMetrics folds the generator's within-session
+// interleaving telemetry (SPEC §9.1) into the run's metrics blob: one
+// sample per session for distinct slots/threads and turns, one sample per
+// maximal same-thread dwell run for run-length. The generator owns the
+// raw slices (no rng, pure post-emission bookkeeping); this keeps the
+// generator metrics-package-free, mirroring recordLifecycleMetrics.
+func recordInterleaveMetrics(h *scenarios.Harness, gen *generator) {
+	for _, v := range gen.sessionDistinctSlots {
+		h.Metrics.Record(metricSessionDistinctSlots, float64(v))
+	}
+	for _, v := range gen.sessionDistinctThreads {
+		h.Metrics.Record(metricSessionDistinctThreads, float64(v))
+	}
+	for _, v := range gen.sessionTurns {
+		h.Metrics.Record(metricSessionTurns, float64(v))
+	}
+	for _, v := range gen.topicDwellRuns {
+		h.Metrics.Record(metricTopicDwellRunlen, float64(v))
+	}
 }
 
 // closureCount counts `retire.complete` events in the harness's event

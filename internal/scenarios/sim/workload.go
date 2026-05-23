@@ -999,6 +999,17 @@ func (g *generator) runDayOff() {
 // fetch) — and so the recall oracle can exclude resident threads.
 const layerBCap = 3
 
+// Within-session interleaving metric keys (SPEC §9.1 "too coherent"
+// concern). Defined here so the generator data, the metrics fold, and
+// the summary share one source of truth. Each is a histogram series with
+// one sample per session (per maximal dwell run for the dwell key).
+const (
+	metricSessionDistinctSlots   = "workload_session_distinct_slots"
+	metricSessionDistinctThreads = "workload_session_distinct_threads"
+	metricSessionTurns           = "workload_session_turns"
+	metricTopicDwellRunlen       = "workload_topic_dwell_runlen"
+)
+
 // generator is the resumable workload state machine. It implements
 // scenarios.StepSource: each Next() call yields one scenarios.Step,
 // advancing the simulated calendar a day at a time rather than building
@@ -1134,6 +1145,26 @@ type generator struct {
 	// (ever-central / history-length / superseded-symbol counts are folded
 	// by the test from post-run frontmatter, not tracked on the generator.)
 	vagueMatchTurns []int
+
+	// Within-session interleaving telemetry — pure post-emission
+	// bookkeeping accumulated from each session's emitted bufSteps
+	// (slotIdx / engagedIdx). These draw no rng and do not influence
+	// control flow; the test folds them into the metrics blob post-run
+	// (SPEC §9.1 "too coherent" concern, measured rather than asserted).
+	// One sample per session per series, plus one dwell sample per
+	// maximal same-engagedIdx run.
+	sessionDistinctSlots   []int // distinct slotIdx touched per session
+	sessionDistinctThreads []int // distinct engagedIdx touched per session
+	sessionTurns           []int // emitted-step count per session
+	topicDwellRuns         []int // length of each maximal same-engagedIdx run
+
+	// Per-session interleaving accumulators, reset at runSession start.
+	sessSlots     map[int]struct{}
+	sessThreads   map[int]struct{}
+	sessTurnCount int
+	dwellPrev     int  // engagedIdx of the current dwell run
+	dwellLen      int  // length of the current dwell run
+	dwellActive   bool // a run is in progress (>=1 step seen this session)
 }
 
 // recallTally is a {hits, total} pair for one lifecycle recall bucket.
@@ -1214,6 +1245,7 @@ func (g *generator) inLayerB(idx int) bool {
 func (g *generator) runSession(active time.Duration) {
 	sessionStart := g.stepIndex
 	emitted := false
+	g.beginInterleaveSession()
 	var spent time.Duration
 	for spent < active {
 		tt := g.sampleTurnType()
@@ -1229,6 +1261,7 @@ func (g *generator) runSession(active time.Duration) {
 		bs := g.buildStep(tt, act)
 		bs.step.TimeDelta = td
 		g.appendStep(bs)
+		g.observeInterleave(bs)
 		emitted = true
 
 		// Advance the clock by this turn's gap; it becomes the next
@@ -1241,6 +1274,51 @@ func (g *generator) runSession(active time.Duration) {
 	}
 	if emitted {
 		g.sessionStarts = append(g.sessionStarts, sessionStart)
+		g.finalizeInterleaveSession()
+	}
+}
+
+// beginInterleaveSession resets the per-session interleaving accumulators.
+// Called once at the top of every runSession.
+func (g *generator) beginInterleaveSession() {
+	g.sessSlots = map[int]struct{}{}
+	g.sessThreads = map[int]struct{}{}
+	g.sessTurnCount = 0
+	g.dwellPrev = 0
+	g.dwellLen = 0
+	g.dwellActive = false
+}
+
+// observeInterleave folds one just-emitted step into the per-session
+// interleaving accumulators. Pure bookkeeping: no rng, no control flow.
+func (g *generator) observeInterleave(bs bufStep) {
+	g.sessSlots[bs.slotIdx] = struct{}{}
+	g.sessThreads[bs.engagedIdx] = struct{}{}
+	g.sessTurnCount++
+
+	// Topic dwell: extend the current run while engagedIdx is unchanged;
+	// otherwise flush the finished run and start a new one.
+	if g.dwellActive && bs.engagedIdx == g.dwellPrev {
+		g.dwellLen++
+		return
+	}
+	if g.dwellActive {
+		g.topicDwellRuns = append(g.topicDwellRuns, g.dwellLen)
+	}
+	g.dwellPrev = bs.engagedIdx
+	g.dwellLen = 1
+	g.dwellActive = true
+}
+
+// finalizeInterleaveSession pushes the per-session summary samples and
+// flushes the final in-progress dwell run. Called once per non-empty
+// session (a session that emitted no steps contributes no samples).
+func (g *generator) finalizeInterleaveSession() {
+	g.sessionDistinctSlots = append(g.sessionDistinctSlots, len(g.sessSlots))
+	g.sessionDistinctThreads = append(g.sessionDistinctThreads, len(g.sessThreads))
+	g.sessionTurns = append(g.sessionTurns, g.sessTurnCount)
+	if g.dwellActive {
+		g.topicDwellRuns = append(g.topicDwellRuns, g.dwellLen)
 	}
 }
 
