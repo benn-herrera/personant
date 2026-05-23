@@ -178,7 +178,7 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 	}
 	h.foldEventLines(stepLines)
 	matchFires := matchFireSet(stepLines)
-	recordRecallFidelity(t, h, idx, label, step.RecallMode, step.ExpectedRecallMatches, matchFires)
+	expectedForgiven := recordRecallFidelity(t, h, idx, label, step.RecallMode, step.ExpectedRecallMatches, matchFires)
 
 	// Per-step metrics.
 	h.Metrics.Counter("turns", 1)
@@ -207,9 +207,10 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 	runInvariants(t, h, perStepInvariants(h, step), label)
 
 	return StepFeedback{
-		Index:            idx,
-		RecallMatchFires: len(matchFires),
-		RecallExpected:   len(step.ExpectedRecallMatches),
+		Index:                  idx,
+		RecallMatchFires:       len(matchFires),
+		RecallExpected:         len(step.ExpectedRecallMatches),
+		RecallExpectedForgiven: expectedForgiven,
 	}
 }
 

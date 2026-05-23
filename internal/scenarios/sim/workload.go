@@ -664,10 +664,14 @@ type dayBuf struct {
 // relies on.
 func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool) {
 	// Tally the just-run step into its lifecycle recall bucket, if any. The
-	// hit predicate matches the episode loop's (observed match-fires meet
-	// the declared expected count). A zero-feedback drainSteps run reports
-	// RecallExpected==0, so the bucket total only advances under a real run
-	// — the buckets are observability, not part of the canonical stream.
+	// hit predicate matches the episode loop's: observed match-fires meet
+	// the FORGIVEN expected count (archived/absent-from-spine expectations
+	// removed, exactly as the F1 path forgives them), not the raw declared
+	// count — counting an archived sibling the runtime cannot surface as a
+	// miss would measure oracle staleness, not recall. A zero-feedback
+	// drainSteps run reports RecallExpected==0, so the bucket total only
+	// advances under a real run — the buckets are observability, not part
+	// of the canonical stream.
 	if g.lastBucket != "" && feedback.RecallExpected > 0 {
 		tally := g.recallBuckets[g.lastBucket]
 		if tally == nil {
@@ -675,7 +679,7 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 			g.recallBuckets[g.lastBucket] = tally
 		}
 		tally.total++
-		if feedback.RecallMatchFires >= feedback.RecallExpected {
+		if feedback.RecallMatchFires >= feedback.RecallExpectedForgiven {
 			tally.hits++
 			if g.lastVagueTurn > 0 && g.vagueArmed {
 				// Record only the FIRST matchable turn of this vague
@@ -688,11 +692,21 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 	g.lastBucket = ""
 	g.lastVagueTurn = 0
 
-	// Process the just-completed step's outcome.
+	// Process the just-completed step's outcome. The hit predicate uses
+	// the FORGIVEN expected count: archived / absent-from-spine
+	// expectations are removed (mirroring the F1/precision path in
+	// recordRecallFidelity), so an episode whose expected set is ENTIRELY
+	// archived (RecallExpectedForgiven == 0) closes as a HIT — there is
+	// nothing recoverable to find — rather than missing through all 3
+	// refinement attempts and inflating the unresolved rate in lockstep
+	// with archival. The episode-open gate stays keyed on the raw declared
+	// count (this WAS a recall opportunity), keeping the canonical step
+	// stream a pure function of (Seed, Duration, Corpus); only this
+	// measurement-side comparison forgives.
 	if g.recallEpisodeOpen && feedback.RecallExpected > 0 {
 		switch {
-		case feedback.RecallMatchFires >= feedback.RecallExpected:
-			// HIT — close the episode and record queries-to-hit.
+		case feedback.RecallMatchFires >= feedback.RecallExpectedForgiven:
+			// HIT (or nothing recoverable) — close and record queries-to-hit.
 			g.closeEpisodeHit()
 		case g.recallAttempts < 3:
 			// MISS with attempts remaining — inject a refinement turn
@@ -1182,8 +1196,9 @@ type generator struct {
 	// recallBuckets accumulates per-bucket {hits, total} recall tallies for
 	// the lifecycle oracles (drift_recall_origin, drift_recall_dest,
 	// abandoned_premise_recall). A step counts toward `total` once its
-	// feedback arrives; toward `hits` when RecallMatchFires >= RecallExpected
-	// (the same hit predicate the episode loop uses). The test reads these
+	// feedback arrives; toward `hits` when RecallMatchFires >=
+	// RecallExpectedForgiven (the same forgiven hit predicate the episode
+	// loop uses — archived expectations are not counted as misses). The test reads these
 	// post-run and writes the ratios into the metrics blob, keeping the
 	// generator metrics-package-free.
 	recallBuckets map[string]*recallTally

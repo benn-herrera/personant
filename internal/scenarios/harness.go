@@ -196,6 +196,21 @@ type StepFeedback struct {
 	// declared (len of Step.ExpectedRecallMatches); 0 for an unmeasured
 	// step.
 	RecallExpected int
+
+	// RecallExpectedForgiven is the count of expected matches that remain
+	// recoverable after removing archived / absent-from-spine threads —
+	// the same forgiveness the F1/precision path applies in
+	// recordRecallFidelity. The recall-episode hit/miss counter MUST use
+	// THIS, not raw RecallExpected: an expected sibling the runtime has
+	// since archived out of the spine can never produce a
+	// `spine.match-fire`, so counting it as a miss penalizes the oracle
+	// for naming an archived thread the runtime cannot surface — which
+	// makes the unresolved-episode rate track archival rather than real
+	// recall loss, and disagrees with how the F1 path already scores the
+	// very same step. 0 (the zero-value default) on an unmeasured step
+	// and on the zero-feedback drainSteps path, keeping the canonical
+	// step stream a pure function of (Seed, Duration, Corpus).
+	RecallExpectedForgiven int
 }
 
 // StepSource yields scenario steps on demand instead of materialising

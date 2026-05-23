@@ -226,11 +226,17 @@ func recallFidelity(expected, actual []string) (precision, recall, f1 float64) {
 //
 // Lives next to its helpers so the harness file stays focused on
 // scenario plumbing.
-func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode RecallFidelityMode, expected, actual []string) {
+// recordRecallFidelity returns the FORGIVEN expected count — the number
+// of expected matches that survive the archival/absent-from-spine filter
+// below (len(kept)). The caller threads this into
+// StepFeedback.RecallExpectedForgiven so the recall-episode hit/miss
+// counter forgives archived expectations exactly as this F1/precision
+// path does. An unmeasured step (expected == nil) returns 0.
+func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode RecallFidelityMode, expected, actual []string) int {
 	t.Helper()
 	if expected == nil {
 		h.Metrics.Counter("recall_fidelity_unmeasured_steps", 1)
-		return
+		return 0
 	}
 
 	// Archival-forgiveness filter: a step's expected set may name a
@@ -262,6 +268,10 @@ func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode 
 		h.Metrics.Counter("recall_fidelity_archival_forgiven", forgiven)
 	}
 	expected = kept
+	// Forgiven expected count: what remains recoverable after archival/
+	// absent filtering. Returned to the caller so the recall-episode
+	// counter scores this step with the same forgiveness as the F1 path.
+	expectedForgiven := len(kept)
 
 	precision, recall, f1 := recallFidelity(expected, actual)
 
@@ -270,7 +280,7 @@ func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode 
 		h.Metrics.Record("recall_fidelity_adversarial_precision", precision)
 		h.Metrics.Record("recall_fidelity_adversarial_recall", recall)
 		h.Metrics.Record("recall_fidelity_adversarial_f1", f1)
-		return
+		return expectedForgiven
 	}
 
 	h.Metrics.Counter("recall_fidelity_measured_steps", 1)
@@ -279,10 +289,11 @@ func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode 
 	h.Metrics.Record("recall_fidelity_f1", f1)
 	unexpected, missing := recallFidelityMismatch(expected, actual)
 	if len(unexpected) == 0 && len(missing) == 0 {
-		return
+		return expectedForgiven
 	}
 	t.Errorf("scenario step %d (%s): recall-fidelity mismatch: expected=%v actual=%v unexpected=%v missing=%v",
 		idx+1, label, expected, actual, unexpected, missing)
+	return expectedForgiven
 }
 
 // recallFidelityMismatch returns the sorted unexpected (false-positive)
