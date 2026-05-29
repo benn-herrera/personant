@@ -206,10 +206,31 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 
 	runInvariants(t, h, perStepInvariants(h, step), label)
 
+	// Archival-forgiveness predicate for a StepSource that measures recall
+	// against a target it did NOT declare as an expected match (the #96
+	// abandoned-topic probe). Mirrors recordRecallFidelity's filter: a
+	// target on the live spine is recoverable; one absent AND in the
+	// archive-delete log is forgiven (not recoverable); one absent but not
+	// archived is an unexplained absence, conservatively recoverable (a real
+	// miss). Built from postSpine (already read) so no extra spine read.
+	livePost := make(map[string]struct{}, len(postSpine))
+	for _, r := range postSpine {
+		livePost[r.ID] = struct{}{}
+	}
+	recoverable := func(id string) bool {
+		if _, onSpine := livePost[id]; onSpine {
+			return true
+		}
+		_, wasArchived := h.archivedThreadIDs[id]
+		return !wasArchived
+	}
+
 	return StepFeedback{
 		Index:                  idx,
 		RecallMatchFires:       len(matchFires),
+		RecallMatchFireIDs:     matchFires,
 		RecallExpected:         len(step.ExpectedRecallMatches),
+		TargetRecoverable:      recoverable,
 		RecallExpectedForgiven: expectedForgiven,
 	}
 }

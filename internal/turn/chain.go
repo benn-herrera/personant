@@ -43,7 +43,7 @@ type fileEdit struct {
 	hash    string
 }
 
-// userTagRE matches user-emitted hash-tags in a prompt. The character
+// UserTagRE matches user-emitted hash-tags in a prompt. The character
 // class deliberately excludes uppercase letters — the §2.7.2
 // normalization downcase happens via memops.Normalize after extraction,
 // but the surface form for tag-class symbols is conventionally lower
@@ -51,7 +51,12 @@ type fileEdit struct {
 //
 // Pattern matches: "#alpha-beta", "#feat_2", "#a"; rejects:
 // "#-leading-dash", "trailing#" without a leading word boundary.
-var userTagRE = regexp.MustCompile(`(?:^|[^a-z0-9_-])#([a-z0-9][a-z0-9_-]*)`)
+//
+// Exported so the sim harness's oracle can replicate the runtime's
+// user-prompt symbol extraction RULE without calling the turn pipeline
+// (DRY: one regex definition backs both the runtime extractor and the
+// oracle's shadow accretion — sharing the contract, not the code path).
+var UserTagRE = regexp.MustCompile(`(?:^|[^a-z0-9_-])#([a-z0-9][a-z0-9_-]*)`)
 
 // onContextDelta runs the spec §3.0 hook chain on one delta. The order
 // of the steps is fixed; see §3.0.3.
@@ -197,7 +202,7 @@ func extractSymbols(ctx context.Context, state *State, delta Delta) error {
 
 	switch delta.Source {
 	case memops.SourceUserPrompt:
-		for _, tag := range userTagRE.FindAllStringSubmatch(delta.Content, -1) {
+		for _, tag := range UserTagRE.FindAllStringSubmatch(delta.Content, -1) {
 			raw := tag[1]
 			normalized := memops.Normalize(raw, memops.SymbolTag)
 			addExtractedSymbol(ctx, state, delta, raw, normalized, memops.SourceUser)

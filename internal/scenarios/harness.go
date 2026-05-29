@@ -192,10 +192,36 @@ type StepFeedback struct {
 	// just-run turn emitted — the observed recall hits for the step.
 	RecallMatchFires int
 
+	// RecallMatchFireIDs is the set of thread IDs that fired
+	// `spine.match-fire` on the just-run turn (de-duplicated, sorted —
+	// matchFireSet semantics). RecallMatchFires == len(RecallMatchFireIDs).
+	// A StepSource needs the IDs (not just the count) to score
+	// per-candidate coherence: the within-thread wander hop-graded probe
+	// (#96) asks "did the runtime surface THIS specific abandoned-topic
+	// thread?", which the count alone cannot answer when a collision could
+	// fire a different thread. nil on the zero-feedback drainSteps path.
+	RecallMatchFireIDs []string
+
 	// RecallExpected is the count of ground-truth matches the step
 	// declared (len of Step.ExpectedRecallMatches); 0 for an unmeasured
 	// step.
 	RecallExpected int
+
+	// TargetRecoverable reports whether a thread ID is still recoverable by
+	// the runtime's §3.4 recall scan as of this step — i.e. it is present on
+	// the live spine, OR it is absent but NOT in the archive-delete log (an
+	// unexplained absence, conservatively treated as a real miss). It returns
+	// false ONLY for a thread the runtime has archived out of the spine,
+	// which can never produce a `spine.match-fire` again. It is the same
+	// archival-forgiveness predicate recordRecallFidelity applies to a
+	// declared expected set, exposed to a StepSource that measures recall
+	// against a target WITHOUT declaring it as an expected match (the #96
+	// abandoned-topic probe, which must stay out of the
+	// recall_fidelity_adversarial_* series). A StepSource MUST forgive an
+	// observation whose target is not recoverable, or it counts archival as
+	// an oracle/runtime divergence. nil on the zero-feedback drainSteps path
+	// (the source must nil-guard; drainSteps measures nothing).
+	TargetRecoverable func(id string) bool
 
 	// RecallExpectedForgiven is the count of expected matches that remain
 	// recoverable after removing archived / absent-from-spine threads —

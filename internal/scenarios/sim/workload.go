@@ -394,7 +394,42 @@ func firstNonLooseTag(slot CorpusSlot) string {
 // pick a recently-dormant thread.
 type thread struct {
 	order   int // 0-based creation order
-	slotIdx int // index into the corpus slot pool
+	slotIdx int // index into the corpus slot pool — traj[0], the birth slot
+
+	// cur is the thread's CURRENT corpus slot — the slot whose tags it
+	// emits on the next engagement. traj is the ordered visited-slot
+	// trajectory (§3.1): traj[0] == slotIdx (the birth slot) and the
+	// last element == cur. A monotonic (non-wandering) thread keeps
+	// traj == [slotIdx] and cur == slotIdx for life; a wandering thread
+	// (§3.2) appends a different-topic slot each time it wanders, so its
+	// trajectory length grows (capped at wanderMaxHops) and cur tracks the
+	// tail. The shadow retained set (shadowRetainedSet) spans the WHOLE
+	// trajectory's emitted tags, so the recall oracle stays trajectory-
+	// aware without any per-slot bookkeeping beyond recordEmission.
+	cur  int
+	traj []int
+
+	// engagementCount is the number of times this thread has been engaged
+	// (continue/switch/resume — every buildStep that selects it). It gates
+	// wander eligibility (a thread must dwell wanderMinDwell engagements on
+	// a topic family before it may wander, §3.2) so a thread does not
+	// wander on its very first turns, protecting the family-pair recall
+	// window (design risk #5).
+	engagementCount int
+}
+
+// newThread constructs a thread bound to slotIdx as its birth slot. It
+// seeds the trajectory state (§3.1) so cur == traj[0] == slotIdx — a
+// thread starts monotonic and stays so until it wanders. slotIdx is kept
+// as the back-compat birth-slot field for annotations and the §3.9 file
+// binding (which keys off the birth topic, not the wandered topic).
+func newThread(order, slotIdx int) thread {
+	return thread{
+		order:   order,
+		slotIdx: slotIdx,
+		cur:     slotIdx,
+		traj:    []int{slotIdx},
+	}
 }
 
 // threadID returns the thr_N id the runtime assigns to a thread by
@@ -562,6 +597,56 @@ const (
 	invertTurns = 12 // discovery-set inversion length
 )
 
+// Within-thread wander tuning (§3.2). A fraction of normal threads
+// carry a multi-topic trajectory, generalizing the campaign drift
+// mechanic: on each eligible engagement a thread may wander to a
+// different-topic slot, superseding its earlier topics. These are seed
+// values tuned on the rung walk (design risk #2 — too low loses
+// non-monotonicity, too high blows past the eviction cap).
+const (
+	// wanderPct / wanderSelector set the per-eligible-engagement wander
+	// probability: g.rng.Intn(wanderSelector) < wanderPct fires the
+	// wander. 18/100 ≈ the campaign drift cadence (§3.2). The draw is made
+	// UNCONDITIONALLY inside the eligibility gate (maybeWander) so the rng
+	// order stays input-determined — same discipline as maybeUserDictated.
+	wanderPct      = 8
+	wanderSelector = 100
+
+	// wanderMinDwell is the minimum engagement count a thread must reach on
+	// a topic before it may wander (§3.2). It protects the family-pair
+	// recall window (design risk #5): the dormant sibling's recall
+	// opportunity fires on early turns before either family member has
+	// dwelt long enough to wander off its birth slot.
+	wanderMinDwell = 3
+
+	// wanderMaxHops caps a thread's trajectory length (§3.2): a thread
+	// accretes at most this many distinct topical slots over its life, so
+	// its retained-symbol set stays bounded (≈ wanderMaxHops×~5 tags + 1
+	// salt ≈ 21) and well under the 40-symbol eviction cap — the
+	// no-eviction precondition the oracle's coherence rests on (§4.3,
+	// criterion (e)).
+	wanderMaxHops = 4
+
+	// wanderProbeEvery is the emitted-step cadence at which buildStep
+	// injects an abandoned-topic probe (criterion (b)) when an eligible
+	// wandering dormant thread exists. The probe is a measurement bucket,
+	// not an episode-gated recall opportunity: it issues a query on one of
+	// the probed thread's EARLIER (abandoned) trajectory slots and records
+	// whether the runtime surfaced the thread, bucketed by hop distance —
+	// recording a predicted+observed MISS at high hops as data, never
+	// suppressing it. It is a deterministic, rng-free step (pure from
+	// generator state), so it is part of the canonical stream and the
+	// determinism guard stays byte-identical.
+	//
+	// DOCUMENTED CHOICE (the design left probe cadence open, §6/risks): a
+	// modest cadence (every ~12 emitted steps) yields a few hundred probe
+	// observations across the rungs — enough to populate every hop bucket
+	// (1..wanderMaxHops-1) without materially shifting the action mix or
+	// the core recall-fidelity statistics, which the probe is interleaved
+	// alongside (it does not replace an ordinary turn — see runSession).
+	wanderProbeEvery = 12
+)
+
 // sessionActive is the turn-active simulated span of one session — the
 // total of its inter-turn gaps. Two of these plus the inter-session and
 // overnight gaps make up a work day.
@@ -592,9 +677,15 @@ func GenerateWorkload(cfg WorkloadConfig) scenarios.Scenario {
 			slots:      cfg.Corpus,
 			familySize: cfg.FamilySize,
 		},
-		files:         map[int]*fileState{},
-		recallBuckets: map[string]*recallTally{},
-		emittedSyms:   map[int]map[string]struct{}{},
+		files:             map[int]*fileState{},
+		recallBuckets:     map[string]*recallTally{},
+		emittedSyms:       map[int]map[string]struct{}{},
+		carrierIdx:        map[int]struct{}{},
+		carrier:           -1,
+		wanderHopHits:     map[int]int{},
+		wanderHopTotal:    map[int]int{},
+		wanderHopCoherent: map[int]int{},
+		wanderHopDiverge:  map[int]int{},
 	}
 	return scenarios.Scenario{
 		Name:       fmt.Sprintf("sim-workload-seed%d-dur%s", cfg.Seed, cfg.Duration),
@@ -633,6 +724,22 @@ type bufStep struct {
 	// campaign's recall step, used to record the first matchable turn for
 	// the actVagueNew oracle. 0 when not a vague recall step.
 	vagueCampaignTurn int
+
+	// probe carries the hop-graded abandoned-topic probe metadata (§3.2,
+	// criterion (b)) when this step is a wander probe; nil otherwise. The
+	// generator reads it back off the just-run step's StepFeedback to bucket
+	// the observation by hop distance and detect oracle/runtime divergence.
+	probe *wanderProbe
+}
+
+// wanderProbe is the per-step metadata of an abandoned-topic probe. The
+// probe issues a query on the probed thread's EARLIER (abandoned)
+// trajectory slot and is scored by hop distance — how far the queried
+// slot sits behind the thread's current slot in its trajectory.
+type wanderProbe struct {
+	threadID   string // the probed (wandering, dormant) thread's runtime id
+	hops       int    // current-traj-index − queried-slot-traj-index (>=1)
+	predictHit bool   // oracle prediction: simJaccard(Q, retained) >= threshold
 }
 
 // dayBuf is one generated calendar day's steps plus the global step
@@ -692,6 +799,65 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 	g.lastBucket = ""
 	g.lastVagueTurn = 0
 
+	// Tally the just-run abandoned-topic probe (§3.2, criterion (b)), if
+	// any. observedHit asks whether the RUNTIME surfaced the SPECIFIC probed
+	// thread — checking its id against the match-fire id set, not just the
+	// count, since a non-target collision must not be miscounted as a hit.
+	// The probe declares no ExpectedRecallMatches (so RecallExpected==0),
+	// so the gate is feedback.Index >= 0: a real run reports the step index,
+	// while the zero-feedback drainSteps path reports Index==-1 and tallies
+	// nothing — the buckets are observability, never part of the canonical
+	// stream.
+	if g.lastProbe != nil && feedback.Index >= 0 &&
+		(feedback.TargetRecoverable == nil || feedback.TargetRecoverable(g.lastProbe.threadID)) {
+		// Archival forgiveness (mirrors the F1/episode path): if the probed
+		// target has been archived off the spine, the runtime can never fire
+		// it again, so the oracle's predict-hit is not a genuine divergence —
+		// it is the oracle not modeling archival. Drop the observation
+		// entirely rather than scoring it as a divergence (measurement-side
+		// only; the canonical step stream is untouched, so determinism holds).
+		p := g.lastProbe
+		observedHit := slices.Contains(feedback.RecallMatchFireIDs, p.threadID)
+		if p.hops == 0 {
+			// Current-topic control (wander_current_recall). At
+			// superseded-weight 1.0 the runtime scores against the FULL
+			// retained union (active ∪ superseded, §4.3), so a DEEP-wander
+			// thread's current 5 tags are diluted below threshold even on its
+			// own current topic — the oracle predicts that same miss, so it
+			// stays COHERENT. Track coherence here too (hop 0 in the
+			// divergence maps) so the assertion covers the control.
+			g.wanderCurrentTotal++
+			if observedHit {
+				g.wanderCurrentHits++
+			}
+			g.wanderHopTotal[0]++
+			if observedHit {
+				g.wanderHopHits[0]++
+			}
+			if p.predictHit == observedHit {
+				g.wanderHopCoherent[0]++
+			} else {
+				g.wanderHopDiverge[0]++
+			}
+		} else {
+			// Abandoned-topic hop bucket: record the observation (hit OR
+			// predicted+observed miss alike — never suppressed) and the
+			// oracle/runtime coherence at this hop. Divergence (predict !=
+			// observe) is the criterion (b) FAILURE; the decay (both
+			// predicting miss at high hops) is the expected deliverable.
+			g.wanderHopTotal[p.hops]++
+			if observedHit {
+				g.wanderHopHits[p.hops]++
+			}
+			if p.predictHit == observedHit {
+				g.wanderHopCoherent[p.hops]++
+			} else {
+				g.wanderHopDiverge[p.hops]++
+			}
+		}
+	}
+	g.lastProbe = nil
+
 	// Process the just-completed step's outcome. The hit predicate uses
 	// the FORGIVEN expected count: archived / absent-from-spine
 	// expectations are removed (mirroring the F1/precision path in
@@ -739,6 +905,7 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 	// campaign-turn index; the outcome is tallied when its feedback arrives.
 	g.lastBucket = bs.recallBucket
 	g.lastVagueTurn = bs.vagueCampaignTurn
+	g.lastProbe = bs.probe
 
 	// If this buffered step opens a new recall opportunity, start an
 	// episode — UNLESS it is a campaign step (suppressEpisode), whose
@@ -827,10 +994,12 @@ func (g *generator) buildRefinementStep() scenarios.Step {
 	thr := g.threads[idx]
 
 	// The refining thread emits the new slot's non-loose tags plus its own
-	// salt; record that emission into the shadow set so the oracle stays
-	// coherent with the runtime's accretion.
+	// salt as model anchors, and its user prompt is the slot's mad-libs
+	// query (slot.UserInput, mentioning every tag including loose cells).
+	// Record the FULL extracted set (user #-tags ∪ model anchors) so the
+	// shadow mirrors the runtime's accretion exactly (§4.2 coherence).
 	anchorTags := append(nonLooseTags(slot), saltSymbol(thr.order))
-	g.recordEmission(idx, anchorTags)
+	g.recordEmission(idx, extractedSymbolsFor(slot.UserInput, anchorTags))
 
 	// Recall oracle for the refinement: the shadow-set Jaccard rule against
 	// the new slot's query (same rule as canonical buildStep — DRY). Q
@@ -1057,6 +1226,41 @@ const (
 	metricTopicDwellRunlen       = "workload_topic_dwell_runlen"
 )
 
+// Within-thread wander metric keys (§3.2/§5, criteria (a)/(b)). Defined
+// here so the generator, the metrics fold, and the rung summary share one
+// source of truth.
+const (
+	// metricThreadTopicsDistinct is a histogram with one sample per thread:
+	// the count of distinct corpus SLOTS in its trajectory at run end
+	// (proves non-monotonicity — mean > 1, tail to wanderMaxHops, criterion
+	// (a)). metricThreadWanderHops is the trajectory LENGTH distribution
+	// (== topics-distinct here, since nextWanderSlot always moves to a
+	// new-topic slot, but kept distinct in case a future corpus allows a
+	// repeat slot in a trajectory).
+	metricThreadTopicsDistinct = "workload_thread_topics_distinct"
+	metricThreadWanderHops     = "workload_thread_wander_hops"
+
+	// metricWanderCurrentRecall is the current-topic control: a wandering
+	// thread queried on its CURRENT slot must surface (≥~0.95).
+	metricWanderCurrentRecall = "wander_current_recall"
+
+	// metricWanderOriginRecallByHops, metricWanderCoherenceByHops, and
+	// their _obs companions are PER-HOP gauges (one gauge per hop distance,
+	// keyed metricWanderOriginRecallByHops+"_h<N>"). origin_recall is the
+	// observed abandoned-topic recall at hop N (expected to DECAY:
+	// hit at 1-2 hops, miss at >=3); coherence is the oracle/runtime
+	// agreement rate at hop N (the PASS condition — must be ~1.0 at every
+	// hop; divergence is the failure, not the decay).
+	metricWanderOriginRecallByHops = "wander_origin_recall_byhops"
+	metricWanderCoherenceByHops    = "wander_coherence_byhops"
+
+	// metricWanderCoherenceDivergence is the run-total count of
+	// oracle/runtime divergences across all hops — the headline criterion
+	// (b) tripwire. Zero (or a tiny rounding band) is the pass; any real
+	// divergence means the §4.3 eviction-free coherence assumption broke.
+	metricWanderCoherenceDivergence = "wander_coherence_divergence"
+)
+
 // generator is the resumable workload state machine. It implements
 // scenarios.StepSource: each Next() call yields one scenarios.Step,
 // advancing the simulated calendar a day at a time rather than building
@@ -1091,6 +1295,41 @@ type generator struct {
 	// a general union so increment 2's wander accretion extends it without
 	// changing the oracle.
 	emittedSyms map[int]map[string]struct{}
+
+	// carrierIdx is the set of creation-order indices of DEDICATED
+	// MEASUREMENT-CARRIER threads — synthetic threads created solely to
+	// host an abandoned-topic probe or campaign-recall query (#96
+	// increment 2). A measurement query is issued on a carrier so the
+	// §3.4 recall scan can surface the genuine target/campaign thread
+	// (the carrier is the engaged thread, excluded from its own turn's
+	// scan); but the query's #-tags PERMANENTLY accrete into the engaged
+	// thread's history_symbols, so engaging a real recall-candidate
+	// thread would inflate its retained set with foreign measurement
+	// symbols — a MEASUREMENT ARTIFACT that, on a popular resident reused
+	// as carrier many times, blew the retained set past the 40-symbol
+	// eviction cap and broke the oracle's no-eviction coherence (the
+	// criterion (e)/(b) failure this increment fixes).
+	//
+	// A carrier absorbs that pollution instead: it is excluded from the
+	// recall-oracle candidate scan (recallExpectedFor) and from
+	// probeTarget on BOTH sides, and from the criterion (e) shadow
+	// max-retained measurement, so its bloated retained set can neither be
+	// scored by the oracle nor counted against the cap. Runtime-side a
+	// heavily-used carrier's history is diluted so far (its ~5-symbol-query
+	// Jaccard denominator is the full ~40-symbol evicted union → ≤0.125 ≪
+	// the 0.4 threshold) that it cannot fire as a recall match, so it never
+	// surfaces as a false collision either. carrierIdx membership is the
+	// single source of truth for all these exclusions.
+	carrierIdx map[int]struct{}
+
+	// carrier is the creation-order index of the lone dedicated carrier
+	// thread, or -1 until first use. One reused carrier (rather than a
+	// fresh thread per measurement) is deliberate: it bloats past the
+	// recall-firing dilution floor within its first handful of distinct
+	// query topics and stays runtime-invisible to recall thereafter, so
+	// the only window in which it could collide with a real query is its
+	// first few uses — measured, not assumed (criterion (b) divergence).
+	carrier int
 
 	// layerB is the generator's model of the runtime's Layer B: thread
 	// indices, most-recently-engaged first, capped at layerBCap. The
@@ -1193,6 +1432,31 @@ type generator struct {
 	lastVagueTurn int
 	vagueArmed    bool
 
+	// Within-thread wander hop-graded probe state (§3.2, criterion (b)).
+	//   - emittedSinceProbe counts emitted steps since the last probe, the
+	//     deterministic cadence counter (no rng).
+	//   - probeHopCursor round-robins which abandoned hop distance the next
+	//     probe targets, so all hop buckets fill over the run.
+	//   - lastProbe is the most-recently-EMITTED probe's metadata, read back
+	//     on the next Next()'s feedback to bucket the observation.
+	//   - wanderHopHits/wanderHopTotal tally per-hop observed recall
+	//     (RUNTIME surfaced the thread). wanderHopCoherent/wanderHopDiverge
+	//     tally per-hop oracle/runtime agreement: divergence (oracle
+	//     predicted hit but runtime missed, or vice-versa) is the criterion
+	//     (b) FAILURE; the decay itself (both predicting miss at high hops)
+	//     is the expected, correct deliverable. wanderCurrentHits/Total tally
+	//     the current-topic control probe (hop 0 ≈ should always surface).
+	emittedSinceProbe  int
+	probeHopCursor     int
+	probeTargetCursor  int
+	lastProbe          *wanderProbe
+	wanderHopHits      map[int]int
+	wanderHopTotal     map[int]int
+	wanderHopCoherent  map[int]int
+	wanderHopDiverge   map[int]int
+	wanderCurrentHits  int
+	wanderCurrentTotal int
+
 	// recallBuckets accumulates per-bucket {hits, total} recall tallies for
 	// the lifecycle oracles (drift_recall_origin, drift_recall_dest,
 	// abandoned_premise_recall). A step counts toward `total` once its
@@ -1282,7 +1546,10 @@ func (g *generator) engage(idx, turn int) {
 func (g *generator) resumeCandidates(turn int) []int {
 	var out []int
 	for idx := range g.threads {
-		if g.inLayerB(idx) {
+		if g.inLayerB(idx) || g.isCarrier(idx) {
+			// A measurement carrier is never a resume target; skipping it also
+			// guards the lastEngagedTurn index, which is never extended for a
+			// carrier (it is not run through g.engage).
 			continue
 		}
 		if turn-g.lastEngagedTurn[idx] <= g.cfg.ResumeWindowTurns {
@@ -1329,6 +1596,25 @@ func (g *generator) runSession(active time.Duration) {
 		g.appendStep(bs)
 		g.observeInterleave(bs)
 		emitted = true
+
+		// Abandoned-topic probe (criterion (b)): on the probe cadence,
+		// inject a hop-graded measurement step if an eligible wandering
+		// dormant thread exists. The probe is rng-FREE (pure from generator
+		// state) and carries a zero TimeDelta — it is issued at the same
+		// simulated instant as the step it follows and does NOT count toward
+		// `spent` or advance the clock, so it perturbs neither the session's
+		// rng draw order nor its length. The canonical stream therefore stays
+		// byte-identical at a fixed seed (determinism guard) while the probe
+		// observations accumulate.
+		g.emittedSinceProbe++
+		if g.emittedSinceProbe >= wanderProbeEvery {
+			if pbs, ok := g.buildWanderProbeStep(); ok {
+				g.emittedSinceProbe = 0
+				pbs.step.TimeDelta = 0
+				g.appendStep(pbs)
+				g.observeInterleave(pbs)
+			}
+		}
 
 		// Advance the clock by this turn's gap; it becomes the next
 		// step's TimeDelta. `spent` tracks only this session's
@@ -1486,44 +1772,69 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 		return g.buildCampaignStep(tt)
 	}
 	idx, isNew := g.selectEngagedThread(act)
-	thr := g.threads[idx]
-	slot := g.model.slots[thr.slotIdx]
+	g.threads[idx].engagementCount++
 
-	// Q is the engaging turn's query symbol set as the RUNTIME builds it:
-	// the slot's topical mad-libs tags PLUS the engaged thread's own salt.
-	// The runtime coalesces the turn's user-prompt symbols AND its model
-	// anchor tags into one query set (turn/recall.go:76 →
-	// coalesce.symbolList()), and the engaged thread emits its salt as a
-	// model anchor this turn — so the salt lands in Q at the runtime. The
-	// oracle must mirror that exactly or it manufactures false misses:
-	// omitting the engaged salt makes the oracle's union one smaller than
-	// the runtime's, so on loose-heavy slots the oracle predicts a hit the
-	// runtime (with the larger union) misses. Including it keeps oracle and
-	// runtime coherent. The salt still suppresses NON-sibling collisions —
-	// the engaged salt is in neither a sibling nor a non-sibling, and each
-	// candidate carries its OWN distinct salt in the union (§2.2/§2.3) — so
-	// the density mechanism is intact; the salt is simply also a query
-	// symbol, contrary to the design's §3.4 assumption (SURPRISE; report).
-	Q := append(append([]string(nil), slot.Tags...), saltSymbol(thr.order))
+	// recallOpp is evaluated on the engaged thread's CURRENT slot, BEFORE
+	// any wander (the wander gate consumes recallOpp). thr.cur == thr.slotIdx
+	// for a monotonic thread, and tracks the trajectory tail for a
+	// wandering one (§3.1). Q is the engaging turn's query symbol set as the
+	// RUNTIME builds it: the current slot's topical mad-libs tags PLUS the
+	// engaged thread's own salt. The runtime coalesces the turn's
+	// user-prompt symbols AND its model anchor tags into one query set
+	// (turn/recall.go:76 → coalesce.symbolList()), and the engaged thread
+	// emits its salt as a model anchor this turn — so the salt lands in Q at
+	// the runtime. The oracle must mirror that exactly or it manufactures
+	// false misses: omitting the engaged salt makes the oracle's union one
+	// smaller than the runtime's, so on loose-heavy slots the oracle
+	// predicts a hit the runtime (with the larger union) misses. Including
+	// it keeps oracle and runtime coherent. The salt still suppresses
+	// NON-sibling collisions — the engaged salt is in neither a sibling nor
+	// a non-sibling, and each candidate carries its OWN distinct salt in the
+	// union (§2.2/§2.3) — so the density mechanism is intact; the salt is
+	// simply also a query symbol, contrary to the design's §3.4 assumption
+	// (SURPRISE; report).
+	curSlot := g.model.slots[g.threads[idx].cur]
+	Q := append(append([]string(nil), curSlot.Tags...), saltSymbol(g.threads[idx].order))
 	recallIDs := g.recallExpectedFor(idx, Q, isNew)
 	recallOpp := len(recallIDs) > 0
 
+	// §3.2 wander decision: a fraction of NORMAL threads, on an eligible
+	// engagement, advance to a different-topic slot, generalizing the
+	// campaign drift mechanic. The rng draw is made unconditionally inside
+	// the eligibility gate (maybeWander), so the canonical step stream stays
+	// a pure function of (Seed, Duration, Corpus). A recall-opportunity turn
+	// never wanders (recallOpp gates it), so cur — and thus Q above — stays
+	// consistent with the emission on recall-opportunity turns.
+	g.maybeWander(idx, isNew, recallOpp)
+	thr := g.threads[idx]
+	slot := g.model.slots[thr.cur]
+
 	// anchorTags drops loose-cell positions on every step regardless of
 	// action (anchor-lifecycle Inc 5: the §5.1 4-floor and its stub-padding
-	// are gone). A new-topic turn now carries nonLooseTags verbatim — 0
-	// anchors is legal (vague start), and the runtime's projection owns the
-	// AnchorProjectionMax ceiling. Engagement/refinement tags carry the same
-	// raw drift set. The thread's per-thread salt symbol (§2.2) is appended
-	// so the runtime folds it into history_symbols — it is a model anchor,
-	// never a query symbol.
+	// are gone). It emits the thread's CURRENT slot's tags (post-wander), so
+	// a wandering thread's earlier topics stop being re-emitted and fall out
+	// of the active projection into superseded-retained (§3.3). A new-topic
+	// turn carries nonLooseTags verbatim — 0 anchors is legal (vague start),
+	// and the runtime's projection owns the AnchorProjectionMax ceiling. The
+	// thread's per-thread salt symbol (§2.2) is appended so the runtime folds
+	// it into history_symbols — it is a model anchor, never a query symbol.
 	anchorTags := append(nonLooseTags(slot), saltSymbol(thr.order))
-	g.recordEmission(idx, anchorTags)
 	userInput := defaultUserInput(slot, recallOpp)
 	userDictated := false
 	if udInput, ok := g.maybeUserDictated(tt, isNew, recallOpp, idx, slot); ok {
 		userInput = udInput
 		userDictated = true
 	}
+	// Record the FULL symbol set the runtime extracts this turn — the
+	// user-prompt #-tags from userInput (on a recall opportunity that is
+	// the slot's mad-libs query, which mentions EVERY tag including loose
+	// cells) UNION the model anchor tags. Folding the user-prompt tags is
+	// what keeps the shadow retained set aligned with history_symbols: the
+	// runtime accretes the loose #-mentions the model anchorTags drop, so
+	// recording only anchorTags would under-count the retained union and
+	// flip borderline recall comparisons (§4.2 coherence). Done after the
+	// user-dictated overlay so the recorded userInput is the one emitted.
+	g.recordEmission(idx, extractedSymbolsFor(userInput, anchorTags))
 
 	annotation := fmt.Sprintf("turn %d: %s %s (%s)",
 		g.stepIndex+1, turnTypeName(tt), actionName(act), slot.Topic)
@@ -1559,7 +1870,11 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 	// Update the Layer-B LRU and last-engaged bookkeeping to reflect
 	// this turn's engagement. g.stepIndex is this turn's 0-based index.
 	g.engage(idx, g.stepIndex)
-	return bufStep{step: step, slotIdx: thr.slotIdx, engagedIdx: idx}
+	// slotIdx reports the CURRENT (post-wander) slot the step emitted, so
+	// the within-session interleaving telemetry counts a wander as touching
+	// a new distinct slot (the distinct-slots-per-session signal then
+	// reflects genuine topic movement, not just the birth binding).
+	return bufStep{step: step, slotIdx: thr.cur, engagedIdx: idx}
 }
 
 // campaign is one in-flight lifecycle ground-truth program. It owns a
@@ -1672,7 +1987,7 @@ func (g *generator) ensureCampaignThread(c *campaign) int {
 		return c.threadIdx
 	}
 	c.threadIdx = len(g.threads)
-	g.threads = append(g.threads, thread{order: c.threadIdx, slotIdx: c.originSlot})
+	g.threads = append(g.threads, newThread(c.threadIdx, c.originSlot))
 	return c.threadIdx
 }
 
@@ -1695,17 +2010,18 @@ func (g *generator) campaignEngage(tt turnType, c *campaign, anchorTags []string
 		userInput = fmt.Sprintf("working on #%s", anchorTags[0])
 	}
 
-	// Append the thread's salt (§2.2/§3.4) and record the emission into the
-	// shadow retained set so campaign threads share the same oracle
-	// bookkeeping as normal threads (DRY: one emission path). The salt
+	// Append the thread's salt (§2.2/§3.4) and record the FULL extracted
+	// set (userInput #-tags ∪ model anchors + salt) into the shadow retained
+	// set so campaign threads share the same oracle bookkeeping as normal
+	// threads (DRY: one emission path, one extraction rule). The salt
 	// follows any topical tags so anchorTags[0] above stays a topical tag
 	// (the user-prompt #-mention must be topical, not the salt). On a
-	// 0-anchor vague turn the only emitted symbol is the salt — that is
-	// correct: a vague thread accretes nothing topical, but it still owns a
-	// private salt token, which never appears in any query Q so it cannot
-	// make the thread spuriously matchable.
+	// 0-anchor vague turn the userInput carries no #-tag, so the only
+	// emitted symbol is the salt — correct: a vague thread accretes nothing
+	// topical, but owns a private salt token, which never appears in any
+	// query Q so it cannot make the thread spuriously matchable.
 	anchorTags = append(append([]string(nil), anchorTags...), saltSymbol(thr.order))
-	g.recordEmission(idx, anchorTags)
+	g.recordEmission(idx, extractedSymbolsFor(userInput, anchorTags))
 
 	threads := []string{thr.threadID()}
 	if isNew {
@@ -1735,30 +2051,20 @@ func (g *generator) firstEngagement(idx int) bool {
 }
 
 // campaignRecall builds a recall-opportunity step that issues querySymbols
-// (origin or destination tags) on a turn that engages a DIFFERENT thread,
-// declaring the campaign thread as the expected match. The campaign thread
-// is not engaged this turn, so the §3.4 recall scan can surface it; the
-// step carries bucket so the outcome is tallied post-feedback. suppressEpisode
-// keeps it out of the miss→refinement loop. vagueTurn (>0) records the
-// became-matchable turn for the vague oracle.
+// (origin or destination tags) on a turn that engages the DEDICATED
+// MEASUREMENT CARRIER, declaring the campaign thread as the expected match.
+// The campaign thread is not engaged this turn, so the §3.4 recall scan can
+// surface it; the step carries bucket so the outcome is tallied
+// post-feedback. suppressEpisode keeps it out of the miss→refinement loop.
+// vagueTurn (>0) records the became-matchable turn for the vague oracle.
+//
+// The carrier (not a real recall-candidate thread) absorbs the query
+// #-tags' permanent accretion, so the campaign measurement never inflates
+// a genuine thread's retained set past the eviction cap (the #96 inc-2
+// invariant — the same fix as the wander probe).
 func (g *generator) campaignRecall(tt turnType, c *campaign, querySymbols []string, bucket string, vagueTurn int) bufStep {
 	campIdx := c.threadIdx
-	// Engage a non-campaign thread: prefer an existing Layer-B head that is
-	// not the campaign thread, else spawn a throwaway new thread.
-	engageIdx := -1
-	for _, id := range g.layerB {
-		if id != campIdx {
-			engageIdx = id
-			break
-		}
-	}
-	isNew := false
-	if engageIdx < 0 {
-		engageIdx = len(g.threads)
-		g.threads = append(g.threads, thread{order: engageIdx, slotIdx: g.model.slotFor(engageIdx)})
-		isNew = true
-	}
-	engThr := g.threads[engageIdx]
+	engageIdx, carrierCreated := g.measurementCarrier()
 
 	// The query is a natural line mentioning the campaign's symbols as
 	// #-tags so the runtime extracts them and the §3.4 layer fires against
@@ -1773,32 +2079,36 @@ func (g *generator) campaignRecall(tt turnType, c *campaign, querySymbols []stri
 	}
 	userInput := "revisiting " + mentions.String()
 
-	// The engaged thread's model tag re-emits the QUERY symbols (not its own
-	// slot tags), so the turn's coalesced query set Q is exactly the query
-	// symbols — user #-mentions and model anchors agree. Emitting the
-	// engaged thread's own unrelated tags would dilute Q with off-topic
-	// symbols and drop the §3.4 Jaccard score below threshold, masking the
-	// campaign thread's retained-symbol match. The engaged thread is a
-	// throwaway distractor, so accreting the query symbols onto it is
-	// harmless to the campaign measurement (it is excluded from the recall
-	// scan as the engaged thread).
-	threads := []string{engThr.threadID()}
-	if isNew {
-		threads = []string{prompt.NewTopicLiteral}
+	// The carrier's model tag re-emits the QUERY symbols (not its own slot
+	// tags), so the turn's coalesced query set Q is exactly the query
+	// symbols — user #-mentions and model anchors agree. Emitting unrelated
+	// tags would dilute Q below the §3.4 threshold and mask the campaign
+	// thread's match. Record the carrier's accretion into the shadow so it
+	// stays internally consistent with what the runtime folds into the
+	// carrier's history_symbols; the carrier is excluded from the
+	// recall-oracle scan and criterion (e), so this accretion cannot inflate
+	// a genuine candidate's set nor be scored as a future match.
+	g.recordEmission(engageIdx, extractedSymbolsFor(userInput, querySymbols))
+	carrierTag := g.threads[engageIdx].threadID()
+	if carrierCreated {
+		carrierTag = prompt.NewTopicLiteral
 	}
 	step := scenarios.Step{
 		UserInput:             userInput,
-		MockResponse:          scenarios.NewMockResponseWithTag(threads, querySymbols, "context revisit."),
+		MockResponse:          scenarios.NewMockResponseWithTag([]string{carrierTag}, querySymbols, "context revisit."),
 		Annotation:            fmt.Sprintf("turn %d: %s campaign-recall %s", g.stepIndex+1, turnTypeName(tt), bucket),
 		ExpectedRecallMatches: []string{g.threads[campIdx].threadID()},
 		RecallMode:            scenarios.RecallMeasureOnly,
 		ClosureAck:            &scenarios.ClosureAck{Outcome: turn.ClosureResolved},
 		RecallAck:             &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
 	}
-	g.engage(engageIdx, g.stepIndex)
+	// The carrier is deliberately NOT entered into the generator's Layer-B
+	// model (no g.engage): it is a measurement artifact, not a topical
+	// thread. The RUNTIME still engages it (the MockResponse threads it),
+	// excluding it from its own turn's recall scan via engagedSet.
 	return bufStep{
 		step:              step,
-		slotIdx:           engThr.slotIdx,
+		slotIdx:           g.threads[engageIdx].slotIdx,
 		engagedIdx:        engageIdx,
 		recallBucket:      bucket,
 		suppressEpisode:   true,
@@ -1888,10 +2198,7 @@ func (g *generator) selectEngagedThread(act action) (idx int, isNew bool) {
 		// slot; the binding never depends on rng, so the recall-oracle
 		// fire rate is fixed and duration-independent (each rung
 		// measures the same thing).
-		g.threads = append(g.threads, thread{
-			order:   idx,
-			slotIdx: g.model.slotFor(idx),
-		})
+		g.threads = append(g.threads, newThread(idx, g.model.slotFor(idx)))
 		isNew = true
 
 	case actContinue:
@@ -1919,18 +2226,113 @@ func (g *generator) selectEngagedThread(act action) (idx int, isNew bool) {
 	return idx, isNew
 }
 
-// recordEmission folds the model anchor tags emitted for thread idx on
-// one turn into that thread's shadow retained set (§4.2). It is the
-// generator's independent bookkeeping of what the runtime accretes into
-// history_symbols — fed ONLY by what the generator emits, never by a
-// runtime read. Pure (no rng); called from every emission path
-// (buildStep, campaignEngage) so the oracle and the runtime see the
-// same accretion. The salt is appended by the emission caller, so tags
-// already includes it.
+// nextWanderSlot returns the corpus slot a wandering thread moves to
+// next (§3.2). It is PURE and deterministic — derived only from the
+// thread's creation order and its current trajectory length, never from
+// rng — so the wander destinations are a fixed per-thread sequence and
+// the canonical step stream stays a pure function of (Seed, Duration,
+// Corpus). The single rng draw that decides WHETHER to wander lives in
+// maybeWander; this function decides only WHERE.
 //
-// For increment 1 the union grows monotonically (threads never wander),
-// but the accumulator is a general union so increment 2's wander
-// accretion rides the same path.
+// The walk starts at (cur + offset) % len(slots) with offset derived
+// from (order, hop count), then skips forward to the first slot of a
+// DIFFERENT topic than cur — mirroring startCampaign's different-topic
+// skip (so the destination tags are disjoint from the current topic's,
+// letting the current topic genuinely supersede the origin once the
+// destination Counts climb past it). Wander targets need not be in the
+// thread's family.
+func nextWanderSlot(thr thread, slots []CorpusSlot) int {
+	n := len(slots)
+	if n == 0 {
+		return thr.cur
+	}
+	curTopic := slots[thr.cur].Topic
+	// offset is a fixed function of (order, hop) so each thread walks a
+	// distinct, reproducible sequence. +1 guards against a zero offset
+	// landing back on cur before the different-topic skip runs.
+	offset := (thr.order + len(thr.traj)*7) % n
+	dest := (thr.cur + offset + 1) % n
+	for slots[dest].Topic == curTopic {
+		dest = (dest + 1) % n
+		if dest == thr.cur {
+			break // single-topic corpus — nothing different to wander to
+		}
+	}
+	return dest
+}
+
+// maybeWander applies the §3.2 wander schedule to the engaged thread on
+// the current turn. The eligibility gate is !isNew && !recallOpp &&
+// engagementCount >= wanderMinDwell && trajectory not yet at the hop cap.
+// The rng draw is made UNCONDITIONALLY INSIDE the gate (same discipline
+// as maybeUserDictated) so the rng draw ordering stays a pure function of
+// the generator's inputs: a thread that is eligible always consumes one
+// draw whether or not it wanders, and an ineligible thread consumes none.
+//
+// On a true draw the thread appends nextWanderSlot to its trajectory and
+// advances cur, so its subsequent emissions ride the new topic's tags and
+// its earlier topics fall out of the active projection into
+// superseded-retained (the campaign drift mechanic, §3.3) — no new
+// runtime behavior. The wander decision precedes emission in buildStep,
+// so the very turn a thread wanders already emits its new current slot.
+func (g *generator) maybeWander(idx int, isNew, recallOpp bool) {
+	thr := &g.threads[idx]
+	if isNew || recallOpp || thr.engagementCount < wanderMinDwell || len(thr.traj) >= wanderMaxHops {
+		return
+	}
+	if g.rng.Intn(wanderSelector) >= wanderPct {
+		return
+	}
+	dest := nextWanderSlot(*thr, g.model.slots)
+	if dest == thr.cur {
+		return // degenerate single-topic corpus: no genuine wander available
+	}
+	thr.traj = append(thr.traj, dest)
+	thr.cur = dest
+}
+
+// extractedSymbolsFor returns the symbol set the RUNTIME extracts for the
+// engaged thread on one turn, mirroring turn/chain.go's two relevant
+// passes: the user-prompt hash-tag pass (turn.UserTagRE over userInput,
+// each capture normalized via memops.Normalize(raw, memops.SymbolTag))
+// UNION the model-response anchor tags (modelAnchors, already normalized
+// by the generator). Both passes feed the engaged thread's coalesced
+// symbols, which merge into its history_symbols at turn close — so this
+// union is precisely what the runtime accretes, and feeding it to
+// recordEmission keeps the shadow retained set byte-aligned with the
+// runtime's history_symbols (§4.2 coherence).
+//
+// It shares the runtime's extraction RULE (the exported turn.UserTagRE
+// regex and memops.Normalize), not the runtime code path — the same
+// permitted coupling as sharing the threshold constant (§4.2). The third
+// deterministic identifier pass (URL / file-path / git-SHA) is irrelevant
+// here: the generated tags, salt, and mad-libs #-mentions match none of
+// those shapes, and the user-dictated work-turn input's only path-like
+// token is a bare "<slug>.go" (no leading slash), which turn's
+// FilePathProseRE — requiring a "/" or "./"/"~/" prefix — does not match.
+// It is PURE (no rng): the canonical step stream stays a function of
+// (Seed, Duration, Corpus).
+func extractedSymbolsFor(userInput string, modelAnchors []string) []string {
+	out := append([]string(nil), modelAnchors...)
+	for _, m := range turn.UserTagRE.FindAllStringSubmatch(userInput, -1) {
+		out = append(out, memops.Normalize(m[1], memops.SymbolTag))
+	}
+	return out
+}
+
+// recordEmission folds the symbols extracted for thread idx on one turn
+// into that thread's shadow retained set (§4.2). It is the generator's
+// independent bookkeeping of what the runtime accretes into
+// history_symbols — fed ONLY by what the generator emits, never by a
+// runtime read. Callers pass the FULL extracted set
+// (extractedSymbolsFor: user-prompt #-tags ∪ model anchor tags) so the
+// shadow mirrors the runtime's accretion exactly. Pure (no rng); called
+// from every emission path (buildStep, campaignEngage, refinement, probe)
+// so the oracle and the runtime see the same accretion.
+//
+// The union grows as a thread wanders (increment 2): each new-topic
+// emission accretes its slot's tags, and recordEmission's set union is
+// the trajectory-spanning retained set the recall oracle scores against.
 func (g *generator) recordEmission(idx int, tags []string) {
 	set := g.emittedSyms[idx]
 	if set == nil {
@@ -2031,7 +2433,14 @@ func (g *generator) recallExpectedFor(idx int, Q []string, isNew bool) []string 
 	}
 	var ids []string
 	for _, cand := range g.threads {
-		if cand.order == idx || g.inLayerB(cand.order) {
+		if cand.order == idx || g.inLayerB(cand.order) || g.isCarrier(cand.order) {
+			// A measurement carrier is excluded from the oracle scan: its
+			// retained set is a synthetic grab-bag of foreign measurement
+			// queries, not a genuine recall candidate. Runtime-side its
+			// accreted union is diluted far below the §3.4 threshold (a
+			// ~5-symbol query against its ~40-symbol evicted set scores
+			// ≤0.125), so it does not fire as a collision there either —
+			// keeping oracle and runtime coherent without scoring it.
 			continue
 		}
 		if simJaccard(Q, g.shadowRetainedSet(cand.order)) >= simRecallThreshold {
@@ -2039,6 +2448,180 @@ func (g *generator) recallExpectedFor(idx int, Q []string, isNew bool) []string 
 		}
 	}
 	return ids
+}
+
+// probeTarget returns a WANDERING DORMANT thread to probe — one with a
+// multi-topic trajectory (len(traj) >= 2) not currently in Layer B, so
+// the §3.4 recall scan can surface it. It ROUND-ROBINS across all eligible
+// threads (probeTargetCursor) rather than always returning the lowest
+// order, so the probe samples shallow AND deep trajectories: a fixed
+// lowest-order pick biases toward the deepest thread (most engagements →
+// deepest wander), which would make wander_current_recall measure only
+// the worst case. nil if none eligible. Deterministic (no rng), so the
+// probe stays out of the canonical rng stream.
+func (g *generator) probeTarget() *thread {
+	var eligible []int
+	for i := range g.threads {
+		if g.isCarrier(i) {
+			continue // a measurement carrier is never a genuine probe target
+		}
+		if len(g.threads[i].traj) >= 2 && !g.inLayerB(g.threads[i].order) {
+			eligible = append(eligible, i)
+		}
+	}
+	if len(eligible) == 0 {
+		return nil
+	}
+	pick := eligible[g.probeTargetCursor%len(eligible)]
+	g.probeTargetCursor++
+	return &g.threads[pick]
+}
+
+// isCarrier reports whether thread idx is a dedicated measurement-carrier
+// thread (see carrierIdx). Carriers are excluded from every recall-oracle
+// candidate scan and from the criterion (e) shadow max-retained
+// measurement.
+func (g *generator) isCarrier(idx int) bool {
+	_, ok := g.carrierIdx[idx]
+	return ok
+}
+
+// measurementCarrier returns the creation-order index of the dedicated
+// carrier thread used to host a measurement query (abandoned-topic probe
+// or campaign recall), creating it lazily on first use. created is true
+// only on that first call — the caller must then tag the carrier's
+// MockResponse with prompt.NewTopicLiteral so the runtime CREATES the
+// thread rather than treating an unknown id as a §5.5 fetch miss.
+//
+// The carrier is recorded in carrierIdx so it is excluded from the
+// recall-oracle scan and the criterion (e) measurement; it is NOT entered
+// into the generator's Layer-B model (engage is not called on it), so it
+// never displaces a genuine topical thread from the switch/resume
+// candidate pool — the canonical step stream stays a pure function of
+// (Seed, Duration, Corpus). Its corpus binding (slot 0) is inert: a
+// carrier emits only the measurement query's symbols as anchors, never its
+// own slot's tags, and it is excluded from every oracle, so the binding
+// never affects recall.
+func (g *generator) measurementCarrier() (idx int, created bool) {
+	if g.carrier >= 0 {
+		return g.carrier, false
+	}
+	idx = len(g.threads)
+	g.threads = append(g.threads, newThread(idx, 0))
+	g.carrierIdx[idx] = struct{}{}
+	g.carrier = idx
+	return idx, true
+}
+
+// buildWanderProbeStep constructs one abandoned-topic probe (§3.2,
+// criterion (b)) if an eligible wandering dormant thread exists; ok=false
+// skips it. It is rng-FREE — every choice (target, hop distance, query) is
+// a pure function of generator state — so it is part of the canonical
+// stream and the determinism guard stays byte-identical.
+//
+// The probe engages the DEDICATED MEASUREMENT CARRIER (not a real
+// recall-candidate thread) and issues a query on ONE of the probed
+// thread's trajectory slots, declaring the probed thread the expected
+// match. The carrier — not the target — absorbs the query #-tags'
+// permanent accretion, so the measurement never inflates a genuine
+// recall-candidate's retained set past the eviction cap (the #96 inc-2
+// invariant). The hop distance is (last traj index − queried traj index):
+// hop 0 is the CURRENT topic (the wander_current_recall control, which
+// must surface ≥~0.95); hop >=1 is an ABANDONED earlier topic, expected to
+// DECAY with distance as later topics inflate the retained union past the
+// §3.4 Jaccard threshold (the deliverable curve). The probed hop
+// round-robins (probeHopCursor) so every bucket fills.
+//
+// The oracle's prediction (simJaccard(Q, retained) >= threshold) is
+// recorded on the probe so the next Next()'s feedback can detect
+// oracle/runtime DIVERGENCE — the criterion (b) pass condition is
+// coherence (oracle and runtime agree per hop), not a high recall floor.
+func (g *generator) buildWanderProbeStep() (bufStep, bool) {
+	target := g.probeTarget()
+	if target == nil {
+		return bufStep{}, false
+	}
+	engageIdx, carrierCreated := g.measurementCarrier()
+
+	// Choose the queried trajectory index. probeHopCursor round-robins the
+	// hop distance across [0, len(traj)-1] so the current-topic control
+	// (hop 0) and every abandoned hop fill over the run. lastIdx is the
+	// current slot's trajectory position.
+	lastIdx := len(target.traj) - 1
+	hop := g.probeHopCursor % len(target.traj)
+	g.probeHopCursor++
+	queriedTrajIdx := lastIdx - hop
+	queriedSlot := g.model.slots[target.traj[queriedTrajIdx]]
+
+	// Q is the queried slot's topical tags — the carrier re-emits the
+	// QUERY symbols as model anchors (like campaignRecall), so the runtime's
+	// coalesced query set is exactly these tags (no salt: the carrier
+	// does not emit the probed thread's salt, and the probed thread's own
+	// salt sits only in its retained union, inflating the denominator). The
+	// oracle scores the SAME Q against the probed thread's shadow retained
+	// set with the SAME threshold — coherent by construction (§4.2).
+	Q := nonLooseTags(queriedSlot)
+	predictHit := simJaccard(Q, g.shadowRetainedSet(target.order)) >= simRecallThreshold
+
+	var mentions strings.Builder
+	for i, s := range Q {
+		if i > 0 {
+			mentions.WriteString(" ")
+		}
+		mentions.WriteString("#")
+		mentions.WriteString(s)
+	}
+
+	// The probe declares NO ExpectedRecallMatches: the runtime fires
+	// spine.match-fire from the query regardless of the harness's expected
+	// declaration, and the probe reads the fired-id set (RecallMatchFireIDs)
+	// directly. Declaring an expected set would route a deliberate high-hop
+	// MISS through recordRecallFidelity into the recall_fidelity_adversarial_*
+	// series — confounding the headline symbolic-only recall and
+	// superseded_precision the rung reports (criterion c). Keeping it
+	// unmeasured isolates the probe's measurement to its own hop buckets.
+	probeUserInput := "revisiting " + mentions.String()
+
+	// Record the carrier's accretion into the shadow: the runtime folds the
+	// probe query symbols (user #-mentions ∪ model anchors, both Q here)
+	// into the carrier's history_symbols. The carrier is excluded from the
+	// recall-oracle scan (recallExpectedFor / probeTarget) and the
+	// criterion (e) measurement, so this accretion can neither inflate a
+	// genuine candidate's retained set nor be scored as a future match — it
+	// stays internally consistent only (the shadow mirrors what the runtime
+	// holds). The probed thread itself is NOT engaged, so it accretes
+	// nothing this turn; only the carrier does.
+	g.recordEmission(engageIdx, extractedSymbolsFor(probeUserInput, Q))
+
+	carrierTag := g.threads[engageIdx].threadID()
+	if carrierCreated {
+		carrierTag = prompt.NewTopicLiteral
+	}
+	step := scenarios.Step{
+		UserInput:    probeUserInput,
+		MockResponse: scenarios.NewMockResponseWithTag([]string{carrierTag}, Q, "abandoned-topic probe."),
+		Annotation:   fmt.Sprintf("turn %d: wander-probe %s hop=%d", g.stepIndex+1, target.threadID(), hop),
+		ClosureAck:   &scenarios.ClosureAck{Outcome: turn.ClosureResolved},
+		RecallAck:    &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
+	}
+	// The carrier is deliberately NOT entered into the generator's Layer-B
+	// model (no g.engage): it is a measurement artifact, not a topical
+	// thread, so it must not displace genuine threads from the
+	// switch/resume candidate pool. The RUNTIME still engages it (the
+	// MockResponse threads it), which excludes it from its own turn's
+	// recall scan via engagedSet — exactly the coherence the probe needs.
+	return bufStep{
+		step:       step,
+		slotIdx:    g.threads[engageIdx].slotIdx,
+		engagedIdx: engageIdx,
+		// No ExpectedRecallMatches → opens no episode; probe is measured
+		// solely via its hop buckets off RecallMatchFireIDs.
+		probe: &wanderProbe{
+			threadID:   target.threadID(),
+			hops:       hop,
+			predictHit: predictHit,
+		},
+	}, true
 }
 
 // defaultUserInput returns the engaging line for a non-user-dictated

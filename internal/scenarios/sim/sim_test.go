@@ -3,6 +3,7 @@ package sim
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -387,6 +388,12 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// generator; no rng, no control-flow influence.
 	recordInterleaveMetrics(h, gen)
 
+	// Fold the within-thread wander telemetry (§3.2/§5, criteria a/b): the
+	// per-thread trajectory shape and the hop-graded abandoned-topic probe
+	// buckets (current-topic recall, per-hop decay, per-hop coherence,
+	// total divergence). Generator-owned, metrics-package-free at the seam.
+	recordWanderMetrics(h, gen)
+
 	if err := h.Metrics.WriteJSON(h.MetricsPath); err != nil {
 		t.Fatalf("re-write metrics blob with episode stats: %v", err)
 	}
@@ -504,6 +511,91 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	t.Logf("turns/session:            mean %.2f", mean(turnsPer))
 	t.Logf("topic dwell run-length:   mean %.2f (consecutive turns on one thread before a cross-topic move)",
 		mean(dwell))
+
+	// Within-thread wander (#96 increment 2). Criterion (a): trajectory
+	// shape — mean distinct topics > 1 with a tail to wanderMaxHops proves
+	// threads are non-monotonic. Criterion (b): current-topic recall holds
+	// (~0.95), abandoned-topic recall DECAYS with hop distance, and the
+	// oracle/runtime COHERENCE is the pass (zero divergence; the decay is
+	// the deliverable, not a failure).
+	topicsDistinct := m.Histograms[metricThreadTopicsDistinct]
+	wanderHopsHist := m.Histograms[metricThreadWanderHops]
+	t.Logf("=== within-thread wander (#96) ===")
+	t.Logf("thread topics distinct:   mean %.3f max %d (criterion a: >1.0 with tail to %d = non-monotonic)",
+		mean(topicsDistinct), int(maxOf(topicsDistinct)), wanderMaxHops)
+	t.Logf("thread wander hops:       mean %.3f max %d (trajectory length distribution)",
+		mean(wanderHopsHist), int(maxOf(wanderHopsHist)))
+	t.Logf("wander_current_recall:    %.3f (%d obs) — current topic must surface (>=~0.95)",
+		m.Gauges[metricWanderCurrentRecall], int(m.Gauges[metricWanderCurrentRecall+"_obs"]))
+	// Per-hop decay + coherence curve (hop 0 = current topic, included so
+	// the curve shows the full active→abandoned gradient).
+	for hop := 0; hop < wanderMaxHops; hop++ {
+		key := fmt.Sprintf("_h%d", hop)
+		obs := int(m.Gauges[metricWanderOriginRecallByHops+key+"_obs"])
+		if obs == 0 {
+			continue
+		}
+		t.Logf("  hop %d: origin_recall=%.3f coherence=%.3f (%d obs)",
+			hop,
+			m.Gauges[metricWanderOriginRecallByHops+key],
+			m.Gauges[metricWanderCoherenceByHops+key],
+			obs)
+	}
+	divergence := int(m.Gauges[metricWanderCoherenceDivergence])
+	t.Logf("wander coherence divergence: %d (criterion b PASS = 0; decay is expected, divergence is the failure)",
+		divergence)
+
+	// Criterion (b) pass condition: oracle and runtime must AGREE per hop.
+	// Real divergence (oracle predicts hit, runtime misses or vice-versa)
+	// beyond a tiny band means the §4.3 eviction-free coherence assumption
+	// broke — STOP, do not paper over it (the design's trip-wire). A small
+	// band absorbs borderline-Jaccard rounding where the runtime's exact
+	// scorer and the oracle's set-Jaccard sit on opposite sides of 0.4 by a
+	// hair; a structural break shows up as divergence scaling with obs.
+	totalProbeObs := 0
+	for hop := 0; hop < wanderMaxHops; hop++ {
+		key := fmt.Sprintf("_h%d", hop)
+		totalProbeObs += int(m.Gauges[metricWanderOriginRecallByHops+key+"_obs"])
+	}
+	if totalProbeObs > 0 {
+		divergenceBand := totalProbeObs / 20 // 5% rounding band
+		if divergence > divergenceBand {
+			t.Errorf("criterion (b) FAILURE: wander coherence divergence %d exceeds band %d over %d probe obs — "+
+				"oracle and runtime DISAGREE on abandoned-topic recall; the §4.3 eviction-free coherence "+
+				"assumption broke (check criterion e / history_len_max). Do NOT trust the decay curve until resolved.",
+				divergence, divergenceBand, totalProbeObs)
+		}
+	}
+
+	// Criterion (e): max per-thread retained symbol count must stay under
+	// the eviction cap — the no-eviction precondition the oracle's
+	// coherence rests on (§4.3). The generator's own shadow retained set is
+	// the authoritative per-thread emitted-symbol union; assert its max is
+	// below the cap. (history_len_max above is the runtime-side companion.)
+	maxRetained := 0
+	for i := range gen.threads {
+		if gen.isCarrier(i) {
+			// Dedicated measurement carriers absorb the abandoned-topic-probe
+			// and campaign-recall query pollution by design (#96 inc 2); they
+			// are excluded from the recall oracle on both sides, so their
+			// bloated shadow set is not a no-eviction-coherence hazard and is
+			// not counted against the cap. Runtime-side their history is
+			// strictly capped at 40 (history.cap-per-thread), and their
+			// ~5-symbol-query Jaccard denominator dilutes below the §3.4
+			// threshold, so they never fire as a false recall match.
+			continue
+		}
+		if n := len(gen.shadowRetainedSet(i)); n > maxRetained {
+			maxRetained = n
+		}
+	}
+	t.Logf("max per-thread retained symbols: %d (criterion e: must stay < eviction cap %d)",
+		maxRetained, historyCapForReport)
+	if maxRetained >= historyCapForReport {
+		t.Errorf("criterion (e) FAILURE: max per-thread retained symbols %d >= eviction cap %d — "+
+			"the oracle's no-eviction assumption (§4.3) breaks; eviction modeling now required",
+			maxRetained, historyCapForReport)
+	}
 
 	// R6 (Build-Plan §4): history_len / ever_central must not blow past the
 	// hard cap. The cap is a storage invariant the runtime enforces; a
@@ -904,6 +996,62 @@ func recordInterleaveMetrics(h *scenarios.Harness, gen *generator) {
 	for _, v := range gen.topicDwellRuns {
 		h.Metrics.Record(metricTopicDwellRunlen, float64(v))
 	}
+}
+
+// recordWanderMetrics folds the within-thread wander telemetry (§3.2/§5,
+// criteria (a)/(b)) into the run's metrics blob:
+//
+//   - per-thread trajectory shape (criterion a): distinct-topics and
+//     wander-hops histograms, proving threads are non-monotonic (mean > 1,
+//     tail to wanderMaxHops).
+//   - the abandoned-topic probe buckets (criterion b): the current-topic
+//     control recall, the per-hop abandoned-topic recall DECAY curve, and
+//     the per-hop oracle/runtime COHERENCE rate plus the total divergence
+//     count (the pass condition — coherence, not a recall floor).
+//
+// The generator owns the raw counters (no rng, pure measurement
+// bookkeeping); this keeps the generator metrics-package-free, mirroring
+// recordLifecycleMetrics / recordInterleaveMetrics.
+func recordWanderMetrics(h *scenarios.Harness, gen *generator) {
+	// Per-thread trajectory shape. One sample per thread; distinct topics
+	// is the set of distinct slots in the trajectory (== len(traj) given
+	// nextWanderSlot's always-different-topic move, but computed as a set
+	// so the metric is honest if that ever changes).
+	for i := range gen.threads {
+		if gen.isCarrier(i) {
+			continue // a measurement carrier is not a genuine user thread
+		}
+		thr := gen.threads[i]
+		distinct := map[int]struct{}{}
+		for _, s := range thr.traj {
+			distinct[s] = struct{}{}
+		}
+		h.Metrics.Record(metricThreadTopicsDistinct, float64(len(distinct)))
+		h.Metrics.Record(metricThreadWanderHops, float64(len(thr.traj)))
+	}
+
+	// Current-topic control recall.
+	if gen.wanderCurrentTotal > 0 {
+		h.Metrics.Set(metricWanderCurrentRecall,
+			float64(gen.wanderCurrentHits)/float64(gen.wanderCurrentTotal))
+		h.Metrics.Set(metricWanderCurrentRecall+"_obs", float64(gen.wanderCurrentTotal))
+	}
+
+	// Per-hop abandoned-topic recall decay + oracle/runtime coherence.
+	divergence := 0
+	for hop, total := range gen.wanderHopTotal {
+		if total == 0 {
+			continue
+		}
+		key := fmt.Sprintf("_h%d", hop)
+		h.Metrics.Set(metricWanderOriginRecallByHops+key,
+			float64(gen.wanderHopHits[hop])/float64(total))
+		h.Metrics.Set(metricWanderOriginRecallByHops+key+"_obs", float64(total))
+		h.Metrics.Set(metricWanderCoherenceByHops+key,
+			float64(gen.wanderHopCoherent[hop])/float64(total))
+		divergence += gen.wanderHopDiverge[hop]
+	}
+	h.Metrics.Set(metricWanderCoherenceDivergence, float64(divergence))
 }
 
 // closureCount counts `retire.complete` events in the harness's event
