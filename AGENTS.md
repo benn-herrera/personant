@@ -218,6 +218,17 @@ In progress:
     threshold-matrix "precision problem" was the top-10-above-cutoff
     candidate policy, not a ranking weakness; a top-1/top-3 recall
     policy on embeddings is strong.
+- Anchor-lifecycle redesign (SPEC §2.2 / §2.7.4 / §3.4 / §5.1):
+  evolving anchors. `anchors` is a deterministic re-derived *projection*
+  of active `history_symbols` (top-`AnchorProjectionMax`=8), not a
+  frozen birth certificate; 0-anchor vague threads are legal; the
+  4-minimum floor is deleted; a symbol that drops out of the projection
+  becomes `superseded` and is **retained, not evicted**, protected from
+  capacity eviction by an `ever_central` latch (abandoned premises stay
+  findable). Shipped in increments (schema → projection + lifecycle
+  state machine + idempotent-write guard → lifecycle-aware scorer →
+  contract loosening + SPEC deltas → coupled sim workload + metrics) and
+  validated across the acceptance ladder.
 
 Queued:
 - Phase 4: closure / retirement (curator-drafted summaries; ack flow;
@@ -228,14 +239,20 @@ Queued:
   SPEC §4.5.8): reconcile/rebuild stale derived state on open after a
   crash; exercise the normal shutdown→resume cycle. Distinct from
   §3.8 archival recovery.
-- Anchor-lifecycle redesign (SPEC §2.2 ⚠ note): replace the
-  frozen-at-creation / 4-minimum anchor model with evolving anchors
-  (re-derived projection; 0-anchor vague threads; superseded-retained,
-  not evicted). Revises §2.2 / §3.4 / §5.1.
 - Realism-convergence backlog (SPEC §9.1): the open list of realism
-  elements gating substrate v0.5.0 — workload interleaving/incoherence,
-  evolving anchors, thread-as-synthesis, the Lens-B gaps, transient-data
-  fidelity.
+  elements gating substrate v0.5.0 — within-thread topic interleaving
+  (non-monotonic threads; in progress), thread-as-synthesis, the Lens-B
+  gaps, transient-data fidelity, and inference-/embedding-in-loop
+  coverage (see below).
+- Inference-/embedding-in-loop simulation (SPEC §9.1): wire real
+  `reaper.local` inference (gemma-4 family) and embedding
+  (`nomicai-modernbert-embed-base-bf16`) into the acceptance sim,
+  individually configurable, to close the coverage gap left by the
+  mock LLM / nil-embedder regime (notably embedding-primary §3.4 recall,
+  which the symbolic-only sim cannot exercise). Transitional + needs an
+  empirical sweet-spot hunt: per-turn cost rises from ~10s of ms to
+  single-digit seconds, trading away the ~20-min/4-month iteration
+  budget, so the goal is max coverage/rigor per unit per-turn overhead.
 - v0.2: deep cold archival via git; working-set content dedup;
   shell escape `$`/`#` with long-lived subprocess; transient-data
   event-log compaction + class-aware tool-output budget.

@@ -701,7 +701,7 @@ Three passes per §3.0.2 step 1, ordered cheapest first:
 
 1. **Deterministic** — regex over the delta (file paths, URLs, claim IDs, `#`-tags).
 2. **Model-emitted** — anchors from the topic tag (§5.1) are folded in directly.
-3. **Curator** — at retirement, the curator selects the final anchor set (§3.5) from the accumulated `history_symbols`.
+3. **Curator** — at retirement, the curator drafts the closure summary (§3.5). It does **not** select anchors: the anchor set is the deterministic re-derived projection of active `history_symbols` (§2.7.4), recomputed every owner turn with no LLM. (Pass 3 is named for the curator's *summary* role at the same lifecycle point, not an anchor-selection step.)
 
 For task-class deltas (§3.10.1), extracted symbols enter the staging buffer (§3.10.2) instead of feeding the coalesce buffer directly; they reach `symbols.jsonl` only on citation-window promotion (§3.10.4).
 
@@ -1978,8 +1978,41 @@ making them measure memory scaling again requires the corpus vocabulary
 to scale with thread population (per-thread symbol salting) — a queued
 sim improvement, not a production recall defect.
 
-**The gate is realism CONVERGENCE, not a single run.** "Survived six
-months in whatever shape the workload happens to be in" is form, not
+**Recall-layer scope: the acceptance sim is transitional, currently
+symbolic-only.** The standard acceptance run uses the mock LLM (§9.2)
+with a *nil embedder*, so it exercises only the §3.4 **symbolic Jaccard**
+layer — not the embedding-primary scan that §3.4 makes the *primary*
+recall mechanism in production, nor the model-judgment confirmation
+layer. This was originally a hard constraint (no unmetered embedding or
+inference available); it is being lifted. With unmetered local inference
++ embedding now available (`reaper.local`: gemma-4 family for inference,
+`nomicai-modernbert-embed-base-bf16` for embeddings), the planned next
+increment wires **inference-in-loop and embedding-in-loop into the
+acceptance sim, each individually configurable**, to close the coverage
+gap — most importantly to measure embedding-primary recall under the
+same realistic workload, rather than inferring it from the separate C.6
+head-to-head. Two consequences the gate must hold honestly:
+
+- **Until that lands, symbolic-only metrics do not validate the recall
+  path users actually get.** A within-thread-drift recall miss on the
+  symbolic layer (e.g. the hop-graded abandoned-recall decay the
+  within-thread-interleaving work measures) is *expected* — it is the
+  quantified motivation for the embedding layer, not a substrate defect.
+  Reporting symbolic-only recall as system recall would be exactly the
+  form-vs-function overclaim the convergence honesty clause forbids.
+- **Service-in-loop is a cost/coverage tradeoff, not a free upgrade.**
+  Real inference/embedding raises per-turn cost from ~10s of milliseconds
+  to single-digit seconds, trading away the ~20-minute wall-clock for a
+  120-day run that makes the mock regime such a fast iteration
+  instrument. The increment therefore includes an **empirical
+  sweet-spot hunt**: maximize coverage/rigor added per unit of per-turn
+  overhead (e.g. inference/embedding sampled on a fraction of turns, or
+  only on recall-bearing turns), keeping the fast mock regime as the
+  default iteration loop and reserving full service-in-loop for
+  periodic deep validation. Tracked, gating v0.5.0 convergence.
+
+**The gate is realism CONVERGENCE, not a single run.** "Survived the
+full span in whatever shape the workload happens to be in" is form, not
 function. The criterion is the full top-rung span (120 days) passed with *every identified
 element of realism accounted for* — including elements surfaced by prior
 runs. It is a converging loop: each run exposes a missing realism

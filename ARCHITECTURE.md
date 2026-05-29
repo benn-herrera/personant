@@ -88,7 +88,7 @@ Spine is always in window → model recognizes prior topic from spine entries �
 
 When the cost of being wrong is far higher than the cost of being right, the bar shifts toward "prove it."
 
-- The architectural thesis cannot be validated by inspection. The §9 measurement regime exists because "use it and find out for six months and then revise if it's wrong" has no graceful recovery — you'd have to either complex-refactor accumulated memory or lose it all.
+- The architectural thesis cannot be validated by inspection. The §9 measurement regime exists because "use it and find out across extended accumulated usage and then revise if it's wrong" has no graceful recovery — you'd have to either complex-refactor accumulated memory or lose it all.
 - The migration-cost asymmetry favored YAML over TOML for thread frontmatter: switching later costs a script + validation pass over every thread file; the immediate gain from going off-standard was modest. Pick the standard path.
 
 When evaluating a "modest gain now" decision, explicitly compute the migration cost if we change our mind later. If it's high, default to the standard path.
@@ -139,7 +139,7 @@ All of these are load-bearing. A change that violates them is a red flag.
 
 The substrate non-negotiables above are constraints on the *canonical* layer — the source of truth that humans inspect, git tracks, and `cat`/`grep` operate on. They do **not** preclude a fast read-optimized **derived index** alongside the canonical, accessed through the same `MemoryOps` port (an additional adapter or an internal optimization within the file adapter).
 
-If the markdown/JSONL canonical substrate ever hits a critical speed ceiling — most plausibly under six-month-simulation acceleration, not interactive use — the option to reach for is **[bbolt](https://github.com/etcd-io/bbolt)** (the etcd-maintained fork of BoltDB) as a derived KV index, with the markdown-graph remaining canonical.
+If the markdown/JSONL canonical substrate ever hits a critical speed ceiling — most plausibly under long-rung simulation acceleration (especially inference-/embedding-in-loop runs), not interactive use — the option to reach for is **[bbolt](https://github.com/etcd-io/bbolt)** (the etcd-maintained fork of BoltDB) as a derived KV index, with the markdown-graph remaining canonical.
 
 The reasoning, captured so future-us doesn't redo it cold:
 
@@ -233,8 +233,8 @@ Layers E and A are the *recognition* surface; Layer B is *active engagement*. Th
 | **Spine record** | one line of `spine.jsonl`; canonical thread bookkeeping (id, project, anchors, summary, state, timestamps, turn_count, recall_fires) | §2.2 |
 | **Thread** | contiguous run of turns united by working on one specific problem; identified by `thr_<n>` (stable forever); has a markdown file with YAML frontmatter | §2.3 |
 | **Project** | three-layer identity: stable handle `prj_<n>`, mutable display name, optional canonical external identity (normalized git remote URL) | §2.5.1, §4.5 |
-| **Anchor symbol** | curated 4–8 normalized symbols per thread; drive recall and surface in spine line | §2.7 |
-| **History symbol** | per-thread accumulated symbol with `raw`, `normalized`, `first_seen_turn`, `count`, `source`; capped per `history.cap-per-thread` | §2.3 |
+| **Anchor symbol** | `[derived]` 0..8 normalized symbols per thread; a re-derived **projection** of the thread's *active* `history_symbols` (not a frozen birth certificate), recomputed deterministically each owner turn — no LLM; drive recall and surface in the spine line | §2.2, §2.7.4 |
+| **History symbol** | per-thread accumulated symbol (`raw`, `normalized`, `first_seen_turn`, `count`, `source`) plus a `lifecycle` (`active`/`superseded`) and an `ever_central` latch; the thread's evolving identity and the recall match set; capped per `history.cap-per-thread`, evicted with ever-central + high-specificity protection | §2.3, §2.7.4 |
 | **Symbol category** | `identifier` (preserve case), `entity` (lowercase + hyphenate), `tag` (lowercase, leading `#` stripped) | §2.7.1 |
 | **Symbol source** | `deterministic` / `model` / `user` / `curator`; dominance: `curator > user > model > deterministic` | §2.7.3 |
 | **Context-modification delta** | one event to the chain (§3.0); content-modifying event with source + content + metadata + retention class | §3.0 |
@@ -266,7 +266,7 @@ The natural retirement boundary is "thread reached a resting point," not "contex
 Display form, briefly:
 
 ```
-thr_<n> [<4–8 anchors>] — <100–150 char gist> [<state>]
+thr_<n> [<0..8 anchors>] — <100–150 char gist> [<state>]
 ```
 
 The anchor set is what makes recall possible. The summary is what makes recognition cheap. Together they're the *whole* recognition surface for retired threads — getting them right at retirement is the point of the curator-summary ack flow.
@@ -275,9 +275,9 @@ The anchor set is what makes recall possible. The summary is what makes recognit
 
 1. **Deterministic** (every turn) — regex/parser scan over turn content extracts identifiers (file paths, URLs, code symbols, project-configured patterns, user `#tags`). Free, reliable, narrow.
 2. **Model-emitted** (every turn) — the topic tag's anchor list provides named-entity coverage the deterministic pass can't reach.
-3. **Curator** (at retirement) — LLM picks 4–8 anchor symbols from accumulated history; user ack at retirement gates the choice.
+3. **Curator** (at retirement) — LLM drafts the closure summary (§3.5); the user ack gates it. Anchors are **not** curator-picked: they are the deterministic projection of active `history_symbols` (below), re-derived every owner turn with no LLM involved.
 
-**Anchors vs. history:** anchors are the curated 4–8 that drive recall and surface in the spine line; history is the soft-capped (~30–40) accumulated set used as a deeper match surface but not surfaced. (Spec §2.7, §3.3.)
+**Anchors vs. history (the evolving-anchor model, §2.7.4):** `history_symbols` is the canonical, accreting, weighted per-thread set (soft-capped ~40) and the recall match surface. `anchors` is **not** a separate storage tier — it is the deterministic top-`AnchorProjectionMax` (8) **projection** of the thread's *active* history symbols, re-derived each owner turn. A symbol that falls out of the projection flips to **superseded** but is **retained, not evicted** — an abandoned premise stays a findable recall handle, protected from capacity eviction by its `ever_central` latch. 0 anchors is legal (a vague-start thread that hasn't accreted a headline yet). The earlier frozen-at-creation / 4-minimum-anchor model is gone. (Spec §2.2, §2.7.4, §3.4.)
 
 ### Recall mechanisms (three, layered by cost)
 
@@ -342,7 +342,7 @@ Under sustained working use this organization fragments unavoidably: threads clo
 
 The intended remedy is an offline **consolidation cycle** — the system's equivalent of organic sleep. During idle time (the day off, or any unused window) the runtime would run larger-scale reorganization it cannot afford mid-turn: re-packing fragmented structures into orderly arrangements, compacting the spine, advancing archival, and making the final keep/toss calls on data the faster in-turn transient-data lifecycle (§3.0) left questionable. Working hours stay responsive; the heavy reorganization happens when nothing is waiting on it.
 
-This is a future consideration, not v0.1 — but the v0.1 six-month simulation already supplies the hook: the day-off is a real idle window in the workload model, and closure (§3.5) / archival (§3.8) are exactly the mechanisms a consolidation pass would tidy.
+This is a future consideration, not v0.1 — but the v0.1 acceptance simulation already supplies the hook: the day-off is a real idle window in the workload model, and closure (§3.5) / archival (§3.8) are exactly the mechanisms a consolidation pass would tidy.
 
 ### Weight-baked instinct from outcome history (far-future consideration)
 
@@ -478,7 +478,7 @@ When a project gains a remote URL after creation (local-only → published), the
 
 Spec §9 is **not a quality gate bolted on after features land**. It is the measurement instrument by which the architectural thesis gets proven empirically — and the substrate by which the techniques evolve iteratively.
 
-The cost of getting this wrong without proof ahead of time is **asymmetric and severe**: six months of accumulated memory state under a structurally-wrong storage strategy has no graceful recovery. The simulation regime exists *because* proof must come ahead of time.
+The cost of getting this wrong without proof ahead of time is **asymmetric and severe**: extended accumulated memory state under a structurally-wrong storage strategy has no graceful recovery. The simulation regime exists *because* proof must come ahead of time.
 
 **Layers** (in build order):
 
@@ -488,9 +488,9 @@ The cost of getting this wrong without proof ahead of time is **asymmetric and s
 4. **Churn tests** — randomized seeded sequences; invariants after every operation.
 5. **Calibration tests** — same scenario, parameter sweeps; metrics matrices identify operating points.
 6. **Cross-run baseline comparison** — stored baselines (git-tracked); regression detection.
-7. **Six-month simulation harness** — synthetic workload, logical-clock acceleration, steady-state assertions.
+7. **Acceptance simulation harness** — synthetic workload, logical-clock acceleration, steady-state assertions; the top rung is 120 days / four months (§9.1).
 
-**v0.1 acceptance is the six-month simulation passing**, not Phase 5 feature-completeness. Memory quality maintained throughout, zero out-of-context-space events, runtime costs bounded and stable, steady state demonstrated such that another six months would run without degradation.
+**v0.1 acceptance is the realism-convergence simulation gate passing** (top rung 120 days / four months; SPEC §9.1), not Phase 5 feature-completeness — and it is a *converging loop*, not a one-shot pass. Memory quality maintained throughout, zero out-of-context-space events, runtime costs bounded and stable, steady state demonstrated such that another full span would run without degradation.
 
 When making technique changes (parameter tweaks, algorithm adjustments), the question is always "what does the simulation say?" — not "does it compile and pass invariants?" Bake metrics emission into new code from day one; bolting it on later is much more expensive.
 
