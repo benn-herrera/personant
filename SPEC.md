@@ -55,7 +55,7 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
   last-active                       # operational; one line: prj_<n> of most-recently-active project (§4.5.7)
   history                           # operational; REPL line-edit history (§4.3.1); newest last; capped
   archive/
-    index.jsonl                     # canonical; deep cold archive index (§3.8); empty until v0.2
+    index.jsonl                     # canonical; deep cold archive index (§3.8); recoverable git-based archival (active)
   .git/                             # git-init'd at first run
   tmp/                              # agent's drafting scratch (see §6.3); never git-committed
 ```
@@ -799,26 +799,49 @@ the autonomic git layer (§8.3) rather than a bespoke archive format.
 
 #### 3.8.1 Mechanism
 
-To archive thread `thr_<n>`:
+A thread is a **directory** (`threads/thr_<n>/` = `thread.md` + `turns/` +
+`files.json`, §2.3), not a single file. Cardinality-pressure archival
+drains a **batch** of the coldest retired threads at once (§3.8 trigger);
+the mechanism below is per-batch, and all git goes through the
+`internal/autogit` (go-git) seam — never shell git, never a pre-commit
+hook (§8.3).
 
-1. The runtime confirms `threads/thr_<n>.md` is in git's working tree at
-   HEAD.
-2. `git rm threads/thr_<n>.md`.
-3. `git commit -m "archive thr_<n>"` — the commit captures the deletion.
-4. Append an archive index entry to `archive/index.jsonl`:
+To archive a batch of threads:
+
+1. The runtime confirms each `threads/thr_<n>/` is tracked at HEAD and
+   captures the directory's git **tree hash** (the value recovery will
+   verify against).
+2. A **capture commit** pins the to-be-archived directories into a
+   committed tree — this commit becomes the *parent* where the thread
+   bytes remain reachable after removal. (Per-turn writes do not commit;
+   the substrate commits at `init` and at archival, so this step
+   guarantees the bytes are in a committed tree before deletion.)
+3. Stage the recursive removal of each `threads/thr_<n>/` directory
+   (`os.RemoveAll` + `autogit.Add(".")`, which stages tracked-file
+   deletions), remove all spine records in **one** filtered rewrite
+   (`RemoveSpineRecords`), regenerate derived state (`symbols.jsonl`,
+   digests) **once** for the batch, and append one `archive/index.jsonl`
+   entry per thread. Commit this **deletion commit** as a unit (gated by
+   `CheckSpineIntegrity` on the pre-state and `CheckDerivedFresh` on the
+   post-state); capture its hash `H`.
+4. The index entry references the deletion commit `H` and the parent's
+   tree hash; because `H` is only known after step 3, a small
+   **stamp commit** records the now-known `commit_hash` into the index
+   entries. The archive index entry:
    ```jsonl
-   {"thr_id":"thr_42","commit_hash":"<sha>","blob_hash":"<sha>","archived_at":"<RFC3339>","original_path":"threads/thr_42.md","spine_summary":"<summary at archival time>","anchors":["..."],"project":"prj_3"}
+   {"thr_id":"thr_42","commit_hash":"<H>","tree_hash":"<tree sha of threads/thr_42/ at H's parent>","archived_at":"<RFC3339>","original_path":"threads/thr_42/","spine_summary":"<summary at archival time>","anchors":["..."],"project":"prj_3","recovered_at":""}
    ```
-   The `spine_summary` and `anchors` are preserved verbatim from the
-   spine record at archival time so a `personant search` over archive
-   entries can match without recovering the full thread.
-5. Remove the spine record from `spine.jsonl` (the thread is no longer
-   active recall material).
-6. Commit the spine and archive-index changes together (one commit, so
-   the archived state is atomic).
+   `spine_summary` and `anchors` are preserved verbatim from the spine
+   record at archival time so a search over archive entries can match
+   without recovering the full thread. `recovered_at` is empty until the
+   thread is recovered (§3.8.3).
 
+The drain thus produces a **bounded** number of commits per batch (not
+one per thread), and the spine rewrite + derived regen happen **once**.
 The archive index is **canonical** (per §2.1 ownership table); sorted by
-`thr_id` for line-grain git diffs.
+`thr_id` for line-grain git diffs. Losing the index never loses data: the
+thread bytes are reachable from the capture commit's tree regardless
+(`git log`).
 
 #### 3.8.2 Storage properties
 
@@ -836,20 +859,57 @@ The archive index is **canonical** (per §2.1 ownership table); sorted by
 
 #### 3.8.3 Recovery
 
-To recover archived thread `thr_<n>`:
+To recover archived thread `thr_<n>` (via the `RecoverThread` port op):
 
-1. Look up the archive index entry by `thr_id`.
-2. `git show <commit_hash>:<original_path>` → write to working tree.
-3. Compute `git hash-object` on the recovered file; verify against the
-   stored `blob_hash`. Mismatch indicates index corruption — abort and
-   surface the discrepancy as an error.
-4. Append a fresh spine record (using current parameters; `state` is
-   typically `wip` after recovery, with `last_engaged` updated).
-5. Commit the recovery to the personant home git tree.
+1. Look up the archive index entry by `thr_id`
+   (`ErrArchiveEntryNotFound` if absent).
+2. Resolve the deletion commit's **parent** (the deletion commit's own
+   tree no longer contains the directory; the bytes live in its parent)
+   and restore the full `threads/thr_<n>/` **subtree** from it —
+   `autogit.CheckoutTree` walks the directory tree and writes every blob,
+   not a single `git show`.
+3. Recompute the recovered directory's git **tree hash** and verify it
+   against the stored `tree_hash`. Mismatch ⇒ delete the partial restore
+   and abort with `ErrArchiveIntegrity` — a partially-recovered thread is
+   never written onto the spine.
+4. Append a fresh spine record reusing the **same** `thr_<n>` id (ids are
+   stable forever — recovery never mints a new one); `state = wip`,
+   `last_engaged` updated. Anchors/summary come from the **recovered
+   frontmatter** (canonical), not the index snapshot (which may be stale).
+5. Stamp `recovered_at` on the index entry and commit the recovery
+   (worktree restore + spine + index) to the home git tree.
 
-The archive index entry is **kept** as a forensic breadcrumb.
-`personant archive list` / `personant archive recover` surface
+The archive index entry is **kept** as a forensic breadcrumb (the
+`recovered_at` stamp marks it historical, not a current archived claim).
+`personant archive list` / `personant archive recover <thr_id>` surface
 deep-cold history.
+
+#### 3.8.4 Recall treatment of archived threads (v0.1: off-recall)
+
+Archived-recoverable threads are **off the live recall surface** in v0.1.
+The §3.4 recall scan operates over the spine + per-thread frontmatter;
+an archived thread is off-spine with no frontmatter loaded, so it is not
+a recall candidate. The `archive/index.jsonl` anchors/summary are a
+forensic + `personant archive list/recover` surface, **not** a live
+recall match surface — deep cold is recoverable by **explicit fetch**,
+not ambient surfacing. (Re-surfacing the coldest threads ambiently would
+re-introduce the cardinality pressure archival exists to relieve.) A
+future "archive recall" — matching the index anchors and offering a
+recovery-fetch — is a clean v0.2 addendum the index schema already
+supports (it carries `anchors` + `spine_summary`); it is out of scope
+for v0.1.
+
+**Measurement consequence (§9).** Because archived threads are off the
+live recall surface, the §9 recall-fidelity metrics exclude an
+archived-recoverable expected match from a *live*-recall score rather
+than counting it a miss (`recall_archived_recoverable`) — the runtime's
+§3.4 algorithm is correctly not surfacing an off-spine thread, not
+failing. This is distinct from `recall_unexplained_absence` (an expected
+thread that is off-spine **and** absent from the archive index — a
+genuine integrity signal that must stay 0). With recoverable archival,
+the only legitimate reason a thread leaves the spine is archival, so the
+distinction is meaningful: a recoverable thread is preserved and
+fetch-recoverable, not lost.
 
 ### 3.9 Working-set content dedup
 
