@@ -78,6 +78,44 @@ func RemoveSpineRecord(paths PersonantPaths, id string) error {
 	return nil
 }
 
+// RemoveSpineRecords deletes every record whose id is in ids, rewriting
+// spine.jsonl ONCE with the remaining records (order preserved). This is
+// the batch counterpart to RemoveSpineRecord: a drain that archives K
+// threads pays one read + one filtered WriteSpine instead of K full
+// rewrites (design §3.2 step 3 / §4). An empty ids set is a no-op (no
+// write). Ids not present in the spine are silently ignored — the batch
+// archival path reports per-thread "no spine record" outcomes itself, so
+// this op never fails on a missing id (unlike single-id RemoveSpineRecord,
+// which is kept for the CLI/wrapper path and still returns
+// memops.ErrThreadNotFound). Atomic.
+func RemoveSpineRecords(paths PersonantPaths, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	drop := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		drop[id] = struct{}{}
+	}
+	records, err := ReadSpine(paths.Spine)
+	if err != nil {
+		return fmt.Errorf("remove spine records: %w", err)
+	}
+	out := make([]memops.SpineRecord, 0, len(records))
+	for i := range records {
+		if _, ok := drop[records[i].ID]; ok {
+			continue
+		}
+		out = append(out, records[i])
+	}
+	if len(out) == len(records) {
+		return nil // nothing matched; no rewrite needed
+	}
+	if err := WriteSpine(paths.Spine, out); err != nil {
+		return fmt.Errorf("remove spine records: %w", err)
+	}
+	return nil
+}
+
 // FindSpineRecord returns the spine record with the given id. The second
 // return is false if no such record exists. Errors only on read failures.
 func FindSpineRecord(paths PersonantPaths, id string) (memops.SpineRecord, bool, error) {

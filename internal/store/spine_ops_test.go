@@ -93,6 +93,58 @@ func TestUpdateSpineRecordMissing(t *testing.T) {
 	}
 }
 
+func TestRemoveSpineRecords_BatchFilteredRewrite(t *testing.T) {
+	paths := spineFixturePaths(t)
+	for _, id := range []string{"thr_1", "thr_2", "thr_3", "thr_4"} {
+		if err := AppendSpineRecord(paths, memops.SpineRecord{ID: id, Project: "prj_1"}); err != nil {
+			t.Fatalf("AppendSpineRecord %s: %v", id, err)
+		}
+	}
+
+	// Remove two ids plus one absent id (silently ignored) in one rewrite.
+	if err := RemoveSpineRecords(paths, []string{"thr_2", "thr_4", "thr_99"}); err != nil {
+		t.Fatalf("RemoveSpineRecords: %v", err)
+	}
+
+	got, err := ReadSpine(paths.Spine)
+	if err != nil {
+		t.Fatalf("ReadSpine: %v", err)
+	}
+	gotIDs := make([]string, len(got))
+	for i := range got {
+		gotIDs[i] = got[i].ID
+	}
+	want := []string{"thr_1", "thr_3"}
+	if len(gotIDs) != len(want) {
+		t.Fatalf("got %v, want %v", gotIDs, want)
+	}
+	for i := range want {
+		if gotIDs[i] != want[i] {
+			t.Fatalf("got %v, want %v", gotIDs, want)
+		}
+	}
+}
+
+func TestRemoveSpineRecords_EmptyAndNoMatchAreNoOps(t *testing.T) {
+	paths := spineFixturePaths(t)
+	if err := AppendSpineRecord(paths, memops.SpineRecord{ID: "thr_1", Project: "prj_1"}); err != nil {
+		t.Fatalf("AppendSpineRecord: %v", err)
+	}
+	if err := RemoveSpineRecords(paths, nil); err != nil {
+		t.Fatalf("empty: %v", err)
+	}
+	if err := RemoveSpineRecords(paths, []string{"thr_99"}); err != nil {
+		t.Fatalf("no-match: %v", err)
+	}
+	got, err := ReadSpine(paths.Spine)
+	if err != nil {
+		t.Fatalf("ReadSpine: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "thr_1" {
+		t.Fatalf("spine unexpectedly changed: %+v", got)
+	}
+}
+
 func TestFindSpineRecordPresentAndAbsent(t *testing.T) {
 	paths := spineFixturePaths(t)
 	for _, rec := range []memops.SpineRecord{

@@ -20,6 +20,8 @@ type PersonantPaths struct {
 	DirectivesDir string // Home/directives/                  (defaults.md, user.md, <project>/...)
 	LogsDir       string // Home/logs/                        (YYYY-MM-DD.log + archive/)
 	LogsArchive   string // Home/logs/archive/                (rotated tar.gz)
+	ArchiveDir    string // Home/archive/                     (canonical: recoverable thread archival)
+	ArchiveIndex  string // Home/archive/index.jsonl          (canonical: archive lookup, sorted by thr_id)
 	TmpDir        string // Home/tmp/                         (agent drafting scratch; not git-committed)
 	Readme        string // Home/README.md                    (layout doc for human inspection)
 	Providers     string // Home/providers.toml               (provider pool; apiKeyFile keeps it scannable)
@@ -52,6 +54,8 @@ func makePaths(home string) PersonantPaths {
 		DirectivesDir: filepath.Join(home, "directives"),
 		LogsDir:       filepath.Join(home, "logs"),
 		LogsArchive:   filepath.Join(home, "logs", "archive"),
+		ArchiveDir:    filepath.Join(home, "archive"),
+		ArchiveIndex:  filepath.Join(home, "archive", "index.jsonl"),
 		TmpDir:        filepath.Join(home, "tmp"),
 		Readme:        filepath.Join(home, "README.md"),
 		Providers:     filepath.Join(home, "providers.toml"),

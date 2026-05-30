@@ -66,6 +66,7 @@ func Init(paths PersonantPaths, opts InitOptions) error {
 		{"directives/", paths.DirectivesDir},
 		{"logs/", paths.LogsDir},
 		{"logs/archive/", paths.LogsArchive},
+		{"archive/", paths.ArchiveDir},
 		{"tmp/", paths.TmpDir},
 	}
 	for _, d := range dirs {

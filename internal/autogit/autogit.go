@@ -32,12 +32,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/filemode"
+	"github.com/go-git/go-git/v5/plumbing/object"
 
 	"personant/internal/index"
 	"personant/internal/memops"
@@ -198,6 +203,221 @@ func Checkout(ctx context.Context, paths store.PersonantPaths, commitHash, fileP
 
 	if err := applyFlags(ctx, paths, postFlags); err != nil {
 		return fmt.Errorf("%w: %w", ErrPostOpVerification, err)
+	}
+	return nil
+}
+
+// CheckoutTree restores a whole directory subtree from a specific commit
+// to the working tree — the directory generalization of Checkout, which
+// restores a single file. It tree-walks the entry at dirPath in the
+// commit and writes every blob beneath it, recreating the subtree on
+// disk under paths.Home.
+//
+// E1/Q1 note: staging the *removal* of a tracked directory needs no
+// autogit function — go-git's AddWithOptions{All:true} (Add(".")) stages
+// tracked-file deletions, verified empirically (see the Q1 probe in
+// archive_recovery_test.go). So the archival/recovery flows compose
+// os.RemoveAll(dir) + Add(".") for removal; CheckoutTree is the restore
+// half.
+//
+// Q3 note: a thread's deletion commit no longer contains the directory in
+// its own tree — the bytes live in the deletion commit's PARENT. Recovery
+// therefore passes the PARENT commit hash here (the caller resolves the
+// parent; the index does not store it for I1). CheckoutTree restores the
+// subtree exactly as it exists in the commit it is given.
+//
+// preFlags run before the writes; postFlags run after. Per the package
+// doc and the Checkout doc above, integrity verification of the restored
+// subtree (tree-hash compare) is the caller's purpose-specific wrapper
+// composing CheckoutTree + VerifyTreeHash — NOT a new GitCheckFlag.
+func CheckoutTree(ctx context.Context, paths store.PersonantPaths, commitHash, dirPath string, preFlags, postFlags GitCheckFlags) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("autogit.CheckoutTree: %w", err)
+	}
+	if commitHash == "" {
+		return errors.New("autogit.CheckoutTree: commitHash is empty")
+	}
+	if dirPath == "" {
+		return errors.New("autogit.CheckoutTree: dirPath is empty")
+	}
+	if err := applyFlags(ctx, paths, preFlags); err != nil {
+		return fmt.Errorf("autogit.CheckoutTree: pre-flag: %w", err)
+	}
+
+	repo, err := git.PlainOpen(paths.Home)
+	if err != nil {
+		return fmt.Errorf("autogit.CheckoutTree: open repo: %w", err)
+	}
+	commit, err := repo.CommitObject(plumbing.NewHash(commitHash))
+	if err != nil {
+		return fmt.Errorf("autogit.CheckoutTree: load commit %s: %w", commitHash, err)
+	}
+	root, err := commit.Tree()
+	if err != nil {
+		return fmt.Errorf("autogit.CheckoutTree: commit tree: %w", err)
+	}
+	subtree, err := root.Tree(dirPath)
+	if err != nil {
+		return fmt.Errorf("autogit.CheckoutTree: %q in commit %s: %w", dirPath, commitHash, err)
+	}
+
+	// Walk every file entry beneath the subtree (Files() recurses) and
+	// write each blob to its host-filesystem location under paths.Home.
+	// The working tree IS the host filesystem under paths.Home, so a
+	// direct os.WriteFile is the simplest correct restore — same rationale
+	// as Checkout's single-file write.
+	fi := subtree.Files()
+	for {
+		f, ferr := fi.Next()
+		if ferr == io.EOF {
+			break
+		}
+		if ferr != nil {
+			return fmt.Errorf("autogit.CheckoutTree: walk %q: %w", dirPath, ferr)
+		}
+		contents, cerr := f.Contents()
+		if cerr != nil {
+			return fmt.Errorf("autogit.CheckoutTree: read %q: %w", f.Name, cerr)
+		}
+		relPath := path.Join(dirPath, f.Name) // f.Name is subtree-relative, slash-separated
+		dst := filepath.Join(paths.Home, filepath.FromSlash(relPath))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return fmt.Errorf("autogit.CheckoutTree: mkdir parent of %q: %w", relPath, err)
+		}
+		if err := os.WriteFile(dst, []byte(contents), 0o644); err != nil {
+			return fmt.Errorf("autogit.CheckoutTree: write %q: %w", relPath, err)
+		}
+	}
+
+	if err := applyFlags(ctx, paths, postFlags); err != nil {
+		return fmt.Errorf("%w: %w", ErrPostOpVerification, err)
+	}
+	return nil
+}
+
+// TreeHashAt computes the git tree-object hash of the directory dirPath as
+// it exists in the given commit. This is the capture primitive: at
+// archival time the thread directory is still tracked at HEAD, so the
+// archiver passes the HEAD commit (or, equivalently, the deletion
+// commit's parent) and gets the integrity token to store in the index.
+//
+// Q2 resolution: go-git exposes the subtree's tree-object hash directly
+// via Tree.FindEntry(dirPath).Hash — no awkward worktree hashing and no
+// byte-diff fallback needed for capture. (WorktreeTreeHash below handles
+// the verify side, where the restored directory is on disk, not yet in a
+// commit.)
+func TreeHashAt(ctx context.Context, paths store.PersonantPaths, commitHash, dirPath string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("autogit.TreeHashAt: %w", err)
+	}
+	if commitHash == "" {
+		return "", errors.New("autogit.TreeHashAt: commitHash is empty")
+	}
+	if dirPath == "" {
+		return "", errors.New("autogit.TreeHashAt: dirPath is empty")
+	}
+	repo, err := git.PlainOpen(paths.Home)
+	if err != nil {
+		return "", fmt.Errorf("autogit.TreeHashAt: open repo: %w", err)
+	}
+	commit, err := repo.CommitObject(plumbing.NewHash(commitHash))
+	if err != nil {
+		return "", fmt.Errorf("autogit.TreeHashAt: load commit %s: %w", commitHash, err)
+	}
+	root, err := commit.Tree()
+	if err != nil {
+		return "", fmt.Errorf("autogit.TreeHashAt: commit tree: %w", err)
+	}
+	entry, err := root.FindEntry(dirPath)
+	if err != nil {
+		return "", fmt.Errorf("autogit.TreeHashAt: %q in commit %s: %w", dirPath, commitHash, err)
+	}
+	return entry.Hash.String(), nil
+}
+
+// WorktreeTreeHash computes the git tree-object hash of an on-disk
+// directory under paths.Home, exactly as git would compute it for that
+// subtree. It builds blob hashes for every regular file and assembles
+// nested tree objects bottom-up, hashing each tree object's canonical
+// encoding — so the result is directly comparable to TreeHashAt and to
+// the integrity token captured at archival.
+//
+// This is the verify primitive (design §5 E3 / invariant 2): after
+// recovery restores a subtree to disk, the caller re-hashes it here and
+// compares against the stored tree hash. Symlinks and submodules are not
+// part of a personant thread directory (thread.md + turns/ + files.json),
+// so only regular files and directories are handled; an unexpected
+// non-regular entry is an error rather than a silent skip.
+func WorktreeTreeHash(paths store.PersonantPaths, dirPath string) (string, error) {
+	if dirPath == "" {
+		return "", errors.New("autogit.WorktreeTreeHash: dirPath is empty")
+	}
+	abs := filepath.Join(paths.Home, filepath.FromSlash(dirPath))
+	hash, err := hashDirTree(abs)
+	if err != nil {
+		return "", fmt.Errorf("autogit.WorktreeTreeHash %q: %w", dirPath, err)
+	}
+	return hash.String(), nil
+}
+
+// hashDirTree recursively builds the git tree object for dir and returns
+// its hash. Entries are sorted by git's tree-entry ordering (which
+// object.Tree.Encode handles via the TreeEntrySorter on encode); we sort
+// here too for a stable in-memory tree before encoding.
+func hashDirTree(dir string) (plumbing.Hash, error) {
+	dirents, err := os.ReadDir(dir)
+	if err != nil {
+		return plumbing.ZeroHash, err
+	}
+	entries := make([]object.TreeEntry, 0, len(dirents))
+	for _, de := range dirents {
+		name := de.Name()
+		full := filepath.Join(dir, name)
+		switch {
+		case de.IsDir():
+			sub, err := hashDirTree(full)
+			if err != nil {
+				return plumbing.ZeroHash, err
+			}
+			entries = append(entries, object.TreeEntry{Name: name, Mode: filemode.Dir, Hash: sub})
+		case de.Type().IsRegular():
+			data, err := os.ReadFile(full)
+			if err != nil {
+				return plumbing.ZeroHash, err
+			}
+			blobHash := plumbing.ComputeHash(plumbing.BlobObject, data)
+			mode := filemode.Regular
+			if info, err := de.Info(); err == nil && info.Mode()&0o111 != 0 {
+				mode = filemode.Executable
+			}
+			entries = append(entries, object.TreeEntry{Name: name, Mode: mode, Hash: blobHash})
+		default:
+			return plumbing.ZeroHash, fmt.Errorf("unsupported entry %q (not a regular file or directory)", full)
+		}
+	}
+	sort.Sort(object.TreeEntrySorter(entries))
+
+	tree := &object.Tree{Entries: entries}
+	obj := &plumbing.MemoryObject{}
+	if err := tree.Encode(obj); err != nil {
+		return plumbing.ZeroHash, fmt.Errorf("encode tree: %w", err)
+	}
+	return obj.Hash(), nil
+}
+
+// VerifyTreeHash restores nothing; it composes the verify side of archive
+// recovery: re-hash the on-disk dirPath and compare against want. On
+// mismatch it returns memops.ErrArchiveIntegrity (invariant 2) so the
+// caller can abort the recovery and surface a distinct integrity failure.
+// This is the purpose-specific verification wrapper the package doc
+// mandates — NOT a GitCheckFlag.
+func VerifyTreeHash(paths store.PersonantPaths, dirPath, want string) error {
+	got, err := WorktreeTreeHash(paths, dirPath)
+	if err != nil {
+		return fmt.Errorf("autogit.VerifyTreeHash: %w", err)
+	}
+	if got != want {
+		return fmt.Errorf("autogit.VerifyTreeHash %q: got %s want %s: %w", dirPath, got, want, memops.ErrArchiveIntegrity)
 	}
 	return nil
 }
