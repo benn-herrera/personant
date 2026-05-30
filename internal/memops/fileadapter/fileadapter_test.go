@@ -17,6 +17,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 
+	"personant/internal/autogit"
 	"personant/internal/clock"
 	"personant/internal/memops"
 	"personant/internal/store"
@@ -606,6 +607,121 @@ func TestArchiveThenRecover_GitignoreAndMode(t *testing.T) {
 	// back — and (the whole point) that absence did not trip the integrity check.
 	if _, err := os.Stat(filepath.Join(dir, "scratch.ignoreme")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("gitignored file unexpectedly restored: err=%v", err)
+	}
+}
+
+// TestArchive_StoresParentCommitHash_RecoveryUsesIt is the F6 guard: archival
+// stores the capture commit explicitly as ParentCommitHash (the deletion
+// commit's actual parent), and recovery restores from THAT stored hash rather
+// than walking the deletion commit's first parent. Pre-fix recovery resolved
+// the parent via CommitObject(CommitHash).ParentHashes[0] — an unconditional
+// first-parent assumption that a future merge commit would break. We prove the
+// stored hash is load-bearing by corrupting CommitHash to a bogus value (so
+// any walk-parent path would fail to load the commit) while leaving
+// ParentCommitHash valid: recovery must still succeed from the stored parent.
+func TestArchive_StoresParentCommitHash_RecoveryUsesIt(t *testing.T) {
+	pinClock(t)
+	a := newAdapter(t)
+	ctx := context.Background()
+
+	seedThread(t, a, "thr_1", "prj_1", "## Turn 1\n\nthe thread body\n")
+	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
+		t.Fatalf("ArchiveThread: %v", err)
+	}
+
+	entry, found, err := store.FindArchiveEntry(a.paths, "thr_1")
+	if err != nil || !found {
+		t.Fatalf("FindArchiveEntry: found=%v err=%v", found, err)
+	}
+	if entry.ParentCommitHash == "" {
+		t.Fatal("ParentCommitHash must be stored at archival (F6)")
+	}
+	// The stored parent must equal the deletion commit's actual first parent —
+	// proving it pins the real capture commit, not some unrelated hash.
+	walked, err := autogit.ParentCommitHash(ctx, a.paths, entry.CommitHash)
+	if err != nil {
+		t.Fatalf("walk parent of deletion commit: %v", err)
+	}
+	if entry.ParentCommitHash != walked {
+		t.Fatalf("stored ParentCommitHash %q != deletion-commit parent %q", entry.ParentCommitHash, walked)
+	}
+
+	// Corrupt CommitHash so the walk-parent fallback would fail to load it,
+	// then recover: success proves recovery used the stored ParentCommitHash.
+	entry.CommitHash = "0000000000000000000000000000000000000000"
+	if err := store.AppendArchiveEntries(a.paths, []memops.ArchiveEntry{entry}); err != nil {
+		t.Fatalf("rewrite entry with bogus CommitHash: %v", err)
+	}
+	rec, err := a.RecoverThread(ctx, "thr_1")
+	if err != nil {
+		t.Fatalf("RecoverThread must succeed via stored ParentCommitHash despite bogus CommitHash: %v", err)
+	}
+	if rec.ID != "thr_1" || rec.State != memops.ThreadWIP {
+		t.Fatalf("recovered record wrong: %+v", rec)
+	}
+	if _, found, _ := store.FindSpineRecord(a.paths, "thr_1"); !found {
+		t.Error("thread not back on spine after recovery via stored parent")
+	}
+}
+
+// TestRecoverDriftRecord_DistinctOutcome is the F6 empty-TreeHash guard: a
+// drift thread (spine record with no on-disk directory) is archived with an
+// empty TreeHash. Recovery must take the distinct record-recovery path — it
+// re-adds the spine record from the index snapshot, restores NO content, and
+// logs archive.recovered-record — rather than running an empty-vs-empty tree
+// hash compare that would FALSE-pass as a verified content recovery.
+func TestRecoverDriftRecord_DistinctOutcome(t *testing.T) {
+	pinClock(t)
+	a := newAdapter(t)
+	ctx := context.Background()
+
+	// Seed a normal thread, then delete its directory out from under the spine
+	// to manufacture drift (spine record present, no dir).
+	seedThread(t, a, "thr_1", "prj_1", "## Turn 1\n\nx\n")
+	if err := os.RemoveAll(store.ThreadDir(a.paths, "thr_1")); err != nil {
+		t.Fatalf("remove thread dir: %v", err)
+	}
+
+	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
+		t.Fatalf("ArchiveThread drift: %v", err)
+	}
+	entry, found, err := store.FindArchiveEntry(a.paths, "thr_1")
+	if err != nil || !found {
+		t.Fatalf("FindArchiveEntry: found=%v err=%v", found, err)
+	}
+	if entry.TreeHash != "" {
+		t.Fatalf("drift entry must have empty TreeHash; got %q", entry.TreeHash)
+	}
+
+	rec, err := a.RecoverThread(ctx, "thr_1")
+	if err != nil {
+		t.Fatalf("RecoverThread drift: %v", err)
+	}
+	if rec.ID != "thr_1" || rec.State != memops.ThreadWIP {
+		t.Fatalf("recovered drift record wrong: %+v", rec)
+	}
+	// Spine record is back; no directory was restored (there were no bytes).
+	if _, found, _ := store.FindSpineRecord(a.paths, "thr_1"); !found {
+		t.Error("drift record not back on spine after recovery")
+	}
+	if _, serr := os.Stat(store.ThreadDir(a.paths, "thr_1")); !errors.Is(serr, os.ErrNotExist) {
+		t.Errorf("drift recovery must restore NO directory; stat=%v", serr)
+	}
+	// The forensic trail distinguishes a record recovery from a content one.
+	log := readEventLog(t, a)
+	if !strings.Contains(log, "archive.recovered-record thr=thr_1") {
+		t.Errorf("expected archive.recovered-record line for drift recovery\n%s", log)
+	}
+	if strings.Contains(log, "archive.recovered thr=thr_1 ") {
+		t.Errorf("drift recovery must NOT log a content-recovery line\n%s", log)
+	}
+	// Breadcrumb retained with RecoveredAt stamped.
+	entry, _, err = store.FindArchiveEntry(a.paths, "thr_1")
+	if err != nil {
+		t.Fatalf("FindArchiveEntry after recovery: %v", err)
+	}
+	if entry.RecoveredAt == "" {
+		t.Error("RecoveredAt not stamped on drift recovery")
 	}
 }
 

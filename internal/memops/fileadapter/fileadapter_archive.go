@@ -32,6 +32,12 @@ const (
 	// recovery path" line is GONE — archival is now genuinely recoverable.
 	archiveActionArchived  = "archived"
 	archiveActionRecovered = "recovered"
+	// archiveActionRecoveredRecord marks recovery of a DRIFT entry — a thread
+	// archived with an empty TreeHash (no on-disk directory body). Only its
+	// spine record is re-added; nothing is restored from git. A distinct
+	// action keeps "recovered a record" from looking like "recovered + tree-
+	// verified content" in the forensic log (F6).
+	archiveActionRecoveredRecord = "recovered-record"
 )
 
 // threadRelDir returns the repo-relative, slash-separated directory path a
@@ -231,13 +237,14 @@ func (a *FileAdapter) ArchiveThreads(ctx context.Context, threadIDs []string) (m
 	for _, id := range archivable {
 		c := caps[id]
 		entries = append(entries, memops.ArchiveEntry{
-			ThrID:        id,
-			TreeHash:     treeHashes[id],
-			ArchivedAt:   archivedAt,
-			OriginalPath: threadRelDir(id),
-			SpineSummary: c.rec.Summary,
-			Anchors:      c.rec.Anchors,
-			Project:      c.rec.Project,
+			ThrID:            id,
+			TreeHash:         treeHashes[id],
+			ParentCommitHash: captureHash,
+			ArchivedAt:       archivedAt,
+			OriginalPath:     threadRelDir(id),
+			SpineSummary:     c.rec.Summary,
+			Anchors:          c.rec.Anchors,
+			Project:          c.rec.Project,
 		})
 	}
 	if err := store.AppendArchiveEntries(a.paths, entries); err != nil {
@@ -323,17 +330,39 @@ func (a *FileAdapter) RecoverThread(ctx context.Context, thrID string) (memops.S
 		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: archive entry has no commit hash (un-stamped)", thrID)
 	}
 
-	// (2) The bytes live in the deletion commit's PARENT (Q3). Resolve it,
-	// then restore the subtree from there.
-	parent, err := autogit.ParentCommitHash(ctx, a.paths, entry.CommitHash)
-	if err != nil {
-		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: resolve parent: %w", thrID, err)
+	// (2) Empty-TreeHash drift recovery is a DISTINCT outcome (F6). A thread
+	// archived with no on-disk directory (spine record with no body) stored an
+	// empty TreeHash as a breadcrumb. There are no bytes to restore and no
+	// tree to verify — running CheckoutTree (the parent commit never contained
+	// the directory) would error, and an empty-vs-empty VerifyTreeHash would
+	// FALSE-pass as if bytes were verified. Surface it explicitly: the thread
+	// had no directory body, so we re-add only its spine record from the index
+	// snapshot, restore nothing, and return the recovered record. This is
+	// recovery of a record, not of content — distinct from a verified
+	// content recovery below.
+	if entry.TreeHash == "" {
+		return a.recoverDriftRecord(ctx, thrID, entry)
+	}
+
+	// (3) The bytes live in the deletion commit's PARENT — the capture commit
+	// (Q3). Prefer the explicitly-stored ParentCommitHash (F6): it pins the
+	// exact capture commit, so recovery does not assume the deletion commit's
+	// first parent IS the capture commit (false on a future merge commit —
+	// v2.0 submind-via-clone integrates via git merge). Fall back to walking
+	// the first parent only for an older entry written before the field
+	// existed (greenfield — no migration, but don't crash on empty).
+	parent := entry.ParentCommitHash
+	if parent == "" {
+		parent, err = autogit.ParentCommitHash(ctx, a.paths, entry.CommitHash)
+		if err != nil {
+			return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: resolve parent: %w", thrID, err)
+		}
 	}
 	if err := autogit.CheckoutTree(ctx, a.paths, parent, entry.OriginalPath, 0, 0); err != nil {
 		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: restore subtree: %w", thrID, err)
 	}
 
-	// (3) Verify the restored directory against the stored tree hash. On
+	// (4) Verify the restored directory against the stored tree hash. On
 	// mismatch, delete the partial restore and abort (invariant 2: never put
 	// a partial thread on the spine).
 	if err := autogit.VerifyTreeHash(a.paths, entry.OriginalPath, entry.TreeHash); err != nil {
@@ -342,7 +371,7 @@ func (a *FileAdapter) RecoverThread(ctx context.Context, thrID string) (memops.S
 		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: %w", thrID, err)
 	}
 
-	// (4) Build a fresh spine record from the RECOVERED frontmatter
+	// (5) Build a fresh spine record from the RECOVERED frontmatter
 	// (canonical — anchors/summary may have evolved past the index snapshot).
 	// Reuse the stable id; state=wip; last_engaged=now.
 	fm, err := store.LoadThreadFrontmatter(a.paths, thrID)
@@ -367,7 +396,7 @@ func (a *FileAdapter) RecoverThread(ctx context.Context, thrID string) (memops.S
 		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: append spine: %w", thrID, err)
 	}
 
-	// (5) Reflect the recovered state into the thread frontmatter so the spine
+	// (6) Reflect the recovered state into the thread frontmatter so the spine
 	// and frontmatter agree (state/last_engaged), and keep the cache coherent.
 	fm.State = memops.ThreadWIP
 	fm.LastEngaged = now
@@ -377,7 +406,7 @@ func (a *FileAdapter) RecoverThread(ctx context.Context, thrID string) (memops.S
 	}
 	a.fmCache.Put(fm)
 
-	// (6) Stamp RecoveredAt on the index entry (KEPT as a breadcrumb,
+	// (7) Stamp RecoveredAt on the index entry (KEPT as a breadcrumb,
 	// invariant 4 — never removed), regen derived so the recovered thread
 	// re-enters symbols.jsonl, then commit the recovery.
 	entry.RecoveredAt = now
@@ -400,6 +429,52 @@ func (a *FileAdapter) RecoverThread(ctx context.Context, thrID string) (memops.S
 		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: log: %w", thrID, err)
 	}
 
+	return rec, nil
+}
+
+// recoverDriftRecord is the distinct-outcome path for recovering an archive
+// entry with an empty TreeHash (F6): a drift thread that was archived with no
+// on-disk directory. There are no bytes to restore and no tree to verify, so
+// recovery rebuilds ONLY the spine record from the index snapshot
+// (SpineSummary / Anchors / Project) — the canonical fields the entry
+// preserved — and never runs the tree-hash compare (an empty-vs-empty match
+// would FALSE-pass as a verified content recovery). It stamps RecoveredAt,
+// commits, and logs archive.recovered-record so the forensic trail
+// distinguishes a record recovery from a content recovery.
+func (a *FileAdapter) recoverDriftRecord(ctx context.Context, thrID string, entry memops.ArchiveEntry) (memops.SpineRecord, error) {
+	now := clock.Timeline().Format(time.RFC3339)
+	rec := memops.SpineRecord{
+		ID:           thrID,
+		Project:      entry.Project,
+		Anchors:      entry.Anchors,
+		Summary:      entry.SpineSummary,
+		State:        memops.ThreadWIP,
+		Created:      now,
+		LastEngaged:  now,
+		StateChanged: now,
+	}
+	if err := store.AppendSpineRecord(a.paths, rec); err != nil {
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover drift record %s: append spine: %w", thrID, err)
+	}
+
+	entry.RecoveredAt = now
+	if err := store.AppendArchiveEntries(a.paths, []memops.ArchiveEntry{entry}); err != nil {
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover drift record %s: stamp index: %w", thrID, err)
+	}
+	if err := a.RegenerateDerivedState(ctx, memops.IndexBuildOptions{Quiet: true}); err != nil {
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover drift record %s: regenerate derived: %w", thrID, err)
+	}
+	if err := autogit.Add(ctx, a.paths, "."); err != nil {
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover drift record %s: stage: %w", thrID, err)
+	}
+	if err := autogit.Commit(ctx, a.paths, "archive: recover record "+thrID,
+		0, autogit.CheckDerivedFresh|autogit.CheckSpineIntegrity); err != nil {
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover drift record %s: commit: %w", thrID, err)
+	}
+	if err := eventlog.Log(a.paths, archiveLogCategory, archiveActionRecoveredRecord,
+		fmt.Sprintf("thr=%s project=%s", thrID, rec.Project)); err != nil {
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover drift record %s: log: %w", thrID, err)
+	}
 	return rec, nil
 }
 

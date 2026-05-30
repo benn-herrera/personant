@@ -179,14 +179,24 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 	// One incremental poll captures exactly this turn's appended log
 	// lines: the turn just completed and the next turn has not started.
 	// From those lines extract this step's match-fire set and fold any
-	// thread.created / archive.archived IDs into the cumulative
-	// sets. Invariant checks between turns do not write to logs/, so
-	// they cannot pollute the next step's window.
+	// thread.created IDs into the cumulative created set. The archived set
+	// is refreshed from the canonical index (not the log) whenever the
+	// batch carried an archival/recovery line. Invariant checks between
+	// turns do not write to logs/, so they cannot pollute the next step's
+	// window.
 	stepLines, err := h.tailer.poll()
 	if err != nil {
 		t.Fatalf("scenario step %d (%s): tailer.poll: %v", idx+1, label, err)
 	}
 	h.foldEventLines(stepLines)
+	// Spine-shrink is the second, log-independent refresh trigger (F4): if
+	// the spine lost records this turn an archival drain ran, so resync the
+	// index-derived archived set even if the forensic archive.archived line
+	// was dropped or partially emitted. This is what makes the measurement
+	// set independent of the event log's completeness.
+	if len(postSpine) < len(preSpine) {
+		h.refreshArchivedSet()
+	}
 	matchFires := matchFireSet(stepLines)
 	expectedForgiven := recordRecallFidelity(t, h, idx, label, step.RecallMode, step.ExpectedRecallMatches, matchFires)
 
@@ -299,17 +309,76 @@ func restartSession(t *testing.T, h *Harness, idx int, label string) {
 }
 
 // foldEventLines folds a batch of tailed log lines into the harness's
-// cumulative created/archived thread-ID sets. Called by runStep after
-// each turn's poll and by tests that seed log lines directly.
+// cumulative thread-ID sets. Called by runStep after each turn's poll and
+// by tests that seed log lines directly.
+//
+// createdThreadIDs is built incrementally from `thread.created` lines (these
+// only ever accrue; a partial-emit window for creation is harmless to
+// accounting).
+//
+// archivedThreadIDs is NOT built from log lines. It is derived from the
+// canonical archive index (store.LoadArchiveIndex), restricted to entries
+// that are currently archived and NOT yet recovered (RecoveredAt == "").
+// This single rule fixes F4 and F8 together:
+//
+//   - F4: a mid-loop eventlog.Log failure in ArchiveThreads could under-emit
+//     `archive.archived` lines for durably-committed threads, so a log-line
+//     fold under-counted the archived set → false recall_unexplained_absence.
+//     The index has every committed entry regardless of log emission, so the
+//     measurement set no longer depends on the forensic log's completeness.
+//   - F8: a recovered thread's index entry is RETAINED with RecoveredAt
+//     stamped (invariant 4). Filtering to RecoveredAt == "" automatically
+//     drops a recovered thread from the archived set the instant it is
+//     recovered, so VerifyThreadAccounting's "on-spine AND archived =
+//     corruption" can never fire on a recovered thread — independent of
+//     whether the recovery gauge runs before or after the invariant sweep.
+//
+// To avoid an O(index) read on every recall-fidelity step (which would hurt
+// long-rung throughput), the index is reloaded ONLY when this batch carries
+// an archival or recovery line — the markers that mean the index changed
+// this turn. Drains/recoveries are infrequent and bounded, so the refresh is
+// cheap. A caller that mutates the spine without an event line (none today)
+// can force a refresh via refreshArchivedSet.
 func (h *Harness) foldEventLines(lines []string) {
+	archiveActivity := false
 	for _, line := range lines {
 		if id, ok := eventThreadID(line, "thread.created ", ""); ok {
 			h.createdThreadIDs[id] = struct{}{}
 		}
-		if id, ok := eventThreadID(line, "archive.archived ", "thr="); ok {
-			h.archivedThreadIDs[id] = struct{}{}
+		if strings.Contains(line, "archive.archived ") ||
+			strings.Contains(line, "archive.recovered ") ||
+			strings.Contains(line, "archive.recovered-record ") {
+			archiveActivity = true
 		}
 	}
+	if archiveActivity {
+		h.refreshArchivedSet()
+	}
+}
+
+// refreshArchivedSet rebuilds h.archivedThreadIDs from the canonical archive
+// index, keeping only entries that are currently archived and not yet
+// recovered (RecoveredAt == ""). It is the single source of truth for "off
+// the live recall surface but preserved + recoverable" — see foldEventLines
+// for why it is index-derived rather than log-derived (F4/F8). Reassigns the
+// map wholesale so a thread that left the archived set (recovered) is dropped,
+// not just never re-added. A read failure leaves the prior set in place and
+// reports via t.Errorf (the index is canonical; a read error is a real
+// substrate fault worth surfacing, not silently swallowing).
+func (h *Harness) refreshArchivedSet() {
+	entries, err := store.LoadArchiveIndex(h.Paths)
+	if err != nil {
+		h.T.Errorf("refreshArchivedSet: load archive index: %v", err)
+		return
+	}
+	set := make(map[string]struct{}, len(entries))
+	for _, e := range entries {
+		if e.RecoveredAt != "" {
+			continue
+		}
+		set[e.ThrID] = struct{}{}
+	}
+	h.archivedThreadIDs = set
 }
 
 // recoveryGaugeSample is the maximum number of archived threads the

@@ -288,10 +288,12 @@ func TestVerifyDedupConsistency_Skipped(t *testing.T) {
 }
 
 // seedEventLog writes a day-log file and tails+folds it into the
-// harness's cumulative created/archived sets — the same sequence
-// runStep performs after each turn. Lets the accounting tests exercise
-// VerifyThreadAccounting (which now reads the cumulative sets off the
-// Harness) without driving a full scenario.
+// harness's cumulative created set — the same sequence runStep performs
+// after each turn. Lets the accounting tests exercise
+// VerifyThreadAccounting (which reads the cumulative sets off the
+// Harness) without driving a full scenario. The archived set is NOT
+// driven by log lines (F4/F8) — it is index-derived; use
+// seedArchiveEntry to mark a thread archived.
 func seedEventLog(t *testing.T, h *Harness, body string) {
 	t.Helper()
 	writeLogFile(t, h, body)
@@ -302,13 +304,34 @@ func seedEventLog(t *testing.T, h *Harness, body string) {
 	h.foldEventLines(lines)
 }
 
+// seedArchiveEntry writes a canonical archive-index entry for thrID with the
+// given RecoveredAt (empty ⇒ currently archived) and refreshes the harness's
+// index-derived archived set — the post-F4/F8 source of truth for "archived,
+// not yet recovered."
+func seedArchiveEntry(t *testing.T, h *Harness, thrID, recoveredAt string) {
+	t.Helper()
+	e := memops.ArchiveEntry{
+		ThrID:        thrID,
+		CommitHash:   "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		TreeHash:     "cafebabecafebabecafebabecafebabecafebabe",
+		ArchivedAt:   "2026-05-01T12:00:00Z",
+		OriginalPath: "threads/" + thrID,
+		Project:      "prj_1",
+		RecoveredAt:  recoveredAt,
+	}
+	if err := store.AppendArchiveEntries(h.Paths, []memops.ArchiveEntry{e}); err != nil {
+		t.Fatalf("seedArchiveEntry %s: %v", thrID, err)
+	}
+	h.refreshArchivedSet()
+}
+
 func TestVerifyThreadAccounting_Pass(t *testing.T) {
 	// thr_1 on the spine, thr_2 created then archived → disjoint union holds.
 	h := invariantHarness(t)
 	seedThread(t, h, validRecord())
 	seedEventLog(t, h, "ts thread.created thr_1 anchors=4 project=prj_1\n"+
-		"ts thread.created thr_2 anchors=4 project=prj_1\n"+
-		"ts archive.archived thr=thr_2 project=prj_1 bytes=512\n")
+		"ts thread.created thr_2 anchors=4 project=prj_1\n")
+	seedArchiveEntry(t, h, "thr_2", "")
 	if err := VerifyThreadAccounting(h); err != nil {
 		t.Fatalf("expected pass, got %v", err)
 	}
@@ -326,13 +349,33 @@ func TestVerifyThreadAccounting_FailsOnUnexplainedLoss(t *testing.T) {
 }
 
 func TestVerifyThreadAccounting_FailsOnSpineAndArchived(t *testing.T) {
-	// thr_1 is on the spine yet also recorded as archived.
+	// thr_1 is on the spine yet also recorded as archived (not recovered).
 	h := invariantHarness(t)
 	seedThread(t, h, validRecord())
-	seedEventLog(t, h, "ts thread.created thr_1 anchors=4 project=prj_1\n"+
-		"ts archive.archived thr=thr_1 project=prj_1 bytes=512\n")
+	seedEventLog(t, h, "ts thread.created thr_1 anchors=4 project=prj_1\n")
+	seedArchiveEntry(t, h, "thr_1", "")
 	if err := VerifyThreadAccounting(h); err == nil {
 		t.Fatalf("expected fail on simultaneous spine+archived; passed")
+	}
+}
+
+// TestVerifyThreadAccounting_RecoveredLeavesArchivedSet is the F8 guard: a
+// recovered thread's index entry is RETAINED with RecoveredAt stamped, but
+// the index-derived archived set excludes RecoveredAt != "" — so a thread
+// that is back on the spine AND still has an archive breadcrumb does NOT
+// trip the "on-spine and archived" corruption signal, regardless of whether
+// the recovery gauge ran before or after the invariant sweep.
+func TestVerifyThreadAccounting_RecoveredLeavesArchivedSet(t *testing.T) {
+	h := invariantHarness(t)
+	seedThread(t, h, validRecord()) // thr_1 back on the spine
+	seedEventLog(t, h, "ts thread.created thr_1 anchors=4 project=prj_1\n")
+	// thr_1 has a retained archive entry, but it was recovered (RecoveredAt set).
+	seedArchiveEntry(t, h, "thr_1", "2026-05-02T12:00:00Z")
+	if _, archived := h.archivedThreadIDs["thr_1"]; archived {
+		t.Fatal("recovered thread must NOT remain in the archived set (RecoveredAt stamped)")
+	}
+	if err := VerifyThreadAccounting(h); err != nil {
+		t.Fatalf("recovered thread on spine must not trip accounting; got %v", err)
 	}
 }
 

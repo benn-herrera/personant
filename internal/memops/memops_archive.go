@@ -38,6 +38,18 @@ type ArchiveEntry struct {
 	// the parent.
 	CommitHash string `json:"commit_hash"`
 
+	// ParentCommitHash is the opaque hash of the deletion commit's parent —
+	// the CAPTURE commit, whose tree still holds the thread directory's
+	// bytes. Recovery restores the subtree from THIS commit directly (F6),
+	// rather than walking CommitHash's parent at recovery time. Storing it
+	// explicitly removes the unconditional first-parent assumption: a future
+	// merge commit (v2.0 submind-via-clone integrates via git merge) has
+	// multiple parents, and ParentHashes[0] would pick the wrong lineage.
+	// Empty on an older entry written before this field existed; recovery
+	// falls back to the walk-parent path in that case (greenfield — no
+	// migration needed, but recovery must not crash on empty).
+	ParentCommitHash string `json:"parent_commit_hash,omitempty"`
+
 	// TreeHash is the opaque hash of the thread directory's subtree as it
 	// existed at the deletion commit's parent — the integrity token.
 	// Recovery re-hashes the restored directory and aborts on mismatch

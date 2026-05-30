@@ -1,13 +1,39 @@
 package scenarios
 
 import (
+	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
+
+	"personant/internal/metrics"
 )
+
+// readCounter writes the run's metrics blob to a temp file and returns the
+// named counter (0 if absent). The metrics package exposes no in-memory
+// getter; round-tripping through the on-disk schema is the supported read
+// path and matches what the §9.4 baseline comparison actually consumes.
+func readCounter(t *testing.T, run *metrics.Run, name string) int64 {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "m.json")
+	if err := run.WriteJSON(p); err != nil {
+		t.Fatalf("readCounter: write metrics: %v", err)
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("readCounter: read metrics: %v", err)
+	}
+	var doc struct {
+		Counters map[string]int64 `json:"counters"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("readCounter: unmarshal: %v", err)
+	}
+	return doc.Counters[name]
+}
 
 // writeLogFile drops a day-log file with the given body under
 // paths.LogsDir so the log-walk helpers can be exercised without
@@ -34,6 +60,13 @@ func sortedKeys(m map[string]struct{}) []string {
 
 func TestFoldEventLines(t *testing.T) {
 	h := invariantHarness(t)
+	// createdThreadIDs is log-derived; archivedThreadIDs is index-derived
+	// (F4/F8). Seed the canonical index so the archive.archived line's
+	// refresh has something to read — the line is the REFRESH TRIGGER, not
+	// the data source. thr_2 is archived (RecoveredAt empty); thr_3 has a
+	// retained breadcrumb but was recovered, so it must be excluded.
+	seedArchiveEntry(t, h, "thr_2", "")
+	seedArchiveEntry(t, h, "thr_3", "2026-05-02T12:00:00Z")
 	h.foldEventLines([]string{
 		"ts thread.created thr_1 anchors=4 project=prj_1",
 		"ts thread.created thr_2 anchors=4 project=prj_1",
@@ -46,6 +79,47 @@ func TestFoldEventLines(t *testing.T) {
 	}
 	if got, want := sortedKeys(h.archivedThreadIDs), []string{"thr_2"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("archivedThreadIDs: got %v want %v", got, want)
+	}
+}
+
+// TestArchivedSet_IndexDerived_DroppedLogLine is the F4 guard: a thread is
+// durably archived (canonical index entry written, spine record gone) but its
+// archive.archived forensic log line was dropped — the mid-loop eventlog.Log
+// failure window in ArchiveThreads. Pre-fix the archived set was built by
+// folding that log line, so the missing line under-counted the set and a step
+// that expected the archived thread tripped recall_unexplained_absence
+// (a false integrity alarm) and VerifyThreadAccounting saw an unexplained
+// loss. Post-fix the set derives from the index (refreshed on spine-shrink,
+// independent of the log), so both stay clean.
+func TestArchivedSet_IndexDerived_DroppedLogLine(t *testing.T) {
+	h := invariantHarness(t)
+	h.Metrics = metrics.New(nil)
+
+	// thr_1 stays on the spine. thr_2 was created, then durably archived:
+	// canonical index entry present (RecoveredAt empty), spine record absent.
+	// NO archive.archived log line is folded — that line was "dropped".
+	seedThread(t, h, validRecord()) // thr_1
+	h.createdThreadIDs["thr_1"] = struct{}{}
+	h.createdThreadIDs["thr_2"] = struct{}{}
+	seedArchiveEntry(t, h, "thr_2", "") // index entry; refreshArchivedSet runs inside
+
+	// A step that expected to recall thr_2 (now archived) must forgive it as
+	// archived-recoverable, NOT count it as an unexplained absence.
+	forgiven := recordRecallFidelity(t, h, 0, "f4", RecallStrict, []string{"thr_2"}, nil)
+	if forgiven != 0 {
+		t.Errorf("archived expected thread should be forgiven (0 kept); got %d", forgiven)
+	}
+	if got := readCounter(t, h.Metrics, "recall_unexplained_absence"); got != 0 {
+		t.Errorf("recall_unexplained_absence must stay 0 for a durably-archived thread with a dropped log line; got %d", got)
+	}
+	if got := readCounter(t, h.Metrics, "recall_archived_recoverable"); got != 1 {
+		t.Errorf("expected 1 recall_archived_recoverable; got %d", got)
+	}
+
+	// Accounting balances: thr_2 is created and archived (index-derived),
+	// thr_1 is created and on-spine — disjoint union holds with no log line.
+	if err := VerifyThreadAccounting(h); err != nil {
+		t.Errorf("VerifyThreadAccounting must balance from the index, not the log: %v", err)
 	}
 }
 
