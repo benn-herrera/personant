@@ -530,6 +530,85 @@ func TestArchiveThenRecover_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestArchiveThenRecover_GitignoreAndMode is the F3 regression guard (#101).
+// Before the fix the integrity token was computed via WorktreeTreeHash (hashes
+// every on-disk file, ignoring .gitignore; derives mode from os.Stat) while the
+// capture commit honored .gitignore and CheckoutTree restored at hardcoded
+// 0o644. So a thread dir containing (i) a gitignored file or (ii) an executable
+// file produced a captured token that a perfectly recoverable thread could not
+// reproduce on restore — recovery FALSE-failed with ErrArchiveIntegrity.
+//
+// This thread dir carries both hazards. Post-fix, recovery must SUCCEED: the
+// token is the committed-tree hash (gitignored file excluded, exec bit encoded)
+// and the restore preserves committed mode, so the verify-side WorktreeTreeHash
+// of the fresh restore matches. The gitignored file legitimately does not come
+// back (never committed) and must NOT trip the integrity check.
+func TestArchiveThenRecover_GitignoreAndMode(t *testing.T) {
+	pinClock(t)
+	a := newAdapter(t)
+	ctx := context.Background()
+
+	seedThread(t, a, "thr_1", "prj_1", "## Turn 1\n\nthe thread body\n")
+	dir := store.ThreadDir(a.paths, "thr_1")
+
+	// Add a .gitignore rule matching a file we drop inside the thread dir, so
+	// the capture commit's Add(".") skips it (the file is on disk but never
+	// committed — exactly the divergence F3 is about).
+	gi, err := os.ReadFile(a.paths.Gitignore)
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	if err := os.WriteFile(a.paths.Gitignore, append(gi, []byte("\n*.ignoreme\n")...), 0o644); err != nil {
+		t.Fatalf("append .gitignore: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "scratch.ignoreme"), []byte("volatile scratch\n"), 0o644); err != nil {
+		t.Fatalf("write gitignored file: %v", err)
+	}
+	// An executable thread file: stat-derived mode (0o755) must match the
+	// committed tree-entry mode after restore.
+	execBody := "#!/bin/sh\necho hi\n"
+	if err := os.WriteFile(filepath.Join(dir, "run.sh"), []byte(execBody), 0o755); err != nil {
+		t.Fatalf("write executable file: %v", err)
+	}
+
+	// --- Archive ---
+	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
+		t.Fatalf("ArchiveThread: %v", err)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("thread dir still present after archival: err=%v", err)
+	}
+
+	// --- Recover --- must NOT FALSE-fail on the integrity check.
+	if _, err := a.RecoverThread(ctx, "thr_1"); err != nil {
+		t.Fatalf("RecoverThread FALSE-failed (F3 regression): %v", err)
+	}
+
+	// The tracked executable file came back byte-exact AND retained its exec bit
+	// (proving restore preserved committed mode, not hardcoded 0o644).
+	runPath := filepath.Join(dir, "run.sh")
+	got, err := os.ReadFile(runPath)
+	if err != nil {
+		t.Fatalf("read recovered run.sh: %v", err)
+	}
+	if string(got) != execBody {
+		t.Errorf("recovered run.sh not byte-exact: got %q want %q", got, execBody)
+	}
+	fi, err := os.Stat(runPath)
+	if err != nil {
+		t.Fatalf("stat recovered run.sh: %v", err)
+	}
+	if fi.Mode()&0o111 == 0 {
+		t.Errorf("recovered run.sh lost its executable bit: mode=%v", fi.Mode())
+	}
+
+	// The gitignored file was never committed, so it legitimately does not come
+	// back — and (the whole point) that absence did not trip the integrity check.
+	if _, err := os.Stat(filepath.Join(dir, "scratch.ignoreme")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("gitignored file unexpectedly restored: err=%v", err)
+	}
+}
+
 // TestRecoverThread_IntegrityFailure — a tampered archived blob fails the
 // tree-hash check, returns ErrArchiveIntegrity, and never puts the thread on
 // the spine (invariant 2).

@@ -182,15 +182,28 @@ func (a *FileAdapter) ArchiveThreads(ctx context.Context, threadIDs []string) (m
 		}
 	}
 
-	// Capture tree hashes from the now-committed worktree (the deletion
-	// commit's parent state). This is the integrity token recovery verifies.
-	// A drift thread with no directory has no bytes — empty TreeHash.
+	// Capture tree hashes from the COMMITTED tree at HEAD — which, after the
+	// capture commit above (or, if that commit was empty, the pre-existing
+	// HEAD), is exactly the deletion commit's parent-to-be: the tree recovery
+	// restores from (F3). Reading the committed tree (TreeHashAt) rather than
+	// the worktree (WorktreeTreeHash) makes the token invariant under the
+	// transform recovery applies: it sees only tracked files (gitignore-safe)
+	// with their committed modes. A worktree hash would include a gitignored
+	// file that the commit never staged, or an executable bit the restore
+	// would not reproduce, and FALSE-fail a perfectly recoverable thread.
+	// A drift thread with no directory has no bytes — empty TreeHash (its dir
+	// is absent from the committed tree too, so TreeHashAt would error; we
+	// skip it, preserving the existing empty-TreeHash breadcrumb semantics).
+	captureHash, err := autogit.HeadHash(ctx, a.paths)
+	if err != nil {
+		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: resolve capture commit: %w", err)
+	}
 	treeHashes := make(map[string]string, len(archivable))
 	for _, id := range archivable {
 		if !caps[id].hasDir {
 			continue
 		}
-		th, err := autogit.WorktreeTreeHash(a.paths, threadRelDir(id))
+		th, err := autogit.TreeHashAt(ctx, a.paths, captureHash, threadRelDir(id))
 		if err != nil {
 			return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: tree hash %s: %w", id, err)
 		}

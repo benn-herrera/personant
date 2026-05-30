@@ -168,6 +168,26 @@ func ParentCommitHash(ctx context.Context, paths store.PersonantPaths, commitHas
 	return commit.ParentHashes[0].String(), nil
 }
 
+// HeadHash returns the hash of the current HEAD commit in paths.Home.
+// The archival batch uses it to read the integrity token from the
+// committed tree (TreeHashAt) at the point where HEAD IS the capture
+// commit (the deletion commit's parent-to-be) — gitignore-safe and
+// mode-faithful, unlike hashing the worktree.
+func HeadHash(ctx context.Context, paths store.PersonantPaths) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("autogit.HeadHash: %w", err)
+	}
+	repo, err := git.PlainOpen(paths.Home)
+	if err != nil {
+		return "", fmt.Errorf("autogit.HeadHash: open repo: %w", err)
+	}
+	head, err := repo.Head()
+	if err != nil {
+		return "", fmt.Errorf("autogit.HeadHash: HEAD: %w", err)
+	}
+	return head.Hash().String(), nil
+}
+
 // Add stages files matching the given patterns. Patterns are paths
 // relative to paths.Home; the literal pattern "." means "all changes
 // in the worktree, honoring .gitignore." Callers that want to stage
@@ -338,12 +358,23 @@ func CheckoutTree(ctx context.Context, paths store.PersonantPaths, commitHash, d
 		if cerr != nil {
 			return fmt.Errorf("autogit.CheckoutTree: read %q: %w", f.Name, cerr)
 		}
+		// Write with the COMMITTED file mode (F3): the integrity token is the
+		// committed tree hash, which encodes mode. A fresh restore that hard-
+		// coded 0o644 would re-hash to a different tree for an executable file
+		// and FALSE-fail VerifyTreeHash. f.Mode is the git tree entry mode;
+		// ToOSFileMode yields the os.FileMode to persist (0o644 for a regular
+		// file, 0o755 for an executable — matching WorktreeTreeHash's stat-based
+		// mode derivation on the verify side).
+		osMode, merr := f.Mode.ToOSFileMode()
+		if merr != nil {
+			return fmt.Errorf("autogit.CheckoutTree: mode of %q: %w", f.Name, merr)
+		}
 		relPath := path.Join(dirPath, f.Name) // f.Name is subtree-relative, slash-separated
 		dst := filepath.Join(paths.Home, filepath.FromSlash(relPath))
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return fmt.Errorf("autogit.CheckoutTree: mkdir parent of %q: %w", relPath, err)
 		}
-		if err := os.WriteFile(dst, []byte(contents), 0o644); err != nil {
+		if err := os.WriteFile(dst, []byte(contents), osMode.Perm()); err != nil {
 			return fmt.Errorf("autogit.CheckoutTree: write %q: %w", relPath, err)
 		}
 	}
