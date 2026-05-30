@@ -213,6 +213,14 @@ type MemoryOps interface {
 	// never reaches the spine). Returns the recovered SpineRecord on success.
 	RecoverThread(ctx context.Context, thrID string) (SpineRecord, error)
 
+	// ListArchivedThreads returns the archive index — every archived thread's
+	// lookup entry, sorted by thr_id. A recovered thread RETAINS its entry
+	// (RecoveredAt stamped), so the list is the full archival history, not
+	// only currently-cold threads. An empty index returns a nil slice, not an
+	// error. Read-only; the deletion commits named by the entries are the
+	// canonical store, this is the forensic lookup.
+	ListArchivedThreads(ctx context.Context) ([]ArchiveEntry, error)
+
 	// ---------- Project operations ----------
 
 	// CreateProject persists a new ProjectMeta. The caller is

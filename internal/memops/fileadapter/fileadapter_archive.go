@@ -390,6 +390,20 @@ func (a *FileAdapter) RecoverThread(ctx context.Context, thrID string) (memops.S
 	return rec, nil
 }
 
+// ListArchivedThreads returns the archive index sorted by thr_id — a thin
+// read-only wrapper over store.LoadArchiveIndex (the index is already sorted
+// on every write). An empty/missing index yields a nil slice, not an error.
+func (a *FileAdapter) ListArchivedThreads(ctx context.Context) ([]memops.ArchiveEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	entries, err := store.LoadArchiveIndex(a.paths)
+	if err != nil {
+		return nil, fmt.Errorf("fileadapter: list archived threads: %w", err)
+	}
+	return entries, nil
+}
+
 // dedupSorted returns ids sorted ascending with duplicates removed and any
 // empty id dropped.
 func dedupSorted(ids []string) []string {
