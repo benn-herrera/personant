@@ -239,19 +239,22 @@ func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode 
 		return 0
 	}
 
-	// Archival-forgiveness filter: a step's expected set may name a
-	// thread that has since been archived (the v0.1 deletion stub),
-	// which makes it genuinely unrecallable. Counting such a thread as a
-	// recall miss understates the §3.4 algorithm's true performance, so
-	// drop it from the expected set before scoring. An expected thread
-	// that is off the spine but NOT in the archive-delete log is an
-	// unexplained absence — kept as a real miss.
+	// Archival-recoverability filter: a step's expected set may name a
+	// thread that has since been archived (the §3.8 recoverable git-based
+	// archival path), which takes it OFF the live recall surface for v0.1
+	// (it stays preserved + recoverable via explicit fetch). Counting such
+	// a thread as a recall miss understates the §3.4 algorithm's true
+	// performance, so drop it from the expected set before scoring an
+	// inherently-LIVE recall score. An expected thread that is off the
+	// spine but NOT in the archive.archived log is an unexplained absence —
+	// a genuine integrity bug, kept as a real miss and counted via
+	// recall_unexplained_absence.
 	live, err := liveSpineThreadSet(h.Paths)
 	if err != nil {
 		t.Fatalf("scenario step %d (%s): recall-fidelity: live spine: %v", idx+1, label, err)
 	}
 	archived := h.archivedThreadIDs
-	var forgiven int64
+	var archivedRecoverable, unexplainedAbsent int64
 	kept := make([]string, 0, len(expected))
 	for _, id := range expected {
 		if _, onSpine := live[id]; onSpine {
@@ -259,13 +262,17 @@ func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode 
 			continue
 		}
 		if _, wasArchived := archived[id]; wasArchived {
-			forgiven++
+			archivedRecoverable++
 			continue
 		}
+		unexplainedAbsent++
 		kept = append(kept, id)
 	}
-	if forgiven > 0 {
-		h.Metrics.Counter("recall_fidelity_archival_forgiven", forgiven)
+	if archivedRecoverable > 0 {
+		h.Metrics.Counter("recall_archived_recoverable", archivedRecoverable)
+	}
+	if unexplainedAbsent > 0 {
+		h.Metrics.Counter("recall_unexplained_absence", unexplainedAbsent)
 	}
 	expected = kept
 	// Forgiven expected count: what remains recoverable after archival/

@@ -37,7 +37,7 @@ func TestFoldEventLines(t *testing.T) {
 	h.foldEventLines([]string{
 		"ts thread.created thr_1 anchors=4 project=prj_1",
 		"ts thread.created thr_2 anchors=4 project=prj_1",
-		"ts archive.simulated-delete thr=thr_2 project=prj_1 bytes=512",
+		"ts archive.archived thr=thr_2 project=prj_1 bytes=512",
 		"ts spine.match-fire thr_1 score=0.5",
 		"",
 	})
@@ -189,7 +189,7 @@ func TestMatchFireSet(t *testing.T) {
 		"ts spine.match-fire thr_1 score=0.5",
 		"ts spine.match-fire thr_5 score=0.6",
 		"ts spine.match-fire thr_1 score=0.7",
-		"ts archive.simulated-delete thr=thr_9 project=prj_1 bytes=1",
+		"ts archive.archived thr=thr_9 project=prj_1 bytes=1",
 	}
 	got := matchFireSet(lines)
 	want := []string{"thr_1", "thr_5"}

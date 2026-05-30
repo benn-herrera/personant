@@ -207,13 +207,14 @@ type StepFeedback struct {
 	// step.
 	RecallExpected int
 
-	// TargetRecoverable reports whether a thread ID is still recoverable by
-	// the runtime's §3.4 recall scan as of this step — i.e. it is present on
-	// the live spine, OR it is absent but NOT in the archive-delete log (an
-	// unexplained absence, conservatively treated as a real miss). It returns
-	// false ONLY for a thread the runtime has archived out of the spine,
-	// which can never produce a `spine.match-fire` again. It is the same
-	// archival-forgiveness predicate recordRecallFidelity applies to a
+	// TargetRecoverable reports whether a thread ID is still on the LIVE
+	// recall surface as of this step — i.e. it is present on the live spine,
+	// OR it is absent but NOT in the archive.archived log (an unexplained
+	// absence, conservatively treated as a real miss). It returns false ONLY
+	// for a thread the runtime has archived off the spine, which is off the
+	// live recall surface (preserved + recoverable via explicit fetch) and
+	// can never produce a `spine.match-fire` again. It is the same
+	// archival-recoverability predicate recordRecallFidelity applies to a
 	// declared expected set, exposed to a StepSource that measures recall
 	// against a target WITHOUT declaring it as an expected match (the #96
 	// abandoned-topic probe, which must stay out of the
@@ -412,7 +413,7 @@ type Harness struct {
 
 	// createdThreadIDs and archivedThreadIDs are the cumulative sets
 	// folded incrementally from each step's tailed log lines:
-	// `thread.created` IDs and `archive.simulated-delete` IDs
+	// `thread.created` IDs and `archive.archived` IDs
 	// respectively. They replace the per-call full log walks the
 	// VerifyThreadAccounting invariant and the recall-fidelity
 	// archival-forgiveness filter used to perform. Both sets only ever

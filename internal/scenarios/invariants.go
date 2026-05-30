@@ -294,9 +294,9 @@ func VerifyClosedThreadConsistency(h *Harness) error {
 // The three sets are reconstructed from durable evidence:
 //   - created  — `thread.created` log lines, folded incrementally into
 //     h.createdThreadIDs by the harness's per-step log tailer.
-//   - archived — `archive.simulated-delete` log lines, folded into
-//     h.archivedThreadIDs the same way (the v0.1 deletion-stub
-//     archival path).
+//   - archived — `archive.archived` log lines, folded into
+//     h.archivedThreadIDs the same way (the §3.8 recoverable git-based
+//     archival path — off the live spine but preserved + recoverable).
 //   - onSpine  — thread IDs currently on the spine.
 //
 // The created/archived sets come off the Harness rather than a fresh

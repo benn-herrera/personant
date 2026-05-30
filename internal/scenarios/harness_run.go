@@ -2,12 +2,14 @@ package scenarios
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 	"testing"
 
 	"personant/internal/clock"
+	"personant/internal/memops"
 	"personant/internal/model"
 	"personant/internal/store"
 	"personant/internal/turn"
@@ -97,6 +99,14 @@ func RunScenario(t *testing.T, sc Scenario) *Harness {
 	}
 	h.Metrics.Set("final_peak_history_symbols", float64(peakHistorySymbols(h.Paths)))
 
+	// Recovery-fetch gauge (design §6.3, AC1): the honest "recoverable,
+	// measured" signal. Runs ONCE here — AFTER the measured run and AFTER the
+	// final invariant sweep — because it mutates the substrate (it recovers
+	// threads back onto the spine), so it must not perturb any measured series
+	// or trip VerifyThreadAccounting. Drives RecoverThread under realistic
+	// accumulated state; the adapter verifies the tree hash internally.
+	runRecoveryGauge(t, h)
+
 	if err := h.Metrics.WriteJSON(h.MetricsPath); err != nil {
 		t.Errorf("scenario %s: metrics write: %v", sc.Name, err)
 	}
@@ -169,7 +179,7 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 	// One incremental poll captures exactly this turn's appended log
 	// lines: the turn just completed and the next turn has not started.
 	// From those lines extract this step's match-fire set and fold any
-	// thread.created / archive.simulated-delete IDs into the cumulative
+	// thread.created / archive.archived IDs into the cumulative
 	// sets. Invariant checks between turns do not write to logs/, so
 	// they cannot pollute the next step's window.
 	stepLines, err := h.tailer.poll()
@@ -206,13 +216,16 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 
 	runInvariants(t, h, perStepInvariants(h, step), label)
 
-	// Archival-forgiveness predicate for a StepSource that measures recall
+	// Archival-recoverability predicate for a StepSource that measures recall
 	// against a target it did NOT declare as an expected match (the #96
 	// abandoned-topic probe). Mirrors recordRecallFidelity's filter: a
 	// target on the live spine is recoverable; one absent AND in the
-	// archive-delete log is forgiven (not recoverable); one absent but not
-	// archived is an unexplained absence, conservatively recoverable (a real
-	// miss). Built from postSpine (already read) so no extra spine read.
+	// archive.archived log is off the LIVE recall surface (excluded — the
+	// thread is preserved + recoverable via explicit fetch, not lost); one
+	// absent but NOT archived is an unexplained absence — a genuine integrity
+	// bug, counted via recall_unexplained_absence (the recall-measurement
+	// sibling of VerifyThreadAccounting) and conservatively treated as a real
+	// miss. Built from postSpine (already read) so no extra spine read.
 	livePost := make(map[string]struct{}, len(postSpine))
 	for _, r := range postSpine {
 		livePost[r.ID] = struct{}{}
@@ -221,8 +234,18 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 		if _, onSpine := livePost[id]; onSpine {
 			return true
 		}
-		_, wasArchived := h.archivedThreadIDs[id]
-		return !wasArchived
+		if _, wasArchived := h.archivedThreadIDs[id]; wasArchived {
+			return false
+		}
+		// Off the live spine and NOT archived: not a forgivable archival. The
+		// recall-measurement sibling of VerifyThreadAccounting's "unexplained
+		// loss" — a thread that is neither live nor recoverable-via-fetch. (In
+		// long sims a tiny count also surfaces an oracle-side artifact: the
+		// shadow generator's refinement burst can name an expected thread the
+		// instant before its spine record materializes; such a thread is never
+		// archived and ends up on-spine — see the §6 measurement-honesty notes.)
+		h.Metrics.Counter("recall_unexplained_absence", 1)
+		return true
 	}
 
 	return StepFeedback{
@@ -283,9 +306,68 @@ func (h *Harness) foldEventLines(lines []string) {
 		if id, ok := eventThreadID(line, "thread.created ", ""); ok {
 			h.createdThreadIDs[id] = struct{}{}
 		}
-		if id, ok := eventThreadID(line, "archive.simulated-delete ", "thr="); ok {
+		if id, ok := eventThreadID(line, "archive.archived ", "thr="); ok {
 			h.archivedThreadIDs[id] = struct{}{}
 		}
+	}
+}
+
+// recoveryGaugeSample is the maximum number of archived threads the
+// recovery-fetch gauge attempts to recover. Sampling a bounded prefix keeps
+// the gauge O(1) regardless of how much a long run archived; recovery is the
+// same code path for every entry, so a sample is sufficient to exercise it.
+const recoveryGaugeSample = 5
+
+// runRecoveryGauge is the §6.3 / AC1 "recoverable, measured" gauge. It reads
+// the archive index and, for up to recoveryGaugeSample entries, drives
+// h.Ops.RecoverThread under the realistic accumulated state the run produced,
+// asserting each comes back as a wip spine record. It records:
+//
+//   - archive_recovered_verified       (+1 per successful recovery)
+//   - archive_recover_integrity_fail   (+1 per ErrArchiveIntegrity — a NONZERO
+//     here is an acceptance FAILURE: the stored tree hash did not match the
+//     restored bytes)
+//
+// It runs AFTER measurement and the final invariant sweep (RunScenario calls
+// it there), so the spine mutation it causes cannot affect a measured series
+// or trip thread-accounting. A run that archived nothing records both counters
+// as 0 and returns cleanly.
+func runRecoveryGauge(t *testing.T, h *Harness) {
+	t.Helper()
+	entries, err := store.LoadArchiveIndex(h.Paths)
+	if err != nil {
+		t.Errorf("recovery gauge: load archive index: %v", err)
+		return
+	}
+	// Record 0 explicitly so the metric is always present in the blob, even
+	// when nothing was archived — a missing key and a measured zero are
+	// otherwise indistinguishable to the §9.4 baseline comparison.
+	h.Metrics.Counter("archive_recovered_verified", 0)
+	h.Metrics.Counter("archive_recover_integrity_fail", 0)
+	if len(entries) == 0 {
+		return
+	}
+
+	n := len(entries)
+	if n > recoveryGaugeSample {
+		n = recoveryGaugeSample
+	}
+	for _, e := range entries[:n] {
+		rec, err := h.Ops.RecoverThread(context.Background(), e.ThrID)
+		if err != nil {
+			if errors.Is(err, memops.ErrArchiveIntegrity) {
+				h.Metrics.Counter("archive_recover_integrity_fail", 1)
+				t.Errorf("recovery gauge: %s: archive integrity check failed: %v", e.ThrID, err)
+				continue
+			}
+			t.Errorf("recovery gauge: %s: RecoverThread: %v", e.ThrID, err)
+			continue
+		}
+		if rec.State != memops.ThreadWIP {
+			t.Errorf("recovery gauge: %s: recovered state %q, want %q", e.ThrID, rec.State, memops.ThreadWIP)
+			continue
+		}
+		h.Metrics.Counter("archive_recovered_verified", 1)
 	}
 }
 

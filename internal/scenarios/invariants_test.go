@@ -308,7 +308,7 @@ func TestVerifyThreadAccounting_Pass(t *testing.T) {
 	seedThread(t, h, validRecord())
 	seedEventLog(t, h, "ts thread.created thr_1 anchors=4 project=prj_1\n"+
 		"ts thread.created thr_2 anchors=4 project=prj_1\n"+
-		"ts archive.simulated-delete thr=thr_2 project=prj_1 bytes=512\n")
+		"ts archive.archived thr=thr_2 project=prj_1 bytes=512\n")
 	if err := VerifyThreadAccounting(h); err != nil {
 		t.Fatalf("expected pass, got %v", err)
 	}
@@ -330,7 +330,7 @@ func TestVerifyThreadAccounting_FailsOnSpineAndArchived(t *testing.T) {
 	h := invariantHarness(t)
 	seedThread(t, h, validRecord())
 	seedEventLog(t, h, "ts thread.created thr_1 anchors=4 project=prj_1\n"+
-		"ts archive.simulated-delete thr=thr_1 project=prj_1 bytes=512\n")
+		"ts archive.archived thr=thr_1 project=prj_1 bytes=512\n")
 	if err := VerifyThreadAccounting(h); err == nil {
 		t.Fatalf("expected fail on simultaneous spine+archived; passed")
 	}
