@@ -109,6 +109,65 @@ func Commit(ctx context.Context, paths store.PersonantPaths, msg string, preFlag
 	return nil
 }
 
+// CommitWithHash is Commit but returns the hash of the commit it creates.
+// The archival batch needs the deletion commit's hash to write into the
+// archive index (recovery resolves the parent from it, Q3); a plain
+// Commit hides the hash. Same pre/post-flag and ErrPostOpVerification
+// semantics as Commit. On a post-flag failure the commit has already been
+// written, so the hash is returned alongside the wrapped error so the
+// caller can still reference it.
+func CommitWithHash(ctx context.Context, paths store.PersonantPaths, msg string, preFlags, postFlags GitCheckFlags) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("autogit.CommitWithHash: %w", err)
+	}
+	if err := applyFlags(ctx, paths, preFlags); err != nil {
+		return "", fmt.Errorf("autogit.CommitWithHash: pre-flag: %w", err)
+	}
+	repo, err := git.PlainOpen(paths.Home)
+	if err != nil {
+		return "", fmt.Errorf("autogit.CommitWithHash: open repo: %w", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		return "", fmt.Errorf("autogit.CommitWithHash: worktree: %w", err)
+	}
+	hash, err := wt.Commit(msg, &git.CommitOptions{Author: store.CommitSignature(repo)})
+	if err != nil {
+		return "", fmt.Errorf("autogit.CommitWithHash: commit: %w", err)
+	}
+	if err := applyFlags(ctx, paths, postFlags); err != nil {
+		return hash.String(), fmt.Errorf("%w: %w", ErrPostOpVerification, err)
+	}
+	return hash.String(), nil
+}
+
+// ParentCommitHash returns the first-parent hash of the given commit. The
+// personant substrate has linear, single-parent history, so the first
+// parent is THE parent (Q3): an archived thread's bytes live in the
+// deletion commit's parent, and recovery restores the subtree from there.
+// Returns an error if the commit has no parent (a root commit cannot have
+// archived a thread).
+func ParentCommitHash(ctx context.Context, paths store.PersonantPaths, commitHash string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("autogit.ParentCommitHash: %w", err)
+	}
+	if commitHash == "" {
+		return "", errors.New("autogit.ParentCommitHash: commitHash is empty")
+	}
+	repo, err := git.PlainOpen(paths.Home)
+	if err != nil {
+		return "", fmt.Errorf("autogit.ParentCommitHash: open repo: %w", err)
+	}
+	commit, err := repo.CommitObject(plumbing.NewHash(commitHash))
+	if err != nil {
+		return "", fmt.Errorf("autogit.ParentCommitHash: load commit %s: %w", commitHash, err)
+	}
+	if len(commit.ParentHashes) == 0 {
+		return "", fmt.Errorf("autogit.ParentCommitHash: commit %s has no parent", commitHash)
+	}
+	return commit.ParentHashes[0].String(), nil
+}
+
 // Add stages files matching the given patterns. Patterns are paths
 // relative to paths.Home; the literal pattern "." means "all changes
 // in the worktree, honoring .gitignore." Callers that want to stage

@@ -182,12 +182,36 @@ type MemoryOps interface {
 	// spine record exists for threadID.
 	RecordRecallFire(ctx context.Context, threadID string) error
 
-	// ArchiveThread removes a retired thread from the active spine. v0.1
-	// implements this as a deletion STUB — the thread's spine record and
-	// file are deleted outright. Real §3.8 git-based archival with a
-	// recovery path is v0.2; this port method is the stable seam across
-	// both. Returns ErrThreadNotFound if no spine record exists.
+	// ArchiveThread removes a retired thread from the active spine into
+	// deep-cold, recoverable §3.8 git archival — a thin single-thread
+	// wrapper over ArchiveThreads. The thread directory is removed from the
+	// worktree and spine but preserved in a git deletion commit, with a
+	// lookup entry written to the archive index; RecoverThread restores it.
+	// Returns ErrThreadNotFound if no spine record exists.
 	ArchiveThread(ctx context.Context, threadID string) error
+
+	// ArchiveThreads archives a batch of retired threads atomically-per-
+	// drain (design §3.2): it captures each thread directory's pre-removal
+	// tree hash, removes every thread directory and spine record, appends
+	// sorted archive-index entries, regenerates derived state, and commits
+	// the batch as git deletion commits gated by CheckDerivedFresh |
+	// CheckSpineIntegrity. The archived bytes stay reachable in git history;
+	// the index is the lookup. Returns per-thread outcomes (ArchiveResult)
+	// so a partial/skip is visible — a thread absent from the spine is
+	// recorded as a skip, not a batch failure. Order-independent; the
+	// adapter sorts internally.
+	ArchiveThreads(ctx context.Context, threadIDs []string) (ArchiveResult, error)
+
+	// RecoverThread restores an archived thread from its git deletion commit
+	// (design §7.2): it restores the directory subtree, verifies it against
+	// the stored tree hash, re-adds a fresh spine record (state=wip,
+	// last_engaged=now) built from the recovered frontmatter, and commits
+	// the recovery. The archive-index entry is RETAINED as a breadcrumb with
+	// RecoveredAt stamped. Returns ErrArchiveEntryNotFound if thrID is not in
+	// the archive index, and ErrArchiveIntegrity if the recovered tree hash
+	// does not match the stored token (the partial restore is removed and
+	// never reaches the spine). Returns the recovered SpineRecord on success.
+	RecoverThread(ctx context.Context, thrID string) (SpineRecord, error)
 
 	// ---------- Project operations ----------
 

@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -265,70 +264,23 @@ func (a *FileAdapter) RecordRecallFire(ctx context.Context, threadID string) err
 	return nil
 }
 
-// ArchiveThread removes a retired thread from the active spine. v0.1 is a
-// deletion STUB: the thread file and its spine record are deleted outright.
-// Real §3.8 git-based archival with a recovery path is v0.2; this method
-// is the stable seam across both implementations.
+// ArchiveThread archives one retired thread — a thin wrapper over the batch
+// ArchiveThreads (design §3.1). It preserves the single-thread seam and the
+// ErrThreadNotFound contract: a thread with no spine record is reported by
+// the batch as a skip, which this wrapper maps back to ErrThreadNotFound.
 //
-// Before deleting, the thread body's byte size is measured and logged on
-// the archive.simulated-delete event line. That byte count, paired with
-// the event log's clock.Timeline() stamp, is the deliberate demand-sizing
-// data for designing v0.2 archival — it must stay exact.
-//
-// The derived index (symbols.jsonl) is intentionally NOT regenerated here.
-// The cardinality-pressure trigger batches archival and regenerates once
-// after the batch, so a per-call rebuild would be wasted work.
+// The drain (turn/archival.go) still calls this per-thread in I2, so each
+// call commits its own batch of one. The drain's rewire to call
+// ArchiveThreads ONCE is I3.
 func (a *FileAdapter) ArchiveThread(ctx context.Context, threadID string) error {
-	if err := ctx.Err(); err != nil {
+	res, err := a.ArchiveThreads(ctx, []string{threadID})
+	if err != nil {
 		return err
 	}
-	rec, found, err := store.FindSpineRecord(a.paths, threadID)
-	if err != nil {
-		return fmt.Errorf("fileadapter: archive thread %s: %w", threadID, err)
-	}
-	if !found {
-		return fmt.Errorf("fileadapter: archive thread %s: %w", threadID, memops.ErrThreadNotFound)
-	}
-
-	// Measure the body byte size before deletion. A missing thread is
-	// size 0, not an error — the spine record alone is enough to archive.
-	// NOTE: bodySize is the assembled turn-excerpt body only — it
-	// excludes the YAML frontmatter and the spine.jsonl line. v0.2
-	// archival sizing against this stat must account for that: real
-	// on-disk cost is body + frontmatter + one spine line. The body is
-	// also recency-windowed (store.ThreadTurnWindow), so it is the live
-	// window, not the thread's full history.
-	bodySize := 0
-	if body, err := store.ReadThreadBody(a.paths, threadID, 0); err == nil {
-		bodySize = len(body)
-	} else if !errors.Is(err, memops.ErrThreadFileNotFound) {
-		return fmt.Errorf("fileadapter: archive thread %s: read body: %w", threadID, err)
-	}
-
-	// Delete the entire thread directory — thread.md, turns/, and
-	// files.json all go together. A missing directory is fine (already
-	// gone). os.RemoveAll subsumes the explicit §3.9 sidecar delete that
-	// the single-file format needed.
-	if err := os.RemoveAll(store.ThreadDir(a.paths, threadID)); err != nil {
-		return fmt.Errorf("fileadapter: archive thread %s: remove dir: %w", threadID, err)
-	}
-	a.fmCache.Invalidate(threadID) // thread.md is gone
-	if err := store.RemoveSpineRecord(a.paths, threadID); err != nil {
-		return fmt.Errorf("fileadapter: archive thread %s: remove spine: %w", threadID, err)
-	}
-
-	// project= attributes the delete per project so v0.2 archival
-	// demand-sizing can size pressure per project even though the archival
-	// drain itself is substrate-global.
-	if err := eventlog.Log(a.paths, "archive", "simulated-delete",
-		fmt.Sprintf("thr=%s project=%s bytes=%d", threadID, rec.Project, bodySize)); err != nil {
-		return fmt.Errorf("fileadapter: archive thread %s: log: %w", threadID, err)
-	}
-	// One loud warning per archival: v0.1 deletes outright — there is no
-	// recovery path. Real recovery-capable archival lands in v0.2.
-	if err := eventlog.Log(a.paths, "archive", "warning",
-		"thr="+threadID+" v0.1 deletion stub — thread deleted with NO recovery path; recovery-capable archival is v0.2"); err != nil {
-		return fmt.Errorf("fileadapter: archive thread %s: log warning: %w", threadID, err)
+	for _, o := range res.Outcomes {
+		if o.ThrID == threadID && o.Skipped {
+			return fmt.Errorf("fileadapter: archive thread %s: %w", threadID, memops.ErrThreadNotFound)
+		}
 	}
 	return nil
 }

@@ -14,10 +14,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+
 	"personant/internal/clock"
 	"personant/internal/memops"
 	"personant/internal/store"
 )
+
+// pinClock freezes clock.Timeline at a fixed instant for the duration of the
+// test so archival commit signatures and ArchivedAt/RecoveredAt stamps are
+// deterministic (AC6) and no wall-clock leaks into committed state.
+func pinClock(t *testing.T) time.Time {
+	t.Helper()
+	when := time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)
+	restore := clock.SetTimeline(func() time.Time { return when })
+	t.Cleanup(restore)
+	return when
+}
 
 // newAdapter returns a FileAdapter rooted at t.TempDir(), with the
 // substrate scaffolded via store.Init. The init pass writes seed
@@ -366,24 +380,64 @@ func readEventLog(t *testing.T, a *FileAdapter) string {
 	return b.String()
 }
 
-// TestArchiveThread_DeletesSpineAndFileAndLogs — archival removes the
-// spine record and thread file and logs archive.simulated-delete with the
-// exact body byte count.
-func TestArchiveThread_DeletesSpineAndFileAndLogs(t *testing.T) {
+// seedThread creates a thread via the adapter and returns its repo-relative
+// dir path. The thread directory is uncommitted in the worktree at this
+// point (only `store.Init` committed) — exactly the state archival sees in a
+// running session.
+func seedThread(t *testing.T, a *FileAdapter, id, project, body string) {
+	t.Helper()
+	rec := validSpine(id, project)
+	w := memops.ThreadWrite{Spine: rec, Meta: validFrontmatter(rec), TurnExcerpt: body}
+	if err := a.CreateThread(context.Background(), w); err != nil {
+		t.Fatalf("seed CreateThread %s: %v", id, err)
+	}
+}
+
+// snapshotDir reads every file under a thread directory into a name→content
+// map so a recovery can be checked byte-for-byte.
+func snapshotDir(t *testing.T, root string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, p)
+		data, rerr := os.ReadFile(p)
+		if rerr != nil {
+			return rerr
+		}
+		out[rel] = string(data)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("snapshot %s: %v", root, err)
+	}
+	return out
+}
+
+// TestArchiveThenRecover_RoundTrip — the I2 keystone. Archiving a thread
+// takes it off the spine and removes its directory, records it in the sorted
+// archive index, and logs archive.archived (NOT archive.warning). Recovering
+// it puts it back on the spine as wip, restores the directory byte-exact
+// (tree-hash verified), and retains the index entry with RecoveredAt stamped.
+func TestArchiveThenRecover_RoundTrip(t *testing.T) {
+	pinClock(t)
 	a := newAdapter(t)
 	ctx := context.Background()
 
-	rec := validSpine("thr_1", "prj_1")
-	body := "the thread body\n"
-	w := memops.ThreadWrite{
-		Spine:       rec,
-		Meta: validFrontmatter(rec),
-		TurnExcerpt: body,
-	}
-	if err := a.CreateThread(ctx, w); err != nil {
-		t.Fatalf("seed CreateThread: %v", err)
+	body := "## Turn 1\n\nthe thread body\n"
+	seedThread(t, a, "thr_1", "prj_1", body)
+	dir := store.ThreadDir(a.paths, "thr_1")
+	before := snapshotDir(t, dir)
+	if len(before) == 0 {
+		t.Fatal("seeded thread dir is empty")
 	}
 
+	// --- Archive ---
 	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
 		t.Fatalf("ArchiveThread: %v", err)
 	}
@@ -393,31 +447,218 @@ func TestArchiveThread_DeletesSpineAndFileAndLogs(t *testing.T) {
 	} else if found {
 		t.Error("spine record still present after archival")
 	}
-	if _, err := os.Stat(store.ThreadDir(a.paths, "thr_1")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("thread dir still present after archival: err=%v", err)
 	}
 
+	entry, found, err := store.FindArchiveEntry(a.paths, "thr_1")
+	if err != nil {
+		t.Fatalf("FindArchiveEntry: %v", err)
+	}
+	if !found {
+		t.Fatal("archive index has no entry for thr_1")
+	}
+	if entry.CommitHash == "" || entry.TreeHash == "" {
+		t.Fatalf("archive entry missing commit/tree hash: %+v", entry)
+	}
+	if entry.OriginalPath != "threads/thr_1" || entry.Project != "prj_1" {
+		t.Fatalf("archive entry fields wrong: %+v", entry)
+	}
+	if entry.RecoveredAt != "" {
+		t.Errorf("RecoveredAt should be empty before recovery; got %q", entry.RecoveredAt)
+	}
+
 	log := readEventLog(t, a)
-	wantLine := "archive.simulated-delete thr=thr_1 project=prj_1 bytes=" + strconv.Itoa(len(body))
+	wantLine := "archive.archived thr=thr_1 project=prj_1 bytes=" + strconv.Itoa(len(body))
 	if !strings.Contains(log, wantLine) {
 		t.Errorf("event log missing %q\n%s", wantLine, log)
 	}
-	if !strings.Contains(log, "archive.warning") {
-		t.Errorf("event log missing archive.warning stub line\n%s", log)
+	if strings.Contains(log, "archive.warning") {
+		t.Errorf("archive.warning line must be gone\n%s", log)
+	}
+	if strings.Contains(log, "archive.simulated-delete") {
+		t.Errorf("archive.simulated-delete line must be gone\n%s", log)
+	}
+
+	// --- Recover ---
+	rec, err := a.RecoverThread(ctx, "thr_1")
+	if err != nil {
+		t.Fatalf("RecoverThread: %v", err)
+	}
+	if rec.ID != "thr_1" || rec.State != memops.ThreadWIP {
+		t.Fatalf("recovered spine record wrong: %+v", rec)
+	}
+
+	if _, found, err := store.FindSpineRecord(a.paths, "thr_1"); err != nil {
+		t.Fatalf("FindSpineRecord after recovery: %v", err)
+	} else if !found {
+		t.Error("thread not back on spine after recovery")
+	}
+
+	after := snapshotDir(t, dir)
+	if len(after) != len(before) {
+		t.Fatalf("recovered dir file count %d != original %d", len(after), len(before))
+	}
+	// The git restore is byte-exact (the tree-hash verify in RecoverThread
+	// already proved that). Recovery then deliberately re-stamps thread.md
+	// with state=wip / last_engaged=now per design §7.2, so thread.md is NOT
+	// expected to be byte-identical. Every OTHER file (the turn-excerpt body,
+	// files.json) must be byte-exact — that is the recoverable content the
+	// archival round-trip exists to preserve.
+	for name, content := range before {
+		if name == "thread.md" {
+			if !strings.Contains(after[name], "state: wip") {
+				t.Errorf("recovered thread.md should be state=wip; got %q", after[name])
+			}
+			continue
+		}
+		if after[name] != content {
+			t.Errorf("file %q not byte-exact after recovery:\n got %q\nwant %q", name, after[name], content)
+		}
+	}
+
+	// Index entry retained as a breadcrumb with RecoveredAt stamped.
+	entry, found, err = store.FindArchiveEntry(a.paths, "thr_1")
+	if err != nil {
+		t.Fatalf("FindArchiveEntry after recovery: %v", err)
+	}
+	if !found {
+		t.Fatal("archive entry must be retained after recovery (breadcrumb)")
+	}
+	if entry.RecoveredAt == "" {
+		t.Error("RecoveredAt not stamped on recovery")
 	}
 }
 
-// TestArchiveThread_MissingFileSizeZero — a spine record whose thread
-// file is absent archives cleanly and logs bytes=0.
-func TestArchiveThread_MissingFileSizeZero(t *testing.T) {
+// TestRecoverThread_IntegrityFailure — a tampered archived blob fails the
+// tree-hash check, returns ErrArchiveIntegrity, and never puts the thread on
+// the spine (invariant 2).
+func TestRecoverThread_IntegrityFailure(t *testing.T) {
+	pinClock(t)
 	a := newAdapter(t)
 	ctx := context.Background()
 
-	rec := validSpine("thr_1", "prj_1")
-	w := memops.ThreadWrite{Spine: rec, Meta: validFrontmatter(rec), TurnExcerpt: "## Turn 1\n\nx\n"}
-	if err := a.CreateThread(ctx, w); err != nil {
-		t.Fatalf("seed CreateThread: %v", err)
+	seedThread(t, a, "thr_1", "prj_1", "## Turn 1\n\noriginal\n")
+	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
+		t.Fatalf("ArchiveThread: %v", err)
 	}
+
+	// Corrupt the stored integrity token so the restored (correct) tree no
+	// longer matches — the integrity check must fire.
+	entry, _, err := store.FindArchiveEntry(a.paths, "thr_1")
+	if err != nil {
+		t.Fatalf("FindArchiveEntry: %v", err)
+	}
+	entry.TreeHash = "0000000000000000000000000000000000000000"
+	if err := store.AppendArchiveEntries(a.paths, []memops.ArchiveEntry{entry}); err != nil {
+		t.Fatalf("tamper index: %v", err)
+	}
+
+	_, err = a.RecoverThread(ctx, "thr_1")
+	if !errors.Is(err, memops.ErrArchiveIntegrity) {
+		t.Fatalf("RecoverThread tampered: got %v, want ErrArchiveIntegrity", err)
+	}
+	if _, found, ferr := store.FindSpineRecord(a.paths, "thr_1"); ferr != nil {
+		t.Fatalf("FindSpineRecord: %v", ferr)
+	} else if found {
+		t.Error("integrity-failed thread must NOT be on the spine")
+	}
+	if _, serr := os.Stat(store.ThreadDir(a.paths, "thr_1")); !errors.Is(serr, os.ErrNotExist) {
+		t.Errorf("partial restore must be removed on integrity failure: stat=%v", serr)
+	}
+}
+
+// TestRecoverThread_UnknownIDNotFound — recovering a thread with no archive
+// index entry returns ErrArchiveEntryNotFound.
+func TestRecoverThread_UnknownIDNotFound(t *testing.T) {
+	a := newAdapter(t)
+	_, err := a.RecoverThread(context.Background(), "thr_999")
+	if !errors.Is(err, memops.ErrArchiveEntryNotFound) {
+		t.Fatalf("RecoverThread unknown id: got %v, want ErrArchiveEntryNotFound", err)
+	}
+}
+
+// TestArchiveThreads_Batch — a batch of K threads archives in ONE call:
+// every thread leaves the spine and disk, every thread gets a sorted index
+// entry sharing one deletion commit, and an unknown id in the batch is a
+// recorded skip, not a failure.
+func TestArchiveThreads_Batch(t *testing.T) {
+	pinClock(t)
+	a := newAdapter(t)
+	ctx := context.Background()
+
+	const k = 4
+	ids := make([]string, 0, k)
+	for i := 1; i <= k; i++ {
+		id := "thr_" + strconv.Itoa(i)
+		ids = append(ids, id)
+		seedThread(t, a, id, "prj_1", "## Turn 1\n\nbody "+id+"\n")
+	}
+
+	// Include an unknown id and a shuffled order to exercise skip + sort.
+	req := []string{"thr_3", "thr_999", "thr_1", "thr_4", "thr_2"}
+	res, err := a.ArchiveThreads(ctx, req)
+	if err != nil {
+		t.Fatalf("ArchiveThreads: %v", err)
+	}
+	if res.CommitHash == "" {
+		t.Fatal("batch result missing deletion commit hash")
+	}
+
+	archived, skipped := 0, 0
+	for _, o := range res.Outcomes {
+		switch {
+		case o.Archived:
+			archived++
+		case o.Skipped:
+			skipped++
+			if o.ThrID != "thr_999" {
+				t.Errorf("unexpected skip: %+v", o)
+			}
+		}
+	}
+	if archived != k || skipped != 1 {
+		t.Fatalf("outcomes: archived=%d skipped=%d (want %d/1)", archived, skipped, k)
+	}
+
+	for _, id := range ids {
+		if _, found, _ := store.FindSpineRecord(a.paths, id); found {
+			t.Errorf("%s still on spine after batch", id)
+		}
+		if _, serr := os.Stat(store.ThreadDir(a.paths, id)); !errors.Is(serr, os.ErrNotExist) {
+			t.Errorf("%s dir still present after batch: %v", id, serr)
+		}
+	}
+
+	// Index is sorted by thr_id and every archived id shares the one commit.
+	idx, err := store.LoadArchiveIndex(a.paths)
+	if err != nil {
+		t.Fatalf("LoadArchiveIndex: %v", err)
+	}
+	if len(idx) != k {
+		t.Fatalf("index has %d entries, want %d", len(idx), k)
+	}
+	for i := 1; i < len(idx); i++ {
+		if idx[i-1].ThrID >= idx[i].ThrID {
+			t.Errorf("index not sorted by thr_id: %q then %q", idx[i-1].ThrID, idx[i].ThrID)
+		}
+	}
+	for _, e := range idx {
+		if e.CommitHash != res.CommitHash {
+			t.Errorf("entry %s commit %q != batch commit %q", e.ThrID, e.CommitHash, res.CommitHash)
+		}
+	}
+}
+
+// TestArchiveThread_MissingFileSizeZero — a spine record whose thread file
+// is absent archives cleanly and logs bytes=0. (Adapted: the log line is
+// archive.archived, not archive.simulated-delete.)
+func TestArchiveThread_MissingFileSizeZero(t *testing.T) {
+	pinClock(t)
+	a := newAdapter(t)
+	ctx := context.Background()
+
+	seedThread(t, a, "thr_1", "prj_1", "## Turn 1\n\nx\n")
 	if err := os.RemoveAll(store.ThreadDir(a.paths, "thr_1")); err != nil {
 		t.Fatalf("remove thread dir: %v", err)
 	}
@@ -425,18 +666,54 @@ func TestArchiveThread_MissingFileSizeZero(t *testing.T) {
 	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
 		t.Fatalf("ArchiveThread with missing file: %v", err)
 	}
-	if !strings.Contains(readEventLog(t, a), "archive.simulated-delete thr=thr_1 project=prj_1 bytes=0") {
+	if !strings.Contains(readEventLog(t, a), "archive.archived thr=thr_1 project=prj_1 bytes=0") {
 		t.Errorf("expected bytes=0 for missing thread file\n%s", readEventLog(t, a))
 	}
 }
 
 // TestArchiveThread_UnknownIDReturnsNotFound — archiving a thread with no
-// spine record returns ErrThreadNotFound.
+// spine record returns ErrThreadNotFound (the single-thread wrapper maps the
+// batch's skip outcome back to the sentinel).
 func TestArchiveThread_UnknownIDReturnsNotFound(t *testing.T) {
 	a := newAdapter(t)
 	err := a.ArchiveThread(context.Background(), "thr_999")
 	if !errors.Is(err, memops.ErrThreadNotFound) {
 		t.Fatalf("ArchiveThread unknown id: got %v, want ErrThreadNotFound", err)
+	}
+}
+
+// TestArchiveDeterminism_NoWallClockLeak — under a pinned timeline, the
+// archive deletion commit's author time is the pinned instant, not wall
+// clock (AC6), and the index ArchivedAt stamp is deterministic.
+func TestArchiveDeterminism_NoWallClockLeak(t *testing.T) {
+	when := pinClock(t)
+	a := newAdapter(t)
+	ctx := context.Background()
+
+	seedThread(t, a, "thr_1", "prj_1", "## Turn 1\n\nbody\n")
+	res, err := a.ArchiveThreads(ctx, []string{"thr_1"})
+	if err != nil {
+		t.Fatalf("ArchiveThreads: %v", err)
+	}
+
+	repo, err := git.PlainOpen(a.paths.Home)
+	if err != nil {
+		t.Fatalf("PlainOpen: %v", err)
+	}
+	commit, err := repo.CommitObject(plumbing.NewHash(res.CommitHash))
+	if err != nil {
+		t.Fatalf("load deletion commit: %v", err)
+	}
+	if !commit.Author.When.Equal(when) {
+		t.Fatalf("deletion commit author time %v != pinned %v — wall clock leaked", commit.Author.When, when)
+	}
+
+	entry, _, err := store.FindArchiveEntry(a.paths, "thr_1")
+	if err != nil {
+		t.Fatalf("FindArchiveEntry: %v", err)
+	}
+	if entry.ArchivedAt != when.Format(time.RFC3339) {
+		t.Fatalf("ArchivedAt %q != pinned %q", entry.ArchivedAt, when.Format(time.RFC3339))
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -24,15 +23,18 @@ func newTestHome(t *testing.T) (store.PersonantPaths, memops.ProjectMeta) {
 	t.Helper()
 	tmp := t.TempDir()
 	paths := store.PathsForHome(tmp)
-	for _, dir := range []string{paths.ThreadsDir, paths.ProjectsDir, paths.LogsDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", dir, err)
-		}
+	// store.Init scaffolds the directory tree, an empty spine, AND a git
+	// repo with a bootstrap commit. The git repo is required now that
+	// archival (surfaceArchivalCandidates → ArchiveThread) goes through
+	// internal/autogit and commits the recoverable deletion (#99 I2); the
+	// older hand-built home had no .git and silently failed every archive.
+	if err := store.Init(paths, store.InitOptions{Quiet: true}); err != nil {
+		t.Fatalf("store.Init: %v", err)
 	}
-	if err := store.WriteSpine(paths.Spine, nil); err != nil {
-		t.Fatalf("write spine: %v", err)
-	}
-	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: tmp}
+	// Valid RFC3339 timestamps so verify.Verify (now run as the archival
+	// CheckSpineIntegrity pre-flag) accepts the project meta.
+	const ts = "2026-01-01T00:00:00Z"
+	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: tmp, Created: ts, LastActive: ts}
 	if err := store.SaveProjectMeta(paths, meta); err != nil {
 		t.Fatalf("save meta: %v", err)
 	}
@@ -1096,19 +1098,8 @@ func TestRunRePromptLogsThreadFetchedDelta(t *testing.T) {
 	}
 
 	// The eventlog uses its own clock (real time.Now at write); read the
-	// only file that exists in LogsDir.
-	entries, err := os.ReadDir(paths.LogsDir)
-	if err != nil {
-		t.Fatalf("read logs dir: %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("logs dir entries: got %d want 1 (%v)", len(entries), entries)
-	}
-	data, err := os.ReadFile(paths.LogsDir + "/" + entries[0].Name())
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
-	logBody := string(data)
+	// day log, ignoring the logs/archive/ rotation subdir.
+	logBody := readDayLog(t, paths)
 	if !strings.Contains(logBody, "context.modified source=thread.fetched") {
 		t.Errorf("log missing thread.fetched context-modified line:\n%s", logBody)
 	}
@@ -1321,18 +1312,7 @@ func TestRunFileEditWithoutTopicTagFailsLoud(t *testing.T) {
 
 	// Log surface: one unsynced-no-topic-tag line per distinct path,
 	// so a human can reconcile the workspace if they care.
-	entries, lerr := os.ReadDir(paths.LogsDir)
-	if lerr != nil {
-		t.Fatalf("read logs dir: %v", lerr)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("logs dir entries: got %d want 1 (%v)", len(entries), entries)
-	}
-	data, rerr := os.ReadFile(paths.LogsDir + "/" + entries[0].Name())
-	if rerr != nil {
-		t.Fatalf("read log: %v", rerr)
-	}
-	logBody := string(data)
+	logBody := readDayLog(t, paths)
 	for _, want := range []string{
 		"unsynced-no-topic-tag path=src/a.go",
 		"unsynced-no-topic-tag path=src/b.go",

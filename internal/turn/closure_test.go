@@ -162,6 +162,9 @@ func TestSurfaceClosure_DisabledWithoutCuratorOrResolver(t *testing.T) {
 		t.Fatalf("read logs dir: %v", err)
 	}
 	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
+			continue
+		}
 		data, err := os.ReadFile(filepath.Join(paths.LogsDir, e.Name()))
 		if err != nil {
 			t.Fatalf("read %s: %v", e.Name(), err)
@@ -519,6 +522,9 @@ func TestSurfaceClosure_VacationSurfacesNoPrompt(t *testing.T) {
 		t.Fatalf("read logs dir: %v", err)
 	}
 	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
+			continue
+		}
 		data, err := os.ReadFile(filepath.Join(paths.LogsDir, e.Name()))
 		if err != nil {
 			t.Fatalf("read %s: %v", e.Name(), err)

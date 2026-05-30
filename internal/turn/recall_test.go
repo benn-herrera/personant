@@ -26,14 +26,21 @@ func readDayLog(t *testing.T, paths store.PersonantPaths) string {
 	if err != nil {
 		t.Fatalf("read logs dir: %v", err)
 	}
-	if len(entries) != 1 {
-		t.Fatalf("logs dir entries: got %d want 1 (%v)", len(entries), entries)
+	// LogsDir holds the YYYY-MM-DD.log files plus a logs/archive/ rotation
+	// subdir (created by store.Init). Read every .log file, skipping the
+	// subdir — counting raw entries would over-count the archive dir.
+	var b strings.Builder
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(paths.LogsDir, e.Name()))
+		if err != nil {
+			t.Fatalf("read log %s: %v", e.Name(), err)
+		}
+		b.Write(data)
 	}
-	data, err := os.ReadFile(filepath.Join(paths.LogsDir, entries[0].Name()))
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
-	return string(data)
+	return b.String()
 }
 
 // seedThreadWithAnchors writes a minimal-but-valid thread file plus
@@ -154,6 +161,9 @@ func TestSurfaceRecallCandidates_NoCandidatesIsQuiet(t *testing.T) {
 		t.Fatalf("read logs dir: %v", err)
 	}
 	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
+			continue
+		}
 		data, err := os.ReadFile(filepath.Join(paths.LogsDir, e.Name()))
 		if err != nil {
 			t.Fatalf("read %s: %v", e.Name(), err)
@@ -228,6 +238,9 @@ func TestRunNoRecallWhenNoSymbols(t *testing.T) {
 		t.Fatalf("read logs dir: %v", err)
 	}
 	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
+			continue
+		}
 		data, err := os.ReadFile(filepath.Join(paths.LogsDir, e.Name()))
 		if err != nil {
 			t.Fatalf("read %s: %v", e.Name(), err)

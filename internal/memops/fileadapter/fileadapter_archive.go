@@ -1,0 +1,420 @@
+package fileadapter
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path"
+	"sort"
+	"time"
+
+	"github.com/go-git/go-git/v5"
+
+	"personant/internal/autogit"
+	"personant/internal/clock"
+	"personant/internal/eventlog"
+	"personant/internal/memops"
+	"personant/internal/store"
+)
+
+// §3.8 recoverable git-based archival (task #99, design §3.2 / §7.2). This
+// file holds the batch ArchiveThreads and RecoverThread — the first
+// callers of internal/autogit from the adapter. Single-thread ArchiveThread
+// is a thin wrapper in fileadapter.go.
+//
+// Archival event vocabulary on the substrate event log:
+const (
+	archiveLogCategory = "archive"
+	// archiveActionArchived replaces the old archive.simulated-delete line.
+	// It carries bytes= for demand-sizing continuity (the body byte size of
+	// the archived thread's live window). The old archive.warning "NO
+	// recovery path" line is GONE — archival is now genuinely recoverable.
+	archiveActionArchived  = "archived"
+	archiveActionRecovered = "recovered"
+)
+
+// threadRelDir returns the repo-relative, slash-separated directory path a
+// thread occupies under the home tree (e.g. "threads/thr_7"). This is the
+// form autogit's tree ops (CheckoutTree, TreeHashAt) and the archive index
+// (OriginalPath) speak.
+func threadRelDir(threadID string) string {
+	return path.Join("threads", threadID)
+}
+
+// ArchiveThreads archives a batch of retired threads (design §3.2).
+//
+// # Index-needs-commit-hash ordering (the crux) and its crash-safety
+//
+// An archive index entry's CommitHash names the DELETION commit, and
+// recovery resolves the thread's bytes from that commit's PARENT (Q3). But
+// a commit's hash is only known AFTER it is written — circular with putting
+// it in a file that the same commit contains. We resolve this with a
+// bounded, per-drain commit shape (the design blesses two; this uses three,
+// still O(1) per drain, never O(K)):
+//
+//  1. CAPTURE commit — stage the whole worktree (Add(".")) and commit. In a
+//     running session thread directories are written to the worktree but
+//     never committed per-turn (only `personant init` commits), so this
+//     pins every to-be-archived directory into a committed tree. This
+//     commit becomes the PARENT of the deletion commit and is where the
+//     archived bytes live. Tree hashes are captured here (worktree == this
+//     commit's state). If the worktree is already clean, go-git rejects the
+//     empty commit; we tolerate that (the dirs are already at HEAD).
+//
+//  2. DELETION commit — os.RemoveAll each dir, one RemoveSpineRecords, regen
+//     derived, append index entries (CommitHash still empty), then
+//     Add(".") + CommitWithHash, capturing the deletion commit hash H. Its
+//     parent is the capture commit, which holds the bytes.
+//
+//  3. STAMP commit — rewrite the index entries with CommitHash = H and
+//     commit that single-file change.
+//
+// Crash-safety (invariant 1: losing the index must not lose data):
+//   - Crash after (1): worktree unchanged except a no-op capture; nothing
+//     archived; fully consistent.
+//   - Crash between (1) and (2)'s commit: worktree ahead of HEAD (dirs
+//     removed, spine/derived/index written but uncommitted). Recoverable —
+//     the capture commit still holds every thread's bytes, and startup
+//     reconcile (#94) realigns. No bytes are lost.
+//   - Crash after (2) but before (3): the deletion commit holds the bytes in
+//     its parent; the index entries exist but with empty CommitHash. This is
+//     the one window where an index entry cannot self-recover by lookup, but
+//     the data is NOT lost (reachable by git log), and reconcile can re-stamp
+//     by matching OriginalPath against the deletion commit. RecoverThread
+//     guards against an empty CommitHash explicitly.
+//   - Crash after (3): fully committed, fully recoverable.
+//
+// The batch is atomic-per-drain in the sense invariant 3 requires: a thread
+// is either fully archived (off worktree + spine, in index + reachable
+// commit) or untouched; no thread ends off-spine yet absent from both the
+// index and a reachable commit.
+func (a *FileAdapter) ArchiveThreads(ctx context.Context, threadIDs []string) (memops.ArchiveResult, error) {
+	if err := ctx.Err(); err != nil {
+		return memops.ArchiveResult{}, err
+	}
+
+	// Sort + dedup the requested ids so the batch is order-independent and
+	// the index stays line-sorted by thr_id (invariant 4).
+	ids := dedupSorted(threadIDs)
+
+	// (1) Validate + capture. Build the set of ids that actually have a
+	// spine record to archive; the rest are recorded as skips. Capture each
+	// archivable thread's spine snapshot (summary/anchors/project) and body
+	// size before any mutation.
+	type capture struct {
+		rec      memops.SpineRecord
+		bodySize int
+		hasDir   bool // false ⇒ drift: spine record with no thread directory
+	}
+	caps := make(map[string]capture, len(ids))
+	var archivable []string
+	result := memops.ArchiveResult{Outcomes: make([]memops.ArchiveOutcome, 0, len(ids))}
+	for _, id := range ids {
+		rec, found, err := store.FindSpineRecord(a.paths, id)
+		if err != nil {
+			return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: find spine %s: %w", id, err)
+		}
+		if !found {
+			result.Outcomes = append(result.Outcomes, memops.ArchiveOutcome{
+				ThrID: id, Skipped: true, Reason: "no spine record",
+			})
+			continue
+		}
+		bodySize := 0
+		if body, err := store.ReadThreadBody(a.paths, id, 0); err == nil {
+			bodySize = len(body)
+		} else if !errors.Is(err, memops.ErrThreadFileNotFound) {
+			return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: read body %s: %w", id, err)
+		}
+		// A spine record whose directory is absent (drift) is still
+		// archivable — the spine record must leave the spine — but there are
+		// no bytes to capture or recover. It gets an index entry with an
+		// empty TreeHash (an un-recoverable breadcrumb), matching the old
+		// stub's bytes=0 tolerance.
+		hasDir := false
+		if fi, serr := os.Stat(store.ThreadDir(a.paths, id)); serr == nil && fi.IsDir() {
+			hasDir = true
+		} else if serr != nil && !errors.Is(serr, os.ErrNotExist) {
+			return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: stat dir %s: %w", id, serr)
+		}
+		caps[id] = capture{rec: rec, bodySize: bodySize, hasDir: hasDir}
+		archivable = append(archivable, id)
+	}
+
+	if len(archivable) == 0 {
+		// Nothing to archive — no commits, no index write. The skips are
+		// already recorded in result.Outcomes.
+		return result, nil
+	}
+
+	// (1, cont.) Freshen derived state BEFORE the capture commit. The
+	// capture pre-flag CheckSpineIntegrity (verify.Verify) treats a stale
+	// symbols.jsonl / missing digest.json as drift and would reject the
+	// commit; regenerating first makes the pre-mutation state genuinely
+	// consistent. In production this is a no-op (derived is kept fresh per
+	// turn); it heals a substrate whose derived state was never built (e.g.
+	// bulk-seeded threads). The post-removal state is regenerated again
+	// below (step 5).
+	if err := a.RegenerateDerivedState(ctx, memops.IndexBuildOptions{Quiet: true}); err != nil {
+		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: pre-regenerate derived: %w", err)
+	}
+
+	// CAPTURE commit: pin the to-be-archived directories into a committed
+	// tree so the deletion commit's parent holds their bytes.
+	if err := autogit.Add(ctx, a.paths, "."); err != nil {
+		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: stage capture: %w", err)
+	}
+	// The capture commit's pre-flag CheckSpineIntegrity validates the OLD
+	// (pre-mutation) state — don't archive on a broken spine (design §3.2
+	// step 6). It runs BEFORE any destructive mutation (the RemoveAll /
+	// RemoveSpineRecords below), so a broken spine aborts cleanly with
+	// nothing removed. The deletion commit then carries no pre-flag (we are
+	// mid-transaction) and validates the END state in its post-flag.
+	if err := autogit.Commit(ctx, a.paths, fmt.Sprintf("archive: capture %d thread(s)", len(archivable)),
+		autogit.CheckSpineIntegrity, 0); err != nil {
+		// An empty capture commit means the worktree was already clean and
+		// the directories are already committed at HEAD — fine, proceed. (A
+		// pre-flag failure returns the check error, NOT ErrEmptyCommit, so
+		// this only swallows the genuinely-clean case.)
+		if !errors.Is(err, git.ErrEmptyCommit) {
+			return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: capture commit: %w", err)
+		}
+	}
+
+	// Capture tree hashes from the now-committed worktree (the deletion
+	// commit's parent state). This is the integrity token recovery verifies.
+	// A drift thread with no directory has no bytes — empty TreeHash.
+	treeHashes := make(map[string]string, len(archivable))
+	for _, id := range archivable {
+		if !caps[id].hasDir {
+			continue
+		}
+		th, err := autogit.WorktreeTreeHash(a.paths, threadRelDir(id))
+		if err != nil {
+			return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: tree hash %s: %w", id, err)
+		}
+		treeHashes[id] = th
+	}
+
+	// (2) Stage removals: remove each thread directory + invalidate its
+	// frontmatter cache entry. os.RemoveAll on a missing dir is a no-op.
+	for _, id := range archivable {
+		if err := os.RemoveAll(store.ThreadDir(a.paths, id)); err != nil {
+			return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: remove dir %s: %w", id, err)
+		}
+		a.fmCache.Invalidate(id)
+	}
+
+	// (3) One spine rewrite for the whole batch.
+	if err := store.RemoveSpineRecords(a.paths, archivable); err != nil {
+		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: remove spine records: %w", err)
+	}
+
+	// (4) Append sorted index entries (CommitHash filled in after the
+	// deletion commit, step 6). ArchivedAt is clock.Timeline() (AC6).
+	archivedAt := clock.Timeline().Format(time.RFC3339)
+	entries := make([]memops.ArchiveEntry, 0, len(archivable))
+	for _, id := range archivable {
+		c := caps[id]
+		entries = append(entries, memops.ArchiveEntry{
+			ThrID:        id,
+			TreeHash:     treeHashes[id],
+			ArchivedAt:   archivedAt,
+			OriginalPath: threadRelDir(id),
+			SpineSummary: c.rec.Summary,
+			Anchors:      c.rec.Anchors,
+			Project:      c.rec.Project,
+		})
+	}
+	if err := store.AppendArchiveEntries(a.paths, entries); err != nil {
+		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: append index: %w", err)
+	}
+
+	// (5) Regenerate derived state ONCE so the deletion commit passes
+	// CheckDerivedFresh — each removed thread dangles symbols.jsonl refs.
+	if err := a.RegenerateDerivedState(ctx, memops.IndexBuildOptions{Quiet: true}); err != nil {
+		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: regenerate derived: %w", err)
+	}
+
+	// (6) DELETION commit: stage everything (removals + spine + index +
+	// derived) and commit once. No pre-flag — the OLD-state spine integrity
+	// was validated by the capture commit's pre-flag before any mutation;
+	// here we are mid-transaction. The post-flag CheckDerivedFresh |
+	// CheckSpineIntegrity validates the END state (regen fresh, spine still
+	// consistent after the batch removal).
+	if err := autogit.Add(ctx, a.paths, "."); err != nil {
+		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: stage deletion: %w", err)
+	}
+	delHash, err := autogit.CommitWithHash(ctx, a.paths,
+		fmt.Sprintf("archive: %d thread(s)", len(archivable)),
+		0, autogit.CheckDerivedFresh|autogit.CheckSpineIntegrity)
+	if err != nil {
+		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: deletion commit: %w", err)
+	}
+	result.CommitHash = delHash
+
+	// (6, cont.) STAMP the deletion commit hash into each index entry, then
+	// commit the index-only change. The entries already exist (step 4); we
+	// re-append them with CommitHash set — AppendArchiveEntries replaces by
+	// thr_id and keeps the file sorted.
+	for i := range entries {
+		entries[i].CommitHash = delHash
+	}
+	if err := store.AppendArchiveEntries(a.paths, entries); err != nil {
+		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: stamp index: %w", err)
+	}
+	if err := autogit.Add(ctx, a.paths, "."); err != nil {
+		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: stage stamp: %w", err)
+	}
+	if err := autogit.Commit(ctx, a.paths,
+		fmt.Sprintf("archive: stamp %d index entr%s", len(archivable), plural(len(archivable))),
+		0, autogit.CheckSpineIntegrity); err != nil {
+		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: stamp commit: %w", err)
+	}
+
+	// (7) Emit one archive.archived line per id (forensic + harness fold
+	// key). bytes= kept for demand-sizing continuity. project= attributes
+	// pressure per project even though the drain is substrate-global.
+	for _, id := range archivable {
+		c := caps[id]
+		if err := eventlog.Log(a.paths, archiveLogCategory, archiveActionArchived,
+			fmt.Sprintf("thr=%s project=%s bytes=%d", id, c.rec.Project, c.bodySize)); err != nil {
+			return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: log %s: %w", id, err)
+		}
+		result.Outcomes = append(result.Outcomes, memops.ArchiveOutcome{ThrID: id, Archived: true})
+	}
+
+	return result, nil
+}
+
+// RecoverThread restores an archived thread from its deletion commit and
+// re-adds it to the spine (design §7.2).
+func (a *FileAdapter) RecoverThread(ctx context.Context, thrID string) (memops.SpineRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return memops.SpineRecord{}, err
+	}
+
+	// (1) Look up the archive entry.
+	entry, found, err := store.FindArchiveEntry(a.paths, thrID)
+	if err != nil {
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: %w", thrID, err)
+	}
+	if !found {
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: %w", thrID, memops.ErrArchiveEntryNotFound)
+	}
+	if entry.CommitHash == "" {
+		// The stamp commit never landed (crash window §ArchiveThreads). The
+		// bytes are still reachable by git log, but this entry cannot resolve
+		// its parent without reconcile (#94). Surface, don't guess.
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: archive entry has no commit hash (un-stamped)", thrID)
+	}
+
+	// (2) The bytes live in the deletion commit's PARENT (Q3). Resolve it,
+	// then restore the subtree from there.
+	parent, err := autogit.ParentCommitHash(ctx, a.paths, entry.CommitHash)
+	if err != nil {
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: resolve parent: %w", thrID, err)
+	}
+	if err := autogit.CheckoutTree(ctx, a.paths, parent, entry.OriginalPath, 0, 0); err != nil {
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: restore subtree: %w", thrID, err)
+	}
+
+	// (3) Verify the restored directory against the stored tree hash. On
+	// mismatch, delete the partial restore and abort (invariant 2: never put
+	// a partial thread on the spine).
+	if err := autogit.VerifyTreeHash(a.paths, entry.OriginalPath, entry.TreeHash); err != nil {
+		_ = os.RemoveAll(store.ThreadDir(a.paths, thrID))
+		a.fmCache.Invalidate(thrID)
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: %w", thrID, err)
+	}
+
+	// (4) Build a fresh spine record from the RECOVERED frontmatter
+	// (canonical — anchors/summary may have evolved past the index snapshot).
+	// Reuse the stable id; state=wip; last_engaged=now.
+	fm, err := store.LoadThreadFrontmatter(a.paths, thrID)
+	if err != nil {
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: load recovered frontmatter: %w", thrID, err)
+	}
+	now := clock.Timeline().Format(time.RFC3339)
+	rec := memops.SpineRecord{
+		ID:           thrID,
+		Project:      fm.Project,
+		Anchors:      fm.Anchors,
+		Summary:      fm.Summary,
+		Description:  fm.Description,
+		State:        memops.ThreadWIP,
+		Created:      fm.Created,
+		LastEngaged:  now,
+		StateChanged: now,
+		TurnCount:    fm.TurnCount,
+		RecallFires:  fm.RecallFires,
+	}
+	if err := store.AppendSpineRecord(a.paths, rec); err != nil {
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: append spine: %w", thrID, err)
+	}
+
+	// (5) Reflect the recovered state into the thread frontmatter so the spine
+	// and frontmatter agree (state/last_engaged), and keep the cache coherent.
+	fm.State = memops.ThreadWIP
+	fm.LastEngaged = now
+	fm.StateChanged = now
+	if err := store.SaveThreadFrontmatter(a.paths, thrID, fm); err != nil {
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: save frontmatter: %w", thrID, err)
+	}
+	a.fmCache.Put(fm)
+
+	// (6) Stamp RecoveredAt on the index entry (KEPT as a breadcrumb,
+	// invariant 4 — never removed), regen derived so the recovered thread
+	// re-enters symbols.jsonl, then commit the recovery.
+	entry.RecoveredAt = now
+	if err := store.AppendArchiveEntries(a.paths, []memops.ArchiveEntry{entry}); err != nil {
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: stamp index: %w", thrID, err)
+	}
+	if err := a.RegenerateDerivedState(ctx, memops.IndexBuildOptions{Quiet: true}); err != nil {
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: regenerate derived: %w", thrID, err)
+	}
+	if err := autogit.Add(ctx, a.paths, "."); err != nil {
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: stage: %w", thrID, err)
+	}
+	if err := autogit.Commit(ctx, a.paths, "archive: recover "+thrID,
+		0, autogit.CheckDerivedFresh|autogit.CheckSpineIntegrity); err != nil {
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: commit: %w", thrID, err)
+	}
+
+	if err := eventlog.Log(a.paths, archiveLogCategory, archiveActionRecovered,
+		fmt.Sprintf("thr=%s project=%s", thrID, rec.Project)); err != nil {
+		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: log: %w", thrID, err)
+	}
+
+	return rec, nil
+}
+
+// dedupSorted returns ids sorted ascending with duplicates removed and any
+// empty id dropped.
+func dedupSorted(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
+}
