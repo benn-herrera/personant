@@ -25,7 +25,7 @@ func newTestHome(t *testing.T) (store.PersonantPaths, memops.ProjectMeta) {
 	paths := store.PathsForHome(tmp)
 	// store.Init scaffolds the directory tree, an empty spine, AND a git
 	// repo with a bootstrap commit. The git repo is required now that
-	// archival (surfaceArchivalCandidates → ArchiveThread) goes through
+	// archival (surfaceArchivalCandidates → ArchiveThreads) goes through
 	// internal/autogit and commits the recoverable deletion (#99 I2); the
 	// older hand-built home had no .git and silently failed every archive.
 	if err := store.Init(paths, store.InitOptions{Quiet: true}); err != nil {

@@ -43,13 +43,20 @@ const (
 // project's live work — does not apply here. A global drain reaching into
 // a dormant project's retired threads is the correct behavior, not a leak.
 //
-// After the batch, the derived index is regenerated ONCE: each archival
-// delete leaves symbols.jsonl with dangling references. (A failed regen is
-// NOT caught by a scenario invariant — see the derivedIndexStale handling
-// below, which forces a retry on the next turn.)
+// The coldest-first retired ids are gathered into one slice and handed to
+// ArchiveThreads in a SINGLE call (design §4 batched cost): one spine
+// rewrite + bounded commits per drain, not O(K). The adapter regenerates
+// the derived index INSIDE that batch, atomically with the deletion commit
+// — the drain no longer regenerates separately (design §8: "REMOVE the
+// drain's separate regen").
 //
-// Opportunistic and non-fatal: an ArchiveThread or regenerate error is
-// logged and swallowed, never aborting the turn (closure is the precedent).
+// Atomicity: ArchiveThreads is atomic-per-call — its pre-flag runs on the
+// CAPTURE commit BEFORE any spine/disk mutation, so a failed batch leaves
+// the spine and worktree intact. The drain can therefore swallow the error
+// (opportunistic, non-fatal) without risking silent thread loss.
+//
+// Opportunistic and non-fatal: an ArchiveThreads error is logged and
+// swallowed, never aborting the turn (closure is the precedent).
 //
 // Cross-turn ordering: archival is coldest-first, so a thread retired by
 // closure earlier THIS turn (step 5b) has the NEWEST StateChanged and is
@@ -79,20 +86,40 @@ func surfaceArchivalCandidates(ctx context.Context, state *State) error {
 		return coldnessKey(retired[i]) < coldnessKey(retired[j])
 	})
 
-	// Archive coldest retired threads until the spine drains to the
-	// low-water mark (or we run out of retired threads).
+	// Gather the coldest retired ids until we have enough to drain the
+	// spine to the low-water mark (or we run out of retired threads).
 	target := len(recs) - archiveLowWater
-	archived := 0
+	ids := make([]string, 0, target)
 	for _, rec := range retired {
-		if archived >= target {
+		if len(ids) >= target {
 			break
 		}
-		if err := state.Ops.ArchiveThread(ctx, rec.ID); err != nil {
-			_ = state.Ops.Log(ctx, memops.LogCategoryArchive, "error",
-				"thr="+rec.ID+" err="+memops.SanitizeDetail(err.Error()))
+		ids = append(ids, rec.ID)
+	}
+
+	// One batched call: spine rewrite + index + derived regen + commit, all
+	// atomic per the adapter. A failure here is logged and swallowed (the
+	// pre-flag fails before any mutation, so the spine is left intact —
+	// nothing is silently lost), and the turn proceeds.
+	res, err := state.Ops.ArchiveThreads(ctx, ids)
+	if err != nil {
+		_ = state.Ops.Log(ctx, memops.LogCategoryArchive, "error",
+			fmt.Sprintf("batch=%d err=%s", len(ids), memops.SanitizeDetail(err.Error())))
+		return nil
+	}
+
+	// Tally the actual archive outcomes; log any per-thread skip (a spine
+	// record with no thread to archive) as a forensic breadcrumb.
+	archived := 0
+	for _, o := range res.Outcomes {
+		if o.Archived {
+			archived++
 			continue
 		}
-		archived++
+		if o.Skipped {
+			_ = state.Ops.Log(ctx, memops.LogCategoryArchive, "skip",
+				"thr="+o.ThrID+" reason="+memops.SanitizeDetail(o.Reason))
+		}
 	}
 
 	// Under-drain: the spine was over the high-water mark but retired
@@ -106,21 +133,6 @@ func surfaceArchivalCandidates(ctx context.Context, state *State) error {
 			fmt.Sprintf("spine=%d low-water=%d wanted=%d archived=%d retired-exhausted",
 				len(recs)-archived, archiveLowWater, target, archived))
 	}
-
-	// Regenerate the derived index if this batch archived anything OR a
-	// prior turn's regen failed (derivedIndexStale). Each archival delete
-	// leaves symbols.jsonl with dangling references; a clean regen clears
-	// the staleness, a failed one re-arms it so the next turn retries even
-	// when it archives nothing.
-	if archived == 0 && !state.derivedIndexStale {
-		return nil
-	}
-	if err := state.Ops.RegenerateDerivedState(ctx, memops.IndexBuildOptions{Quiet: true}); err != nil {
-		state.derivedIndexStale = true
-		_ = state.Ops.Log(ctx, memops.LogCategoryArchive, "regen-error", memops.SanitizeDetail(err.Error()))
-		return nil
-	}
-	state.derivedIndexStale = false
 	return nil
 }
 

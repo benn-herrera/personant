@@ -179,6 +179,59 @@ func TestSurfaceArchival_WatermarkDrainsColdestRetired(t *testing.T) {
 	}
 }
 
+// failArchiveBatchOps wraps a real MemoryOps but forces ArchiveThreads to
+// fail WITHOUT mutating the spine — modelling the adapter's atomic-per-call
+// contract (the capture-commit pre-flag fails before any spine/disk
+// mutation, so a failed batch leaves the spine intact). It lets the drain
+// test assert that the drain swallows the error and never silently loses
+// threads off the spine.
+type failArchiveBatchOps struct {
+	memops.MemoryOps
+	err error
+}
+
+func (f failArchiveBatchOps) ArchiveThreads(context.Context, []string) (memops.ArchiveResult, error) {
+	return memops.ArchiveResult{}, f.err
+}
+
+// TestSurfaceArchival_FailedBatchLeavesSpineIntact is the I2-regression
+// guard: when ArchiveThreads fails, the drain must swallow the error
+// (non-fatal) AND the spine must be UNCHANGED — never drained, never
+// partially lost. The adapter's atomic-per-call contract guarantees a
+// failed batch leaves the spine intact (pre-flag before mutation); this
+// asserts the drain honors that by not treating a failure as progress.
+func TestSurfaceArchival_FailedBatchLeavesSpineIntact(t *testing.T) {
+	paths, meta := newTestHome(t)
+
+	const total = archiveHighWater + 30
+	for rank := 0; rank < total; rank++ {
+		seedArchivalThread(t, paths, meta.ID, fmt.Sprintf("thr_%d", rank+1),
+			memops.ThreadResolved, monotonicTS(rank))
+	}
+
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state.Ops = failArchiveBatchOps{
+		MemoryOps: state.Ops,
+		err:       fmt.Errorf("injected batch failure"),
+	}
+
+	// The drain must NOT propagate the error (opportunistic + non-fatal).
+	if err := surfaceArchivalCandidates(context.Background(), state); err != nil {
+		t.Fatalf("surfaceArchivalCandidates returned the swallowed error: %v", err)
+	}
+
+	// The spine is unchanged — a failed batch never drains it (and never to 0,
+	// the I2 bug class).
+	recs, err := store.ReadSpine(paths.Spine)
+	if err != nil {
+		t.Fatalf("read spine after failed archival: %v", err)
+	}
+	if len(recs) != total {
+		t.Errorf("spine count after failed archival = %d, want %d (failed batch must leave spine intact)",
+			len(recs), total)
+	}
+}
+
 // TestSurfaceArchival_NoOpBelowHighWater — a spine below the high-water
 // mark triggers no archival.
 func TestSurfaceArchival_NoOpBelowHighWater(t *testing.T) {

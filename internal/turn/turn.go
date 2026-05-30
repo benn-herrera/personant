@@ -135,14 +135,6 @@ type State struct {
 	// §3.5 closure re-prompt is suppressed. Populated when the user
 	// defers a closure offer; not persisted (session-scoped).
 	closureDeferUntil map[string]int
-
-	// derivedIndexStale is set when a §3.8 archival batch deleted threads
-	// but the post-batch RegenerateDerivedState failed — symbols.jsonl is
-	// then left with dangling references to deleted threads. The next
-	// turn's archival step regenerates if a batch was archived OR this
-	// flag is set, clearing it on success, so a failed regen self-heals
-	// instead of persisting until the next archival batch or git op.
-	derivedIndexStale bool
 }
 
 // dormantThreadsCap is the v0.1 maximum count for State.DormantThreads.
