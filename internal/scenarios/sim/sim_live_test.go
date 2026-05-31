@@ -34,6 +34,7 @@ import (
 	"personant/internal/memops"
 	"personant/internal/model"
 	"personant/internal/recall/measure"
+	"personant/internal/scenarios"
 	"personant/internal/store"
 )
 
@@ -118,14 +119,119 @@ func TestSimLive(t *testing.T) {
 		}
 	}
 
-	// Inc 3 (deferred): real chat model. Inference-in-loop wiring lands next
-	// increment; for now mock inference runs regardless of the toggle.
+	// Inc 3: inference-in-loop. When -sim.live-inference is on, install the real
+	// chat client on State.Client (replacing the scripted mock). This is a SHORT
+	// BEHAVIOR-VALIDATION mode, NOT a coherent recall workload: a real model
+	// emits different topic tags / symbols than the canned plan, so the runtime
+	// engages/creates different threads, which both invalidates the recall
+	// oracle AND breaks the generator's forward-planning coherence (it plans the
+	// next step's engagement from canned tags). oracleBlind is therefore set in
+	// lockstep with the client install, downgrading every oracle/coherence gate
+	// to an observation; the run is capped short (liveInferenceMaxDuration).
+	var liveClient model.Client
+	var liveModel string
+	oracleBlind := false
 	if *liveInference {
-		log.Info("sim-live: live-inference requested (real chat-model wiring lands in Inc 3); running mock inference this increment")
+		if d > liveInferenceMaxDuration {
+			t.Fatalf("sim-live: -sim.live-inference is a SHORT behavior-validation mode (a real model emits "+
+				"different tags than the canned plan, so a multi-day workload is structurally incoherent). "+
+				"Requested span %s exceeds the cap %s — re-run with -sim.duration=1d (or shorter).",
+				d, liveInferenceMaxDuration)
+		}
+		ep := chatEndpoint(t, endpoints)
+		client := model.NewHTTPClient(ep.provider)
+		liveClient, liveModel = client, ep.model
+		oracleBlind = true
+		log.Info("sim-live: installing live chat model — provider=%s model=%s (inference-in-loop, Inc 3; "+
+			"oracle/coherence gates BLINDED, behavior-validation only)", ep.provider.Name, ep.model)
 	}
 
 	corpus := loadCorpusSlots(t)
-	runSimRung(t, "sim-live-"+*simDuration, d, corpus, recaller)
+	h := runSimRung(t, "sim-live-"+*simDuration, d, corpus, recaller, oracleBlind, liveClient, liveModel)
+
+	// Inference-in-loop behavior-validation summary (#98, Inc 3). These are the
+	// real-model behaviors the mock structurally cannot exercise. They are
+	// derived from the runtime's OWN event log (the runtime's authoritative
+	// view of what the model emitted), never from the canned plan — so they are
+	// honest about the live model even though the recall oracle is blind.
+	if *liveInference {
+		reportInferenceBehavior(t, h)
+	}
+}
+
+// liveInferenceMaxDuration is the T2-1 short-run cap on inference-in-loop. A
+// real chat model diverges from the canned plan immediately, so the workload
+// is only coherent for a behavior-validation sniff, not a multi-day recall
+// run; one sim day is plenty to observe tag discipline, extraction, streaming,
+// and the §5.5 re-prompt. A longer request is refused (TestSimLive fails with
+// guidance) rather than silently producing meaningless "recall" over an
+// incoherent workload.
+const liveInferenceMaxDuration = 24 * time.Hour
+
+// chatEndpoint returns the resolved chat endpoint from the loaded set,
+// failing if it is absent (it must be present when -sim.live-inference is on,
+// since loadLiveEndpoints resolved it under the same flag). Mirrors
+// embeddingEndpoint.
+func chatEndpoint(t *testing.T, endpoints []liveEndpoint) liveEndpoint {
+	t.Helper()
+	for _, ep := range endpoints {
+		if ep.role == "chat" {
+			return ep
+		}
+	}
+	t.Fatalf("sim-live: -sim.live-inference set but no chat endpoint resolved (internal inconsistency)")
+	return liveEndpoint{}
+}
+
+// reportInferenceBehavior logs the inference-in-loop behavior-validation
+// metrics (#98, Inc 3) from the run's event log. The recall oracle is blind
+// under live inference, so these — NOT any recall number — are what the mode
+// measures:
+//
+//   - tag-emission discipline: the runtime logs `topic.tag-missing` whenever
+//     the model's response carried no parseable §5.1 topic tag. The parseable
+//     rate = (turns - tag-missing) / turns is the headline. A high miss rate
+//     is a real model regression on the tag contract the whole substrate rests
+//     on — the signal the mock can never produce.
+//   - real symbol extraction (observability): threads_created + match-fires
+//     count what the real model's tags/anchors drove through the runtime.
+//   - streaming: turn.Run drives ConsultStream; the run reaching this point
+//     with no turn.Run error (RunScenario t.Fatalf's otherwise) confirms the
+//     harness drained a real streaming endpoint cleanly.
+//   - §5.5 mid-turn re-prompt: `topic.re-prompt` counts dormant-resumption
+//     re-prompts the real model drove and the runtime handled without desync.
+func reportInferenceBehavior(t *testing.T, h *scenarios.Harness) {
+	t.Helper()
+	m, err := readMetrics(h.MetricsPath)
+	if err != nil {
+		t.Fatalf("reportInferenceBehavior: read metrics blob: %v", err)
+	}
+	turns := m.Counters["turns"]
+	tagMissing := logEventCount(t, h, "topic.tag-missing")
+	tagParsed := int(turns) - tagMissing
+	parsedRate := 0.0
+	if turns > 0 {
+		parsedRate = float64(tagParsed) / float64(turns)
+	}
+
+	t.Logf("=== inference-in-loop behavior validation (#98, oracle BLIND — no recall claim) ===")
+	t.Logf("turns:                    %d (live chat model, streaming via ConsultStream)", turns)
+	t.Logf("topic-tag discipline:     %d/%d parseable (%.3f); %d missing (runtime `topic.tag-missing`)",
+		tagParsed, int(turns), parsedRate, tagMissing)
+	t.Logf("threads created:          %d (real-model tags/anchors that drove §3.0.4 creation)",
+		m.Counters["threads_created"])
+	t.Logf("engaged existing threads: %d (real-model tags naming a live thr_<n>)",
+		m.Counters["engaged_existing_threads"])
+	t.Logf("topic.warning lines:      %d (malformed-tag drift the runtime tolerated)",
+		logEventCount(t, h, "topic.warning"))
+	t.Logf("§5.5 mid-turn re-prompts: %d (dormant-resumption re-prompts handled with no queue desync)",
+		logEventCount(t, h, "topic.re-prompt"))
+	t.Logf("spine.match-fire:         %d (symbolic recall fires off real-model symbols — observability only)",
+		logEventCount(t, h, "spine.match-fire "))
+	if *liveEmbedding {
+		t.Logf("spine.embed-match-fire:   %d (embedding recall fires; fullest live mode, still oracle-blind)",
+			logEventCount(t, h, "spine.embed-match-fire "))
+	}
 }
 
 // embeddingEndpoint returns the resolved embedding endpoint from the

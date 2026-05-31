@@ -49,7 +49,18 @@ func RunScenario(t *testing.T, sc Scenario) *Harness {
 	// drains cleanly. No pre-queue, so an on-demand StepSource needs no
 	// up-front step count.
 	h.Mock = model.NewScriptedMock(nil, nil)
-	h.State.Client = h.Mock
+	if h.liveClient != nil {
+		// Inference-in-loop (#98, Inc 3): drive turns against a real chat
+		// endpoint instead of the scripted mock. The mock is still constructed
+		// (some helpers reference it) but never installed on State; runStep
+		// skips SetResponse and restartSession rebuilds against the live client.
+		// State.Model names the real chat model so the request does not carry
+		// the sentinel harness DefaultModel.
+		h.State.Client = h.liveClient
+		h.State.Model = h.liveModel
+	} else {
+		h.State.Client = h.Mock
+	}
 
 	if sc.Setup != nil {
 		if err := sc.Setup(h); err != nil {
@@ -156,7 +167,11 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 
 	// Install this step's mock response. Every consult during the turn —
 	// including a §5.5 mid-turn re-prompt — re-serves this one response.
-	h.Mock.SetResponse(step.MockResponse)
+	// Under inference-in-loop (#98) the live client is installed instead, so
+	// the canned response is neither served nor relevant — skip it.
+	if h.liveClient == nil {
+		h.Mock.SetResponse(step.MockResponse)
+	}
 
 	h.State.RecallResolver = recallResolverFor(t, idx, label, step.RecallAck)
 	h.State.ClosureResolver = closureResolverFor(step.ClosureAck)
@@ -232,7 +247,6 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 	// Per-step metrics.
 	h.Metrics.Counter("turns", 1)
 	h.Metrics.Record("turn_duration_ms", float64(elapsed.Milliseconds()))
-	h.Metrics.Record("response_bytes", float64(len(step.MockResponse.Content)))
 	if len(postSpine) > len(preSpine) {
 		h.Metrics.Counter("threads_created", int64(len(postSpine)-len(preSpine)))
 	} else if len(postSpine) == len(preSpine) {
@@ -242,13 +256,23 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 		h.Metrics.Counter("engaged_existing_threads", 1)
 	}
 
-	// Topic-tag presence accounting. Cheap and useful for cross-version
-	// drift detection (a model regressing on tag emission would show up
-	// here long before any thread/spine corruption).
-	if strings.Contains(step.MockResponse.Content, "*topic:") {
-		h.Metrics.Counter("topic_tag_parsed", 1)
-	} else {
-		h.Metrics.Counter("topic_tag_missing", 1)
+	// Response size + topic-tag presence accounting. Under mock inference these
+	// read the canned step.MockResponse (the bytes the mock served, the tag the
+	// plan emitted) — cheap cross-version drift signal. Under inference-in-loop
+	// (#98) the canned response is NOT what the model produced, so these mock-
+	// derived figures are meaningless: the REAL model's response bytes never
+	// reach the harness (turn.Run streams + tag-strips the body), and its tag
+	// discipline is measured authoritatively from the runtime's own
+	// `topic.tag-missing` log line (counted by the live behavior-validation
+	// summary), not from the canned plan. Skip them in live mode to avoid
+	// recording the plan as if it were the model.
+	if h.liveClient == nil {
+		h.Metrics.Record("response_bytes", float64(len(step.MockResponse.Content)))
+		if strings.Contains(step.MockResponse.Content, "*topic:") {
+			h.Metrics.Counter("topic_tag_parsed", 1)
+		} else {
+			h.Metrics.Counter("topic_tag_missing", 1)
+		}
 	}
 
 	_ = body // body is the streamed text; harness keeps it in History via turn.Run.
@@ -326,9 +350,21 @@ func restartSession(t *testing.T, h *Harness, idx int, label string) {
 	t.Helper()
 	before := h.State
 
-	rebuilt, err := turn.LoadSession(context.Background(), h.Ops, h.Project, h.Provider, h.Mock)
+	// Rebuild against the client the run is driving: the live chat client under
+	// inference-in-loop (#98), else the scripted mock. A relaunched real runtime
+	// would re-resolve its live client too, so the live model name is re-applied
+	// below — without it LoadSession's State would revert to the sentinel
+	// harness DefaultModel.
+	client := model.Client(h.Mock)
+	if h.liveClient != nil {
+		client = h.liveClient
+	}
+	rebuilt, err := turn.LoadSession(context.Background(), h.Ops, h.Project, h.Provider, client)
 	if err != nil {
 		t.Fatalf("scenario step %d (%s): simulated relaunch: turn.LoadSession: %v", idx+1, label, err)
+	}
+	if h.liveClient != nil {
+		rebuilt.Model = h.liveModel
 	}
 	// Re-install the deterministic scripted curator — newHarness installs
 	// it on the original State, and a relaunched runtime would re-install

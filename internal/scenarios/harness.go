@@ -370,6 +370,24 @@ type Scenario struct {
 	// per-thread-creation index upkeep wired automatically — see runStep.
 	Recaller func(ops memops.MemoryOps) measure.Recaller
 
+	// LiveClient, when non-nil, is installed on turn.State.Client INSTEAD of
+	// the scripted mock — the inference-in-loop seam (#98, Inc 3). With it set,
+	// every turn's ConsultStream hits a real chat endpoint, so the per-step
+	// MockResponse is NOT served (runStep skips SetResponse) and the workload's
+	// canned bodies are ignored by the runtime. This is a BEHAVIOR-VALIDATION
+	// mode ONLY: a real model emits different topic tags / symbols than the
+	// canned plan, which both invalidates the recall oracle AND breaks the
+	// generator's forward-planning coherence (it plans the next step's thread
+	// engagement from canned tags). The live-sim caller therefore runs it short
+	// and SKIPS every oracle/coherence-dependent gate. When nil the harness
+	// keeps the scripted mock, so every existing scenario is unaffected.
+	LiveClient model.Client
+
+	// LiveModel is the model name set on turn.State.Model when LiveClient is
+	// installed, overriding the sentinel harness provider's DefaultModel so the
+	// live request names the real chat model. Ignored when LiveClient is nil.
+	LiveModel string
+
 	// MemoryCapBytes, when > 0, arms the harness's heap watchdog: a
 	// goroutine that polls runtime.MemStats.HeapInuse every
 	// memWatchdogCheckInterval and, on cap exceed, captures a heap profile
@@ -484,6 +502,14 @@ type Harness struct {
 	// recaller satisfies threadIndexer (the embedding measure.Service does).
 	// nil for the symbolic-only default. runStep drives it per thread created.
 	indexer threadIndexer
+
+	// liveClient is Scenario.LiveClient — the inference-in-loop chat client
+	// (#98). When non-nil it is installed on State.Client instead of the
+	// scripted mock; runStep then skips the per-step SetResponse and
+	// restartSession rebuilds the session against it (not the mock). liveModel
+	// rides along onto State.Model. nil on every mock scenario.
+	liveClient model.Client
+	liveModel  string
 }
 
 // installRecaller builds the scenario's custom recaller (if any), installs

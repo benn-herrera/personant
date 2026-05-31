@@ -94,6 +94,8 @@ defaultModel = "harness-mock"
 		archivedThreadIDs: map[string]struct{}{},
 		heavyCadence:      sc.HeavyInvariantCadence,
 		recallerFactory:   sc.Recaller,
+		liveClient:        sc.LiveClient,
+		liveModel:         sc.LiveModel,
 		// Schedule the first heavy firing one cadence-tick after the
 		// start: this puts the first firing well into the run rather than
 		// at step 1 when nothing has happened yet. End-of-run always

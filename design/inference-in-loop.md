@@ -76,10 +76,21 @@ exist:
   oracle still asserts. Turn-close already logs `spine.embed-match-fire` alongside
   `spine.match-fire`, so both layers' fires are observable per turn.
 - **Inference-in-loop:** replace `h.State.Client` (the mock) with `NewHTTPClient(...)`.
-  This run DISABLES the `ExpectedRecallMatches` assertions (no deterministic ground
-  truth) → it is a behavior-validation mode (tag discipline / extraction / streaming),
-  not a recall-fidelity gate. Streaming: the harness uses blocking `Consult` today; a
-  real client may stream — confirm `Consult` (blocking) suffices or drain `ConsultStream`.
+  Live inference breaks **two** things, not one: (a) the recall oracle (live response
+  symbols ≠ canned), AND (b) — deeper — the **generator's forward-planning coherence**.
+  The on-demand generator plans which threads to engage/create from the *canned* topic
+  tags; a real model emits *different* tags → the runtime engages/creates different
+  threads → every subsequent generated step (which assumes the planned state) is
+  incoherent. So inference-in-loop is NOT a coherent multi-day recall workload — it is a
+  **short behavior-validation mode** (per the T2-1 framing): measure real-model behaviors
+  the mock structurally can't — tag-emission discipline (parseable `*topic:*` rate,
+  preamble-before-tag T1-1), real symbol extraction, streaming shape, §5.5 mid-turn
+  re-prompt. ALL oracle/coherence-dependent assertions + hard gates
+  (`recall_unexplained_absence`, wander coherence, recall-fidelity) are SKIPPED in this
+  mode (they assume canned responses). Capped SHORT (T2-1 duration cap). Streaming: the
+  harness uses blocking `Consult` today; a real client may stream — confirm `Consult`
+  suffices or drain `ConsultStream`. Combinable with live-embedding (fullest live mode,
+  closest to production, fully oracle-blind).
 
 ## 5. Embedding recall measurement (the #98 payoff)
 

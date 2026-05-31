@@ -15,6 +15,7 @@ import (
 
 	"personant/internal/clock"
 	"personant/internal/memops"
+	"personant/internal/model"
 	"personant/internal/recall/measure"
 	"personant/internal/scenarios"
 	"personant/internal/store"
@@ -261,7 +262,7 @@ func TestSim(t *testing.T) {
 	}
 
 	corpus := loadCorpusSlots(t)
-	h := runSimRung(t, "sim-"+*simDuration, d, corpus, nil)
+	h := runSimRung(t, "sim-"+*simDuration, d, corpus, nil, false, nil, "")
 
 	// Light sanity band — a smoke rung, not a tuning gate. Derivation:
 	// a work day is 2 sessions of 6 h turn-active time = 12 h of
@@ -319,8 +320,25 @@ func withRunTimestampSuffix(name string) string {
 // gated) passes a factory that builds measure.NewService(ops, embedder);
 // the harness installs it, Prepares the index, and keeps it current via
 // the per-thread-creation AddThread seam.
+//
+// oracleBlind is the inference-in-loop guard (#98, Inc 3). When true (set
+// only by TestSimLive under -sim.live-inference), every gate whose ground
+// truth is the deterministic generator's CANNED responses is downgraded
+// from a t.Errorf failure to a logged observation: a real chat model emits
+// different topic tags / symbols than the plan, so the runtime engages and
+// creates different threads, which (a) invalidates the recall oracle and
+// (b) breaks the generator's forward-planning coherence. The blinded gates
+// are the recall-fidelity / wander-coherence / abandoned-topic-recall
+// oracles, the §4.3 no-eviction coherence criteria (e), the closure-flow
+// liveness check (thread engagement is plan-driven), and the
+// recall_unexplained_absence canary. The substrate-invariant gates that do
+// NOT depend on the oracle — the R6 history_len hard cap, thread-id
+// well-formedness, RunScenario's per-step invariants — stay LIVE under
+// blinding, because a real model cannot legitimately break a storage
+// invariant. With oracleBlind false (every mock path) the run is unchanged.
 func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot,
-	recaller func(ops memops.MemoryOps) measure.Recaller) *scenarios.Harness {
+	recaller func(ops memops.MemoryOps) measure.Recaller, oracleBlind bool,
+	liveClient model.Client, liveModel string) *scenarios.Harness {
 	t.Helper()
 
 	sc := GenerateWorkload(WorkloadConfig{
@@ -329,6 +347,12 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 		Corpus:   corpus,
 	})
 	sc.Recaller = recaller
+	// Inference-in-loop (#98, Inc 3): when a live chat client is supplied the
+	// harness drives turns against it instead of the scripted mock, and
+	// oracleBlind is set in lockstep (every caller pairs them). nil keeps the
+	// mock path.
+	sc.LiveClient = liveClient
+	sc.LiveModel = liveModel
 
 	// Relax the heavy-invariant cadence to sim-daily. The sim's per-step
 	// heavy-invariant sweeps were super-linear in turn count and ate the
@@ -449,7 +473,14 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// turns to decay-close some threads, so a non-zero count is the
 	// expected, healthy signal that the closure flow is live.
 	if closures == 0 {
-		t.Errorf("closures: got 0; the §3.5 closure flow is dead — expected >0 over the %s workload", label)
+		// Closure depends on which threads the runtime engaged/decayed, which is
+		// plan-driven; under inference-in-loop the real model engages different
+		// threads than the canned plan, so a zero is an observation, not a defect.
+		if oracleBlind {
+			t.Logf("closures: got 0 (live-inference: plan-driven closure not asserted)")
+		} else {
+			t.Errorf("closures: got 0; the §3.5 closure flow is dead — expected >0 over the %s workload", label)
+		}
 	}
 
 	// Recall fidelity is measured (RecallMeasureOnly), never pass/fail
@@ -603,7 +634,7 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 		key := fmt.Sprintf("_h%d", hop)
 		totalProbeObs += int(m.Gauges[metricWanderOriginRecallByHops+key+"_obs"])
 	}
-	if totalProbeObs > 0 {
+	if totalProbeObs > 0 && !oracleBlind {
 		divergenceBand := totalProbeObs / 20 // 5% rounding band
 		if divergence > divergenceBand {
 			t.Errorf("criterion (b) FAILURE: wander coherence divergence %d exceeds band %d over %d probe obs — "+
@@ -611,6 +642,13 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 				"assumption broke (check criterion e / history_len_max). Do NOT trust the decay curve until resolved.",
 				divergence, divergenceBand, totalProbeObs)
 		}
+	} else if oracleBlind && totalProbeObs > 0 {
+		// The abandoned-topic recall oracle compares the runtime's match-fires
+		// against the canned plan; under live inference the runtime fired on a
+		// different thread set, so divergence here measures plan-vs-model drift,
+		// not a coherence break. Report, do not fail.
+		t.Logf("wander coherence divergence %d over %d probe obs (live-inference: oracle blind — not asserted)",
+			divergence, totalProbeObs)
 	}
 
 	// Criterion (e): max per-thread retained symbol count must stay under
@@ -637,7 +675,11 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	}
 	t.Logf("max per-thread retained symbols: %d (criterion e: must stay < eviction cap %d)",
 		maxRetained, historyCapForReport)
-	if maxRetained >= historyCapForReport {
+	if maxRetained >= historyCapForReport && !oracleBlind {
+		// This is the generator's shadow-set no-eviction precondition for the
+		// abandoned-topic oracle. Under live inference that oracle is off, so the
+		// precondition it guards is moot — the shadow set still reflects the canned
+		// plan, not what the live runtime retained. Report only.
 		t.Errorf("criterion (e) FAILURE: max per-thread retained symbols %d >= eviction cap %d — "+
 			"the oracle's no-eviction assumption (§4.3) breaks; eviction modeling now required",
 			maxRetained, historyCapForReport)
@@ -666,9 +708,19 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// genuine loss FAILS the sim rather than hiding in the summary. This is
 	// the payoff of the #100 oracle fix — the canary is now usable.
 	if absent := m.Counters["recall_unexplained_absence"]; absent != 0 {
-		t.Errorf("recall_unexplained_absence = %d, want 0 — a recall expectation names a thread that is "+
-			"OFF the live spine AND NOT archived (genuine integrity loss, or an uncovered oracle/execution-timing "+
-			"artifact). This is the genuine-loss canary; do NOT relax it without root-causing every count.", absent)
+		// The canary keys off the recall oracle's expected set (built from canned
+		// tags). Under inference-in-loop the runtime engages/creates threads the
+		// plan never named, so the oracle names threads the runtime never
+		// materialized — manufacturing false absences. The gate is meaningless
+		// when the model is real; report the count, do not fail.
+		if oracleBlind {
+			t.Logf("recall_unexplained_absence = %d (live-inference: oracle expected-set is plan-derived, "+
+				"runtime diverged — canary not asserted)", absent)
+		} else {
+			t.Errorf("recall_unexplained_absence = %d, want 0 — a recall expectation names a thread that is "+
+				"OFF the live spine AND NOT archived (genuine integrity loss, or an uncovered oracle/execution-timing "+
+				"artifact). This is the genuine-loss canary; do NOT relax it without root-causing every count.", absent)
+		}
 	}
 
 	t.Logf("wall-clock runtime: %s", wall.Round(time.Millisecond))

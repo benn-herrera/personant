@@ -49,7 +49,7 @@ func mockEmbedderRecaller(ops memops.MemoryOps) measure.Recaller {
 // machinery runs end-to-end and stays network-free.
 func TestSimEmbeddingHeadToHead_Machinery(t *testing.T) {
 	corpus := loadCorpusSlots(t)
-	h := runSimRung(t, "sim-embed-machinery", simDayDuration, corpus, mockEmbedderRecaller)
+	h := runSimRung(t, "sim-embed-machinery", simDayDuration, corpus, mockEmbedderRecaller, false, nil, "")
 
 	m, err := readMetrics(h.MetricsPath)
 	if err != nil {
@@ -133,7 +133,7 @@ func TestSimEmbeddingHeadToHead_Machinery(t *testing.T) {
 // acceptance gates are provably unaffected by the #98 wiring.
 func TestSimNoEmbedder_HeadToHeadAbsent(t *testing.T) {
 	corpus := loadCorpusSlots(t)
-	h := runSimRung(t, "sim-embed-absent", simDayDuration, corpus, nil)
+	h := runSimRung(t, "sim-embed-absent", simDayDuration, corpus, nil, false, nil, "")
 
 	m, err := readMetrics(h.MetricsPath)
 	if err != nil {
