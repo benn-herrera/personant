@@ -551,7 +551,7 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// recall means below are scored against the SAME archival-forgiven
 	// expected set on the SAME workload (recordEmbedRecallFidelity), so the
 	// comparison is apples-to-apples. The REAL gap-closure number is produced
-	// by `make sim-live -sim.live-embedding` against reaper; a MockEmbedder
+	// by `make sim LIVE_EMBEDDING=true` against reaper; a MockEmbedder
 	// run exercises the machinery but not semantic recall quality.
 	if esteps := m.Counters["embed_recall_fidelity_steps"]; esteps > 0 {
 		t.Logf("=== embedding-vs-symbolic recall head-to-head (#98) ===")

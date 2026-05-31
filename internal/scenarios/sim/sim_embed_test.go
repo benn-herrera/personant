@@ -8,7 +8,7 @@ package sim
 // MATH, NOT recall QUALITY: a feature-hashing vectorizer is not semantic,
 // so it cannot demonstrate the drift-robustness #96 is about. The REAL
 // gap-closure measurement is run by the user via
-// `make sim-live DURATION=… -sim.live-embedding` against the live nomic
+// `make sim LIVE_EMBEDDING=true DURATION=…` against the live nomic
 // embedder on reaper — this test cannot and does not claim that result.
 //
 // What it proves:

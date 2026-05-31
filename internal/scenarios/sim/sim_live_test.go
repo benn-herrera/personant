@@ -99,7 +99,7 @@ func setupLiveElements(t *testing.T, d time.Duration) (
 	t.Helper()
 	if !*liveEmbedding && !*liveInference {
 		// The mock acceptance gate (bare `make test` / `make sim`, or
-		// `make sim-live EMBEDDING=false INFERENCE=false`). No live element to
+		// `make sim LIVE_EMBEDDING=false LIVE_INFERENCE=false`). No live element to
 		// install: return zero values and touch no config/endpoint. The gate
 		// RUNS — this is not a skip.
 		return nil, nil, "", false

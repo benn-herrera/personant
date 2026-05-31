@@ -312,7 +312,7 @@ Makefile                    build + agents-submodule pinning +
 make build            # bin/personant
 make test             # go vet + go test ./... --count=1
 make integration-test # live reaper embedder/recall tests (opt-in)
-make sim-live         # live-mode sim (opt-in via -sim.live-* toggles)
+make sim              # acceptance rung-walk (mock); LIVE_EMBEDDING=true / LIVE_INFERENCE=true for live-mode
 make recall-corpus-test # corpus recall-fidelity measurement (opt-in)
 make clean
 ```

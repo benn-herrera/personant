@@ -1,6 +1,6 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build test cover sim sim-live integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
+.PHONY: all build test cover sim integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
 
 all: build
 
@@ -125,67 +125,46 @@ cover: build recall-madlibs
 	go test -coverpkg=./... -coverprofile=cover.out ./... --count=1
 	@go tool cover -func=cover.out | tail -1
 
-# sim runs the six-month simulation rung walk at a given span — TestSim
-# in internal/scenarios/sim/ reads the span from -sim.duration. Span is
-# a runtime parameter, no build tags. Deliberately NOT part of `make
-# test`: the default test run passes no flag, so TestSim there runs the
-# 1-day smoke rung. Run -v to see the logged metrics summary.
-# -timeout 0 disables go test's 10-minute default — the longer rungs
-# run for minutes to (at 6m) an hour; this is a deliberate, watched
-# invocation, so a runaway is the user's to Ctrl-C.
-#   make sim DURATION=1w   (1d|1w|1m|2m|6m or a Go duration like 168h)
+# sim runs the simulation rung walk — TestSim in internal/scenarios/sim/ at the
+# span given by -sim.duration. By DEFAULT (both live toggles false) it is the
+# MOCK, deterministic acceptance gate: symbolic-only recall (nil-embedder
+# stand-in) + scripted mock responses, all hard gates active. `make test` runs
+# this same TestSim at the 1d default; `make sim DURATION=...` walks the rungs
+# (1d|1w|1m|2m|6m or a Go duration like 168h). -timeout 0 disables go test's
+# 10-minute default (long rungs run minutes -> ~an hour; a watched, deliberate
+# invocation — a runaway is the user's to Ctrl-C).
 #
-# SIM_WRAP wraps the sim invocation on Darwin with caffeinate(8) +
-# taskpolicy(8) so a long run isn't penalized by idle-sleep transitions
-# or background-QoS demotion when the user steps away. caffeinate -i
-# blocks idle-sleep (display can still sleep — no side effects for the
-# user). taskpolicy -t 0 -l 0 pins the process tree to the highest
-# throughput tier and lowest latency tier (highest scheduling priority);
-# on Apple Silicon this also keeps the work on P-cores. (The earlier
-# `-c user-initiated` form is rejected on macOS 26.5 as "Could not parse
-# 'user-initiated' as a QoS clamp" — using tier flags instead, which
-# work in wrap mode across macOS versions.) Both wrappers are
-# process-scoped and self-clean when the wrapped command exits — no
-# system-wide state changes, nothing to undo. On non-Darwin SIM_WRAP is
-# empty.
+# LIVE_EMBEDDING / LIVE_INFERENCE (default false -> the stand-ins above) opt the
+# two live elements in independently — there is NO separate sim-live target
+# (#98), just this TestSim with the -sim.live-* flags:
+#   make sim                                   # mock acceptance gate (default)
+#   make sim LIVE_EMBEDDING=true               # embedding-in-loop (real §3.4 embedder)
+#   make sim LIVE_INFERENCE=true DURATION=1d   # inference-in-loop (see cap below)
+#   make sim LIVE_EMBEDDING=true LIVE_INFERENCE=true DURATION=1d
+# A live run reads the USER-provided, gitignored
+# test/rundata/test.{providers,config}.toml, resolves the selected chat +
+# embedding providers, and FAILS (not skips) if those files are missing or the
+# endpoint is unreachable (design §2). Embedding-in-loop keeps the recall oracle
+# VALID (symbolic-vs-embedding head-to-head); inference-in-loop is a SHORT
+# behavior-validation mode with the oracle gates relaxed (a real model diverges
+# from the canned plan) and is REFUSED past a 1-sim-day cap — so with
+# LIVE_INFERENCE=true pass a cap-safe DURATION (e.g. DURATION=1d); DURATION
+# defaults to 1w for the mock long-haul.
+#
+# SIM_WRAP wraps the run on Darwin with caffeinate + taskpolicy so a long run is
+# not penalized by idle-sleep or background-QoS demotion; process-scoped,
+# self-cleaning, empty on non-Darwin.
 ifeq ($(shell uname -s), Darwin)
 SIM_WRAP := caffeinate -i taskpolicy -t 0 -l 0
 else
 SIM_WRAP :=
 endif
 DURATION ?= 1w
+LIVE_EMBEDDING ?= false
+LIVE_INFERENCE ?= false
 sim: build recall-madlibs
-	$(SIM_WRAP) go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 -sim.duration=$(DURATION)
-
-# sim-live runs the SAME TestSim with the live toggles ON — the opt-in
-# MEASUREMENT convenience that activates the live embedder/chat-model per
-# element. There is no separate live test (#98): `make sim-live` is just
-# TestSim with -sim.live-* set, so EMBEDDING / INFERENCE select the two live
-# elements independently (both ON by default):
-#   make sim-live                          # both live (embedding + inference)
-#   make sim-live INFERENCE=false          # embedding-in-loop only
-#   make sim-live EMBEDDING=false          # inference-in-loop only
-#   make sim-live EMBEDDING=false INFERENCE=false   # neither → RUNS the mock gate
-#                                                    # (it IS TestSim with both stand-ins)
-# The live run reads the USER-provided, gitignored
-# test/rundata/test.{providers,config}.toml, resolves the selected chat +
-# embedding providers, and FAILS (not skips) if those files are missing or
-# the endpoint is unreachable (design §2). Embedding-in-loop keeps the recall
-# oracle valid (symbolic-vs-embedding head-to-head); inference-in-loop is a
-# SHORT behavior-validation mode with the oracle gates relaxed.
-#
-# SIM_LIVE_DURATION defaults to 1d — cap-safe when inference is live (the
-# inference cap is one sim day; a longer span is refused). It is separate from
-# `make sim`'s DURATION (default 1w) so `make sim-live` with defaults does not
-# trip the cap. Override with e.g. `make sim-live SIM_LIVE_DURATION=12h`.
-#
-#   make sim-live SIM_LIVE_DURATION=1d EMBEDDING=true INFERENCE=false
-EMBEDDING ?= true
-INFERENCE ?= true
-SIM_LIVE_DURATION ?= 1d
-sim-live: build recall-madlibs
 	$(SIM_WRAP) go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 \
-	  -sim.duration=$(SIM_LIVE_DURATION) -sim.live-embedding=$(EMBEDDING) -sim.live-inference=$(INFERENCE)
+	  -sim.duration=$(DURATION) -sim.live-embedding=$(LIVE_EMBEDDING) -sim.live-inference=$(LIVE_INFERENCE)
 
 # integration-test runs the live-inference tests — they require the
 # `reaper` provider reachable. The tests ALWAYS COMPILE (part of the

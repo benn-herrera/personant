@@ -53,19 +53,28 @@ exist:
   a clear endpoint-unreachable/unconfigured failure. Asking for live with nothing live =
   loud failure.
 
-## 3. Gating (build-tag + target + runtime flags)
+## 3. Gating (runtime flags on a single TestSim — NOT build tags)
 
-- A build tag `//go:build live_sim` gates the live entry point — so the live code
-  (HTTP, provider loading) is NOT compiled into `make test` / `make sim`, structurally
-  preventing accidental live activation. Mirrors the existing `//go:build integration`
-  pattern.
-- A `make sim-live` target builds with the tag and passes the runtime flags.
-- Runtime flags select the toggles WITHIN the tagged build:
-  `-sim.live-embedding` and `-sim.live-inference` (independent; default off). Span via the
-  existing `-sim.duration` (subject to the live duration cap, §6).
-- `make test` and `make sim` are unaffected (the tag excludes the live path); the
-  mock-deterministic acceptance gate (incl. the `recall_unexplained_absence == 0` hard
-  gate, the wander coherence gates, steady-state) is untouched.
+> **Implemented design (supersedes the original build-tag plan).** The first
+> cut used a `//go:build live_sim` tag + a separate `TestSimLive` + a `make
+> sim-live` target. Both were removed: (a) build-tag-gated tests are excluded
+> from the normal compile and silently bit-rot (the antipattern we then swept
+> repo-wide — `integration`/`recall_corpus` were de-tagged too); (b) a separate
+> always-skipping `TestSimLive` is the silent-skip antipattern (looks like
+> coverage, never runs). The live mode is now toggles on the SINGLE `TestSim`.
+
+- **One `TestSim`, two runtime flags, default off:** `-sim.live-embedding` and
+  `-sim.live-inference` (independent — either/both/neither). The live code ALWAYS
+  COMPILES (part of `make test`), so it can't rot; EXECUTION is gated by the flags.
+- **both-false IS the mock acceptance gate** — symbolic-only (nil-embedder stand-in) +
+  scripted mock responses, all hard gates active (`recall_unexplained_absence == 0`,
+  wander coherence, steady-state). It RUNS under `make test` (1d) and `make sim`; it does
+  NOT skip. A flag on installs that live element; both off touches no config/endpoint.
+- **`make sim` is the single target**, parametrized by `LIVE_EMBEDDING` / `LIVE_INFERENCE`
+  Makefile vars (both default false → mock gate) passed as the `-sim.live-*=<bool>` form,
+  e.g. `make sim LIVE_EMBEDDING=true DURATION=1d`. No separate `sim-live` target.
+- Span via `-sim.duration` (`DURATION` var); inference-in-loop is refused past a 1-sim-day
+  cap (§6), so `LIVE_INFERENCE=true` needs a cap-safe `DURATION` (default is 1w).
 
 ## 4. The toggle seams
 
@@ -116,11 +125,16 @@ T2-1 live-inference regime in the test-infrastructure memory.
 
 ## 7. Increments (checkpoint per increment)
 
-1. **Config plumbing + gating scaffold** — `//go:build live_sim` entry point + `make
-   sim-live`; read `test/rundata/test.{providers,config}.toml`; provider/model selection;
+> **As-built note:** Inc 1 used a `//go:build live_sim` tag + `make sim-live`;
+> a later pass de-tagged everything to runtime-skip and folded the live test
+> into the single `TestSim` / `make sim` (§3). The increment descriptions below
+> are the original plan; the gating they describe was superseded.
+
+1. **Config plumbing + gating scaffold** — entry point + config load: read
+   `test/rundata/test.{providers,config}.toml`; provider/model selection;
    usable-endpoint check; fail-with-suggestion guard; the two runtime flags parsed but
    wired as NO-OPS (default mock/nil path unchanged). No live recall yet. Gate: `make
-   test` unaffected (tag excludes it); `make sim-live` with no flags runs the
+   test` unaffected; live invocation with no flags runs the
    mock path; missing/unusable config fails with the message.
 2. **Embedding-in-loop** (THE critical path) — install the real embedder + `Prepare`;
    mock inference; symbolic-vs-embedding recall-fidelity head-to-head (§5), incl. the #96
