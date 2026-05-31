@@ -1,10 +1,11 @@
-//go:build live_sim
-
-// Live-mode simulation entry point (#98). Build-tag isolated (`live_sim`)
-// and run via `make sim-live`; it is NOT compiled into `make test` /
-// `make sim`, so the mock-deterministic acceptance gate cannot
-// accidentally activate a live endpoint. It runs the SAME sim workload as
-// TestSim and is the seam where the live toggles activate.
+// Live-mode simulation entry point (#98). It ALWAYS COMPILES (no build
+// tag) and gates EXECUTION at runtime on its live toggles: run via
+// `make sim-live`, which passes -sim.live-embedding / -sim.live-inference.
+// With NEITHER toggle set (the bare `make test` / `make sim` case) it
+// SKIPS — so the mock-deterministic acceptance gate compiles this file but
+// never activates a live endpoint, while a refactor that breaks it is still
+// caught by the normal compile. It runs the SAME sim workload as TestSim
+// and is the seam where the live toggles activate.
 //
 // As of Increment 1 (this file) the two live toggles are PARSED and
 // LOGGED but wired as NO-OPS: when off (default) the existing
@@ -90,11 +91,12 @@ func TestSimLive(t *testing.T) {
 	}
 
 	if !*liveEmbedding && !*liveInference {
-		// Neither toggle set: live mode invoked with nothing live. The
-		// design makes this a loud failure — `make sim-live` always passes
-		// both flags, so reaching here means a hand-run forgot them.
-		t.Fatalf("TestSimLive requires -sim.live-embedding and/or -sim.live-inference; " +
-			"neither is set. Run via `make sim-live`, or pass a toggle explicitly.")
+		// Neither toggle set: this is the runtime opt-out. Since the file
+		// always compiles, bare `make test` / `make sim` reaches TestSimLive
+		// with no toggle — SKIP it (the toggles are the opt-in). `make
+		// sim-live` always passes both flags, so it runs the live path.
+		t.Skip("TestSimLive skipped — no live toggle set; run via `make sim-live` " +
+			"(or pass -sim.live-embedding / -sim.live-inference) to exercise the live endpoint")
 	}
 
 	// Config load + usable-endpoint guard (design §2). Runs whenever EITHER

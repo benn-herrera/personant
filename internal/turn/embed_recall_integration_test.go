@@ -1,58 +1,53 @@
-//go:build integration
-
-// Live integration test for embedding recall through the Recaller.
-// Build-tag isolated (`integration`), run via `make integration-test`;
-// needs the `reaper` provider reachable. It exercises the real
-// HTTPEmbedder end to end — measure.Service.Prepare builds the index
-// over seeded threads, then Recall cosine-matches — confirming the
-// runtime path works against an actual embedding model, not the mock.
+// Live integration test for embedding recall through the Recaller. It
+// ALWAYS COMPILES (no build tag) and gates EXECUTION at runtime: without
+// the live opt-in (testsupport.LiveTestsEnv) it skips, so bare `make test`
+// compiles and skips it, hitting no endpoint. Run it via
+// `make integration-test`, which sets the opt-in; it needs the `reaper`
+// provider reachable. Under the opt-in an unreachable/misconfigured
+// endpoint is a FAILURE, not a skip.
+//
+// It exercises the real HTTPEmbedder end to end — measure.Service.Prepare
+// builds the index over seeded threads, then Recall cosine-matches —
+// confirming the runtime path works against an actual embedding model, not
+// the mock.
 
 package turn
 
 import (
 	"context"
-	"os"
-	"strings"
 	"testing"
 
-	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
 	"personant/internal/recall/measure"
+	"personant/internal/testsupport"
 )
-
-func reaperProvider() memops.Provider {
-	url := os.Getenv("PERSONANT_REAPER_URL")
-	if url == "" {
-		url = "http://reaper.local:4000/v1"
-	}
-	return memops.Provider{
-		Name:    "reaper",
-		BaseURL: url,
-		APIKey:  "dummy",
-	}
-}
-
-// reaperEmbeddingModel is the embedding model id served by reaper.
-const reaperEmbeddingModel = "nomicai-embed"
-
-func skipIfUnreachable(t *testing.T, err error) {
-	t.Helper()
-	msg := err.Error()
-	if strings.Contains(msg, "connection refused") ||
-		strings.Contains(msg, "no such host") ||
-		strings.Contains(msg, "dial tcp") ||
-		strings.Contains(msg, "timeout") {
-		t.Skipf("reaper unreachable — integration test needs it running: %v", err)
-	}
-	t.Fatalf("embedding recall: %v", err)
-}
 
 // TestEmbeddingRecall_Live builds the Recaller's embedding index over
 // two disjoint-topic threads with the real embedder, then checks that
 // a knot-theory query recalls the knot thread as the top candidate.
 func TestEmbeddingRecall_Live(t *testing.T) {
-	provider := reaperProvider()
+	testsupport.RequireLive(t)
+	provider := testsupport.ReaperProvider()
+
+	// Fail fast if the configured embedding model is not actually served —
+	// a stale model ref otherwise surfaces as an opaque mid-run error.
+	client, ok := model.NewHTTPClient(provider).(*model.HTTPClient)
+	if !ok {
+		t.Fatalf("NewHTTPClient did not return *HTTPClient (cannot verify model presence)")
+	}
+	testsupport.RequireModelPresent(t, func(ctx context.Context) ([]string, error) {
+		infos, err := client.ListModels(ctx)
+		if err != nil {
+			return nil, err
+		}
+		ids := make([]string, len(infos))
+		for i, m := range infos {
+			ids[i] = m.ID
+		}
+		return ids, nil
+	}, testsupport.ReaperEmbeddingModel)
+
 	paths, meta := newTestHome(t)
 	seedThreadWithBody(t, paths, meta.ID, "thr_1",
 		"The trefoil knot is the simplest nontrivial knot in knot theory. "+
@@ -62,19 +57,14 @@ func TestEmbeddingRecall_Live(t *testing.T) {
 			"changes lepton flavor as it propagates, implying nonzero neutrino mass.")
 	ops := fileadapter.NewFileAdapter(paths)
 
-	svc := measure.NewService(ops, model.NewHTTPEmbedder(provider, reaperEmbeddingModel, 0))
-	if err := svc.Prepare(context.Background()); err != nil {
-		skipIfUnreachable(t, err)
-		return
-	}
+	svc := measure.NewService(ops, model.NewHTTPEmbedder(provider, testsupport.ReaperEmbeddingModel, 0))
+	err := svc.Prepare(context.Background())
+	testsupport.FailOnErr(t, "embedding recall prepare", err)
 
 	results, err := svc.Recall(context.Background(), measure.Request{
 		QueryText: "tell me about knots and their crossing number",
 	})
-	if err != nil {
-		skipIfUnreachable(t, err)
-		return
-	}
+	testsupport.FailOnErr(t, "embedding recall", err)
 	t.Logf("recall results: %+v", results)
 	if len(results) == 0 {
 		t.Fatal("no recall results — knot query matched nothing")

@@ -1,9 +1,10 @@
-//go:build integration
-
-// Live integration tests for the embeddings client. Build-tag isolated
-// (`integration`) and run via `make integration-test`; they require the
-// `reaper` provider reachable. A connection failure skips (reaper not
-// running); any other error fails (a real bug in the client).
+// Live integration tests for the embeddings client. They ALWAYS COMPILE
+// (no build tag) and gate EXECUTION at runtime: without the live opt-in
+// (testsupport.LiveTestsEnv) they skip, so bare `make test` compiles and
+// skips them, hitting no endpoint. Run them via `make integration-test`,
+// which sets the opt-in; they require the `reaper` provider reachable.
+// Under the opt-in an unreachable/misconfigured endpoint is a FAILURE, not
+// a skip — you explicitly asked for the live path.
 //
 // reaper coordinates default to the dev-machine address and are
 // overridable via PERSONANT_REAPER_URL. The API key is the local
@@ -13,53 +14,20 @@ package model
 
 import (
 	"context"
-	"os"
-	"strings"
 	"testing"
 
-	"personant/internal/memops"
+	"personant/internal/testsupport"
 )
 
-func reaperProvider() memops.Provider {
-	url := os.Getenv("PERSONANT_REAPER_URL")
-	if url == "" {
-		url = "http://reaper.local:4000/v1"
-	}
-	return memops.Provider{
-		Name:    "reaper",
-		BaseURL: url,
-		APIKey:  "dummy",
-	}
-}
-
-// reaperEmbeddingModel is the embedding model id served by reaper.
-const reaperEmbeddingModel = "nomicai-embed"
-
-// skipIfUnreachable skips the test on a network-level failure (reaper
-// not running) and fails on anything else.
-func skipIfUnreachable(t *testing.T, err error) {
-	t.Helper()
-	msg := err.Error()
-	if strings.Contains(msg, "connection refused") ||
-		strings.Contains(msg, "no such host") ||
-		strings.Contains(msg, "dial tcp") ||
-		strings.Contains(msg, "timeout") {
-		t.Skipf("reaper unreachable — integration test needs it running: %v", err)
-	}
-	t.Fatalf("embed: %v", err)
-}
-
 func TestHTTPEmbedder_Live(t *testing.T) {
-	emb := NewHTTPEmbedder(reaperProvider(), reaperEmbeddingModel, 0)
+	testsupport.RequireLive(t)
+	emb := NewHTTPEmbedder(testsupport.ReaperProvider(), testsupport.ReaperEmbeddingModel, 0)
 	vecs, err := emb.Embed(context.Background(), []string{
 		"how does shear thinning affect emulsion viscosity",
 		"rheology of emulsions, pseudoplastic flow and droplet coalescence",
 		"the trefoil knot is the simplest nontrivial knot in topology",
 	})
-	if err != nil {
-		skipIfUnreachable(t, err)
-		return
-	}
+	testsupport.FailOnErr(t, "embed", err)
 	if len(vecs) != 3 {
 		t.Fatalf("got %d vectors, want 3", len(vecs))
 	}

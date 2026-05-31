@@ -1,7 +1,6 @@
-//go:build recall_corpus
-
-// This file is compiled only under the `recall_corpus` build tag and
-// run via `make recall-corpus-test`.
+// This file ALWAYS COMPILES (no build tag); EXECUTION is gated at runtime
+// on testsupport.RequireCorpus (the recall-corpus opt-in). Run via
+// `make recall-corpus-test`.
 //
 // It measures recall fidelity over the full Wikipedia-corpus query set
 // by exercising the recall matcher DIRECTLY — `scoring.ProposeFromIndex`
@@ -28,6 +27,7 @@ import (
 	"personant/internal/memops"
 	"personant/internal/metrics"
 	"personant/internal/recall/scoring"
+	"personant/internal/testsupport"
 )
 
 // corpusQueriesPath is the derived query artifact for the
@@ -83,6 +83,7 @@ func corpusQuerySymbols(q madlibsQuery) []string {
 // calibration sweep and §9.4 baseline comparison build on. Run with -v
 // to see the table.
 func TestRecallMadlibs_CorpusReport(t *testing.T) {
+	testsupport.RequireCorpus(t)
 	doc := loadMadlibsQueries(t, corpusQueriesPath)
 	spine, threads, threadID := corpusIndex(doc)
 
@@ -183,6 +184,7 @@ type calibCell struct{ p, r, f float64 }
 // comparison is where regressions in this matrix would surface. Run
 // with -v to see the matrix.
 func TestRecallMadlibs_CorpusCalibration(t *testing.T) {
+	testsupport.RequireCorpus(t)
 	run := metrics.New(map[string]string{"measurement": "recall-fidelity-calibration"})
 
 	results := map[int]map[float64]calibCell{}

@@ -183,9 +183,11 @@ In progress:
     Sonnet-authored in batches and human-curated, under
     `corpus_templates/`. Recipe: 5 columns of 4 tight
     interchangeable synonyms (canonical term first = the stored
-    anchor), `measure-only`. The corpus-backed scenario tests are
-    build-tag isolated (`//go:build recall_corpus`,
-    `make recall-corpus-test`) — out of `make test`. Hand-crafted
+    anchor), `measure-only`. The corpus-backed scenario tests
+    ALWAYS COMPILE (part of the `make test` compile); EXECUTION is
+    runtime-gated on the `PERSONANT_CORPUS_TESTS` opt-in (set by
+    `make recall-corpus-test`) — without it they skip, so they are out
+    of the `make test` run. Hand-crafted
     C.2/C.3 templates and corpus templates generate separate
     `queries.json` / `corpus_queries.json` derived artifacts.
   - **C.6 (done — initial sweep):** calibration sweep. The corpus
@@ -309,11 +311,25 @@ Makefile                    build + agents-submodule pinning +
 ```sh
 make build            # bin/personant
 make test             # go vet + go test ./... --count=1
-make integration-test
+make integration-test # live reaper embedder/recall tests (opt-in)
+make sim-live         # live-mode sim (opt-in via -sim.live-* toggles)
+make recall-corpus-test # corpus recall-fidelity measurement (opt-in)
 make clean
 ```
 
 Go 1.26.1+.
+
+Slow / live tests use a **runtime opt-in**, not build tags: they always
+compile (so a refactor that breaks them fails `make test`), and gate
+EXECUTION at runtime — they `t.Skip` unless their opt-in is present, so
+bare `make test` compiles and skips them. The opt-ins live in
+`internal/testsupport`: `PERSONANT_LIVE_TESTS` (live reaper endpoint;
+under it an unreachable endpoint is a FAILURE, not a skip),
+`PERSONANT_CORPUS_TESTS` (slow corpus measurement), and the
+`-sim.live-embedding` / `-sim.live-inference` flags (live sim). The
+`make` targets above set the right opt-in. Do not reintroduce
+`//go:build` tags for conditional execution — tagged tests are excluded
+from the normal compile and bit-rot silently.
 
 ## House rules for agents
 

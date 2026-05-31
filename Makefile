@@ -80,11 +80,13 @@ recall-embed-data: recall-corpus-sweep-data
 	python3 test/tools/embed_corpus.py
 
 # recall-corpus-test runs the Wikipedia-corpus recall-fidelity report
-# and the C.6 calibration sweep. Build-tag isolated (recall_corpus) and
-# deliberately NOT part of `make test`. Run -v to see the per-topic
-# report and the synonym-depth × threshold calibration matrix.
+# and the C.6 calibration sweep. The tests ALWAYS COMPILE (part of the
+# normal `make test` compile); EXECUTION is opted in here by setting
+# PERSONANT_CORPUS_TESTS — without it they skip, so they are not part of
+# the `make test` run. Run -v to see the per-topic report and the
+# synonym-depth × threshold calibration matrix.
 recall-corpus-test: build recall-madlibs recall-corpus-sweep-data
-	go test -tags recall_corpus -run Corpus ./internal/scenarios/... --count=1
+	PERSONANT_CORPUS_TESTS=1 go test -run Corpus ./internal/scenarios/... --count=1
 
 # recall-corpus-fetch is a HEAVYWEIGHT, NETWORKED mining operation —
 # NOT part of `make test` and NOT a pre-commit step. It fetches ~150
@@ -155,12 +157,14 @@ DURATION ?= 1w
 sim: build recall-madlibs
 	$(SIM_WRAP) go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 -sim.duration=$(DURATION)
 
-# sim-live runs the build-tag-isolated live-mode sim (TestSimLive, build
-# tag `live_sim`) — the opt-in MEASUREMENT mode that activates the live
-# embedder/chat-model toggles. It is NOT the acceptance gate and is NOT
-# part of `make test` / `make sim`: the `live_sim` tag excludes the entry
-# from every untagged build, so the mock-deterministic gate cannot
-# accidentally hit a live endpoint.
+# sim-live runs the live-mode sim (TestSimLive) — the opt-in MEASUREMENT
+# mode that activates the live embedder/chat-model toggles. The test
+# ALWAYS COMPILES (part of the normal `make test` compile); EXECUTION is
+# gated on its -sim.live-* toggles. It is NOT the acceptance gate and is
+# NOT part of `make test` / `make sim`: with no toggle set (the bare
+# `make test` / `make sim` case) TestSimLive SKIPS, so the
+# mock-deterministic gate cannot accidentally hit a live endpoint. This
+# target passes both toggles, opting the live path in.
 #
 # Both live toggles are passed ON by default (independent — edit the flags
 # to run one at a time). The run reads the USER-provided, gitignored
@@ -172,15 +176,18 @@ sim: build recall-madlibs
 #
 #   make sim-live DURATION=1d
 sim-live: build recall-madlibs
-	$(SIM_WRAP) go test -tags live_sim ./internal/scenarios/sim/ -run TestSimLive -count=1 -v -timeout 0 \
+	$(SIM_WRAP) go test ./internal/scenarios/sim/ -run TestSimLive -count=1 -v -timeout 0 \
 	  -sim.duration=$(DURATION) -sim.live-embedding -sim.live-inference
 
-# integration-test runs the live-inference tests (build tag
-# `integration`) — they require the `reaper` provider reachable.
-# Tests skip cleanly when reaper is unreachable; they fail only on a
-# real defect. Override the endpoint with PERSONANT_REAPER_URL.
+# integration-test runs the live-inference tests — they require the
+# `reaper` provider reachable. The tests ALWAYS COMPILE (part of the
+# normal `make test` compile); EXECUTION is opted in here by setting
+# PERSONANT_LIVE_TESTS — without it they skip, so bare `make test`
+# compiles and skips them, hitting no endpoint. Under the opt-in an
+# unreachable/misconfigured endpoint is a FAILURE, not a skip. Override
+# the endpoint with PERSONANT_REAPER_URL.
 integration-test: build
-	go test -tags integration ./... --count=1
+	PERSONANT_LIVE_TESTS=1 go test ./... --count=1
 
 clean:
 	rm -f $(BINDIR)/personant
