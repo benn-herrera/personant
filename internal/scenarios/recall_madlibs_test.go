@@ -17,8 +17,9 @@ import (
 // regeneration hint rather than hard-failing.
 //
 // The Wikipedia-corpus query set lives in a separate artifact
-// (corpus_queries.json) consumed only by the build-tagged corpus
-// tests — see recall_madlibs_corpus_test.go. The split keeps the
+// (corpus_queries.json) consumed only by the corpus tests, which
+// always compile but skip at runtime unless the corpus opt-in is set
+// — see recall_madlibs_corpus_test.go. The split keeps the
 // heavyweight corpus run out of the default `make test`.
 var handcraftedQueriesPath = filepath.Join("testdata", "recall_madlibs", "queries.json")
 

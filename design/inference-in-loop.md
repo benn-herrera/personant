@@ -1,6 +1,7 @@
 # Design: optional inference-in-loop + embedding-in-loop simulation (#98)
 
-Status: DESIGN / build contract. Scope: sim harness + a build-tagged live entry point.
+Status: DESIGN / build contract (AS-BUILT diverged from the gating plan — see §3/§7).
+Scope: sim harness + runtime-flag-gated live toggles on the single `TestSim` (no build tag).
 Branch: `initial-implementation`. Build order: embedding-in-loop FIRST (the critical
 recall-testing path), then inference-in-loop. Checkpoint (commit) per increment.
 
@@ -152,4 +153,5 @@ T2-1 live-inference regime in the test-infrastructure memory.
   context.
 - No provider/endpoint info in version-controlled files (config lives in gitignored
   `test/rundata/`).
-- `make test` stays mock-only and green; the live path is build-tag-isolated.
+- `make test` stays mock-only and green by DEFAULT; the live path always compiles
+  (no build tag) but its EXECUTION is gated off unless `-sim.live-*` is set (§3).
