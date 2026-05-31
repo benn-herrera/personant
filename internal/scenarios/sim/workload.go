@@ -427,6 +427,20 @@ type thread struct {
 	// to keep the execution-time refinement oracle from naming a thread the
 	// runtime has not yet put on the spine. Set at creation; never mutated.
 	createdAtStep int
+
+	// borrowedTags holds the parent-thread tags a SYNTHESIS thread (§2.7.3,
+	// #47) carries forward from ≥2 prior threads — a bounded sample of each
+	// parent's salient (non-loose) tags. It is emitted as extra model
+	// anchors on the synthesis thread's CREATION turn only (buildStep
+	// appends it to anchorTags once, then clears it), so the runtime
+	// accretes the borrowed symbols into the synthesis thread's
+	// history_symbols and the shadow retained set mirrors that accretion
+	// (recordEmission). nil for an ordinary (non-synthesis) thread, which
+	// is the common case. The borrow DILUTES single-parent recall queries
+	// (another symbolic-misses/embedding-recovers candidate, like a
+	// wanderer) but stays bounded so it never manufactures a false match —
+	// see synthesisParentTagSample.
+	borrowedTags []string
 }
 
 // newThread constructs a thread bound to slotIdx as its birth slot. It
@@ -454,6 +468,13 @@ func (g *generator) createThread(order, slotIdx int) int {
 	t := newThread(order, slotIdx)
 	t.createdAtStep = g.stepIndex
 	g.threads = append(g.threads, t)
+	// A thread creation is a material structural change for #42 (a new
+	// spine record the runtime commits). Tallied per sim-day in
+	// g.dayStructuralChanges, flushed once per day in generateNextDay.
+	// createThread is the single creation site (actNew, campaign, carrier),
+	// so this counts every materialized thread exactly once. Synthesis adds
+	// its own increment in maybeSynthesize (the borrow is an extra event).
+	g.dayStructuralChanges++
 	return order
 }
 
@@ -670,6 +691,45 @@ const (
 	// the core recall-fidelity statistics, which the probe is interleaved
 	// alongside (it does not replace an ordinary turn — see runSession).
 	wanderProbeEvery = 12
+)
+
+// Synthesis-thread tuning (§2.7.3, #47/#42). A fraction of new-thread
+// creations are SYNTHESIS threads: a fresh framing that borrows a
+// bounded sample of salient tags from ≥2 prior threads, modelling "new
+// thread as synthesis of multiple prior threads." The borrowed tags
+// dilute single-parent recall queries exactly as a wanderer does — a
+// real symbolic-misses/embedding-recovers signal, not a manufactured
+// match. These are seed values, tunable on the rung walk.
+const (
+	// synthesisPct / synthesisSelector set the per-new-thread synthesis
+	// probability: g.rng.Intn(synthesisSelector) < synthesisPct converts
+	// an eligible actNew creation into a synthesis. The draw is made
+	// UNCONDITIONALLY whenever actNew fires (same discipline as
+	// maybeWander), so the rng draw ordering stays a pure function of
+	// (Seed, Duration, Corpus). Modest (≈ wanderPct scale) so synthesis
+	// is a steady minority of creations, not the common case.
+	synthesisPct      = 8
+	synthesisSelector = 100
+
+	// synthesisParents is K, the number of prior threads a synthesis
+	// borrows from. Fixed at 2 for now (the minimal "multiple" the #47
+	// realism element names); the synthesis_parents histogram records it
+	// per event so a future distribution is visible without a code
+	// change. Eligibility requires at least this many candidate parents
+	// in the dormant/materialized/non-carrier pool.
+	synthesisParents = 2
+
+	// synthesisParentTagSample caps how many non-loose tags a synthesis
+	// borrows from EACH parent's current slot. Bounded so the synthesis
+	// thread's emitted set stays well under the 40-symbol eviction cap
+	// (freshSlot ≈5 + K×sample + salt = 5 + 2×2 + 1 = 10 ≪ 40), the
+	// no-eviction precondition the oracle's coherence rests on (§4.3).
+	// Bounded also keeps any single-parent query's Jaccard against the
+	// synthesis set modest (intersection ≤ sample against the ~10-symbol
+	// union → ≈0.15 ≪ the 0.4 threshold), so the borrow DILUTES without
+	// manufacturing a false expected-match the runtime would miss
+	// (coherence holds; unexplained_absence stays 0).
+	synthesisParentTagSample = 2
 )
 
 // sessionActive is the turn-active simulated span of one session — the
@@ -1162,6 +1222,16 @@ func (g *generator) generateNextDay() (dayBuf, bool) {
 	g.dayIndex++
 	g.day = nil
 
+	// Flush the day's material-structural-change tally (#42). Only a day
+	// that emitted turns contributes a sample — a day off creates no
+	// threads and would otherwise inject a spurious 0 into the
+	// distribution. Reset the accumulator regardless so the next day
+	// starts clean.
+	if len(day.steps) > 0 {
+		g.structuralChangesPerDay = append(g.structuralChangesPerDay, g.dayStructuralChanges)
+	}
+	g.dayStructuralChanges = 0
+
 	g.markSecondSession(day)
 	return day, true
 }
@@ -1312,6 +1382,39 @@ const (
 	metricWanderCoherenceDivergence = "wander_coherence_divergence"
 )
 
+// Synthesis-thread metric keys (§2.7.3, #47/#42). Defined here so the
+// generator, the metrics fold (recordWanderMetrics), and the rung summary
+// share one source of truth.
+const (
+	// metricSynthesisEvents is the run-total count of new-thread creations
+	// converted into synthesis threads (a counter).
+	metricSynthesisEvents = "workload_synthesis_events"
+
+	// metricSynthesisParents is a histogram with one sample per synthesis
+	// event: the parent count (= synthesisParents today). Recorded as a
+	// distribution so a future variable-K synthesis is visible without a
+	// metric change.
+	metricSynthesisParents = "synthesis_parents"
+
+	// metricSynthesisBorrowedSymbols is the run-total count of borrowed
+	// parent tags blended into synthesis threads — the sim-side
+	// observability for the derived_from realism element. NOTE (§2.7.3
+	// Part-2 finding): the sim's decline-all RecallAck means production
+	// never promotes a parent into recallSurfaced ∩ Layer-B, so it does
+	// NOT stamp derived_from end-to-end on these turns; this counter
+	// measures the workload's borrow volume, not a production stamp. The
+	// production rule is covered directly by Inc B unit tests.
+	metricSynthesisBorrowedSymbols = "synthesis_derived_from_symbols"
+
+	// metricMaterialStructuralChangesPerDay is a histogram with one sample
+	// per sim-DAY: the count of material structural changes the generator
+	// emitted that day — thread creations + synthesis events + thread
+	// closures/archivals — the substrate events #42 reads as
+	// commits-worthy-per-sim-day. It COMPOSES the generator's existing
+	// structural counters rather than introducing a parallel tally.
+	metricMaterialStructuralChangesPerDay = "material_structural_changes_per_simday"
+)
+
 // generator is the resumable workload state machine. It implements
 // scenarios.StepSource: each Next() call yields one scenarios.Step,
 // advancing the simulated calendar a day at a time rather than building
@@ -1459,6 +1562,36 @@ type generator struct {
 	// observability for the §3.9 / §3.0 live-window paths the variant
 	// exercises.
 	userDictatedCount int
+
+	// Synthesis-thread telemetry (§2.7.3, #47/#42). synthesisEvents counts
+	// new-thread creations converted into synthesis threads;
+	// synthesisParentCounts records the parent count of each such event
+	// (the synthesis_parents histogram source — = synthesisParents today,
+	// recorded so a future distribution is visible). synthesisParentCursor
+	// round-robins the deterministic parent pick across the eligible pool
+	// so synthesis samples a spread of parents, not always the lowest
+	// orders. synthesisBorrowedSymbols totals the borrowed parent tags
+	// blended into synthesis threads — the sim-side observability for the
+	// derived_from realism element (see the Part-2 finding in §2.7.3: the
+	// sim's decline-all RecallAck means production never stamps it
+	// end-to-end here). All advance only on actNew synthesis conversion;
+	// the gate draw keeps them a pure function of (Seed, Duration, Corpus).
+	synthesisEvents          int
+	synthesisParentCounts    []int
+	synthesisParentCursor    int
+	synthesisBorrowedSymbols int
+
+	// Material-structural-change-per-sim-day telemetry (#42). dayStructural-
+	// Changes accumulates the current day's material structural changes
+	// (thread creations + synthesis events — the substrate events the
+	// GENERATOR knows it drives); generateNextDay flushes it into
+	// structuralChangesPerDay (one sample per sim-day) and resets it. The
+	// test folds the slice into the metricMaterialStructuralChangesPerDay
+	// histogram post-run. Runtime-owned events (closures/archivals) are not
+	// counted here — the generator cannot observe them; #42 reads those off
+	// the substrate directly. Draws no rng (pure bookkeeping).
+	dayStructuralChanges    int
+	structuralChangesPerDay []int
 
 	// campaign is the in-flight lifecycle program (vague / drift / invert),
 	// or nil when none is running. One runs at a time: an actCampaign draw
@@ -1882,6 +2015,18 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 	// thread's per-thread salt symbol (§2.2) is appended so the runtime folds
 	// it into history_symbols — it is a model anchor, never a query symbol.
 	anchorTags := append(nonLooseTags(slot), saltSymbol(thr.order))
+	// §2.7.3 (#47): a synthesis thread carries forward a bounded sample of
+	// its ≥2 parents' salient tags on its CREATION turn only. Emitting them
+	// as extra model anchors makes the runtime accrete them into the
+	// synthesis thread's history_symbols (and recordEmission mirrors it
+	// into the shadow set, so the oracle scans the same blended set). The
+	// field is cleared after this single emission — subsequent engagements
+	// ride only the thread's own slot tags, the natural drift of a borrowed
+	// idea becoming the thread's own.
+	if len(thr.borrowedTags) > 0 {
+		anchorTags = append(anchorTags, thr.borrowedTags...)
+		g.threads[idx].borrowedTags = nil
+	}
 	userInput := defaultUserInput(slot, recallOpp)
 	userDictated := false
 	if udInput, ok := g.maybeUserDictated(tt, isNew, recallOpp, idx, slot); ok {
@@ -2262,6 +2407,12 @@ func (g *generator) selectEngagedThread(act action) (idx int, isNew bool) {
 		// measures the same thing).
 		g.createThread(idx, g.model.slotFor(idx))
 		isNew = true
+		// §2.7.3 (#47): a fraction of creations become synthesis threads,
+		// borrowing salient tags from ≥2 prior threads. The gate draw is
+		// made UNCONDITIONALLY here (same discipline as maybeWander) so the
+		// rng draw ordering stays a pure function of (Seed, Duration,
+		// Corpus): every actNew consumes exactly one synthesis draw.
+		g.maybeSynthesize(idx)
 
 	case actContinue:
 		idx = g.layerB[0] // the active thread
@@ -2351,6 +2502,81 @@ func (g *generator) maybeWander(idx int, isNew, recallOpp bool) {
 	}
 	thr.traj = append(thr.traj, dest)
 	thr.cur = dest
+}
+
+// eligibleSynthesisParents returns the creation-order indices of threads
+// a synthesis thread may borrow from, applying the SAME exclusions the
+// recall oracle uses (recallExpectedForMaterialized): the new thread
+// itself, any thread currently resident in Layer B, and any measurement
+// carrier are excluded. The remaining dormant/materialized non-carrier
+// threads are the candidate parent pool. Returned in ascending creation
+// order; deterministic (no rng) so the canonical step stream stays a pure
+// function of (Seed, Duration, Corpus).
+func (g *generator) eligibleSynthesisParents(newIdx int) []int {
+	var out []int
+	for i := range g.threads {
+		order := g.threads[i].order
+		if order == newIdx || g.inLayerB(order) || g.isCarrier(order) {
+			continue
+		}
+		out = append(out, order)
+	}
+	return out
+}
+
+// maybeSynthesize converts the just-created new thread newIdx into a
+// SYNTHESIS thread (§2.7.3, #47): a fresh framing that borrows a bounded
+// sample of salient tags from synthesisParents prior threads. The gate
+// draw is consumed UNCONDITIONALLY on every actNew (the caller's
+// discipline), so the rng draw ordering is input-determined; the borrow
+// only happens when the draw fires AND at least synthesisParents eligible
+// parents exist.
+//
+// Parents are picked DETERMINISTICALLY from the eligible pool by a
+// round-robin cursor — no rng beyond the gate — so synthesis samples a
+// spread of parents across the run rather than always the lowest orders.
+// The borrowed tags are stamped on the thread's borrowedTags field;
+// buildStep emits them as extra model anchors on the creation turn, so
+// the runtime accretes them and the shadow retained set mirrors that.
+func (g *generator) maybeSynthesize(newIdx int) {
+	fires := g.rng.Intn(synthesisSelector) < synthesisPct
+	if !fires {
+		return
+	}
+	parents := g.eligibleSynthesisParents(newIdx)
+	if len(parents) < synthesisParents {
+		return // too few prior threads to synthesise from
+	}
+	borrowed := make([]string, 0, synthesisParents*synthesisParentTagSample)
+	for k := 0; k < synthesisParents; k++ {
+		p := parents[(g.synthesisParentCursor+k)%len(parents)]
+		borrowed = append(borrowed, g.salientParentTags(p)...)
+	}
+	g.synthesisParentCursor++
+	g.threads[newIdx].borrowedTags = borrowed
+	g.synthesisEvents++
+	g.synthesisParentCounts = append(g.synthesisParentCounts, synthesisParents)
+	g.synthesisBorrowedSymbols += len(borrowed)
+	// A synthesis is a material structural change beyond the bare creation
+	// createThread already counted: it folds ≥2 prior threads' framings
+	// into a new spine record (#42 reads it as a distinct commit-worthy
+	// event). Tallied into the same per-day accumulator.
+	g.dayStructuralChanges++
+}
+
+// salientParentTags returns a bounded sample (up to synthesisParentTagSample)
+// of a parent thread's salient tags: the non-loose tags of its CURRENT slot
+// — the same set the parent emits as its own anchors (nonLooseTags), so a
+// synthesis genuinely carries forward the parent's live framing. Bounded so
+// the synthesis thread's emitted set stays well under the eviction cap and
+// the borrow dilutes without manufacturing a false recall match (§4.3).
+// Deterministic (no rng).
+func (g *generator) salientParentTags(parentIdx int) []string {
+	tags := nonLooseTags(g.model.slots[g.threads[parentIdx].cur])
+	if len(tags) > synthesisParentTagSample {
+		tags = tags[:synthesisParentTagSample]
+	}
+	return tags
 }
 
 // extractedSymbolsFor returns the symbol set the RUNTIME extracts for the

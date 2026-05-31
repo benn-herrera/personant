@@ -469,6 +469,12 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// total divergence). Generator-owned, metrics-package-free at the seam.
 	recordWanderMetrics(h, gen)
 
+	// Fold the synthesis-thread telemetry (§2.7.3, #47/#42): the synthesis
+	// event count, the per-event parent-count histogram, the borrowed-symbol
+	// volume, and the per-sim-day material-structural-change histogram (#42).
+	// Generator-owned, metrics-package-free at the seam.
+	recordSynthesisMetrics(h, gen)
+
 	if err := h.Metrics.WriteJSON(h.MetricsPath); err != nil {
 		t.Fatalf("re-write metrics blob with episode stats: %v", err)
 	}
@@ -1214,6 +1220,36 @@ func recordWanderMetrics(h *scenarios.Harness, gen *generator) {
 		divergence += gen.wanderHopDiverge[hop]
 	}
 	h.Metrics.Set(metricWanderCoherenceDivergence, float64(divergence))
+}
+
+// recordSynthesisMetrics folds the synthesis-thread telemetry (§2.7.3,
+// #47/#42) into the run's metrics blob:
+//
+//   - metricSynthesisEvents (counter): synthesis threads created.
+//   - metricSynthesisParents (histogram): parent count per event (= K
+//     today, recorded so a future variable-K distribution is visible).
+//   - metricSynthesisBorrowedSymbols (counter): total borrowed parent tags
+//     blended in — sim-side observability for the derived_from realism
+//     element (NOT a production stamp; see the metric doc / Part-2 finding).
+//   - metricMaterialStructuralChangesPerDay (histogram): one sample per
+//     sim-day, composing thread-creations + synthesis events (#42).
+//
+// The generator owns the raw counters (no rng, pure measurement
+// bookkeeping); this keeps the generator metrics-package-free, mirroring
+// recordWanderMetrics / recordLifecycleMetrics.
+func recordSynthesisMetrics(h *scenarios.Harness, gen *generator) {
+	if gen.synthesisEvents > 0 {
+		h.Metrics.Counter(metricSynthesisEvents, int64(gen.synthesisEvents))
+	}
+	for _, n := range gen.synthesisParentCounts {
+		h.Metrics.Record(metricSynthesisParents, float64(n))
+	}
+	if gen.synthesisBorrowedSymbols > 0 {
+		h.Metrics.Counter(metricSynthesisBorrowedSymbols, int64(gen.synthesisBorrowedSymbols))
+	}
+	for _, n := range gen.structuralChangesPerDay {
+		h.Metrics.Record(metricMaterialStructuralChangesPerDay, float64(n))
+	}
 }
 
 // closureCount counts `retire.complete` events in the harness's event
