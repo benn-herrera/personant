@@ -1,20 +1,14 @@
-// Live-mode simulation entry point (#98). It ALWAYS COMPILES (no build
-// tag) and gates EXECUTION at runtime on its live toggles: run via
-// `make sim-live`, which passes -sim.live-embedding / -sim.live-inference.
-// With NEITHER toggle set (the bare `make test` / `make sim` case) it
-// SKIPS — so the mock-deterministic acceptance gate compiles this file but
-// never activates a live endpoint, while a refactor that breaks it is still
-// caught by the normal compile. It runs the SAME sim workload as TestSim
-// and is the seam where the live toggles activate.
-//
-// As of Increment 1 (this file) the two live toggles are PARSED and
-// LOGGED but wired as NO-OPS: when off (default) the existing
-// mock-client / nil-embedder path runs unchanged; when on, Inc 1 only
-// loads + validates the test/rundata config and logs that the live
-// embedder/client swap is deferred to Inc 2/3. The config-load and
-// usable-endpoint guard run regardless of which toggle is on, so live
-// mode invoked with nothing reachable is a LOUD failure (design §2), not
-// a skip — distinct from the integration tests' skipIfUnreachable.
+// Live-mode setup for the unified TestSim (#98). There is NO separate live
+// test function: TestSim is the single entry point, and these helpers supply
+// the live-vs-stand-in elements it installs per toggle. The two toggles
+// (-sim.live-embedding / -sim.live-inference, both default false) are read by
+// TestSim; with NEITHER set (bare `make test` / `make sim`) setupLiveElements
+// returns zero values immediately — no config load, no endpoint touch — so
+// the deterministic mock acceptance gate never reaches any live code here and
+// never skips. When a toggle is on, the config-load and usable-endpoint guard
+// run for the selected role(s), so live mode invoked with nothing reachable is
+// a LOUD failure (design §2), not a skip — distinct from the integration
+// tests' skipIfUnreachable.
 //
 // NEVER reads/writes/operates in ~/.personant; the apiKeyFile targets are
 // resolved by store.LoadProviders (this file passes paths to the loader,
@@ -39,14 +33,13 @@ import (
 	"personant/internal/store"
 )
 
-// Live-mode runtime toggles (design §3). Independent — either, both, or
-// neither. Default OFF. In Inc 1 they are parsed + logged but wired as
-// no-ops; the embedder/client swap lands in Inc 2/3.
+// Live-mode runtime toggles (design §3), read by TestSim. Independent —
+// either, both, or neither. Default OFF; both-off IS the mock acceptance gate.
 var (
 	liveEmbedding = flag.Bool("sim.live-embedding", false,
-		"live-sim: install the real §3.4 embedder for embedding-in-loop recall (Inc 2; no-op in Inc 1)")
+		"sim: install the real §3.4 embedder for embedding-in-loop recall (off = symbolic-only stand-in)")
 	liveInference = flag.Bool("sim.live-inference", false,
-		"live-sim: install the real chat model for inference-in-loop (Inc 3; no-op in Inc 1)")
+		"sim: install the real chat model for inference-in-loop (off = scripted mock client stand-in)")
 )
 
 // rundataDir holds the USER-provided, gitignored (test/rundata*/) live
@@ -76,31 +69,40 @@ type liveEndpoint struct {
 	vectorLength int
 }
 
-// TestSimLive is the live-mode sibling of TestSim. It loads + validates
-// the test/rundata live config and runs the usable-endpoint guard
-// (FAIL-not-skip on missing files or an unreachable endpoint), then runs
-// the SAME workload TestSim runs. In Inc 1 the toggles are no-ops: the run
-// is the ordinary mock/nil path regardless of the flags; only the config
-// load + endpoint probe are exercised live, with the actual embedder/
-// client swap deferred to Inc 2/3.
-func TestSimLive(t *testing.T) {
-	d, err := parseSimDuration(*simDuration)
-	if err != nil {
-		t.Fatalf("invalid -sim.duration %q: %v (use 1d|1w|1m|2m|6m, or `<N>d` calendar days like 30d, or a Go duration like 168h)",
-			*simDuration, err)
-	}
-
+// setupLiveElements supplies TestSim with the live-vs-stand-in elements for
+// the run: a recaller factory (live embedder, or nil = symbolic-only
+// stand-in), a live chat client + model (or nil = scripted mock stand-in), and
+// oracleBlind (true only under live inference). With NEITHER toggle set it
+// returns all zero values WITHOUT touching any config or endpoint — that is
+// the mock acceptance gate path, and it must stay a no-op here (no skip, no
+// load, no probe).
+//
+// When a toggle is on it loads + validates the test/rundata live config and
+// runs the usable-endpoint guard for the selected role(s) (FAIL-not-skip on
+// missing files or an unreachable endpoint, design §2). For embedding it
+// builds a recaller factory installing the real §3.4 embedder (the harness
+// Prepares its index and keeps it current via the per-thread-creation
+// AddThread seam); mock inference is unchanged, so the recall oracle stays
+// valid and symbolic recall runs alongside (both layers fire) for the
+// head-to-head. For inference it installs the real chat client on State.Client
+// (replacing the scripted mock) — a SHORT behavior-validation mode, NOT a
+// coherent recall workload: a real model emits different topic tags / symbols
+// than the canned plan, so the runtime engages/creates different threads,
+// which both invalidates the recall oracle AND breaks the generator's
+// forward-planning coherence. oracleBlind is therefore set in lockstep with
+// the client install, and the span is refused if it exceeds the short cap
+// (liveInferenceMaxDuration).
+func setupLiveElements(t *testing.T, d time.Duration) (
+	recaller func(ops memops.MemoryOps) measure.Recaller,
+	liveClient model.Client, liveModel string, oracleBlind bool,
+) {
+	t.Helper()
 	if !*liveEmbedding && !*liveInference {
-		// No live element selected. Two ways here: (a) bare `make test` /
-		// `make sim` reaches the always-compiled TestSimLive with no toggle
-		// (the deterministic mock gate must not hit a live endpoint), and
-		// (b) an explicit `make sim-live EMBEDDING=false INFERENCE=false`.
-		// Both SKIP (not fail): there is no live element to run, and the
-		// deterministic mock run has its own home (`make sim`). A skip avoids
-		// a wasted live invocation without redding the mock gate.
-		t.Skip("TestSimLive skipped — no live element enabled. For the deterministic " +
-			"mock run use `make sim`; to run live set EMBEDDING=true and/or INFERENCE=true " +
-			"(e.g. `make sim-live`), or pass -sim.live-embedding / -sim.live-inference")
+		// The mock acceptance gate (bare `make test` / `make sim`, or
+		// `make sim-live EMBEDDING=false INFERENCE=false`). No live element to
+		// install: return zero values and touch no config/endpoint. The gate
+		// RUNS — this is not a skip.
+		return nil, nil, "", false
 	}
 
 	// Config load + usable-endpoint guard (design §2). Runs whenever EITHER
@@ -108,14 +110,6 @@ func TestSimLive(t *testing.T) {
 	endpoints := loadLiveEndpoints(t)
 	probeLiveEndpoints(t, endpoints)
 
-	// Inc 2: embedding-in-loop. When -sim.live-embedding is on, build a
-	// recaller factory that installs the real §3.4 embedder; the harness
-	// Prepares its index and keeps it current via the per-thread-creation
-	// AddThread seam (see runSimRung's recaller arg + harness installRecaller).
-	// Mock inference is UNCHANGED — the canned thread bodies stay deterministic
-	// so the recall oracle's ExpectedRecallMatches stays valid, and symbolic
-	// recall runs alongside (both layers fire) for the head-to-head.
-	var recaller func(ops memops.MemoryOps) measure.Recaller
 	if *liveEmbedding {
 		ep := embeddingEndpoint(t, endpoints)
 		log.Info("sim-live: installing live §3.4 embedder — provider=%s model=%s dims=%d (embedding-in-loop, Inc 2)",
@@ -125,18 +119,6 @@ func TestSimLive(t *testing.T) {
 		}
 	}
 
-	// Inc 3: inference-in-loop. When -sim.live-inference is on, install the real
-	// chat client on State.Client (replacing the scripted mock). This is a SHORT
-	// BEHAVIOR-VALIDATION mode, NOT a coherent recall workload: a real model
-	// emits different topic tags / symbols than the canned plan, so the runtime
-	// engages/creates different threads, which both invalidates the recall
-	// oracle AND breaks the generator's forward-planning coherence (it plans the
-	// next step's engagement from canned tags). oracleBlind is therefore set in
-	// lockstep with the client install, downgrading every oracle/coherence gate
-	// to an observation; the run is capped short (liveInferenceMaxDuration).
-	var liveClient model.Client
-	var liveModel string
-	oracleBlind := false
 	if *liveInference {
 		if d > liveInferenceMaxDuration {
 			t.Fatalf("sim-live: -sim.live-inference is a SHORT behavior-validation mode (a real model emits "+
@@ -145,24 +127,13 @@ func TestSimLive(t *testing.T) {
 				d, liveInferenceMaxDuration)
 		}
 		ep := chatEndpoint(t, endpoints)
-		client := model.NewHTTPClient(ep.provider)
-		liveClient, liveModel = client, ep.model
+		liveClient, liveModel = model.NewHTTPClient(ep.provider), ep.model
 		oracleBlind = true
 		log.Info("sim-live: installing live chat model — provider=%s model=%s (inference-in-loop, Inc 3; "+
 			"oracle/coherence gates BLINDED, behavior-validation only)", ep.provider.Name, ep.model)
 	}
 
-	corpus := loadCorpusSlots(t)
-	h := runSimRung(t, "sim-live-"+*simDuration, d, corpus, recaller, oracleBlind, liveClient, liveModel)
-
-	// Inference-in-loop behavior-validation summary (#98, Inc 3). These are the
-	// real-model behaviors the mock structurally cannot exercise. They are
-	// derived from the runtime's OWN event log (the runtime's authoritative
-	// view of what the model emitted), never from the canned plan — so they are
-	// honest about the live model even though the recall oracle is blind.
-	if *liveInference {
-		reportInferenceBehavior(t, h)
-	}
+	return recaller, liveClient, liveModel, oracleBlind
 }
 
 // liveInferenceMaxDuration is the T2-1 short-run cap on inference-in-loop. A
@@ -364,6 +335,6 @@ func probeLiveEndpoints(t *testing.T, endpoints []liveEndpoint) {
 		log.Info("sim-live: %s endpoint usable — provider=%s baseUrl=%s model=%s (reachable)",
 			ep.role, ep.provider.Name, ep.provider.BaseURL, ep.model)
 	}
-	log.Info("sim-live: at=%s — all %d requested endpoint(s) usable; live wiring deferred to Inc 2/3, running mock path",
+	log.Info("sim-live: at=%s — all %d requested endpoint(s) usable; installing the selected live element(s)",
 		clock.Profiling().Format(time.RFC3339), len(endpoints))
 }

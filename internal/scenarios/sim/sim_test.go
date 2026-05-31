@@ -247,13 +247,34 @@ func TestParseSimDuration(t *testing.T) {
 	}
 }
 
-// TestSim is the six-month simulation rung: it generates a
-// deterministic workload of the span chosen by -sim.duration (default
-// 1d), drives it through the existing scenario harness, and logs a
-// summary plus the extrapolated 6-month runtime. RunScenario already
-// asserts no turn.Run error and runs DefaultInvariants per step, so
-// "completes clean, invariants hold" comes for free; the assertions
-// here are a light smoke check only.
+// TestSim is the ONE configurable simulation entry point (#98). It
+// generates a deterministic workload of the span chosen by -sim.duration
+// (default 1d), drives it through the scenario harness, and logs a summary
+// plus the extrapolated 6-month runtime. RunScenario already asserts no
+// turn.Run error and runs DefaultInvariants per step, so "completes clean,
+// invariants hold" comes for free; the smoke-band assertion here is a light
+// check only.
+//
+// The two live toggles select live-vs-stand-in PER element, independently:
+//
+//   - both off (the default — bare `make test` / `make sim`): the full
+//     deterministic MOCK ACCEPTANCE GATE. nil embedder (symbolic-only
+//     stand-in), scripted mock client (canned-response stand-in), EVERY hard
+//     gate active (recall_unexplained_absence==0, wander coherence, criteria
+//     b/e, closures, R6, determinism). No config load, no endpoint touch, no
+//     skip — this path is byte-for-byte the pre-#98 mock rung.
+//   - -sim.live-embedding on: install the real §3.4 embedder as the recaller
+//     (live config load from test/rundata + endpoint guard, FAIL-not-skip on
+//     missing/unreachable). Mock inference stays, so the recall oracle stays
+//     valid → the symbolic-vs-embedding head-to-head (Inc 2).
+//   - -sim.live-inference on: install the live chat client and set oracleBlind
+//     (downgrade the oracle/plan-dependent gates to logs, keep the storage
+//     invariants hard — Inc 3); behavior-validation metrics; the SHORT
+//     duration cap applies (a too-long span is refused, not silently run).
+//
+// The live config-load / endpoint-guard / duration-cap / oracle-blind are all
+// CONDITIONAL branches gated on the flags, so the both-false `make test` path
+// never reaches them.
 func TestSim(t *testing.T) {
 	d, err := parseSimDuration(*simDuration)
 	if err != nil {
@@ -261,8 +282,28 @@ func TestSim(t *testing.T) {
 			*simDuration, err)
 	}
 
+	// Live-vs-stand-in selection (#98). Both off → the mock acceptance gate
+	// below runs with a nil recaller, the scripted mock client, oracleBlind
+	// false, and no config/endpoint touch. setupLiveElements returns those
+	// zero values when neither toggle is set, so the gate path is unchanged.
+	recaller, liveClient, liveModel, oracleBlind := setupLiveElements(t, d)
+
+	label := "sim-" + *simDuration
+	if *liveEmbedding || *liveInference {
+		label = "sim-live-" + *simDuration
+	}
+
 	corpus := loadCorpusSlots(t)
-	h := runSimRung(t, "sim-"+*simDuration, d, corpus, nil, false, nil, "")
+	h := runSimRung(t, label, d, corpus, recaller, oracleBlind, liveClient, liveModel)
+
+	// Inference-in-loop behavior-validation summary (#98, Inc 3). These are the
+	// real-model behaviors the mock structurally cannot exercise, derived from
+	// the runtime's OWN event log (never the canned plan) — honest about the
+	// live model even though the recall oracle is blind. Skipped on the mock
+	// path (where -sim.live-inference is off).
+	if *liveInference {
+		reportInferenceBehavior(t, h)
+	}
 
 	// Light sanity band — a smoke rung, not a tuning gate. Derivation:
 	// a work day is 2 sessions of 6 h turn-active time = 12 h of
@@ -314,15 +355,15 @@ func withRunTimestampSuffix(name string) string {
 // build, and returns the post-run *Harness for any rung-specific
 // follow-up assertions.
 // runSimRung's recaller argument is the embedding-in-loop seam (#98): the
-// mock acceptance path (TestSim) passes nil → the harness keeps the
-// symbolic-only default recaller, and the run is byte-for-byte the
-// pre-#98 mock rung. The live-embedding path (TestSimLive, build-tag
-// gated) passes a factory that builds measure.NewService(ops, embedder);
-// the harness installs it, Prepares the index, and keeps it current via
-// the per-thread-creation AddThread seam.
+// mock acceptance path (TestSim with both toggles off) passes nil → the
+// harness keeps the symbolic-only default recaller, and the run is
+// byte-for-byte the pre-#98 mock rung. The live-embedding path (TestSim under
+// -sim.live-embedding) passes a factory that builds
+// measure.NewService(ops, embedder); the harness installs it, Prepares the
+// index, and keeps it current via the per-thread-creation AddThread seam.
 //
 // oracleBlind is the inference-in-loop guard (#98, Inc 3). When true (set
-// only by TestSimLive under -sim.live-inference), every gate whose ground
+// only by TestSim under -sim.live-inference), every gate whose ground
 // truth is the deterministic generator's CANNED responses is downgraded
 // from a t.Errorf failure to a logged observation: a real chat model emits
 // different topic tags / symbols than the plan, so the runtime engages and

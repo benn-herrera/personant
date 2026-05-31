@@ -157,33 +157,35 @@ DURATION ?= 1w
 sim: build recall-madlibs
 	$(SIM_WRAP) go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 -sim.duration=$(DURATION)
 
-# sim-live runs the live-mode sim (TestSimLive) — the opt-in MEASUREMENT
-# mode that activates the live embedder/chat-model toggles. The test
-# ALWAYS COMPILES (part of the normal `make test` compile); EXECUTION is
-# gated on its -sim.live-* toggles. It is NOT the acceptance gate and is
-# NOT part of `make test` / `make sim`: with no toggle set (the bare
-# `make test` / `make sim` case) TestSimLive SKIPS, so the
-# mock-deterministic gate cannot accidentally hit a live endpoint.
-#
-# EMBEDDING / INFERENCE select the two live elements independently (both ON
-# by default). They are passed as the `=<bool>` form of the toggles, so:
+# sim-live runs the SAME TestSim with the live toggles ON — the opt-in
+# MEASUREMENT convenience that activates the live embedder/chat-model per
+# element. There is no separate live test (#98): `make sim-live` is just
+# TestSim with -sim.live-* set, so EMBEDDING / INFERENCE select the two live
+# elements independently (both ON by default):
 #   make sim-live                          # both live (embedding + inference)
 #   make sim-live INFERENCE=false          # embedding-in-loop only
 #   make sim-live EMBEDDING=false          # inference-in-loop only
-#   make sim-live EMBEDDING=false INFERENCE=false   # neither → SKIPS (use `make sim`)
-# The run reads the USER-provided, gitignored
+#   make sim-live EMBEDDING=false INFERENCE=false   # neither → RUNS the mock gate
+#                                                    # (it IS TestSim with both stand-ins)
+# The live run reads the USER-provided, gitignored
 # test/rundata/test.{providers,config}.toml, resolves the selected chat +
 # embedding providers, and FAILS (not skips) if those files are missing or
-# the endpoint is unreachable (design §2). Embedding-in-loop keeps the
-# recall oracle valid (symbolic-vs-embedding head-to-head); inference-in-loop
-# is a SHORT behavior-validation mode with the oracle gates relaxed.
+# the endpoint is unreachable (design §2). Embedding-in-loop keeps the recall
+# oracle valid (symbolic-vs-embedding head-to-head); inference-in-loop is a
+# SHORT behavior-validation mode with the oracle gates relaxed.
 #
-#   make sim-live DURATION=1d EMBEDDING=true INFERENCE=false
+# SIM_LIVE_DURATION defaults to 1d — cap-safe when inference is live (the
+# inference cap is one sim day; a longer span is refused). It is separate from
+# `make sim`'s DURATION (default 1w) so `make sim-live` with defaults does not
+# trip the cap. Override with e.g. `make sim-live SIM_LIVE_DURATION=12h`.
+#
+#   make sim-live SIM_LIVE_DURATION=1d EMBEDDING=true INFERENCE=false
 EMBEDDING ?= true
 INFERENCE ?= true
+SIM_LIVE_DURATION ?= 1d
 sim-live: build recall-madlibs
-	$(SIM_WRAP) go test ./internal/scenarios/sim/ -run TestSimLive -count=1 -v -timeout 0 \
-	  -sim.duration=$(DURATION) -sim.live-embedding=$(EMBEDDING) -sim.live-inference=$(INFERENCE)
+	$(SIM_WRAP) go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 \
+	  -sim.duration=$(SIM_LIVE_DURATION) -sim.live-embedding=$(EMBEDDING) -sim.live-inference=$(INFERENCE)
 
 # integration-test runs the live-inference tests — they require the
 # `reaper` provider reachable. The tests ALWAYS COMPILE (part of the
