@@ -416,6 +416,17 @@ type thread struct {
 	// wander on its very first turns, protecting the family-pair recall
 	// window (design risk #5).
 	engagementCount int
+
+	// createdAtStep is the global 0-based index of the canonical buffered
+	// step that creates this thread (the actNew/campaign/carrier step that
+	// first appends it to g.threads). It is the thread's MATERIALIZATION
+	// point: the runtime emits the thread's spine record only when that
+	// step EXECUTES, but the day-ahead buffer means the generator appends
+	// the thread to g.threads at GENERATION time — up to a full day before
+	// the creating step runs. The materialization filter (#100) uses this
+	// to keep the execution-time refinement oracle from naming a thread the
+	// runtime has not yet put on the spine. Set at creation; never mutated.
+	createdAtStep int
 }
 
 // newThread constructs a thread bound to slotIdx as its birth slot. It
@@ -430,6 +441,20 @@ func newThread(order, slotIdx int) thread {
 		cur:     slotIdx,
 		traj:    []int{slotIdx},
 	}
+}
+
+// createThread appends a new thread of the given creation order bound to
+// slotIdx and returns its index. It is the single creation site: it
+// stamps createdAtStep with the global index of the step currently being
+// built (g.stepIndex — appendStep increments it only after buildStep
+// returns), so every thread records the execution position at which the
+// runtime materializes its spine record. Pure (no rng); the canonical
+// step stream stays a function of (Seed, Duration, Corpus).
+func (g *generator) createThread(order, slotIdx int) int {
+	t := newThread(order, slotIdx)
+	t.createdAtStep = g.stepIndex
+	g.threads = append(g.threads, t)
+	return order
 }
 
 // threadID returns the thr_N id the runtime assigns to a thread by
@@ -1007,7 +1032,13 @@ func (g *generator) buildRefinementStep() scenarios.Step {
 	// engaged (refining) thread's salt, which it emits as a model anchor
 	// this turn (see buildStep's Q note).
 	Q := append(append([]string(nil), slot.Tags...), saltSymbol(thr.order))
-	recallIDs := g.recallExpectedFor(idx, Q, false)
+	// #100: the refinement is injected at EXECUTION time, so its expected
+	// set must consider only threads the runtime has already materialized
+	// on the spine — those whose creating step has executed. Pass the
+	// executed-step count as the materialization cutoff; a thread from the
+	// day-ahead generation buffer whose creating step has not yet run is
+	// excluded, preventing the off-spine-not-archived false miss.
+	recallIDs := g.recallExpectedForMaterialized(idx, Q, false, g.executedStepCount())
 
 	step := scenarios.Step{
 		// The refinement's TimeDelta is a small jittered rapid gap — the
@@ -1986,8 +2017,7 @@ func (g *generator) ensureCampaignThread(c *campaign) int {
 	if c.threadIdx >= 0 {
 		return c.threadIdx
 	}
-	c.threadIdx = len(g.threads)
-	g.threads = append(g.threads, newThread(c.threadIdx, c.originSlot))
+	c.threadIdx = g.createThread(len(g.threads), c.originSlot)
 	return c.threadIdx
 }
 
@@ -2198,7 +2228,7 @@ func (g *generator) selectEngagedThread(act action) (idx int, isNew bool) {
 		// slot; the binding never depends on rng, so the recall-oracle
 		// fire rate is fixed and duration-independent (each rung
 		// measures the same thing).
-		g.threads = append(g.threads, newThread(idx, g.model.slotFor(idx)))
+		g.createThread(idx, g.model.slotFor(idx))
 		isNew = true
 
 	case actContinue:
@@ -2428,6 +2458,37 @@ func simJaccard(q []string, t map[string]struct{}) float64 {
 // loose-filter on anchorTags. The dormant first-family-member still
 // surfaces as the sibling on later continue/switch/resume turns.
 func (g *generator) recallExpectedFor(idx int, Q []string, isNew bool) []string {
+	return g.recallExpectedForMaterialized(idx, Q, isNew, noMaterializationFilter)
+}
+
+// noMaterializationFilter is the sentinel materializedBefore value that
+// disables the #100 materialization filter — every thread in g.threads is
+// considered materialized. Canonical (generation-time) buildStep passes
+// it because at generation time g.threads only holds threads whose
+// creating step was generated earlier, which is exactly earlier in
+// execution; the filter would be a no-op there anyway, so the sentinel
+// keeps the canonical-step oracle byte-for-byte unchanged.
+const noMaterializationFilter = -1
+
+// recallExpectedForMaterialized is recallExpectedFor with the #100
+// execution-time materialization filter. materializedBefore is the count
+// of canonical steps the harness has already EXECUTED (g.ready.firstStep +
+// g.readyPos at the refinement-injection point): a candidate thread is
+// materialized on the runtime spine iff its creating step has executed,
+// i.e. createdAtStep < materializedBefore. The day-ahead buffer means
+// g.threads holds threads whose creating step is generated but not yet
+// run; naming such a thread as an expected match produces a thread the
+// runtime has no spine record for yet — an off-spine-not-archived false
+// miss that the harness charges to recall_unexplained_absence (#100). The
+// refinement path (injected at execution time) passes the executed count
+// so those unmaterialized threads are excluded; the canonical path passes
+// noMaterializationFilter so its behavior is unchanged.
+//
+// This is the ONLY oracle-side coupling to execution position. It is
+// measurement-side: the filter does not consume rng and does not reshape
+// the canonical step stream (refinement is injected only under real
+// feedback), so the determinism contract holds.
+func (g *generator) recallExpectedForMaterialized(idx int, Q []string, isNew bool, materializedBefore int) []string {
 	if isNew {
 		return nil
 	}
@@ -2443,11 +2504,29 @@ func (g *generator) recallExpectedFor(idx int, Q []string, isNew bool) []string 
 			// keeping oracle and runtime coherent without scoring it.
 			continue
 		}
+		if materializedBefore != noMaterializationFilter && cand.createdAtStep >= materializedBefore {
+			// Created by a step not yet executed: the runtime has not put
+			// this thread on the spine at this execution point, so naming it
+			// an expected match would be a false miss (#100). Exclude it.
+			continue
+		}
 		if simJaccard(Q, g.shadowRetainedSet(cand.order)) >= simRecallThreshold {
 			ids = append(ids, cand.threadID())
 		}
 	}
 	return ids
+}
+
+// executedStepCount is the number of canonical buffered steps the harness
+// has already handed out (executed) at the current Next() injection point.
+// g.ready.firstStep is the global index of g.ready.steps[0] and g.readyPos
+// is the next offset to draw, so their sum is the global index of the next
+// step to draw — equivalently the count of steps already drawn. A thread
+// whose createdAtStep is < this count has had its creating step executed
+// and is materialized on the spine. Refinement is only injected while a
+// g.ready buffer is active, so g.ready is non-nil here.
+func (g *generator) executedStepCount() int {
+	return g.ready.firstStep + g.readyPos
 }
 
 // probeTarget returns a WANDERING DORMANT thread to probe — one with a
@@ -2506,8 +2585,7 @@ func (g *generator) measurementCarrier() (idx int, created bool) {
 	if g.carrier >= 0 {
 		return g.carrier, false
 	}
-	idx = len(g.threads)
-	g.threads = append(g.threads, newThread(idx, 0))
+	idx = g.createThread(len(g.threads), 0)
 	g.carrierIdx[idx] = struct{}{}
 	g.carrier = idx
 	return idx, true

@@ -249,11 +249,16 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 		}
 		// Off the live spine and NOT archived: not a forgivable archival. The
 		// recall-measurement sibling of VerifyThreadAccounting's "unexplained
-		// loss" — a thread that is neither live nor recoverable-via-fetch. (In
-		// long sims a tiny count also surfaces an oracle-side artifact: the
-		// shadow generator's refinement burst can name an expected thread the
-		// instant before its spine record materializes; such a thread is never
-		// archived and ends up on-spine — see the §6 measurement-honesty notes.)
+		// loss" — a thread that is neither live nor recoverable-via-fetch, a
+		// genuine integrity bug. This is a HARD ==0 gate in the sim (#100):
+		// the oracle no longer manufactures false positives here. Previously a
+		// long-sim refinement burst could name an expected thread the instant
+		// before its spine record materialized (the day-ahead generation
+		// buffer creates the thread in the shadow model before its creating
+		// step executes), inflating this counter for a thread that was never
+		// archived and ended up on-spine. The refinement oracle now excludes
+		// unmaterialized threads (recallExpectedForMaterialized), so a nonzero
+		// count is a real off-spine-not-archived loss, not an oracle artifact.
 		h.Metrics.Counter("recall_unexplained_absence", 1)
 		return true
 	}

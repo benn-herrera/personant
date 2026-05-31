@@ -608,6 +608,23 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 			"history is growing unbounded; investigate before tuning away", maxHist, historyCapForReport)
 	}
 
+	// Genuine-loss canary (#100): recall_unexplained_absence counts every
+	// recall expectation whose thread is OFF the live spine AND NOT in the
+	// archive.archived log — a thread that is neither recall-live nor
+	// recoverable-via-fetch, the recall-measurement sibling of
+	// VerifyThreadAccounting's unexplained loss. The oracle no longer
+	// manufactures these (the refinement expected-set excludes threads the
+	// runtime has not yet materialized on the spine — recallExpectedForMaterialized),
+	// so the counter is a clean integrity signal: any nonzero value is a
+	// real off-spine-not-archived data loss. Gate hard on ==0 so a future
+	// genuine loss FAILS the sim rather than hiding in the summary. This is
+	// the payoff of the #100 oracle fix — the canary is now usable.
+	if absent := m.Counters["recall_unexplained_absence"]; absent != 0 {
+		t.Errorf("recall_unexplained_absence = %d, want 0 — a recall expectation names a thread that is "+
+			"OFF the live spine AND NOT archived (genuine integrity loss, or an uncovered oracle/execution-timing "+
+			"artifact). This is the genuine-loss canary; do NOT relax it without root-causing every count.", absent)
+	}
+
 	t.Logf("wall-clock runtime: %s", wall.Round(time.Millisecond))
 
 	// Headline output: a LOWER BOUND on the six-month simulation
@@ -1220,4 +1237,78 @@ func absDiff(a, b float64) float64 {
 		return a - b
 	}
 	return b - a
+}
+
+// TestRecallExpectedMaterializationFilter pins the #100 oracle fix: the
+// execution-time refinement oracle must exclude candidate threads the
+// runtime has not yet materialized on the spine — those whose creating
+// step has not executed (createdAtStep >= materializedBefore). The
+// canonical (generation-time) path passes noMaterializationFilter and must
+// be unaffected: it names every clearing sibling regardless of
+// createdAtStep, because at generation time g.threads only holds threads
+// generated (= executed) earlier.
+//
+// Setup: four sibling threads bound to one slot (so each clears the
+// Jaccard threshold against the slot's query), none in Layer B, none a
+// carrier. The engaged thread is order 0. The other three sit at
+// ascending createdAtStep. With a materialization cutoff between them, the
+// filter must drop exactly the candidates created at-or-after the cutoff.
+func TestRecallExpectedMaterializationFilter(t *testing.T) {
+	tags := []string{"alpha", "beta", "gamma", "delta", "epsilon"}
+	slot := CorpusSlot{Topic: "physics", Tags: tags}
+
+	g := &generator{
+		model:       corpusModel{slots: []CorpusSlot{slot}, familySize: 4},
+		emittedSyms: map[int]map[string]struct{}{},
+		carrierIdx:  map[int]struct{}{},
+		carrier:     -1,
+		layerB:      nil, // every thread dormant, so each is a candidate
+	}
+	// Four siblings on the single slot, all dormant. createdAtStep ascends:
+	// the engaged thread (0) is created first, then candidates at 10/20/30.
+	created := []int{0, 10, 20, 30}
+	for order, cas := range created {
+		thr := newThread(order, 0)
+		thr.createdAtStep = cas
+		g.threads = append(g.threads, thr)
+		// Each emits the slot's tags + its own salt — the sibling retained
+		// set that clears the threshold against Q below.
+		g.recordEmission(order, append(append([]string(nil), tags...), saltSymbol(order)))
+	}
+
+	// Q is the slot's tags plus the engaged thread's salt (mirrors the
+	// runtime's coalesced query; see buildStep). The engaged thread (0) is
+	// excluded as the candidate's own turn; threads 1,2,3 are siblings that
+	// clear the threshold.
+	Q := append(append([]string(nil), tags...), saltSymbol(0))
+
+	// Canonical (sentinel) path: every clearing sibling is named, regardless
+	// of createdAtStep — generation-time behavior is unchanged.
+	if got, want := g.recallExpectedFor(0, Q, false), []string{"thr_2", "thr_3", "thr_4"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("sentinel (canonical) oracle = %v, want %v (all siblings, no materialization filter)", got, want)
+	}
+
+	// Materialization cutoff = 21: threads created at 10 and 20 are
+	// materialized (createdAtStep < 21); the one at 30 is not yet executed
+	// and must be excluded.
+	if got, want := g.recallExpectedForMaterialized(0, Q, false, 21), []string{"thr_2", "thr_3"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("filtered oracle (cutoff 21) = %v, want %v (thr_4 created at 30 is unmaterialized)", got, want)
+	}
+
+	// Cutoff = 11: only the thread created at 10 is materialized.
+	if got, want := g.recallExpectedForMaterialized(0, Q, false, 11), []string{"thr_2"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("filtered oracle (cutoff 11) = %v, want %v", got, want)
+	}
+
+	// Cutoff = 0: nothing materialized yet — empty expected set, never a
+	// false miss.
+	if got := g.recallExpectedForMaterialized(0, Q, false, 0); len(got) != 0 {
+		t.Errorf("filtered oracle (cutoff 0) = %v, want empty (no thread materialized)", got)
+	}
+
+	// The sentinel and a cutoff past every createdAtStep must agree — the
+	// filter is a no-op once all candidates are materialized.
+	if got, want := g.recallExpectedForMaterialized(0, Q, false, 1000), g.recallExpectedFor(0, Q, false); !reflect.DeepEqual(got, want) {
+		t.Errorf("filter past all createdAtStep = %v, want sentinel result %v (must be a no-op)", got, want)
+	}
 }
