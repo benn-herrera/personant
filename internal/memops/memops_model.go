@@ -145,6 +145,19 @@ type HistorySymbol struct {
 	// projection — temporal ordering (with FirstSeenTurn) plus an
 	// eviction tiebreak. Zero value 0 ≡ never-active.
 	LastActiveTurn int `json:"last_active_turn,omitempty" yaml:"last_active_turn,omitempty"`
+
+	// DerivedFrom records the origin thread ID(s) this symbol was carried
+	// into this thread from — observed co-incident with a recall hit
+	// during the same turn (spec §2.7.3). It is honest origin provenance,
+	// populated deterministically at turn-close (no LLM, no human): when a
+	// newly-emitted symbol's normalized form also appears in a thread
+	// recalled this turn, that thread's id is unioned in. Set-valued,
+	// sorted, deduplicated; monotonic — origins accumulate and are never
+	// cleared. Provenance only: it does NOT participate in the §3.4 recall
+	// match. nil-safe; the zero value (omitted/empty) ≡ organic to this
+	// thread (the common case). An old record without the field decodes to
+	// empty (back-compatible; no migration).
+	DerivedFrom []string `json:"derived_from,omitempty" yaml:"derived_from,omitempty"`
 }
 
 // ThreadMeta is the per-thread metadata record at the memops port.

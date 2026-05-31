@@ -395,6 +395,16 @@ func updateExistingThread(ctx context.Context, state *State, threadID string, ow
 
 	merged := mergeHistorySymbols(fm.HistorySymbols, turnSymbols, mergeTurn)
 
+	// §2.7.3 origin provenance: union each recall-surfaced thread's id into
+	// the DerivedFrom of any merged symbol (newly-emitted OR re-emitted)
+	// that coincides with its symbol set. Origins accumulate monotonically,
+	// so newness is not a gate — the union is applied to every coinciding
+	// entry. Runs on the full merged set BEFORE project/cap — ProjectAnchors
+	// copies but does not touch DerivedFrom, and capHistorySymbols only
+	// drops entries, so the field survives both. selfID = threadID (a
+	// thread is never its own origin).
+	populateDerivedFrom(merged, surfacedSymbolSets(ctx, state, threadID), threadID)
+
 	// Merge → project → evict (Build-Plan Risk R5). Only the OWNER turn
 	// re-projects (SOLUTION §2: "Engaged-non-owner threads do not
 	// re-project"). The projection runs on the full merged set so its
@@ -480,6 +490,12 @@ func createNewThread(ctx context.Context, state *State, owner bool, userInput, r
 	// cap. A genuinely-new thread is always "changed", so the watermark is
 	// stamped at creation.
 	merged := mergeHistorySymbols(nil, turnSymbols, turnCount)
+	// §2.7.3 origin provenance — the PRIMARY synthesis case: a new thread
+	// created in a turn that recalled prior threads carries each parent's
+	// symbol forward, acquiring that parent's id as the symbol's origin
+	// (multi-parent provenance distributed across the synthesized symbols).
+	// selfID = newID.
+	populateDerivedFrom(merged, surfacedSymbolSets(ctx, state, newID), newID)
 	anchors, projectedSyms, _ := projectAnchorsForTurn(ctx, state, merged, turnCount)
 	historySymbols := capHistorySymbols(projectedSyms)
 

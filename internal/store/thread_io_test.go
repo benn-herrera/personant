@@ -164,6 +164,60 @@ history_symbols:
 	}
 }
 
+// TestDerivedFromRoundTrip — §2.7.3 origin provenance. A history symbol
+// carrying DerivedFrom survives the YAML frontmatter round-trip AND the
+// HistorySymbol JSON round-trip with its (sorted) origin set intact; a
+// symbol with no DerivedFrom decodes to nil (omitted in YAML/JSON via
+// omitempty). The field is honest provenance metadata — this proves it
+// serializes, nothing more.
+func TestDerivedFromRoundTrip(t *testing.T) {
+	paths := newThreadHome(t)
+	in := sampleFrontmatter()
+	in.HistorySymbols = []memops.HistorySymbol{
+		{Raw: "carried", Normalized: "carried", FirstSeenTurn: 5, Count: 3, Source: memops.SourceModel, DerivedFrom: []string{"thr_1", "thr_9"}},
+		{Raw: "organic", Normalized: "organic", FirstSeenTurn: 6, Count: 1, Source: memops.SourceUser},
+	}
+
+	if err := SaveThreadFrontmatter(paths, in.ID, in); err != nil {
+		t.Fatalf("SaveThreadFrontmatter: %v", err)
+	}
+	got, err := LoadThreadFrontmatter(paths, in.ID)
+	if err != nil {
+		t.Fatalf("LoadThreadFrontmatter: %v", err)
+	}
+	if !reflect.DeepEqual(got, in) {
+		t.Fatalf("frontmatter mismatch:\n got: %#v\nwant: %#v", got, in)
+	}
+	// The organic symbol decodes to nil (omitted), not an empty non-nil slice.
+	if got.HistorySymbols[1].DerivedFrom != nil {
+		t.Errorf("organic symbol DerivedFrom: got %#v want nil", got.HistorySymbols[1].DerivedFrom)
+	}
+
+	// HistorySymbol JSON round-trip of the same field.
+	b, err := json.Marshal(in.HistorySymbols[0])
+	if err != nil {
+		t.Fatalf("marshal symbol: %v", err)
+	}
+	var symOut memops.HistorySymbol
+	if err := json.Unmarshal(b, &symOut); err != nil {
+		t.Fatalf("unmarshal symbol: %v", err)
+	}
+	if !reflect.DeepEqual(symOut.DerivedFrom, []string{"thr_1", "thr_9"}) {
+		t.Errorf("JSON DerivedFrom: got %#v want [thr_1 thr_9]", symOut.DerivedFrom)
+	}
+	// An old record without derived_from decodes to nil.
+	if !strings.Contains(string(b), "derived_from") {
+		t.Errorf("expected derived_from key in JSON: %s", b)
+	}
+	var noField memops.HistorySymbol
+	if err := json.Unmarshal([]byte(`{"raw":"x","normalized":"x","count":1,"source":"model"}`), &noField); err != nil {
+		t.Fatalf("unmarshal legacy symbol: %v", err)
+	}
+	if noField.DerivedFrom != nil {
+		t.Errorf("legacy symbol DerivedFrom: got %#v want nil", noField.DerivedFrom)
+	}
+}
+
 func TestSaveThreadFrontmatterWritesTitle(t *testing.T) {
 	paths := newThreadHome(t)
 	in := sampleFrontmatter()

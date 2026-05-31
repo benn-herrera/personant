@@ -88,6 +88,40 @@ func TestProposeFromIndex_HistorySymbolsContribute(t *testing.T) {
 	}
 }
 
+// TestProposeFromIndex_DerivedFromIsProvenanceAgnostic — §2.7.3 guarantee.
+// derived_from is honest origin provenance, NOT a recall input: two threads
+// with identical normalized symbol sets score identically whether or not
+// their history symbols carry DerivedFrom. buildThreadSet reads Normalized
+// (and Lifecycle), never DerivedFrom — this test pins that the match set is
+// unchanged by provenance.
+func TestProposeFromIndex_DerivedFromIsProvenanceAgnostic(t *testing.T) {
+	spine := []memops.SpineRecord{
+		makeSpine("thr_1", "prj_1", []string{"alpha", "beta"}, 0),
+		makeSpine("thr_2", "prj_1", []string{"alpha", "beta"}, 0),
+	}
+	// thr_1 carries provenance on its history symbols; thr_2 is identical
+	// but organic. Both have the same normalized symbol set.
+	withProv := makeFM("thr_1", "prj_1", []string{"alpha", "beta"}, []string{"gamma"})
+	withProv.HistorySymbols[0].DerivedFrom = []string{"thr_9", "thr_42"}
+	organic := makeFM("thr_2", "prj_1", []string{"alpha", "beta"}, []string{"gamma"})
+	threads := []memops.ThreadMeta{withProv, organic}
+
+	got := ProposeFromIndex(spine, threads, []string{"gamma", "alpha"}, Options{})
+	if len(got) != 2 {
+		t.Fatalf("expected both threads; got %#v", got)
+	}
+	// Locate each by id; their scores must be equal (provenance does not
+	// move the match).
+	score := map[string]float64{}
+	for _, c := range got {
+		score[c.ThreadID] = c.Score
+	}
+	if score["thr_1"] != score["thr_2"] {
+		t.Errorf("derived_from changed the score: thr_1=%v thr_2=%v (must be equal)",
+			score["thr_1"], score["thr_2"])
+	}
+}
+
 func TestProposeFromIndex_ExcludeFiltersResult(t *testing.T) {
 	spine := []memops.SpineRecord{
 		makeSpine("thr_1", "prj_1", []string{"alpha", "beta", "gamma", "delta"}, 0),

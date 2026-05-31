@@ -1,6 +1,7 @@
 package turn
 
 import (
+	"context"
 	"sort"
 
 	"personant/internal/memops"
@@ -98,6 +99,144 @@ func mergeHistorySymbols(existing []memops.HistorySymbol, turnSymbols []coalesce
 	// returns the uncapped set so it cannot strand a symbol the projection is
 	// about to make ever-central.
 	return out
+}
+
+// populateDerivedFrom is the §2.7.3 origin-provenance population step. It
+// is pure (no I/O): the caller loads the recall-surfaced threads' symbol
+// sets and passes them in.
+//
+// For every entry in merged whose Normalized form coincides with a
+// recall-surfaced thread X's symbol set, X's threadID is unioned into that
+// entry's DerivedFrom. Attribution applies to both NEWLY-emitted symbols
+// (the synthesis-carry-in case) AND re-emitted existing symbols that newly
+// coincide with a recall this turn — origins accumulate, never clear
+// (monotonic), and the union is idempotent for an origin already recorded.
+// Because the union is applied to EVERY coinciding entry (spec §2.7.3:
+// "origins accumulate, never clear"), newness is not a gate — the per-symbol
+// monotonic union is the whole rule. selfID (the thread these symbols belong
+// to) is never attributed to itself — a thread is not its own origin.
+//
+// DerivedFrom is kept sorted + deduplicated so the YAML/JSON serialization
+// is git-diff-stable and runs are deterministic. The mutation is in place
+// on merged's entries.
+func populateDerivedFrom(merged []memops.HistorySymbol, surfaced map[string]map[string]struct{}, selfID string) {
+	if len(surfaced) == 0 {
+		return
+	}
+	for i := range merged {
+		norm := merged[i].Normalized
+		if norm == "" {
+			continue
+		}
+		for originID, symSet := range surfaced {
+			if originID == selfID {
+				continue // a thread is never its own origin
+			}
+			if _, ok := symSet[norm]; !ok {
+				continue
+			}
+			merged[i].DerivedFrom = unionSorted(merged[i].DerivedFrom, originID)
+		}
+	}
+}
+
+// unionSorted returns the sorted, deduplicated union of existing and the
+// single value v. The input slice is not mutated (a fresh slice is returned
+// when v is absent; existing is returned as-is when v is already present).
+func unionSorted(existing []string, v string) []string {
+	i := sort.SearchStrings(existing, v)
+	if i < len(existing) && existing[i] == v {
+		return existing // already present
+	}
+	out := make([]string, 0, len(existing)+1)
+	out = append(out, existing[:i]...)
+	out = append(out, v)
+	out = append(out, existing[i:]...)
+	return out
+}
+
+// surfacedSymbolSets loads the recall-surfaced threads' normalized symbol
+// sets — the I/O half of derived_from population, kept out of the pure
+// populateDerivedFrom. For each surfaced thread it returns the set the §3.4
+// recall scorer matches against: Anchors ∪ {h.Normalized for h in
+// history_symbols}. This MIRRORS recall/scoring.buildThreadSet's notion of a
+// thread's symbol set; it is replicated (not imported) because that function
+// is unexported and returns a superseded-map second value this caller does
+// not need — the replication is a few lines and avoids exporting scoring
+// internals. A thread that fails to load is skipped (best-effort; provenance
+// is opportunistic and must never abort turn close); selfID is never loaded
+// (a thread is not its own origin).
+//
+// Eligibility (§2.7.3 "Deterministic population") is recallSurfaced ∩ Layer-B
+// residency: a recall-promoted parent is an eligible origin only while it is
+// still resident in state.ActiveThreads (Layer B). Once it is evicted from the
+// working set — displaced past BTopK by other engagements — it is no longer in
+// context and must not be newly attributed; provenance stays honest, not
+// "ever-recalled". recallSurfaced remains the "arrived via recall, not direct
+// engagement/switch" marker (not every ActiveThreads member is recall-sourced);
+// ActiveThreads membership is the residency gate. Opportunistic pruning: ids in
+// recallSurfaced that are no longer resident are dropped here — they cannot
+// become eligible again without a fresh recall, which re-adds them — bounding
+// the set over a long session.
+func surfacedSymbolSets(ctx context.Context, state *State, selfID string) map[string]map[string]struct{} {
+	if len(state.recallSurfaced) == 0 {
+		return nil
+	}
+	resident := residentRecallOrigins(state)
+	out := make(map[string]map[string]struct{}, len(resident))
+	for id := range resident {
+		if id == selfID {
+			continue
+		}
+		// LoadThreadMeta reads only the metadata block (anchors +
+		// history_symbols) — no body assembly — which is exactly the
+		// scorer's match surface and cheaper than LoadThread.
+		meta, err := state.Ops.LoadThreadMeta(ctx, id)
+		if err != nil {
+			continue // best-effort: a thread that won't load is not an origin
+		}
+		set := make(map[string]struct{}, len(meta.Anchors)+len(meta.HistorySymbols))
+		for _, a := range meta.Anchors {
+			if a != "" {
+				set[a] = struct{}{}
+			}
+		}
+		for _, h := range meta.HistorySymbols {
+			if h.Normalized != "" {
+				set[h.Normalized] = struct{}{}
+			}
+		}
+		if len(set) > 0 {
+			out[id] = set
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// residentRecallOrigins returns the eligible-origin set: recallSurfaced ∩
+// Layer-B residency (state.ActiveThreads). It also opportunistically prunes
+// state.recallSurfaced of ids that are no longer resident — they cannot become
+// eligible again without a fresh recall (which re-adds them via recall.go), so
+// dropping them here bounds the map over a long session. Deterministic: the
+// returned set and the post-prune recallSurfaced depend only on the two input
+// sets, not on iteration order.
+func residentRecallOrigins(state *State) map[string]struct{} {
+	active := make(map[string]struct{}, len(state.ActiveThreads))
+	for _, id := range state.ActiveThreads {
+		active[id] = struct{}{}
+	}
+	resident := make(map[string]struct{}, len(state.recallSurfaced))
+	for id := range state.recallSurfaced {
+		if _, ok := active[id]; ok {
+			resident[id] = struct{}{}
+		} else {
+			delete(state.recallSurfaced, id) // evicted from Layer B → no longer eligible
+		}
+	}
+	return resident
 }
 
 // capHistorySymbols enforces the §2.6.1 hard total cap (default 40) over the
