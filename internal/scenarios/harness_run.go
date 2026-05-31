@@ -176,6 +176,22 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 
 	postSpine, _ := store.ReadSpine(h.Paths.Spine)
 
+	// Keep the embedding index current (#98): a thread created this turn must
+	// be embedded and added to the layer-2 index, or it is structurally
+	// unrecallable by embedding for the rest of the run (the session-start
+	// Prepare embedded only the threads that existed then). Drive the
+	// incremental AddThread seam for each spine ID that appeared this turn.
+	// A no-op for the symbolic-only default (h.indexer nil). An embed failure
+	// is fatal: a silently-missing index entry would understate embedding
+	// recall and corrupt the symbolic-vs-embedding head-to-head.
+	if h.indexer != nil && len(postSpine) > len(preSpine) {
+		for _, id := range newSpineIDs(preSpine, postSpine) {
+			if err := h.indexer.AddThread(context.Background(), id); err != nil {
+				t.Fatalf("scenario step %d (%s): embedding index add %s: %v", idx+1, label, id, err)
+			}
+		}
+	}
+
 	// One incremental poll captures exactly this turn's appended log
 	// lines: the turn just completed and the next turn has not started.
 	// From those lines extract this step's match-fire set and fold any
@@ -198,7 +214,20 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 		h.refreshArchivedSet()
 	}
 	matchFires := matchFireSet(stepLines)
-	expectedForgiven := recordRecallFidelity(t, h, idx, label, step.RecallMode, step.ExpectedRecallMatches, matchFires)
+	keptExpected, expectedForgiven := recordRecallFidelity(t, h, idx, label, step.RecallMode, step.ExpectedRecallMatches, matchFires)
+
+	// Embedding-in-loop head-to-head (#98): when an embedder is installed the
+	// turn-close path logs spine.embed-match-fire alongside spine.match-fire,
+	// so parse the embedding match set and score it against the SAME forgiven
+	// expected set the symbolic path scored (keptExpected), into the parallel
+	// embed_recall_fidelity_* series. This runs only when the embedding layer
+	// is live (h.indexer != nil), keeping the symbolic-only default's metrics
+	// blob unchanged. Symbolic recall is still recorded above on the same step
+	// — apples-to-apples on one workload, one forgiven ground truth.
+	embedFires := embedMatchFireSet(stepLines)
+	if h.indexer != nil {
+		recordEmbedRecallFidelity(h, keptExpected, embedFires, step.ExpectedRecallMatches != nil)
+	}
 
 	// Per-step metrics.
 	h.Metrics.Counter("turns", 1)
@@ -267,6 +296,7 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 		Index:                  idx,
 		RecallMatchFires:       len(matchFires),
 		RecallMatchFireIDs:     matchFires,
+		EmbedMatchFireIDs:      embedFires,
 		RecallExpected:         len(step.ExpectedRecallMatches),
 		TargetRecoverable:      recoverable,
 		RecallExpectedForgiven: expectedForgiven,
@@ -305,6 +335,14 @@ func restartSession(t *testing.T, h *Harness, idx int, label string) {
 	// its curator too. The per-step RecallResolver/ClosureResolver are
 	// installed by runStep below, so they need no handling here.
 	rebuilt.Curator = scriptedCurator{}
+
+	// Re-install the scenario's custom recaller — turn.LoadSession built
+	// rebuilt with turn.NewState's nil-embedder default, so without this an
+	// embedding-in-loop run would silently revert to symbolic-only after the
+	// first RestartSession step. installRecaller re-Prepares the index from
+	// the current substrate, so embedding recall resumes against every thread
+	// that exists at relaunch. A no-op when no factory is set.
+	h.installRecaller(t, rebuilt)
 
 	h.State = rebuilt
 
@@ -443,6 +481,23 @@ func runRecoveryGauge(t *testing.T, h *Harness) {
 		}
 		h.Metrics.Counter("archive_recovered_verified", 1)
 	}
+}
+
+// newSpineIDs returns the thread IDs present in post but not in pre — the
+// threads a step created. Used to drive the incremental embedding-index
+// upkeep (#98). O(pre+post); the sets are small per step.
+func newSpineIDs(pre, post []memops.SpineRecord) []string {
+	had := make(map[string]struct{}, len(pre))
+	for _, r := range pre {
+		had[r.ID] = struct{}{}
+	}
+	var out []string
+	for _, r := range post {
+		if _, ok := had[r.ID]; !ok {
+			out = append(out, r.ID)
+		}
+	}
+	return out
 }
 
 // peakHistorySymbols walks every thread file and returns the maximum

@@ -93,6 +93,7 @@ defaultModel = "harness-mock"
 		createdThreadIDs:  map[string]struct{}{},
 		archivedThreadIDs: map[string]struct{}{},
 		heavyCadence:      sc.HeavyInvariantCadence,
+		recallerFactory:   sc.Recaller,
 		// Schedule the first heavy firing one cadence-tick after the
 		// start: this puts the first firing well into the run rather than
 		// at step 1 when nothing has happened yet. End-of-run always
@@ -145,6 +146,11 @@ defaultModel = "harness-mock"
 	// curator and a ClosureResolver are installed; the resolver is
 	// installed per-step from Step.ClosureAck.
 	state.Curator = scriptedCurator{}
+
+	// Install the scenario's custom recaller (embedding-in-loop seam, #98)
+	// and prime its index. A no-op when the scenario kept the default
+	// symbolic-only recaller turn.NewState installed.
+	h.installRecaller(t, state)
 
 	return h
 }

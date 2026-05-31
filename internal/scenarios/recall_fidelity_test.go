@@ -105,7 +105,7 @@ func TestArchivedSet_IndexDerived_DroppedLogLine(t *testing.T) {
 
 	// A step that expected to recall thr_2 (now archived) must forgive it as
 	// archived-recoverable, NOT count it as an unexplained absence.
-	forgiven := recordRecallFidelity(t, h, 0, "f4", RecallStrict, []string{"thr_2"}, nil)
+	_, forgiven := recordRecallFidelity(t, h, 0, "f4", RecallStrict, []string{"thr_2"}, nil)
 	if forgiven != 0 {
 		t.Errorf("archived expected thread should be forgiven (0 kept); got %d", forgiven)
 	}

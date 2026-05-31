@@ -103,12 +103,55 @@ func NewService(ops memops.MemoryOps, embedder model.Embedder) *Service {
 	return &Service{ops: ops, embedder: embedder}
 }
 
+// AddThread incrementally embeds one thread's current body and appends
+// (or replaces, if already present) its vector in the layer-2 index. It
+// is the incremental counterpart to Prepare's batch build: a long-lived
+// session creates threads continuously, and without per-thread index
+// upkeep the embedding layer can never recall any thread created after
+// the one-shot Prepare ran (it is structurally absent from the index).
+//
+// A no-op when no embedder is configured. Safe to call before Prepare;
+// the index simply starts as this one entry.
+//
+// PRODUCTION RELEVANCE: the embedding index for a single-career session
+// spanning thousands of threads cannot rely on session-start Prepare
+// alone — every thread born mid-session would be invisible to embedding
+// recall until the next process restart. AddThread is the seam a
+// long-lived runtime calls at thread-create (and at body-grow, if it
+// wants the index to track edits) to keep the index current.
+func (s *Service) AddThread(ctx context.Context, threadID string) error {
+	if s.embedder == nil {
+		return nil
+	}
+	thr, err := s.ops.LoadThread(ctx, threadID)
+	if err != nil {
+		return fmt.Errorf("recall: add-to-index load %s: %w", threadID, err)
+	}
+	vecs, err := s.embedder.Embed(ctx, []string{truncateForEmbed(thr.Body)})
+	if err != nil {
+		return fmt.Errorf("recall: add-to-index embed %s: %w", threadID, err)
+	}
+	if len(vecs) != 1 {
+		return fmt.Errorf("recall: add-to-index %s: embedder returned %d vectors for 1 input", threadID, len(vecs))
+	}
+	tv := scoring.ThreadVector{ThreadID: threadID, Vector: vecs[0]}
+	for i := range s.index {
+		if s.index[i].ThreadID == threadID {
+			s.index[i] = tv // replace an existing entry (body grew)
+			return nil
+		}
+	}
+	s.index = append(s.index, tv)
+	return nil
+}
+
 // Prepare builds the in-memory layer-2 embedding index by embedding
 // every thread's body. A no-op when no embedder is configured.
 //
-// Session-scoped: built once. Threads created within the session are
-// not re-embedded until the next Prepare — acceptable while recall is
-// log-only; incremental refresh is a later increment.
+// Session-scoped batch build: it embeds every thread that exists at call
+// time. Threads created AFTER Prepare are not in the index until either a
+// re-Prepare or an incremental AddThread call (the long-lived-session
+// path — see AddThread's PRODUCTION RELEVANCE note).
 func (s *Service) Prepare(ctx context.Context) error {
 	s.index = nil
 	if s.embedder == nil {

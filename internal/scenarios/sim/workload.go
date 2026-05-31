@@ -702,15 +702,16 @@ func GenerateWorkload(cfg WorkloadConfig) scenarios.Scenario {
 			slots:      cfg.Corpus,
 			familySize: cfg.FamilySize,
 		},
-		files:             map[int]*fileState{},
-		recallBuckets:     map[string]*recallTally{},
-		emittedSyms:       map[int]map[string]struct{}{},
-		carrierIdx:        map[int]struct{}{},
-		carrier:           -1,
-		wanderHopHits:     map[int]int{},
-		wanderHopTotal:    map[int]int{},
-		wanderHopCoherent: map[int]int{},
-		wanderHopDiverge:  map[int]int{},
+		files:              map[int]*fileState{},
+		recallBuckets:      map[string]*recallTally{},
+		emittedSyms:        map[int]map[string]struct{}{},
+		carrierIdx:         map[int]struct{}{},
+		carrier:            -1,
+		wanderHopHits:      map[int]int{},
+		wanderHopTotal:     map[int]int{},
+		wanderHopCoherent:  map[int]int{},
+		wanderHopDiverge:   map[int]int{},
+		wanderHopEmbedHits: map[int]int{},
 	}
 	return scenarios.Scenario{
 		Name:       fmt.Sprintf("sim-workload-seed%d-dur%s", cfg.Seed, cfg.Duration),
@@ -843,6 +844,15 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 		// only; the canonical step stream is untouched, so determinism holds).
 		p := g.lastProbe
 		observedHit := slices.Contains(feedback.RecallMatchFireIDs, p.threadID)
+		// Embedding-layer observation (#98 head-to-head): did the EMBEDDING
+		// layer surface this specific probed thread? Shares the symbolic
+		// layer's per-hop denominator (wanderHopTotal, bumped below), so the
+		// two per-hop recall curves are directly comparable. nil on the mock
+		// path (EmbedMatchFireIDs nil) → no embed hits recorded.
+		embedHit := slices.Contains(feedback.EmbedMatchFireIDs, p.threadID)
+		if embedHit {
+			g.wanderHopEmbedHits[p.hops]++
+		}
 		if p.hops == 0 {
 			// Current-topic control (wander_current_recall). At
 			// superseded-weight 1.0 the runtime scores against the FULL
@@ -1285,6 +1295,16 @@ const (
 	metricWanderOriginRecallByHops = "wander_origin_recall_byhops"
 	metricWanderCoherenceByHops    = "wander_coherence_byhops"
 
+	// metricWanderEmbedRecallByHops is the EMBEDDING-layer per-hop recall of
+	// the abandoned-topic probe (#98 head-to-head): the fraction of probes at
+	// hop N for which the embedding layer surfaced the probed thread. Shares
+	// the symbolic layer's per-hop denominator (one observation per probe), so
+	// comparing it against metricWanderOriginRecallByHops at the same hop is
+	// the gap-closure view — does embedding recover origin/abandoned topics at
+	// hops where symbolic decays to ~0. Populated only on an embedding-in-loop
+	// run; absent on the mock acceptance run.
+	metricWanderEmbedRecallByHops = "wander_embed_recall_byhops"
+
 	// metricWanderCoherenceDivergence is the run-total count of
 	// oracle/runtime divergences across all hops — the headline criterion
 	// (b) tripwire. Zero (or a tiny rounding band) is the pass; any real
@@ -1487,6 +1507,18 @@ type generator struct {
 	wanderHopDiverge   map[int]int
 	wanderCurrentHits  int
 	wanderCurrentTotal int
+
+	// Embedding-layer per-hop probe hits (#98 head-to-head). Parallel to
+	// wanderHopHits but counting whether the EMBEDDING layer
+	// (spine.embed-match-fire) surfaced the probed thread, so the rung
+	// summary can show whether embedding recovers origin/abandoned topics at
+	// hop distances where symbolic decays to ~0 — the gap-closure view. Keyed
+	// by hop (0 = current-topic control). Populated only on an embedding-in-
+	// loop run (feedback carries EmbedMatchFireIDs); nil/zero otherwise, so
+	// the mock acceptance run is unaffected. The total per hop is the SAME
+	// wanderHopTotal the symbolic layer uses (one observation per probe), so
+	// the two layers' per-hop recall share one denominator — apples-to-apples.
+	wanderHopEmbedHits map[int]int
 
 	// recallBuckets accumulates per-bucket {hits, total} recall tallies for
 	// the lifecycle oracles (drift_recall_origin, drift_recall_dest,

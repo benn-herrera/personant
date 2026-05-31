@@ -33,6 +33,7 @@ import (
 	"personant/internal/log"
 	"personant/internal/memops"
 	"personant/internal/model"
+	"personant/internal/recall/measure"
 	"personant/internal/store"
 )
 
@@ -63,11 +64,14 @@ const liveConfigMissingMsg = "test.providers.toml and test.config.toml are requi
 	"(apiKeyFile paths may need to be absolute)."
 
 // liveEndpoint pairs a resolved provider with the role and model it was
-// selected for, for logging + the usable-endpoint probe.
+// selected for, for logging + the usable-endpoint probe. vectorLength is
+// the [embedding] vectorLength config (Matryoshka truncation; 0 = native);
+// meaningful only for the embedding role.
 type liveEndpoint struct {
-	role     string // "chat" or "embedding"
-	provider memops.Provider
-	model    string
+	role         string // "chat" or "embedding"
+	provider     memops.Provider
+	model        string
+	vectorLength int
 }
 
 // TestSimLive is the live-mode sibling of TestSim. It loads + validates
@@ -97,17 +101,46 @@ func TestSimLive(t *testing.T) {
 	endpoints := loadLiveEndpoints(t)
 	probeLiveEndpoints(t, endpoints)
 
-	// Inc 1: the toggles are no-ops past the guard. Log what each WOULD do
-	// so the deferred wiring is visible, then run the ordinary mock path.
+	// Inc 2: embedding-in-loop. When -sim.live-embedding is on, build a
+	// recaller factory that installs the real §3.4 embedder; the harness
+	// Prepares its index and keeps it current via the per-thread-creation
+	// AddThread seam (see runSimRung's recaller arg + harness installRecaller).
+	// Mock inference is UNCHANGED — the canned thread bodies stay deterministic
+	// so the recall oracle's ExpectedRecallMatches stays valid, and symbolic
+	// recall runs alongside (both layers fire) for the head-to-head.
+	var recaller func(ops memops.MemoryOps) measure.Recaller
 	if *liveEmbedding {
-		log.Info("sim-live: live-embedding requested (real §3.4 embedder wiring lands in Inc 2); running mock/nil path this increment")
+		ep := embeddingEndpoint(t, endpoints)
+		log.Info("sim-live: installing live §3.4 embedder — provider=%s model=%s dims=%d (embedding-in-loop, Inc 2)",
+			ep.provider.Name, ep.model, ep.vectorLength)
+		recaller = func(ops memops.MemoryOps) measure.Recaller {
+			return measure.NewService(ops, model.NewHTTPEmbedder(ep.provider, ep.model, ep.vectorLength))
+		}
 	}
+
+	// Inc 3 (deferred): real chat model. Inference-in-loop wiring lands next
+	// increment; for now mock inference runs regardless of the toggle.
 	if *liveInference {
-		log.Info("sim-live: live-inference requested (real chat-model wiring lands in Inc 3); running mock path this increment")
+		log.Info("sim-live: live-inference requested (real chat-model wiring lands in Inc 3); running mock inference this increment")
 	}
 
 	corpus := loadCorpusSlots(t)
-	runSimRung(t, "sim-live-"+*simDuration, d, corpus)
+	runSimRung(t, "sim-live-"+*simDuration, d, corpus, recaller)
+}
+
+// embeddingEndpoint returns the resolved embedding endpoint from the
+// loaded set, failing if it is absent (it must be present when
+// -sim.live-embedding is on, since loadLiveEndpoints resolved it under the
+// same flag). Separated so TestSimLive reads as the toggle wiring it is.
+func embeddingEndpoint(t *testing.T, endpoints []liveEndpoint) liveEndpoint {
+	t.Helper()
+	for _, ep := range endpoints {
+		if ep.role == "embedding" {
+			return ep
+		}
+	}
+	t.Fatalf("sim-live: -sim.live-embedding set but no embedding endpoint resolved (internal inconsistency)")
+	return liveEndpoint{}
 }
 
 // loadLiveEndpoints loads the test/rundata providers + config, resolves
@@ -153,9 +186,13 @@ func loadLiveEndpoints(t *testing.T) []liveEndpoint {
 	if *liveInference {
 		endpoints = append(endpoints, resolveEndpoint(t, "chat", cfg.Chat.DefaultModel, providers))
 	}
-	// Resolve the embedding selection when embedding is requested.
+	// Resolve the embedding selection when embedding is requested. The
+	// [embedding] vectorLength rides along (Matryoshka truncation), so the
+	// embedder is built with the same dimensionality production would use.
 	if *liveEmbedding {
-		endpoints = append(endpoints, resolveEndpoint(t, "embedding", cfg.Embedding.Model, providers))
+		ep := resolveEndpoint(t, "embedding", cfg.Embedding.Model, providers)
+		ep.vectorLength = cfg.Embedding.VectorLength
+		endpoints = append(endpoints, ep)
 	}
 	return endpoints
 }

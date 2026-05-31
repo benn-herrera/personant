@@ -29,6 +29,7 @@
 package scenarios
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -39,9 +40,23 @@ import (
 	"personant/internal/memops"
 	"personant/internal/metrics"
 	"personant/internal/model"
+	"personant/internal/recall/measure"
 	"personant/internal/store"
 	"personant/internal/turn"
 )
+
+// threadIndexer is the narrow optional interface a Recaller may satisfy to
+// receive incremental per-thread index updates as the run creates threads.
+// measure.Service implements it (AddThread). The harness type-asserts the
+// installed recaller against this interface once and, when satisfied, calls
+// AddThread for every thread a step creates — keeping the embedding index
+// current across a run that creates thousands of threads (the session-start
+// Prepare alone cannot recall a thread born mid-run). A recaller that does
+// not implement it (the nil-embedder default) is simply not driven, so the
+// symbolic-only path is unaffected.
+type threadIndexer interface {
+	AddThread(ctx context.Context, threadID string) error
+}
 
 // Step is one turn in a Scenario. Exactly one mock LLM response is
 // queued for the step; running the step calls turn.Run once. Per-step
@@ -202,6 +217,16 @@ type StepFeedback struct {
 	// fire a different thread. nil on the zero-feedback drainSteps path.
 	RecallMatchFireIDs []string
 
+	// EmbedMatchFireIDs is the set of thread IDs that fired
+	// `spine.embed-match-fire` on the just-run turn (de-duplicated, sorted —
+	// embedMatchFireSet semantics). Non-nil only on an embedding-in-loop run
+	// (#98); nil on the symbolic-only default and the zero-feedback drainSteps
+	// path. A StepSource that measures per-candidate recall (the #96
+	// abandoned-topic wander probe) reads it to record whether the EMBEDDING
+	// layer surfaced the specific probed thread, parallel to RecallMatchFireIDs
+	// for the symbolic layer — the per-hop head-to-head gap-closure view.
+	EmbedMatchFireIDs []string
+
 	// RecallExpected is the count of ground-truth matches the step
 	// declared (len of Step.ExpectedRecallMatches); 0 for an unmeasured
 	// step.
@@ -329,6 +354,22 @@ type Scenario struct {
 	// supplies an explicit invariant list, that exact list runs.
 	HeavyInvariantCadence time.Duration
 
+	// Recaller, when non-nil, overrides the default symbolic-only recaller
+	// the harness installs on turn.State. It is a factory (not a built
+	// instance) because the harness builds State during newHarness AND
+	// rebuilds it on a RestartSession step (turn.LoadSession constructs a
+	// fresh State with the nil-embedder default) — both install points call
+	// this with the run's ops so the embedding recaller survives a simulated
+	// relaunch. The harness calls Prepare on the returned recaller after
+	// install. When nil the State keeps turn.NewState's symbolic-only default,
+	// so every existing scenario is unaffected.
+	//
+	// This is the embedding-in-loop seam (#98): the live-sim path passes a
+	// factory that builds measure.NewService(ops, embedder). A recaller that
+	// also satisfies the threadIndexer interface (measure.Service does) gets
+	// per-thread-creation index upkeep wired automatically — see runStep.
+	Recaller func(ops memops.MemoryOps) measure.Recaller
+
 	// MemoryCapBytes, when > 0, arms the harness's heap watchdog: a
 	// goroutine that polls runtime.MemStats.HeapInuse every
 	// memWatchdogCheckInterval and, on cap exceed, captures a heap profile
@@ -433,6 +474,39 @@ type Harness struct {
 	// h.nextHeavyAt by h.heavyCadence. Unused (and meaningless) when
 	// heavyCadence == 0.
 	nextHeavyAt time.Time
+
+	// recallerFactory is Scenario.Recaller — retained so restartSession can
+	// re-install the same custom recaller after turn.LoadSession rebuilds a
+	// nil-embedder State. nil when the scenario kept the default recaller.
+	recallerFactory func(ops memops.MemoryOps) measure.Recaller
+
+	// indexer is the installed recaller's incremental-index seam, set iff the
+	// recaller satisfies threadIndexer (the embedding measure.Service does).
+	// nil for the symbolic-only default. runStep drives it per thread created.
+	indexer threadIndexer
+}
+
+// installRecaller builds the scenario's custom recaller (if any), installs
+// it on the given State, captures its incremental-index seam, and Prepares
+// it. Shared by newHarness's initial install and restartSession's
+// post-relaunch re-install so the embedding recaller — and a primed index —
+// survives a simulated shutdown→relaunch. A no-op when no factory is set
+// (the symbolic-only default State.Recaller stays in place). A Prepare
+// failure is fatal: an embedding run with an unbuilt index would silently
+// measure zero embedding recall, masquerading as a gap-closure failure.
+func (h *Harness) installRecaller(t testing.TB, state *turn.State) {
+	t.Helper()
+	if h.recallerFactory == nil {
+		return
+	}
+	r := h.recallerFactory(h.Ops)
+	state.Recaller = r
+	if ix, ok := r.(threadIndexer); ok {
+		h.indexer = ix
+	}
+	if err := r.Prepare(context.Background()); err != nil {
+		t.Fatalf("install recaller: Prepare: %v", err)
+	}
 }
 
 // NewMockResponseWithTag is the common-case constructor for a Step's

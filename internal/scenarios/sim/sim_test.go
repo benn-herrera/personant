@@ -15,6 +15,7 @@ import (
 
 	"personant/internal/clock"
 	"personant/internal/memops"
+	"personant/internal/recall/measure"
 	"personant/internal/scenarios"
 	"personant/internal/store"
 )
@@ -260,7 +261,7 @@ func TestSim(t *testing.T) {
 	}
 
 	corpus := loadCorpusSlots(t)
-	h := runSimRung(t, "sim-"+*simDuration, d, corpus)
+	h := runSimRung(t, "sim-"+*simDuration, d, corpus, nil)
 
 	// Light sanity band — a smoke rung, not a tuning gate. Derivation:
 	// a work day is 2 sessions of 6 h turn-active time = 12 h of
@@ -311,7 +312,15 @@ func withRunTimestampSuffix(name string) string {
 // the rung walk tracks. It is untagged so it compiles into every test
 // build, and returns the post-run *Harness for any rung-specific
 // follow-up assertions.
-func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot) *scenarios.Harness {
+// runSimRung's recaller argument is the embedding-in-loop seam (#98): the
+// mock acceptance path (TestSim) passes nil → the harness keeps the
+// symbolic-only default recaller, and the run is byte-for-byte the
+// pre-#98 mock rung. The live-embedding path (TestSimLive, build-tag
+// gated) passes a factory that builds measure.NewService(ops, embedder);
+// the harness installs it, Prepares the index, and keeps it current via
+// the per-thread-creation AddThread seam.
+func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot,
+	recaller func(ops memops.MemoryOps) measure.Recaller) *scenarios.Harness {
 	t.Helper()
 
 	sc := GenerateWorkload(WorkloadConfig{
@@ -319,6 +328,7 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 		Duration: d,
 		Corpus:   corpus,
 	})
+	sc.Recaller = recaller
 
 	// Relax the heavy-invariant cadence to sim-daily. The sim's per-step
 	// heavy-invariant sweeps were super-linear in turn count and ate the
@@ -462,6 +472,27 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 		t.Logf("symbolic-only recall (Jaccard):  no measured steps this run")
 	}
 
+	// Embedding-vs-symbolic head-to-head (#98). Present only on an
+	// embedding-in-loop run (embed_recall_fidelity_steps > 0); the mock
+	// acceptance run never installs an embedder, so the series is absent and
+	// this line is skipped — keeping the mock summary unchanged. The two
+	// recall means below are scored against the SAME archival-forgiven
+	// expected set on the SAME workload (recordEmbedRecallFidelity), so the
+	// comparison is apples-to-apples. The REAL gap-closure number is produced
+	// by `make sim-live -sim.live-embedding` against reaper; a MockEmbedder
+	// run exercises the machinery but not semantic recall quality.
+	if esteps := m.Counters["embed_recall_fidelity_steps"]; esteps > 0 {
+		t.Logf("=== embedding-vs-symbolic recall head-to-head (#98) ===")
+		t.Logf("embedding recall: measured over %d steps, mean recall=%.3f mean precision=%.3f mean F1=%.3f",
+			esteps,
+			mean(m.Histograms["embed_recall_fidelity_recall"]),
+			mean(m.Histograms["embed_recall_fidelity_precision"]),
+			mean(m.Histograms["embed_recall_fidelity_f1"]))
+		t.Logf("(symbolic adversarial mean recall=%.3f over %d steps — compare; embedding closes the #96 gap iff it recovers what symbolic misses)",
+			mean(m.Histograms["recall_fidelity_adversarial_recall"]),
+			m.Counters["recall_fidelity_adversarial_steps"])
+	}
+
 	// Miss → refinement episode summary. queries-to-hit is a per-episode
 	// sample (n attempts to first hit, n ∈ {1,2,3}); unresolved is a
 	// counter of episodes that exhausted 3 attempts without a hit or
@@ -529,10 +560,25 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 		m.Gauges[metricWanderCurrentRecall], int(m.Gauges[metricWanderCurrentRecall+"_obs"]))
 	// Per-hop decay + coherence curve (hop 0 = current topic, included so
 	// the curve shows the full active→abandoned gradient).
+	// embedHeadToHead is true on an embedding-in-loop run; it gates the
+	// per-hop embedding column so the mock summary stays unchanged.
+	embedHeadToHead := m.Counters["embed_recall_fidelity_steps"] > 0
 	for hop := 0; hop < wanderMaxHops; hop++ {
 		key := fmt.Sprintf("_h%d", hop)
 		obs := int(m.Gauges[metricWanderOriginRecallByHops+key+"_obs"])
 		if obs == 0 {
+			continue
+		}
+		if embedHeadToHead {
+			// Gap-closure view (#98): symbolic vs embedding per-hop recall on
+			// one denominator. Embedding "closes the gap" iff embed_recall
+			// stays high at hops where symbolic origin_recall has decayed.
+			t.Logf("  hop %d: symbolic_recall=%.3f embed_recall=%.3f coherence=%.3f (%d obs)",
+				hop,
+				m.Gauges[metricWanderOriginRecallByHops+key],
+				m.Gauges[metricWanderEmbedRecallByHops+key],
+				m.Gauges[metricWanderCoherenceByHops+key],
+				obs)
 			continue
 		}
 		t.Logf("  hop %d: origin_recall=%.3f coherence=%.3f (%d obs)",
@@ -1066,6 +1112,12 @@ func recordWanderMetrics(h *scenarios.Harness, gen *generator) {
 		h.Metrics.Set(metricWanderOriginRecallByHops+key+"_obs", float64(total))
 		h.Metrics.Set(metricWanderCoherenceByHops+key,
 			float64(gen.wanderHopCoherent[hop])/float64(total))
+		// Embedding-layer per-hop recall (#98 head-to-head), same denominator
+		// as the symbolic curve above. Zero at every hop on the mock run
+		// (no embed-match-fires); the gap-closure signal on an embedding-in-
+		// loop run is this curve staying high where the symbolic curve decays.
+		h.Metrics.Set(metricWanderEmbedRecallByHops+key,
+			float64(gen.wanderHopEmbedHits[hop])/float64(total))
 		divergence += gen.wanderHopDiverge[hop]
 	}
 	h.Metrics.Set(metricWanderCoherenceDivergence, float64(divergence))

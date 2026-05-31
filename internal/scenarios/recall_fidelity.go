@@ -156,6 +156,50 @@ func matchFireSet(lines []string) []string {
 	return out
 }
 
+// embedMatchFireSet returns the sorted set of thread IDs that have a
+// `spine.embed-match-fire` event among the given log lines — the layer-2
+// (embedding cosine) analogue of matchFireSet. The runtime logs this line
+// per embedding candidate at turn close whenever an embedder is installed
+// (turn/recall.go), so on an embedding-in-loop run it is the observed
+// embedding recall set scored head-to-head against the SAME expected set
+// the symbolic layer is scored against (#98).
+func embedMatchFireSet(lines []string) []string {
+	seen := map[string]struct{}{}
+	for _, line := range lines {
+		if id, ok := eventThreadID(line, "spine.embed-match-fire ", ""); ok {
+			seen[id] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// recordEmbedRecallFidelity records the embedding layer's per-step
+// precision/recall/F1 into the parallel embed_recall_fidelity_* series
+// (#98). It mirrors recordRecallFidelity's scoring but against the
+// embedding match set, and never asserts — the embedding layer is the
+// gap-closure measurement, not a gate.
+//
+// keptExpected is the SAME archival-forgiven expected slice the symbolic
+// path scored against (recordRecallFidelity's `kept`), so the head-to-head
+// is exactly apples-to-apples: both layers face one forgiven ground truth on
+// one workload. A nil keptExpected is the unmeasured step (no ground truth).
+func recordEmbedRecallFidelity(h *Harness, keptExpected, actual []string, measured bool) {
+	if !measured {
+		h.Metrics.Counter("embed_recall_fidelity_unmeasured_steps", 1)
+		return
+	}
+	precision, recall, f1 := recallFidelity(keptExpected, actual)
+	h.Metrics.Counter("embed_recall_fidelity_steps", 1)
+	h.Metrics.Record("embed_recall_fidelity_precision", precision)
+	h.Metrics.Record("embed_recall_fidelity_recall", recall)
+	h.Metrics.Record("embed_recall_fidelity_f1", f1)
+}
+
 // recallFidelity is the per-step measurement of the symbolic Jaccard
 // recall layer's behavior on a ground-truth-labeled step.
 //
@@ -226,17 +270,19 @@ func recallFidelity(expected, actual []string) (precision, recall, f1 float64) {
 //
 // Lives next to its helpers so the harness file stays focused on
 // scenario plumbing.
-// recordRecallFidelity returns the FORGIVEN expected count — the number
-// of expected matches that survive the archival/absent-from-spine filter
-// below (len(kept)). The caller threads this into
+// recordRecallFidelity returns the FORGIVEN expected set — the expected
+// matches that survive the archival/absent-from-spine filter below (kept) —
+// and its count. The caller threads the count into
 // StepFeedback.RecallExpectedForgiven so the recall-episode hit/miss
-// counter forgives archived expectations exactly as this F1/precision
-// path does. An unmeasured step (expected == nil) returns 0.
-func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode RecallFidelityMode, expected, actual []string) int {
+// counter forgives archived expectations exactly as this F1/precision path
+// does, and feeds the kept slice to recordEmbedRecallFidelity so the
+// embedding head-to-head scores the identical forgiven ground truth (#98).
+// An unmeasured step (expected == nil) returns (nil, 0).
+func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode RecallFidelityMode, expected, actual []string) ([]string, int) {
 	t.Helper()
 	if expected == nil {
 		h.Metrics.Counter("recall_fidelity_unmeasured_steps", 1)
-		return 0
+		return nil, 0
 	}
 
 	// Archival-recoverability filter: a step's expected set may name a
@@ -287,7 +333,7 @@ func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode 
 		h.Metrics.Record("recall_fidelity_adversarial_precision", precision)
 		h.Metrics.Record("recall_fidelity_adversarial_recall", recall)
 		h.Metrics.Record("recall_fidelity_adversarial_f1", f1)
-		return expectedForgiven
+		return expected, expectedForgiven
 	}
 
 	h.Metrics.Counter("recall_fidelity_measured_steps", 1)
@@ -296,11 +342,11 @@ func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode 
 	h.Metrics.Record("recall_fidelity_f1", f1)
 	unexpected, missing := recallFidelityMismatch(expected, actual)
 	if len(unexpected) == 0 && len(missing) == 0 {
-		return expectedForgiven
+		return expected, expectedForgiven
 	}
 	t.Errorf("scenario step %d (%s): recall-fidelity mismatch: expected=%v actual=%v unexpected=%v missing=%v",
 		idx+1, label, expected, actual, unexpected, missing)
-	return expectedForgiven
+	return expected, expectedForgiven
 }
 
 // recallFidelityMismatch returns the sorted unexpected (false-positive)
