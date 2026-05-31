@@ -207,7 +207,7 @@ One turn-excerpt file, `turns/0000024.md`:
 
 **`description` vs `summary`.** `description` is the *triggering utterance* — the user prompt that spawned the thread — set once at creation and never rewritten. `summary` is the curator's closure *gist*, set at retirement (§3.5). A live thread has a `description` but no `summary`; a retired thread has both. v0.1 sets `description` deterministically (a whitespace-collapsed copy of the spawning prompt, truncated to the same length bound the new-thread summary uses); no LLM paraphrase is involved.
 
-**No parent.** A thread belongs to no parent thread — the model is flat (§3.2). Lineage/provenance between threads is reserved, not built: there is no parent field and none is synthesized.
+**No parent thread; symbol-level origin provenance.** A thread belongs to no parent thread — the model stays flat (§3.2): there is no thread-level parent field and none is synthesized. *Symbol*-level origin provenance, however, **is** built: a `history_symbols` entry may record the thread(s) it was carried into this thread from via recall (`derived_from`, §2.7.3). This is provenance on symbols, not edges between threads — **the flat-thread invariant is unchanged.** Thread-level lineage remains reserved.
 
 **Body content guidelines:**
 - This is operational, not pedagogical. Terse; machine-friendly.
@@ -226,13 +226,14 @@ interface HistorySymbol {
   lifecycle?: SymbolLifecycle;      // "active" | "superseded"; canonical source of truth for supersession state (see §2.7.x). Omitted ≡ "active".
   ever_central?: boolean;           // latched true the first time the symbol enters the active anchor projection; never cleared. The retention discriminator. Omitted/false ≡ never-central.
   last_active_turn?: number;        // most recent turn the symbol was in the active projection; temporal ordering + eviction tiebreak. Omitted/0 ≡ never-active.
+  derived_from?: string[];          // origin thread ID(s) this symbol was carried into this thread from, observed co-incident with a recall hit (§2.7.3); deterministic, set-valued, monotonic. Omitted/empty ≡ organic to this thread (the common case).
 }
 
 type SymbolSource = "deterministic" | "model" | "user" | "curator";
 type SymbolLifecycle = "active" | "superseded";  // "evicted" is the *absence* of the entry, not a stored value
 ```
 
-**Zero-value semantics (greenfield, no migration — §2.7.x).** The three lifecycle fields are added plainly; an old record decoding without them is well-formed: `lifecycle == ""` is treated as `active`, `ever_central` false ≡ never-central, `last_active_turn` 0 ≡ never-active. `verify`/index-rebuild regenerate the derived projection from canonical on first run.
+**Zero-value semantics (greenfield, no migration — §2.7.x).** The three lifecycle fields are added plainly; an old record decoding without them is well-formed: `lifecycle == ""` is treated as `active`, `ever_central` false ≡ never-central, `last_active_turn` 0 ≡ never-active, `derived_from` absent ≡ empty ≡ organic. `verify`/index-rebuild regenerate the derived projection from canonical on first run.
 
 `history_symbols` is hard-capped at `history.cap-per-thread` directive value (default 40) — a hard *total* cap over both `active` and `superseded` entries. When the cap is exceeded, eviction operates over the **evictable** partition only: a symbol is evictable **iff** it is `NOT ever_central AND NOT a §2.7.2 high-specificity (B11) identifier` — the *union* of two protections (once-central premises stay a findable abandoned-premise handle; intrinsically discriminative identifiers stay matchable). Within the evictable set, lowest cumulative weight: lowest `count` first, ties broken by lowest `first_seen_turn`. **Graceful degradation:** if the protected set alone exceeds the cap, evict the lowest-`count` `superseded` entries first (an abandoned premise yields before a still-protected active one). Symbols with low cumulative count and early `first_seen_turn` represent brief noise rather than persistent signal; retaining them dilutes the Jaccard matching set and degrades recall precision [§3.4].
 
@@ -413,6 +414,16 @@ type SymbolSource =
 ```
 
 When a symbol is emitted by multiple sources, `source_dominant` in `SymbolRecord` is the most-frequent source across all its history entries; ties broken by `curator > user > model > deterministic`.
+
+**Origin provenance (`derived_from`) vs source (`source`).** `source` records *how* a symbol was emitted (the agent). `derived_from` records *where it came from* (origin thread). The two are orthogonal: a symbol can be `source: model` (the model re-emitted it this turn) and `derived_from: [thr_X]` (it surfaced via a recall hit on `thr_X` that same turn) simultaneously.
+
+**Deterministic population — no LLM, no human.** At turn-close, for each symbol newly emitted into the engaged thread's `history_symbols`, if that normalized symbol also appears in the set of threads **recalled during the same turn**, those recalled thread IDs are unioned into the symbol's `derived_from`. The origin is *known* because the recall hit is known. The set is monotonic — origins accumulate, never clear. Recall does not *write* symbols into a thread; it surfaces a parent whose symbol the turn then re-emits — that coincidence is the deterministic attribution hook.
+
+**The synthesis case.** This is the symbol-level realization of "a new thread synthesizes prior threads": when a thread is started by recalling and combining ≥2 prior threads, the symbols it carries forward from each acquire that parent's id — multi-parent provenance distributed across the synthesized symbols, rather than a coarse thread-level edge.
+
+**Recall is provenance-agnostic.** `derived_from` does **not** participate in the §3.4 recall match — recall scores on the symbols themselves; origin is honest provenance metadata (load-bearing for "where did this come from?" queries and submind merge), not a recall input. Keeping recall provenance-agnostic is deliberate.
+
+**Open (deferred).** Synthesis introduced *without* a recall hit — a human or the model brings forward a prior thread's idea by paraphrase, so no normalized symbol matches — leaves `derived_from` empty (honest: the origin is not deterministically known). Attributing that residual is a fuzzy judgment reserved for an LLM-inference or human-declaration path; it is an explicit open decision, **not built in v0.1**.
 
 #### 2.7.4 Symbol lifecycle and anchor projection
 
@@ -2127,8 +2138,12 @@ as runs surface new gaps):
   interleave excerpts + queries from several unrelated topics within a
   session. Until done, recall/precision numbers describe a too-coherent
   stream.
-- **New thread as synthesis** of multiple prior threads (multi-parent
-  provenance at the symbol level).
+- **New thread as synthesis** of multiple prior threads — *accounted-for
+  (built at the symbol level)*: multi-parent provenance is carried as
+  per-symbol `derived_from` (§2.3/§2.7.3), populated deterministically on
+  recall-incorporation; the non-recall-triggered residual is an explicit
+  deferred decision (§2.7.3). The sim models synthesis threads (borrowing
+  symbols from ≥2 prior threads); recall stays provenance-agnostic.
 - **Topic clustering / deep dives, metronomic edit cadence, cold start**
   (the sim-vs-reality review's Lens-B gaps).
 - **Transient-data lifecycle (§3.10)** fidelity — a prerequisite to an
