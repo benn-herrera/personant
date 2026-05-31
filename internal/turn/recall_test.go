@@ -288,6 +288,16 @@ func TestSurfaceRecall_AcceptPromotesToLayerB(t *testing.T) {
 		t.Errorf("thr_2 declined but present in ActiveThreads: %v", state.ActiveThreads)
 	}
 
+	// The §3.4 accept-path recallSurfaced marking now flows through the
+	// shared promoteToLayerB chokepoint (no longer an explicit block in
+	// applyRecallResolution). Accepted thr_1 is marked; declined thr_2 is not.
+	if _, ok := state.recallSurfaced["thr_1"]; !ok {
+		t.Errorf("accepted thr_1 must be marked recallSurfaced via promoteToLayerB; got %v", state.recallSurfaced)
+	}
+	if _, ok := state.recallSurfaced["thr_2"]; ok {
+		t.Errorf("declined thr_2 must not be marked recallSurfaced; got %v", state.recallSurfaced)
+	}
+
 	logBody := readDayLog(t, paths)
 	for _, want := range []string{
 		"recall.offer count=2",

@@ -133,15 +133,13 @@ func applyRecallResolution(ctx context.Context, state *State, offer RecallOffer,
 	}
 	for i, c := range offer.Candidates {
 		if accepted[i] {
+			// promoteToLayerB pulls the thread into Layer B AND records the
+			// §2.7.3 recallSurfaced origin at the shared recall-promotion
+			// chokepoint. As an accept runs at turn-close (after the merge),
+			// the attribution lands one turn later — when the model, having
+			// seen this parent in the next turn's context, re-emits one of
+			// its symbols.
 			promoteToLayerB(state, c.ThreadID)
-			// Record the recall-surfaced origin for §2.7.3 derived_from
-			// attribution. This thread is now in-context as a result of
-			// recall; a later turn that re-emits one of its symbols
-			// attributes that symbol's origin here.
-			if state.recallSurfaced == nil {
-				state.recallSurfaced = make(map[string]struct{})
-			}
-			state.recallSurfaced[c.ThreadID] = struct{}{}
 			if err := state.Ops.Log(ctx, memops.LogCategoryRecall, "accept",
 				fmt.Sprintf("thr=%s layers=%s", c.ThreadID, strings.Join(c.Layers(), "+"))); err != nil {
 				return fmt.Errorf("log recall.accept: %w", err)

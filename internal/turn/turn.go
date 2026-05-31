@@ -136,9 +136,12 @@ type State struct {
 	// defers a closure offer; not persisted (session-scoped).
 	closureDeferUntil map[string]int
 
-	// recallSurfaced marks thread IDs that arrived in context via a recall
-	// accept (§2.7.3 origin-provenance attribution source) — as opposed to
-	// direct engagement or switch. It is the "got here via recall" marker the
+	// recallSurfaced marks thread IDs that arrived in context via recall
+	// (§2.7.3 origin-provenance attribution source) — as opposed to direct
+	// engagement or switch. Both recall paths mark here through their shared
+	// chokepoint promoteToLayerB: the §3.4 recall-accept (applyRecallResolution,
+	// turn-close) and the §5.5 mid-turn fetch (fetchThreadForReprompt). It is
+	// the "got here via recall" marker the
 	// turn-close derived_from population scores newly-emitted symbols against:
 	// a symbol coinciding with a recall-surfaced thread's symbol set acquires
 	// that thread's id as an origin. Eligibility is NOT membership alone — it
@@ -150,16 +153,19 @@ type State struct {
 	// that have left ActiveThreads, bounding the map over a long session.
 	//
 	// Why a State field rather than threaded call/return (#2 option B):
-	// the recall stack runs at turn close (surfaceRecallCandidates →
-	// applyRecallResolution), which is structurally AFTER the merge sites
-	// (engageOwner update + new-thread creation) within the same Run. The
-	// accepted-recall set therefore cannot be threaded forward to those
-	// callers in the same turn — it is produced too late. It is the
+	// the §3.4 recall-accept stack runs at turn close (surfaceRecallCandidates
+	// → applyRecallResolution → promoteToLayerB), which is structurally AFTER
+	// the merge sites (engageOwner update + new-thread creation) within the
+	// same Run. The accepted-recall set therefore cannot be threaded forward
+	// to those callers in the same turn — it is produced too late. It is the
 	// recall accepted in turn N (promoting parents into Layer B, which the
 	// model then sees in turn N+1) that the turn N+1 merge attributes
-	// against. So the set must survive the turn boundary; a per-Run return
-	// value cannot. It is deliberately NOT cleared at turn start: residency,
-	// not turn boundary, ends eligibility. Per-symbol union remains monotonic
+	// against. (The §5.5 mid-turn fetch promotes BEFORE the merge, so it
+	// attributes same-turn — but it too marks through promoteToLayerB into
+	// this same field, so the field serves both paths uniformly.) So the set
+	// must survive the turn boundary; a per-Run return value cannot. It is
+	// deliberately NOT cleared at turn start: residency, not turn boundary,
+	// ends eligibility. Per-symbol union remains monotonic
 	// (an attributed DerivedFrom origin is never removed, §2.7.3); only
 	// eligibility — which origins can be NEWLY added — is residency-gated.
 	// nil is the well-formed empty case (no recall ever accepted).

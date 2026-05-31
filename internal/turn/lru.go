@@ -45,7 +45,21 @@ func fetchThreadForReprompt(ctx context.Context, state *State, thrID string) boo
 // head of state.DormantThreads and capping that slice at
 // dormantThreadsCap. Used by the §5.5 mid-turn fetch and by the §3.4
 // recall-accept path (Part B).
+//
+// This is the shared recall-promotion chokepoint, so it owns the §2.7.3
+// recallSurfaced marking for BOTH callers: fetchThreadForReprompt (§5.5
+// mid-turn fetch) and applyRecallResolution (§3.4 recall-accept). Marking
+// here makes each path record the origin at its natural turn-lifecycle
+// point — accept runs at turn-close (after the merge), so its attribution
+// lands one turn later; a mid-turn fetch runs before the merge, so its
+// attribution lands same-turn — timing falls out of residency for free.
+// touchActiveLRU is NOT routed through here (updateLayerLRU calls it
+// directly for engaged threads), so engagement never marks recallSurfaced.
 func promoteToLayerB(state *State, thrID string) {
+	if state.recallSurfaced == nil {
+		state.recallSurfaced = make(map[string]struct{})
+	}
+	state.recallSurfaced[thrID] = struct{}{}
 	touchActiveLRU(state, thrID)
 }
 

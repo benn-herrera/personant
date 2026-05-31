@@ -169,6 +169,50 @@ func TestSurfacedSymbolSets_EvictedFromLayerB_NotEligible(t *testing.T) {
 	}
 }
 
+// TestFetchThreadForReprompt_SameTurnDerivedFrom is the §5.5 mid-turn-fetch
+// end-to-end proof: a fetch promotes parent X (carrying symbol S) into Layer B
+// BEFORE the turn's merge, so X is resident when the engaged thread merges S —
+// and S's DerivedFrom acquires X within the SAME turn (no one-turn lag, the
+// property that distinguishes §5.5 fetch from §3.4 accept). The fetch path
+// reaches promoteToLayerB via fetchThreadForReprompt; the chokepoint now owns
+// the recallSurfaced marking, so this exercises exactly the production wiring.
+func TestFetchThreadForReprompt_SameTurnDerivedFrom(t *testing.T) {
+	paths, meta := newTestHome(t)
+	// Parent X carries S; the engaged thread starts without it.
+	seedThreadWithAnchors(t, paths, meta.ID, "thr_X", []string{"shared_sym"})
+	seedThreadWithAnchors(t, paths, meta.ID, "thr_engaged", []string{"engaged_own"})
+
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+
+	// §5.5 mid-turn fetch of X. This is the path that calls promoteToLayerB:
+	// it both pulls X into ActiveThreads AND marks it recallSurfaced — all
+	// BEFORE this turn's merge runs.
+	if !fetchThreadForReprompt(context.Background(), state, "thr_X") {
+		t.Fatalf("fetchThreadForReprompt(thr_X) returned false; want success")
+	}
+	if _, ok := state.recallSurfaced["thr_X"]; !ok {
+		t.Fatalf("fetch must mark thr_X recallSurfaced via promoteToLayerB; got %v", state.recallSurfaced)
+	}
+	if len(state.ActiveThreads) == 0 || state.ActiveThreads[0] != "thr_X" {
+		t.Fatalf("fetch must promote thr_X to front of ActiveThreads; got %v", state.ActiveThreads)
+	}
+
+	// Same turn: the engaged thread emits S. Run the production merge-time
+	// attribution exactly as engageOwner/createNewThread do — surfacedSymbolSets
+	// (residency-gated load) feeding populateDerivedFrom.
+	merged := mergeHistorySymbols(nil, []coalescedSymbol{
+		{Normalized: "shared_sym", Raw: "shared_sym", Source: memops.SourceModel},
+	}, 1)
+	populateDerivedFrom(merged, surfacedSymbolSets(context.Background(), state, "thr_engaged"), "thr_engaged")
+
+	if len(merged) != 1 {
+		t.Fatalf("expected one merged symbol; got %d", len(merged))
+	}
+	if got := merged[0].DerivedFrom; !reflect.DeepEqual(got, []string{"thr_X"}) {
+		t.Errorf("same-turn §5.5 fetch: shared_sym DerivedFrom = %#v, want [thr_X] within the SAME turn", got)
+	}
+}
+
 // TestUnionSorted — the sorted-dedup union primitive: insert keeps order,
 // duplicate is a no-op returning the same slice.
 func TestUnionSorted(t *testing.T) {
