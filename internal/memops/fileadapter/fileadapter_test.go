@@ -531,6 +531,140 @@ func TestArchiveThenRecover_RoundTrip(t *testing.T) {
 	}
 }
 
+// seedThreadWithDerivedFrom seeds a thread (seedThread) and then overwrites its
+// frontmatter so its history_symbols carry the given §2.7.3 DerivedFrom origin
+// provenance. Returns the history_symbols slice as written, for the caller to
+// compare against the post-recovery frontmatter.
+func seedThreadWithDerivedFrom(t *testing.T, a *FileAdapter, id, project string, syms []memops.HistorySymbol) []memops.HistorySymbol {
+	t.Helper()
+	seedThread(t, a, id, project, "## Turn 1\n\nbody\n")
+	fm, err := store.LoadThreadFrontmatter(a.paths, id)
+	if err != nil {
+		t.Fatalf("seedDerivedFrom load %s: %v", id, err)
+	}
+	fm.HistorySymbols = syms
+	if err := store.SaveThreadFrontmatter(a.paths, id, fm); err != nil {
+		t.Fatalf("seedDerivedFrom save %s: %v", id, err)
+	}
+	a.fmCache.Invalidate(id)
+	return syms
+}
+
+// assertDerivedFromEqual asserts two history_symbols slices carry identical
+// DerivedFrom values per Normalized symbol — exact and order-stable (§2.7.3
+// keeps DerivedFrom sorted+deduped). It keys by Normalized so it tolerates the
+// slice order being incidental while pinning each symbol's provenance exactly.
+func assertDerivedFromEqual(t *testing.T, want, got []memops.HistorySymbol) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("history_symbols count: got %d want %d", len(got), len(want))
+	}
+	gotByNorm := make(map[string][]string, len(got))
+	for _, s := range got {
+		gotByNorm[s.Normalized] = s.DerivedFrom
+	}
+	for _, w := range want {
+		g, ok := gotByNorm[w.Normalized]
+		if !ok {
+			t.Fatalf("recovered frontmatter missing symbol %q", w.Normalized)
+		}
+		if len(g) != len(w.DerivedFrom) {
+			t.Errorf("symbol %q DerivedFrom: got %#v want %#v", w.Normalized, g, w.DerivedFrom)
+			continue
+		}
+		for i := range w.DerivedFrom {
+			if g[i] != w.DerivedFrom[i] {
+				t.Errorf("symbol %q DerivedFrom[%d]: got %q want %q (order-stable mismatch)", w.Normalized, i, g[i], w.DerivedFrom[i])
+			}
+		}
+	}
+}
+
+// TestArchiveThenRecover_PreservesDerivedFrom is the #105 guard: §2.7.3
+// symbol-level origin provenance (HistorySymbol.DerivedFrom) lives in plain
+// thread.md YAML frontmatter, so the #99 git-tree capture/restore round-trip
+// should preserve it verbatim with NO archival code change. This proves it:
+// archive a thread whose history_symbols carry DerivedFrom origin ids, recover
+// it, and assert every symbol's DerivedFrom survives exact and order-stable.
+func TestArchiveThenRecover_PreservesDerivedFrom(t *testing.T) {
+	pinClock(t)
+	a := newAdapter(t)
+	ctx := context.Background()
+
+	want := seedThreadWithDerivedFrom(t, a, "thr_1", "prj_1", []memops.HistorySymbol{
+		// Carried-in symbol with multiple sorted+deduped origins.
+		{Raw: "manifold", Normalized: "manifold", FirstSeenTurn: 3, Count: 7, Source: memops.SourceModel, DerivedFrom: []string{"thr_origin_a", "thr_origin_b"}},
+		// Carried-in symbol with a single origin.
+		{Raw: "geodesic", Normalized: "geodesic", FirstSeenTurn: 5, Count: 2, Source: memops.SourceUser, DerivedFrom: []string{"thr_origin_c"}},
+		// Organic symbol — no provenance (the common case); zero value must
+		// stay zero across the round-trip.
+		{Raw: "curvature", Normalized: "curvature", FirstSeenTurn: 6, Count: 1, Source: memops.SourceDeterministic},
+	})
+
+	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
+		t.Fatalf("ArchiveThread: %v", err)
+	}
+	if _, err := a.RecoverThread(ctx, "thr_1"); err != nil {
+		t.Fatalf("RecoverThread: %v", err)
+	}
+
+	got, err := store.LoadThreadFrontmatter(a.paths, "thr_1")
+	if err != nil {
+		t.Fatalf("LoadThreadFrontmatter after recovery: %v", err)
+	}
+	assertDerivedFromEqual(t, want, got.HistorySymbols)
+}
+
+// TestArchive_DanglingDerivedFromOriginTolerated is the #105 dangling-origin
+// guard. DerivedFrom is an opaque string set (§2.7.3 "provenance only; never
+// dereferenced") — archiving an origin thread X must not affect a live child
+// thread Z whose history_symbols carry DerivedFrom=[X].
+//
+// (a) is asserted directly: X is archived (off-spine, dir gone) while Z stays
+// live, and Z still loads with DerivedFrom=[X] intact — a dangling/archived
+// origin reference is tolerated because nothing dereferences it.
+//
+// (b) "recovering Z never requires X to be present" holds BY CONSTRUCTION and
+// is documented rather than re-asserted: RecoverThread resolves Z's bytes from
+// Z's own deletion-commit parent and rebuilds Z's spine record from Z's own
+// recovered frontmatter (fileadapter_archive.go RecoverThread steps 3-5). It
+// never reads, lists, or validates any DerivedFrom origin — the string is
+// copied verbatim, never followed. There is no archival API surface where X's
+// presence could gate Z's recovery, so (b) is not independently testable
+// without inventing a dependency the design deliberately does not have.
+func TestArchive_DanglingDerivedFromOriginTolerated(t *testing.T) {
+	pinClock(t)
+	a := newAdapter(t)
+	ctx := context.Background()
+
+	// Origin X — plain seeded thread, will be archived.
+	seedThread(t, a, "thr_91", "prj_1", "## Turn 1\n\norigin body\n")
+	// Child Z — its sole symbol's provenance points at X.
+	wantZ := seedThreadWithDerivedFrom(t, a, "thr_92", "prj_1", []memops.HistorySymbol{
+		{Raw: "manifold", Normalized: "manifold", FirstSeenTurn: 2, Count: 3, Source: memops.SourceModel, DerivedFrom: []string{"thr_91"}},
+	})
+
+	// Archive the origin only; Z stays live.
+	if err := a.ArchiveThread(ctx, "thr_91"); err != nil {
+		t.Fatalf("ArchiveThread origin: %v", err)
+	}
+	if _, found, err := store.FindSpineRecord(a.paths, "thr_91"); err != nil {
+		t.Fatalf("FindSpineRecord origin: %v", err)
+	} else if found {
+		t.Error("origin still on spine after archival")
+	}
+	if _, err := os.Stat(store.ThreadDir(a.paths, "thr_91")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("origin dir still present after archival: err=%v", err)
+	}
+
+	// (a) Z still loads fine with its dangling DerivedFrom=[thr_91] intact.
+	gotZ, err := store.LoadThreadFrontmatter(a.paths, "thr_92")
+	if err != nil {
+		t.Fatalf("LoadThreadFrontmatter child after origin archived: %v", err)
+	}
+	assertDerivedFromEqual(t, wantZ, gotZ.HistorySymbols)
+}
+
 // TestArchiveThenRecover_GitignoreAndMode is the F3 regression guard (#101).
 // Before the fix the integrity token was computed via WorktreeTreeHash (hashes
 // every on-disk file, ignoring .gitignore; derives mode from os.Stat) while the
