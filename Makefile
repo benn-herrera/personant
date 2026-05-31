@@ -1,6 +1,6 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build test cover sim integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
+.PHONY: all build test cover sim sim-live integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
 
 all: build
 
@@ -154,6 +154,26 @@ endif
 DURATION ?= 1w
 sim: build recall-madlibs
 	$(SIM_WRAP) go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 -sim.duration=$(DURATION)
+
+# sim-live runs the build-tag-isolated live-mode sim (TestSimLive, build
+# tag `live_sim`) — the opt-in MEASUREMENT mode that activates the live
+# embedder/chat-model toggles. It is NOT the acceptance gate and is NOT
+# part of `make test` / `make sim`: the `live_sim` tag excludes the entry
+# from every untagged build, so the mock-deterministic gate cannot
+# accidentally hit a live endpoint.
+#
+# Both live toggles are passed ON by default (independent — edit the flags
+# to run one at a time). The run reads the USER-provided, gitignored
+# test/rundata/test.{providers,config}.toml, resolves the selected chat +
+# embedding providers, and FAILS (not skips) if those files are missing or
+# the endpoint is unreachable (design §2). As of Increment 1 the toggles
+# are parsed + logged but wired as no-ops past that guard — the run is the
+# ordinary mock path; the embedder/client swap lands in Inc 2/3.
+#
+#   make sim-live DURATION=1d
+sim-live: build recall-madlibs
+	$(SIM_WRAP) go test -tags live_sim ./internal/scenarios/sim/ -run TestSimLive -count=1 -v -timeout 0 \
+	  -sim.duration=$(DURATION) -sim.live-embedding -sim.live-inference
 
 # integration-test runs the live-inference tests (build tag
 # `integration`) — they require the `reaper` provider reachable.
