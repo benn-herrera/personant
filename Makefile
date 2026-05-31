@@ -163,21 +163,27 @@ sim: build recall-madlibs
 # gated on its -sim.live-* toggles. It is NOT the acceptance gate and is
 # NOT part of `make test` / `make sim`: with no toggle set (the bare
 # `make test` / `make sim` case) TestSimLive SKIPS, so the
-# mock-deterministic gate cannot accidentally hit a live endpoint. This
-# target passes both toggles, opting the live path in.
+# mock-deterministic gate cannot accidentally hit a live endpoint.
 #
-# Both live toggles are passed ON by default (independent — edit the flags
-# to run one at a time). The run reads the USER-provided, gitignored
+# EMBEDDING / INFERENCE select the two live elements independently (both ON
+# by default). They are passed as the `=<bool>` form of the toggles, so:
+#   make sim-live                          # both live (embedding + inference)
+#   make sim-live INFERENCE=false          # embedding-in-loop only
+#   make sim-live EMBEDDING=false          # inference-in-loop only
+#   make sim-live EMBEDDING=false INFERENCE=false   # neither → SKIPS (use `make sim`)
+# The run reads the USER-provided, gitignored
 # test/rundata/test.{providers,config}.toml, resolves the selected chat +
 # embedding providers, and FAILS (not skips) if those files are missing or
-# the endpoint is unreachable (design §2). As of Increment 1 the toggles
-# are parsed + logged but wired as no-ops past that guard — the run is the
-# ordinary mock path; the embedder/client swap lands in Inc 2/3.
+# the endpoint is unreachable (design §2). Embedding-in-loop keeps the
+# recall oracle valid (symbolic-vs-embedding head-to-head); inference-in-loop
+# is a SHORT behavior-validation mode with the oracle gates relaxed.
 #
-#   make sim-live DURATION=1d
+#   make sim-live DURATION=1d EMBEDDING=true INFERENCE=false
+EMBEDDING ?= true
+INFERENCE ?= true
 sim-live: build recall-madlibs
 	$(SIM_WRAP) go test ./internal/scenarios/sim/ -run TestSimLive -count=1 -v -timeout 0 \
-	  -sim.duration=$(DURATION) -sim.live-embedding -sim.live-inference
+	  -sim.duration=$(DURATION) -sim.live-embedding=$(EMBEDDING) -sim.live-inference=$(INFERENCE)
 
 # integration-test runs the live-inference tests — they require the
 # `reaper` provider reachable. The tests ALWAYS COMPILE (part of the

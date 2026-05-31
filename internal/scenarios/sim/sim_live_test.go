@@ -91,12 +91,16 @@ func TestSimLive(t *testing.T) {
 	}
 
 	if !*liveEmbedding && !*liveInference {
-		// Neither toggle set: this is the runtime opt-out. Since the file
-		// always compiles, bare `make test` / `make sim` reaches TestSimLive
-		// with no toggle — SKIP it (the toggles are the opt-in). `make
-		// sim-live` always passes both flags, so it runs the live path.
-		t.Skip("TestSimLive skipped — no live toggle set; run via `make sim-live` " +
-			"(or pass -sim.live-embedding / -sim.live-inference) to exercise the live endpoint")
+		// No live element selected. Two ways here: (a) bare `make test` /
+		// `make sim` reaches the always-compiled TestSimLive with no toggle
+		// (the deterministic mock gate must not hit a live endpoint), and
+		// (b) an explicit `make sim-live EMBEDDING=false INFERENCE=false`.
+		// Both SKIP (not fail): there is no live element to run, and the
+		// deterministic mock run has its own home (`make sim`). A skip avoids
+		// a wasted live invocation without redding the mock gate.
+		t.Skip("TestSimLive skipped — no live element enabled. For the deterministic " +
+			"mock run use `make sim`; to run live set EMBEDDING=true and/or INFERENCE=true " +
+			"(e.g. `make sim-live`), or pass -sim.live-embedding / -sim.live-inference")
 	}
 
 	// Config load + usable-endpoint guard (design §2). Runs whenever EITHER
