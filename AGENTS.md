@@ -331,6 +331,8 @@ under it an unreachable endpoint is a FAILURE, not a skip),
 `//go:build` tags for conditional execution — tagged tests are excluded
 from the normal compile and bit-rot silently.
 
+**Ensure Docs Stay Up To Date** - AGENTS.md, README.md, ARCHITECTURE.md, SPEC.md must be brought up to date when committing checkpoints.
+
 ## House rules for agents
 
 - **Be deliberate about dependencies.** Two categories:
