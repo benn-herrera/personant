@@ -824,9 +824,11 @@ To archive a batch of threads:
    verify against).
 2. A **capture commit** pins the to-be-archived directories into a
    committed tree — this commit becomes the *parent* where the thread
-   bytes remain reachable after removal. (Per-turn writes do not commit;
-   the substrate commits at `init` and at archival, so this step
-   guarantees the bytes are in a committed tree before deletion.)
+   bytes remain reachable after removal. (Per-turn *content* writes do
+   not commit; the substrate commits at `init`, on structural change,
+   at archival, and at session close — §3.11 — so a capture commit here
+   guarantees the bytes are in a committed tree before deletion
+   regardless of what the cadence committed earlier.)
 3. Stage the recursive removal of each `threads/thr_<n>/` directory
    (`os.RemoveAll` + `autogit.Add(".")`, which stages tracked-file
    deletions), remove all spine records in **one** filtered rewrite
@@ -1162,6 +1164,49 @@ simulation scale (§9.1), this pollution would compound turn-by-turn
 until recall measurements reflected noise level as much as signal. The
 transient-data lifecycle is therefore a prerequisite for meaningful
 execution of the recall-fidelity measurement regime (§9).
+
+### 3.11 Substrate commit cadence
+
+The substrate is a git repo; every commit buys a recovery point at the
+cost of `.git` growth and commit overhead. The cadence policy is
+**commit-on-structural-change**: the substrate commits at `init`, on
+each **structural change**, at **archival** (§3.8, its own
+capture/deletion/stamp batch), and at **session close**. Per-turn
+*content* writes (turn excerpts, `history_symbols` accretion, anchor
+re-projection, file edits) do **not** themselves commit.
+
+**Structural change** = a turn that **creates** a thread (incl. a
+synthesis thread, §2.7.3) or **closes/retires** one (§3.5 closure), or
+the creation of a project. Archival is structural but commits via its
+own §3.8 batch.
+
+**The check is performed once at turn close**, not at each mutation
+site: a turn that produced ≥1 structural change yields **exactly one**
+commit. A close+create switch, or a vacation closure-storm (§9 T1-4)
+that retires many threads in one turn, is therefore a single commit, not
+one per event — fewer commits than a per-mutation rule, and the turn's
+accumulated content rides along in the same commit.
+
+**Session-close commit.** At session end the runtime commits any pending
+working-tree changes — the safety net that flushes content-only turns
+accumulated since the last structural commit.
+
+**Why this cadence.** Per-turn commits at multi-month scale produce tens
+of thousands of commits and corresponding `.git` growth; per-session
+commits lose up to a session's work on a crash. Commit-on-structural-
+change is the empirically-chosen middle: the §9 sim measures ≈36
+structural changes per sim-day against ≈229 turns/session (≈1 commit per
+6 turns), an order of magnitude below per-turn. It is a §9 calibration
+choice, not a frozen constant — adjustable if the sim's measured
+commit rate, `.git` growth, or commit overhead warrant.
+
+**Durability gap (by design).** Content-only turns between structural
+commits are uncommitted; a hard crash loses at most that window, bounded
+by the session-close commit. Finer-grain per-turn recovery is the
+separate concern of the forced-shutdown/crash-resilience work (a per-turn
+transaction boundary + reconstruct-on-open), which layers *beneath* this
+cadence rather than replacing it — the cadence governs git recovery
+points; the journal governs mid-session crash replay.
 
 ---
 
