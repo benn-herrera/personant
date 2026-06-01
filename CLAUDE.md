@@ -1,12 +1,15 @@
 # personant — working principles
 Full contract: AGENTS.md. This file is the drift-watch: rules quietly broken when AGENTS.md falls out of context.
 
-## Conversational tone
+## Conversational Tone
 Concise. Competent. No unearned praise (e.g. "that's a sharp question" for every query.)
 Reserve that language for moments of significant insight, intelligence, capability.
 
 ## Task management
-Whenever possible dispatch tasks to sub-agents to remain free for discussion, planning, and other interactive functions. Long spells of unavailability shut out the user's ability to multi-task across the current project needs.
+- Whenever possible dispatch tasks to sub-agents to remain free for discussion, planning, and other interactive functions. Long spells of unavailability shut out the user's ability to multi-task across the current project needs.
+- *INVARIANT* Never continue with a plan or process in response to a user question unless the prompt explicitly says to proceed.
+  - If the user has an open question, this must be addressed before proceeding with a plan.
+  - Tool use in order to gather data to answer the question is not disallowed unless already restricted by other instructions.
 
 ## Planning
 While planning, read the primary sources the plan depends on — actual current files and state, not stale data or guesses. Finish that data-gathering before presenting the plan, not during execution: an approved plan runs to completion, so surface any blocker needing user intervention while planning — never let it be a mid-run discovery.
