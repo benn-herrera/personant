@@ -66,7 +66,7 @@ The ack is the **integrity gate** at the moment its accuracy matters most.
 
 The runtime performs many operations the LLM cannot. Most notably **git**:
 
-- The runtime owns `~/.personant/`'s git tree autonomically (init, add/commit on every canonical mutation) via the `internal/autogit` wrapper, which composes in-process go-git operations with policy-driven systemic-validation checks (`CheckDerivedFresh`, `CheckSpineIntegrity`) declared as bitflags on each call. No git pre-commit hook is installed: validation runs as part of personant's own logic at the event points where it's required. Same lifecycle status as writing to `spine.jsonl`.
+- The runtime owns `~/.personant/`'s git tree autonomically (init, then **commit-on-structural-change** per SPEC §3.11 — a commit fires at turn close when the turn created or retired a thread, plus at archival and session close, *not* on every canonical write) via the `internal/autogit` wrapper, which composes in-process go-git operations with policy-driven systemic-validation checks (`CheckDerivedFresh`, `CheckSpineIntegrity`) declared as bitflags on each call. No git pre-commit hook is installed: validation runs as part of personant's own logic at the event points where it's required. Same lifecycle status as writing to `spine.jsonl`.
 - The runtime issues read-only git queries against the user's *workspace* (`git ls-files`, `git status`, `git diff`) for permission-tier classification and ack-prompt diff rendering.
 - The LLM has **no git tool**.
 
