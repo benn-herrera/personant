@@ -145,6 +145,17 @@ type Step struct {
 	// is NOT covered here and is tracked separately as queued crash-recovery
 	// work (sim-vs-reality MAD finding B9 / T0-3).
 	RestartSession bool
+
+	// SleepCycle marks a deterministic ARCHITECTURE.md "sleep cycle" step
+	// (task #108): the sim's day-off generator emits one such step per
+	// day-off idle window. It carries no turn — UserInput is empty and no
+	// LLM consult runs. Instead the harness intercepts it before any turn
+	// machinery and drives h.Ops.Consolidate (substrate gc), measuring the
+	// .git footprint before and after to prove reclamation. A SleepCycle
+	// step is the ONLY step type the harness routes off the turn path; it
+	// is seed-independent (fires every day-off) so it does not perturb the
+	// workload's (Seed, Duration) determinism contract.
+	SleepCycle bool
 }
 
 // ClosureAck scripts how a step resolves a §3.5 closure offer surfaced

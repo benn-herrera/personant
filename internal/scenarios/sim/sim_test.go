@@ -786,7 +786,51 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	t.Logf("extrapolated 6 m runtime ≥ %s (floor; real per-turn cost grows "+
 		"with spine size, so the actual run will exceed this)", floor.Round(time.Second))
 
+	reportSleepCycles(t, m, d)
+
 	return h
+}
+
+// sleepCycleDayOffPeriod is the day index modulus the workload uses to
+// schedule a day-off (every 7th day, index 6/13/…). A run spanning at
+// least this many calendar days crosses ≥1 day-off and must therefore fire
+// ≥1 sleep cycle (#108).
+const sleepCycleDayOffPeriod = 7
+
+// reportSleepCycles logs the sleep-cycle (#108) summary — count fired and
+// the .git footprint reclaimed by substrate gc — and, when the run spanned
+// at least one day-off, hard-asserts that ≥1 cycle ran with its pre/post
+// .git-size gauges populated. A run too short to reach a day-off records 0
+// and asserts nothing (the marker simply never fired).
+func reportSleepCycles(t *testing.T, m metricsBlob, d time.Duration) {
+	t.Helper()
+	// Metric keys match the harness-side constants in package scenarios
+	// (harness_run.go): sleep_cycles, git_dir_bytes_pre_gc/post_gc,
+	// git_dir_bytes_reclaimed. The harness owns the emit-side constants; the
+	// metrics blob is consumed cross-package by string key, the same
+	// convention as "turns"/"turn_duration_ms" elsewhere in this file.
+	cycles := m.Counters["sleep_cycles"]
+	pre := m.Histograms["git_dir_bytes_pre_gc"]
+	post := m.Histograms["git_dir_bytes_post_gc"]
+	reclaimed := m.Counters["git_dir_bytes_reclaimed"]
+
+	t.Logf("=== sleep cycles (#108) ===")
+	t.Logf("sleep_cycles:     %d", cycles)
+	t.Logf("git_dir_bytes:    pre-gc mean=%.0f post-gc mean=%.0f reclaimed total=%d",
+		mean(pre), mean(post), reclaimed)
+
+	spannedDayOff := d >= sleepCycleDayOffPeriod*24*time.Hour
+	if !spannedDayOff {
+		return
+	}
+	if cycles < 1 {
+		t.Errorf("sleep_cycles = %d over a %s run that spans ≥1 day-off — the day-off "+
+			"consolidation hook is dead (expected ≥1)", cycles, d)
+	}
+	if len(pre) == 0 || len(post) == 0 {
+		t.Errorf("sleep-cycle .git-size gauges missing: pre samples=%d post samples=%d "+
+			"(expected one per cycle, %d cycles)", len(pre), len(post), cycles)
+	}
 }
 
 // historyCapForReport mirrors turn.historyCapPerThread (the §2.6.1 hard

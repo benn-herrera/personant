@@ -1203,7 +1203,9 @@ not bog down even at this rate — it stays well below per-turn. The cost it
 *does* carry is loose-object accumulation in `.git` (the sim never packs:
 ≈159 MB unpacked over 15 sim-days); packing is delegated to the offline
 **sleep/consolidation cycle** (`git gc`/repack — ARCHITECTURE.md), not a
-working-hours operation. It is a §9 calibration choice, not a frozen
+working-hours operation. `MemoryOps.Consolidate` is the sleep-cycle entry
+point — today it runs go-git gc (`RepackObjects` + `Prune`); the §9 sim
+fires it on the day-off idle window. It is a §9 calibration choice, not a frozen
 constant — adjustable (e.g. commit only on terminal retirement, not
 wip-pause) if `.git` growth or overhead ever warrant, but the measured
 linear cost did not.

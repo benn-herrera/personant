@@ -43,8 +43,10 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/storage/filesystem"
 
 	"personant/internal/index"
+	pnlog "personant/internal/log"
 	"personant/internal/memops"
 	"personant/internal/store"
 	"personant/internal/verify"
@@ -540,6 +542,83 @@ func Tag(ctx context.Context, paths store.PersonantPaths, name, commitHash strin
 	}
 	if _, err := repo.CreateTag(name, hash, nil); err != nil {
 		return fmt.Errorf("autogit.Tag: create %q: %w", name, err)
+	}
+	return nil
+}
+
+// GC runs an offline garbage-collection pass over the home tree, packing
+// reachable loose objects and pruning unreachable ones — the substrate op
+// behind the ARCHITECTURE.md "sleep cycle" (task #108). It is a pure
+// space optimization: a personant session writes one loose object per
+// commit and never packs during the session, so the loose-object pile
+// grows unbounded until a gc folds it into a packfile. The triad runs in
+// order:
+//
+//  1. RepackObjects — packs reachable loose objects into a packfile,
+//     deletes the now-packed loose copies, and deletes the superseded old
+//     packs. This is what reclaims the disk.
+//  2. Prune — removes unreachable (garbage) loose objects the repack did
+//     not pack (e.g. orphaned by a reset).
+//  3. PackRefs — folds loose refs into packed-refs, if the storer exposes
+//     it. Refs are tiny; this is a tidy-up, not the disk win.
+//
+// BEST-EFFORT: gc is an optimization, never correctness. A storer that
+// cannot pack (RepackObjects → ErrPackedObjectsNotSupported) or cannot
+// enumerate loose objects (Prune → ErrLooseObjectsNotSupported) — e.g. an
+// in-memory or empty repo — is a clean no-op: logged at debug, returns
+// nil. PackRefs failure is likewise logged and swallowed. Only a genuinely
+// unexpected repack/prune error propagates; the caller (Consolidate) must
+// also treat any returned error as non-fatal — a sleep cycle that cannot
+// gc must not abort the run.
+func GC(ctx context.Context, paths store.PersonantPaths) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("autogit.GC: %w", err)
+	}
+	repo, err := git.PlainOpen(paths.Home)
+	if err != nil {
+		return fmt.Errorf("autogit.GC: open repo: %w", err)
+	}
+
+	// (1) Repack: pack reachable loose objects, delete their loose copies
+	// and the old packs. ErrPackedObjectsNotSupported ⇒ nothing to pack.
+	if err := repo.RepackObjects(&git.RepackConfig{}); err != nil {
+		if errors.Is(err, git.ErrPackedObjectsNotSupported) {
+			pnlog.Debug("autogit.GC: repack unsupported by storer; skipping (no-op)")
+			return nil
+		}
+		return fmt.Errorf("autogit.GC: repack: %w", err)
+	}
+
+	// (2) Prune unreachable loose objects not packed in (1).
+	// ErrLooseObjectsNotSupported ⇒ no loose objects to prune.
+	//
+	// Re-open the repo first: RepackObjects wrote a new packfile and deleted
+	// the old packs, but the in-memory storer that did the repack still
+	// caches the OLD pack layout. Prune's reachability walk resolves objects
+	// through that stale cache and fails with "packfile not found" for any
+	// object that moved into the fresh pack. A fresh PlainOpen re-reads the
+	// post-repack pack layout, so the walk resolves cleanly.
+	pruneRepo, err := git.PlainOpen(paths.Home)
+	if err != nil {
+		return fmt.Errorf("autogit.GC: re-open repo for prune: %w", err)
+	}
+	if err := pruneRepo.Prune(git.PruneOptions{Handler: pruneRepo.DeleteObject}); err != nil {
+		if errors.Is(err, git.ErrLooseObjectsNotSupported) {
+			pnlog.Debug("autogit.GC: prune unsupported by storer; skipping")
+			return nil
+		}
+		return fmt.Errorf("autogit.GC: prune: %w", err)
+	}
+
+	// (3) Pack refs if the storer's reference storage exposes it. Reached
+	// via a type assertion on the concrete filesystem storer; any other
+	// storer (in-memory) simply skips this tidy-up. Best-effort: a
+	// PackRefs failure is logged and swallowed — refs are tiny and not the
+	// reclamation goal.
+	if fsStorer, ok := pruneRepo.Storer.(*filesystem.Storage); ok {
+		if err := fsStorer.PackRefs(); err != nil {
+			pnlog.Warn("autogit.GC: pack refs: %v", err)
+		}
 	}
 	return nil
 }

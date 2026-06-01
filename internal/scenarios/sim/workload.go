@@ -836,6 +836,19 @@ type dayBuf struct {
 	firstStep int // global step index of steps[0]
 }
 
+// dayHasTurn reports whether the day buffered at least one real turn — any
+// step that is not a no-turn SleepCycle marker (#108). Used to keep the
+// day-off (sleep-only) from injecting a spurious 0 into the per-day
+// structural-change distribution.
+func dayHasTurn(day dayBuf) bool {
+	for _, bs := range day.steps {
+		if !bs.step.SleepCycle {
+			return true
+		}
+	}
+	return false
+}
+
 // Next yields the next scenarios.Step, implementing scenarios.StepSource.
 // It hands out the current day's buffered steps one at a time; when that
 // day drains it advances the generator until another day with turns is
@@ -1223,11 +1236,13 @@ func (g *generator) generateNextDay() (dayBuf, bool) {
 	g.day = nil
 
 	// Flush the day's material-structural-change tally (#42). Only a day
-	// that emitted turns contributes a sample — a day off creates no
+	// that emitted TURNS contributes a sample — a day off creates no
 	// threads and would otherwise inject a spurious 0 into the
-	// distribution. Reset the accumulator regardless so the next day
-	// starts clean.
-	if len(day.steps) > 0 {
+	// distribution. A day-off now buffers a single SleepCycle marker step
+	// (#108), which is not a turn, so gate on "has a non-sleep step"
+	// rather than "has any step." Reset the accumulator regardless so the
+	// next day starts clean.
+	if dayHasTurn(day) {
 		g.structuralChangesPerDay = append(g.structuralChangesPerDay, g.dayStructuralChanges)
 	}
 	g.dayStructuralChanges = 0
@@ -1310,11 +1325,24 @@ func (g *generator) runWorkDay() {
 // jittered ~24–36 h day-off gap, carried as the next day's first step's
 // TimeDelta. The long recurring gap is deliberate — it crosses the §3.5
 // wall-clock decay threshold so the longer rungs exercise decay/closure.
+//
+// The day-off idle window is also where the ARCHITECTURE.md sleep cycle
+// runs (#108): runDayOff appends one deterministic SleepCycle marker step
+// (no turn, no LLM consult). The harness intercepts the marker and drives
+// h.Ops.Consolidate (substrate gc) — the generator is a stateless
+// StepSource and cannot reach Ops, so the marker is the seam. The marker
+// fires every day-off and carries no seed-dependent payload, so it does
+// not perturb the (Seed, Duration) determinism contract.
 func (g *generator) runDayOff() {
 	g.simNow -= g.pendingGap // discard any pending intra-day gap
 	off := jitter(g.rng, g.cfg.DayOffGap)
 	g.simNow += off
 	g.pendingGap = off
+
+	g.appendStep(bufStep{step: scenarios.Step{
+		SleepCycle: true,
+		Annotation: fmt.Sprintf("day %d: sleep-cycle (day-off consolidation)", g.dayIndex+1),
+	}})
 }
 
 // layerBCap mirrors memops.DefaultBTopK (spec §2.6.1 layer.b-top-k):

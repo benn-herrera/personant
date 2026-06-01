@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -142,6 +144,16 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 	label := step.Annotation
 	if label == "" {
 		label = fmt.Sprintf("step %d", idx+1)
+	}
+
+	// Sleep-cycle steps (#108) carry no turn: route them off the turn path
+	// entirely. The harness owns h.Ops, so the substrate consolidation runs
+	// here (the generator is a stateless StepSource that cannot reach Ops).
+	// Returns a zero-but-indexed feedback so downstream bucketing treats it
+	// as a real, no-recall-opportunity step (Index >= 0, RecallExpected 0).
+	if step.SleepCycle {
+		runSleepCycle(t, h, idx, label)
+		return StepFeedback{Index: idx}
 	}
 
 	// Sample memory telemetry BEFORE the step executes so even a step
@@ -465,6 +477,65 @@ func (h *Harness) refreshArchivedSet() {
 // the gauge O(1) regardless of how much a long run archived; recovery is the
 // same code path for every entry, so a sample is sufficient to exercise it.
 const recoveryGaugeSample = 5
+
+// Sleep-cycle metric keys (#108). One source of truth for the harness
+// emitter and any downstream summary/baseline comparison.
+const (
+	// metricSleepCycles counts how many sleep/consolidation passes the run
+	// fired (one per day-off).
+	metricSleepCycles = "sleep_cycles"
+	// metricGitDirBytesPreGC / PostGC are histograms — one sample per sleep
+	// cycle — of the substrate .git directory size immediately before and
+	// after the gc. The post < pre delta is the reclamation proof.
+	metricGitDirBytesPreGC  = "git_dir_bytes_pre_gc"
+	metricGitDirBytesPostGC = "git_dir_bytes_post_gc"
+	// metricGitDirBytesReclaimed accumulates total bytes reclaimed across all
+	// sleep cycles (pre − post, clamped at 0 so a cycle that grew .git — e.g.
+	// a fresh pack larger than the loose pile it replaced — does not subtract).
+	metricGitDirBytesReclaimed = "git_dir_bytes_reclaimed"
+)
+
+// runSleepCycle drives one ARCHITECTURE.md sleep cycle (#108): it measures
+// the substrate .git footprint, calls h.Ops.Consolidate (substrate gc), and
+// re-measures, recording the before/after sizes so the run proves gc
+// reclamation. Consolidate is non-fatal by contract (a gc failure is logged
+// and swallowed inside the adapter), so this never fails the test on gc
+// trouble — it asserts only that the port call itself returns without error.
+func runSleepCycle(t *testing.T, h *Harness, idx int, label string) {
+	t.Helper()
+	pre := gitDirBytes(h.Paths.Home)
+	if err := h.Ops.Consolidate(context.Background(), "sleep-cycle: day-off"); err != nil {
+		t.Fatalf("scenario step %d (%s): Consolidate: %v", idx+1, label, err)
+	}
+	post := gitDirBytes(h.Paths.Home)
+
+	h.Metrics.Counter(metricSleepCycles, 1)
+	h.Metrics.Record(metricGitDirBytesPreGC, float64(pre))
+	h.Metrics.Record(metricGitDirBytesPostGC, float64(post))
+	if pre > post {
+		h.Metrics.Counter(metricGitDirBytesReclaimed, pre-post)
+	}
+}
+
+// gitDirBytes returns the total on-disk size of home's .git directory in
+// bytes via a filepath.Walk over regular files. A walk error (e.g. a file
+// vanishing mid-walk during a concurrent op — not expected in the
+// single-threaded sim) yields the bytes counted so far; the gauge is
+// forensic, not load-bearing, so a partial count beats failing the run.
+func gitDirBytes(home string) int64 {
+	var total int64
+	root := filepath.Join(home, ".git")
+	_ = filepath.Walk(root, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // skip unreadable entries; keep counting
+		}
+		if !info.IsDir() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
+}
 
 // runRecoveryGauge is the §6.3 / AC1 "recoverable, measured" gauge. It reads
 // the archive index and, for up to recoveryGaugeSample entries, drives

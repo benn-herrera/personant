@@ -14,6 +14,7 @@ import (
 	"personant/internal/autogit"
 	"personant/internal/clock"
 	"personant/internal/eventlog"
+	pnlog "personant/internal/log"
 	"personant/internal/memops"
 	"personant/internal/store"
 )
@@ -39,6 +40,11 @@ const (
 	// verified content" in the forensic log (F6).
 	archiveActionRecoveredRecord = "recovered-record"
 )
+
+// consolidateAction is the event-log action for one sleep-cycle pass
+// (MemoryOps.Consolidate). reason= carries the schedule context; gc=ok|err
+// records whether the substrate gc reclaimed or fell back.
+const consolidateAction = "sleep-cycle"
 
 // threadRelDir returns the repo-relative, slash-separated directory path a
 // thread occupies under the home tree (e.g. "threads/thr_7"). This is the
@@ -78,6 +84,36 @@ func (a *FileAdapter) Checkpoint(ctx context.Context, reason string) error {
 			return nil // clean tree — nothing to checkpoint
 		}
 		return fmt.Errorf("fileadapter: checkpoint: commit: %w", err)
+	}
+	return nil
+}
+
+// Consolidate runs one offline sleep-cycle pass (MemoryOps.Consolidate,
+// task #108). Today the pass is substrate gc — autogit.GC packs the
+// session's accumulated loose git objects and prunes garbage, bounding the
+// home tree's on-disk footprint across long-lived sessions. It is
+// extensible to spine compaction / archival advance later.
+//
+// gc failure is NON-FATAL: a sleep cycle is a pure optimization, so a gc
+// error is logged (and recorded as gc=err on the event line) but does not
+// propagate — the method returns nil so a failed reclamation never aborts
+// the session it runs inside. An event-log write failure, by contrast,
+// does propagate: the forensic record is the one durable signal the cycle
+// ran, and losing it silently would hide the pass entirely.
+func (a *FileAdapter) Consolidate(ctx context.Context, reason string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	gcStatus := "ok"
+	if err := autogit.GC(ctx, a.paths); err != nil {
+		// Non-fatal: log and record, but do not abort the caller. The %s
+		// arg keeps any error text out of format-string position.
+		pnlog.Warn("fileadapter: consolidate: gc failed (non-fatal): %v", err)
+		gcStatus = "err"
+	}
+	if err := eventlog.Log(a.paths, memops.LogCategoryConsolidate, consolidateAction,
+		fmt.Sprintf("reason=%s gc=%s", reason, gcStatus)); err != nil {
+		return fmt.Errorf("fileadapter: consolidate: log: %w", err)
 	}
 	return nil
 }

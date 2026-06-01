@@ -432,6 +432,23 @@ type MemoryOps interface {
 	// its own transaction/snapshot boundary; the application never sees git.
 	Checkpoint(ctx context.Context, reason string) error
 
+	// Consolidate runs an offline consolidation pass over the substrate —
+	// the ARCHITECTURE.md "sleep cycle." Today it runs substrate gc
+	// (autogit.GC: RepackObjects + Prune), folding the session's
+	// accumulated loose git objects into a packfile and pruning garbage so
+	// the substrate's on-disk footprint stays bounded across long-lived
+	// sessions. It is extensible to spine compaction / archival advance /
+	// derived-state recomputation as the sleep cycle grows.
+	//
+	// `reason` is folded into the consolidation event log line for
+	// forensics (the caller builds it from schedule context, never from
+	// user content). Consolidation is a pure optimization: a gc failure is
+	// non-fatal — the adapter logs it and returns nil — because a sleep
+	// cycle that cannot reclaim space must never abort the session it runs
+	// inside. Production does not yet schedule this; only the sim triggers
+	// it, on its day-off idle window.
+	Consolidate(ctx context.Context, reason string) error
+
 	// ---------- Bootstrap and verification ----------
 
 	// Init scaffolds the substrate for first-run use. Idempotent: a
