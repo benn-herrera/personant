@@ -227,6 +227,40 @@ func ReadThreadBody(paths PersonantPaths, threadID string, byteBudget int) (stri
 	return b.String(), nil
 }
 
+// ReadThreadExcerpts reads a thread's retained turn-excerpt files as
+// discrete per-turn units, in turn-number order (oldest→newest). Unlike
+// ReadThreadBody it does not join them — it preserves the per-file
+// boundary the fine-tier embedding index chunks on, which a join would
+// lose (an excerpt's own text can contain the blank-line separator the
+// join inserts). A thread with no turns/ directory yet returns
+// (nil, nil).
+func ReadThreadExcerpts(paths PersonantPaths, threadID string) ([]memops.ThreadExcerpt, error) {
+	turnsDir := ThreadTurnsDir(paths, threadID)
+	nums, err := turnFileNumbers(turnsDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read thread excerpts %s: %w", threadID, err)
+	}
+	if len(nums) == 0 {
+		return nil, nil
+	}
+	out := make([]memops.ThreadExcerpt, 0, len(nums))
+	for _, n := range nums {
+		path := filepath.Join(turnsDir, turnFileName(n))
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read thread excerpts %s: read %s: %w", threadID, path, err)
+		}
+		out = append(out, memops.ThreadExcerpt{
+			TurnNumber: n,
+			Text:       strings.TrimRight(string(data), "\n"),
+		})
+	}
+	return out, nil
+}
+
 // LoadThread is the convenience whole-thread read: LoadThreadFrontmatter
 // plus ReadThreadBody with no byte budget. For callers that genuinely
 // need the entire thread (the closure curator). Index, verify, and the

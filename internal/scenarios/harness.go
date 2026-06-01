@@ -536,6 +536,11 @@ func (h *Harness) installRecaller(t testing.TB, state *turn.State) {
 	if h.recallerFactory == nil {
 		return
 	}
+	// Close any prior recaller so a restart does not leak its indexer
+	// goroutine; the default symbolic-only Close is a no-op.
+	if state.Recaller != nil {
+		_ = state.Recaller.Close()
+	}
 	r := h.recallerFactory(h.Ops)
 	state.Recaller = r
 	if ix, ok := r.(threadIndexer); ok {
@@ -544,6 +549,14 @@ func (h *Harness) installRecaller(t testing.TB, state *turn.State) {
 	if err := r.Prepare(context.Background()); err != nil {
 		t.Fatalf("install recaller: Prepare: %v", err)
 	}
+	// Stop the indexer goroutine at test end (the final live recaller; a
+	// restart already closed the prior one above). h.State is the source of
+	// truth — restartSession swaps it — so read it at cleanup time.
+	t.Cleanup(func() {
+		if h.State != nil && h.State.Recaller != nil {
+			_ = h.State.Recaller.Close()
+		}
+	})
 }
 
 // NewMockResponseWithTag is the common-case constructor for a Step's

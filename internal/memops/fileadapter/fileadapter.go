@@ -161,6 +161,20 @@ func (a *FileAdapter) LoadThreadMeta(ctx context.Context, threadID string) (memo
 	return fm, nil
 }
 
+// LoadThreadExcerpts returns the thread's retained turn-excerpts as
+// discrete per-turn units (one per turns/<n>.md file), turn-number
+// ordered — the fine-tier chunk unit for intra-thread recall.
+func (a *FileAdapter) LoadThreadExcerpts(ctx context.Context, threadID string) ([]memops.ThreadExcerpt, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	ex, err := store.ReadThreadExcerpts(a.paths, threadID)
+	if err != nil {
+		return nil, fmt.Errorf("fileadapter: load thread excerpts: %w", err)
+	}
+	return ex, nil
+}
+
 // FindThread looks up the spine record for threadID.
 func (a *FileAdapter) FindThread(ctx context.Context, threadID string) (memops.SpineRecord, bool, error) {
 	if err := ctx.Err(); err != nil {

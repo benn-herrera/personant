@@ -153,6 +153,20 @@ type MemoryOps interface {
 	// LoadThread.
 	LoadThreadMeta(ctx context.Context, threadID string) (ThreadMeta, error)
 
+	// LoadThreadExcerpts returns the thread's retained turn-excerpts as
+	// discrete per-turn units (one per turns/<n>.md file), in turn-number
+	// order. Unlike LoadThread, which assembles the excerpts into a single
+	// joined body, this preserves the per-turn boundary the fine-tier
+	// embedding index (§3.4 / intra-thread recall) chunks on — splitting
+	// the joined body would be lossy because an excerpt's own text can
+	// contain the blank-line separator the join uses.
+	//
+	// Returns the excerpts currently on the substrate; FIFO eviction
+	// (ThreadTurnWindow) means an excerpt that scrolled out long ago is
+	// not returned. A thread with no turns/ directory yet returns
+	// (nil, nil).
+	LoadThreadExcerpts(ctx context.Context, threadID string) ([]ThreadExcerpt, error)
+
 	// FindThread looks up the spine record for threadID. The second
 	// return is false when no record exists. Folds in
 	// store.FindSpineRecord. An I/O error on the underlying spine

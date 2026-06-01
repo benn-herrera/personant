@@ -210,6 +210,16 @@ type Thread struct {
 	Body string // markdown body; trailing newline preserved
 }
 
+// ThreadExcerpt is one retained turn-excerpt of a thread, kept as a
+// discrete unit rather than joined into the assembled body. It is the
+// chunk unit the fine-tier embedding index (§3.4 / intra-thread recall)
+// embeds: one excerpt → one chunk vector. Returned by
+// MemoryOps.LoadThreadExcerpts in turn-number order.
+type ThreadExcerpt struct {
+	TurnNumber int
+	Text       string // the excerpt body; trailing newline trimmed
+}
+
 // ---------- Project records ----------
 
 // ProjectPattern is a project-scoped regex for the deterministic symbol

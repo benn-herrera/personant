@@ -255,6 +255,13 @@ func Run(opts Options) error {
 		return err
 	}
 
+	// Stop the recaller's indexer goroutine (no-op on the symbolic-only
+	// recaller). Done before the session-close checkpoint so no in-flight
+	// index write races the final commit.
+	if err := state.Recaller.Close(); err != nil {
+		fmt.Fprintf(opts.Stderr, "warn: recaller close: %v\n", err)
+	}
+
 	// §3.11 session-close commit: the safety net that flushes content-only
 	// turns accumulated since the last structural commit. A clean tree (the
 	// last turn was structural, or nothing changed) is a benign no-op inside
