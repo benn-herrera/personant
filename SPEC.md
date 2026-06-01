@@ -722,10 +722,14 @@ Three layers, run as **parallel signals**, not a strict cost cascade:
 
 1. **Symbolic Jaccard** over the symbol index — high precision, low
    recall. Cheap.
-2. **Embedding cosine** over an in-memory thread-embedding index — the
-   primary recall scan. Drift-robust. Cheap to match (cosine over a
-   few hundred in-memory vectors); the cost is one embedding call per
-   turn to vectorize the query.
+2. **Embedding cosine** over an in-memory, **hierarchical** embedding
+   index — the primary recall scan, drift-robust. A coarse tier (one
+   vector per thread body) is the first pass (which threads); a fine
+   tier (per-turn-excerpt chunk vectors) is the second pass (which
+   content within a surfaced thread). Coarse→fine keeps matching cheap
+   and bounded as both thread count and per-thread length grow; the
+   per-turn cost is one embedding call to vectorize the query. Index
+   granularity / maintenance / persistence is detailed below.
 3. **Model judgment** on surfaced candidates — expensive confirmation,
    used to cut false positives before a recall is offered to the user.
 
@@ -741,9 +745,67 @@ Three layers, run as **parallel signals**, not a strict cost cascade:
 Embedding recall (layer 2) is **opt-in**: enabled when `config.toml`
 pins an `[embedding]` provider/model (§8.2.2). With no embedding model
 configured, recall runs symbolic-only — graceful degradation, never a
-hard failure. The thread-embedding index is
-session-scoped and rebuilt at session start; persistence (a derived
-KV store) is a later increment if rebuild cost warrants it.
+hard failure.
+
+**Embedding index — granularity, maintenance, persistence (build target;
+unifies #102 thread-level freshness and #109 intra-thread recall).** The
+index is chunk-level and hierarchical (above), and **one uniform
+mechanism serves all "not-immediately-in-context" recall — there is no
+separate intra-thread path.** The organizing distinction is **live FIFO
+window vs. indexed body**, not active vs. inactive thread: every thread
+is an *indexed body* (coarse thread vector + per-excerpt chunk vectors);
+an *active* thread additionally carries a live FIFO window (§2.3,
+`ThreadTurnWindow`) that is already in the working set and so is
+deliberately *not* embedded. As turns scroll out of the FIFO into the
+stored body they become index material. Recall runs uniformly over all
+indexed bodies; whether the **engaged thread's own** indexed body is a
+candidate is a filter choice — include it → intra-thread recall of its
+scrolled-out early content; the live FIFO window is never a candidate
+because it is in-context. This is how §3.4 answers "what did we settle
+on earlier *in this thread*" for a long-running thread: the early content
+is in the index like everything else.
+
+*Maintenance.* Incremental and **asynchronous** — a single background
+indexer embeds scrolled-out chunks off the turn's critical path, then
+swaps an `atomic`-pointer index so recall reads never block; a
+**per-thread turncount watermark** guards ordering, so a stale in-flight
+embed never overwrites a fresher vector when a thread re-activates and
+re-decays mid-job. Two flush triggers feed the one index: an
+**embedding-debt cap** (flush after N turns of accumulated scrolled-out
+content — N a §9 calibration window, with a small blind-spot for content
+scrolled-out-but-not-yet-flushed, the §3.11-shaped gap) and the
+**dormancy transition** (flush a thread's remaining debt when it decays
+out of the working set, so its full body is indexed before it becomes a
+pure recall target). Mid-session threads and mid-thread content thus
+become recallable without a full rebuild.
+
+*Persistence (required, not deferred).* The vectors are a **derived,
+persisted cache** keyed by a content-staleness marker (body/chunk hash):
+gitignored and regenerable (never canonical — rebuild-on-miss), written
+through by the indexer, and loaded at startup so a session re-embeds only
+what changed since last run — **O(changed), not O(all)**. A multi-year
+instance accrues thousands of threads × turns; re-embedding everything
+every startup is untenable, so the cache is a requirement of the design,
+not a later increment. (Shares the staleness-keyed rebuild-on-open logic;
+cf. #44.)
+
+*Non-negotiable + simulation.* Intra-thread recall on long-running
+threads is load-bearing — through usage or topic there will be very long
+single threads (a multi-year project managed on one thread; a main
+default thread where work is discussed and synthesized before kickoff).
+It must work reliably and efficiently with **no performance decay**, and
+must be **validated in the §9 acceptance simulation** with a
+long-running-thread workload and explicit decay measurement (index size,
+per-query cost, retrieval latency) as both thread count *and* per-thread
+length grow into the thousands.
+
+*Open design points (a focused design pass precedes build):* chunk unit
+(turn-excerpt lean) vs. fixed-size; the coarse→fine top-K cutoff; the
+debt-window N and its blind-spot; the persisted-cache format; and the
+simulation's intra-thread ground-truth oracle (how the deterministic
+workload knows which early turn a query should retrieve). Tasks #102
+(thread-level maintenance facet) and #109 (intra-thread, high priority)
+are designed as one.
 
 **Recall surface.** At turn close the merged candidates are logged
 per-layer (`spine.match-fire` / `spine.embed-match-fire`) and, when an
