@@ -5,7 +5,7 @@ GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 all: build
 
 # DO NOT MANUALLY EDIT vvv - use make update-dependencies
-AGENTS_VERSION := v0.6.17
+AGENTS_VERSION := v0.6.18
 AGENTS_REPO := $(GH_ROOT)/agents.git
 AGENTS_DIR := .claude/agents
 AGENTS_MARKER := $(AGENTS_DIR)/.git/HEAD
