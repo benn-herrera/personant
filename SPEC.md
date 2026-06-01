@@ -1194,11 +1194,19 @@ accumulated since the last structural commit.
 **Why this cadence.** Per-turn commits at multi-month scale produce tens
 of thousands of commits and corresponding `.git` growth; per-session
 commits lose up to a session's work on a crash. Commit-on-structural-
-change is the empirically-chosen middle: the §9 sim measures ≈36
-structural changes per sim-day against ≈229 turns/session (≈1 commit per
-6 turns), an order of magnitude below per-turn. It is a §9 calibration
-choice, not a frozen constant — adjustable if the sim's measured
-commit rate, `.git` growth, or commit overhead warrant.
+change is the empirically-chosen middle. The §9 sim (15 sim-days) measures
+**≈130 commits/sim-day, ≈1 commit per 2.8 turns** — closures dominate
+(≈1648 vs ≈399 creates), so the rate is set mostly by thread retirement,
+not creation. Per-commit cost is **linear** (P50 ≈38 ms; no `Add(".")`
+rescan blowup, since thread bodies are FIFO-windowed), so the cadence does
+not bog down even at this rate — it stays well below per-turn. The cost it
+*does* carry is loose-object accumulation in `.git` (the sim never packs:
+≈159 MB unpacked over 15 sim-days); packing is delegated to the offline
+**sleep/consolidation cycle** (`git gc`/repack — ARCHITECTURE.md), not a
+working-hours operation. It is a §9 calibration choice, not a frozen
+constant — adjustable (e.g. commit only on terminal retirement, not
+wip-pause) if `.git` growth or overhead ever warrant, but the measured
+linear cost did not.
 
 **Durability gap (by design).** Content-only turns between structural
 commits are uncommitted; a hard crash loses at most that window, bounded
