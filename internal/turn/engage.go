@@ -545,6 +545,9 @@ func createNewThread(ctx context.Context, state *State, owner bool, userInput, r
 	}); err != nil {
 		return "", fmt.Errorf("create thread %s: %w", newID, err)
 	}
+	// §3.11: a thread creation is a structural change. Count it; the
+	// turn-close cadence check (turn.go step 5e) commits once per turn.
+	state.structuralCreates++
 	act := "created"
 	if !owner {
 		act = "created-meta-only"

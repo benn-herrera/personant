@@ -48,6 +48,40 @@ func threadRelDir(threadID string) string {
 	return path.Join("threads", threadID)
 }
 
+// Checkpoint creates a §3.11 substrate recovery point: it stages the whole
+// worktree (Add(".")) and commits it with a message folding in `reason`. The
+// caller drives the cadence (turn close on structural change, session close);
+// this method is the mechanism, not the policy.
+//
+// A clean tree is a benign no-op. go-git rejects an empty commit with
+// git.ErrEmptyCommit; we swallow it and return nil — there is no recovery
+// point to make when nothing changed (archival already committed this turn's
+// structural bytes, or session close after the last structural commit flushed
+// everything). Any other failure propagates.
+//
+// Verification flags are conservative: none on pre, none on post. The cadence
+// fires on every material turn, so a post-flag CheckSpineIntegrity (a full
+// verify.Verify pass) would add that cost to every commit — and integrity
+// gating is already owned by archival (CheckDerivedFresh|CheckSpineIntegrity
+// on its deletion/recovery commits) and the standalone `personant verify`. A
+// cadence commit is a durability snapshot, not an integrity gate; keeping it
+// flag-free keeps per-commit cost flat.
+func (a *FileAdapter) Checkpoint(ctx context.Context, reason string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := autogit.Add(ctx, a.paths, "."); err != nil {
+		return fmt.Errorf("fileadapter: checkpoint: stage: %w", err)
+	}
+	if err := autogit.Commit(ctx, a.paths, fmt.Sprintf("checkpoint: %s", reason), 0, 0); err != nil {
+		if errors.Is(err, git.ErrEmptyCommit) {
+			return nil // clean tree — nothing to checkpoint
+		}
+		return fmt.Errorf("fileadapter: checkpoint: commit: %w", err)
+	}
+	return nil
+}
+
 // ArchiveThreads archives a batch of retired threads (design §3.2).
 //
 // # Index-needs-commit-hash ordering (the crux) and its crash-safety

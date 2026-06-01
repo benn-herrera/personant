@@ -413,6 +413,25 @@ type MemoryOps interface {
 	// freed (demand-sizing forensic data, also written to the event log).
 	AgeFileChains(ctx context.Context, threadID string, currentTurn int) (agedPaths []string, bytesFreed int, err error)
 
+	// ---------- Substrate recovery points ----------
+
+	// Checkpoint creates a durable recovery point on the substrate — in the
+	// file adapter, a git commit of the current working tree. It is the
+	// §3.11 commit-on-structural-change cadence's single mutation: the
+	// application layer calls it at turn close when a structural change
+	// occurred (thread create / close-retire, project create) and at session
+	// close, never per content write. `reason` is folded into the commit
+	// message for forensics (the caller builds it from event counts, never
+	// from user content).
+	//
+	// A clean tree is a benign no-op: when there is nothing to commit the
+	// method returns nil (no error, no recovery point) — e.g. a structural
+	// change whose bytes were already committed this turn by archival, or a
+	// session close after the last structural commit already flushed
+	// everything. A non-file adapter (SQLite, network) implements this as
+	// its own transaction/snapshot boundary; the application never sees git.
+	Checkpoint(ctx context.Context, reason string) error
+
 	// ---------- Bootstrap and verification ----------
 
 	// Init scaffolds the substrate for first-run use. Idempotent: a

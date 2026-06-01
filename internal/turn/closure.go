@@ -358,6 +358,12 @@ func applyClosureResolution(ctx context.Context, state *State, threadID string, 
 	}); err != nil {
 		return fmt.Errorf("closure: write thread %s: %w", threadID, err)
 	}
+	// §3.11: a §3.5 closure write (retire or WIP — both transition the
+	// thread's persisted state out of the active window) is a structural
+	// change. Count it; the turn-close cadence check (turn.go step 5e) commits
+	// once per turn regardless of how many threads a closure-storm (#82)
+	// resolved. Defer reaches no write and is correctly not counted.
+	state.structuralCloses++
 
 	// The defer grace, if any, is now moot — the thread has been
 	// resolved or demoted out of the active set.

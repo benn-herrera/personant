@@ -255,6 +255,15 @@ func Run(opts Options) error {
 		return err
 	}
 
+	// §3.11 session-close commit: the safety net that flushes content-only
+	// turns accumulated since the last structural commit. A clean tree (the
+	// last turn was structural, or nothing changed) is a benign no-op inside
+	// Checkpoint (ErrEmptyCommit swallowed). Non-fatal: warn and continue to
+	// the session-end log, consistent with the per-turn cadence call.
+	if err := ops.Checkpoint(ctx, "session-close"); err != nil {
+		fmt.Fprintf(opts.Stderr, "warn: session-close checkpoint: %v\n", err)
+	}
+
 	if err := ops.Log(ctx, memops.LogCategorySession, "ended", "active="+project.ID); err != nil {
 		fmt.Fprintf(opts.Stderr, "warn: log session.end: %v\n", err)
 	}
@@ -637,6 +646,16 @@ func createNewProject(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd 
 	}
 	if err := ops.Log(ctx, memops.LogCategoryProject, "created", "id="+id+" name="+name); err != nil {
 		fmt.Fprintf(opts.Stderr, "warn: log project.created: %v\n", err)
+	}
+	// §3.11: a project creation is a structural change. This runs during
+	// bootstrap (a NEW project chosen at session start), distinct from
+	// `personant init` which commits the default project at scaffold time —
+	// so it needs its own recovery point rather than riding init's commit.
+	// Non-fatal: the session-close commit is the backstop. (last-active is a
+	// substrate marker kept out of git, so it rides this commit only if the
+	// adapter tracks it; either way the project meta is captured.)
+	if err := ops.Checkpoint(ctx, "project-create "+id); err != nil {
+		fmt.Fprintf(opts.Stderr, "warn: project-create checkpoint: %v\n", err)
 	}
 	return meta, nil
 }

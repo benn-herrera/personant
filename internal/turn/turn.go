@@ -170,6 +170,19 @@ type State struct {
 	// eligibility — which origins can be NEWLY added — is residency-gated.
 	// nil is the well-formed empty case (no recall ever accepted).
 	recallSurfaced map[string]struct{}
+
+	// structuralCreates / structuralCloses count the §3.11 structural
+	// changes that occurred during the in-flight turn: thread creations
+	// (createNewThread) and §3.5 closure/retire writes (applyClosureResolution).
+	// They are the turn-close commit-cadence trigger — a turn with
+	// (creates+closes) > 0 yields EXACTLY ONE Checkpoint at Run close, never
+	// one per mutation, so a close+create switch or a vacation closure-storm
+	// (#82, many closes in one turn) coalesces to a single commit (§3.11).
+	// Both are reset to 0 at the top of every Run; the counts also build the
+	// commit reason string (e.g. "+1 thread, -2 retired"). Archival commits
+	// via its own §3.8 batch and is deliberately NOT counted here.
+	structuralCreates int
+	structuralCloses  int
 }
 
 // dormantThreadsCap is the v0.1 maximum count for State.DormantThreads.
@@ -242,6 +255,15 @@ func LoadSession(ctx context.Context, ops memops.MemoryOps, project memops.Proje
 // latency cost.
 const maxRePromptsPerTurn = 1
 
+// commitOnStructuralChange gates the §3.11 turn-close commit cadence: when
+// true (the default), a turn that produced ≥1 structural change (thread
+// create / §3.5 close-retire) takes exactly one substrate Checkpoint at turn
+// close. Per-turn content writes never commit on their own — the
+// session-close commit (chat.go) is the safety net that flushes them.
+// Default-on; a §9-calibration toggle (not a config.toml setting — that file
+// is model choices only), flipped only to A/B the cadence in the sim.
+const commitOnStructuralChange = true
+
 // Run drives one complete user turn end-to-end (spec §3.0). It is a
 // thin wrapper around RunWithDeltas with no pre-prompt deltas; see
 // RunWithDeltas for the step-by-step contract.
@@ -305,6 +327,10 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 	// The single-owner stamp is per-turn — clear it so the prior turn's
 	// owner cannot trip this turn's claim guard.
 	state.turnOwner = ""
+	// §3.11 structural-change counters are per-turn — clear them so the
+	// turn-close cadence check sees only this turn's creates/closes.
+	state.structuralCreates = 0
+	state.structuralCloses = 0
 	// Bump the turn counter BEFORE any chain step fires so the user.prompt
 	// delta and the model.response delta both observe the same
 	// TurnNumber. The transient-data lifecycle B.4 window-close GC keys
@@ -498,6 +524,25 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 	// close-time substrate calls (AgeFileChains, recall).
 	if err := state.Ops.SaveWorkingSet(ctx, state.ActiveThreads, state.DormantThreads); err != nil {
 		_ = state.Ops.Log(ctx, memops.LogCategorySession, "working-set-save-error", memops.SanitizeDetail(err.Error()))
+	}
+
+	// Step 5e: §3.11 commit-on-structural-change. The cadence check runs ONCE
+	// here at turn close, not at each mutation site, so a turn with ≥1
+	// structural change (thread create / §3.5 close-retire) yields EXACTLY one
+	// substrate Checkpoint — a close+create switch or a closure-storm (#82)
+	// coalesces to a single commit. The turn's accumulated content writes ride
+	// along in the same commit. This MUST run after 5b/5c/5d: closure and
+	// archival are the structural mutators, and the content they touched must
+	// be staged by the time Checkpoint calls Add("."). A Checkpoint failure is
+	// non-fatal (log and continue), consistent with the other close-time
+	// substrate calls; the session-close commit is the backstop. Archival
+	// commits via its own §3.8 batch, so it is excluded from the trigger.
+	if commitOnStructuralChange && state.structuralCreates+state.structuralCloses > 0 {
+		reason := fmt.Sprintf("structural: +%d thread, -%d retired",
+			state.structuralCreates, state.structuralCloses)
+		if err := state.Ops.Checkpoint(ctx, reason); err != nil {
+			_ = state.Ops.Log(ctx, memops.LogCategorySession, "checkpoint-error", memops.SanitizeDetail(err.Error()))
+		}
 	}
 
 	// Step 6: derive the topic-tag-stripped body for the return value.
