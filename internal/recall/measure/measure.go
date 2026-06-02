@@ -56,6 +56,20 @@ type indexSnapshot struct {
 	coarse    []scoring.ThreadVector           // one vector per thread (coarse tier)
 	fine      map[string][]scoring.ChunkVector // threadID → scrolled-out chunk vectors (fine tier)
 	watermark map[string]int                   // threadID → dispatch turncount these vectors were read at
+
+	// tree is the per-thread summary-hierarchy index (#111 / design
+	// within-thread-summary-hierarchy.md §9.2): one root SummaryNode per
+	// thread whose leaves are exactly that thread's fine[threadID] chunk
+	// vectors, used by the engaged-thread intra-pass to descend in O(log n)
+	// instead of flat-scanning all of fine[engaged] (the §0 decay fix).
+	// It is part of the immutable published index (same I1 atomic-swap
+	// discipline as coarse/fine). nil/absent for a thread with no built
+	// tree — and NOTHING builds trees in this increment (Inc D's sleep-
+	// cycle builder does), so at runtime this map is always empty and the
+	// intra-pass always takes the W8 flat-scan fallback. The descent path
+	// is exercised only by tests here. A nil/absent tree is the W8 signal:
+	// the intra-pass falls back to the flat scan over fine[threadID].
+	tree map[string]*scoring.SummaryNode
 }
 
 // emptySnapshot is the published value before any thread is indexed and
@@ -66,6 +80,7 @@ func emptySnapshot() *indexSnapshot {
 		coarse:    nil,
 		fine:      map[string][]scoring.ChunkVector{},
 		watermark: map[string]int{},
+		tree:      map[string]*scoring.SummaryNode{},
 	}
 }
 
@@ -557,7 +572,19 @@ func (s *indexSnapshot) with(threadID string, coarse scoring.ThreadVector, chunk
 	}
 	newWM[threadID] = watermark
 
-	return &indexSnapshot{coarse: newCoarse, fine: newFine, watermark: newWM}
+	// Carry the tree map forward unchanged. The indexer does not build or
+	// invalidate trees (Inc D's sleep-cycle builder owns the tree map); a
+	// fine-tier swap here may leave a stale tree for threadID, which the
+	// §4 staleness/threshold check in intraThread handles — a tree whose
+	// leaf count no longer matches fine[threadID] falls back to the flat
+	// scan (W8) until the sleep cycle reconciles it. Until Inc D the map
+	// is always empty, so this is a copy of an empty map.
+	newTree := make(map[string]*scoring.SummaryNode, len(s.tree))
+	for id, t := range s.tree {
+		newTree[id] = t
+	}
+
+	return &indexSnapshot{coarse: newCoarse, fine: newFine, watermark: newWM, tree: newTree}
 }
 
 // Recall runs the recall layers and returns merged candidates ranked
@@ -686,17 +713,22 @@ func (s *Service) coarseFine(q []float64, snap *indexSnapshot, exclude map[strin
 	return out
 }
 
-// intraThread runs the §4.1 step-3 engaged-thread pass: the fine pass
-// directly over the engaged thread's chunk vectors, bypassing the coarse
-// gate. Returns nil when no engaged thread, no fine chunks for it, or no
-// chunk clears the threshold. The engaged thread's live FIFO-window
-// excerpts are not in snap.fine (only scrolled-out chunks are indexed,
-// I6), so the bypass is automatically window-excluded.
+// intraThread runs the §4.1 step-3 engaged-thread pass: directly over the
+// engaged thread's scrolled-out chunks, bypassing the coarse gate. Returns
+// nil when no engaged thread, no fine chunks for it, or no chunk clears the
+// threshold. The engaged thread's live FIFO-window excerpts are not in
+// snap.fine (only scrolled-out chunks are indexed, I6), so the bypass is
+// automatically window-excluded.
+//
+// It chooses between two paths (design §4 / W8): the O(log n) summary-tree
+// descent when a usable tree is present, else the flat O(C_main)
+// ProposeChunks scan over all of snap.fine[engaged]. See intraChunks for
+// the path-selection rule.
 func (s *Service) intraThread(q []float64, snap *indexSnapshot, engaged string) *IntraThreadHit {
 	if engaged == "" {
 		return nil
 	}
-	chunks := scoring.ProposeChunks(q, snap.fine[engaged], scoring.ChunkOptions{Limit: Kf})
+	chunks := s.intraChunks(q, snap, engaged)
 	if len(chunks) == 0 {
 		return nil
 	}
@@ -705,6 +737,142 @@ func (s *Service) intraThread(q []float64, snap *indexSnapshot, engaged string) 
 		turns[i] = c.TurnNumber
 	}
 	return &IntraThreadHit{Turns: turns, Score: chunks[0].Score}
+}
+
+// intraChunks returns the engaged thread's top-Kf chunk candidates, taking
+// the summary-tree descent when usable and the flat scan otherwise. It is
+// the single point where the descent-vs-fallback decision lives, so the
+// divergence hook (intraThreadDivergence) can ask "which path would
+// production take" without duplicating the rule.
+//
+// Descent is taken iff the tree is present AND the thread has at least
+// scoring.TreeBuildThreshold leaves AND the tree is not stale (W8: a short
+// thread, an absent tree, or a stale tree all fall back to the flat scan —
+// a tree is an optimization layered over a still-correct flat path). Tree
+// staleness is the leaf-count mismatch check (treeUsable): a fuller
+// childrenHash reconcile is Inc C's, but a tree whose leaf count no longer
+// matches snap.fine[engaged] cannot be apples-to-apples with the flat scan,
+// so it falls back.
+//
+// Because NOTHING builds trees in this increment (Inc D's sleep cycle
+// does), snap.tree is always empty at runtime and this always takes the
+// flat-scan branch — byte-identical to the pre-#111 behaviour. The descent
+// branch is reached only by tests that install a tree.
+func (s *Service) intraChunks(q []float64, snap *indexSnapshot, engaged string) []scoring.ChunkCandidate {
+	leaves := snap.fine[engaged]
+	if treeUsable(snap.tree[engaged], len(leaves)) {
+		return scoring.DescendChunks(q, snap.tree[engaged], scoring.DescendOptions{Limit: Kf})
+	}
+	return scoring.ProposeChunks(q, leaves, scoring.ChunkOptions{Limit: Kf})
+}
+
+// treeUsable reports whether the engaged thread's summary tree should drive
+// the intra-pass (design §4 fallback predicate / W8). A nil tree, a thread
+// below scoring.TreeBuildThreshold leaves (a short thread the flat scan
+// handles cheaply), or a tree whose leaf count no longer matches the fine
+// tier (stale topology after leaves were added/trimmed) all return false →
+// the caller flat-scans. The leaf-count check is the minimal staleness
+// guard for this increment; Inc C composes the childrenHash key.
+func treeUsable(tree *scoring.SummaryNode, leafCount int) bool {
+	if tree == nil || leafCount < scoring.TreeBuildThreshold {
+		return false
+	}
+	return treeLeafCount(tree) == leafCount
+}
+
+// treeLeafCount counts the leaf nodes reachable from a tree root — the
+// descent's actual leaf set, compared against the fine tier for staleness.
+func treeLeafCount(n *scoring.SummaryNode) int {
+	if n == nil {
+		return 0
+	}
+	if len(n.Children) == 0 {
+		return 1
+	}
+	total := 0
+	for _, c := range n.Children {
+		total += treeLeafCount(c)
+	}
+	return total
+}
+
+// intraThreadDivergence is the W1 recall-preservation differential (design
+// §7.1, the §7 gate mechanism). It runs BOTH the tree descent and the flat
+// scan over the SAME engaged-thread leaves and returns the size of the
+// symmetric set difference between their top-Kf turn sets — the metric
+// recall_intra_descent_divergence the sim/harness gates at == 0 (Inc E
+// wires the sim gate).
+//
+// This is a measurement-only seam: production recall (intraChunks, called
+// from Recall) runs only the single chosen path and never pays the double
+// cost. The harness calls this explicitly when it wants the differential.
+//
+// The comparison is apples-to-apples by construction: the tree's leaves are
+// exactly snap.fine[engaged] (treeUsable enforces the leaf-count match), so
+// both paths consume the identical leaf vectors and the only difference is
+// which leaves the beam reached. When no usable tree exists, descent is not
+// run and divergence is 0 by definition (there is no fast path to diverge
+// from — the flat scan IS the result). A nonzero return is the
+// zero-tolerance stop-and-root-cause signal: raise the beam or fix the
+// build side, never widen the gate.
+func (s *Service) intraThreadDivergence(q []float64, snap *indexSnapshot, engaged string) int {
+	if engaged == "" {
+		return 0
+	}
+	leaves := snap.fine[engaged]
+	if !treeUsable(snap.tree[engaged], len(leaves)) {
+		return 0 // no fast path → nothing to diverge from (W8)
+	}
+	descent := scoring.DescendChunks(q, snap.tree[engaged], scoring.DescendOptions{Limit: Kf})
+	flat := scoring.ProposeChunks(q, leaves, scoring.ChunkOptions{Limit: Kf})
+	return turnSetDifference(descent, flat)
+}
+
+// turnSetDifference returns the number of turn numbers present in exactly
+// one of the two candidate sets (the symmetric difference size). Ordering
+// within top-Kf is irrelevant to W1 — only the leaf set matters (§7.1).
+func turnSetDifference(a, b []scoring.ChunkCandidate) int {
+	setA := make(map[int]struct{}, len(a))
+	for _, c := range a {
+		setA[c.TurnNumber] = struct{}{}
+	}
+	setB := make(map[int]struct{}, len(b))
+	for _, c := range b {
+		setB[c.TurnNumber] = struct{}{}
+	}
+	diff := 0
+	for t := range setA {
+		if _, ok := setB[t]; !ok {
+			diff++
+		}
+	}
+	for t := range setB {
+		if _, ok := setA[t]; !ok {
+			diff++
+		}
+	}
+	return diff
+}
+
+// IntraThreadDivergence is the exported W1 recall-preservation gate seam
+// (design §7.1) the sim/harness calls per intra-thread probe: embed the
+// query, load the live index snapshot, and return the descent-vs-flat
+// top-Kf set difference for the engaged thread. The sim gates
+// recall_intra_descent_divergence == 0 on this (Inc E).
+//
+// It mirrors Recall's read path — one atomic snapshot load (I1), the same
+// query embedding — so the differential is measured against the exact index
+// production recall would have used. Returns 0 when no embedder is
+// configured, the query is empty, or no usable tree exists for the engaged
+// thread (the W8 flat-only case, where there is no fast path to diverge
+// from). Keeping the snapshot and tree private to measure, this is the only
+// surface the harness needs.
+func (s *Service) IntraThreadDivergence(ctx context.Context, queryText, engaged string) int {
+	q := s.embedQuery(ctx, queryText)
+	if q == nil {
+		return 0
+	}
+	return s.intraThreadDivergence(q, s.cur.Load(), engaged)
 }
 
 // truncateForEmbed bounds text sent to the embedder. Byte truncation
