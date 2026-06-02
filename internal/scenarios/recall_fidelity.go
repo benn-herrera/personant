@@ -178,6 +178,29 @@ func embedMatchFireSet(lines []string) []string {
 	return out
 }
 
+// intraMatchFireSet returns the sorted set of thread IDs that have a
+// `spine.intra-match-fire` event among the given log lines — the §7
+// intra-thread (fine-tier) analogue of matchFireSet / embedMatchFireSet.
+// The runtime logs this line at turn close whenever the engaged thread's
+// scrolled-out early content matched the query (turn/recall.go), so on an
+// embedding-in-loop run it is the observed intra-thread recall set the §8.2
+// shadow-chunk oracle scores per hop. Empty on the symbolic-only default
+// (no embedder → the intra pass never fires).
+func intraMatchFireSet(lines []string) []string {
+	seen := map[string]struct{}{}
+	for _, line := range lines {
+		if id, ok := eventThreadID(line, "spine.intra-match-fire ", ""); ok {
+			seen[id] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // recordEmbedRecallFidelity records the embedding layer's per-step
 // precision/recall/F1 into the parallel embed_recall_fidelity_* series
 // (#98). It mirrors recordRecallFidelity's scoring but against the

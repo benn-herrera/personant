@@ -732,6 +732,61 @@ const (
 	synthesisParentTagSample = 2
 )
 
+// Candidate-A long-running-thread + intra-thread probe tuning (§9.1/§8.2,
+// #109). The main thread is the never-retired, deep-trajectory thread whose
+// excerpt count grows into the thousands across the rung, driving FIFO
+// scroll-out and debt-cap flushes — the intra-thread (#109) target. Its
+// engagements and probes are injected as EXTRA, rng-FREE steps (the
+// wanderProbe discipline), so the canonical action stream and the
+// determinism contract are untouched.
+const (
+	// mainThreadEngageEvery is the emitted-step cadence at which the
+	// generator injects a main-thread engagement. Every cadence steps one
+	// extra owner-engagement of the main thread fires, appending one
+	// turn-excerpt (one shadow chunk). At ~430 turns/sim-day a cadence of 2
+	// yields ~215 main-thread excerpts/day → past ThreadTurnWindow (512) in
+	// ~2.5 sim-days and into the thousands across the 15d→120d ladder, the
+	// continuous-scroll-out + debt-flush regime #109 targets. Seed value,
+	// tunable on the rung walk.
+	mainThreadEngageEvery = 2
+
+	// mainThreadWanderEvery is how many main-thread engagements pass between
+	// wanders to a fresh, distinct-topic slot. The main thread is the
+	// UNBOUNDED-trajectory variant (§9.1): unlike a normal thread capped at
+	// wanderMaxHops, it accretes a new topical slot every mainThreadWanderEvery
+	// engagements for life, so its early content is vocabulary-distinct from
+	// its current content — the realistic intra-thread drift-recovery case.
+	// 24 engagements/topic ≈ a sustained dwell before the topic moves on.
+	mainThreadWanderEvery = 24
+
+	// mainThreadProbeEvery is the emitted-step cadence at which the generator
+	// injects an intra-thread probe (§8.2): a query re-issuing one of the main
+	// thread's EARLIER (scrolled-out) trajectory slots, predicting whether the
+	// runtime should surface the main thread via spine.intra-match-fire. Like
+	// the wander probe it is rng-free and zero-TimeDelta (part of the canonical
+	// stream, determinism-safe), bucketed by hop distance.
+	mainThreadProbeEvery = 16
+
+	// intraThreadTurnWindow mirrors store.ThreadTurnWindow — the assembly
+	// window past which a turn-excerpt has scrolled out of context and is fine-
+	// tier index material (I6). A shadow chunk with turnNumber t is scrolled
+	// out at main-thread turn `cur` iff cur-t >= intraThreadTurnWindow. Kept as
+	// a named mirror (not store.ThreadTurnWindow directly) only because the sim
+	// package does not import store; if the runtime window moves, this must
+	// move with it — asserted equal in TestIntraThreadWindowMirrorsRuntime.
+	intraThreadTurnWindow = 512
+
+	// intraThreadDebtCap mirrors the runtime's embeddingDebtCap (turn/lru.go,
+	// =16): a chunk that scrolled out fewer than this many turns ago may still
+	// be in unflushed debt — not yet in the fine tier — so the oracle predicts
+	// it a MISS (the §6.5 by-design blind spot). A chunk is RECALLABLE
+	// (predict-hit eligible) only once it has been scrolled out >= this many
+	// turns: turnNumber <= cur - intraThreadTurnWindow - intraThreadDebtCap.
+	// Modeling the blind spot is what keeps the oracle from penalizing the
+	// runtime for the by-design lag — a divergence inside it is a real bug.
+	intraThreadDebtCap = 16
+)
+
 // sessionActive is the turn-active simulated span of one session — the
 // total of its inter-turn gaps. Two of these plus the inter-session and
 // overnight gaps make up a work day.
@@ -762,16 +817,23 @@ func GenerateWorkload(cfg WorkloadConfig) scenarios.Scenario {
 			slots:      cfg.Corpus,
 			familySize: cfg.FamilySize,
 		},
-		files:              map[int]*fileState{},
-		recallBuckets:      map[string]*recallTally{},
-		emittedSyms:        map[int]map[string]struct{}{},
-		carrierIdx:         map[int]struct{}{},
-		carrier:            -1,
-		wanderHopHits:      map[int]int{},
-		wanderHopTotal:     map[int]int{},
-		wanderHopCoherent:  map[int]int{},
-		wanderHopDiverge:   map[int]int{},
-		wanderHopEmbedHits: map[int]int{},
+		files:               map[int]*fileState{},
+		recallBuckets:       map[string]*recallTally{},
+		emittedSyms:         map[int]map[string]struct{}{},
+		carrierIdx:          map[int]struct{}{},
+		carrier:             -1,
+		wanderHopHits:       map[int]int{},
+		wanderHopTotal:      map[int]int{},
+		wanderHopCoherent:   map[int]int{},
+		wanderHopDiverge:    map[int]int{},
+		wanderHopEmbedHits:  map[int]int{},
+		mainThreadIdx:       -1,
+		shadowChunks:        map[int][]chunkRecord{},
+		intraHopTotal:       map[int]int{},
+		intraHopPredictHit:  map[int]int{},
+		intraHopObservedHit: map[int]int{},
+		intraHopCoherent:    map[int]int{},
+		intraHopDiverge:     map[int]int{},
 	}
 	return scenarios.Scenario{
 		Name:       fmt.Sprintf("sim-workload-seed%d-dur%s", cfg.Seed, cfg.Duration),
@@ -816,6 +878,35 @@ type bufStep struct {
 	// generator reads it back off the just-run step's StepFeedback to bucket
 	// the observation by hop distance and detect oracle/runtime divergence.
 	probe *wanderProbe
+
+	// intraProbe carries the intra-thread (#109, §8.2) probe metadata when
+	// this step re-issues an EARLIER scrolled-out slot of the Candidate-A main
+	// thread; nil otherwise. Read back off the just-run step's StepFeedback to
+	// bucket the spine.intra-match-fire observation by hop distance and detect
+	// oracle/runtime divergence on the fine tier.
+	intraProbe *intraProbe
+}
+
+// chunkRecord is the generator's shadow of ONE fine-tier chunk: the
+// turn-excerpt number the runtime assigns the engaged owner's excerpt and
+// the symbol set emitted on that turn (§8.2). The ordered list
+// shadowChunks[idx] is the generator's shadow of thread idx's fine tier —
+// scored by the intra-thread oracle, never read from a runtime index (F6).
+type chunkRecord struct {
+	turnNumber int      // runtime owner-excerpt turn number (1-based, monotonic)
+	slotIdx    int      // the corpus slot whose tags this turn emitted
+	tags       []string // the per-turn emitted symbol set (this chunk's content)
+}
+
+// intraProbe is the per-step metadata of an intra-thread (#109) probe. It
+// re-issues an EARLIER scrolled-out trajectory slot of the main thread and
+// is scored by hop distance — how many wander-boundaries back the queried
+// slot sits behind the main thread's current slot.
+type intraProbe struct {
+	threadID   string // the probed main thread's runtime id
+	hops       int    // current-traj-index − queried-slot-traj-index (>=1)
+	predictHit bool   // oracle prediction: a recallable chunk clears threshold
+	blindspot  bool   // the queried slot's chunks are all inside the debt-window blind spot
 }
 
 // wanderProbe is the per-step metadata of an abandoned-topic probe. The
@@ -966,6 +1057,61 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 	}
 	g.lastProbe = nil
 
+	// Latch the embedding/intra fine tier as LIVE once any feedback carries a
+	// non-nil EmbedMatchFireIDs (an embedder is installed this run). The
+	// symbolic-only mock run never sets it, so the intra layer is off there —
+	// spine.intra-match-fire never fires, and scoring observed-miss against a
+	// predicted-hit would be a false divergence. The intra-thread oracle's
+	// observed-vs-predicted coherence/divergence tally is therefore gated on
+	// this flag (the same discipline as the embedding head-to-head column,
+	// which is simply absent on the mock run). The PREDICTED hop-recall curve
+	// — the symbolic coherence curve (H2) — is recorded on every run.
+	if feedback.EmbedMatchFireIDs != nil {
+		g.embeddingRun = true
+	}
+
+	// Tally the just-run intra-thread (#109, §8.2) probe, if any. Same
+	// observability discipline as the wander probe: gate on feedback.Index>=0
+	// (a real run; the zero-feedback drainSteps path reports -1 and tallies
+	// nothing, keeping the canonical stream pure) and forgive an archived
+	// target. observedHit asks whether the RUNTIME surfaced the main thread via
+	// spine.intra-match-fire — checked by id, not count.
+	if g.lastIntraProbe != nil && feedback.Index >= 0 &&
+		(feedback.TargetRecoverable == nil || feedback.TargetRecoverable(g.lastIntraProbe.threadID)) {
+		p := g.lastIntraProbe
+		observedHit := slices.Contains(feedback.IntraMatchFireIDs, p.threadID)
+		// Per-hop observation: the denominator (intraHopTotal) and the oracle's
+		// predicted-recoverability curve (intraHopPredictHit) are recorded on
+		// EVERY run — that is the symbolic hop-recall coherence curve (H2,
+		// recall_intra_hop_recall). The observed hit and the oracle/runtime
+		// coherence/divergence are recorded ONLY on an embedding-live run, where
+		// the intra layer can actually fire; on the mock run there is no intra
+		// layer, so observed-miss is by-design, not a divergence.
+		g.intraHopTotal[p.hops]++
+		if p.predictHit {
+			g.intraHopPredictHit[p.hops]++
+		}
+		if g.embeddingRun {
+			if observedHit {
+				g.intraHopObservedHit[p.hops]++
+			}
+			if p.predictHit == observedHit {
+				g.intraHopCoherent[p.hops]++
+			} else {
+				g.intraHopDiverge[p.hops]++
+			}
+			// Blind-spot miss: the target's chunks are all inside the debt-window
+			// blind spot (predicted miss) AND the runtime missed too. This
+			// separates the by-design lag (§6.5) from a real recall loss — a
+			// divergence INSIDE the blind spot would be a real bug, but a matched
+			// predicted+observed miss there is the expected staleness window.
+			if p.blindspot && !observedHit {
+				g.intraBlindspotMisses++
+			}
+		}
+	}
+	g.lastIntraProbe = nil
+
 	// Process the just-completed step's outcome. The hit predicate uses
 	// the FORGIVEN expected count: archived / absent-from-spine
 	// expectations are removed (mirroring the F1/precision path in
@@ -1014,6 +1160,7 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 	g.lastBucket = bs.recallBucket
 	g.lastVagueTurn = bs.vagueCampaignTurn
 	g.lastProbe = bs.probe
+	g.lastIntraProbe = bs.intraProbe
 
 	// If this buffered step opens a new recall opportunity, start an
 	// episode — UNLESS it is a campaign step (suppressEpisode), whose
@@ -1410,6 +1557,78 @@ const (
 	metricWanderCoherenceDivergence = "wander_coherence_divergence"
 )
 
+// Intra-thread recall metric keys (§9.2, #109). Defined here so the
+// generator, the metrics fold (recordIntraThreadMetrics), and the rung
+// summary share one source of truth. The §4.3 perf-decay series
+// (coarse_size / fine_chunks / cosine_ops / latency / flush) are read off the
+// runtime's own event log + the generator's shadow, NOT a runtime index read
+// (F6).
+const (
+	// metricRecallIndexCoarseSize is the coarse-tier vector count = live
+	// thread count T (the I4 check: flat per-thread-length). Read from the
+	// final spine size.
+	metricRecallIndexCoarseSize = "recall_index_coarse_size"
+
+	// metricRecallIndexFineChunks is the total fine-tier chunk count across all
+	// threads (the generator's shadow total); _main is the Candidate-A main
+	// thread's chunk count specifically (the length axis the I3 gate watches).
+	metricRecallIndexFineChunks     = "recall_index_fine_chunks"
+	metricRecallIndexFineChunksMain = "recall_index_fine_chunks_main"
+
+	// metricRecallQueryCosineOps is the modeled per-query cosine-op count
+	// O(T·D + Kc·C·D) (§4.3): coarse pass over T thread vectors plus the fine
+	// pass over (Kc+1) selected threads' chunks. Modeled from T, the main
+	// thread's chunk count, and the design constants — must be flat in
+	// NON-engaged thread length, growing only with T and the engaged thread's C.
+	metricRecallQueryCosineOps = "recall_query_cosine_ops"
+
+	// metricRecallQueryLatency* are the per-query retrieval wall-clock
+	// percentiles (profiling clock) — the headline I3 gate is p99 flat across
+	// the rung ladder. Sourced from the runtime turn_duration_ms histogram as a
+	// proxy (the recall scan is part of turn close); reported as the available
+	// latency signal until a dedicated recall-latency timer lands.
+	metricRecallQueryLatencyP50 = "recall_query_latency_p50"
+	metricRecallQueryLatencyP95 = "recall_query_latency_p95"
+	metricRecallQueryLatencyP99 = "recall_query_latency_p99"
+
+	// metricRecallIndexFlushCalls / _Chunks are the embed-call rate from the
+	// debt-cap + dormancy flush triggers — the cost N pays (§6.2/§9.2). Modeled
+	// from the main thread's scrolled-out chunk count and the debt cap:
+	// flush_calls ≈ scrolled-out / debtCap, flush_chunks ≈ scrolled-out.
+	metricRecallIndexFlushCalls  = "recall_index_flush_calls"
+	metricRecallIndexFlushChunks = "recall_index_flush_chunks"
+
+	// metricRecallIntraBlindspotMisses is the count of intra-thread probes that
+	// missed BECAUSE the target chunk was inside the debt-window blind spot
+	// (predicted+observed miss) — separating by-design lag from real loss
+	// (§9.2). Embedding-live runs only.
+	metricRecallIntraBlindspotMisses = "recall_intra_blindspot_misses"
+
+	// metricRecallIntraHopRecall is the per-hop intra-thread recall curve (the
+	// #109 fidelity curve), keyed metricRecallIntraHopRecall+"_h<N>". SYMBOLIC
+	// now (the oracle's predicted recoverability — the H2 coherence curve), with
+	// an _obs companion (the per-hop observation count) and a _coherence
+	// companion (oracle/runtime agreement, embedding-live runs only). The
+	// embedding-quality head-to-head is the live-embedding run, NOT this number.
+	metricRecallIntraHopRecall = "recall_intra_hop_recall"
+
+	// metricRecallIntraCoherenceDivergence is the run-total intra-thread
+	// oracle/runtime divergence across all hops — the #109 coherence tripwire
+	// (== 0 is the pass on an embedding-live run; trivially 0 on the mock run,
+	// where the intra layer is off and no observed-vs-predicted tally runs).
+	metricRecallIntraCoherenceDivergence = "recall_intra_coherence_divergence"
+)
+
+// Per-query cosine-op model constants (§4.3). embedDim is the working
+// embedding dimension D (the §4.3 figure); the op model is O(T·D + Kc·C·D).
+// recallKc mirrors the runtime's coarse top-K (measure.Kc = 10); these are
+// the design's calibration anchors, used to MODEL the op count from the
+// shadow rather than instrument the runtime's inner loop.
+const (
+	embedDim = 768
+	recallKc = 10
+)
+
 // Synthesis-thread metric keys (§2.7.3, #47/#42). Defined here so the
 // generator, the metrics fold (recordWanderMetrics), and the rung summary
 // share one source of truth.
@@ -1681,6 +1900,59 @@ type generator struct {
 	// the two layers' per-hop recall share one denominator — apples-to-apples.
 	wanderHopEmbedHits map[int]int
 
+	// Candidate-A long-running main thread (§9.1, #109). mainThreadIdx is the
+	// creation-order index of the never-retired deep-trajectory thread (-1
+	// until lazily created on its first injected engagement); mainEngageCount
+	// counts injected main-thread engagements (gates the wander cadence);
+	// emittedSinceMainEngage / emittedSinceIntraProbe are the deterministic
+	// cadence counters for the injected engagement / probe steps (no rng).
+	// intraProbeHopCursor round-robins which earlier hop the next probe
+	// targets so every bucket fills.
+	mainThreadIdx          int
+	mainEngageCount        int
+	emittedSinceMainEngage int
+	emittedSinceIntraProbe int
+	intraProbeHopCursor    int
+
+	// shadowChunks[idx] is the generator's ordered shadow of thread idx's
+	// fine tier: one chunkRecord per emitted owner-excerpt (§8.2). Appended by
+	// recordEmission alongside emittedSyms, so it stays byte-aligned with the
+	// retained set; the intra-thread oracle scores it, never a runtime index
+	// (F6). Pure (no rng).
+	shadowChunks map[int][]chunkRecord
+
+	// lastIntraProbe is the most-recently-EMITTED intra-thread probe's
+	// metadata, read back on the next Next()'s feedback to bucket the
+	// observation. embeddingRun latches true once any feedback carries a
+	// non-nil EmbedMatchFireIDs — the signal that the embedding/intra fine
+	// tier is LIVE this run. The intra-thread coherence/divergence tally runs
+	// ONLY on an embedding-live run (the symbolic-only mock run has no intra
+	// layer to fire spine.intra-match-fire, so scoring observed-miss against a
+	// predicted-hit there would be a false divergence — the same discipline as
+	// the embedding head-to-head column, which is simply absent on the mock
+	// run). The PREDICTED hop-recall curve (the symbolic coherence curve, H2)
+	// is recorded on every run; only the observed-vs-predicted divergence is
+	// embedding-gated.
+	lastIntraProbe *intraProbe
+	embeddingRun   bool
+
+	// Intra-thread per-hop probe tallies (§9.2, #109). intraHopTotal is the
+	// per-hop observation count (the shared denominator); intraHopPredictHit
+	// is the oracle's predicted recoverability (the symbolic hop-recall curve,
+	// recall_intra_hop_recall); intraHopObservedHit is the runtime's observed
+	// spine.intra-match-fire (embedding-live runs only); intraHopCoherent /
+	// intraHopDiverge tally oracle/runtime agreement (embedding-live only;
+	// divergence is the criterion-(b) tripwire — 0 is the pass).
+	// intraBlindspotMisses counts probes whose target chunk is inside the
+	// debt-window blind spot AND observed a miss — separating by-design lag
+	// from real loss (§9.2 recall_intra_blindspot_misses).
+	intraHopTotal        map[int]int
+	intraHopPredictHit   map[int]int
+	intraHopObservedHit  map[int]int
+	intraHopCoherent     map[int]int
+	intraHopDiverge      map[int]int
+	intraBlindspotMisses int
+
 	// recallBuckets accumulates per-bucket {hits, total} recall tallies for
 	// the lifecycle oracles (drift_recall_origin, drift_recall_dest,
 	// abandoned_premise_recall). A step counts toward `total` once its
@@ -1837,6 +2109,40 @@ func (g *generator) runSession(active time.Duration) {
 				pbs.step.TimeDelta = 0
 				g.appendStep(pbs)
 				g.observeInterleave(pbs)
+			}
+		}
+
+		// Candidate-A main-thread engagement (§9.1, #109): on the cadence,
+		// inject one extra owner-engagement of the never-retired deep-trajectory
+		// main thread. Like the wander probe it is rng-FREE and zero-TimeDelta —
+		// it is issued at the same simulated instant as the step it follows,
+		// does NOT advance the clock or `spent`, and consumes no rng, so the
+		// canonical action stream and the determinism contract are untouched.
+		// Each such engagement appends one turn-excerpt (one shadow chunk),
+		// growing the main thread's excerpt count past ThreadTurnWindow into the
+		// continuous-scroll-out + debt-flush regime intra-thread recall targets.
+		g.emittedSinceMainEngage++
+		if g.emittedSinceMainEngage >= mainThreadEngageEvery {
+			g.emittedSinceMainEngage = 0
+			mbs := g.buildMainThreadStep()
+			mbs.step.TimeDelta = 0
+			g.appendStep(mbs)
+			g.observeInterleave(mbs)
+		}
+
+		// Intra-thread (#109) probe (§8.2): on the cadence, inject a query
+		// re-issuing one of the main thread's EARLIER scrolled-out trajectory
+		// slots, predicting whether the runtime should surface the main thread
+		// via spine.intra-match-fire. rng-free + zero-TimeDelta (determinism-
+		// safe); skipped (ok=false) until the main thread has a scrolled-out,
+		// past-blind-spot earlier slot to query.
+		g.emittedSinceIntraProbe++
+		if g.emittedSinceIntraProbe >= mainThreadProbeEvery {
+			if ibs, ok := g.buildIntraProbeStep(); ok {
+				g.emittedSinceIntraProbe = 0
+				ibs.step.TimeDelta = 0
+				g.appendStep(ibs)
+				g.observeInterleave(ibs)
 			}
 		}
 
@@ -2658,6 +2964,25 @@ func (g *generator) recordEmission(idx int, tags []string) {
 	for _, t := range tags {
 		set[t] = struct{}{}
 	}
+
+	// §8.2 fine-tier shadow: every owner emission writes one turn-excerpt, so
+	// append one chunkRecord. The runtime numbers an owner's excerpt
+	// rec.TurnCount+1 (engage.go), i.e. 1-based and monotonic per thread — the
+	// generator mirrors it as the prior chunk count + 1. tags is the per-turn
+	// emitted symbol set (this chunk's content); slotIdx is the thread's
+	// current slot. The shadow chunk list is the intra-thread oracle's score
+	// material — never a runtime index read (F6). A defensive copy of tags
+	// keeps the chunk immutable if the caller reuses its slice.
+	if g.shadowChunks == nil {
+		g.shadowChunks = map[int][]chunkRecord{}
+	}
+	chunkTags := append([]string(nil), tags...)
+	prior := g.shadowChunks[idx]
+	g.shadowChunks[idx] = append(prior, chunkRecord{
+		turnNumber: len(prior) + 1,
+		slotIdx:    g.threads[idx].cur,
+		tags:       chunkTags,
+	})
 }
 
 // shadowRetainedSet returns thread idx's shadow retained symbol set: the
@@ -2827,8 +3152,12 @@ func (g *generator) executedStepCount() int {
 func (g *generator) probeTarget() *thread {
 	var eligible []int
 	for i := range g.threads {
-		if g.isCarrier(i) {
-			continue // a measurement carrier is never a genuine probe target
+		if g.isCarrier(i) || g.isMainThread(i) {
+			// A measurement carrier is never a genuine probe target; the
+			// Candidate-A main thread is measured by the intra-thread probe, not
+			// the 40-symbol-bounded abandoned-topic wander probe (its retained
+			// set is unbounded by design — isMainThread).
+			continue
 		}
 		if len(g.threads[i].traj) >= 2 && !g.inLayerB(g.threads[i].order) {
 			eligible = append(eligible, i)
@@ -2849,6 +3178,69 @@ func (g *generator) probeTarget() *thread {
 func (g *generator) isCarrier(idx int) bool {
 	_, ok := g.carrierIdx[idx]
 	return ok
+}
+
+// mainThreadChunkCount returns the Candidate-A main thread's total shadow
+// chunk count (its turn-excerpt count) — the length axis the I3 perf-decay
+// gate watches. 0 when the main thread was never created (a rung too short
+// to inject one).
+func (g *generator) mainThreadChunkCount() int {
+	if g.mainThreadIdx < 0 {
+		return 0
+	}
+	return len(g.shadowChunks[g.mainThreadIdx])
+}
+
+// totalFineChunks returns the total shadow chunk count across all threads —
+// the generator's shadow of the fine tier's size.
+func (g *generator) totalFineChunks() int {
+	total := 0
+	for _, chunks := range g.shadowChunks {
+		total += len(chunks)
+	}
+	return total
+}
+
+// mainThreadScrolledOut returns the count of the main thread's chunks that
+// have scrolled out of the assembly window (turnNumber <= cur - window) —
+// the fine-tier debt the flush triggers pay down. Used to MODEL the flush
+// call/chunk rate (§9.2) from the shadow rather than instrument the runtime.
+func (g *generator) mainThreadScrolledOut() int {
+	if g.mainThreadIdx < 0 {
+		return 0
+	}
+	cur := len(g.shadowChunks[g.mainThreadIdx])
+	if cur <= intraThreadTurnWindow {
+		return 0
+	}
+	return cur - intraThreadTurnWindow
+}
+
+// modeledCosineOps returns the §4.3 modeled per-query cosine-op count
+// O(T·D + Kc·C·D): a coarse pass over T thread vectors plus a fine pass over
+// (Kc+1) selected threads' chunks, where C is the engaged thread's chunk
+// count (the main thread's, the length-sensitive term). This MODELS the cost
+// from the design constants and the shadow — it is the §4.3 validation that
+// the term is flat in NON-engaged thread length (only T and the engaged C
+// move it), not a runtime inner-loop instrument.
+func (g *generator) modeledCosineOps(liveThreads int) int {
+	coarse := liveThreads * embedDim
+	fine := (recallKc + 1) * g.mainThreadChunkCount() * embedDim
+	return coarse + fine
+}
+
+// isMainThread reports whether idx is the Candidate-A long-running main
+// thread (§9.1, #109). The main thread's retained set is DELIBERATELY
+// unbounded — its multi-year trajectory accretes thousands of turn-excerpts,
+// which is the entire point of intra-thread recall. It is therefore excluded
+// from the within-thread WANDER oracle (probeTarget, recordWanderMetrics) and
+// the criterion (e) no-eviction shadow-max measurement, exactly as a carrier
+// is: its growth is the intra-thread fine tier's reason to exist, not a
+// no-eviction-coherence hazard for the symbolic abandoned-topic oracle. Its
+// intra-thread recall is measured by the dedicated intra-thread probe, not the
+// 40-symbol-bounded wander probe.
+func (g *generator) isMainThread(idx int) bool {
+	return g.mainThreadIdx >= 0 && idx == g.mainThreadIdx
 }
 
 // measurementCarrier returns the creation-order index of the dedicated
@@ -2984,6 +3376,210 @@ func (g *generator) buildWanderProbeStep() (bufStep, bool) {
 			threadID:   target.threadID(),
 			hops:       hop,
 			predictHit: predictHit,
+		},
+	}, true
+}
+
+// ensureMainThread lazily creates the Candidate-A long-running main thread
+// (§9.1, #109) on its first injected engagement, bound to corpus slot 0 as
+// its birth topic, and returns its creation-order index. Subsequent calls
+// return the existing index. The main thread is never retired and accretes
+// an unbounded multi-topic trajectory — its birth-slot binding is just the
+// trajectory head. Pure (no rng): creation order is len(g.threads) at first
+// use, keeping the threadID mapping intact and the canonical stream
+// deterministic.
+func (g *generator) ensureMainThread() int {
+	if g.mainThreadIdx >= 0 {
+		return g.mainThreadIdx
+	}
+	g.mainThreadIdx = g.createThread(len(g.threads), 0)
+	return g.mainThreadIdx
+}
+
+// advanceMainThreadTrajectory moves the main thread to a fresh, distinct-
+// topic slot every mainThreadWanderEvery engagements — the UNBOUNDED-
+// trajectory variant (§9.1), unlike a normal thread capped at wanderMaxHops.
+// It reuses nextWanderSlot (the deterministic, rng-free destination walk),
+// so the main thread's early content becomes vocabulary-distinct from its
+// current content over its life — the realistic intra-thread drift-recovery
+// case. Pure (no rng).
+func (g *generator) advanceMainThreadTrajectory(idx int) {
+	if g.mainEngageCount%mainThreadWanderEvery != 0 {
+		return
+	}
+	thr := &g.threads[idx]
+	dest := nextWanderSlot(*thr, g.model.slots)
+	if dest == thr.cur {
+		return // degenerate single-topic corpus
+	}
+	thr.traj = append(thr.traj, dest)
+	thr.cur = dest
+}
+
+// buildMainThreadStep injects one owner-engagement of the Candidate-A main
+// thread (§9.1, #109). It is rng-FREE — every choice is a pure function of
+// generator state — so it is part of the canonical stream and the
+// determinism guard stays byte-identical. Each engagement emits the main
+// thread's CURRENT slot tags + salt (one turn-excerpt → one shadow chunk via
+// recordEmission), and the trajectory advances on the wander cadence. The
+// main thread is engaged through g.engage (it is a genuine topical thread,
+// not a measurement carrier), so it stays resident and its excerpt count
+// grows monotonically into the thousands, driving FIFO scroll-out + debt
+// flushes — the #109 regime.
+func (g *generator) buildMainThreadStep() bufStep {
+	idx := g.ensureMainThread()
+	isNew := g.firstEngagement(idx)
+	g.mainEngageCount++
+	g.threads[idx].engagementCount++
+	g.advanceMainThreadTrajectory(idx)
+
+	thr := g.threads[idx]
+	slot := g.model.slots[thr.cur]
+	anchorTags := append(nonLooseTags(slot), saltSymbol(thr.order))
+	userInput := defaultUserInput(slot, false)
+	g.recordEmission(idx, extractedSymbolsFor(userInput, anchorTags))
+
+	threads := []string{thr.threadID()}
+	if isNew {
+		threads = []string{prompt.NewTopicLiteral}
+	}
+	step := scenarios.Step{
+		UserInput:    userInput,
+		MockResponse: scenarios.NewMockResponseWithTag(threads, anchorTags, fmt.Sprintf("main thread — %s.", slot.Topic)),
+		Annotation:   fmt.Sprintf("turn %d: main-thread engage %s (%s)", g.stepIndex+1, thr.threadID(), slot.Topic),
+		ClosureAck:   &scenarios.ClosureAck{Outcome: turn.ClosureResolved},
+		RecallAck:    &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
+	}
+	g.engage(idx, g.stepIndex)
+	return bufStep{step: step, slotIdx: thr.cur, engagedIdx: idx}
+}
+
+// buildIntraProbeStep constructs one intra-thread (#109, §8.2) probe if the
+// main thread has an EARLIER slot whose chunks have scrolled out of the
+// assembly window; ok=false otherwise. It is rng-FREE (every choice is a
+// pure function of generator state), so it is part of the canonical stream.
+//
+// The probe ENGAGES the main thread (unlike the wander probe, which uses a
+// carrier): intra-thread recall is recall of the engaged long thread's OWN
+// early content, so the main thread must be Request.Engaged for the runtime's
+// §4.1-step-3 fine pass to scan its scrolled-out chunks. The query is an
+// EARLIER trajectory slot's tags; the runtime fires spine.intra-match-fire
+// for the main thread iff a scrolled-out, flushed chunk of that slot clears
+// the fine-tier threshold.
+//
+// The oracle predicts a hit iff SOME shadow chunk of the queried slot is
+// (a) scrolled out of the assembly window (turnNumber <= cur - window),
+// (b) past the debt-window blind spot (turnNumber <= cur - window - debtCap;
+//     §6.5 — a chunk scrolled out < debtCap turns ago may be unflushed, so
+//     it is predicted MISS, NOT a divergence), AND
+// (c) clears simRecallThreshold against the query under simJaccard, scored
+//     PER CHUNK (the same set/union semantics the runtime applies per chunk
+//     vector — §8.2 coherence). blindspot is true when the queried slot has
+// scrolled-out chunks but ALL of them are inside the blind spot, separating
+// by-design lag from real loss (recall_intra_blindspot_misses).
+//
+// The hop distance is (current traj index − queried traj index): hop >= 1 is
+// an EARLIER abandoned topic. probeIntraHopCursor round-robins so every
+// bucket fills.
+func (g *generator) buildIntraProbeStep() (bufStep, bool) {
+	if g.mainThreadIdx < 0 {
+		return bufStep{}, false
+	}
+	idx := g.mainThreadIdx
+	thr := g.threads[idx]
+	if len(thr.traj) < 2 {
+		return bufStep{}, false // no earlier slot yet
+	}
+	cur := len(g.shadowChunks[idx]) // the main thread's current turn number
+
+	// Round-robin an earlier hop in [1, len(traj)-1]. lastIdx is the current
+	// slot's trajectory position; queriedTrajIdx sits `hop` slots earlier.
+	span := len(thr.traj) - 1
+	hop := 1 + g.intraProbeHopCursor%span
+	g.intraProbeHopCursor++
+	queriedTrajIdx := (len(thr.traj) - 1) - hop
+	if queriedTrajIdx < 0 {
+		return bufStep{}, false
+	}
+	queriedSlotIdx := thr.traj[queriedTrajIdx]
+	queriedSlot := g.model.slots[queriedSlotIdx]
+	Q := nonLooseTags(queriedSlot)
+	if len(Q) == 0 {
+		return bufStep{}, false
+	}
+
+	// Oracle prediction over the generator's own shadow chunks (F6): scan the
+	// queried slot's chunks for one that is scrolled out, past the blind spot,
+	// AND clears the threshold per-chunk. Salt is unioned into each chunk's set
+	// defensively (the runtime folds the thread salt into history_symbols, so
+	// the per-chunk denominator carries it); Q carries no salt (the query is the
+	// earlier slot's topical tags only). Whether ANY scrolled-out chunk exists
+	// for the slot (regardless of threshold) decides the blind-spot bookkeeping.
+	predictHit, anyScrolledOut, anyRecallable := false, false, false
+	for _, ch := range g.shadowChunks[idx] {
+		if ch.slotIdx != queriedSlotIdx {
+			continue
+		}
+		if cur-ch.turnNumber < intraThreadTurnWindow {
+			continue // still in the assembly window — not index material (I6)
+		}
+		anyScrolledOut = true
+		if cur-ch.turnNumber < intraThreadTurnWindow+intraThreadDebtCap {
+			continue // inside the debt-window blind spot — predicted miss (§6.5)
+		}
+		anyRecallable = true
+		set := make(map[string]struct{}, len(ch.tags)+1)
+		for _, t := range ch.tags {
+			set[t] = struct{}{}
+		}
+		set[saltSymbol(thr.order)] = struct{}{}
+		if simJaccard(Q, set) >= simRecallThreshold {
+			predictHit = true
+			break
+		}
+	}
+	if !anyScrolledOut {
+		return bufStep{}, false // nothing of this slot has scrolled out yet
+	}
+	// blindspot: the queried slot has scrolled-out chunks but none are past
+	// the blind spot — its recallability is gated entirely by the by-design lag.
+	blindspot := !anyRecallable
+
+	var mentions strings.Builder
+	for i, s := range Q {
+		if i > 0 {
+			mentions.WriteString(" ")
+		}
+		mentions.WriteString("#")
+		mentions.WriteString(s)
+	}
+	probeUserInput := "earlier in this thread, " + mentions.String()
+
+	// Engage the main thread as owner, re-emitting the queried (earlier) slot's
+	// tags. recordEmission keeps the shadow aligned with what the runtime
+	// accretes; the queried slot is already in the main thread's history, so
+	// this adds no foreign symbol — only a fresh (non-scrolled-out) chunk that
+	// the oracle and the index both exclude from prediction (I6).
+	anchorTags := append(append([]string(nil), Q...), saltSymbol(thr.order))
+	g.recordEmission(idx, extractedSymbolsFor(probeUserInput, anchorTags))
+
+	step := scenarios.Step{
+		UserInput:    probeUserInput,
+		MockResponse: scenarios.NewMockResponseWithTag([]string{thr.threadID()}, anchorTags, "intra-thread probe."),
+		Annotation:   fmt.Sprintf("turn %d: intra-probe %s hop=%d", g.stepIndex+1, thr.threadID(), hop),
+		ClosureAck:   &scenarios.ClosureAck{Outcome: turn.ClosureResolved},
+		RecallAck:    &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
+	}
+	g.engage(idx, g.stepIndex)
+	return bufStep{
+		step:       step,
+		slotIdx:    thr.cur,
+		engagedIdx: idx,
+		intraProbe: &intraProbe{
+			threadID:   thr.threadID(),
+			hops:       hop,
+			predictHit: predictHit,
+			blindspot:  blindspot,
 		},
 	}, true
 }

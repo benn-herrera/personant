@@ -93,7 +93,7 @@ func TestSurfaceRecallCandidates_LogsMatchFire(t *testing.T) {
 	state.coalesce.addSymbol("alpha", "alpha", memops.SourceUser)
 	state.coalesce.addSymbol("beta", "beta", memops.SourceUser)
 
-	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}); err != nil {
+	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
 		t.Fatalf("surfaceRecallCandidates: %v", err)
 	}
 
@@ -124,7 +124,7 @@ func TestSurfaceRecallCandidates_ExcludesEngaged(t *testing.T) {
 	state.coalesce.addSymbol("beta", "beta", memops.SourceUser)
 
 	engaged := map[string]struct{}{"thr_1": {}}
-	if err := surfaceRecallCandidates(context.Background(), state, "", engaged); err != nil {
+	if err := surfaceRecallCandidates(context.Background(), state, "", engaged, ""); err != nil {
 		t.Fatalf("surfaceRecallCandidates: %v", err)
 	}
 
@@ -150,7 +150,7 @@ func TestSurfaceRecallCandidates_NoCandidatesIsQuiet(t *testing.T) {
 	state.coalesce.addSymbol("nope1", "nope1", memops.SourceUser)
 	state.coalesce.addSymbol("nope2", "nope2", memops.SourceUser)
 
-	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}); err != nil {
+	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
 		t.Fatalf("surfaceRecallCandidates: %v", err)
 	}
 
@@ -277,7 +277,7 @@ func TestSurfaceRecall_AcceptPromotesToLayerB(t *testing.T) {
 		return RecallResolution{Reason: DeclineNotRelevant}, nil
 	}
 
-	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}); err != nil {
+	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
 		t.Fatalf("surfaceRecallCandidates: %v", err)
 	}
 
@@ -327,7 +327,7 @@ func TestSurfaceRecall_DeclineAllLogsReason(t *testing.T) {
 		return RecallResolution{Reason: DeclineWrongProject}, nil
 	}
 
-	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}); err != nil {
+	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
 		t.Fatalf("surfaceRecallCandidates: %v", err)
 	}
 
@@ -363,7 +363,7 @@ func TestSurfaceRecall_NoResolverStaysLogOnly(t *testing.T) {
 	state.coalesce.addSymbol("beta", "beta", memops.SourceUser)
 	// RecallResolver deliberately left nil.
 
-	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}); err != nil {
+	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
 		t.Fatalf("surfaceRecallCandidates: %v", err)
 	}
 

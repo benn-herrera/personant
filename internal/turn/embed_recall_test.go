@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
@@ -74,7 +75,7 @@ func TestSurfaceRecall_EmbeddingFires(t *testing.T) {
 	state := embeddingState(t, paths, meta)
 
 	if err := surfaceRecallCandidates(context.Background(), state,
-		"trefoil knot topology invariant", map[string]struct{}{}); err != nil {
+		"trefoil knot topology invariant", map[string]struct{}{}, ""); err != nil {
 		t.Fatalf("surfaceRecallCandidates: %v", err)
 	}
 
@@ -87,6 +88,74 @@ func TestSurfaceRecall_EmbeddingFires(t *testing.T) {
 	}
 }
 
+// TestSurfaceRecall_IntraThreadFires covers the §7 turn-close emission of
+// spine.intra-match-fire: when the engaged thread has a scrolled-out
+// early-content chunk that matches the query, surfaceRecallCandidates logs
+// the additive intra-match-fire line for it (the §8 oracle's observable).
+// It drives the real Recaller end-to-end — the engaged thread is passed as
+// engagedOwner, so the §4.1 step-3 fine pass admits its chunks by ID.
+func TestSurfaceRecall_IntraThreadFires(t *testing.T) {
+	paths, meta := newTestHome(t)
+	// Per-turn body: an early turn topically distinct from the rest, so a
+	// probe for it retrieves that scrolled-out chunk.
+	body := "## Turn 1\ntrefoil knot topology invariant chirality\n\n" +
+		"## Turn 2\nmonsoon humidity precipitation tropics\n\n" +
+		"## Turn 3\nledger reconciliation accrual depreciation\n"
+	seedThreadWithBody(t, paths, meta.ID, "thr_1", body)
+
+	ops := fileadapter.NewFileAdapter(paths)
+	svc := measure.NewService(ops, model.NewMockEmbedder())
+	if err := svc.Prepare(context.Background()); err != nil {
+		t.Fatalf("Recaller.Prepare: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
+	state := NewState(ops, meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state.Recaller = svc
+
+	// Flush the thread's chunks into the fine tier and wait for the async
+	// indexer to publish a snapshot that surfaces the early chunk — a stuck
+	// indexer is a real defect, not flakiness.
+	svc.EnqueueFlush("thr_1", 3)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		results, err := svc.Recall(context.Background(), measure.Request{
+			QueryText: "trefoil knot topology invariant chirality",
+			Engaged:   "thr_1",
+			Exclude:   map[string]struct{}{"thr_1": {}},
+		})
+		if err != nil {
+			t.Fatalf("Recall: %v", err)
+		}
+		if r, ok := findResultByID(results, "thr_1"); ok && r.IntraThread != nil {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Now run the turn-close emission path with the engaged thread excluded
+	// at the thread level but passed as engagedOwner (the #109 bypass).
+	if err := surfaceRecallCandidates(context.Background(), state,
+		"trefoil knot topology invariant chirality",
+		map[string]struct{}{"thr_1": {}}, "thr_1"); err != nil {
+		t.Fatalf("surfaceRecallCandidates: %v", err)
+	}
+
+	log := readDayLog(t, paths)
+	if !strings.Contains(log, "spine.intra-match-fire thr_1") {
+		t.Errorf("expected intra-match-fire for thr_1; log:\n%s", log)
+	}
+}
+
+// findResultByID returns the result for threadID among results.
+func findResultByID(results []measure.Result, threadID string) (measure.Result, bool) {
+	for _, r := range results {
+		if r.ThreadID == threadID {
+			return r, true
+		}
+	}
+	return measure.Result{}, false
+}
+
 // TestSurfaceRecall_NoEmbedder confirms graceful absence: the default
 // symbolic-only Recaller produces no embedding matches. With an empty
 // coalesce buffer there is no symbolic match either, so nothing logs.
@@ -97,7 +166,7 @@ func TestSurfaceRecall_NoEmbedder(t *testing.T) {
 
 	state := NewState(ops, meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
 	if err := surfaceRecallCandidates(context.Background(), state,
-		"trefoil knot topology", map[string]struct{}{}); err != nil {
+		"trefoil knot topology", map[string]struct{}{}, ""); err != nil {
 		t.Fatalf("surfaceRecallCandidates: %v", err)
 	}
 

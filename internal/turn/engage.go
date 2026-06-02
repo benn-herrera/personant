@@ -205,7 +205,14 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 	for _, id := range engaged {
 		engagedSet[id] = struct{}{}
 	}
-	if err := surfaceRecallCandidates(ctx, state, userInput, engagedSet); err != nil {
+	// The owner (engaged[0]) is the thread the user is currently in — the
+	// intra-thread (#109) engaged thread whose scrolled-out early content
+	// the fine-tier pass may surface. Empty when this turn engaged nothing.
+	var engagedOwner string
+	if len(engaged) > 0 {
+		engagedOwner = engaged[0]
+	}
+	if err := surfaceRecallCandidates(ctx, state, userInput, engagedSet, engagedOwner); err != nil {
 		_ = state.Ops.Log(ctx, memops.LogCategoryRecall, "error", memops.SanitizeDetail(err.Error()))
 		// Non-fatal: opportunistic recall failure does not abort the turn.
 	}

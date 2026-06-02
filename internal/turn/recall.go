@@ -3,11 +3,22 @@ package turn
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"personant/internal/memops"
 	"personant/internal/recall/measure"
 )
+
+// joinInts renders a turn-number slice as a comma-separated token for the
+// spine.intra-match-fire log line (e.g. "12,40,103"). Empty → "" .
+func joinInts(ns []int) string {
+	parts := make([]string, len(ns))
+	for i, n := range ns {
+		parts[i] = strconv.Itoa(n)
+	}
+	return strings.Join(parts, ",")
+}
 
 // recallOfferK is the number of recall candidates surfaced to the user
 // at turn close. C.6 measured top-1 recall ~73%, top-3 ~92%; surface
@@ -68,7 +79,12 @@ type RecallResolver func(ctx context.Context, offer RecallOffer) (RecallResoluti
 // thread doesn't shadow the turn's own engagement signal. A Recaller
 // error is non-fatal: the caller logs and swallows it (recall is
 // opportunistic and must never abort the turn).
-func surfaceRecallCandidates(ctx context.Context, state *State, userInput string, engagedSet map[string]struct{}) error {
+//
+// engagedOwner is the thread the user is currently in (the turn's owner).
+// It is passed as Request.Engaged so the §4.1 step-3 intra-thread pass
+// scans its scrolled-out early-content chunks (the #109 case) even though
+// it is in engagedSet at the thread level. Empty when nothing was engaged.
+func surfaceRecallCandidates(ctx context.Context, state *State, userInput string, engagedSet map[string]struct{}, engagedOwner string) error {
 	if state.Recaller == nil {
 		return nil
 	}
@@ -77,6 +93,7 @@ func surfaceRecallCandidates(ctx context.Context, state *State, userInput string
 		QueryText:    userInput,
 		Project:      state.ActiveProject.ID,
 		Exclude:      engagedSet,
+		Engaged:      engagedOwner,
 	})
 	if err != nil {
 		return fmt.Errorf("recall: %w", err)
@@ -101,6 +118,19 @@ func surfaceRecallCandidates(ctx context.Context, state *State, userInput string
 				r.ThreadID, r.Embedding.Score, queryChars)
 			if err := state.Ops.Log(ctx, memops.LogCategorySpine, "embed-match-fire", details); err != nil {
 				return fmt.Errorf("log spine.embed-match-fire: %w", err)
+			}
+		}
+		// Intra-thread (#109) fine-tier hit on the engaged thread: an early,
+		// scrolled-out turn-excerpt matched the query. Mirrors the
+		// embed-match-fire emission (design §7) — the additive
+		// spine.intra-match-fire event the §8 oracle scores. Only non-user
+		// values reach the format string: the thread id, the matched
+		// turn-excerpt number(s), and the best chunk score.
+		if r.IntraThread != nil {
+			details := fmt.Sprintf("%s score=%.3f turns=%s query_chars=%d",
+				r.ThreadID, r.IntraThread.Score, joinInts(r.IntraThread.Turns), queryChars)
+			if err := state.Ops.Log(ctx, memops.LogCategorySpine, "intra-match-fire", details); err != nil {
+				return fmt.Errorf("log spine.intra-match-fire: %w", err)
 			}
 		}
 	}

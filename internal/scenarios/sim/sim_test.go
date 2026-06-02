@@ -309,12 +309,17 @@ func TestSim(t *testing.T) {
 	// a work day is 2 sessions of 6 h turn-active time = 12 h of
 	// inter-turn gaps. With the 6:1 rapid:work weighting the mean gap is
 	// ~(6*RapidGap + 1*WorkGap)/7 ≈ (6*1m + 6m)/7 ≈ 1.7m, so 12 h / 1.7m
-	// ≈ 420 turns; ±30% jitter and weighting variance widen that to a
-	// [250, 600] band. Re-derive this if RapidGap/WorkGap or the
-	// rapid:work weights change. The band is 1-day-specific, so it
-	// applies only when the span is exactly 24 h — longer rungs still
-	// get runSimRung's clean-completion + well-formedness assertions,
-	// just not this turn-count band.
+	// ≈ 420 NATURAL turns; ±30% jitter and weighting variance widen that to
+	// ~[250, 600]. The Candidate-A main thread (#109) then injects one EXTRA
+	// rng-free engagement every mainThreadEngageEvery natural turns (plus a
+	// handful of intra-thread probes once the main thread scrolls past the
+	// assembly window), so the OBSERVED turn count is ~natural × (1 +
+	// 1/mainThreadEngageEvery) — at every-2 that is ~1.5×, widening the band
+	// to [375, 950]. Re-derive this if RapidGap/WorkGap, the rapid:work
+	// weights, or mainThreadEngageEvery change. The band is 1-day-specific, so
+	// it applies only when the span is exactly 24 h — longer rungs still get
+	// runSimRung's clean-completion + well-formedness assertions, just not
+	// this turn-count band.
 	//
 	// The on-demand generator yields steps one at a time, so the count
 	// is not knowable up front — it is asserted against the post-run
@@ -325,8 +330,8 @@ func TestSim(t *testing.T) {
 			t.Fatalf("read metrics blob for turn-count band: %v", err)
 		}
 		turns := m.Counters["turns"]
-		if turns < 250 || turns > 600 {
-			t.Errorf("turn count %d outside plausible band [250, 600]", turns)
+		if turns < 375 || turns > 950 {
+			t.Errorf("turn count %d outside plausible band [375, 950]", turns)
 		}
 	}
 }
@@ -488,6 +493,7 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	durations := m.Histograms["turn_duration_ms"]
 	p50 := percentile(durations, 0.50)
 	p95 := percentile(durations, 0.95)
+	p99 := percentile(durations, 0.99)
 	meanMs := mean(durations)
 
 	threadsCreated := m.Counters["threads_created"]
@@ -502,6 +508,20 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// contiguity / no-gaps; see threadID()'s precondition.)
 	assertThreadIDsWellFormed(t, h)
 	finalPopulation := finalThreadPopulation(t, h)
+
+	// Fold the intra-thread recall telemetry (§9.2, #109): the §4.3 perf-decay
+	// series (coarse_size==T, fine_chunks[_main], modeled cosine_ops, latency
+	// p50/p95/p99, modeled flush rate) and the intra-thread oracle's per-hop
+	// coherence curve + divergence. Needs the final spine size T and the turn
+	// latency percentiles, so it runs here (after both are known) and re-writes
+	// the blob, then re-reads m so the summary + gates below see the new series.
+	recordIntraThreadMetrics(h, gen, finalPopulation, p50, p95, p99)
+	if err := h.Metrics.WriteJSON(h.MetricsPath); err != nil {
+		t.Fatalf("re-write metrics blob with intra-thread series: %v", err)
+	}
+	if m, err = readMetrics(h.MetricsPath); err != nil {
+		t.Fatalf("re-read metrics blob: %v", err)
+	}
 
 	t.Logf("=== %s summary ===", label)
 	t.Logf("turns:            %d", turns)
@@ -698,6 +718,91 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 			divergence, totalProbeObs)
 	}
 
+	// Intra-thread recall (#109, §9.2). The §4.3 perf-decay series (the I3/I4
+	// gates) and the intra-thread oracle's per-hop coherence curve. H2 HONESTY:
+	// the hop-recall curve here is the SYMBOLIC shadow-chunk oracle's predicted
+	// recoverability — a COHERENCE signal, not validated user recall. The
+	// embedding-quality head-to-head is the live-embedding run (Inc 6 / #98), not
+	// this number; a green symbolic curve does NOT mean "recall works for users".
+	embeddingRun := gen.embeddingRun
+	t.Logf("=== intra-thread recall (#109) ===")
+	t.Logf("recall_index_coarse_size: %d (== final spine size T; flat per-thread-length, the I4 check)",
+		int(m.Gauges[metricRecallIndexCoarseSize]))
+	t.Logf("recall_index_fine_chunks: %d total, %d main-thread (the I3 length axis)",
+		int(m.Gauges[metricRecallIndexFineChunks]), int(m.Gauges[metricRecallIndexFineChunksMain]))
+	t.Logf("recall_query_cosine_ops:  %d (modeled O(T·D + Kc·C·D), §4.3; D=%d Kc=%d)",
+		int(m.Gauges[metricRecallQueryCosineOps]), embedDim, recallKc)
+	t.Logf("recall_query_latency:     P50=%.1fms P95=%.1fms P99=%.1fms (I3 gate: P99 flat across the rung ladder)",
+		m.Gauges[metricRecallQueryLatencyP50], m.Gauges[metricRecallQueryLatencyP95], m.Gauges[metricRecallQueryLatencyP99])
+	t.Logf("recall_index_flush:       %d calls / %d chunks (modeled debt-cap N=%d flush rate — the cost N pays)",
+		int(m.Gauges[metricRecallIndexFlushCalls]), int(m.Gauges[metricRecallIndexFlushChunks]), intraThreadDebtCap)
+
+	intraProbeObs := 0
+	for _, total := range gen.intraHopTotal {
+		intraProbeObs += total
+	}
+	if intraProbeObs == 0 {
+		t.Logf("intra-thread probes:      none this run (rung too short to scroll the main thread past the assembly window + debt cap)")
+	} else if embeddingRun {
+		t.Logf("intra-thread hop-recall (symbolic coherence curve, H2 — NOT user recall):")
+		maxHop := 0
+		for hop := range gen.intraHopTotal {
+			if hop > maxHop {
+				maxHop = hop
+			}
+		}
+		for hop := 1; hop <= maxHop; hop++ {
+			key := fmt.Sprintf("_h%d", hop)
+			obs := int(m.Gauges[metricRecallIntraHopRecall+key+"_obs"])
+			if obs == 0 {
+				continue
+			}
+			t.Logf("  hop %d: predicted_recall=%.3f coherence=%.3f (%d obs)",
+				hop, m.Gauges[metricRecallIntraHopRecall+key],
+				m.Gauges[metricRecallIntraHopRecall+key+"_coherence"], obs)
+		}
+		t.Logf("recall_intra_blindspot_misses: %d (predicted+observed miss inside the debt-window blind spot — by-design lag, not loss)",
+			int(m.Gauges[metricRecallIntraBlindspotMisses]))
+	} else {
+		// Symbolic-only (mock) run: the intra layer never fires (no embedder), so
+		// only the oracle's PREDICTED recoverability curve is meaningful; observed
+		// recall and coherence are by-construction 0 (no layer to fire), exactly
+		// as the embedding head-to-head column is absent on the mock run.
+		t.Logf("intra-thread hop-recall (oracle PREDICTED recoverability — symbolic-only run, intra layer off; observed n/a):")
+		maxHop := 0
+		for hop := range gen.intraHopTotal {
+			if hop > maxHop {
+				maxHop = hop
+			}
+		}
+		for hop := 1; hop <= maxHop; hop++ {
+			key := fmt.Sprintf("_h%d", hop)
+			obs := int(m.Gauges[metricRecallIntraHopRecall+key+"_obs"])
+			if obs == 0 {
+				continue
+			}
+			t.Logf("  hop %d: predicted_recall=%.3f (%d obs)",
+				hop, m.Gauges[metricRecallIntraHopRecall+key], obs)
+		}
+	}
+
+	// Intra-thread coherence divergence — the #109 tripwire (ZERO-TOLERANCE,
+	// same discipline as the wander-coherence gate). On an embedding-live run a
+	// real divergence (oracle predicts a recoverable early chunk the runtime
+	// misses, or vice-versa, OUTSIDE the modeled debt-window blind spot) means
+	// the oracle/runtime fine-tier coherence broke — STOP and root-cause, never
+	// widen forgiveness. On the symbolic-only mock run the intra layer is off,
+	// so no observed-vs-predicted tally ran and divergence is trivially 0.
+	intraDivergence := int(m.Gauges[metricRecallIntraCoherenceDivergence])
+	t.Logf("intra-thread coherence divergence: %d (#109 PASS = 0; the decay curve is the deliverable, divergence is the failure)",
+		intraDivergence)
+	if embeddingRun && !oracleBlind && intraDivergence != 0 {
+		t.Errorf("#109 FAILURE: intra-thread coherence divergence %d != 0 over %d probe obs — the shadow-chunk oracle and "+
+			"the runtime fine tier DISAGREE on early-content recall outside the debt-window blind spot. Root-cause the "+
+			"oracle/runtime coherence (do NOT widen forgiveness — that disables the canary).",
+			intraDivergence, intraProbeObs)
+	}
+
 	// Criterion (e): max per-thread retained symbol count must stay under
 	// the eviction cap — the no-eviction precondition the oracle's
 	// coherence rests on (§4.3). The generator's own shadow retained set is
@@ -705,7 +810,7 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// below the cap. (history_len_max above is the runtime-side companion.)
 	maxRetained := 0
 	for i := range gen.threads {
-		if gen.isCarrier(i) {
+		if gen.isCarrier(i) || gen.isMainThread(i) {
 			// Dedicated measurement carriers absorb the abandoned-topic-probe
 			// and campaign-recall query pollution by design (#96 inc 2); they
 			// are excluded from the recall oracle on both sides, so their
@@ -714,6 +819,15 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 			// strictly capped at 40 (history.cap-per-thread), and their
 			// ~5-symbol-query Jaccard denominator dilutes below the §3.4
 			// threshold, so they never fire as a false recall match.
+			//
+			// The Candidate-A main thread (#109) is likewise excluded: its
+			// retained set is UNBOUNDED by design — its multi-year trajectory is
+			// the intra-thread fine tier's reason to exist. The wander oracle's
+			// no-eviction (criterion e) precondition is about the 40-symbol
+			// abandoned-topic threads; the main thread's intra-thread recall is
+			// scored by the dedicated intra-thread probe (recall_intra_hop_recall),
+			// not by symbolic whole-thread Jaccard, so its growth is not a
+			// criterion-(e) hazard.
 			continue
 		}
 		if n := len(gen.shadowRetainedSet(i)); n > maxRetained {
@@ -1004,6 +1118,103 @@ func TestGenerateWorkload_Deterministic(t *testing.T) {
 	}
 }
 
+// TestIntraThreadWindowMirrorsRuntime asserts the intra-thread oracle's
+// scroll-out boundary (intraThreadTurnWindow) tracks the runtime's assembly
+// window (store.ThreadTurnWindow). The two MUST agree or the oracle's "this
+// chunk is index material" predicate diverges from the runtime's I6 boundary,
+// silently breaking intra-thread coherence. The sim package cannot import
+// turn's unexported embeddingDebtCap, so the debt-cap mirror is a documented
+// invariant (intraThreadDebtCap == turn.embeddingDebtCap == 16) checked by
+// hand; the window mirror is machine-checked here.
+func TestIntraThreadWindowMirrorsRuntime(t *testing.T) {
+	if intraThreadTurnWindow != store.ThreadTurnWindow {
+		t.Fatalf("intraThreadTurnWindow=%d must mirror store.ThreadTurnWindow=%d "+
+			"(the I6 scroll-out boundary the runtime and the intra-thread oracle share)",
+			intraThreadTurnWindow, store.ThreadTurnWindow)
+	}
+}
+
+// TestIntraProbeOracle_BlindSpotBoundary is a focused logic test of the
+// intra-thread oracle's three-band scroll-out predicate (§8.2): a chunk is
+// (1) still in the assembly window → not index material; (2) scrolled out but
+// inside the debt-window blind spot → predicted MISS (by-design lag); (3)
+// scrolled out past the blind spot AND clearing the threshold → predicted HIT.
+// It seeds the main thread's shadow chunks directly and drives one probe,
+// asserting the oracle's prediction matches the band the queried slot's
+// oldest chunk falls in.
+func TestIntraProbeOracle_BlindSpotBoundary(t *testing.T) {
+	corpus := loadCorpusSlots(t)
+	g := GenerateWorkload(WorkloadConfig{Seed: simSeed, Duration: simDayDuration, Corpus: corpus}).
+		StepSource.(*generator)
+
+	// Stand up a main thread with two trajectory slots: an EARLY slot whose
+	// chunks are deep in the past (well past the blind spot) and a CURRENT
+	// slot. cur = total chunk count.
+	earlySlot := 0
+	currentSlot := 1
+	for g.model.slots[currentSlot].Topic == g.model.slots[earlySlot].Topic {
+		currentSlot++ // ensure a distinct topic so the trajectory is a real wander
+	}
+	g.mainThreadIdx = g.createThread(len(g.threads), earlySlot)
+	g.threads[g.mainThreadIdx].traj = []int{earlySlot, currentSlot}
+	g.threads[g.mainThreadIdx].cur = currentSlot
+
+	earlyTags := nonLooseTags(g.model.slots[earlySlot])
+	if len(earlyTags) == 0 {
+		t.Skip("early slot has no non-loose tags; pick another corpus")
+	}
+	// One early chunk far in the past (recallable), then enough current-slot
+	// chunks to push the early chunk well past window+debtCap.
+	g.shadowChunks[g.mainThreadIdx] = []chunkRecord{
+		{turnNumber: 1, slotIdx: earlySlot, tags: earlyTags},
+	}
+	for n := 2; n <= intraThreadTurnWindow+intraThreadDebtCap+50; n++ {
+		g.shadowChunks[g.mainThreadIdx] = append(g.shadowChunks[g.mainThreadIdx],
+			chunkRecord{turnNumber: n, slotIdx: currentSlot, tags: nonLooseTags(g.model.slots[currentSlot])})
+	}
+
+	// Force the probe to query hop 1 (the early slot).
+	g.intraProbeHopCursor = 0
+	bs, ok := g.buildIntraProbeStep()
+	if !ok {
+		t.Fatal("buildIntraProbeStep returned ok=false; expected a probe with a scrolled-out early slot")
+	}
+	if bs.intraProbe == nil {
+		t.Fatal("probe bufStep carries no intraProbe metadata")
+	}
+	if !bs.intraProbe.predictHit {
+		t.Errorf("oracle predicted MISS for an early chunk well past the blind spot that re-issues its own tags; want HIT")
+	}
+	if bs.intraProbe.blindspot {
+		t.Errorf("oracle flagged blind spot for a chunk scrolled out far past window+debtCap; want false")
+	}
+
+	// Now make the early chunk's age land INSIDE the blind spot: shrink the
+	// current-slot tail so cur - 1 sits in [window, window+debtCap).
+	g2 := GenerateWorkload(WorkloadConfig{Seed: simSeed, Duration: simDayDuration, Corpus: corpus}).
+		StepSource.(*generator)
+	g2.mainThreadIdx = g2.createThread(len(g2.threads), earlySlot)
+	g2.threads[g2.mainThreadIdx].traj = []int{earlySlot, currentSlot}
+	g2.threads[g2.mainThreadIdx].cur = currentSlot
+	g2.shadowChunks[g2.mainThreadIdx] = []chunkRecord{{turnNumber: 1, slotIdx: earlySlot, tags: earlyTags}}
+	// cur such that cur-1 is >= window (scrolled out) but < window+debtCap (blind spot).
+	for n := 2; n <= intraThreadTurnWindow+intraThreadDebtCap/2; n++ {
+		g2.shadowChunks[g2.mainThreadIdx] = append(g2.shadowChunks[g2.mainThreadIdx],
+			chunkRecord{turnNumber: n, slotIdx: currentSlot, tags: nonLooseTags(g2.model.slots[currentSlot])})
+	}
+	g2.intraProbeHopCursor = 0
+	bs2, ok := g2.buildIntraProbeStep()
+	if !ok {
+		t.Fatal("buildIntraProbeStep (blind-spot case) returned ok=false")
+	}
+	if bs2.intraProbe.predictHit {
+		t.Errorf("oracle predicted HIT for an early chunk INSIDE the debt-window blind spot; want MISS (by-design lag)")
+	}
+	if !bs2.intraProbe.blindspot {
+		t.Errorf("oracle did not flag blind spot for a chunk scrolled out < debtCap turns ago; want true")
+	}
+}
+
 // TestWorkloadInterleaveMetrics_Invariants drains a small deterministic
 // workload and asserts the within-session interleaving telemetry (SPEC
 // §9.1) is populated and structurally consistent. It checks invariants,
@@ -1224,8 +1435,14 @@ func recordWanderMetrics(h *scenarios.Harness, gen *generator) {
 	// nextWanderSlot's always-different-topic move, but computed as a set
 	// so the metric is honest if that ever changes).
 	for i := range gen.threads {
-		if gen.isCarrier(i) {
-			continue // a measurement carrier is not a genuine user thread
+		if gen.isCarrier(i) || gen.isMainThread(i) {
+			// A measurement carrier is not a genuine user thread; the
+			// Candidate-A main thread (#109) has an UNBOUNDED trajectory by
+			// design and would dominate the topics-distinct / wander-hops
+			// histograms, which characterize ordinary within-thread wander
+			// (capped at wanderMaxHops). Its trajectory shape is the intra-thread
+			// probe's concern, not the wander curve's.
+			continue
 		}
 		thr := gen.threads[i]
 		distinct := map[int]struct{}{}
@@ -1294,6 +1511,63 @@ func recordSynthesisMetrics(h *scenarios.Harness, gen *generator) {
 	for _, n := range gen.structuralChangesPerDay {
 		h.Metrics.Record(metricMaterialStructuralChangesPerDay, float64(n))
 	}
+}
+
+// recordIntraThreadMetrics folds the intra-thread recall telemetry (§9.2,
+// #109) into the run's metrics blob — the §4.3 perf-decay series and the
+// intra-thread oracle's hop-recall coherence curve:
+//
+//   - coarse_size == T (the I4 check), fine_chunks (total) + _main (the
+//     length axis), the modeled cosine_ops (O(T·D + Kc·C·D), §4.3),
+//     latency p50/p95/p99 (the I3 gate; sourced from turn_duration_ms), and
+//     the modeled flush call/chunk rate (the cost N pays).
+//   - the per-hop intra-thread recall curve (recall_intra_hop_recall, the
+//     symbolic predicted-recoverability curve — H2, NOT embedding quality),
+//     its _obs denominators and _coherence companions, the blind-spot miss
+//     count, and the run-total coherence divergence (the #109 tripwire).
+//
+// liveThreads is the final spine size T; p50/p95/p99 are the turn-latency
+// percentiles already computed by the caller. All shadow reads go through the
+// generator (no runtime index read, F6); the generator stays
+// metrics-package-free at the seam, mirroring recordWanderMetrics.
+func recordIntraThreadMetrics(h *scenarios.Harness, gen *generator, liveThreads int, p50, p95, p99 float64) {
+	// §4.3 perf-decay series.
+	h.Metrics.Set(metricRecallIndexCoarseSize, float64(liveThreads))
+	h.Metrics.Set(metricRecallIndexFineChunks, float64(gen.totalFineChunks()))
+	h.Metrics.Set(metricRecallIndexFineChunksMain, float64(gen.mainThreadChunkCount()))
+	h.Metrics.Set(metricRecallQueryCosineOps, float64(gen.modeledCosineOps(liveThreads)))
+	h.Metrics.Set(metricRecallQueryLatencyP50, p50)
+	h.Metrics.Set(metricRecallQueryLatencyP95, p95)
+	h.Metrics.Set(metricRecallQueryLatencyP99, p99)
+	// Modeled flush rate: every scrolled-out chunk is eventually flushed
+	// (flush_chunks), in batches of intraThreadDebtCap (flush_calls). This is
+	// the embed-call cost the debt cap N pays over the rung.
+	scrolledOut := gen.mainThreadScrolledOut()
+	h.Metrics.Set(metricRecallIndexFlushChunks, float64(scrolledOut))
+	h.Metrics.Set(metricRecallIndexFlushCalls, float64(scrolledOut/intraThreadDebtCap))
+
+	// Per-hop intra-thread recall + coherence.
+	divergence := 0
+	for hop, total := range gen.intraHopTotal {
+		if total == 0 {
+			continue
+		}
+		key := fmt.Sprintf("_h%d", hop)
+		// Symbolic predicted-recoverability curve (H2): the fraction of probes
+		// at this hop the oracle predicts recoverable. This is the #109 fidelity
+		// curve "symbolic now" — a coherence signal, NOT validated user recall.
+		h.Metrics.Set(metricRecallIntraHopRecall+key,
+			float64(gen.intraHopPredictHit[hop])/float64(total))
+		h.Metrics.Set(metricRecallIntraHopRecall+key+"_obs", float64(total))
+		// Oracle/runtime coherence at this hop — meaningful only on an
+		// embedding-live run (the mock run leaves the observed/coherence tallies
+		// at 0, so this reads 0.0 there and is reported as "n/a — symbolic-only").
+		h.Metrics.Set(metricRecallIntraHopRecall+key+"_coherence",
+			float64(gen.intraHopCoherent[hop])/float64(total))
+		divergence += gen.intraHopDiverge[hop]
+	}
+	h.Metrics.Set(metricRecallIntraCoherenceDivergence, float64(divergence))
+	h.Metrics.Set(metricRecallIntraBlindspotMisses, float64(gen.intraBlindspotMisses))
 }
 
 // closureCount counts `retire.complete` events in the harness's event

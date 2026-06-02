@@ -250,6 +250,18 @@ type StepFeedback struct {
 	// for the symbolic layer — the per-hop head-to-head gap-closure view.
 	EmbedMatchFireIDs []string
 
+	// IntraMatchFireIDs is the set of thread IDs that fired
+	// `spine.intra-match-fire` on the just-run turn (de-duplicated, sorted —
+	// intraMatchFireSet semantics). It is the §7 intra-thread (fine-tier)
+	// analogue of EmbedMatchFireIDs: non-empty only when an embedder is
+	// installed AND the engaged thread's scrolled-out early content matched
+	// the query (the #109 case); nil on the symbolic-only default and the
+	// zero-feedback drainSteps path. A StepSource that measures intra-thread
+	// recall (the #109 intra-thread probe) reads it to record whether the
+	// runtime surfaced the engaged long thread for a probe of its early
+	// scrolled-out slot, scored per hop against the shadow-chunk oracle.
+	IntraMatchFireIDs []string
+
 	// RecallExpected is the count of ground-truth matches the step
 	// declared (len of Step.ExpectedRecallMatches); 0 for an unmeasured
 	// step.

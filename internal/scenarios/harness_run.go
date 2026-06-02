@@ -256,6 +256,19 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 		recordEmbedRecallFidelity(h, keptExpected, embedFires, step.ExpectedRecallMatches != nil)
 	}
 
+	// Intra-thread (#109) fine-tier match set: which engaged threads the
+	// runtime surfaced via spine.intra-match-fire this turn. Parsed
+	// unconditionally (cheap); threaded back ONLY on an embedding-in-loop run
+	// (h.indexer != nil), per the field contract ("non-nil only on an
+	// embedding-in-loop run"). On the symbolic-only default the intra layer is
+	// off and never fires, so a non-nil empty slice would falsely signal the
+	// layer is live to a StepSource that gates its coherence tally on liveness.
+	var intraFires, embedFireIDs []string
+	if h.indexer != nil {
+		intraFires = intraMatchFireSet(stepLines)
+		embedFireIDs = embedFires
+	}
+
 	// Per-step metrics.
 	h.Metrics.Counter("turns", 1)
 	h.Metrics.Record("turn_duration_ms", float64(elapsed.Milliseconds()))
@@ -332,7 +345,8 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 		Index:                  idx,
 		RecallMatchFires:       len(matchFires),
 		RecallMatchFireIDs:     matchFires,
-		EmbedMatchFireIDs:      embedFires,
+		EmbedMatchFireIDs:      embedFireIDs,
+		IntraMatchFireIDs:      intraFires,
 		RecallExpected:         len(step.ExpectedRecallMatches),
 		TargetRecoverable:      recoverable,
 		RecallExpectedForgiven: expectedForgiven,
