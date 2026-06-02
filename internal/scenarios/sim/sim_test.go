@@ -745,7 +745,18 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	if intraProbeObs == 0 {
 		t.Logf("intra-thread probes:      none this run (rung too short to scroll the main thread past the assembly window + debt cap)")
 	} else if embeddingRun {
-		t.Logf("intra-thread hop-recall (symbolic coherence curve, H2 — NOT user recall):")
+		// Symbolic-vs-embedding intra-thread head-to-head (#109/#111 Finding B):
+		// the LIVE replacement for the mock-only intra coherence gate. The
+		// SYMBOLIC column is the oracle's predicted/coherence curve (H2 — what
+		// the oracle says should be recoverable, NOT validated user recall); the
+		// EMBEDDING column is the recall users ACTUALLY get (the runtime's intra
+		// fine-tier match-fire for the same forgiven ground truth). Both scored
+		// against the identical predicted-leaf ground truth on one denominator,
+		// exactly the wander head-to-head. ORDERING (#109 Finding A): until A
+		// lands (beam k raised → recall_intra_descent_divergence==0), the
+		// embedding column reads slightly low vs symbolic — expected, resolves
+		// with A; do NOT misread a pre-A shortfall as recall loss.
+		t.Logf("intra-thread hop-recall head-to-head (symbolic predicted/coherence curve, H2 — vs embedding-observed = actual user recall):")
 		maxHop := 0
 		for hop := range gen.intraHopTotal {
 			if hop > maxHop {
@@ -758,8 +769,9 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 			if obs == 0 {
 				continue
 			}
-			t.Logf("  hop %d: predicted_recall=%.3f coherence=%.3f (%d obs)",
+			t.Logf("  hop %d: symbolic_recall=%.3f embed_recall=%.3f coherence=%.3f (%d obs)",
 				hop, m.Gauges[metricRecallIntraHopRecall+key],
+				m.Gauges[metricRecallIntraEmbedHopRecall+key],
 				m.Gauges[metricRecallIntraHopRecall+key+"_coherence"], obs)
 		}
 		t.Logf("recall_intra_blindspot_misses: %d (predicted+observed miss inside the debt-window blind spot — by-design lag, not loss)",
@@ -1688,6 +1700,17 @@ func recordIntraThreadMetrics(h *scenarios.Harness, gen *generator, liveThreads 
 		// at 0, so this reads 0.0 there and is reported as "n/a — symbolic-only").
 		h.Metrics.Set(metricRecallIntraHopRecall+key+"_coherence",
 			float64(gen.intraHopCoherent[hop])/float64(total))
+		// Embedding-OBSERVED per-hop recall (#109/#111 Finding B head-to-head),
+		// scored against the SAME forgiven ground truth as the symbolic curve
+		// above and on the SAME denominator (intraHopTotal), so the two columns
+		// are directly comparable. intraHopObservedHit is the runtime's
+		// spine.intra-match-fire for the oracle-predicted leaf, recorded only on
+		// an embedding-live run — 0 at every hop on the mock run (no intra
+		// layer), exactly as metricWanderEmbedRecallByHops is on the mock run.
+		// This is the recall users actually get; mirror of how wander derives
+		// metricWanderEmbedRecallByHops from its embed-match-fire observations.
+		h.Metrics.Set(metricRecallIntraEmbedHopRecall+key,
+			float64(gen.intraHopObservedHit[hop])/float64(total))
 		divergence += gen.intraHopDiverge[hop]
 	}
 	h.Metrics.Set(metricRecallIntraCoherenceDivergence, float64(divergence))

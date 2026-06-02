@@ -125,6 +125,35 @@ func TestSimEmbeddingHeadToHead_Machinery(t *testing.T) {
 	if probeHopsSeen == 0 {
 		t.Error("no wander probe hops observed over the rung — cannot confirm per-hop embedding buckets emit")
 	}
+
+	// 4) Per-hop intra-thread embedding buckets (#109/#111 Finding B
+	//    head-to-head): for every hop the symbolic intra probe observed
+	//    (recall_intra_hop_recall obs > 0), the embedding-observed bucket must
+	//    be present and a valid ratio, on the SAME denominator as the symbolic
+	//    curve — the live replacement for the mock-only intra coherence gate.
+	//    A 1-day rung may not scroll the main thread past the assembly window +
+	//    debt cap, so zero intra-probe hops is acceptable here (the wander hops
+	//    above already prove the per-hop embedding plumbing); when intra hops
+	//    DO appear, the embedding column must be emitted for each.
+	for hop := 1; ; hop++ {
+		key := fmt.Sprintf("_h%d", hop)
+		obs, ok := m.Gauges[metricRecallIntraHopRecall+key+"_obs"]
+		if !ok {
+			break
+		}
+		if obs == 0 {
+			continue
+		}
+		v, ok := m.Gauges[metricRecallIntraEmbedHopRecall+key]
+		if !ok {
+			t.Errorf("intra hop %d had %d symbolic probe obs but no %s embedding bucket emitted",
+				hop, int(obs), metricRecallIntraEmbedHopRecall+key)
+			continue
+		}
+		if v < 0 || v > 1 {
+			t.Errorf("%s = %.4f, out of [0,1]", metricRecallIntraEmbedHopRecall+key, v)
+		}
+	}
 }
 
 // TestSimNoEmbedder_HeadToHeadAbsent is the negative control: the mock

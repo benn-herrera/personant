@@ -1662,6 +1662,29 @@ const (
 	// embedding-quality head-to-head is the live-embedding run, NOT this number.
 	metricRecallIntraHopRecall = "recall_intra_hop_recall"
 
+	// metricRecallIntraEmbedHopRecall is the EMBEDDING-OBSERVED per-hop
+	// intra-thread recall (#109/#111 Finding B, the live replacement for the
+	// now-report-only intra coherence gate). For each hop it is the fraction
+	// of intra-probes at that hop distance where the runtime's EMBEDDING intra
+	// fine-tier pass actually surfaced the oracle-predicted early leaf — i.e.
+	// where spine.intra-match-fire fired for the expected thread
+	// (intraHopObservedHit / intraHopTotal). It is scored against the SAME
+	// archival-forgiven ground truth the symbolic metricRecallIntraHopRecall
+	// curve uses (the oracle's predicted scrolled-out leaf), so the two are
+	// directly comparable on one denominator — exactly the wander head-to-head
+	// (metricWanderEmbedRecallByHops vs metricWanderOriginRecallByHops). This
+	// is the recall users ACTUALLY get; the symbolic curve is the oracle's
+	// coherence/predicted curve (H2). Populated only on an embedding-live run
+	// (intra layer off on the mock run → no spine.intra-match-fire → absent),
+	// keyed metricRecallIntraEmbedHopRecall+"_h<N>".
+	//
+	// ORDERING (#109 Finding A): until Finding A lands (raise beam k →
+	// recall_intra_descent_divergence == 0), the embedding intra pass still
+	// loses a few leaves vs the flat scan, so this curve reads SLIGHTLY LOW vs
+	// the symbolic predicted curve. That is expected and resolves with A — do
+	// NOT read a pre-A shortfall here as recall loss.
+	metricRecallIntraEmbedHopRecall = "recall_intra_embed_hop_recall"
+
 	// metricRecallIntraCoherenceDivergence is the run-total intra-thread
 	// oracle/runtime divergence across all hops — the #109 coherence tripwire
 	// (== 0 is the pass on an embedding-live run; trivially 0 on the mock run,
