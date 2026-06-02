@@ -6,6 +6,72 @@ import (
 	"personant/internal/memops"
 )
 
+// embeddingDebtCap is the §6.5 debt window: the count of turn-excerpts a
+// thread may accrue scrolled-out-of-the-assembly-window before the turn
+// loop enqueues a §3.4 fine-tier flush of that thread (and resets its
+// debt). At ThreadTurnWindow=512 a cap of 16 means the fine tier lags the
+// assembly window by at most ~3%, and a continuously active thread
+// flushes ~32 times per window's worth of scroll-out — frequent enough to
+// keep recent early content recallable within a bounded lag, infrequent
+// enough that the embed-call rate stays well under one batch per turn. A
+// §9 calibration window, not a frozen value.
+const embeddingDebtCap = 16
+
+// flushEnqueuer is the narrow optional interface a Recaller may satisfy to
+// receive §3.4 index-flush signals (design §11.3, I7). The embedding
+// measure.Service implements EnqueueFlush; the symbolic-only default does
+// not — so with no embedder installed the debt/dormancy hooks below are
+// inert and behavior is byte-identical to today (the type assertion
+// simply fails). turn signals only "this thread's retained body changed,
+// flush it" with the dispatch turncount for the I2 watermark; it never
+// embeds, touches vectors, or knows coarse/fine.
+type flushEnqueuer interface {
+	EnqueueFlush(threadID string, dispatchTurncount int)
+}
+
+// recordExcerptScrollOut is the §6.2 debt-cap hook. The owner-excerpt
+// write path calls it once per turn-excerpt that scrolls out of a thread's
+// assembly window (a newer excerpt pushed it past the most-recent
+// ThreadTurnWindow boundary — it stays retained on disk but leaves the
+// assembled context). It accrues per-thread embedding debt; when debt
+// reaches embeddingDebtCap it enqueues a fine-tier flush of that thread
+// (passing state.TurnNumber as the I2 dispatch watermark) and resets the
+// counter.
+//
+// A no-op when the installed Recaller does not satisfy flushEnqueuer
+// (symbolic-only default → no embedder → no debt tracking, I7).
+func recordExcerptScrollOut(state *State, threadID string) {
+	enq, ok := state.Recaller.(flushEnqueuer)
+	if !ok {
+		return
+	}
+	if state.embeddingDebt == nil {
+		state.embeddingDebt = make(map[string]int)
+	}
+	state.embeddingDebt[threadID]++
+	if state.embeddingDebt[threadID] >= embeddingDebtCap {
+		enq.EnqueueFlush(threadID, state.TurnNumber)
+		state.embeddingDebt[threadID] = 0
+	}
+}
+
+// flushOnDormancy is the §6.2 dormancy hook. touchActiveLRU calls it when
+// a thread is demoted out of Layer B (decays out of the working set), so
+// the thread's remaining debt is flushed into the fine tier before it
+// becomes a pure recall target. It enqueues a flush (passing
+// state.TurnNumber as the I2 dispatch watermark) and clears the thread's
+// debt counter so the next active episode starts clean.
+//
+// A no-op when the installed Recaller does not satisfy flushEnqueuer (I7).
+func flushOnDormancy(state *State, threadID string) {
+	enq, ok := state.Recaller.(flushEnqueuer)
+	if !ok {
+		return
+	}
+	enq.EnqueueFlush(threadID, state.TurnNumber)
+	delete(state.embeddingDebt, threadID)
+}
+
 // fetchThreadForReprompt loads thread thrID from disk, fires a
 // thread.fetched context delta, and promotes the thread into
 // state.ActiveThreads (de-duped, capped by Budget.BTopK; overflow
@@ -80,10 +146,15 @@ func touchActiveLRU(state *State, thrID string) {
 	// Insert at the front of ActiveThreads.
 	state.ActiveThreads = append([]string{thrID}, state.ActiveThreads...)
 	// Overflow: tail of ActiveThreads demotes to head of DormantThreads.
+	// Demotion is the §6.2 dormancy trigger — a thread decaying out of the
+	// working set flushes its remaining embedding debt into the §3.4 fine
+	// tier so its full retained body is recall-indexed before it becomes a
+	// pure recall target. Inert when no embedder is installed (I7).
 	for len(state.ActiveThreads) > bTopK {
 		demoted := state.ActiveThreads[len(state.ActiveThreads)-1]
 		state.ActiveThreads = state.ActiveThreads[:len(state.ActiveThreads)-1]
 		state.DormantThreads = append([]string{demoted}, state.DormantThreads...)
+		flushOnDormancy(state, demoted)
 	}
 	// Cap DormantThreads by count.
 	if len(state.DormantThreads) > dormantThreadsCap {

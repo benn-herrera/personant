@@ -20,15 +20,17 @@ import (
 // YAML frontmatter block at the head of every thread.md file.
 const thrFrontmatterDelimiter = "---"
 
-// ThreadTurnWindow is the count of per-turn excerpt files retained in a
-// thread's turns/ directory. Appending a new excerpt FIFO-evicts the
-// lowest-numbered files until the count is back to ThreadTurnWindow, so
-// the live thread body is recency-windowed and per-turn write cost is
-// O(1) instead of O(thread length).
+// ThreadTurnWindow is the ASSEMBLY window: the count of a thread's
+// most-recent turn-excerpts that ReadThreadBody assembles into the live
+// body (the Layer-B byte budget is calibrated to it). It governs only
+// *assembly into context* — NOT on-disk retention. Turn-excerpts are
+// retained on disk past this window (AppendThreadTurn no longer evicts);
+// the retained set is the durable decision-class content the §3.4
+// chunk-level index embeds for intra-thread recall of early content.
+// Retention is therefore decoupled from the assembly window per SPEC §2.3.
 //
-// v0.1 best-guess calibration: 512 turn-excerpts is a generous live
-// window — older operational detail is recoverable from the §2.8 event
-// log and the distilled symbol memory persists in frontmatter
+// v0.1 best-guess calibration: 512 turn-excerpts is a generous assembly
+// window; the distilled symbol memory persists in frontmatter
 // history_symbols. Calibratable against six-month-sim data.
 const ThreadTurnWindow = 512
 
@@ -170,11 +172,14 @@ func LoadThreadFrontmatter(paths PersonantPaths, threadID string) (memops.Thread
 }
 
 // ReadThreadBody assembles a thread's body from its turns/ excerpt
-// files. Excerpts are read newest-first (highest-numbered first); when
-// byteBudget > 0, reading stops once the accumulated size reaches the
-// budget, so a caller reads only ~budget worth of recent excerpts, not
-// all ThreadTurnWindow files. byteBudget <= 0 reads every retained
-// excerpt.
+// files. It reads only the ASSEMBLY window — at most the most-recent
+// ThreadTurnWindow excerpts — from the (now-larger) retained set on disk:
+// retention keeps every excerpt for the §3.4 chunk index, but assembly
+// into context is bounded by the window per SPEC §2.3. Excerpts are read
+// newest-first (highest-numbered first); when byteBudget > 0, reading
+// also stops once the accumulated size reaches the budget, so a caller
+// reads only ~budget worth of recent excerpts. byteBudget <= 0 reads the
+// whole assembly window (the most-recent ThreadTurnWindow excerpts).
 //
 // The selected excerpts are returned joined in chronological order
 // (oldest→newest) with a blank line between, so the result reads
@@ -193,12 +198,21 @@ func ReadThreadBody(paths PersonantPaths, threadID string, byteBudget int) (stri
 		return "", nil
 	}
 
-	// Walk newest-first, accumulating excerpts until the budget is met.
-	// selected holds excerpts in newest-first order; it is reversed for
-	// the final chronological join.
-	selected := make([]string, 0, len(nums))
+	// The assembly window bounds how far back the body reaches: never read
+	// below the most-recent ThreadTurnWindow excerpts, regardless of how
+	// many are retained on disk. windowFloor is the lowest index the
+	// newest-first walk may visit.
+	windowFloor := 0
+	if len(nums) > ThreadTurnWindow {
+		windowFloor = len(nums) - ThreadTurnWindow
+	}
+
+	// Walk newest-first, accumulating excerpts until the budget is met or
+	// the assembly window floor is reached. selected holds excerpts in
+	// newest-first order; it is reversed for the final chronological join.
+	selected := make([]string, 0, len(nums)-windowFloor)
 	total := 0
-	for i := len(nums) - 1; i >= 0; i-- {
+	for i := len(nums) - 1; i >= windowFloor; i-- {
 		path := filepath.Join(turnsDir, turnFileName(nums[i]))
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -453,13 +467,20 @@ func parseTurnHeading(line string) int {
 }
 
 // AppendThreadTurn writes a single turn excerpt to
-// threads/thr_<n>/turns/<zero-padded>.md atomically, then FIFO-evicts
-// the lowest-numbered excerpts until at most ThreadTurnWindow remain.
-// The turns/ directory is created if absent.
+// threads/thr_<n>/turns/<zero-padded>.md atomically. The turns/
+// directory is created if absent.
 //
-// Appending is O(1): one small file written, at most one evicted. An
-// empty excerpt is a no-op (the closure path re-engages a thread to
-// rewrite frontmatter without adding a turn).
+// Excerpts are RETAINED on disk past ThreadTurnWindow — the FIFO no
+// longer deletes them (SPEC §2.3 Correction). The window bounds only
+// what ReadThreadBody assembles into context; retention keeps every
+// excerpt as the durable source the §3.4 chunk index embeds for
+// intra-thread recall of early content. An excerpt scrolling out of the
+// assembly window is a logical "embedding debt" event tracked by the
+// turn loop (it knows the thread's turn count), not an on-disk deletion.
+//
+// Appending is O(1): one small file written, nothing evicted. An empty
+// excerpt is a no-op (the closure path re-engages a thread to rewrite
+// frontmatter without adding a turn).
 func AppendThreadTurn(paths PersonantPaths, threadID string, turnNumber int, excerpt string) error {
 	if excerpt == "" {
 		return nil
@@ -479,19 +500,6 @@ func AppendThreadTurn(paths PersonantPaths, threadID string, turnNumber int, exc
 	path := filepath.Join(turnsDir, turnFileName(turnNumber))
 	if err := WriteFileAtomic(path, []byte(body)); err != nil {
 		return fmt.Errorf("append thread turn %s: %w", threadID, err)
-	}
-
-	nums, err := turnFileNumbers(turnsDir)
-	if err != nil {
-		return fmt.Errorf("append thread turn %s: list turns: %w", threadID, err)
-	}
-	// nums is sorted ascending; evict from the front until the count is
-	// within the window.
-	for i := 0; len(nums)-i > ThreadTurnWindow; i++ {
-		evict := filepath.Join(turnsDir, turnFileName(nums[i]))
-		if err := os.Remove(evict); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("append thread turn %s: evict %s: %w", threadID, evict, err)
-		}
 	}
 	return nil
 }

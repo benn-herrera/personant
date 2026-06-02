@@ -171,6 +171,18 @@ type State struct {
 	// nil is the well-formed empty case (no recall ever accepted).
 	recallSurfaced map[string]struct{}
 
+	// embeddingDebt accrues per thread the count of turn-excerpts that have
+	// scrolled out of the *assembly* window (ThreadTurnWindow) but are not
+	// yet in the §3.4 fine-tier embedding index. It is the trigger for the
+	// debt-cap flush (§6.2): when a thread's debt reaches embeddingDebtCap,
+	// recordExcerptScrollOut enqueues a flush of the engaged-thread index
+	// and resets the counter to 0. Session-scoped, like the other LRU /
+	// coalesce runtime state — a fresh session starts at zero debt and the
+	// next dormancy flush (or the cache reconcile on Prepare) covers any
+	// gap. nil is the well-formed empty case (no excerpt has scrolled out,
+	// or no indexer-capable recaller is installed so debt is never tracked).
+	embeddingDebt map[string]int
+
 	// structuralCreates / structuralCloses count the §3.11 structural
 	// changes that occurred during the in-flight turn: thread creations
 	// (createNewThread) and §3.5 closure/retire writes (applyClosureResolution).

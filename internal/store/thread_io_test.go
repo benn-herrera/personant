@@ -374,9 +374,13 @@ func TestReadThreadBodyBudgetStopsEarly(t *testing.T) {
 	}
 }
 
-// TestAppendThreadTurnFIFOEviction: appending past ThreadTurnWindow
-// evicts the lowest-numbered excerpts.
-func TestAppendThreadTurnFIFOEviction(t *testing.T) {
+// TestAppendThreadTurnRetainsPastWindow: appending past ThreadTurnWindow
+// RETAINS every excerpt on disk — retention is decoupled from the
+// assembly window per SPEC §2.3. The window now bounds only what
+// ReadThreadBody assembles into context (see TestReadThreadBodyWindowsOnRead);
+// the FIFO no longer deletes, so the retained set is the durable source
+// the §3.4 chunk index embeds for intra-thread recall of early content.
+func TestAppendThreadTurnRetainsPastWindow(t *testing.T) {
 	paths := newThreadHome(t)
 	fm := sampleFrontmatter()
 	fm.ID = "thr_1"
@@ -393,15 +397,59 @@ func TestAppendThreadTurnFIFOEviction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("turnFileNumbers: %v", err)
 	}
-	if len(nums) != ThreadTurnWindow {
-		t.Fatalf("retained %d turn files, want %d", len(nums), ThreadTurnWindow)
+	// Every excerpt is retained — nothing evicted.
+	if len(nums) != total {
+		t.Fatalf("retained %d turn files, want %d (all retained, no FIFO delete)", len(nums), total)
 	}
-	// The oldest 5 must be gone; the lowest retained is turn 6.
-	if nums[0] != total-ThreadTurnWindow+1 {
-		t.Errorf("lowest retained turn = %d, want %d", nums[0], total-ThreadTurnWindow+1)
+	if nums[0] != 1 {
+		t.Errorf("lowest retained turn = %d, want 1 (earliest excerpt kept past window)", nums[0])
 	}
 	if nums[len(nums)-1] != total {
 		t.Errorf("highest retained turn = %d, want %d", nums[len(nums)-1], total)
+	}
+}
+
+// TestReadThreadBodyWindowsOnRead: with more excerpts retained than the
+// assembly window holds, ReadThreadBody (no byte budget) reads only the
+// most-recent ThreadTurnWindow excerpts into the body — assembly is
+// windowed on read while the older excerpts stay retained on disk
+// (SPEC §2.3). This is the behavior the old FIFO-delete produced for the
+// assembled context, now achieved by read-windowing instead of deletion.
+func TestReadThreadBodyWindowsOnRead(t *testing.T) {
+	paths := newThreadHome(t)
+	fm := sampleFrontmatter()
+	fm.ID = "thr_1"
+	if err := SaveThreadFrontmatter(paths, fm.ID, fm); err != nil {
+		t.Fatalf("SaveThreadFrontmatter: %v", err)
+	}
+	total := ThreadTurnWindow + 5
+	for n := 1; n <= total; n++ {
+		if err := AppendThreadTurn(paths, fm.ID, n, turnExcerpt(n)); err != nil {
+			t.Fatalf("AppendThreadTurn %d: %v", n, err)
+		}
+	}
+	body, err := ReadThreadBody(paths, fm.ID, 0)
+	if err != nil {
+		t.Fatalf("ReadThreadBody: %v", err)
+	}
+	// turnExcerpt(n) renders a unique "prompt <n>" / "reply <n>" pair; use
+	// "reply <n>\n" as the per-turn presence marker (the trailing newline
+	// disambiguates "reply 6" from "reply 60").
+	marker := func(n int) string { return fmt.Sprintf("reply %d\n", n) }
+	// The newest excerpt is in the assembled body; the lowest in-window
+	// excerpt is turn total-ThreadTurnWindow+1 (== 6 here).
+	if !strings.Contains(body, marker(total)) {
+		t.Errorf("assembled body missing newest turn %d", total)
+	}
+	lowestInWindow := total - ThreadTurnWindow + 1
+	if !strings.Contains(body, marker(lowestInWindow)) {
+		t.Errorf("assembled body missing lowest in-window turn %d", lowestInWindow)
+	}
+	// Excerpts older than the window are retained on disk but NOT assembled.
+	for _, scrolled := range []int{1, lowestInWindow - 1} {
+		if strings.Contains(body, marker(scrolled)) {
+			t.Errorf("scrolled-out turn %d should not be in assembled body", scrolled)
+		}
 	}
 }
 

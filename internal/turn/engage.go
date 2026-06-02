@@ -11,6 +11,7 @@ import (
 	"personant/internal/clock"
 	"personant/internal/memops"
 	"personant/internal/prompt"
+	"personant/internal/store"
 )
 
 // Topic-tag protocol violation surface (MAD B2 / T1-3). When an LLM emits
@@ -444,6 +445,14 @@ func updateExistingThread(ctx context.Context, state *State, threadID string, ow
 		TurnExcerpt: excerpt,
 	}); err != nil {
 		return fmt.Errorf("engage thread %s: %w", threadID, err)
+	}
+	// §6.2 debt-cap hook: once the owner has written more excerpts than the
+	// assembly window holds, each new owner excerpt pushes one out of the
+	// assembled context (it stays retained on disk for the §3.4 fine tier).
+	// Signal that scroll-out so the debt counter can trigger a flush. Inert
+	// when no embedder is installed (I7).
+	if owner && mergeTurn > store.ThreadTurnWindow {
+		recordExcerptScrollOut(state, threadID)
 	}
 	act := "engaged"
 	if !owner {
