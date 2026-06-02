@@ -27,8 +27,11 @@ const (
 	// whose vector cosine-misses the query (a summary averages a
 	// heterogeneous cluster); greedy top-1 would prune that subtree and
 	// lose the leaf. k>1 recovers it. Raised by the §7 gate if recall
-	// diverges; never tuned by latency.
-	BeamWidth = 4
+	// diverges; never tuned by latency. Raised 4→8 (2026-06-02) after a
+	// 14d live-embedding rung showed W1 descent-vs-flat divergence 6/251
+	// at k=4 over real nomic vectors (centroid keys are less separable
+	// than the mock's feature-hash vectors); the §7 W1 gate drives this.
+	BeamWidth = 8
 
 	// LeafFrontierCap bounds the leaf set the terminal ProposeChunks
 	// ranks: k·B, independent of total n (design §4.1). The frontier
@@ -70,7 +73,7 @@ func (n *SummaryNode) isLeaf() bool { return len(n.Children) == 0 }
 // DescendOptions governs DescendChunks. Zero-valued fields fall back to
 // the documented design §4.1 defaults.
 type DescendOptions struct {
-	// Beam is the per-level branch count k. 0 → BeamWidth (4). Wider k
+	// Beam is the per-level branch count k. 0 → BeamWidth (8). Wider k
 	// recovers more leaves under cosine-missing summaries (W3), at linear
 	// descent cost. The §7 recall-preservation gate raises it on
 	// divergence.
