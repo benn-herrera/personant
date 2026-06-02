@@ -84,6 +84,14 @@ type DescendOptions struct {
 	// through to ProposeChunks. 0 → DefaultChunkLimit; negative →
 	// unbounded.
 	Limit int
+
+	// Counter, when non-nil, tallies the cosine comparisons this descent
+	// performs — the MEASURED recall_query_cosine_ops instrument (design
+	// §7.2). Only the PRUNED levels (where child count > beam) and the
+	// terminal leaf rank compute cosines; a lossless level (child count <=
+	// beam) computes none. This is precisely why the count is measured at
+	// the call site, not modeled. nil on the production hot path.
+	Counter *CosineCounter
 }
 
 // DescendChunks is the §4 beam descent over a per-thread summary tree.
@@ -135,7 +143,7 @@ func DescendChunks(query []float64, root *SummaryNode, opts DescendOptions) []Ch
 			}
 			children = append(children, n.Children...)
 		}
-		frontier = topKByCosine(query, children, beam)
+		frontier = topKByCosine(query, children, beam, opts.Counter)
 	}
 
 	// Frontier is now all leaves (≤ LeafFrontierCap). Rank them with the
@@ -144,7 +152,7 @@ func DescendChunks(query []float64, root *SummaryNode, opts DescendOptions) []Ch
 	for _, n := range frontier {
 		leaves = append(leaves, n.Leaf)
 	}
-	return ProposeChunks(query, leaves, ChunkOptions{Threshold: opts.Threshold, Limit: opts.Limit})
+	return ProposeChunks(query, leaves, ChunkOptions{Threshold: opts.Threshold, Limit: opts.Limit, Counter: opts.Counter})
 }
 
 // hasInternal reports whether any node in the frontier is an internal
@@ -163,15 +171,18 @@ func hasInternal(frontier []*SummaryNode) bool {
 // deterministic tie-break). It is the per-level beam step. When k >=
 // len(nodes) all nodes survive (no pruning), which is what keeps a short
 // or wide level lossless.
-func topKByCosine(query []float64, nodes []*SummaryNode, k int) []*SummaryNode {
+func topKByCosine(query []float64, nodes []*SummaryNode, k int, counter *CosineCounter) []*SummaryNode {
 	if len(nodes) <= k {
-		// No pruning needed; preserve all branches (lossless level).
+		// No pruning needed; preserve all branches (lossless level) — and,
+		// crucially, compute ZERO cosines here. This short-circuit is the
+		// O(log n) win the measured counter must reflect, so it bumps nothing.
 		return nodes
 	}
 	type scored struct {
 		node  *SummaryNode
 		score float64
 	}
+	counter.add(len(nodes)) // one cosine per child node at this pruned level
 	ranked := make([]scored, len(nodes))
 	for i, n := range nodes {
 		ranked[i] = scored{node: n, score: cosineSimilarity(query, n.Vector)}

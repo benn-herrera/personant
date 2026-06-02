@@ -776,6 +776,32 @@ const (
 	// move with it — asserted equal in TestIntraThreadWindowMirrorsRuntime.
 	intraThreadTurnWindow = 512
 
+	// convoTransientPct / toolTransientPct are the PRNG keep/toss model's
+	// transient RATES (#111 / design §7.3): the sim's deterministic stand-in for
+	// the production §3.10.8 `lifetime:` marker. Per retained-excerpt-to-be, a
+	// fixed-seed PRNG (g.trimRng, derived from cfg.Seed) marks the excerpt
+	// transient with this probability; a transient excerpt is TRIMMED — it is
+	// NOT retained into the fine tier (no shadow chunk), modelling keep/toss
+	// shrinking the leaf set (the constant-factor slope win that composes with
+	// the hierarchy's O(log n) order win). convoTransientPct (60) is the
+	// conversation-turn rate; toolTransientPct (75) the tool-run rate (tool
+	// output churns faster, so a larger fraction is transient). These are the §9
+	// calibration starting values, tunable on the rung walk. The whole-thread
+	// SYMBOL retained set (emittedSyms) is unaffected — keep/toss trims fine-tier
+	// LEAVES, not history_symbols; the symbols a turn contributed stay in the
+	// thread's history union regardless of whether its excerpt leaf is retained.
+	convoTransientPct = 60
+	toolTransientPct  = 75
+
+	// transientSelector is the [0,100) draw cap the keep/toss PRNG compares the
+	// rate against: g.trimRng.Intn(transientSelector) < rate marks transient.
+	transientSelector = 100
+
+	// keepTossSeedOffset derives the keep/toss PRNG seed from cfg.Seed (XOR) so
+	// trim draws are deterministic for a given seed yet isolated from g.rng's
+	// action-selection stream. An arbitrary fixed constant.
+	keepTossSeedOffset = 0x6b656570 // "keep"
+
 	// intraThreadDebtCap mirrors the runtime's embeddingDebtCap (turn/lru.go,
 	// =16): a chunk that scrolled out fewer than this many turns ago may still
 	// be in unflushed debt — not yet in the fine tier — so the oracle predicts
@@ -829,6 +855,11 @@ func GenerateWorkload(cfg WorkloadConfig) scenarios.Scenario {
 		wanderHopEmbedHits:  map[int]int{},
 		mainThreadIdx:       -1,
 		shadowChunks:        map[int][]chunkRecord{},
+		// Derived, fixed seed for the keep/toss PRNG — distinct from cfg.Seed so
+		// the trim draws do not interleave with g.rng's action draws, yet still a
+		// pure function of cfg.Seed (the determinism contract). The offset is an
+		// arbitrary fixed constant; any deterministic derivation works.
+		trimRng: rand.New(rand.NewSource(cfg.Seed ^ keepTossSeedOffset)),
 		intraHopTotal:       map[int]int{},
 		intraHopPredictHit:  map[int]int{},
 		intraHopObservedHit: map[int]int{},
@@ -896,6 +927,18 @@ type chunkRecord struct {
 	turnNumber int      // runtime owner-excerpt turn number (1-based, monotonic)
 	slotIdx    int      // the corpus slot whose tags this turn emitted
 	tags       []string // the per-turn emitted symbol set (this chunk's content)
+
+	// transient is the PRNG keep/toss verdict for this excerpt (#111 / design
+	// §7.3): true → keep/toss WOULD trim it from the fine tier. The chunk stays
+	// in the shadow list regardless, because PRODUCTION OVER-RETAINS (the
+	// §3.10.8 marker is unbuilt; negative constraint) — so the runtime's fine
+	// tier, the intra-thread coherence oracle, and the W1 descent-vs-flat gate
+	// all see the FULL retained set, byte-aligned with the runtime's turn
+	// numbering. The flag drives ONLY the reported leaf-set metric
+	// (fine_chunks_main = the durable subset), modelling the constant-factor
+	// slope win keep/toss would deliver without desynchronizing the oracle from
+	// the over-retaining runtime.
+	transient bool
 }
 
 // intraProbe is the per-step metadata of an intra-thread (#109) probe. It
@@ -1254,7 +1297,9 @@ func (g *generator) buildRefinementStep() scenarios.Step {
 	// Record the FULL extracted set (user #-tags ∪ model anchors) so the
 	// shadow mirrors the runtime's accretion exactly (§4.2 coherence).
 	anchorTags := append(nonLooseTags(slot), saltSymbol(thr.order))
-	g.recordEmission(idx, extractedSymbolsFor(slot.UserInput, anchorTags))
+	// Refinement is a conversation-class turn (a re-issued query), so it draws
+	// the conversation keep/toss rate (§7.3).
+	g.recordEmission(idx, extractedSymbolsFor(slot.UserInput, anchorTags), convoTransientPct)
 
 	// Recall oracle for the refinement: the shadow-set Jaccard rule against
 	// the new slot's query (same rule as canonical buildStep — DRY). Q
@@ -1575,11 +1620,16 @@ const (
 	metricRecallIndexFineChunks     = "recall_index_fine_chunks"
 	metricRecallIndexFineChunksMain = "recall_index_fine_chunks_main"
 
-	// metricRecallQueryCosineOps is the modeled per-query cosine-op count
-	// O(T·D + Kc·C·D) (§4.3): coarse pass over T thread vectors plus the fine
-	// pass over (Kc+1) selected threads' chunks. Modeled from T, the main
-	// thread's chunk count, and the design constants — must be flat in
-	// NON-engaged thread length, growing only with T and the engaged thread's C.
+	// metricRecallQueryCosineOps is the MEASURED per-query cosine-op count
+	// (#111 / design §7.2): the recaller's run-total cosine comparisons divided
+	// by the queries that performed them, COUNTED at the scoring call sites
+	// (scoring.CosineCounter) — coarse pass over T vectors + the population fine
+	// pass + the engaged-thread path (flat O(C_main) scan OR k·B·log_B(n)
+	// descent). This REPLACES the prior O(T·D + Kc·C·D) formula: the perf bend
+	// from O(C_main) to O(log n) is now empirical, not modeled. 0 on the
+	// symbolic mock run (no embedding recall ran); meaningful on an
+	// embedding-live run where a usable tree drives the descent. Emitted by
+	// recordCosineOpsMeasured via the recaller's cosineOpsReporter surface.
 	metricRecallQueryCosineOps = "recall_query_cosine_ops"
 
 	// metricRecallQueryLatency* are the per-query retrieval wall-clock
@@ -1617,16 +1667,6 @@ const (
 	// (== 0 is the pass on an embedding-live run; trivially 0 on the mock run,
 	// where the intra layer is off and no observed-vs-predicted tally runs).
 	metricRecallIntraCoherenceDivergence = "recall_intra_coherence_divergence"
-)
-
-// Per-query cosine-op model constants (§4.3). embedDim is the working
-// embedding dimension D (the §4.3 figure); the op model is O(T·D + Kc·C·D).
-// recallKc mirrors the runtime's coarse top-K (measure.Kc = 10); these are
-// the design's calibration anchors, used to MODEL the op count from the
-// shadow rather than instrument the runtime's inner loop.
-const (
-	embedDim = 768
-	recallKc = 10
 )
 
 // Synthesis-thread metric keys (§2.7.3, #47/#42). Defined here so the
@@ -1915,11 +1955,32 @@ type generator struct {
 	intraProbeHopCursor    int
 
 	// shadowChunks[idx] is the generator's ordered shadow of thread idx's
-	// fine tier: one chunkRecord per emitted owner-excerpt (§8.2). Appended by
-	// recordEmission alongside emittedSyms, so it stays byte-aligned with the
-	// retained set; the intra-thread oracle scores it, never a runtime index
-	// (F6). Pure (no rng).
+	// fine tier: one chunkRecord per emitted owner-excerpt (§8.2) that the
+	// PRNG keep/toss model RETAINED (transient-marked excerpts are trimmed and
+	// never appended — design §7.3). Appended by recordEmission; the
+	// intra-thread oracle scores it, never a runtime index (F6).
 	shadowChunks map[int][]chunkRecord
+
+	// trimRng is the PRNG keep/toss model's dedicated, fixed-seed source
+	// (#111 / design §7.3): the sim's deterministic stand-in for the production
+	// §3.10.8 `lifetime:` marker. Seeded from cfg.Seed (a derived seed) so the
+	// transient/durable classification is part of the canonical, byte-stable
+	// step stream for a given seed, and so it draws INDEPENDENTLY of g.rng (the
+	// action-selection source) — keeping the canonical action stream unchanged.
+	// Drawn once per retained-excerpt-to-be in recordEmission. Determinism: a
+	// dedicated source whose draw order is input-determined (recordEmission is
+	// called in a deterministic order) keeps TestGenerateWorkload_Deterministic
+	// green.
+	trimRng *rand.Rand
+
+	// trimmedChunks / retainedChunks count keep/toss outcomes across the run
+	// (observability for §7.3: the trim's effect on the leaf set). trimmedMain
+	// / retainedMain are the same split for the Candidate-A main thread, so the
+	// summary can report fine_chunks_main as ~(1-rate) of the untrimmed count.
+	trimmedChunks  int
+	retainedChunks int
+	trimmedMain    int
+	retainedMain   int
 
 	// lastIntraProbe is the most-recently-EMITTED intra-thread probe's
 	// metadata, read back on the next Next()'s feedback to bucket the
@@ -2376,7 +2437,7 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 	// recording only anchorTags would under-count the retained union and
 	// flip borderline recall comparisons (§4.2 coherence). Done after the
 	// user-dictated overlay so the recorded userInput is the one emitted.
-	g.recordEmission(idx, extractedSymbolsFor(userInput, anchorTags))
+	g.recordEmission(idx, extractedSymbolsFor(userInput, anchorTags), transientRateFor(tt))
 
 	annotation := fmt.Sprintf("turn %d: %s %s (%s)",
 		g.stepIndex+1, turnTypeName(tt), actionName(act), slot.Topic)
@@ -2562,7 +2623,7 @@ func (g *generator) campaignEngage(tt turnType, c *campaign, anchorTags []string
 	// topical, but owns a private salt token, which never appears in any
 	// query Q so it cannot make the thread spuriously matchable.
 	anchorTags = append(append([]string(nil), anchorTags...), saltSymbol(thr.order))
-	g.recordEmission(idx, extractedSymbolsFor(userInput, anchorTags))
+	g.recordEmission(idx, extractedSymbolsFor(userInput, anchorTags), transientRateFor(tt))
 
 	threads := []string{thr.threadID()}
 	if isNew {
@@ -2629,7 +2690,7 @@ func (g *generator) campaignRecall(tt turnType, c *campaign, querySymbols []stri
 	// carrier's history_symbols; the carrier is excluded from the
 	// recall-oracle scan and criterion (e), so this accretion cannot inflate
 	// a genuine candidate's set nor be scored as a future match.
-	g.recordEmission(engageIdx, extractedSymbolsFor(userInput, querySymbols))
+	g.recordEmission(engageIdx, extractedSymbolsFor(userInput, querySymbols), transientRateFor(tt))
 	carrierTag := g.threads[engageIdx].threadID()
 	if carrierCreated {
 		carrierTag = prompt.NewTopicLiteral
@@ -2955,7 +3016,23 @@ func extractedSymbolsFor(userInput string, modelAnchors []string) []string {
 // The union grows as a thread wanders (increment 2): each new-topic
 // emission accretes its slot's tags, and recordEmission's set union is
 // the trajectory-spanning retained set the recall oracle scores against.
-func (g *generator) recordEmission(idx int, tags []string) {
+//
+// transientRate is the PRNG keep/toss transient probability for THIS
+// excerpt (design §7.3): convoTransientPct for a conversation turn,
+// toolTransientPct for a tool/work turn. The whole-thread SYMBOL union
+// (emittedSyms) is ALWAYS updated — keep/toss trims fine-tier leaves, not
+// history_symbols.
+//
+// The shadow chunk is ALWAYS appended (turn-numbered monotonically), never
+// dropped, because production OVER-RETAINS (the §3.10.8 keep/toss marker is
+// unbuilt; the negative constraint). The runtime's fine tier, the intra-thread
+// coherence oracle, and the W1 descent-vs-flat gate therefore all see the full
+// retained set, byte-aligned with the runtime's turn numbering. A fixed-seed
+// PRNG draw (g.trimRng) sets the chunk's `transient` flag, which drives ONLY
+// the reported durable leaf-set metric (fine_chunks = the kept subset) — the
+// constant-factor slope win keep/toss would deliver, modeled WITHOUT
+// desynchronizing the oracle from the over-retaining runtime.
+func (g *generator) recordEmission(idx int, tags []string, transientRate int) {
 	set := g.emittedSyms[idx]
 	if set == nil {
 		set = map[string]struct{}{}
@@ -2965,14 +3042,33 @@ func (g *generator) recordEmission(idx int, tags []string) {
 		set[t] = struct{}{}
 	}
 
-	// §8.2 fine-tier shadow: every owner emission writes one turn-excerpt, so
-	// append one chunkRecord. The runtime numbers an owner's excerpt
-	// rec.TurnCount+1 (engage.go), i.e. 1-based and monotonic per thread — the
-	// generator mirrors it as the prior chunk count + 1. tags is the per-turn
-	// emitted symbol set (this chunk's content); slotIdx is the thread's
-	// current slot. The shadow chunk list is the intra-thread oracle's score
-	// material — never a runtime index read (F6). A defensive copy of tags
-	// keeps the chunk immutable if the caller reuses its slice.
+	// PRNG keep/toss (§7.3): classify this excerpt transient with probability
+	// transientRate. Deterministic via the dedicated g.trimRng (isolated from
+	// g.rng), so the canonical step stream stays byte-stable for a given seed.
+	// A nil g.trimRng (a bare-literal generator in a focused unit test that does
+	// not run the keep/toss model) defaults to keep — the trim is observability,
+	// never load-bearing for those tests.
+	transient := g.trimRng != nil && g.trimRng.Intn(transientSelector) < transientRate
+	isMain := g.isMainThread(idx)
+	if transient {
+		g.trimmedChunks++
+		if isMain {
+			g.trimmedMain++
+		}
+	} else {
+		g.retainedChunks++
+		if isMain {
+			g.retainedMain++
+		}
+	}
+
+	// §8.2 fine-tier shadow: every owner excerpt becomes one chunkRecord. The
+	// runtime numbers an excerpt monotonically — the generator mirrors it as the
+	// prior chunk count + 1. tags is the per-turn emitted symbol set (this
+	// chunk's content); slotIdx is the thread's current slot. The shadow chunk
+	// list is the intra-thread oracle's score material — never a runtime index
+	// read (F6). A defensive copy of tags keeps the chunk immutable if the
+	// caller reuses its slice.
 	if g.shadowChunks == nil {
 		g.shadowChunks = map[int][]chunkRecord{}
 	}
@@ -2982,7 +3078,20 @@ func (g *generator) recordEmission(idx int, tags []string) {
 		turnNumber: len(prior) + 1,
 		slotIdx:    g.threads[idx].cur,
 		tags:       chunkTags,
+		transient:  transient,
 	})
+}
+
+// transientRateFor returns the PRNG keep/toss transient rate for a turn of
+// the given class (§7.3): tool/work turns churn faster (toolTransientPct),
+// conversation turns slower (convoTransientPct). Used by the buildStep main
+// emission, which knows its turnType; the probe/campaign/refinement emissions
+// are conversation-class and pass convoTransientPct directly.
+func transientRateFor(tt turnType) int {
+	if tt == turnWork {
+		return toolTransientPct
+	}
+	return convoTransientPct
 }
 
 // shadowRetainedSet returns thread idx's shadow retained symbol set: the
@@ -3180,25 +3289,38 @@ func (g *generator) isCarrier(idx int) bool {
 	return ok
 }
 
-// mainThreadChunkCount returns the Candidate-A main thread's total shadow
-// chunk count (its turn-excerpt count) — the length axis the I3 perf-decay
-// gate watches. 0 when the main thread was never created (a rung too short
-// to inject one).
+// mainThreadChunkCount returns the Candidate-A main thread's DURABLE (kept)
+// shadow chunk count — the post-keep/toss fine-tier leaf count, the length
+// axis the I3 perf-decay gate watches (§7.3: the trim shrinks n_main by the
+// constant transient factor). Transient-marked chunks are excluded (they are
+// the leaves keep/toss would trim). 0 when the main thread was never created.
 func (g *generator) mainThreadChunkCount() int {
 	if g.mainThreadIdx < 0 {
 		return 0
 	}
-	return len(g.shadowChunks[g.mainThreadIdx])
+	return durableChunkCount(g.shadowChunks[g.mainThreadIdx])
 }
 
-// totalFineChunks returns the total shadow chunk count across all threads —
-// the generator's shadow of the fine tier's size.
+// totalFineChunks returns the total DURABLE (kept) shadow chunk count across
+// all threads — the post-keep/toss fine tier's modeled size (§7.3).
 func (g *generator) totalFineChunks() int {
 	total := 0
 	for _, chunks := range g.shadowChunks {
-		total += len(chunks)
+		total += durableChunkCount(chunks)
 	}
 	return total
+}
+
+// durableChunkCount counts the chunks the PRNG keep/toss model RETAINED (not
+// transient) — the modeled fine-tier leaf set (§7.3).
+func durableChunkCount(chunks []chunkRecord) int {
+	kept := 0
+	for _, c := range chunks {
+		if !c.transient {
+			kept++
+		}
+	}
+	return kept
 }
 
 // mainThreadScrolledOut returns the count of the main thread's chunks that
@@ -3214,19 +3336,6 @@ func (g *generator) mainThreadScrolledOut() int {
 		return 0
 	}
 	return cur - intraThreadTurnWindow
-}
-
-// modeledCosineOps returns the §4.3 modeled per-query cosine-op count
-// O(T·D + Kc·C·D): a coarse pass over T thread vectors plus a fine pass over
-// (Kc+1) selected threads' chunks, where C is the engaged thread's chunk
-// count (the main thread's, the length-sensitive term). This MODELS the cost
-// from the design constants and the shadow — it is the §4.3 validation that
-// the term is flat in NON-engaged thread length (only T and the engaged C
-// move it), not a runtime inner-loop instrument.
-func (g *generator) modeledCosineOps(liveThreads int) int {
-	coarse := liveThreads * embedDim
-	fine := (recallKc + 1) * g.mainThreadChunkCount() * embedDim
-	return coarse + fine
 }
 
 // isMainThread reports whether idx is the Candidate-A long-running main
@@ -3347,7 +3456,7 @@ func (g *generator) buildWanderProbeStep() (bufStep, bool) {
 	// stays internally consistent only (the shadow mirrors what the runtime
 	// holds). The probed thread itself is NOT engaged, so it accretes
 	// nothing this turn; only the carrier does.
-	g.recordEmission(engageIdx, extractedSymbolsFor(probeUserInput, Q))
+	g.recordEmission(engageIdx, extractedSymbolsFor(probeUserInput, Q), convoTransientPct)
 
 	carrierTag := g.threads[engageIdx].threadID()
 	if carrierCreated {
@@ -3437,7 +3546,10 @@ func (g *generator) buildMainThreadStep() bufStep {
 	slot := g.model.slots[thr.cur]
 	anchorTags := append(nonLooseTags(slot), saltSymbol(thr.order))
 	userInput := defaultUserInput(slot, false)
-	g.recordEmission(idx, extractedSymbolsFor(userInput, anchorTags))
+	// Candidate-A engagements are conversation-class (no file edit); the
+	// keep/toss model trims them at the conversation rate (§7.3), so
+	// fine_chunks_main reports ~(1-convoTransientPct/100) of the emitted count.
+	g.recordEmission(idx, extractedSymbolsFor(userInput, anchorTags), convoTransientPct)
 
 	threads := []string{thr.threadID()}
 	if isNew {
@@ -3561,7 +3673,7 @@ func (g *generator) buildIntraProbeStep() (bufStep, bool) {
 	// this adds no foreign symbol — only a fresh (non-scrolled-out) chunk that
 	// the oracle and the index both exclude from prediction (I6).
 	anchorTags := append(append([]string(nil), Q...), saltSymbol(thr.order))
-	g.recordEmission(idx, extractedSymbolsFor(probeUserInput, anchorTags))
+	g.recordEmission(idx, extractedSymbolsFor(probeUserInput, anchorTags), convoTransientPct)
 
 	step := scenarios.Step{
 		UserInput:    probeUserInput,
@@ -3569,6 +3681,13 @@ func (g *generator) buildIntraProbeStep() (bufStep, bool) {
 		Annotation:   fmt.Sprintf("turn %d: intra-probe %s hop=%d", g.stepIndex+1, thr.threadID(), hop),
 		ClosureAck:   &scenarios.ClosureAck{Outcome: turn.ClosureResolved},
 		RecallAck:    &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
+		// W1 recall-preservation gate (#111 / design §7.1): the harness evaluates
+		// IntraThreadDivergence for the engaged main thread on this step (on an
+		// embedding-live run with a usable tree) and accumulates
+		// recall_intra_descent_divergence. The intra probe is exactly the
+		// scrolled-out-early-content query the descent must preserve, so it is the
+		// natural W1 evaluation point.
+		W1Engaged: thr.threadID(),
 	}
 	g.engage(idx, g.stepIndex)
 	return bufStep{

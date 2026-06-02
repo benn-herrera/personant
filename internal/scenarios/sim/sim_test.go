@@ -728,10 +728,11 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	t.Logf("=== intra-thread recall (#109) ===")
 	t.Logf("recall_index_coarse_size: %d (== final spine size T; flat per-thread-length, the I4 check)",
 		int(m.Gauges[metricRecallIndexCoarseSize]))
-	t.Logf("recall_index_fine_chunks: %d total, %d main-thread (the I3 length axis)",
-		int(m.Gauges[metricRecallIndexFineChunks]), int(m.Gauges[metricRecallIndexFineChunksMain]))
-	t.Logf("recall_query_cosine_ops:  %d (modeled O(T·D + Kc·C·D), §4.3; D=%d Kc=%d)",
-		int(m.Gauges[metricRecallQueryCosineOps]), embedDim, recallKc)
+	t.Logf("recall_index_fine_chunks: %d total, %d main-thread durable/kept (the I3 length axis; PRNG keep/toss trim active — convo=%d%% tool=%d%% transient)",
+		int(m.Gauges[metricRecallIndexFineChunks]), int(m.Gauges[metricRecallIndexFineChunksMain]),
+		convoTransientPct, toolTransientPct)
+	t.Logf("recall_query_cosine_ops:  %.1f per-query MEASURED (§7.2; counted at the scoring call sites — coarse + engaged flat/descent; 0 on the symbolic mock run where no embedding recall ran)",
+		m.Gauges[metricRecallQueryCosineOps])
 	t.Logf("recall_query_latency:     P50=%.1fms P95=%.1fms P99=%.1fms (I3 gate: P99 flat across the rung ladder)",
 		m.Gauges[metricRecallQueryLatencyP50], m.Gauges[metricRecallQueryLatencyP95], m.Gauges[metricRecallQueryLatencyP99])
 	t.Logf("recall_index_flush:       %d calls / %d chunks (modeled debt-cap N=%d flush rate — the cost N pays)",
@@ -802,6 +803,43 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 			"oracle/runtime coherence (do NOT widen forgiveness — that disables the canary).",
 			intraDivergence, intraProbeObs)
 	}
+
+	// W1 recall-preservation gate (#111 / design §7.1, the headline safety
+	// property). recall_intra_descent_divergence is the run-total top-Kf leaf
+	// set difference between the summary-tree DESCENT and the flat scan,
+	// accumulated by the harness over every intra-probe step on an
+	// embedding-live run (recall_intra_descent_probes is its denominator). The
+	// metric keys mirror the scenarios-package harness constants
+	// (metricRecallIntraDescent*); they are the string contract between the
+	// harness emitter and this reader, like recall_unexplained_absence below.
+	// HARD ==0 GATE: a nonzero means the beam pruned a leaf the flat scan would
+	// have returned (beam too small, or a tree/clustering bug) — the
+	// zero-tolerance stop-and-root-cause signal. Raise the beam or fix the build
+	// side; NEVER widen the tolerance (that trades recall for speed, the one
+	// thing W1 forbids). On the symbolic mock run no W1 probe runs (no embedder,
+	// no usable tree), so probes==0 and divergence==0 trivially — reported as
+	// "no probe ran", not a pass.
+	descentDivergence := int(m.Counters["recall_intra_descent_divergence"])
+	descentProbes := int(m.Counters["recall_intra_descent_probes"])
+	if descentProbes == 0 {
+		t.Logf("recall_intra_descent_divergence: n/a — no W1 probe ran this rung (symbolic mock run, or main thread never grew a usable summary tree)")
+	} else {
+		t.Logf("recall_intra_descent_divergence: %d over %d W1 probes (#111 W1 PASS = 0 — descent returns the same top-Kf leaves the flat scan would; nonzero = beam too small or tree bug, STOP-and-root-cause)",
+			descentDivergence, descentProbes)
+		if descentDivergence != 0 {
+			t.Errorf("#111 W1 FAILURE: recall_intra_descent_divergence %d != 0 over %d probes — the beam descent did NOT return the same top-Kf leaves the flat O(C_main) scan would. Speed was traded for recall. Root-cause the beam width or the tree build; do NOT widen the gate tolerance.",
+				descentDivergence, descentProbes)
+		}
+	}
+
+	// F-B rebuild trip-wire (#111 / design §7.2, fork F-B). recall_intra_tree_
+	// rebuild_calls counts within-thread summary-tree (re)builds across the run's
+	// sleep cycles. It is a WATCH metric, NOT a hard gate: if it trends up with
+	// main-thread length on the long rungs, semantic rebalancing is not staying
+	// bounded and the design escalates to the hybrid recency-cap MAD. Reported
+	// beside the W1 gate so the rebuild churn is visible on every rung.
+	t.Logf("recall_intra_tree_rebuild_calls: %d (F-B trip-wire — semantic-rebalance churn; watch, no gate; escalates to the hybrid MAD if it trends with main-thread length)",
+		int(m.Counters["recall_intra_tree_rebuild_calls"]))
 
 	// Criterion (e): max per-thread retained symbol count must stay under
 	// the eviction cap — the no-eviction precondition the oracle's
@@ -1131,6 +1169,66 @@ func TestIntraThreadWindowMirrorsRuntime(t *testing.T) {
 		t.Fatalf("intraThreadTurnWindow=%d must mirror store.ThreadTurnWindow=%d "+
 			"(the I6 scroll-out boundary the runtime and the intra-thread oracle share)",
 			intraThreadTurnWindow, store.ThreadTurnWindow)
+	}
+}
+
+// TestKeepTossTrim_DeterministicAndShrinksLeafSet exercises the PRNG keep/toss
+// model (#111 / design §7.3): the durable (kept) leaf count must (a) be
+// deterministic for a given seed — two generators draw the identical
+// classification — and (b) shrink the emitted excerpt set toward the
+// (1-rate) keep fraction. The SYMBOL union (emittedSyms) and the full shadow
+// chunk list are unaffected (the oracle/W1 alignment), only the durable count
+// reported as fine_chunks is reduced.
+func TestKeepTossTrim_DeterministicAndShrinksLeafSet(t *testing.T) {
+	tags := []string{"alpha", "beta", "gamma", "delta", "epsilon"}
+	slot := CorpusSlot{Topic: "physics", Tags: tags}
+	newGen := func() *generator {
+		return GenerateWorkload(WorkloadConfig{
+			Seed: simSeed, Duration: simDayDuration,
+			Corpus: []CorpusSlot{slot}, FamilySize: 1,
+		}).StepSource.(*generator)
+	}
+
+	const n = 1000
+	emit := func(g *generator) {
+		g.threads = append(g.threads, newThread(0, 0))
+		for i := 0; i < n; i++ {
+			g.recordEmission(0, tags, convoTransientPct)
+		}
+	}
+
+	g1, g2 := newGen(), newGen()
+	emit(g1)
+	emit(g2)
+
+	// (a) Determinism: identical seed → identical kept/trimmed split and an
+	// identical per-chunk transient flag sequence.
+	if g1.retainedChunks != g2.retainedChunks || g1.trimmedChunks != g2.trimmedChunks {
+		t.Fatalf("keep/toss not deterministic: g1 kept/trimmed = %d/%d, g2 = %d/%d",
+			g1.retainedChunks, g1.trimmedChunks, g2.retainedChunks, g2.trimmedChunks)
+	}
+	for i := range g1.shadowChunks[0] {
+		if g1.shadowChunks[0][i].transient != g2.shadowChunks[0][i].transient {
+			t.Fatalf("transient flag diverged at chunk %d", i)
+		}
+	}
+
+	// (b) Shrink: durable count ≈ (1-convoTransientPct/100)·n, within a band.
+	// The full shadow list is untrimmed (oracle/W1 alignment); only the durable
+	// count is reduced.
+	if got := len(g1.shadowChunks[0]); got != n {
+		t.Errorf("shadow chunk list = %d, want all %d emitted (trim must NOT drop chunks — production over-retains)", got, n)
+	}
+	kept := durableChunkCount(g1.shadowChunks[0])
+	wantKeep := n * (100 - convoTransientPct) / 100
+	band := n / 10 // ±10% sampling band
+	if kept < wantKeep-band || kept > wantKeep+band {
+		t.Errorf("durable kept = %d, want ~%d (1-%d%% of %d) within ±%d", kept, wantKeep, convoTransientPct, n, band)
+	}
+	// The symbol union is unaffected by the trim (keep/toss trims leaves, not
+	// history_symbols): all five tags plus the salt remain.
+	if got := len(g1.shadowRetainedSet(0)); got < len(tags) {
+		t.Errorf("symbol union = %d, want >= %d — trim wrongly shrank history_symbols", got, len(tags))
 	}
 }
 
@@ -1535,7 +1633,15 @@ func recordIntraThreadMetrics(h *scenarios.Harness, gen *generator, liveThreads 
 	h.Metrics.Set(metricRecallIndexCoarseSize, float64(liveThreads))
 	h.Metrics.Set(metricRecallIndexFineChunks, float64(gen.totalFineChunks()))
 	h.Metrics.Set(metricRecallIndexFineChunksMain, float64(gen.mainThreadChunkCount()))
-	h.Metrics.Set(metricRecallQueryCosineOps, float64(gen.modeledCosineOps(liveThreads)))
+	// MEASURED recall_query_cosine_ops (§7.2): read the recaller's actual cosine
+	// comparison tally (counted at the scoring call sites — coarse + the engaged
+	// flat-scan OR descent), divided by the queries that performed them. This
+	// REPLACES the prior modeled formula: the O(C_main)→O(log n) perf bend is now
+	// empirical, not derived. On the symbolic-only mock run no embedding recall
+	// ran, so the reporter reports 0 queries → the metric is 0 (honestly
+	// unavailable; the bend is measurable only on an embedding-live run, where a
+	// usable tree drives the descent). recordCosineOpsMeasured handles both.
+	recordCosineOpsMeasured(h)
 	h.Metrics.Set(metricRecallQueryLatencyP50, p50)
 	h.Metrics.Set(metricRecallQueryLatencyP95, p95)
 	h.Metrics.Set(metricRecallQueryLatencyP99, p99)
@@ -1568,6 +1674,34 @@ func recordIntraThreadMetrics(h *scenarios.Harness, gen *generator, liveThreads 
 	}
 	h.Metrics.Set(metricRecallIntraCoherenceDivergence, float64(divergence))
 	h.Metrics.Set(metricRecallIntraBlindspotMisses, float64(gen.intraBlindspotMisses))
+}
+
+// cosineOpsReporter is the recaller surface the MEASURED recall_query_cosine_ops
+// metric reads (#111 / design §7.2). measure.Service satisfies it; the
+// symbolic-only default does not (no embedding recall ran), so the metric is 0
+// on the mock acceptance path — honestly, the perf bend is measurable only on
+// an embedding-live run. Mirrors the harness's optional-interface discipline.
+type cosineOpsReporter interface {
+	CosineOps() int64
+	RecallQueries() int64
+}
+
+// recordCosineOpsMeasured emits the MEASURED per-query cosine-op count (§7.2):
+// the recaller's run-total cosine comparisons divided by the queries that
+// performed them. Reads the live recaller off the harness's State; emits 0 when
+// no embedding recaller is installed or no embedding query ran (the symbolic
+// mock path). Counted at the scoring call sites (scoring.CosineCounter), so the
+// O(C_main)→O(log n) bend is empirical, not modeled.
+func recordCosineOpsMeasured(h *scenarios.Harness) {
+	var perQuery float64
+	if h.State != nil && h.State.Recaller != nil {
+		if rep, ok := h.State.Recaller.(cosineOpsReporter); ok {
+			if q := rep.RecallQueries(); q > 0 {
+				perQuery = float64(rep.CosineOps()) / float64(q)
+			}
+		}
+	}
+	h.Metrics.Set(metricRecallQueryCosineOps, perQuery)
 }
 
 // closureCount counts `retire.complete` events in the harness's event
@@ -1772,7 +1906,7 @@ func TestRecallExpectedMaterializationFilter(t *testing.T) {
 		g.threads = append(g.threads, thr)
 		// Each emits the slot's tags + its own salt — the sibling retained
 		// set that clears the threshold against Q below.
-		g.recordEmission(order, append(append([]string(nil), tags...), saltSymbol(order)))
+		g.recordEmission(order, append(append([]string(nil), tags...), saltSymbol(order)), convoTransientPct)
 	}
 
 	// Q is the slot's tags plus the engaged thread's salt (mirrors the

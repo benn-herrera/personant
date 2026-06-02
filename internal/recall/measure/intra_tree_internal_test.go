@@ -118,7 +118,7 @@ func TestIntraChunks_NoTree_ByteIdenticalToFlat(t *testing.T) {
 	}
 
 	q := axisVec(dim, 3, 0.1)
-	got := (&Service{}).intraChunks(q, snap, "thr_eng")
+	got := (&Service{}).intraChunks(q, snap, "thr_eng", nil)
 	want := scoring.ProposeChunks(q, fine, scoring.ChunkOptions{Limit: Kf})
 	if !sameTurns(got, want) {
 		t.Errorf("no-tree intraChunks %v != flat ProposeChunks %v", turns(got), turns(want))
@@ -147,7 +147,7 @@ func TestIntraChunks_Descent_MatchesFlat(t *testing.T) {
 	svc := &Service{}
 	for axis := 0; axis < dim; axis++ {
 		q := axisVec(dim, axis, 0.1)
-		got := svc.intraChunks(q, snap, "thr_eng")
+		got := svc.intraChunks(q, snap, "thr_eng", nil)
 		flat := scoring.ProposeChunks(q, fine, scoring.ChunkOptions{Limit: Kf})
 		if !sameTurnSet(got, flat) {
 			t.Errorf("axis %d: descent top-Kf %v != flat %v", axis, turns(got), turns(flat))
@@ -235,7 +235,7 @@ func TestTreeUsable_BelowThreshold_FlatFallback(t *testing.T) {
 	}
 
 	q := axisVec(dim, 0, 0.1)
-	got := (&Service{}).intraChunks(q, snap, "thr_eng")
+	got := (&Service{}).intraChunks(q, snap, "thr_eng", nil)
 	want := scoring.ProposeChunks(q, fine, scoring.ChunkOptions{Limit: Kf})
 	if !sameTurns(got, want) {
 		t.Errorf("below-threshold intraChunks %v != flat %v", turns(got), turns(want))
@@ -326,7 +326,7 @@ func TestRebuildTrees_SleepCycleSeam(t *testing.T) {
 	// The engaged above-threshold thread now descends, matching flat (W1).
 	for axis := 0; axis < dim; axis++ {
 		q := axisVec(dim, axis, 0.1)
-		got := svc.intraChunks(q, snap, "thr_big")
+		got := svc.intraChunks(q, snap, "thr_big", nil)
 		flat := scoring.ProposeChunks(q, big, scoring.ChunkOptions{Limit: Kf})
 		if !sameTurnSet(got, flat) {
 			t.Errorf("axis %d: post-rebuild descent %v != flat %v", axis, turns(got), turns(flat))

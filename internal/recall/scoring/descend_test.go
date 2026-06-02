@@ -142,6 +142,56 @@ func TestDescendChunks_W1_RecallPreservation(t *testing.T) {
 	}
 }
 
+// TestCosineCounter_DescentBendsBelowFlat is the unit-level proof that the
+// MEASURED recall_query_cosine_ops instrument (§7.2) reflects the O(C_main)→
+// O(log n) bend: over the SAME large leaf set, the beam descent must perform
+// FAR fewer cosine comparisons than the flat scan, and a lossless level (child
+// count <= beam) must compute zero. This is the headline perf-validation claim
+// the sim's measured metric rests on, checked here without the sim stack.
+func TestCosineCounter_DescentBendsBelowFlat(t *testing.T) {
+	const dim = 8
+	var leaves []ChunkVector
+	turn := 0
+	for axis := 0; axis < dim; axis++ {
+		for j := 0; j < 64; j++ { // 512 leaves — a "long thread" scale
+			leaves = append(leaves, ChunkVector{TurnNumber: turn, Vector: unitNoisy(dim, axis, 0.05*float64(j))})
+			turn++
+		}
+	}
+	tree := buildTestTree(leaves, TreeBranchingFactor)
+	q := unitNoisy(dim, 0, 0.1)
+
+	flatCounter := &CosineCounter{}
+	ProposeChunks(q, leaves, ChunkOptions{Limit: DefaultChunkLimit, Counter: flatCounter})
+	// Flat scan: exactly one cosine per leaf.
+	if flatCounter.Ops() != len(leaves) {
+		t.Errorf("flat scan ops = %d, want one per leaf = %d", flatCounter.Ops(), len(leaves))
+	}
+
+	descentCounter := &CosineCounter{}
+	DescendChunks(q, tree, DescendOptions{Limit: DefaultChunkLimit, Counter: descentCounter})
+	// Descent: pruned levels + terminal frontier rank, log-bounded — must be a
+	// small fraction of the flat scan over 512 leaves.
+	if descentCounter.Ops() == 0 {
+		t.Fatal("descent counted 0 cosine ops — the counter is not threaded through topKByCosine / ProposeChunks")
+	}
+	if descentCounter.Ops() >= flatCounter.Ops() {
+		t.Errorf("descent ops %d not below flat ops %d — the O(log n) bend the measured metric must show is absent",
+			descentCounter.Ops(), flatCounter.Ops())
+	}
+	// Sanity on the magnitude of the bend: at 512 leaves, B=16, k=4 the descent
+	// should be well under half the flat cost (it is ~k·B·depth + frontier).
+	if descentCounter.Ops() > flatCounter.Ops()/2 {
+		t.Errorf("descent ops %d > half of flat ops %d — bend weaker than the cost model predicts",
+			descentCounter.Ops(), flatCounter.Ops())
+	}
+
+	// A nil counter must be a no-op (production hot-path: no instrumentation).
+	if got := ProposeChunks(q, leaves, ChunkOptions{Limit: DefaultChunkLimit}); len(got) == 0 {
+		t.Error("nil-counter ProposeChunks returned no candidates — nil-safety broke the scan")
+	}
+}
+
 // TestDescendChunks_W3_Beam constructs the failure mode W3 exists to
 // prevent: the best leaf sits under an internal node whose SUMMARY vector
 // cosine-misses the query, so greedy top-1 descent would prune that

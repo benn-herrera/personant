@@ -113,6 +113,57 @@ func TestService_EmbeddingFires(t *testing.T) {
 	}
 }
 
+// TestService_CosineOpsMeasured: the MEASURED recall_query_cosine_ops counter
+// (#111 / design §7.2) accumulates the actual cosine comparisons the embedding
+// recall path performs. With an embedder, a Recall that runs the coarse pass
+// bumps RecallQueries and counts at least one cosine per coarse vector; with no
+// embedder, no embedding pass runs so both stay 0 (the metric is honestly
+// unavailable on the symbolic path).
+func TestService_CosineOpsMeasured(t *testing.T) {
+	paths, ops := newRecallHome(t)
+	seedThread(t, paths, "thr_1", []string{"thr_1"}, "trefoil knot topology invariant chirality")
+	seedThread(t, paths, "thr_2", []string{"thr_2"}, "neutrino oscillation flavor lepton boson")
+
+	// Symbolic-only: no embedding pass → no cosine ops, no recall queries.
+	sym := measure.NewService(ops, nil)
+	if err := sym.Prepare(context.Background()); err != nil {
+		t.Fatalf("Prepare (symbolic): %v", err)
+	}
+	if _, err := sym.Recall(context.Background(), measure.Request{QueryText: "trefoil knot topology"}); err != nil {
+		t.Fatalf("Recall (symbolic): %v", err)
+	}
+	if sym.CosineOps() != 0 || sym.RecallQueries() != 0 {
+		t.Errorf("symbolic-only run counted cosine ops: ops=%d queries=%d, want 0/0", sym.CosineOps(), sym.RecallQueries())
+	}
+
+	// Embedding: each query runs the coarse pass over the 2 coarse vectors, so
+	// after two queries RecallQueries==2 and CosineOps grows monotonically and
+	// is at least one comparison per coarse vector per query.
+	svc := measure.NewService(ops, model.NewMockEmbedder())
+	if err := svc.Prepare(context.Background()); err != nil {
+		t.Fatalf("Prepare (embedding): %v", err)
+	}
+	if _, err := svc.Recall(context.Background(), measure.Request{QueryText: "trefoil knot topology"}); err != nil {
+		t.Fatalf("Recall 1: %v", err)
+	}
+	afterOne := svc.CosineOps()
+	if svc.RecallQueries() != 1 {
+		t.Errorf("RecallQueries after one query = %d, want 1", svc.RecallQueries())
+	}
+	if afterOne < 1 {
+		t.Errorf("CosineOps after one query = %d, want >= 1 (coarse pass over the index)", afterOne)
+	}
+	if _, err := svc.Recall(context.Background(), measure.Request{QueryText: "neutrino oscillation flavor"}); err != nil {
+		t.Fatalf("Recall 2: %v", err)
+	}
+	if svc.RecallQueries() != 2 {
+		t.Errorf("RecallQueries after two queries = %d, want 2", svc.RecallQueries())
+	}
+	if svc.CosineOps() <= afterOne {
+		t.Errorf("CosineOps did not grow on the second query: %d <= %d", svc.CosineOps(), afterOne)
+	}
+}
+
 // TestService_MergesLayers: when a thread matches on both symbols and
 // content, the merged Result carries both layer hits.
 func TestService_MergesLayers(t *testing.T) {

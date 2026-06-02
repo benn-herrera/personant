@@ -40,6 +40,11 @@ type EmbeddingOptions struct {
 	// Exclude is the set of thread IDs to omit — typically threads
 	// already engaged this turn. Nil/empty → no exclusion.
 	Exclude map[string]struct{}
+
+	// Counter, when non-nil, tallies the cosine comparisons this scan
+	// performs — the MEASURED recall_query_cosine_ops instrument (design
+	// §7.2). nil on the production hot path. See CosineCounter.
+	Counter *CosineCounter
 }
 
 // ProposeEmbedding is the §3.4 layer-2 matcher: it ranks thread
@@ -73,6 +78,7 @@ func ProposeEmbedding(query []float64, threads []ThreadVector, opts EmbeddingOpt
 		if _, skip := opts.Exclude[tv.ThreadID]; skip {
 			continue
 		}
+		opts.Counter.add(1) // one cosine comparison per scanned coarse vector
 		score := cosineSimilarity(query, tv.Vector)
 		if score < threshold {
 			continue

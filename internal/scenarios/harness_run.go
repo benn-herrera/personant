@@ -269,6 +269,23 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 		embedFireIDs = embedFires
 	}
 
+	// W1 recall-preservation gate (#111 / design §7.1): on an intra-probe step
+	// (W1Engaged set) on an embedding-live run, ask the recaller for the
+	// descent-vs-flat top-Kf set difference for the engaged main thread and
+	// accumulate it. The HARD ==0 assertion lives in the sim summary
+	// (recordRecallPreservationGate); here we only tally the per-step
+	// differential. Gated on h.indexer (an embedding recaller is live) and the
+	// optional intraDivergenceProbe interface (measure.Service satisfies it) so
+	// the symbolic-only default is untouched. Counted unconditionally when a
+	// usable tree exists — divergence is 0 by construction otherwise (W8).
+	if h.indexer != nil && step.W1Engaged != "" && h.State != nil && h.State.Recaller != nil {
+		if probe, ok := h.State.Recaller.(intraDivergenceProbe); ok {
+			div := probe.IntraThreadDivergence(context.Background(), step.UserInput, step.W1Engaged)
+			h.Metrics.Counter(metricRecallIntraDescentDivergence, int64(div))
+			h.Metrics.Counter(metricRecallIntraDescentProbes, 1)
+		}
+	}
+
 	// Per-step metrics.
 	h.Metrics.Counter("turns", 1)
 	h.Metrics.Record("turn_duration_ms", float64(elapsed.Milliseconds()))
@@ -512,6 +529,18 @@ const (
 	// if it trends up with main-thread length on the long rungs, semantic
 	// rebalancing is not staying bounded and escalates to the hybrid MAD.
 	metricRecallIntraTreeRebuildCalls = "recall_intra_tree_rebuild_calls"
+
+	// metricRecallIntraDescentDivergence is the W1 recall-preservation gate
+	// accumulator (#111 / design §7.1): the run-total top-Kf leaf set difference
+	// between the summary-tree descent and the flat scan, summed over every
+	// intra-probe step on an embedding-live run. HARD ==0 gate in the sim
+	// summary — a nonzero means the beam pruned a leaf the flat scan would have
+	// returned (beam too small, or a tree/clustering bug), which is the
+	// zero-tolerance stop-and-root-cause signal. metricRecallIntraDescentProbes
+	// is its denominator (the number of W1 probes evaluated), so the summary can
+	// distinguish "0 because the gate passed" from "0 because no probe ran".
+	metricRecallIntraDescentDivergence = "recall_intra_descent_divergence"
+	metricRecallIntraDescentProbes     = "recall_intra_descent_probes"
 )
 
 // runSleepCycle drives one ARCHITECTURE.md sleep cycle (#108): it measures

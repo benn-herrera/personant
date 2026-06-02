@@ -38,6 +38,11 @@ type ChunkOptions struct {
 	// Limit caps the returned candidates (the §4.2 Kf cap). 0 →
 	// DefaultChunkLimit; negative → unbounded.
 	Limit int
+
+	// Counter, when non-nil, tallies the cosine comparisons this scan
+	// performs — the MEASURED recall_query_cosine_ops instrument (design
+	// §7.2). nil on the production hot path. See CosineCounter.
+	Counter *CosineCounter
 }
 
 // ProposeChunks is the §4 fine-pass matcher: it ranks a thread's chunk
@@ -62,6 +67,7 @@ func ProposeChunks(query []float64, chunks []ChunkVector, opts ChunkOptions) []C
 	}
 
 	out := make([]ChunkCandidate, 0, len(chunks))
+	opts.Counter.add(len(chunks)) // one cosine comparison per chunk scanned
 	for _, cv := range chunks {
 		score := cosineSimilarity(query, cv.Vector)
 		if score < threshold {

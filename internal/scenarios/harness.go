@@ -84,6 +84,32 @@ type treeRebuilder interface {
 	RebuildTrees(ctx context.Context) (int, error)
 }
 
+// intraDivergenceProbe is the narrow optional interface a Recaller may satisfy
+// to expose the W1 recall-preservation differential (#111 / design §7.1):
+// IntraThreadDivergence runs BOTH the summary-tree descent and the flat scan
+// over the engaged thread's leaves and returns the size of their top-Kf leaf
+// set difference. measure.Service implements it. The harness calls it on
+// intra-probe steps (Step.W1Engaged set) on an embedding-live run and
+// accumulates recall_intra_descent_divergence — the HARD ==0 gate (a nonzero
+// means the beam pruned a leaf the flat scan would have returned: STOP and
+// root-cause, never widen). A recaller without it (symbolic-only default) is
+// not probed.
+type intraDivergenceProbe interface {
+	IntraThreadDivergence(ctx context.Context, queryText, engaged string) int
+}
+
+// cosineOpsReporter is the narrow optional interface a Recaller may satisfy to
+// expose the MEASURED recall_query_cosine_ops instrument (#111 / design §7.2):
+// CosineOps is the run-total cosine comparisons the embedding recall path
+// performed, RecallQueries the number of queries that performed them. The
+// harness reads them post-run and emits the per-query average — the empirical
+// O(C_main)→O(log) perf bend, counted rather than modeled. measure.Service
+// implements it; a recaller without it is simply not reported.
+type cosineOpsReporter interface {
+	CosineOps() int64
+	RecallQueries() int64
+}
+
 // Step is one turn in a Scenario. Exactly one mock LLM response is
 // queued for the step; running the step calls turn.Run once. Per-step
 // invariants run after the turn completes; an empty Invariants slice
@@ -171,6 +197,18 @@ type Step struct {
 	// is NOT covered here and is tracked separately as queued crash-recovery
 	// work (sim-vs-reality MAD finding B9 / T0-3).
 	RestartSession bool
+
+	// W1Engaged names the engaged thread whose intra-thread recall-preservation
+	// gate (#111 / design §7.1) the harness should evaluate on this step. When
+	// non-empty AND an embedding recaller is live, the harness calls the
+	// recaller's IntraThreadDivergence(ctx, UserInput, W1Engaged) and accumulates
+	// recall_intra_descent_divergence — the HARD ==0 gate that descent returns
+	// the same top-Kf leaves the flat scan would. The sim sets it to the
+	// Candidate-A main thread on intra-probe steps. Empty on every other step;
+	// the symbolic-only run never evaluates it (no usable tree, divergence is 0
+	// by construction). It is observability/gate wiring only — it does not touch
+	// the turn, the canonical step stream, or determinism.
+	W1Engaged string
 
 	// SleepCycle marks a deterministic ARCHITECTURE.md "sleep cycle" step
 	// (task #108): the sim's day-off generator emits one such step per

@@ -245,6 +245,20 @@ type Service struct {
 	// Close can wait for a clean shutdown (no leaked goroutine).
 	indexerDone chan struct{}
 
+	// cosineOps / recallQueries are the MEASURED recall_query_cosine_ops
+	// instrument (design within-thread-summary-hierarchy.md §7.2): the
+	// run-total count of cosine comparisons the embedding recall path
+	// actually performed, and the number of embedding-recall queries that
+	// performed them. The per-query average (cosineOps/recallQueries) is the
+	// headline perf-bend metric — empirical (counted at the scoring call
+	// sites via scoring.CosineCounter), NOT a formula. Bumped once per Recall
+	// query that runs the embedding pass; read by the harness via CosineOps /
+	// RecallQueries. Atomic because Recall may be called concurrently in
+	// principle (the read path takes no lock, I1) even though the sim drives
+	// it one turn at a time.
+	cosineOps     atomic.Int64
+	recallQueries atomic.Int64
+
 	closeOnce sync.Once
 }
 
@@ -628,7 +642,15 @@ func (s *Service) Recall(ctx context.Context, req Request) ([]Result, error) {
 	if q != nil {
 		snap := s.cur.Load() // I1: one atomic load, no read-path lock
 
-		for _, c := range s.coarseFine(q, snap, req.Exclude) {
+		// MEASURED recall_query_cosine_ops (§7.2): one counter per query,
+		// threaded into both the coarse→fine population pass and the engaged-
+		// thread intra pass, so it tallies the ACTUAL cosine comparisons —
+		// coarse over T vectors + the population fine pass + the engaged path
+		// (flat O(C_main) scan OR k·B·log_B(n) descent). Accumulated into the
+		// run total after the query so the perf bend is empirical.
+		counter := &scoring.CosineCounter{}
+
+		for _, c := range s.coarseFine(q, snap, req.Exclude, counter) {
 			r := merged[c.ThreadID]
 			if r == nil {
 				r = &Result{ThreadID: c.ThreadID}
@@ -638,7 +660,7 @@ func (s *Service) Recall(ctx context.Context, req Request) ([]Result, error) {
 			r.Score = c.Score // embedding score dominates the unified rank
 		}
 
-		if hit := s.intraThread(q, snap, req.Engaged); hit != nil {
+		if hit := s.intraThread(q, snap, req.Engaged, counter); hit != nil {
 			r := merged[req.Engaged]
 			if r == nil {
 				r = &Result{ThreadID: req.Engaged}
@@ -649,6 +671,12 @@ func (s *Service) Recall(ctx context.Context, req Request) ([]Result, error) {
 				r.Score = hit.Score
 			}
 		}
+
+		// Accumulate the MEASURED cosine-op tally for this query into the run
+		// total (§7.2). One query that ran the embedding pass → one increment
+		// of recallQueries; the per-query average is cosineOps/recallQueries.
+		s.cosineOps.Add(int64(counter.Ops()))
+		s.recallQueries.Add(1)
 	}
 
 	out := make([]Result, 0, len(merged))
@@ -694,10 +722,11 @@ func (s *Service) embedQuery(ctx context.Context, queryText string) []float64 {
 // thread with no indexed chunks still surfaces at thread granularity
 // exactly as before (I8). Excluded threads are dropped at the thread
 // level (the existing Exclude semantics).
-func (s *Service) coarseFine(q []float64, snap *indexSnapshot, exclude map[string]struct{}) []scoring.EmbeddingCandidate {
+func (s *Service) coarseFine(q []float64, snap *indexSnapshot, exclude map[string]struct{}, counter *scoring.CosineCounter) []scoring.EmbeddingCandidate {
 	coarse := scoring.ProposeEmbedding(q, snap.coarse, scoring.EmbeddingOptions{
 		Exclude: exclude,
 		Limit:   Kc,
+		Counter: counter,
 	})
 	if len(snap.fine) == 0 {
 		return coarse // no fine tier yet — coarse hits stand as thread-level embedding hits
@@ -705,7 +734,7 @@ func (s *Service) coarseFine(q []float64, snap *indexSnapshot, exclude map[strin
 	out := make([]scoring.EmbeddingCandidate, len(coarse))
 	for i, c := range coarse {
 		out[i] = c
-		chunks := scoring.ProposeChunks(q, snap.fine[c.ThreadID], scoring.ChunkOptions{Limit: Kf})
+		chunks := scoring.ProposeChunks(q, snap.fine[c.ThreadID], scoring.ChunkOptions{Limit: Kf, Counter: counter})
 		if len(chunks) > 0 && chunks[0].Score > c.Score {
 			out[i].Score = chunks[0].Score // refine the thread score by its best chunk
 		}
@@ -724,11 +753,11 @@ func (s *Service) coarseFine(q []float64, snap *indexSnapshot, exclude map[strin
 // descent when a usable tree is present, else the flat O(C_main)
 // ProposeChunks scan over all of snap.fine[engaged]. See intraChunks for
 // the path-selection rule.
-func (s *Service) intraThread(q []float64, snap *indexSnapshot, engaged string) *IntraThreadHit {
+func (s *Service) intraThread(q []float64, snap *indexSnapshot, engaged string, counter *scoring.CosineCounter) *IntraThreadHit {
 	if engaged == "" {
 		return nil
 	}
-	chunks := s.intraChunks(q, snap, engaged)
+	chunks := s.intraChunks(q, snap, engaged, counter)
 	if len(chunks) == 0 {
 		return nil
 	}
@@ -758,12 +787,12 @@ func (s *Service) intraThread(q []float64, snap *indexSnapshot, engaged string) 
 // does), snap.tree is always empty at runtime and this always takes the
 // flat-scan branch — byte-identical to the pre-#111 behaviour. The descent
 // branch is reached only by tests that install a tree.
-func (s *Service) intraChunks(q []float64, snap *indexSnapshot, engaged string) []scoring.ChunkCandidate {
+func (s *Service) intraChunks(q []float64, snap *indexSnapshot, engaged string, counter *scoring.CosineCounter) []scoring.ChunkCandidate {
 	leaves := snap.fine[engaged]
 	if treeUsable(snap.tree[engaged], len(leaves)) {
-		return scoring.DescendChunks(q, snap.tree[engaged], scoring.DescendOptions{Limit: Kf})
+		return scoring.DescendChunks(q, snap.tree[engaged], scoring.DescendOptions{Limit: Kf, Counter: counter})
 	}
-	return scoring.ProposeChunks(q, leaves, scoring.ChunkOptions{Limit: Kf})
+	return scoring.ProposeChunks(q, leaves, scoring.ChunkOptions{Limit: Kf, Counter: counter})
 }
 
 // treeUsable reports whether the engaged thread's summary tree should drive
@@ -874,6 +903,21 @@ func (s *Service) IntraThreadDivergence(ctx context.Context, queryText, engaged 
 	}
 	return s.intraThreadDivergence(q, s.cur.Load(), engaged)
 }
+
+// CosineOps returns the run-total count of cosine comparisons the embedding
+// recall path has performed — the MEASURED numerator of recall_query_cosine_ops
+// (design §7.2). RecallQueries returns the number of embedding-recall queries
+// that performed them (the denominator). The per-query average
+// CosineOps()/RecallQueries() is the empirical perf-bend metric: with a flat
+// scan the engaged term tracks C_main; with a usable descent tree it collapses
+// to ~k·B·log_B(n). The harness reads these post-run via the cosineOpsReporter
+// optional interface and emits the average as recall_query_cosine_ops, so the
+// §0 O(C_main)→O(log) bend is counted, not modeled.
+func (s *Service) CosineOps() int64 { return s.cosineOps.Load() }
+
+// RecallQueries returns the number of embedding-recall queries counted into
+// CosineOps. See CosineOps.
+func (s *Service) RecallQueries() int64 { return s.recallQueries.Load() }
 
 // truncateForEmbed bounds text sent to the embedder. Byte truncation
 // may clip a trailing multi-byte rune; embedding endpoints tolerate
