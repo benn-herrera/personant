@@ -203,7 +203,9 @@ One turn-excerpt file, `turns/0000024.md`:
 **agent:** [terse response excerpt, topic tag stripped]
 ```
 
-**FIFO recency window.** The `turns/` directory retains at most `ThreadTurnWindow` excerpt files (currently 512; a calibratable count). 512 is calibrated against the Layer B budget: at `b-top-k = 3`, each thread's excerpt window must stay within LayerB/3 bytes; `history_symbols` in frontmatter is the explicit compensating mechanism — symbol memory that survives FIFO eviction. Appending a new excerpt past that bound deletes the lowest-numbered files until the count is back within the window. The live thread body — what the working-set assembler reads — is therefore **recency-windowed**: it holds the last `ThreadTurnWindow` turn-excerpts. Older operational detail is not lost: it remains recoverable from the §2.8 event log, and the distilled symbol memory persists in frontmatter `history_symbols`. The body assembled for a prompt is read newest-first up to a byte budget, then joined oldest→newest so it reads naturally top-to-bottom.
+**Recency window (assembly) vs. retention (disk).** The working-set assembler reads at most `ThreadTurnWindow` (currently 512; a calibratable count) of a thread's most-recent turn-excerpts into the live body — calibrated against the Layer B budget: at `b-top-k = 3`, each thread's assembled window stays within LayerB/3 bytes. **This window governs *assembly into context*, not on-disk retention.** Turn-excerpts are **retained** on disk past the window: an excerpt is decision-class content (the terse `user:`/`agent:` turn rendering — raw task-class tool output is a transient §3.0 context delta and is *never* written as an excerpt), and the retained excerpts are the durable source the §3.4 chunk-level index embeds for **intra-thread recall** of early content. Earlier turns scroll out of the *assembled context* but remain on disk and recall-indexed; `history_symbols` additionally distills symbol memory. The body assembled for a prompt is read newest-first up to a byte budget, then joined oldest→newest so it reads naturally top-to-bottom.
+
+> **Correction (the durable-content source).** An earlier draft said scrolled-out detail "remains recoverable from the §2.8 event log." It does **not** — the event log records only event *metadata* (`source=` + byte count), never content (§2.8). Durable turn content lives in the **retained excerpts**, which is why the window must not delete them. **Retention trimming is the deferred keep/toss precision layer (§3.10):** routine/fluff turns and the agent's transient tool-data re-presentations can be evicted from retention by the sleep-cycle keep/toss; the v0.1 first cut **over-retains** (decision-class excerpts are kept — safe; losing crucial content is the dangerous error) and trims later.
 
 **`description` vs `summary`.** `description` is the *triggering utterance* — the user prompt that spawned the thread — set once at creation and never rewritten. `summary` is the curator's closure *gist*, set at retirement (§3.5). A live thread has a `description` but no `summary`; a retired thread has both. v0.1 sets `description` deterministically (a whitespace-collapsed copy of the spawning prompt, truncated to the same length bound the new-thread summary uses); no LLM paraphrase is involved.
 
@@ -1226,6 +1228,39 @@ simulation scale (§9.1), this pollution would compound turn-by-turn
 until recall measurements reflected noise level as much as signal. The
 transient-data lifecycle is therefore a prerequisite for meaningful
 execution of the recall-fidelity measurement regime (§9).
+
+#### 3.10.8 Content retention (keep/toss) — deferred precision layer
+
+§3.10.1–.7 govern *symbol* promotion. **Content retention** — which retained
+turn-excerpts (§2.3) survive on disk for §3.4 intra-thread recall — is the
+adjacent keep/toss decision. The v0.1 **first cut over-retains**: decision-class
+excerpts are all kept (safe — losing crucial content is the dangerous error;
+keeping fluff is the cheap one), raw task-class tool output is never an excerpt
+(already transient). The **precision layer** that trims the retained set is
+deferred to the sleep-cycle keep/toss (§-sleep-cycle, ARCHITECTURE), and its
+mechanism is settled:
+
+- **Raw tool output → always transient. Deterministic, no judgment.** The bulk is
+  disposed by the substrate with zero LLM involvement.
+- **The agent's *re-presentation* of tool data → the durable candidate**, marked
+  inline by the agent via a pinned closed-set marker — exactly one of
+  `lifetime:transient` | `lifetime:durable`, at a fixed stripped position (the
+  topic-tag #81 emit-then-parse pattern; metadata, never shown to the user). This
+  is the one inherently-fuzzy call (is this stat worth remembering?) and is
+  reserved for the LLM per the founding division of labor; everything else is
+  deterministic.
+- **Fail-safe = durable.** A missing/malformed marker resolves to *preserve* — a
+  non-compliant model over-retains safely. Compliance is measured in the
+  inference-in-loop sim (rides the #81/#98 tag-discipline harness); the metric to
+  watch is the omission rate.
+- The marker's primary job is **downgrading**: decision content is preserve-by-
+  default, so a genuinely-important re-presented stat is kept automatically; the
+  marker lets the agent flag a *routine* tool-data presentation `lifetime:transient`
+  to trim noise. So `durable = decision content − agent-marked-transient`.
+
+The in-turn agent marker and the offline sleep-cycle keep/toss are the **same
+decision at two cadences**. Not built in v0.1; the first-cut over-retention is the
+correctness floor it later trims.
 
 ### 3.11 Substrate commit cadence
 

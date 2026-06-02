@@ -714,3 +714,44 @@ escalating a redesign. The one item I want a reviewer's eye on is **H2** (the
 oracle's symbolic/embedding gap and its dependency on #98) — it is a coverage-
 honesty question more than a structural one, but it is the place where a wrong
 call would let a green check overclaim.
+
+---
+
+## 13. Resolution: durable content source (corrects §3 and §11.6)
+
+**Build-surfaced correction (Inc 2, 2026-06-01).** §3 and §11.6 above inherited
+SPEC §2.3's claim that scrolled-out content "stays recoverable from the §2.8 event
+log and the turns directory until archival." Building Inc 2 (the D-A decision)
+**falsified it**: the event log records only event *metadata* (`source=` + byte
+count), never content; and `turns/` FIFO-**deletes** excerpt files past
+`ThreadTurnWindow=512` (`store.ReadThreadExcerpts` / `thread_io.go` eviction). So a
+multi-year thread's early content was being *destroyed*, leaving nothing to embed
+or return — the headline #109 case had no durable source.
+
+**Resolution (decided with the user; SPEC §2.3 + §3.10.8 updated):**
+
+- **Decouple the recency window from on-disk retention.** `ThreadTurnWindow` governs
+  only *assembly into context* (the Layer-B byte budget); turn-excerpts are
+  **retained on disk** past the window. They are the durable decision-class content
+  the fine tier embeds. The FIFO no longer deletes them. (Inc 4 changes here:
+  window = assembly bound; retention keeps excerpts; debt = excerpts scrolled out of
+  the *assembly* window but retained on disk. Inc 2's `LoadThreadExcerpts` already
+  reads retained excerpts — no Inc 2 rework.)
+- **Turn-excerpts are uniformly decision-class** (terse `user:`/`agent:` renderings);
+  raw task-class tool output is a transient §3.0 context delta, never an excerpt. So
+  the first cut is simply *retain all excerpts* (over-retain — safe), not a
+  per-excerpt class filter.
+- **Keep/toss precision is deferred** (SPEC §3.10.8, sleep-cycle): raw tool output
+  always-transient (deterministic) + the agent's tool-data re-presentation marked
+  inline `lifetime:transient | lifetime:durable` (pinned closed-set marker, fail-safe
+  durable, stripped, compliance-measured on the #98 harness). Trims the retained set;
+  not a v0.1 #109 blocker.
+- **Storage note:** retain-all grows the git-tracked `turns/` **linearly** with thread
+  length (inherent — intra-thread recall needs the content somewhere; the cheapest
+  honest home is the canonical excerpts). Archival (§3.8) pulls cold threads off-spine;
+  the keep/toss layer trims live retained sets. The §9.3 perf-decay gates are about
+  *query* cost (flat via coarse→fine), not storage (linear, inherent). H1/the gates
+  remain the trip-wire.
+
+This resolves the blocker as a contained Inc-4 change (decouple window/retention)
+plus the SPEC correction — no redesign, no new store, Inc 2/3/5/6 proceed.
