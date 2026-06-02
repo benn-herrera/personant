@@ -441,6 +441,18 @@ func (a *FileAdapter) LoadWorkingSet(ctx context.Context) ([]string, []string, e
 	return active, dormant, nil
 }
 
+// RecallCacheDir returns <Home>/.recall-cache — the gitignored operational
+// directory the §3.4 recall stack's persisted derived-vector cache lives in.
+// The cache is operational state, never canonical (I5), so — like
+// working-set.json — it is not a port concept and gets no MemoryOps method;
+// the recall Service discovers this directory by type-asserting the adapter
+// against a narrow optional interface (measure.recallCacheLocator). Paths
+// stay the adapter's secret: callers never see PersonantPaths, only this one
+// resolved directory string when they need it.
+func (a *FileAdapter) RecallCacheDir() string {
+	return a.paths.RecallCache
+}
+
 // ---------- Symbol index / recall ----------
 
 // ProposeRecall runs the §3.4 layer-1 symbolic Jaccard pre-filter. The

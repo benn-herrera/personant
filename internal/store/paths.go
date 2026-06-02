@@ -29,6 +29,7 @@ type PersonantPaths struct {
 	Gitignore     string // Home/.gitignore                   (excludes tmp/, key files)
 	LastActive    string // Home/last-active                  (operational; one line: prj_<n>; gitignored)
 	WorkingSet    string // Home/working-set.json             (operational; Layer B/C membership; rewritten per turn; gitignored)
+	RecallCache   string // Home/.recall-cache/               (operational; derived embedding-vector cache; gitignored; never canonical, §5/I5)
 }
 
 // EnvHome is the environment variable that overrides the default home.
@@ -63,6 +64,7 @@ func makePaths(home string) PersonantPaths {
 		Gitignore:     filepath.Join(home, ".gitignore"),
 		LastActive:    filepath.Join(home, "last-active"),
 		WorkingSet:    filepath.Join(home, "working-set.json"),
+		RecallCache:   filepath.Join(home, ".recall-cache"),
 	}
 }
 

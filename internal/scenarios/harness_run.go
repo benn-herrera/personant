@@ -507,6 +507,18 @@ func runSleepCycle(t *testing.T, h *Harness, idx int, label string) {
 	if err := h.Ops.Consolidate(context.Background(), "sleep-cycle: day-off"); err != nil {
 		t.Fatalf("scenario step %d (%s): Consolidate: %v", idx+1, label, err)
 	}
+	// §6.4 recall-cache sweep: drop persisted .vec files for archived/absent
+	// threads, alongside the substrate gc. The cache is operational state the
+	// adapter's Consolidate cannot reach, so the seam is on the Service the
+	// harness already holds (measure.Service.SweepCache). A recaller that does
+	// not implement it (the symbolic-only default) is simply not swept.
+	if h.State != nil && h.State.Recaller != nil {
+		if sw, ok := h.State.Recaller.(cacheSweeper); ok {
+			if err := sw.SweepCache(context.Background()); err != nil {
+				t.Fatalf("scenario step %d (%s): SweepCache: %v", idx+1, label, err)
+			}
+		}
+	}
 	post := gitDirBytes(h.Paths.Home)
 
 	h.Metrics.Counter(metricSleepCycles, 1)

@@ -96,7 +96,7 @@ func TestInitFreshHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read gitignore: %v", err)
 	}
-	for _, want := range []string{"tmp/", "providers.toml"} {
+	for _, want := range []string{"tmp/", "providers.toml", ".recall-cache/"} {
 		if !strings.Contains(string(gi), want) {
 			t.Errorf("gitignore missing %q; content:\n%s", want, string(gi))
 		}

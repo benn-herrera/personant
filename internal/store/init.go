@@ -409,6 +409,12 @@ last-active
 # rewritten on every turn. Git-tracking it would dirty the home tree
 # with LRU churn every turn; it is operational state, not canonical.
 working-set.json
+# .recall-cache/ is the derived embedding-vector cache (§3.4 / intra-thread
+# recall). It is operational state — rebuildable from canonical (spine.jsonl
+# + threads/*/turns/*.md) on any miss or staleness — and is NEVER canonical
+# (I5). Deleting it costs CPU at next startup, never data. Git-tracking it
+# would couple a regenerable derivation to its source for no information gain.
+.recall-cache/
 # symbols.jsonl is a derived index — rebuildable from spine.jsonl plus
 # thread frontmatters via index.RebuildSymbols. Single-source-of-truth:
 # tracking the derivation alongside its canonical source creates a

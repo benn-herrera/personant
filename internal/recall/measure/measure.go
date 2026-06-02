@@ -78,17 +78,45 @@ type indexJob struct {
 	dispatchTurncount int
 }
 
-// vectorCache is the §5 persisted derived-vector cache seam. Inc 2 leaves
-// it a stub (a nil handle is a no-op); Inc 3 supplies the real
-// implementation. It is declared here so Prepare/the swap point have the
-// hook in place without Inc 2 building the cache.
+// vectorCache is the §5 persisted derived-vector cache. A nil handle is a
+// no-op (no embedder → no cache, I7); when present it is the veccache in
+// veccache.go. The interface is the seam Prepare and the swap point hook
+// into; the concrete cache reads canonical via the port and reads/writes
+// .recall-cache/ via plain file I/O (operational state, never canonical —
+// I5; it never writes into the git-tracked tree and never parses git).
 type vectorCache interface {
-	// Reconcile loads cached vectors for the live threads and returns the
-	// snapshot plus the jobs needed to fill misses (design §5.3). Inc 3.
-	Reconcile(ctx context.Context, liveThreadIDs []string) (*indexSnapshot, []indexJob, error)
+	// Reconcile is the §5.3 O(changed) startup. It loads the manifest +
+	// .vec files, content-hashes each live thread's current canonical
+	// body/chunks against the cache, and returns the fully built initial
+	// snapshot: unchanged threads loaded verbatim (zero embed calls — AC4),
+	// changed threads re-embedded for only the changed chunks (+coarse if
+	// the body moved), and brand-new threads embedded from scratch. The
+	// snapshot is warm on return, so Prepare publishes a usable index with
+	// no async cold window.
+	Reconcile(ctx context.Context) (*indexSnapshot, error)
 	// Write persists one thread's freshly embedded vectors (write-through
-	// at the swap point, §6.3). Inc 3.
-	Write(ctx context.Context, threadID string, coarse scoring.ThreadVector, chunks []scoring.ChunkVector, watermark int) error
+	// at the swap point, §6.3). bodyHash keys the coarse vector's
+	// staleness; chunkHashes[i] keys chunks[i] (§5.3).
+	Write(ctx context.Context, e cacheEntry) error
+	// Sweep drops .vec files for threads no longer on the spine (archived /
+	// removed) and compacts the manifest to the live set (the §6.4
+	// Consolidate sleep-cycle hook). Lazy-safe: startup Reconcile also
+	// ignores stale entries, so a missed Sweep only wastes disk, never
+	// correctness.
+	Sweep(ctx context.Context, liveThreadIDs []string) error
+}
+
+// cacheEntry is one thread's freshly embedded vectors plus their content-
+// hash staleness keys, handed to vectorCache.Write at the swap point. The
+// hashes are computed at the same point the embed texts exist (processJob),
+// so the cache never re-reads canonical to key its writes.
+type cacheEntry struct {
+	threadID    string
+	coarse      scoring.ThreadVector
+	chunks      []scoring.ChunkVector
+	watermark   int
+	bodyHash    string   // hash of the assembled body fed to the coarse embed
+	chunkHashes []string // chunkHashes[i] hashes chunks[i]'s excerpt text
 }
 
 // IntraThreadHit is the intra-thread (fine-tier) detail for a recalled
@@ -205,61 +233,117 @@ type Service struct {
 	closeOnce sync.Once
 }
 
-// NewService constructs a Service. A nil embedder yields a
-// symbolic-only recaller — embedding recall is opt-in per provider, and
-// with no embedder the indexer goroutine is never started (I7).
+// recallCacheLocator is the optional interface a MemoryOps adapter
+// satisfies to expose the operational directory the persisted vector cache
+// lives in (§5.1, $PERSONANT_HOME/.recall-cache/). The adapter owns paths —
+// they are its secret — so the cache directory is surfaced through this
+// narrow type-assertion rather than a port method or a PersonantPaths in a
+// signature (the §5/§11.6 negative constraint: the cache is operational
+// state, not a port concept). The file adapter implements it; a port mock
+// that does not is simply run without a persisted cache (Prepare falls back
+// to the from-scratch coarse build), which keeps tests and alternate
+// adapters working unchanged.
+type recallCacheLocator interface {
+	RecallCacheDir() string
+}
+
+// NewService constructs a Service. A nil embedder yields a symbolic-only
+// recaller — embedding recall is opt-in per provider, and with no embedder
+// the indexer goroutine is never started and no cache is created (I7).
+//
+// When the embedder is non-nil and ops exposes a recall-cache directory
+// (recallCacheLocator), the §5 persisted vector cache is wired in so
+// Prepare runs the O(changed) reconcile and the indexer write-through
+// persists vectors. A port that does not expose the directory runs without
+// a cache — correct, just no startup-cost savings.
 func NewService(ops memops.MemoryOps, embedder model.Embedder) *Service {
 	s := &Service{ops: ops, embedder: embedder}
+	if embedder != nil {
+		if loc, ok := ops.(recallCacheLocator); ok {
+			s.cache = newVecCache(ops, embedder, loc.RecallCacheDir())
+		}
+	}
 	s.cur.Store(emptySnapshot())
 	return s
 }
 
-// Prepare builds the initial coarse-tier index (embedding every thread's
-// body, as today) and starts the single indexer goroutine. The fine tier
-// starts empty and is filled by EnqueueFlush jobs as threads scroll out
-// (Inc 4 drives those). A no-op when no embedder is configured (I7).
+// Prepare warms the index and starts the single indexer goroutine. A
+// no-op when no embedder is configured (I7).
 //
-// Inc 3 replaces the from-scratch coarse build with a cache reconcile
-// (load cached vectors, embed only the changed ones) via s.cache; the
-// vectorCache seam is in place but nil in Inc 2, so Prepare embeds all.
+// With a persisted cache (s.cache != nil) it runs the §5.3 O(changed)
+// startup: Reconcile loads cached vectors for unchanged threads (zero
+// embed calls — AC4), re-embeds only the changed chunks of partial-miss
+// threads, and returns full-miss threads as indexJobs. Without a cache
+// (a port that does not expose a cache dir, or a test) it falls back to
+// the from-scratch coarse build (embed every thread's body). Either way
+// the fine tier for un-cached threads is then filled by EnqueueFlush jobs
+// as threads scroll out (Inc 4 drives those).
 func (s *Service) Prepare(ctx context.Context) error {
 	if s.embedder == nil {
 		return nil
 	}
 
-	recs, err := s.ops.ListThreads(ctx, memops.ThreadFilter{})
-	if err != nil {
-		return fmt.Errorf("recall: list threads: %w", err)
-	}
-
-	snap := emptySnapshot()
-	if len(recs) > 0 {
-		texts := make([]string, len(recs))
-		for i, r := range recs {
-			thr, err := s.ops.LoadThread(ctx, r.ID)
-			if err != nil {
-				return fmt.Errorf("recall: load %s: %w", r.ID, err)
-			}
-			texts[i] = truncateForEmbed(thr.Body)
-		}
-		vecs, err := s.embedder.Embed(ctx, texts)
+	// Build the initial snapshot synchronously so the index is warm on
+	// return (a Recall right after Prepare sees the full coarse+fine tier,
+	// not an empty one). With a cache this is the §5.3 O(changed) reconcile;
+	// without one it is the from-scratch coarse build.
+	var snap *indexSnapshot
+	if s.cache != nil {
+		reconciled, err := s.cache.Reconcile(ctx)
 		if err != nil {
-			return fmt.Errorf("recall: embed index: %w", err)
+			return fmt.Errorf("recall: cache reconcile: %w", err)
 		}
-		if len(vecs) != len(recs) {
-			return fmt.Errorf("recall: %d vectors for %d threads", len(vecs), len(recs))
+		snap = reconciled
+	} else {
+		built, err := s.buildCoarse(ctx)
+		if err != nil {
+			return err
 		}
-		snap.coarse = make([]scoring.ThreadVector, len(recs))
-		for i := range recs {
-			snap.coarse[i] = scoring.ThreadVector{ThreadID: recs[i].ID, Vector: vecs[i]}
-		}
+		snap = built
 	}
 	s.cur.Store(snap)
 
+	// Start the single indexer goroutine for runtime upkeep (EnqueueFlush /
+	// AddThread driven by Inc 4's debt/dormancy hooks). Startup misses were
+	// already filled synchronously by the reconcile above.
 	s.jobs = make(chan indexJob, jobQueueDepth)
 	s.indexerDone = make(chan struct{})
 	go s.runIndexer()
 	return nil
+}
+
+// buildCoarse is the no-cache fallback for Prepare: it embeds every
+// thread's body into a fresh coarse tier (the fine tier starts empty,
+// filled by EnqueueFlush). Used only when the port exposes no cache dir.
+func (s *Service) buildCoarse(ctx context.Context) (*indexSnapshot, error) {
+	recs, err := s.ops.ListThreads(ctx, memops.ThreadFilter{})
+	if err != nil {
+		return nil, fmt.Errorf("recall: list threads: %w", err)
+	}
+	snap := emptySnapshot()
+	if len(recs) == 0 {
+		return snap, nil
+	}
+	texts := make([]string, len(recs))
+	for i, r := range recs {
+		thr, err := s.ops.LoadThread(ctx, r.ID)
+		if err != nil {
+			return nil, fmt.Errorf("recall: load %s: %w", r.ID, err)
+		}
+		texts[i] = truncateForEmbed(thr.Body)
+	}
+	vecs, err := s.embedder.Embed(ctx, texts)
+	if err != nil {
+		return nil, fmt.Errorf("recall: embed index: %w", err)
+	}
+	if len(vecs) != len(recs) {
+		return nil, fmt.Errorf("recall: %d vectors for %d threads", len(vecs), len(recs))
+	}
+	snap.coarse = make([]scoring.ThreadVector, len(recs))
+	for i := range recs {
+		snap.coarse[i] = scoring.ThreadVector{ThreadID: recs[i].ID, Vector: vecs[i]}
+	}
+	return snap, nil
 }
 
 // jobQueueDepth bounds the indexer's pending-job buffer. Flush triggers
@@ -303,6 +387,32 @@ func (s *Service) EnqueueFlush(threadID string, dispatchTurncount int) {
 	s.jobs <- indexJob{threadID: threadID, dispatchTurncount: dispatchTurncount}
 }
 
+// SweepCache drops persisted .vec files for threads no longer on the spine
+// and compacts the manifest to the live set — the §6.4 sleep-cycle hook,
+// meant to be called from the same owner that calls MemoryOps.Consolidate
+// (the cache is operational state the adapter's Consolidate cannot reach,
+// so the seam is on the Service the owner already holds). A no-op when no
+// cache is configured (nil embedder / no cache dir). Best-effort and
+// non-fatal: the sweep is opportunistic disk hygiene, never correctness —
+// startup Reconcile ignores stale entries regardless (I5).
+func (s *Service) SweepCache(ctx context.Context) error {
+	if s.cache == nil {
+		return nil
+	}
+	recs, err := s.ops.ListThreads(ctx, memops.ThreadFilter{})
+	if err != nil {
+		return fmt.Errorf("recall: sweep-cache list threads: %w", err)
+	}
+	live := make([]string, len(recs))
+	for i, r := range recs {
+		live[i] = r.ID
+	}
+	if err := s.cache.Sweep(ctx, live); err != nil {
+		return fmt.Errorf("recall: sweep-cache: %w", err)
+	}
+	return nil
+}
+
 // Close stops the indexer goroutine and waits for it to drain. Idempotent
 // and safe to call when Prepare never ran (no goroutine, no channel).
 func (s *Service) Close() error {
@@ -344,9 +454,13 @@ func (s *Service) processJob(ctx context.Context, job indexJob) {
 	}
 
 	// Batch: coarse body first, then one chunk text per excerpt. One embed
-	// call for the whole thread (design §6.1).
+	// call for the whole thread (design §6.1). The body text and each
+	// excerpt text are hashed for the cache's staleness keys (§5.3) at the
+	// same point they exist, so the cache never re-reads canonical to key
+	// its write.
+	bodyText := truncateForEmbed(thr.Body)
 	texts := make([]string, 0, len(excerpts)+1)
-	texts = append(texts, truncateForEmbed(thr.Body))
+	texts = append(texts, bodyText)
 	for _, ex := range excerpts {
 		texts = append(texts, truncateForEmbed(ex.Text))
 	}
@@ -363,14 +477,23 @@ func (s *Service) processJob(ctx context.Context, job indexJob) {
 
 	coarse := scoring.ThreadVector{ThreadID: job.threadID, Vector: vecs[0]}
 	chunks := make([]scoring.ChunkVector, len(excerpts))
+	chunkHashes := make([]string, len(excerpts))
 	for i, ex := range excerpts {
 		chunks[i] = scoring.ChunkVector{TurnNumber: ex.TurnNumber, Vector: vecs[i+1]}
+		chunkHashes[i] = contentHash(ex.Text)
 	}
 
 	s.swap(job.threadID, job.dispatchTurncount, coarse, chunks)
 
 	if s.cache != nil {
-		if err := s.cache.Write(ctx, job.threadID, coarse, chunks, job.dispatchTurncount); err != nil {
+		if err := s.cache.Write(ctx, cacheEntry{
+			threadID:    job.threadID,
+			coarse:      coarse,
+			chunks:      chunks,
+			watermark:   job.dispatchTurncount,
+			bodyHash:    contentHash(bodyText),
+			chunkHashes: chunkHashes,
+		}); err != nil {
 			_ = s.ops.Log(ctx, memops.LogCategoryRecall, "index-error", fmt.Sprintf("cache %s: %v", job.threadID, err))
 		}
 	}

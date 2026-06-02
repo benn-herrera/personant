@@ -58,6 +58,18 @@ type threadIndexer interface {
 	AddThread(ctx context.Context, threadID string) error
 }
 
+// cacheSweeper is the narrow optional interface a Recaller may satisfy to
+// drop persisted recall-cache (.vec) files for archived/absent threads — the
+// design §6.4 sleep-cycle hook. measure.Service implements it (SweepCache).
+// The harness drives it from runSleepCycle, alongside the substrate gc the
+// MemoryOps.Consolidate call performs: the recall cache is operational state
+// the adapter's Consolidate cannot reach, so the sweep is invoked on the
+// Service the harness already holds. A recaller that does not implement it
+// (the nil-embedder default) is not driven.
+type cacheSweeper interface {
+	SweepCache(ctx context.Context) error
+}
+
 // Step is one turn in a Scenario. Exactly one mock LLM response is
 // queued for the step; running the step calls turn.Run once. Per-step
 // invariants run after the turn completes; an empty Invariants slice
