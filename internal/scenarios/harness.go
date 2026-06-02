@@ -70,6 +70,20 @@ type cacheSweeper interface {
 	SweepCache(ctx context.Context) error
 }
 
+// treeRebuilder is the narrow optional interface a Recaller may satisfy to
+// (re)build its per-thread within-thread summary trees (#111 / design
+// within-thread-summary-hierarchy.md §9.3). measure.Service implements it
+// (RebuildTrees). Like cacheSweeper it is operational state the adapter's
+// Consolidate cannot reach, so the harness drives it from runSleepCycle —
+// OFFLINE, in the sleep pass, never on the turn loop (W6). It runs AFTER the
+// cache sweep so the trees summarize a settled leaf set (§5.3 ordering). The
+// returned count is the recall_intra_tree_rebuild_calls trip-wire metric
+// (§7.2 / fork F-B). A recaller that does not implement it (the nil-embedder
+// default) is not driven.
+type treeRebuilder interface {
+	RebuildTrees(ctx context.Context) (int, error)
+}
+
 // Step is one turn in a Scenario. Exactly one mock LLM response is
 // queued for the step; running the step calls turn.Run once. Per-step
 // invariants run after the turn completes; an empty Invariants slice

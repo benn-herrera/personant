@@ -507,6 +507,11 @@ const (
 	// sleep cycles (pre − post, clamped at 0 so a cycle that grew .git — e.g.
 	// a fresh pack larger than the loose pile it replaced — does not subtract).
 	metricGitDirBytesReclaimed = "git_dir_bytes_reclaimed"
+	// metricRecallIntraTreeRebuildCalls counts within-thread summary-tree
+	// (re)builds across the run — the design §7.2 / fork-F-B trip-wire (#111):
+	// if it trends up with main-thread length on the long rungs, semantic
+	// rebalancing is not staying bounded and escalates to the hybrid MAD.
+	metricRecallIntraTreeRebuildCalls = "recall_intra_tree_rebuild_calls"
 )
 
 // runSleepCycle drives one ARCHITECTURE.md sleep cycle (#108): it measures
@@ -533,6 +538,23 @@ func runSleepCycle(t *testing.T, h *Harness, idx int, label string) {
 			}
 		}
 	}
+	// §5.3 within-thread summary-tree build, AFTER the cache sweep so the
+	// trees summarize a settled leaf set (ordering: leaf reconcile → sweep →
+	// tree rebuild). Offline, in the sleep pass — never the turn loop (W6).
+	// The rebuild count is the recall_intra_tree_rebuild_calls trip-wire
+	// (§7.2 / F-B). A recaller without trees (symbolic-only) is not driven.
+	if h.State != nil && h.State.Recaller != nil {
+		if tb, ok := h.State.Recaller.(treeRebuilder); ok {
+			rebuilt, err := tb.RebuildTrees(context.Background())
+			if err != nil {
+				t.Fatalf("scenario step %d (%s): RebuildTrees: %v", idx+1, label, err)
+			}
+			if rebuilt > 0 {
+				h.Metrics.Counter(metricRecallIntraTreeRebuildCalls, int64(rebuilt))
+			}
+		}
+	}
+
 	post := gitDirBytes(h.Paths.Home)
 
 	h.Metrics.Counter(metricSleepCycles, 1)

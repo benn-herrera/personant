@@ -1,8 +1,10 @@
 package measure
 
 import (
+	"context"
 	"testing"
 
+	"personant/internal/model"
 	"personant/internal/recall/scoring"
 )
 
@@ -265,6 +267,109 @@ func TestTreeUsable_StaleLeafCount_FlatFallback(t *testing.T) {
 		t.Fatalf("treeUsable=true for stale tree (%d tree leaves vs %d fine); expected fallback",
 			treeLeafCount(tree), len(grownFine))
 	}
+}
+
+// TestRebuildTrees_SleepCycleSeam is the Inc-D sleep-cycle wiring check: a
+// Service whose published snapshot carries an above-threshold thread and a
+// below-threshold thread gets trees populated by RebuildTrees (the sleep
+// pass) for ONLY the above-threshold thread; the below-threshold thread
+// stays tree-less (W8 flat fallback). After the rebuild the engaged
+// above-threshold thread's intra-pass DESCENDS (treeUsable true) and the
+// descent matches the flat scan (W1, divergence 0); the short thread still
+// flat-scans.
+func TestRebuildTrees_SleepCycleSeam(t *testing.T) {
+	const dim = 8
+	// Above-threshold engaged thread: 96 semantically-clustered leaves.
+	var bigVecs [][]float64
+	for axis := 0; axis < dim; axis++ {
+		for j := 0; j < 12; j++ {
+			bigVecs = append(bigVecs, axisVec(dim, axis, 0.05*float64(j)))
+		}
+	}
+	big := chunksFromVectors(bigVecs)
+	// Below-threshold thread: a handful of leaves.
+	var smallVecs [][]float64
+	for i := 0; i < scoring.TreeBuildThreshold-1; i++ {
+		smallVecs = append(smallVecs, axisVec(dim, i%dim, 0.01*float64(i)))
+	}
+	small := chunksFromVectors(smallVecs)
+
+	// A Service with a (non-nil) embedder so RebuildTrees does not no-op;
+	// it does not embed here — the snapshot is seeded directly.
+	svc := measureServiceWithSeededSnapshot(map[string][]scoring.ChunkVector{
+		"thr_big":   big,
+		"thr_small": small,
+	})
+
+	rebuilt, err := svc.RebuildTrees(context.Background())
+	if err != nil {
+		t.Fatalf("RebuildTrees: %v", err)
+	}
+	if rebuilt != 1 {
+		t.Fatalf("rebuilt = %d, want 1 (only the above-threshold thread)", rebuilt)
+	}
+
+	snap := svc.cur.Load()
+	if snap.tree["thr_big"] == nil {
+		t.Fatal("above-threshold thread has no tree after RebuildTrees")
+	}
+	if snap.tree["thr_small"] != nil {
+		t.Fatal("below-threshold thread should have no tree (W8)")
+	}
+	if !treeUsable(snap.tree["thr_big"], len(big)) {
+		t.Fatal("above-threshold tree not usable after rebuild")
+	}
+	if treeUsable(snap.tree["thr_small"], len(small)) {
+		t.Fatal("below-threshold thread should fall back to flat scan")
+	}
+
+	// The engaged above-threshold thread now descends, matching flat (W1).
+	for axis := 0; axis < dim; axis++ {
+		q := axisVec(dim, axis, 0.1)
+		got := svc.intraChunks(q, snap, "thr_big")
+		flat := scoring.ProposeChunks(q, big, scoring.ChunkOptions{Limit: Kf})
+		if !sameTurnSet(got, flat) {
+			t.Errorf("axis %d: post-rebuild descent %v != flat %v", axis, turns(got), turns(flat))
+		}
+	}
+
+	// A second rebuild with the leaf set unchanged is a no-op (nothing
+	// crossed the dirty threshold) — the bounded-churn property.
+	again, err := svc.RebuildTrees(context.Background())
+	if err != nil {
+		t.Fatalf("second RebuildTrees: %v", err)
+	}
+	if again != 0 {
+		t.Errorf("second rebuild = %d, want 0 (leaf set unchanged)", again)
+	}
+}
+
+// TestRebuildTrees_NilEmbedder_NoTrees is I7/W8: a nil-embedder Service
+// builds no trees (RebuildTrees no-ops), so the intra-pass always flat-scans.
+func TestRebuildTrees_NilEmbedder_NoTrees(t *testing.T) {
+	svc := &Service{}
+	svc.cur.Store(emptySnapshot())
+	n, err := svc.RebuildTrees(context.Background())
+	if err != nil {
+		t.Fatalf("RebuildTrees: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("nil-embedder rebuilt %d trees, want 0", n)
+	}
+}
+
+// measureServiceWithSeededSnapshot builds a Service with a non-nil embedder
+// (so RebuildTrees runs) and a published snapshot whose fine tier is the
+// given threads. No indexer goroutine is started (Prepare is not called), so
+// the snapshot is stable for the test.
+func measureServiceWithSeededSnapshot(fine map[string][]scoring.ChunkVector) *Service {
+	svc := &Service{embedder: model.NewMockEmbedder()}
+	snap := emptySnapshot()
+	for id, chunks := range fine {
+		snap.fine[id] = chunks
+	}
+	svc.cur.Store(snap)
+	return svc
 }
 
 func leafNodesFor(leaves []scoring.ChunkVector) []*scoring.SummaryNode {
