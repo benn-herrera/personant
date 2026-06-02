@@ -20,6 +20,8 @@ package measure
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"sync"
@@ -57,19 +59,36 @@ type indexSnapshot struct {
 	fine      map[string][]scoring.ChunkVector // threadID → scrolled-out chunk vectors (fine tier)
 	watermark map[string]int                   // threadID → dispatch turncount these vectors were read at
 
+	// fineHash carries the per-chunk content-hash staleness keys parallel to
+	// fine: fineHash[threadID][i] is the chunk_hash of fine[threadID][i] (the
+	// same SHA-256 of the excerpt text the .vec stores, §5.3). It is the leaf
+	// bottom-out of the summary-tree childrenHash (#111 Inc C): a tree is
+	// usable iff the composed hash of the CURRENT leaves' chunk hashes matches
+	// the hash the tree was built against (treeHash). Reusing the existing
+	// chunk_hash here is the DRY childrenHash leaf key — no new leaf hash is
+	// introduced. Parallel to fine and carried through every swap/reconcile so
+	// the read path can compose the staleness key with no canonical re-read.
+	fineHash map[string][]string
+
 	// tree is the per-thread summary-hierarchy index (#111 / design
 	// within-thread-summary-hierarchy.md §9.2): one root SummaryNode per
 	// thread whose leaves are exactly that thread's fine[threadID] chunk
 	// vectors, used by the engaged-thread intra-pass to descend in O(log n)
 	// instead of flat-scanning all of fine[engaged] (the §0 decay fix).
 	// It is part of the immutable published index (same I1 atomic-swap
-	// discipline as coarse/fine). nil/absent for a thread with no built
-	// tree — and NOTHING builds trees in this increment (Inc D's sleep-
-	// cycle builder does), so at runtime this map is always empty and the
-	// intra-pass always takes the W8 flat-scan fallback. The descent path
-	// is exercised only by tests here. A nil/absent tree is the W8 signal:
-	// the intra-pass falls back to the flat scan over fine[threadID].
+	// discipline as coarse/fine). nil/absent for a thread with no built tree.
+	// The sleep-cycle builder (RebuildTrees) populates it; Prepare/Reconcile
+	// loads persisted trees from the .tree sidecars (Inc C). A nil/absent tree
+	// is the W8 signal: the intra-pass falls back to the flat scan.
 	tree map[string]*scoring.SummaryNode
+
+	// treeHash[threadID] is the composed childrenHash of the leaf set tree[
+	// threadID] was built against — the staleness key (#111 Inc C §6). A tree
+	// is usable iff treeHash[threadID] equals the hash composed from the
+	// thread's CURRENT fineHash leaves (composeLeafHash): trimming/adding a
+	// leaf moves the composed hash, marking the tree stale → flat fallback
+	// (W8) until the next sleep cycle rebuilds and re-stamps it.
+	treeHash map[string]string
 }
 
 // emptySnapshot is the published value before any thread is indexed and
@@ -79,8 +98,10 @@ func emptySnapshot() *indexSnapshot {
 	return &indexSnapshot{
 		coarse:    nil,
 		fine:      map[string][]scoring.ChunkVector{},
+		fineHash:  map[string][]string{},
 		watermark: map[string]int{},
 		tree:      map[string]*scoring.SummaryNode{},
+		treeHash:  map[string]string{},
 	}
 }
 
@@ -113,12 +134,34 @@ type vectorCache interface {
 	// at the swap point, §6.3). bodyHash keys the coarse vector's
 	// staleness; chunkHashes[i] keys chunks[i] (§5.3).
 	Write(ctx context.Context, e cacheEntry) error
-	// Sweep drops .vec files for threads no longer on the spine (archived /
-	// removed) and compacts the manifest to the live set (the §6.4
-	// Consolidate sleep-cycle hook). Lazy-safe: startup Reconcile also
+	// Sweep drops .vec AND .tree files for threads no longer on the spine
+	// (archived / removed) and compacts the manifest to the live set (the
+	// §6.4 Consolidate sleep-cycle hook). Lazy-safe: startup Reconcile also
 	// ignores stale entries, so a missed Sweep only wastes disk, never
 	// correctness.
 	Sweep(ctx context.Context, liveThreadIDs []string) error
+
+	// WriteTree persists one thread's summary tree to its .tree sidecar
+	// (#111 Inc C §6) — the write-through the sleep-cycle RebuildTrees calls
+	// after publishing a rebuilt tree. rootHash is the composed childrenHash
+	// the tree was built against (the staleness key on reload); leafHashByTurn
+	// maps each leaf turn number to its chunk_hash (the existing .vec key,
+	// DRY) so the writer can compose every node's childrenHash. Leaf vectors
+	// are NOT written (they live in the .vec — DRY); the sidecar holds the
+	// topology, internal-node summary vectors, leaf turn numbers, and the
+	// per-node childrenHash. A nil tree removes any stale sidecar.
+	WriteTree(ctx context.Context, threadID string, tree *scoring.SummaryNode, rootHash string, leafHashByTurn map[int]string) error
+
+	// LoadTrees loads the persisted .tree sidecars for the given threads,
+	// rehydrating each into a *scoring.SummaryNode (leaf vectors looked up
+	// from the supplied fine tier by turn number — the .vec is the leaf
+	// source of truth, DRY) plus its stored root childrenHash. A tree whose
+	// root childrenHash still matches its leaves loads usable immediately
+	// (descent active from session start, no rebuild); a stale/absent one is
+	// simply omitted, so the thread flat-falls-back (W8) until the next sleep
+	// cycle rebuilds it. Best-effort: a malformed/missing sidecar is skipped,
+	// never fatal (the tree is derived — rebuildable, W5).
+	LoadTrees(ctx context.Context, fine map[string][]scoring.ChunkVector) (trees map[string]*scoring.SummaryNode, hashes map[string]string)
 }
 
 // cacheEntry is one thread's freshly embedded vectors plus their content-
@@ -322,6 +365,14 @@ func (s *Service) Prepare(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("recall: cache reconcile: %w", err)
 		}
+		// Load the persisted summary trees beside the reconciled leaves
+		// (#111 Inc C): a .tree whose root childrenHash matches its (cache-
+		// loaded) leaves is usable immediately — descent is active from
+		// session start with no rebuild. A stale/absent tree is omitted, so
+		// the thread flat-falls-back (W8) until the next sleep-cycle
+		// RebuildTrees rebuilds and re-persists it. The reconciled snapshot
+		// is not yet published, so attaching the trees here is race-free.
+		reconciled.tree, reconciled.treeHash = s.cache.LoadTrees(ctx, reconciled.fine)
 		snap = reconciled
 	} else {
 		built, err := s.buildCoarse(ctx)
@@ -512,7 +563,7 @@ func (s *Service) processJob(ctx context.Context, job indexJob) {
 		chunkHashes[i] = contentHash(ex.Text)
 	}
 
-	s.swap(job.threadID, job.dispatchTurncount, coarse, chunks)
+	s.swap(job.threadID, job.dispatchTurncount, coarse, chunks, chunkHashes)
 
 	if s.cache != nil {
 		if err := s.cache.Write(ctx, cacheEntry{
@@ -538,13 +589,13 @@ func (s *Service) processJob(ctx context.Context, job indexJob) {
 // This is the sole writer of s.cur; the CAS retry guards only against a
 // future second mutator — today the single indexer goroutine makes the
 // CAS always succeed first try, but the loop keeps the contract explicit.
-func (s *Service) swap(threadID string, dispatchTurncount int, coarse scoring.ThreadVector, chunks []scoring.ChunkVector) {
+func (s *Service) swap(threadID string, dispatchTurncount int, coarse scoring.ThreadVector, chunks []scoring.ChunkVector, chunkHashes []string) {
 	for {
 		old := s.cur.Load()
 		if dispatchTurncount <= old.watermark[threadID] {
 			return // stale embed — a fresher vector already published (I2/F5)
 		}
-		next := old.with(threadID, coarse, chunks, dispatchTurncount)
+		next := old.with(threadID, coarse, chunks, chunkHashes, dispatchTurncount)
 		if s.cur.CompareAndSwap(old, next) {
 			return
 		}
@@ -555,7 +606,7 @@ func (s *Service) swap(threadID string, dispatchTurncount int, coarse scoring.Th
 // vector, chunk vectors, and watermark replaced. The receiver is not
 // mutated (snapshots are immutable once published). The maps are copied;
 // the coarse slice is rebuilt with the one entry replaced or appended.
-func (s *indexSnapshot) with(threadID string, coarse scoring.ThreadVector, chunks []scoring.ChunkVector, watermark int) *indexSnapshot {
+func (s *indexSnapshot) with(threadID string, coarse scoring.ThreadVector, chunks []scoring.ChunkVector, chunkHashes []string, watermark int) *indexSnapshot {
 	newCoarse := make([]scoring.ThreadVector, 0, len(s.coarse)+1)
 	replaced := false
 	for _, tv := range s.coarse {
@@ -574,10 +625,16 @@ func (s *indexSnapshot) with(threadID string, coarse scoring.ThreadVector, chunk
 	for id, cv := range s.fine {
 		newFine[id] = cv
 	}
+	newFineHash := make(map[string][]string, len(s.fineHash)+1)
+	for id, h := range s.fineHash {
+		newFineHash[id] = h
+	}
 	if len(chunks) == 0 {
 		delete(newFine, threadID)
+		delete(newFineHash, threadID)
 	} else {
 		newFine[threadID] = chunks
+		newFineHash[threadID] = chunkHashes
 	}
 
 	newWM := make(map[string]int, len(s.watermark)+1)
@@ -586,19 +643,31 @@ func (s *indexSnapshot) with(threadID string, coarse scoring.ThreadVector, chunk
 	}
 	newWM[threadID] = watermark
 
-	// Carry the tree map forward unchanged. The indexer does not build or
-	// invalidate trees (Inc D's sleep-cycle builder owns the tree map); a
-	// fine-tier swap here may leave a stale tree for threadID, which the
-	// §4 staleness/threshold check in intraThread handles — a tree whose
-	// leaf count no longer matches fine[threadID] falls back to the flat
-	// scan (W8) until the sleep cycle reconciles it. Until Inc D the map
-	// is always empty, so this is a copy of an empty map.
+	// Carry the tree maps forward unchanged. The indexer does not build or
+	// invalidate trees (the sleep-cycle builder owns them); a fine-tier swap
+	// here may leave a stale tree for threadID, which treeUsable handles — a
+	// tree whose stored treeHash no longer matches the composed hash of the
+	// CURRENT fineHash[threadID] leaves falls back to the flat scan (W8) until
+	// the next sleep cycle rebuilds and re-stamps it. nil chunkHashes (an
+	// empty fine entry was just deleted) leaves no leaf hashes, so any prior
+	// tree for it is unconditionally stale on the next read.
 	newTree := make(map[string]*scoring.SummaryNode, len(s.tree))
 	for id, t := range s.tree {
 		newTree[id] = t
 	}
+	newTreeHash := make(map[string]string, len(s.treeHash))
+	for id, h := range s.treeHash {
+		newTreeHash[id] = h
+	}
 
-	return &indexSnapshot{coarse: newCoarse, fine: newFine, watermark: newWM, tree: newTree}
+	return &indexSnapshot{
+		coarse:    newCoarse,
+		fine:      newFine,
+		fineHash:  newFineHash,
+		watermark: newWM,
+		tree:      newTree,
+		treeHash:  newTreeHash,
+	}
 }
 
 // Recall runs the recall layers and returns merged candidates ranked
@@ -789,40 +858,63 @@ func (s *Service) intraThread(q []float64, snap *indexSnapshot, engaged string, 
 // branch is reached only by tests that install a tree.
 func (s *Service) intraChunks(q []float64, snap *indexSnapshot, engaged string, counter *scoring.CosineCounter) []scoring.ChunkCandidate {
 	leaves := snap.fine[engaged]
-	if treeUsable(snap.tree[engaged], len(leaves)) {
+	if snap.treeUsable(engaged) {
 		return scoring.DescendChunks(q, snap.tree[engaged], scoring.DescendOptions{Limit: Kf, Counter: counter})
 	}
 	return scoring.ProposeChunks(q, leaves, scoring.ChunkOptions{Limit: Kf, Counter: counter})
 }
 
 // treeUsable reports whether the engaged thread's summary tree should drive
-// the intra-pass (design §4 fallback predicate / W8). A nil tree, a thread
-// below scoring.TreeBuildThreshold leaves (a short thread the flat scan
-// handles cheaply), or a tree whose leaf count no longer matches the fine
-// tier (stale topology after leaves were added/trimmed) all return false →
-// the caller flat-scans. The leaf-count check is the minimal staleness
-// guard for this increment; Inc C composes the childrenHash key.
-func treeUsable(tree *scoring.SummaryNode, leafCount int) bool {
-	if tree == nil || leafCount < scoring.TreeBuildThreshold {
+// the intra-pass (design §4 fallback predicate / W8). It returns false — the
+// caller flat-scans — for any of:
+//
+//   - no tree built for the thread (nil entry);
+//   - a thread below scoring.TreeBuildThreshold leaves (a short thread the
+//     flat scan handles cheaply, a tree is pure overhead);
+//   - a STALE tree (#111 Inc C §6 childrenHash key): the tree's stored
+//     treeHash — the composed childrenHash of the leaf set it was built
+//     against — no longer equals the hash composed from the thread's CURRENT
+//     leaf chunk hashes. Adding, trimming, or changing a leaf moves the
+//     composed hash, so the tree is stale until the next sleep cycle rebuilds
+//     and re-stamps it (G8).
+//
+// The staleness key reuses the existing per-chunk chunk_hash as the leaf
+// bottom-out (composeLeafHash), composing it into one root hash — the DRY
+// childrenHash: no new leaf hash is introduced (§6).
+func (s *indexSnapshot) treeUsable(threadID string) bool {
+	tree := s.tree[threadID]
+	if tree == nil || len(s.fine[threadID]) < scoring.TreeBuildThreshold {
 		return false
 	}
-	return treeLeafCount(tree) == leafCount
+	return s.treeHash[threadID] == composeLeafHash(s.fineHash[threadID])
 }
 
-// treeLeafCount counts the leaf nodes reachable from a tree root — the
-// descent's actual leaf set, compared against the fine tier for staleness.
-func treeLeafCount(n *scoring.SummaryNode) int {
-	if n == nil {
-		return 0
+// composeLeafHash composes a thread's leaf chunk hashes into the root
+// childrenHash staleness key (#111 Inc C §6). The leaf bottom-out is the
+// existing chunk_hash (DRY — the .vec/snapshot already carry it, no new leaf
+// hash); the root key is the SHA-256 of the chunk hashes joined in their
+// canonical turn order (fineHash is parallel to fine, which is turn-ordered).
+// Internal-node childrenHashes (composed up the topology) are persisted in
+// the .tree for subtree-level reconcile; the read-path staleness check needs
+// only the root composition, which is recomputable from the current leaves
+// with no topology — exactly so trim/add invalidates it without the tree.
+//
+// composeNodeHash is the building block both this and the .tree writer use: a
+// node's childrenHash = SHA-256 over its ordered children's hashes.
+func composeLeafHash(leafHashes []string) string {
+	return composeNodeHash(leafHashes)
+}
+
+// composeNodeHash hashes an ordered list of child hashes into one parent
+// childrenHash (#111 Inc C §6). A length prefix per child makes the
+// composition unambiguous (no two child splits collide). An empty list
+// hashes the empty input — a stable, distinct key for a childless node.
+func composeNodeHash(childHashes []string) string {
+	h := sha256.New()
+	for _, ch := range childHashes {
+		fmt.Fprintf(h, "%d:%s", len(ch), ch)
 	}
-	if len(n.Children) == 0 {
-		return 1
-	}
-	total := 0
-	for _, c := range n.Children {
-		total += treeLeafCount(c)
-	}
-	return total
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // intraThreadDivergence is the W1 recall-preservation differential (design
@@ -837,8 +929,9 @@ func treeLeafCount(n *scoring.SummaryNode) int {
 // cost. The harness calls this explicitly when it wants the differential.
 //
 // The comparison is apples-to-apples by construction: the tree's leaves are
-// exactly snap.fine[engaged] (treeUsable enforces the leaf-count match), so
-// both paths consume the identical leaf vectors and the only difference is
+// exactly snap.fine[engaged] (treeUsable's childrenHash key enforces that the
+// tree was built against the current leaf set), so both paths consume the
+// identical leaf vectors and the only difference is
 // which leaves the beam reached. When no usable tree exists, descent is not
 // run and divergence is 0 by definition (there is no fast path to diverge
 // from — the flat scan IS the result). A nonzero return is the
@@ -849,7 +942,7 @@ func (s *Service) intraThreadDivergence(q []float64, snap *indexSnapshot, engage
 		return 0
 	}
 	leaves := snap.fine[engaged]
-	if !treeUsable(snap.tree[engaged], len(leaves)) {
+	if !snap.treeUsable(engaged) {
 		return 0 // no fast path → nothing to diverge from (W8)
 	}
 	descent := scoring.DescendChunks(q, snap.tree[engaged], scoring.DescendOptions{Limit: Kf})

@@ -2,6 +2,7 @@ package measure
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"personant/internal/model"
@@ -87,14 +88,33 @@ func axisVec(dim, axis int, perturb float64) []float64 {
 }
 
 // snapWithFine builds a snapshot whose engaged thread has the given fine
-// chunks and the given tree (nil for the no-tree default).
+// chunks and the given tree (nil for the no-tree default). It also stamps the
+// parallel fineHash (one synthetic per-leaf hash, the chunk_hash stand-in)
+// and, when a tree is supplied, the treeHash composed from those leaf hashes
+// — so treeUsable's #111 Inc C childrenHash key matches a freshly installed
+// full tree. A test that mutates the fine tier after building the tree leaves
+// treeHash stale on purpose (the staleness path).
 func snapWithFine(engaged string, fine []scoring.ChunkVector, tree *scoring.SummaryNode) *indexSnapshot {
 	snap := emptySnapshot()
 	snap.fine[engaged] = fine
+	snap.fineHash[engaged] = synthLeafHashes(fine)
 	if tree != nil {
 		snap.tree[engaged] = tree
+		snap.treeHash[engaged] = composeLeafHash(snap.fineHash[engaged])
 	}
 	return snap
+}
+
+// synthLeafHashes derives a stable per-leaf hash from each chunk's turn
+// number — a deterministic stand-in for the .vec chunk_hash, sufficient for
+// the childrenHash composition tests (they need the hash to change when a
+// leaf is added/removed, which a turn-keyed hash gives).
+func synthLeafHashes(fine []scoring.ChunkVector) []string {
+	out := make([]string, len(fine))
+	for i, cv := range fine {
+		out[i] = contentHash(fmt.Sprintf("leaf-%d", cv.TurnNumber))
+	}
+	return out
 }
 
 // TestIntraChunks_NoTree_ByteIdenticalToFlat is the non-breaking gate: with
@@ -113,7 +133,7 @@ func TestIntraChunks_NoTree_ByteIdenticalToFlat(t *testing.T) {
 	fine := chunksFromVectors(vecs)
 	snap := snapWithFine("thr_eng", fine, nil)
 
-	if treeUsable(snap.tree["thr_eng"], len(fine)) {
+	if snap.treeUsable("thr_eng") {
 		t.Fatal("treeUsable=true with no tree installed; expected flat fallback")
 	}
 
@@ -140,7 +160,7 @@ func TestIntraChunks_Descent_MatchesFlat(t *testing.T) {
 	tree := buildBalancedTree(fine, scoring.TreeBranchingFactor)
 	snap := snapWithFine("thr_eng", fine, tree)
 
-	if !treeUsable(snap.tree["thr_eng"], len(fine)) {
+	if !snap.treeUsable("thr_eng") {
 		t.Fatal("treeUsable=false for a freshly built full tree above threshold")
 	}
 
@@ -229,7 +249,7 @@ func TestTreeUsable_BelowThreshold_FlatFallback(t *testing.T) {
 	tree := buildBalancedTree(fine, scoring.TreeBranchingFactor)
 	snap := snapWithFine("thr_eng", fine, tree)
 
-	if treeUsable(snap.tree["thr_eng"], len(fine)) {
+	if snap.treeUsable("thr_eng") {
 		t.Fatalf("treeUsable=true for %d leaves (< TreeBuildThreshold=%d); expected flat fallback",
 			len(fine), scoring.TreeBuildThreshold)
 	}
@@ -246,11 +266,13 @@ func TestTreeUsable_BelowThreshold_FlatFallback(t *testing.T) {
 	}
 }
 
-// TestTreeUsable_StaleLeafCount_FlatFallback proves the staleness guard: a
-// tree whose leaf count no longer matches the fine tier (leaves added/
-// trimmed since the build) is not used — apples-to-apples is broken, so it
-// falls back to the flat scan (W8 / G8).
-func TestTreeUsable_StaleLeafCount_FlatFallback(t *testing.T) {
+// TestTreeUsable_StaleChildrenHash_FlatFallback proves the #111 Inc C
+// childrenHash staleness guard: a tree whose stored treeHash no longer matches
+// the composed hash of the CURRENT leaf chunk hashes (a leaf added/trimmed/
+// changed since the build) is not used — it falls back to the flat scan
+// (W8 / G8). The tree is usable while the leaves are unchanged, and becomes
+// stale the moment the leaf set moves.
+func TestTreeUsable_StaleChildrenHash_FlatFallback(t *testing.T) {
 	const dim = 8
 	var vecs [][]float64
 	for i := 0; i < 64; i++ {
@@ -259,13 +281,34 @@ func TestTreeUsable_StaleLeafCount_FlatFallback(t *testing.T) {
 	fine := chunksFromVectors(vecs)
 	tree := buildBalancedTree(fine, scoring.TreeBranchingFactor)
 
-	// Now the fine tier grew by one leaf after the tree was built.
-	grownFine := append(fine, scoring.ChunkVector{TurnNumber: 64, Vector: axisVec(dim, 0, 0.5)})
-	snap := snapWithFine("thr_eng", grownFine, tree)
+	// Install the tree against the original leaves: usable while unchanged.
+	snap := snapWithFine("thr_eng", fine, tree)
+	if !snap.treeUsable("thr_eng") {
+		t.Fatal("treeUsable=false for a tree whose leaves are unchanged")
+	}
 
-	if treeUsable(snap.tree["thr_eng"], len(grownFine)) {
-		t.Fatalf("treeUsable=true for stale tree (%d tree leaves vs %d fine); expected fallback",
-			treeLeafCount(tree), len(grownFine))
+	// Grow the fine tier by one leaf WITHOUT rebuilding the tree: the composed
+	// leaf hash moves, so the stored treeHash no longer matches → stale.
+	grownFine := append(append([]scoring.ChunkVector{}, fine...),
+		scoring.ChunkVector{TurnNumber: 64, Vector: axisVec(dim, 0, 0.5)})
+	snap.fine["thr_eng"] = grownFine
+	snap.fineHash["thr_eng"] = synthLeafHashes(grownFine)
+
+	if snap.treeUsable("thr_eng") {
+		t.Fatal("treeUsable=true for a stale tree (leaf added since build); expected fallback")
+	}
+
+	// Trimming a leaf is symmetric: restore the tree's stamp, then trim.
+	snap.fine["thr_eng"] = fine
+	snap.fineHash["thr_eng"] = synthLeafHashes(fine)
+	if !snap.treeUsable("thr_eng") {
+		t.Fatal("treeUsable=false after restoring the original leaf set")
+	}
+	trimmed := fine[:len(fine)-1]
+	snap.fine["thr_eng"] = trimmed
+	snap.fineHash["thr_eng"] = synthLeafHashes(trimmed)
+	if snap.treeUsable("thr_eng") {
+		t.Fatal("treeUsable=true for a stale tree (leaf trimmed since build); expected fallback")
 	}
 }
 
@@ -316,10 +359,10 @@ func TestRebuildTrees_SleepCycleSeam(t *testing.T) {
 	if snap.tree["thr_small"] != nil {
 		t.Fatal("below-threshold thread should have no tree (W8)")
 	}
-	if !treeUsable(snap.tree["thr_big"], len(big)) {
+	if !snap.treeUsable("thr_big") {
 		t.Fatal("above-threshold tree not usable after rebuild")
 	}
-	if treeUsable(snap.tree["thr_small"], len(small)) {
+	if snap.treeUsable("thr_small") {
 		t.Fatal("below-threshold thread should fall back to flat scan")
 	}
 

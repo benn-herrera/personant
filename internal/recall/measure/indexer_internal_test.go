@@ -23,7 +23,7 @@ func TestSwap_DropsStaleWatermark(t *testing.T) {
 
 	// A fresh embed at turncount 100 lands.
 	fresh := scoring.ChunkVector{TurnNumber: 5, Vector: vec(1, 0)}
-	s.swap("thr_1", 100, scoring.ThreadVector{ThreadID: "thr_1", Vector: vec(1, 0)}, []scoring.ChunkVector{fresh})
+	s.swap("thr_1", 100, scoring.ThreadVector{ThreadID: "thr_1", Vector: vec(1, 0)}, []scoring.ChunkVector{fresh}, []string{"h5"})
 
 	snap := s.cur.Load()
 	if snap.watermark["thr_1"] != 100 {
@@ -37,7 +37,7 @@ func TestSwap_DropsStaleWatermark(t *testing.T) {
 	// re-decayed while this embed was outstanding) must be DROPPED — the
 	// fresher turn-100 vector survives.
 	stale := scoring.ChunkVector{TurnNumber: 2, Vector: vec(0, 1)}
-	s.swap("thr_1", 80, scoring.ThreadVector{ThreadID: "thr_1", Vector: vec(0, 1)}, []scoring.ChunkVector{stale})
+	s.swap("thr_1", 80, scoring.ThreadVector{ThreadID: "thr_1", Vector: vec(0, 1)}, []scoring.ChunkVector{stale}, []string{"h2"})
 
 	snap = s.cur.Load()
 	if snap.watermark["thr_1"] != 100 {
@@ -48,14 +48,14 @@ func TestSwap_DropsStaleWatermark(t *testing.T) {
 	}
 
 	// An equal watermark is also dropped (strictly-greater rule).
-	s.swap("thr_1", 100, scoring.ThreadVector{ThreadID: "thr_1", Vector: vec(0, 1)}, nil)
+	s.swap("thr_1", 100, scoring.ThreadVector{ThreadID: "thr_1", Vector: vec(0, 1)}, nil, nil)
 	snap = s.cur.Load()
 	if len(snap.fine["thr_1"]) != 1 || snap.fine["thr_1"][0].TurnNumber != 5 {
 		t.Errorf("equal-watermark swap was not dropped: fine=%+v", snap.fine["thr_1"])
 	}
 
 	// A strictly newer embed wins and may shrink the fine tier to empty.
-	s.swap("thr_1", 101, scoring.ThreadVector{ThreadID: "thr_1", Vector: vec(0, 1)}, nil)
+	s.swap("thr_1", 101, scoring.ThreadVector{ThreadID: "thr_1", Vector: vec(0, 1)}, nil, nil)
 	snap = s.cur.Load()
 	if snap.watermark["thr_1"] != 101 {
 		t.Errorf("watermark after newer swap = %d, want 101", snap.watermark["thr_1"])
@@ -71,10 +71,10 @@ func TestSwap_DropsStaleWatermark(t *testing.T) {
 func TestSnapshotImmutability(t *testing.T) {
 	old := emptySnapshot()
 	old = old.with("thr_1", scoring.ThreadVector{ThreadID: "thr_1", Vector: vec(1, 0)},
-		[]scoring.ChunkVector{{TurnNumber: 1, Vector: vec(1, 0)}}, 10)
+		[]scoring.ChunkVector{{TurnNumber: 1, Vector: vec(1, 0)}}, []string{"h1"}, 10)
 
 	next := old.with("thr_1", scoring.ThreadVector{ThreadID: "thr_1", Vector: vec(0, 1)},
-		[]scoring.ChunkVector{{TurnNumber: 2, Vector: vec(0, 1)}}, 20)
+		[]scoring.ChunkVector{{TurnNumber: 2, Vector: vec(0, 1)}}, []string{"h2"}, 20)
 
 	if old.watermark["thr_1"] != 10 {
 		t.Errorf("prior snapshot watermark mutated: %d", old.watermark["thr_1"])

@@ -207,7 +207,7 @@ func (c *vecCache) Reconcile(ctx context.Context) (*indexSnapshot, error) {
 		if err != nil {
 			return nil, err
 		}
-		snap = snap.with(rec.ID, entry.coarse, entry.chunks, entry.watermark)
+		snap = snap.with(rec.ID, entry.coarse, entry.chunks, entry.chunkHashes, entry.watermark)
 		if refreshed {
 			// PARTIAL / FULL miss: persist the .vec + manifest so the next
 			// startup is a HIT. A pure HIT (refreshed == false) wrote nothing.
@@ -384,6 +384,11 @@ func (c *vecCache) Sweep(ctx context.Context, liveIDs []string) error {
 		// Drop the .vec; a missing file is fine (already gone).
 		if err := os.Remove(c.vecPath(id)); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("sweep remove vec %s: %w", id, err)
+		}
+		// Drop the derived .tree sidecar alongside the .vec (#111 Inc C §6):
+		// a tree is meaningless without its leaves. Missing is fine.
+		if err := os.Remove(c.treePath(id)); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("sweep remove tree %s: %w", id, err)
 		}
 		delete(m.Threads, id)
 		changed = true

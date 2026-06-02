@@ -2,7 +2,9 @@ package measure
 
 import (
 	"context"
+	"fmt"
 
+	"personant/internal/memops"
 	"personant/internal/recall/scoring"
 )
 
@@ -11,8 +13,10 @@ import (
 // the feature: the builder runs in the consolidation pass (the #108 sleep
 // cycle), never on the turn loop (W6/G2). The turn loop only DESCENDS the
 // already-built tree (intraChunks); it never summarizes. Trees are derived,
-// in-memory, part of the immutable published snapshot (W5/G4) — persistence
-// is Inc C, not here.
+// part of the immutable published snapshot (W5/G4); a rebuilt tree is
+// write-through-persisted to its .tree sidecar here (#111 Inc C, treecache.go)
+// so it survives across sessions, and the childrenHash staleness key decides
+// what is rebuilt.
 
 // RebuildTrees is the §5/§9.3 sleep-cycle entry: (re)build the per-thread
 // summary trees from the current snapshot's settled fine tier and publish
@@ -49,16 +53,32 @@ func (s *Service) RebuildTrees(ctx context.Context) (int, error) {
 	}
 	for {
 		old := s.cur.Load()
-		next, rebuilt := buildTreeSnapshot(old, s.treeSummarizer())
-		if rebuilt == 0 {
-			return 0, nil // nothing crossed the dirty threshold this pass
+		next, rebuiltIDs := buildTreeSnapshot(old, s.treeSummarizer())
+		if len(rebuiltIDs) == 0 {
+			return 0, nil // nothing stale this pass
 		}
-		if s.cur.CompareAndSwap(old, next) {
-			return rebuilt, nil
+		if !s.cur.CompareAndSwap(old, next) {
+			// Lost a race with the indexer's swap — rebuild against the fresh
+			// snapshot. Bounded retry: the indexer publishes at most once per
+			// in-flight job, and RebuildTrees runs on the idle sleep window.
+			continue
 		}
-		// Lost a race with the indexer's swap — rebuild against the fresh
-		// snapshot. Bounded retry: the indexer publishes at most once per
-		// in-flight job, and RebuildTrees runs on the idle sleep window.
+		// Write-through the .tree sidecars for the threads rebuilt this pass
+		// (Inc C §6): a tree whose childrenHash matches its leaves loads
+		// usable on the next startup with no rebuild. Best-effort and
+		// non-fatal (W8/§5.3): a write failure leaves the in-memory tree
+		// published — descent still works this session, the next sleep pass
+		// re-persists. The cache owns the .tree layout; nil cache (no dir) is
+		// a no-op.
+		if s.cache != nil {
+			for _, id := range rebuiltIDs {
+				if err := s.cache.WriteTree(ctx, id, next.tree[id], next.treeHash[id], leafHashByTurn(next, id)); err != nil {
+					_ = s.ops.Log(ctx, memops.LogCategoryRecall, "tree-error",
+						fmt.Sprintf("persist tree %s: %v", id, err))
+				}
+			}
+		}
+		return len(rebuiltIDs), nil
 	}
 }
 
@@ -77,67 +97,71 @@ func (s *Service) treeSummarizer() scoring.Summarizer {
 	return scoring.CentroidSummarizer
 }
 
-// treeRebuildThreshold is the leaf-count delta that dirties a thread's tree
-// for the next sleep pass (the v0.1 "correct-but-simple" incremental rule;
-// the full §5 design assigns individual new leaves instead). A thread whose
-// retained leaf count moved by at least this much since its tree was built
-// (its tree's leaf count) is rebuilt; one that drifted less keeps its prior
-// tree (the staleness guard treeUsable handles the small mismatch by flat-
-// falling-back until the next qualifying pass). B is the natural unit — a
-// drift of one branching factor's worth of leaves is when a level-1 cluster
-// would have wanted to split/merge anyway (§3 rebalancing).
-const treeRebuildThreshold = scoring.TreeBranchingFactor
+// leafHashByTurn maps a thread's leaf turn numbers to their chunk_hash from
+// the snapshot's parallel fine / fineHash slices — the per-leaf childrenHash
+// bottom-out the .tree writer composes node hashes from (DRY: the chunk_hash
+// the .vec already stores). A turn with no recorded hash maps to "" (a fresh
+// tier the cache had not yet hashed); composeNodeHash still produces a stable
+// key from it.
+func leafHashByTurn(snap *indexSnapshot, threadID string) map[int]string {
+	fine := snap.fine[threadID]
+	hashes := snap.fineHash[threadID]
+	out := make(map[int]string, len(fine))
+	for i, cv := range fine {
+		h := ""
+		if i < len(hashes) {
+			h = hashes[i]
+		}
+		out[cv.TurnNumber] = h
+	}
+	return out
+}
 
 // buildTreeSnapshot returns a new snapshot with rebuilt trees for the
-// above-threshold threads whose leaf set drifted past treeRebuildThreshold
-// (or that have no tree yet), reusing every other thread's prior tree
-// verbatim, and the count of trees rebuilt. The input snapshot is not
-// mutated (W5/I1 immutability); the coarse/fine/watermark tiers carry over
-// by reference (immutable, shared safely).
+// above-threshold threads whose tree is stale or absent, reusing every other
+// thread's prior tree verbatim, and the IDs of the threads rebuilt this pass.
+// The input snapshot is not mutated (W5/I1 immutability); the coarse / fine /
+// fineHash / watermark tiers carry over by reference (immutable, shared
+// safely).
 //
-// A thread below scoring.TreeBuildThreshold leaves gets NO tree (W8: the
-// flat scan handles a short thread; a tree is pure overhead) — any prior
-// tree for it is dropped so the staleness/threshold guard cannot pick it up.
-func buildTreeSnapshot(old *indexSnapshot, summarize scoring.Summarizer) (*indexSnapshot, int) {
+// Staleness is the #111 Inc C childrenHash key (treeDirty): a tree whose
+// stored treeHash no longer matches the composed hash of the thread's current
+// leaf chunk hashes is rebuilt; one whose hash still matches is reused
+// verbatim (zero work — the bounded-churn property: an unchanged thread is
+// never rebuilt). A rebuilt tree is re-stamped with the composed hash of the
+// leaf set it was built against, so the next read sees it usable and the next
+// pass sees it clean.
+//
+// A thread below scoring.TreeBuildThreshold leaves gets NO tree (W8: the flat
+// scan handles a short thread; a tree is pure overhead) — any prior tree for
+// it is dropped so the staleness guard cannot pick it up.
+func buildTreeSnapshot(old *indexSnapshot, summarize scoring.Summarizer) (*indexSnapshot, []string) {
 	newTree := make(map[string]*scoring.SummaryNode, len(old.fine))
-	rebuilt := 0
+	newTreeHash := make(map[string]string, len(old.fine))
+	var rebuiltIDs []string
 	for threadID, leaves := range old.fine {
 		if len(leaves) < scoring.TreeBuildThreshold {
 			continue // short thread → no tree (W8)
 		}
-		prior := old.tree[threadID]
-		if !treeDirty(prior, len(leaves)) {
-			newTree[threadID] = prior // unchanged enough — reuse verbatim
+		leafHash := composeLeafHash(old.fineHash[threadID])
+		if old.tree[threadID] != nil && old.treeHash[threadID] == leafHash {
+			newTree[threadID] = old.tree[threadID] // clean — reuse verbatim
+			newTreeHash[threadID] = old.treeHash[threadID]
 			continue
 		}
 		newTree[threadID] = scoring.BuildTree(leaves, scoring.TreeBranchingFactor, summarize)
-		rebuilt++
+		newTreeHash[threadID] = leafHash
+		rebuiltIDs = append(rebuiltIDs, threadID)
 	}
-	if rebuilt == 0 {
-		return old, 0
+	if len(rebuiltIDs) == 0 {
+		return old, nil
 	}
 	return &indexSnapshot{
 		coarse:    old.coarse,
 		fine:      old.fine,
+		fineHash:  old.fineHash,
 		watermark: old.watermark,
 		tree:      newTree,
-	}, rebuilt
-}
-
-// treeDirty reports whether a thread's tree must be rebuilt this pass: it has
-// no tree yet, or its leaf count drifted by at least treeRebuildThreshold
-// from the current fine-tier leaf count (the v0.1 dirty rule; the full §5
-// design tracks per-leaf dirty marks instead). A tree whose leaf count is
-// within the threshold of the current fine tier is reused — the small
-// mismatch (if any) is handled by treeUsable's flat-fallback on the read
-// path until a later pass crosses the threshold.
-func treeDirty(prior *scoring.SummaryNode, leafCount int) bool {
-	if prior == nil {
-		return true
-	}
-	drift := treeLeafCount(prior) - leafCount
-	if drift < 0 {
-		drift = -drift
-	}
-	return drift >= treeRebuildThreshold
+		treeHash:  newTreeHash,
+	}, rebuiltIDs
 }
