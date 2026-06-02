@@ -131,6 +131,171 @@ func TestBuildTree_W1_MatchesFlat(t *testing.T) {
 	}
 }
 
+// centroidOnlySummarizer is the N=1 (single-centroid) descent key the
+// exemplar set replaces — the degenerate medoid-only route, modeled here as
+// the literal cluster centroid so the W1-failure-mode test can contrast it
+// against the exemplar spread over the IDENTICAL topology. It returns a
+// one-element set {centroid}, so descent routes each node by a single point.
+func centroidOnlySummarizer(children []*SummaryNode) [][]float64 {
+	if len(children) == 0 {
+		return nil
+	}
+	return [][]float64{centroidOf(children)}
+}
+
+// TestExemplarSet_RecoversCentroidMiss is THE #111 Finding A headline test:
+// it constructs the exact W1 failure mode the exemplar set fixes — a query
+// whose best leaf sits under a HETEROGENEOUS cluster whose CENTROID cosine-
+// misses the query (so a single-centroid key prunes that branch at the beam
+// and loses the leaf), and proves that
+//
+//   - single-centroid routing (N=1, centroidOnlySummarizer) MISSES the leaf
+//     (descent top-Kf != flat top-Kf — a real W1 divergence), while
+//   - exemplar-set routing (ExemplarSummarizer, N spanning the spread)
+//     RECOVERS it (descent top-Kf == flat top-Kf — divergence 0).
+//
+// Construction: BeamWidth tight DECOY clusters on distinct axes whose
+// centroids each out-cosine the target cluster's centroid against the query,
+// plus ONE heterogeneous TARGET cluster that contains the single exact-match
+// leaf but whose centroid points nowhere near the query. With a beam of
+// BeamWidth, the BeamWidth decoy centroids fill every beam slot and the
+// target's centroid is pruned (N=1 loses the leaf). The target's EXEMPLAR
+// SET, by spanning the cluster, includes the exact-match leaf's vector as an
+// exemplar, so the target node's MAX-cosine score wins a beam slot and the
+// leaf survives (the spread closes the gap the centroid left).
+func TestExemplarSet_RecoversCentroidMiss(t *testing.T) {
+	const dim = 16
+	axis0 := func(v float64) []float64 { e := make([]float64, dim); e[0] = v; return e }
+	query := axis0(1) // pure axis 0
+
+	var allLeaves []ChunkVector
+	var clusters []*SummaryNode
+	turn := 0
+
+	// BeamWidth decoy clusters. Each leaf points MOSTLY at a distinct off-axis
+	// direction but carries a moderate, consistent axis-0 component, so the
+	// decoy's CENTROID has a healthy axis-0 cosine (it out-cosines the
+	// heterogeneous target's centroid) yet NO single decoy leaf is the exact
+	// axis-0 match the flat scan wants. Distinct off-axis directions keep the
+	// decoy leaves from themselves ranking in the flat top-Kf.
+	for d := 0; d < BeamWidth; d++ {
+		offAxis := 1 + d // axes 1..BeamWidth, never axis 0
+		var leaves []ChunkVector
+		for j := 0; j < 4; j++ {
+			v := make([]float64, dim)
+			v[0] = 0.6                          // shared axis-0 pull → strong centroid cosine
+			v[offAxis] = 1.0 + 0.05*float64(j)  // dominant off-axis direction, slight per-leaf spread
+			leaves = append(leaves, ChunkVector{TurnNumber: turn, Vector: v})
+			turn++
+		}
+		allLeaves = append(allLeaves, leaves...)
+		clusters = append(clusters, &SummaryNode{Children: leafNodes(leaves)})
+	}
+
+	// The heterogeneous TARGET cluster: ONE exact axis-0 match (the best leaf)
+	// plus distinct off-axis leaves carrying a NEGATIVE axis-0 component, so
+	// the cluster's mean cancels most of the axis-0 signal — its centroid
+	// cosine-misses the query (below every decoy centroid), yet it CONTAINS
+	// the leaf the flat scan ranks #1.
+	bestTurn := turn
+	mk := func(off int, a0 float64) []float64 {
+		v := make([]float64, dim)
+		v[0] = a0
+		if off >= 0 {
+			v[off] = 1.0
+		}
+		return v
+	}
+	targetLeaves := []ChunkVector{
+		{TurnNumber: turn, Vector: mk(-1, 1.0)},     // exact axis-0 match — the best leaf
+		{TurnNumber: turn + 1, Vector: mk(5, -0.5)}, // off-axis, negative axis-0 → dilutes centroid
+		{TurnNumber: turn + 2, Vector: mk(9, -0.5)},
+		{TurnNumber: turn + 3, Vector: mk(13, -0.5)},
+	}
+	allLeaves = append(allLeaves, targetLeaves...)
+	target := &SummaryNode{Children: leafNodes(targetLeaves)}
+	clusters = append(clusters, target)
+
+	// Build two roots over the SAME topology, differing only in the summary
+	// key: N=1 centroid vs the exemplar spread.
+	rootN1 := &SummaryNode{Children: clusters}
+	rootSpread := &SummaryNode{Children: cloneClusters(clusters)}
+	applySummaryKey(rootN1, centroidOnlySummarizer)
+	applySummaryKey(rootSpread, ExemplarSummarizer)
+
+	flat := ProposeChunks(query, allLeaves, ChunkOptions{Limit: DefaultChunkLimit})
+	if _, ok := turnSet(flat)[bestTurn]; !ok {
+		t.Fatalf("test setup invalid: flat scan did not rank the exact-match leaf (turn %d); got %v", bestTurn, turnSet(flat))
+	}
+
+	// Sanity: the target centroid really does cosine-MISS relative to the
+	// weakest decoy centroid, so a single-centroid beam prunes the target.
+	targetCentroid := centroidOf(target.Children)
+	targetScore := cosineSimilarity(query, targetCentroid)
+	for _, c := range clusters[:BeamWidth] {
+		if s := cosineSimilarity(query, centroidOf(c.Children)); !(s > targetScore) {
+			t.Fatalf("test setup invalid: a decoy centroid (%.4f) must out-cosine the target centroid (%.4f) for the N=1 prune", s, targetScore)
+		}
+	}
+
+	n1 := DescendChunks(query, rootN1, DescendOptions{Limit: DefaultChunkLimit})
+	if setsEqual(turnSet(n1), turnSet(flat)) {
+		t.Fatalf("N=1 centroid routing should MISS the leaf under the cosine-missing target centroid: descent %v == flat %v (no divergence — the failure mode is not reproduced)",
+			turnSet(n1), turnSet(flat))
+	}
+	if _, ok := turnSet(n1)[bestTurn]; ok {
+		t.Fatalf("N=1 centroid routing unexpectedly recovered the best leaf (turn %d): %v", bestTurn, turnSet(n1))
+	}
+
+	spread := DescendChunks(query, rootSpread, DescendOptions{Limit: DefaultChunkLimit})
+	if !setsEqual(turnSet(spread), turnSet(flat)) {
+		t.Errorf("exemplar-set routing should RECOVER the leaf the centroid missed: descent %v != flat %v (W1 divergence the spread must close)",
+			turnSet(spread), turnSet(flat))
+	}
+}
+
+// cloneClusters deep-copies a slice of internal-node subtrees (children +
+// leaves) so two roots can carry independent summary keys over the same
+// topology without aliasing.
+func cloneClusters(clusters []*SummaryNode) []*SummaryNode {
+	out := make([]*SummaryNode, len(clusters))
+	for i, c := range clusters {
+		out[i] = cloneNode(c)
+	}
+	return out
+}
+
+func cloneNode(n *SummaryNode) *SummaryNode {
+	if n.isLeaf() {
+		return &SummaryNode{Vector: n.Vector, Vectors: n.Vectors, Leaf: n.Leaf}
+	}
+	children := make([]*SummaryNode, len(n.Children))
+	for i, c := range n.Children {
+		children[i] = cloneNode(c)
+	}
+	return &SummaryNode{Children: children}
+}
+
+// applySummaryKey populates every node's exemplar set bottom-up: a leaf's set
+// is its own chunk vector; an internal node's set is summarize(children). It
+// mirrors what BuildTree does, applied to a hand-built topology so a test can
+// swap the summary-key strategy over a fixed tree shape.
+func applySummaryKey(n *SummaryNode, summarize Summarizer) {
+	if n.isLeaf() {
+		n.Vectors = [][]float64{n.Leaf.Vector}
+		n.Vector = n.Leaf.Vector
+		return
+	}
+	for _, c := range n.Children {
+		applySummaryKey(c, summarize)
+	}
+	exemplars := summarize(n.Children)
+	n.Vectors = exemplars
+	if len(exemplars) > 0 {
+		n.Vector = exemplars[0]
+	}
+}
+
 // TestBuildTree_Degenerate covers the empty and single-leaf inputs.
 func TestBuildTree_Degenerate(t *testing.T) {
 	if BuildTree(nil, TreeBranchingFactor, nil) != nil {

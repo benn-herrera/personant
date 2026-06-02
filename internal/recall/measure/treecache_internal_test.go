@@ -45,7 +45,7 @@ func leafHashMap(fine []scoring.ChunkVector, hashes []string) map[int]string {
 func TestTreeCache_RoundTrip(t *testing.T) {
 	const dim = 8
 	fine, hashes := fineFixture(dim, 96)
-	tree := scoring.BuildTree(fine, scoring.TreeBranchingFactor, scoring.CentroidSummarizer)
+	tree := scoring.BuildTree(fine, scoring.TreeBranchingFactor, scoring.ExemplarSummarizer)
 	rootHash := composeLeafHash(hashes)
 
 	cache := newVecCache(nil, nil, t.TempDir())
@@ -90,7 +90,7 @@ func TestTreeCache_RoundTrip(t *testing.T) {
 func TestTreeCache_NilTree_RemovesSidecar(t *testing.T) {
 	const dim = 4
 	fine, hashes := fineFixture(dim, 40)
-	tree := scoring.BuildTree(fine, scoring.TreeBranchingFactor, scoring.CentroidSummarizer)
+	tree := scoring.BuildTree(fine, scoring.TreeBranchingFactor, scoring.ExemplarSummarizer)
 	cache := newVecCache(nil, nil, t.TempDir())
 	ctx := context.Background()
 
@@ -115,7 +115,7 @@ func TestTreeCache_NilTree_RemovesSidecar(t *testing.T) {
 func TestTreeCache_MissingLeaf_DropsTree(t *testing.T) {
 	const dim = 4
 	fine, hashes := fineFixture(dim, 40)
-	tree := scoring.BuildTree(fine, scoring.TreeBranchingFactor, scoring.CentroidSummarizer)
+	tree := scoring.BuildTree(fine, scoring.TreeBranchingFactor, scoring.ExemplarSummarizer)
 	cache := newVecCache(nil, nil, t.TempDir())
 	if err := cache.WriteTree(context.Background(), "thr_1", tree, composeLeafHash(hashes), leafHashMap(fine, hashes)); err != nil {
 		t.Fatalf("WriteTree: %v", err)

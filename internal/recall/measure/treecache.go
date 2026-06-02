@@ -49,17 +49,20 @@ type treeFile struct {
 }
 
 // treeNode is one persisted summary node. An internal node carries its
-// summary Vector (the descent key, derived — not in the .vec) and its
-// Children; a leaf carries TurnNumber + ChunkHash and no Children/Vector (its
-// vector is rehydrated from the .vec-loaded fine tier by turn number, DRY).
-// ChildrenHash is the node's composed childrenHash (§6): a leaf's is its
-// chunk_hash; an internal node's is the SHA-256 of its ordered children's
-// childrenHashes — composed up the topology so a leaf change re-hashes
-// exactly its ancestor path (the dirtied set), enabling subtree-level
-// reconcile later. The read-path staleness check uses only RootHash.
+// EXEMPLAR SET in Vectors (the max-cosine descent key, derived — not in the
+// .vec; #111 Finding A) and its Children; a leaf carries TurnNumber +
+// ChunkHash and no Children/Vectors (its single-element exemplar set is its
+// own chunk vector, rehydrated from the .vec-loaded fine tier by turn
+// number, DRY). ChildrenHash is the node's composed childrenHash (§6): a
+// leaf's is its chunk_hash; an internal node's is the SHA-256 of its ordered
+// children's childrenHashes — composed up the topology so a leaf change
+// re-hashes exactly its ancestor path (the dirtied set). Exemplars are
+// DERIVED from the leaves (a spread over child vectors), so they are NOT
+// part of childrenHash — the staleness key still composes from the leaf
+// chunk_hashes only. The read-path staleness check uses only RootHash.
 type treeNode struct {
 	ChildrenHash string      `json:"children_hash"`
-	Vector       []float64   `json:"vector,omitempty"`
+	Vectors      [][]float64 `json:"vectors,omitempty"`
 	TurnNumber   int         `json:"turn_number,omitempty"`
 	ChunkHash    string      `json:"chunk_hash,omitempty"`
 	Children     []*treeNode `json:"children,omitempty"`
@@ -99,9 +102,9 @@ func (c *vecCache) WriteTree(ctx context.Context, threadID string, tree *scoring
 
 // serializeNode recursively converts a scoring tree into the persisted form,
 // composing each node's childrenHash from the existing leaf chunk hashes
-// (DRY, §6). Leaf nodes drop their vector (rehydrated from the .vec on load);
-// internal nodes keep their summary vector (the derived descent key, not in
-// the .vec).
+// (DRY, §6). Leaf nodes drop their vectors (rehydrated from the .vec on
+// load); internal nodes keep their exemplar SET (the derived max-cosine
+// descent key, not in the .vec; #111 Finding A).
 func serializeNode(n *scoring.SummaryNode, leafHashByTurn map[int]string) *treeNode {
 	if len(n.Children) == 0 {
 		h := leafHashByTurn[n.Leaf.TurnNumber]
@@ -115,7 +118,7 @@ func serializeNode(n *scoring.SummaryNode, leafHashByTurn map[int]string) *treeN
 	}
 	return &treeNode{
 		ChildrenHash: composeNodeHash(childHashes),
-		Vector:       n.Vector,
+		Vectors:      n.Vectors,
 		Children:     children,
 	}
 }
@@ -188,11 +191,14 @@ func rehydrateNode(tn *treeNode, byTurn map[int][]float64) (*scoring.SummaryNode
 		if !ok {
 			return nil, false
 		}
-		// Leaf.Vector mirrors the chunk vector — the descent key and the rank
-		// key are the same embedding at the leaf (the W1-cheap identity).
+		// A leaf's exemplar set is its own chunk vector (one element) —
+		// Vector and Vectors[0] both mirror Leaf.Vector, the descent key and
+		// the rank key being the same embedding at the leaf (the W1-cheap
+		// identity).
 		return &scoring.SummaryNode{
-			Vector: vec,
-			Leaf:   scoring.ChunkVector{TurnNumber: tn.TurnNumber, Vector: vec},
+			Vector:  vec,
+			Vectors: [][]float64{vec},
+			Leaf:    scoring.ChunkVector{TurnNumber: tn.TurnNumber, Vector: vec},
 		}, true
 	}
 	children := make([]*scoring.SummaryNode, len(tn.Children))
@@ -203,5 +209,11 @@ func rehydrateNode(tn *treeNode, byTurn map[int][]float64) (*scoring.SummaryNode
 		}
 		children[i] = child
 	}
-	return &scoring.SummaryNode{Vector: tn.Vector, Children: children}, true
+	// Internal node: rehydrate the persisted exemplar set; the primary
+	// (Vector) is the first exemplar, for the single-key back-compat field.
+	var primary []float64
+	if len(tn.Vectors) > 0 {
+		primary = tn.Vectors[0]
+	}
+	return &scoring.SummaryNode{Vector: primary, Vectors: tn.Vectors, Children: children}, true
 }

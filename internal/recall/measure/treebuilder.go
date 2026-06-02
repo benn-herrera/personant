@@ -82,19 +82,22 @@ func (s *Service) RebuildTrees(ctx context.Context) (int, error) {
 	}
 }
 
-// treeSummarizer returns the summary-vector strategy this Service builds
-// trees with — the §2.2 / fork-F-A seam. v0.1 always uses the centroid
-// (scoring.CentroidSummarizer): the sim has no real LLM, so an LLM-summary
-// descent key would be a meaningless mock embedding that breaks the W1
-// recall-preservation gate the feature must pass; the centroid is
-// deterministic, sim-validatable, and W1-sound under semantic clustering.
+// treeSummarizer returns the summary-key strategy this Service builds trees
+// with — the §2.2 / fork-F-A seam. v0.1 always uses the exemplar spread
+// (scoring.ExemplarSummarizer, #111 Finding A): the sim has no real LLM, so
+// an LLM-summary descent key would be a meaningless mock embedding that
+// breaks the W1 recall-preservation gate the feature must pass; the
+// exemplar set is deterministic, sim-validatable, and W1-sound — it covers
+// each cluster's spread with real child vectors so descent's max-cosine
+// route keeps a branch alive for a query near any region of the cluster
+// (the centroid key it replaces missed edge queries → the W1 4/251 gap).
 // This is the coordinator call that promotes F-A's "boring fallback" to the
 // v0.1-primary for the validatable path. LLM-summary is the deferred
 // production enrichment at THIS SAME seam: a Service built with an injected
-// summarizer model would return an embed-the-LLM-summary strategy here, and
+// summarizer model would return N embed-the-LLM-summary exemplars here, and
 // the tree shape and descent would be unchanged.
 func (s *Service) treeSummarizer() scoring.Summarizer {
-	return scoring.CentroidSummarizer
+	return scoring.ExemplarSummarizer
 }
 
 // leafHashByTurn maps a thread's leaf turn numbers to their chunk_hash from
