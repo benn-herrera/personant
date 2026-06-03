@@ -27,15 +27,19 @@ const (
 	// whose vector cosine-misses the query (a summary averages a
 	// heterogeneous cluster); greedy top-1 would prune that subtree and
 	// lose the leaf. k>1 recovers it. Raised by the §7 gate if recall
-	// diverges; never tuned by latency. k=4 is the cost-minimized width:
-	// the 4→8 raise (9c9493d, on the theory the W1 gate needed a wider
-	// beam) was superseded by the Finding A exemplar-set-propagation fix
-	// (d8e32b3), which closed the W1 recall-preservation gap STRUCTURALLY
-	// at the node keys (max-cosine over an exemplar set, not a single
-	// centroid) — driving the 14d live divergence to 0/251 independent of
-	// beam width. The wider beam is no longer needed; the §7 W1 gate
-	// (recall_intra_descent_divergence == 0) guards against regression.
-	BeamWidth = 4
+	// diverges; never tuned by latency. k=8 is load-bearing and is NOT a
+	// latency cost: the 4→8 raise (9c9493d) was KEPT after the Finding A
+	// exemplar-set-propagation fix (d8e32b3) was measured against a k=4
+	// retry (d1ec270) on the live 14d rung — k=4 reintroduced the W1
+	// divergence (2/251, strict_miss=1: the dense-cluster probe whose two
+	// highest-cosine leaves sit under a branch k=4 prunes), while
+	// recall_query_cosine_ops was byte-identical (2613.8 vs 2613.7). The
+	// descent beam is NOT the cosine-op cost driver (that is the coarse
+	// pass + fine population + the flat W1-probe scan), so narrowing k
+	// saves nothing and only loses recall. The exemplar fix is necessary
+	// but not sufficient; the wider beam is the other half — together they
+	// hold divergence at 0/251 for free. §7 W1 gate guards regression.
+	BeamWidth = 8
 
 	// LeafFrontierCap bounds the leaf set the terminal ProposeChunks
 	// ranks: k·B, independent of total n (design §4.1). The frontier
