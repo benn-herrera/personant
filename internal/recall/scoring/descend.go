@@ -45,6 +45,36 @@ const (
 	// it only documents the calibrated window (2·B ≈ 32).
 	TreeBuildThreshold = 2 * TreeBranchingFactor
 
+	// ClearlyRelated is the "clearly related, not kidding" cosine: the bar
+	// above which a candidate must NOT be dropped to satisfy a fixed-count
+	// cut (#111 Finding A). It is the relevance-net knob distinct from
+	// DefaultCosineThreshold (0.55, the relevance FLOOR — the bar a candidate
+	// must clear to be considered AT ALL). Set DISTINCTLY above the floor at
+	// 0.75: the live diagnosis showed a dense intra-thread cluster where ALL
+	// leaves scored 0.80–0.83 and the fixed BeamWidth cut pruned the branch
+	// holding the two HIGHEST-cosine leaves — they were clearly related yet
+	// lost to an arbitrary slot count. 0.75 sits below that observed cluster
+	// (so it captures it) and well above the 0.55 floor (so it does not
+	// degrade to "keep everything above the floor", which would re-introduce
+	// the O(n) scan this whole feature removes). A §9 calibration window:
+	// raise toward the floor only if the net proves too narrow; the
+	// recall-preservation gate (W1) and the cosine-ops bend are the signals.
+	ClearlyRelated = 0.75
+
+	// NetCap bounds the relevance-sized net at BOTH the beam frontier and
+	// the terminal leaf rank (#111 Finding A) — a PERFORMANCE BACKSTOP, not
+	// the normal path. The net is normally bounded by genuine relevance
+	// density (the count of candidates clearing ClearlyRelated) plus the
+	// min-k/Limit floor; NetCap only bites a degenerate pathological cluster
+	// where nearly everything is clearly-related, which would otherwise let
+	// the net degrade toward the O(n) scan. At 4·LeafFrontierCap it is well
+	// above any healthy net (a wide spread of genuinely-related leaves still
+	// fits) yet bounds the worst case. When the cap drops a clearly-related
+	// candidate, the caller logs recall.net-cap-hit (via NetCapHits) so the
+	// pathological tail is VISIBLE — a silent truncation would hide the very
+	// density the feature exists to surface.
+	NetCap = 4 * LeafFrontierCap
+
 	// NodeExemplars N is the size of an internal node's EXEMPLAR SET — the
 	// descent key (design §9 calibration window). The #111 Finding A fix:
 	// a single centroid is a meaningless point in the middle of a
@@ -141,19 +171,25 @@ func maxCosine(query []float64, n *SummaryNode, counter *CosineCounter) float64 
 // DescendOptions governs DescendChunks. Zero-valued fields fall back to
 // the documented design §4.1 defaults.
 type DescendOptions struct {
-	// Beam is the per-level branch count k. 0 → BeamWidth (8). Wider k
-	// recovers more leaves under cosine-missing summaries (W3), at linear
-	// descent cost. The §7 recall-preservation gate raises it on
-	// divergence.
+	// Beam is the per-level branch MINIMUM-floor count k (#111 Finding A) —
+	// no longer a hard cap. Each level keeps the top-Beam branches PLUS every
+	// additional branch whose max-exemplar-cosine is at or above
+	// ClearlyRelated, so a clearly-related branch is never pruned for losing
+	// a fixed slot to an equally-related sibling (the live W1 gap: the branch
+	// holding the two highest-cosine leaves was cut at the BeamWidth slot
+	// boundary). 0 → BeamWidth (8). Wider k recovers more leaves under
+	// cosine-missing summaries (W3); the §7 recall-preservation gate raises
+	// it on divergence. The clearly-related widening is bounded by NetCap.
 	Beam int
 
 	// Threshold is the minimum cosine for the terminal leaf rank, passed
 	// through to ProposeChunks. 0 → DefaultCosineThreshold.
 	Threshold float64
 
-	// Limit caps the returned leaf candidates (the §4.2 Kf cap), passed
-	// through to ProposeChunks. 0 → DefaultChunkLimit; negative →
-	// unbounded.
+	// Limit caps the returned leaf candidates — the MINIMUM floor of the
+	// terminal net (#111 Finding A), passed through to ProposeChunks, which
+	// returns top-Limit PLUS all leaves at or above ClearlyRelated. 0 →
+	// DefaultChunkLimit; negative → unbounded.
 	Limit int
 
 	// Counter, when non-nil, tallies the cosine comparisons this descent
@@ -163,6 +199,14 @@ type DescendOptions struct {
 	// beam) computes none. This is precisely why the count is measured at
 	// the call site, not modeled. nil on the production hot path.
 	Counter *CosineCounter
+
+	// NetCapHits, when non-nil, is incremented once per NetCap truncation
+	// that drops a clearly-related branch (beam) or leaf (terminal) the net
+	// would otherwise have kept — the pathological-density signal the caller
+	// logs (recall.net-cap-hit, #111 Finding A). Threaded through to both the
+	// beam (topKByCosine) and the terminal ProposeChunks. nil on the
+	// production hot path. See NetCap.
+	NetCapHits *int
 }
 
 // DescendChunks is the §4 beam descent over a per-thread summary tree.
@@ -214,16 +258,19 @@ func DescendChunks(query []float64, root *SummaryNode, opts DescendOptions) []Ch
 			}
 			children = append(children, n.Children...)
 		}
-		frontier = topKByCosine(query, children, beam, opts.Counter)
+		frontier = topKByCosine(query, children, beam, opts.Counter, opts.NetCapHits)
 	}
 
-	// Frontier is now all leaves (≤ LeafFrontierCap). Rank them with the
-	// terminal ProposeChunks — the SAME cosine the flat scan uses (W1).
+	// Frontier is now all leaves (bounded by the beam net + NetCap). Rank
+	// them with the terminal ProposeChunks — the SAME cosine AND the SAME
+	// relevance-net policy the flat scan uses (W1, #111 Finding A): both
+	// paths return top-Limit PLUS all clearly-related leaves, so the
+	// descent-vs-flat comparison is like-for-like.
 	leaves := make([]ChunkVector, 0, len(frontier))
 	for _, n := range frontier {
 		leaves = append(leaves, n.Leaf)
 	}
-	return ProposeChunks(query, leaves, ChunkOptions{Threshold: opts.Threshold, Limit: opts.Limit, Counter: opts.Counter})
+	return ProposeChunks(query, leaves, ChunkOptions{Threshold: opts.Threshold, Limit: opts.Limit, Counter: opts.Counter, NetCapHits: opts.NetCapHits})
 }
 
 // TreeLeafTurns returns the turn numbers of every leaf reachable in the
@@ -262,13 +309,22 @@ func hasInternal(frontier []*SummaryNode) bool {
 	return false
 }
 
-// topKByCosine returns the top-k nodes by their MAX-cosine exemplar score
-// (#111 Finding A: max over the node's exemplar set, not a single
-// centroid), stable-sorted (score desc, then leaf turn-number asc for a
-// deterministic tie-break). It is the per-level beam step. When k >=
-// len(nodes) all nodes survive (no pruning), which is what keeps a short
-// or wide level lossless.
-func topKByCosine(query []float64, nodes []*SummaryNode, k int, counter *CosineCounter) []*SummaryNode {
+// topKByCosine is the per-level beam step with the relevance-sized net
+// (#111 Finding A): it keeps the top-k branches by MAX-cosine exemplar
+// score (the minimum floor, as before — max over the node's exemplar set,
+// not a single centroid) PLUS every additional branch whose score is at or
+// above ClearlyRelated (the cast net), bounded by NetCap. So a clearly-
+// related branch is never pruned for losing a fixed slot to an equally-
+// related sibling — the live W1 gap, where the branch holding the two
+// highest-cosine leaves was cut at the BeamWidth boundary.
+//
+// Branches are stable-sorted (score desc, then leaf turn-number asc for a
+// deterministic tie-break). When k >= len(nodes) all nodes survive (no
+// pruning) and ZERO cosines are computed — the lossless short-circuit that
+// keeps a short or wide level cheap and preserves the O(log n) measured
+// bend. netCapHits (nil-safe) is bumped iff NetCap drops a clearly-related
+// branch (the caller logs recall.net-cap-hit).
+func topKByCosine(query []float64, nodes []*SummaryNode, k int, counter *CosineCounter, netCapHits *int) []*SummaryNode {
 	if len(nodes) <= k {
 		// No pruning needed; preserve all branches (lossless level) — and,
 		// crucially, compute ZERO cosines here. This short-circuit is the
@@ -291,8 +347,30 @@ func topKByCosine(query []float64, nodes []*SummaryNode, k int, counter *CosineC
 		}
 		return ranked[i].node.Leaf.TurnNumber < ranked[j].node.Leaf.TurnNumber
 	})
-	out := make([]*SummaryNode, k)
-	for i := 0; i < k; i++ {
+
+	// The kept count is the larger of the floor k and the number of
+	// clearly-related branches (the cast net), bounded by NetCap. Sorted
+	// desc → the kept set is a prefix; count clearly-related from the front.
+	clearlyRelated := 0
+	for _, r := range ranked {
+		if r.score >= ClearlyRelated {
+			clearlyRelated++
+		} else {
+			break
+		}
+	}
+	keep := k
+	if clearlyRelated > keep {
+		keep = clearlyRelated
+	}
+	if keep > NetCap {
+		if clearlyRelated > NetCap {
+			bumpNetCap(netCapHits) // dropping a clearly-related branch — pathological
+		}
+		keep = NetCap
+	}
+	out := make([]*SummaryNode, keep)
+	for i := 0; i < keep; i++ {
 		out[i] = ranked[i].node
 	}
 	return out

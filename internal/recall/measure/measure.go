@@ -752,7 +752,14 @@ func (s *Service) Recall(ctx context.Context, req Request) ([]Result, error) {
 			r.Score = c.Score // embedding score dominates the unified rank
 		}
 
-		if hit := s.intraThread(q, snap, req.Engaged, counter); hit != nil {
+		// netCapHits is the #111 Finding A backstop signal: the relevance-
+		// sized net (top-Kf OR all clearly-related leaves) is normally bounded
+		// by genuine relevance density, but a pathological dense cluster could
+		// blow past scoring.NetCap; when that truncation drops a clearly-
+		// related candidate, the scorer bumps this and we log it once so the
+		// degenerate tail is VISIBLE (it is never the normal path).
+		netCapHits := 0
+		if hit := s.intraThread(q, snap, req.Engaged, counter, &netCapHits); hit != nil {
 			r := merged[req.Engaged]
 			if r == nil {
 				r = &Result{ThreadID: req.Engaged}
@@ -762,6 +769,10 @@ func (s *Service) Recall(ctx context.Context, req Request) ([]Result, error) {
 			if hit.Score > r.Score {
 				r.Score = hit.Score
 			}
+		}
+		if netCapHits > 0 {
+			_ = s.ops.Log(ctx, memops.LogCategoryRecall, "net-cap-hit",
+				fmt.Sprintf("thread=%s hits=%d cap=%d", req.Engaged, netCapHits, scoring.NetCap))
 		}
 
 		// Accumulate the MEASURED cosine-op tally for this query into the run
@@ -845,11 +856,11 @@ func (s *Service) coarseFine(q []float64, snap *indexSnapshot, exclude map[strin
 // descent when a usable tree is present, else the flat O(C_main)
 // ProposeChunks scan over all of snap.fine[engaged]. See intraChunks for
 // the path-selection rule.
-func (s *Service) intraThread(q []float64, snap *indexSnapshot, engaged string, counter *scoring.CosineCounter) *IntraThreadHit {
+func (s *Service) intraThread(q []float64, snap *indexSnapshot, engaged string, counter *scoring.CosineCounter, netCapHits *int) *IntraThreadHit {
 	if engaged == "" {
 		return nil
 	}
-	chunks := s.intraChunks(q, snap, engaged, counter)
+	chunks := s.intraChunks(q, snap, engaged, counter, netCapHits)
 	if len(chunks) == 0 {
 		return nil
 	}
@@ -879,12 +890,12 @@ func (s *Service) intraThread(q []float64, snap *indexSnapshot, engaged string, 
 // does), snap.tree is always empty at runtime and this always takes the
 // flat-scan branch — byte-identical to the pre-#111 behaviour. The descent
 // branch is reached only by tests that install a tree.
-func (s *Service) intraChunks(q []float64, snap *indexSnapshot, engaged string, counter *scoring.CosineCounter) []scoring.ChunkCandidate {
+func (s *Service) intraChunks(q []float64, snap *indexSnapshot, engaged string, counter *scoring.CosineCounter, netCapHits *int) []scoring.ChunkCandidate {
 	leaves := snap.fine[engaged]
 	if snap.treeUsable(engaged) {
-		return scoring.DescendChunks(q, snap.tree[engaged], scoring.DescendOptions{Limit: Kf, Counter: counter})
+		return scoring.DescendChunks(q, snap.tree[engaged], scoring.DescendOptions{Limit: Kf, Counter: counter, NetCapHits: netCapHits})
 	}
-	return scoring.ProposeChunks(q, leaves, scoring.ChunkOptions{Limit: Kf, Counter: counter})
+	return scoring.ProposeChunks(q, leaves, scoring.ChunkOptions{Limit: Kf, Counter: counter, NetCapHits: netCapHits})
 }
 
 // treeUsable reports whether the engaged thread's summary tree should drive

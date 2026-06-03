@@ -260,9 +260,16 @@ func TestDescendChunks_W3_Beam(t *testing.T) {
 	})
 
 	t.Run("beam k=2 recovers the best leaf", func(t *testing.T) {
+		// Limit is the net's MINIMUM floor (#111 Finding A), not a hard cap:
+		// the terminal returns leaf 99 PLUS any clearly-related decoy leaves,
+		// so we assert leaf 99 is RECOVERED and ranks first, not that exactly
+		// one leaf returns.
 		got := DescendChunks(query, root, DescendOptions{Beam: 2, Limit: 1})
-		if len(got) != 1 || got[0].TurnNumber != 99 {
-			t.Errorf("beam k=2: got %+v, want top leaf turn 99 (recovered via beam)", got)
+		if len(got) == 0 || got[0].TurnNumber != 99 {
+			t.Errorf("beam k=2: got %+v, want top leaf turn 99 first (recovered via beam)", got)
+		}
+		if _, ok := turnSet(got)[99]; !ok {
+			t.Errorf("beam k=2: leaf 99 not in result %+v", got)
 		}
 	})
 }
@@ -275,12 +282,14 @@ func leafNodes(leaves []ChunkVector) []*SummaryNode {
 	return out
 }
 
-// TestDescendChunks_FrontierBound asserts the descent's leaf frontier
-// never exceeds LeafFrontierCap = k·B regardless of how many leaves the
-// tree holds (design §4.1, W2). Verified by capping Limit at a value far
-// above LeafFrontierCap and counting returned candidates against the
-// frontier bound: ProposeChunks over the frontier cannot return more
-// than the frontier holds.
+// TestDescendChunks_FrontierBound asserts the descent's leaf frontier is
+// bounded (design §4.1, W2). With the #111 Finding A relevance net the
+// per-level beam keeps the top-Beam branches PLUS any clearly-related ones,
+// so the frontier is bounded by NetCap (the backstop), not strictly by
+// LeafFrontierCap. This fixture's clusters are near-orthogonal (only the
+// axis-0 cluster is query-related), so the net does not widen here and the
+// frontier stays within LeafFrontierCap — but the assertion is against the
+// real bound, NetCap, which the dense-cluster + backstop tests below exercise.
 func TestDescendChunks_FrontierBound(t *testing.T) {
 	const dim = 8
 	var leaves []ChunkVector
@@ -291,13 +300,259 @@ func TestDescendChunks_FrontierBound(t *testing.T) {
 	q := unitNoisy(dim, 0, 0.1)
 
 	// Threshold -2 admits every frontier leaf; Limit -1 unbounded — so
-	// the count returned == frontier size, which must be ≤ LeafFrontierCap.
+	// the count returned == frontier size, which must be ≤ NetCap.
 	got := DescendChunks(q, tree, DescendOptions{Beam: BeamWidth, Threshold: -2, Limit: -1})
-	if len(got) > LeafFrontierCap {
-		t.Errorf("frontier bound: descent returned %d leaves, want ≤ LeafFrontierCap=%d", len(got), LeafFrontierCap)
+	if len(got) > NetCap {
+		t.Errorf("frontier bound: descent returned %d leaves, want ≤ NetCap=%d", len(got), NetCap)
 	}
 	if len(got) == 0 {
 		t.Error("expected a non-empty frontier from a 5000-leaf tree")
+	}
+}
+
+// TestDescendChunks_Net_DenseCluster is THE #111 Finding A headline test: it
+// reproduces the live W1 failure structurally and shows the relevance net
+// fixes it. The live diagnosis: a dense intra-thread cluster of leaves all
+// scoring 0.80–0.83 (all clearly-related) split across branches; the fixed
+// BeamWidth=8 cut pruned the branch holding the two HIGHEST-cosine leaves
+// because other equally-related branches' SUMMARY keys took the 8 slots, so
+// those top leaves never reached the terminal rank — descent != flat, a
+// strict-miss.
+//
+// Construction: BeamWidth+1 sibling branches under the root. Every branch is
+// clearly-related (max-exemplar-cosine ≥ ClearlyRelated). The VICTIM branch's
+// summary EXEMPLAR key under-represents its leaves (a heterogeneous-cluster
+// summary), so its max-exemplar score ranks LAST — outside a fixed top-
+// BeamWidth cut — yet it holds the two leaves with the highest LEAF cosine,
+// which the flat scan ranks in its top-Kf. A fixed-k beam drops the victim
+// (descent misses those leaves); the relevance net keeps it (it is clearly-
+// related) so descent reaches the same leaves flat finds → divergence 0.
+func TestDescendChunks_Net_DenseCluster(t *testing.T) {
+	const dim = 32
+	axis0 := func(v float64) []float64 { e := make([]float64, dim); e[0] = v; return e }
+	query := axis0(1)
+
+	// vecCos builds a vector with a CONTROLLED cosine ≈ target to the pure
+	// axis-0 query: axis-0 component 1, off-axis component sqrt(1/t²-1) on a
+	// distinct axis (cosine = 1/sqrt(1+off²) = t). Cosine ignores magnitude,
+	// so the off-axis tilt — not the axis-0 magnitude — sets the score.
+	vecCos := func(target float64, off int) []float64 {
+		v := make([]float64, dim)
+		v[0] = 1
+		v[off] = math.Sqrt(1/(target*target) - 1)
+		return v
+	}
+	mkLeaf := func(turn int, target float64, off int) ChunkVector {
+		return ChunkVector{TurnNumber: turn, Vector: vecCos(target, off)}
+	}
+
+	var allLeaves []ChunkVector
+	var branches []*SummaryNode
+	turn := 100
+
+	// BeamWidth "filler" branches: clearly-related leaves (~0.81) and a
+	// summary exemplar that faithfully represents them (max-exemplar ~0.81),
+	// so each WINS a fixed beam slot ahead of the victim.
+	for d := 0; d < BeamWidth; d++ {
+		off := 1 + d
+		ls := []ChunkVector{
+			mkLeaf(turn, 0.81, off),
+			mkLeaf(turn+1, 0.80, off),
+		}
+		turn += 2
+		allLeaves = append(allLeaves, ls...)
+		b := &SummaryNode{Children: leafNodes(ls)}
+		// Faithful summary key: an exemplar at ~0.81 (the branch's own leaf).
+		b.Vectors = [][]float64{ls[0].Vector}
+		b.Vector = b.Vectors[0]
+		branches = append(branches, b)
+	}
+
+	// VICTIM branch: holds the two HIGHEST-cosine leaves (0.83, 0.825), but
+	// its summary EXEMPLAR under-represents them — a heterogeneous summary key
+	// scoring ~0.76 (still clearly-related, but the LOWEST max-exemplar, so a
+	// fixed top-BeamWidth cut drops it). The net keeps it because 0.76 ≥
+	// ClearlyRelated.
+	victimLeaves := []ChunkVector{
+		mkLeaf(turn, 0.83, 30),    // global-highest leaf
+		mkLeaf(turn+1, 0.825, 31), // global-second leaf
+	}
+	topTurn1, topTurn2 := turn, turn+1
+	turn += 2
+	allLeaves = append(allLeaves, victimLeaves...)
+	victim := &SummaryNode{Children: leafNodes(victimLeaves)}
+	victim.Vectors = [][]float64{vecCos(0.76, 29)} // under-representing summary key
+	victim.Vector = victim.Vectors[0]
+	branches = append(branches, victim)
+
+	root := &SummaryNode{Children: branches, Vector: axis0(0.8)}
+
+	// Sanity 1: the victim's summary key really ranks LAST among the branches
+	// (so a fixed top-BeamWidth cut, with BeamWidth+1 branches, drops it).
+	victimScore := cosineSimilarity(query, victim.Vector)
+	dropped := 0
+	for _, b := range branches[:BeamWidth] {
+		if cosineSimilarity(query, b.Vector) > victimScore {
+			dropped++
+		}
+	}
+	if dropped < BeamWidth {
+		t.Fatalf("test setup invalid: victim summary key (%.4f) must rank below all %d filler keys for the fixed-k prune; only %d out-rank it",
+			victimScore, BeamWidth, dropped)
+	}
+	if victimScore < ClearlyRelated {
+		t.Fatalf("test setup invalid: victim key %.4f must stay ≥ ClearlyRelated %.2f (else the net cannot keep it)", victimScore, ClearlyRelated)
+	}
+
+	flat := ProposeChunks(query, allLeaves, ChunkOptions{Limit: DefaultChunkLimit})
+	flatSet := turnSet(flat)
+	// Sanity 2: the flat scan ranks the victim's two top leaves in its top-Kf.
+	if _, ok := flatSet[topTurn1]; !ok {
+		t.Fatalf("test setup invalid: flat top-Kf %v missing the global-highest leaf turn %d", flatSet, topTurn1)
+	}
+
+	// OLD fixed-k behaviour (Beam: BeamWidth, but force the net OFF by setting
+	// the clearly-related bar above every score) DROPS the victim → divergence.
+	// We model "net off" with a beam-only top-k by asserting the victim's
+	// summary loses a fixed slot (Sanity 1 above) — and confirm the leaves are
+	// reachable ONLY because the net keeps the branch:
+	descent := DescendChunks(query, root, DescendOptions{Beam: BeamWidth, Limit: DefaultChunkLimit})
+	descentSet := turnSet(descent)
+	if !setsEqual(descentSet, flatSet) {
+		t.Errorf("NET should keep the clearly-related victim branch so descent == flat: descent %v != flat %v (divergence %d)",
+			descentSet, flatSet, len(descentSet)+len(flatSet)-2*intersectCount(descentSet, flatSet))
+	}
+	// The headline: the two top leaves the fixed-k cut would have dropped are
+	// present.
+	if _, ok := descentSet[topTurn1]; !ok {
+		t.Errorf("net descent missing the global-highest leaf turn %d — the relevance net did not keep the victim branch", topTurn1)
+	}
+	if _, ok := descentSet[topTurn2]; !ok {
+		t.Errorf("net descent missing the global-second leaf turn %d", topTurn2)
+	}
+}
+
+// intersectCount is a tiny test helper: the size of a ∩ b for two turn sets.
+func intersectCount(a, b map[int]struct{}) int {
+	n := 0
+	for k := range a {
+		if _, ok := b[k]; ok {
+			n++
+		}
+	}
+	return n
+}
+
+// TestDescendChunks_Net_SparseUnchanged asserts the relevance net collapses
+// to the old fixed top-K in a SPARSE region (#111 Finding A negative
+// constraint): when few branches/leaves clear ClearlyRelated, the min-k floor
+// governs and the result equals the pre-net top-K. The fixture has ONE
+// query-related cluster and BeamWidth+3 near-orthogonal ones (cosine ~0), so
+// only the one cluster's branch is clearly-related — the net adds nothing
+// beyond the beam floor, and descent == flat exactly as before.
+func TestDescendChunks_Net_SparseUnchanged(t *testing.T) {
+	const dim = 32
+	query := func() []float64 { v := make([]float64, dim); v[0] = 1; return v }()
+	// A leaf whose cosine to the axis-0 query is `target`, tilted on a distinct
+	// off-axis so leaves are distinct: cosine = 1/sqrt(1+off²), off=sqrt(1/t²-1).
+	mkLeaf := func(turn int, target float64, off int) ChunkVector {
+		v := make([]float64, dim)
+		v[0] = 1
+		v[off] = math.Sqrt(1/(target*target) - 1)
+		return ChunkVector{TurnNumber: turn, Vector: v}
+	}
+
+	// "Sparse" means thin RELEVANCE density above ClearlyRelated, not few
+	// leaves: a handful of leaves score in (DefaultCosineThreshold,
+	// ClearlyRelated) = (0.55, 0.75) — above the floor (so they are candidates)
+	// but below the clearly-related bar (so the net does NOT widen past the
+	// min-k floor). The rest are orthogonal (cosine ~0, below the floor).
+	var leaves []ChunkVector
+	turn := 0
+	for i := 0; i < 10; i++ { // 10 weakly-related leaves, all in (0.55, 0.75)
+		leaves = append(leaves, mkLeaf(turn, 0.62, 1+i))
+		turn++
+	}
+	for i := 0; i < 200; i++ { // many orthogonal leaves (below the floor)
+		v := make([]float64, dim)
+		v[15+(i%10)] = 1 // off-axis only → cosine ~0 to the axis-0 query
+		leaves = append(leaves, ChunkVector{TurnNumber: turn, Vector: v})
+		turn++
+	}
+	tree := buildTestTree(leaves, TreeBranchingFactor)
+
+	flat := ProposeChunks(query, leaves, ChunkOptions{Limit: DefaultChunkLimit})
+	descent := DescendChunks(query, tree, DescendOptions{Limit: DefaultChunkLimit})
+	if !setsEqual(turnSet(flat), turnSet(descent)) {
+		t.Errorf("sparse region: net descent %v != flat %v (the net should not widen where the cluster is thin)",
+			turnSet(descent), turnSet(flat))
+	}
+	// No leaf clears ClearlyRelated, so the net collapses to the min-k floor:
+	// exactly DefaultChunkLimit returned (the OLD fixed-K result), not widened.
+	if len(flat) != DefaultChunkLimit {
+		t.Errorf("sparse region returned %d, want exactly Kf=%d (net collapsed to the floor)", len(flat), DefaultChunkLimit)
+	}
+}
+
+// TestProposeChunks_Net_Backstop drives a pathological dense set BEYOND NetCap
+// and asserts the backstop bites: the returned set is bounded at NetCap and
+// the net-cap-hit signal fires (no silent drop). A genuine high-density return
+// that fits under NetCap is the feature working; this is the degenerate guard.
+func TestProposeChunks_Net_Backstop(t *testing.T) {
+	const dim = 8
+	q := unitNoisy(dim, 0, 0)
+	// NetCap+50 leaves all clearly-related (cosine ~1.0 > ClearlyRelated).
+	var leaves []ChunkVector
+	for i := 0; i < NetCap+50; i++ {
+		leaves = append(leaves, ChunkVector{TurnNumber: i, Vector: unitNoisy(dim, 0, 0.001*float64(i%5))})
+	}
+
+	hits := 0
+	got := ProposeChunks(q, leaves, ChunkOptions{Limit: DefaultChunkLimit, NetCapHits: &hits})
+	if len(got) != NetCap {
+		t.Errorf("backstop: returned %d, want exactly NetCap=%d (bounded, no silent overflow)", len(got), NetCap)
+	}
+	if hits != 1 {
+		t.Errorf("backstop: net-cap-hit signal = %d, want 1 (the cap dropped clearly-related candidates — must be visible)", hits)
+	}
+
+	// Under NetCap: high density returns many but does NOT trip the backstop.
+	var fewer []ChunkVector
+	for i := 0; i < NetCap-10; i++ {
+		fewer = append(fewer, ChunkVector{TurnNumber: i, Vector: unitNoisy(dim, 0, 0.001*float64(i%5))})
+	}
+	hits2 := 0
+	got2 := ProposeChunks(q, fewer, ChunkOptions{Limit: DefaultChunkLimit, NetCapHits: &hits2})
+	if len(got2) != NetCap-10 {
+		t.Errorf("under-cap dense set: returned %d, want all %d clearly-related (the net working)", len(got2), NetCap-10)
+	}
+	if hits2 != 0 {
+		t.Errorf("under-cap dense set tripped the backstop (%d hits) — the cap must only bite beyond NetCap", hits2)
+	}
+}
+
+// TestProposeChunks_Net_Determinism asserts the net result is deterministic:
+// the same query + leaves yield byte-identical candidate slices across runs
+// (no map-iteration order leak into the result; the sort + prefix cut are
+// stable).
+func TestProposeChunks_Net_Determinism(t *testing.T) {
+	const dim = 8
+	q := unitNoisy(dim, 0, 0)
+	var leaves []ChunkVector
+	for i := 0; i < 40; i++ {
+		leaves = append(leaves, ChunkVector{TurnNumber: 1000 - i, Vector: unitNoisy(dim, 0, 0.005*float64(i))})
+	}
+	first := ProposeChunks(q, leaves, ChunkOptions{Limit: DefaultChunkLimit})
+	for i := 0; i < 20; i++ {
+		again := ProposeChunks(q, leaves, ChunkOptions{Limit: DefaultChunkLimit})
+		if len(again) != len(first) {
+			t.Fatalf("run %d: len %d != %d (non-deterministic net size)", i, len(again), len(first))
+		}
+		for j := range first {
+			if again[j] != first[j] {
+				t.Fatalf("run %d idx %d: %+v != %+v (non-deterministic order)", i, j, again[j], first[j])
+			}
+		}
 	}
 }
 
