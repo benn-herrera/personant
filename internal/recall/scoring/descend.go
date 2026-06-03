@@ -27,11 +27,15 @@ const (
 	// whose vector cosine-misses the query (a summary averages a
 	// heterogeneous cluster); greedy top-1 would prune that subtree and
 	// lose the leaf. k>1 recovers it. Raised by the §7 gate if recall
-	// diverges; never tuned by latency. Raised 4→8 (2026-06-02) after a
-	// 14d live-embedding rung showed W1 descent-vs-flat divergence 6/251
-	// at k=4 over real nomic vectors (centroid keys are less separable
-	// than the mock's feature-hash vectors); the §7 W1 gate drives this.
-	BeamWidth = 8
+	// diverges; never tuned by latency. k=4 is the cost-minimized width:
+	// the 4→8 raise (9c9493d, on the theory the W1 gate needed a wider
+	// beam) was superseded by the Finding A exemplar-set-propagation fix
+	// (d8e32b3), which closed the W1 recall-preservation gap STRUCTURALLY
+	// at the node keys (max-cosine over an exemplar set, not a single
+	// centroid) — driving the 14d live divergence to 0/251 independent of
+	// beam width. The wider beam is no longer needed; the §7 W1 gate
+	// (recall_intra_descent_divergence == 0) guards against regression.
+	BeamWidth = 4
 
 	// LeafFrontierCap bounds the leaf set the terminal ProposeChunks
 	// ranks: k·B, independent of total n (design §4.1). The frontier
