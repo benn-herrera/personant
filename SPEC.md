@@ -801,13 +801,21 @@ long-running-thread workload and explicit decay measurement (index size,
 per-query cost, retrieval latency) as both thread count *and* per-thread
 length grow into the thousands.
 
-*Open design points (a focused design pass precedes build):* chunk unit
-(turn-excerpt lean) vs. fixed-size; the coarse→fine top-K cutoff; the
-debt-window N and its blind-spot; the persisted-cache format; and the
-simulation's intra-thread ground-truth oracle (how the deterministic
-workload knows which early turn a query should retrieve). Tasks #102
-(thread-level maintenance facet) and #109 (intra-thread, high priority)
-are designed as one.
+*Implementation — shipped.* Tasks #102 and #109 were designed and built
+as one: chunk unit = turn-excerpt (`internal/recall/scoring/chunk.go`);
+coarse→fine Kc/Kf cutoffs implemented; debt-window N=16 (embedding-debt
+cap) implemented with the §3.11 blind-spot described above; persisted
+cache = `.vec` + `.tree` sidecars under `.recall-cache/`
+(`internal/recall/measure/veccache.go`, `treecache.go`); shadow-chunk
+oracle implemented in the sim. On top of this, the #111 within-thread
+summary hierarchy shipped: an O(log n) beam descent over a per-thread
+summary tree (v0.1 node keys = deterministic exemplar sets per
+`ExemplarSummarizer`; an LLM-summary key is the deferred F-A enrichment
+at the same seam) built offline by the sleep cycle, replacing the O(n)
+flat fine-pass on the engaged thread. The W1 recall-preservation gate
+was green on a live 14-day run. Algorithm detail and acceptance criteria
+are in `design/within-thread-summary-hierarchy.md` and
+`design/intra-thread-recall-design.md`.
 
 **Recall surface.** At turn close the merged candidates are logged
 per-layer (`spine.match-fire` / `spine.embed-match-fire`) and, when an

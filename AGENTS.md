@@ -144,6 +144,25 @@ Complete:
   by the C.6 finding that symbolic Jaccard recall collapses under
   vocabulary drift — spec §3.4 was rewritten from a Jaccard-pre-filter
   cascade to embedding-primary parallel signals.
+- Intra-thread recall + within-thread summary hierarchy (#109/#111).
+  Chunk-level hierarchical embedding index for the engaged long-running
+  thread: coarse→fine with the engaged thread bypassing the coarse gate
+  (§4.1 step 3); turn-excerpt retained on disk past the assembly window
+  (durable content source fix, Inc 4); async single-indexer goroutine +
+  `atomic.Pointer` snapshot + dispatch watermark (I1/I2); persisted
+  `.vec` vector cache (O(changed) startup); sim shadow-chunk oracle +
+  Candidate-A workload + intra-thread probe. **W1 recall-preservation
+  gate green on live 14d: divergence 0/251** after Finding A (exemplar-set
+  propagation fix, d8e32b3 — pool = union of every child's full `.Vectors`
+  rather than child primaries; closes the structural W1 gap). Finding B
+  (intra coherence gate scoped to mock; report-only on live, #96 boundary)
+  shipped. Beam width k raised 4→8 (9c9493d) then restored to 4
+  (exemplar fix made the wider beam unnecessary, per BeamWidth comment).
+  `.tree` sidecar persisted (treecache.go, Inc C). Sleep-cycle
+  `RebuildTrees` builds/reconciles the summary trees offline (Inc D).
+  Still open: cost-minimization (re-verify W1==0 at narrower beam after
+  exemplar fix confirms the keys carry recall); brute-force O(n) backstop
+  for user-asserted-confidence fallback.
 
 In progress:
 - Phase C: recall-fidelity test infrastructure. Six-step plan in the
@@ -283,10 +302,23 @@ internal/turn/              §3.0 chain, turn loop, per-turn coalescing,
                             transient-data staging buffer, §3.4 recall
                             surface, §3.5 decay-triggered closure flow
 internal/recall/scoring/    pure Jaccard/cosine recall primitives
-                            (substrate-free, memops domain model only)
+                            (substrate-free, memops domain model only);
+                            chunk-tier: chunk.go (ProposeChunks,
+                            relevance-net cap), descend.go
+                            (DescendChunks beam descent, SummaryNode,
+                            exemplar-set keys), cluster.go (BuildTree,
+                            ExemplarSummarizer, agglomerative
+                            clusterByCosine)
 internal/recall/measure/    application-side recall stack (Service,
                             Recaller) — uses memops port for substrate
-                            access; composes scoring primitives
+                            access; composes scoring primitives; async
+                            single-indexer goroutine + atomic.Pointer
+                            snapshot; .recall-cache sidecars: veccache.go
+                            (.vec per-thread vectors), treecache.go (.tree
+                            per-thread summary trees); sleep-cycle tree
+                            builder: treebuilder.go (RebuildTrees /
+                            buildTreeSnapshot); W1 divergence probe:
+                            intraThreadDivergence / classifyW1Divergence
 internal/curator/           closure-summary drafting (§3.5/§5.2):
                             model-backed summary + anchor selection
 internal/chat/              REPL, slash dispatch, bootstrap UX
@@ -313,6 +345,8 @@ make build            # bin/personant
 make test             # go vet + go test ./... --count=1
 make integration-test # live reaper embedder/recall tests (opt-in)
 make sim              # acceptance rung-walk (mock); LIVE_EMBEDDING=true / LIVE_INFERENCE=true for live-mode
+                      # DURATION=<span>  override sim span (default 1w for mock; e.g. 1d, 14d, 1m, 2m, 6m or <N>d / Go duration 168h)
+                      #   named rungs: 1d|1w|1m|2m|6m  bare-day form: <N>d (e.g. 30d, 120d)  Go duration: 168h
 make recall-corpus-test # corpus recall-fidelity measurement (opt-in)
 make clean
 ```
@@ -330,6 +364,24 @@ under it an unreachable endpoint is a FAILURE, not a skip),
 `make` targets above set the right opt-in. Do not reintroduce
 `//go:build` tags for conditional execution — tagged tests are excluded
 from the normal compile and bit-rot silently.
+
+**Intra-thread recall metrics (#109/#111).** The sim emits the following at every rung; the W1 gate is build-blocking:
+
+*Counters (m.Counters):*
+- `recall_intra_descent_divergence` — run-total top-Kf leaf set difference between summary-tree descent and flat scan over every W1 probe on a live-embedding run. **HARD GATE: must be == 0.** A nonzero means the beam pruned a leaf the flat scan would return — zero-tolerance stop-and-root-cause, never widen the gate (see below).
+- `recall_intra_descent_probes` — denominator for the above (number of W1 probes evaluated; distinguishes "gate passed" from "no probe ran").
+- `recall_intra_w1_strict_miss` — of the divergent probes: a strictly-better leaf was pruned (real recall loss; fix keys or beam).
+- `recall_intra_w1_tie` — of the divergent probes: an equal-cosine leaf was substituted (tie-boundary, not a recall loss; fix tie-break).
+- `recall_intra_w1_tree_mismatch` — of the divergent probes: the flat scan ranked a leaf the tree does not contain (staleness/build edge).
+- `recall_intra_tree_rebuild_calls` — within-thread summary-tree (re)builds fired across sleep cycles; F-B trip-wire (watch for unbounded growth with main-thread length, escalates to the hybrid-rebalancing MAD).
+
+*Gauges (m.Gauges):*
+- `recall_intra_hop_recall` / `recall_intra_embed_hop_recall` — symbolic (predicted) and embedding (observed) intra-thread recall by hop distance; the #109 fidelity curve. Reported, not gated to a floor — the curve is the deliverable.
+- `recall_intra_coherence_divergence` — symbolic oracle vs. runtime intra fine-tier disagreement; **HARD gate == 0 on mock runs** (mock embedder → symbolic oracle valid); report-only on live-embedding runs (symbolic oracle ≠ embedding recall by design, #96).
+- `recall_intra_blindspot_misses` — intra probes that missed because the target chunk was inside the debt-window blind spot (by-design lag, not loss).
+- `recall_query_cosine_ops` — measured per-query cosine comparisons (coarse + fine population + engaged-thread descent or flat scan); the headline perf-bend metric.
+
+**W1 recall-preservation HARD GATE (#111 §7.1, build-blocking on live-embedding runs):** `recall_intra_descent_divergence == 0` is the acceptance criterion. The descent is a performance optimization that must not change which leaves are recalled; any nonzero divergence means speed was traded for recall. First nonzero = stop-and-root-cause (raise beam width, or fix tree/clustering build side). **Never widen the gate tolerance** — that disables the safety canary.
 
 **Ensure Docs Stay Up To Date** - AGENTS.md, README.md, ARCHITECTURE.md, SPEC.md must be brought up to date when committing checkpoints.
 
