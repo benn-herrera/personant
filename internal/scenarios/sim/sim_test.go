@@ -860,6 +860,19 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 			t.Errorf("#111 W1 FAILURE: recall_intra_descent_divergence %d != 0 over %d probes — the beam descent did NOT return the same top-Kf leaves the flat O(C_main) scan would. Speed was traded for recall. Root-cause the beam width or the tree build; do NOT widen the gate tolerance.",
 				descentDivergence, descentProbes)
 		}
+		// W1 divergence classification (#111 §7.1 DIAGNOSTIC) — the headline
+		// that says WHICH kind each divergence is: strict-miss (a strictly
+		// better leaf was pruned → real recall loss, fix keys/beam), tie (an
+		// equal-cosine leaf was substituted → not lost recall, fix a tie-break),
+		// or tree-mismatch (the flat scan ranked a leaf the tree does not
+		// contain → staleness/build edge). Two prior key strategies both gave
+		// exactly the same divergence count; this breakdown settles whether
+		// that is key-quality (strict-miss) or structural (tie/tree-mismatch).
+		// Pure observation; per-probe detail is in logs/ as recall.W1-diag.
+		t.Logf("recall_intra_w1 classification: strict_miss=%d tie=%d tree_mismatch=%d (#111 §7.1 diagnostic — strict_miss=real loss/fix keys; tie=equal-cosine/fix tie-break; tree_mismatch=staleness/build edge)",
+			int(m.Gauges[metricRecallIntraW1StrictMiss]),
+			int(m.Gauges[metricRecallIntraW1Tie]),
+			int(m.Gauges[metricRecallIntraW1TreeMismatch]))
 	}
 
 	// F-B rebuild trip-wire (#111 / design §7.2, fork F-B). recall_intra_tree_
@@ -1672,6 +1685,10 @@ func recordIntraThreadMetrics(h *scenarios.Harness, gen *generator, liveThreads 
 	// unavailable; the bend is measurable only on an embedding-live run, where a
 	// usable tree drives the descent). recordCosineOpsMeasured handles both.
 	recordCosineOpsMeasured(h)
+	// W1 divergence classification (#111 §7.1 diagnostic): the strict-miss /
+	// tie / tree-mismatch breakdown of recall_intra_descent_divergence. 0 on
+	// the mock run; the headline on a live-embedding run.
+	recordW1DiagTally(h)
 	h.Metrics.Set(metricRecallQueryLatencyP50, p50)
 	h.Metrics.Set(metricRecallQueryLatencyP95, p95)
 	h.Metrics.Set(metricRecallQueryLatencyP99, p99)
@@ -1743,6 +1760,37 @@ func recordCosineOpsMeasured(h *scenarios.Harness) {
 		}
 	}
 	h.Metrics.Set(metricRecallQueryCosineOps, perQuery)
+}
+
+// w1DiagReporter is the recaller surface the W1 DIAGNOSTIC tally reads
+// (#111 §7.1): the run-total classification of descent-vs-flat divergences
+// into strict-miss / tie / tree-mismatch. measure.Service satisfies it; the
+// symbolic-only mock default does not, so the gauges are 0 on the mock path
+// (no divergence occurs). Mirrors cosineOpsReporter's optional-interface
+// discipline. Pure observation — these gauges never gate.
+type w1DiagReporter interface {
+	W1DiagStrictMiss() int64
+	W1DiagTie() int64
+	W1DiagTreeMismatch() int64
+}
+
+// recordW1DiagTally emits the W1 divergence classification gauges (#111
+// §7.1) — the headline that says whether the recall_intra_descent_divergence
+// probes were real recall losses (strict-miss), benign equal-cosine
+// substitutions (tie), or staleness/build edges (tree-mismatch). Reads the
+// live recaller off the harness State; 0 on the mock path (no divergence).
+// The per-probe detail and a final tally also land in logs/ as
+// recall.W1-diag / recall.W1-diag-tally (the recaller's own emission).
+func recordW1DiagTally(h *scenarios.Harness) {
+	var sm, tie, tm int64
+	if h.State != nil && h.State.Recaller != nil {
+		if rep, ok := h.State.Recaller.(w1DiagReporter); ok {
+			sm, tie, tm = rep.W1DiagStrictMiss(), rep.W1DiagTie(), rep.W1DiagTreeMismatch()
+		}
+	}
+	h.Metrics.Set(metricRecallIntraW1StrictMiss, float64(sm))
+	h.Metrics.Set(metricRecallIntraW1Tie, float64(tie))
+	h.Metrics.Set(metricRecallIntraW1TreeMismatch, float64(tm))
 }
 
 // closureCount counts `retire.complete` events in the harness's event

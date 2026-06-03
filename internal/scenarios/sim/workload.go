@@ -843,23 +843,23 @@ func GenerateWorkload(cfg WorkloadConfig) scenarios.Scenario {
 			slots:      cfg.Corpus,
 			familySize: cfg.FamilySize,
 		},
-		files:               map[int]*fileState{},
-		recallBuckets:       map[string]*recallTally{},
-		emittedSyms:         map[int]map[string]struct{}{},
-		carrierIdx:          map[int]struct{}{},
-		carrier:             -1,
-		wanderHopHits:       map[int]int{},
-		wanderHopTotal:      map[int]int{},
-		wanderHopCoherent:   map[int]int{},
-		wanderHopDiverge:    map[int]int{},
-		wanderHopEmbedHits:  map[int]int{},
-		mainThreadIdx:       -1,
-		shadowChunks:        map[int][]chunkRecord{},
+		files:              map[int]*fileState{},
+		recallBuckets:      map[string]*recallTally{},
+		emittedSyms:        map[int]map[string]struct{}{},
+		carrierIdx:         map[int]struct{}{},
+		carrier:            -1,
+		wanderHopHits:      map[int]int{},
+		wanderHopTotal:     map[int]int{},
+		wanderHopCoherent:  map[int]int{},
+		wanderHopDiverge:   map[int]int{},
+		wanderHopEmbedHits: map[int]int{},
+		mainThreadIdx:      -1,
+		shadowChunks:       map[int][]chunkRecord{},
 		// Derived, fixed seed for the keep/toss PRNG — distinct from cfg.Seed so
 		// the trim draws do not interleave with g.rng's action draws, yet still a
 		// pure function of cfg.Seed (the determinism contract). The offset is an
 		// arbitrary fixed constant; any deterministic derivation works.
-		trimRng: rand.New(rand.NewSource(cfg.Seed ^ keepTossSeedOffset)),
+		trimRng:             rand.New(rand.NewSource(cfg.Seed ^ keepTossSeedOffset)),
 		intraHopTotal:       map[int]int{},
 		intraHopPredictHit:  map[int]int{},
 		intraHopObservedHit: map[int]int{},
@@ -1690,6 +1690,19 @@ const (
 	// (== 0 is the pass on an embedding-live run; trivially 0 on the mock run,
 	// where the intra layer is off and no observed-vs-predicted tally runs).
 	metricRecallIntraCoherenceDivergence = "recall_intra_coherence_divergence"
+
+	// metricRecallIntraW1StrictMiss / Tie / TreeMismatch are the DIAGNOSTIC
+	// classification of the W1 descent-vs-flat divergences (#111 §7.1): of the
+	// recall_intra_descent_divergence probes, how many were a genuine recall
+	// loss (a strictly-better leaf pruned — fixable by better keys / beam),
+	// an equal-cosine tie-boundary substitution (not lost recall — fixable by
+	// a gate tie-break), or a tree-mismatch (the flat scan ranked a leaf the
+	// tree does not contain — a staleness/build edge). Read from the recaller's
+	// W1Diag* surface post-run. All 0 on the mock run (no divergence occurs);
+	// the headline that classifies the live-run 4/251 gap.
+	metricRecallIntraW1StrictMiss   = "recall_intra_w1_strict_miss"
+	metricRecallIntraW1Tie          = "recall_intra_w1_tie"
+	metricRecallIntraW1TreeMismatch = "recall_intra_w1_tree_mismatch"
 )
 
 // Synthesis-thread metric keys (§2.7.3, #47/#42). Defined here so the
@@ -3605,11 +3618,15 @@ func (g *generator) buildMainThreadStep() bufStep {
 // The oracle predicts a hit iff SOME shadow chunk of the queried slot is
 // (a) scrolled out of the assembly window (turnNumber <= cur - window),
 // (b) past the debt-window blind spot (turnNumber <= cur - window - debtCap;
-//     §6.5 — a chunk scrolled out < debtCap turns ago may be unflushed, so
-//     it is predicted MISS, NOT a divergence), AND
+//
+//	§6.5 — a chunk scrolled out < debtCap turns ago may be unflushed, so
+//	it is predicted MISS, NOT a divergence), AND
+//
 // (c) clears simRecallThreshold against the query under simJaccard, scored
-//     PER CHUNK (the same set/union semantics the runtime applies per chunk
-//     vector — §8.2 coherence). blindspot is true when the queried slot has
+//
+//	PER CHUNK (the same set/union semantics the runtime applies per chunk
+//	vector — §8.2 coherence). blindspot is true when the queried slot has
+//
 // scrolled-out chunks but ALL of them are inside the blind spot, separating
 // by-design lag from real loss (recall_intra_blindspot_misses).
 //

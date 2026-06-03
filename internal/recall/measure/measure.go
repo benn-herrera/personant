@@ -302,6 +302,20 @@ type Service struct {
 	cosineOps     atomic.Int64
 	recallQueries atomic.Int64
 
+	// w1DiagStrictMiss / w1DiagTie / w1DiagTreeMismatch are the per-run
+	// classification tally of W1 descent-vs-flat divergences (the #111
+	// diagnostic — design within-thread-summary-hierarchy.md §7.1). Each
+	// divergent probe (descent top-Kf != flat top-Kf) is classified once
+	// and bumps exactly one of these (see classifyW1Divergence). They are
+	// pure observation: never gate, never alter recall. On the mock run no
+	// divergence occurs (W1==0 by construction), so all three stay 0 and no
+	// diagnostic line is emitted. Read post-run via the W1Diag* accessors
+	// (the sim emits recall_intra_w1_strict_miss / _tie / _tree_mismatch
+	// gauges) and summarized once on Close as recall.W1-diag-tally.
+	w1DiagStrictMiss   atomic.Int64
+	w1DiagTie          atomic.Int64
+	w1DiagTreeMismatch atomic.Int64
+
 	closeOnce sync.Once
 }
 
@@ -497,6 +511,15 @@ func (s *Service) SweepCache(ctx context.Context) error {
 // and safe to call when Prepare never ran (no goroutine, no channel).
 func (s *Service) Close() error {
 	s.closeOnce.Do(func() {
+		// Per-run W1 diagnostic tally (#111 §7.1) — the headline. Emitted
+		// once, only when at least one divergence was classified, so the mock
+		// run (no embedder, no divergence) writes nothing. Greppable in logs/
+		// as recall.W1-diag-tally beside the per-probe recall.W1-diag lines.
+		sm, tie, tm := s.w1DiagStrictMiss.Load(), s.w1DiagTie.Load(), s.w1DiagTreeMismatch.Load()
+		if sm+tie+tm > 0 {
+			_ = s.ops.Log(context.Background(), memops.LogCategoryRecall, "W1-diag-tally",
+				fmt.Sprintf("strict_miss=%d tie=%d tree_mismatch=%d", sm, tie, tm))
+		}
 		if s.jobs == nil {
 			return
 		}
@@ -937,7 +960,7 @@ func composeNodeHash(childHashes []string) string {
 // from — the flat scan IS the result). A nonzero return is the
 // zero-tolerance stop-and-root-cause signal: raise the beam or fix the
 // build side, never widen the gate.
-func (s *Service) intraThreadDivergence(q []float64, snap *indexSnapshot, engaged string) int {
+func (s *Service) intraThreadDivergence(ctx context.Context, q []float64, snap *indexSnapshot, engaged string) int {
 	if engaged == "" {
 		return 0
 	}
@@ -947,7 +970,168 @@ func (s *Service) intraThreadDivergence(q []float64, snap *indexSnapshot, engage
 	}
 	descent := scoring.DescendChunks(q, snap.tree[engaged], scoring.DescendOptions{Limit: Kf})
 	flat := scoring.ProposeChunks(q, leaves, scoring.ChunkOptions{Limit: Kf})
-	return turnSetDifference(descent, flat)
+	div := turnSetDifference(descent, flat)
+	if div > 0 {
+		// DIAGNOSTIC ONLY (#111 §7.1): classify and log the per-probe detail
+		// so a live run's 4/251 divergences can be read out of logs/. Pure
+		// observation — it does not touch div, the gate, or recall.
+		s.emitW1Diag(ctx, snap.tree[engaged], descent, flat)
+	}
+	return div
+}
+
+// w1Epsilon is the cosine-equality tolerance for the W1 divergence
+// classification (#111 §7.1 diagnostic). Two leaf cosines within this of
+// each other are treated as EQUAL — a tie-boundary substitution, not a
+// recall loss. nomic embeddings are float64 and cosine arithmetic carries
+// rounding noise well below this; 1e-9 is loose enough to absorb that noise
+// yet tight enough that a genuine ranking gap (a strict-miss) never reads as
+// a tie. It classifies a measurement, never gates.
+const w1Epsilon = 1e-9
+
+// w1Class is the diagnostic classification of one W1 divergence (#111
+// §7.1). It says whether the divergence is a genuine recall loss or a
+// benign equal-cosine substitution — the empirical question the
+// instrumentation settles.
+type w1Class string
+
+const (
+	// w1StrictMiss: the best leaf the flat scan ranked but descent missed
+	// has STRICTLY higher cosine (beyond w1Epsilon) than the best leaf
+	// descent substituted for it — a real recall loss (a better leaf was
+	// pruned). Fixable by better keys / beam (F-A), not a gate refinement.
+	w1StrictMiss w1Class = "strict-miss"
+	// w1Tie: the best missed leaf and the best substituted leaf are within
+	// w1Epsilon — descent picked a DIFFERENT leaf of EQUAL cosine at the
+	// top-Kf cut. Not lost recall; fixable by a gate-correctness refinement
+	// (a deterministic tie-break), not by better keys.
+	w1Tie w1Class = "tie"
+	// w1TreeMismatch: a missed leaf is not present among the tree's leaves
+	// at all — the flat scan ranked a leaf the descent tree does not
+	// contain. A staleness/build edge (the tree's leaf set drifted from
+	// snap.fine), not a key-quality or tie issue.
+	w1TreeMismatch w1Class = "tree-mismatch"
+)
+
+// classifyW1Divergence classifies one W1 divergence from the missed set
+// (in flat top-Kf, not in descent) and the substituted set (in descent,
+// not in flat), given the set of turn numbers the tree actually contains.
+// It is pure and unit-tested: tree-mismatch first (a missed leaf absent
+// from the tree is a build/staleness edge, distinct from any cosine
+// comparison), then the best-missed-vs-best-substituted cosine comparison
+// at tolerance eps (strict-miss when missed is strictly higher, else tie).
+//
+// Each candidate carries its own cosine in Score (the terminal
+// ProposeChunks fills it for both paths over the same operating point), so
+// no cosine is recomputed here — the classification reads the scores the
+// gate already produced. If descent returned fewer leaves (empty substituted
+// set) and the missed leaf has a real positive cosine, bestSub is 0 and the
+// row is a strict-miss — descent dropped a leaf the flat scan surfaced and
+// put nothing in its place, a genuine loss.
+func classifyW1Divergence(missed, substituted []scoring.ChunkCandidate, treeTurns map[int]struct{}, eps float64) w1Class {
+	for _, m := range missed {
+		if _, ok := treeTurns[m.TurnNumber]; !ok {
+			return w1TreeMismatch
+		}
+	}
+	bestMissed := bestScore(missed)
+	bestSub := bestScore(substituted)
+	if bestMissed > bestSub+eps {
+		return w1StrictMiss
+	}
+	return w1Tie
+}
+
+// bestScore returns the highest cosine Score in a candidate set, or 0 for
+// an empty set (the candidates are already threshold-filtered and >= 0).
+func bestScore(cands []scoring.ChunkCandidate) float64 {
+	best := 0.0
+	for _, c := range cands {
+		if c.Score > best {
+			best = c.Score
+		}
+	}
+	return best
+}
+
+// emitW1Diag computes the per-divergence detail and writes ONE greppable
+// recall.W1-diag line to the substrate log (#111 §7.1 diagnostic). It also
+// bumps the run tally (classifyW1Divergence's verdict). Called only on a
+// divergent probe; pure observation, never gates. The log channel is the
+// same memops.LogCategoryRecall the embed-error line uses, so logs/ can be
+// grepped for `recall.W1-diag` after a live run.
+func (s *Service) emitW1Diag(ctx context.Context, tree *scoring.SummaryNode, descent, flat []scoring.ChunkCandidate) {
+	descSet := turnSet(descent)
+	flatSet := turnSet(flat)
+	missed := diffCandidates(flat, descSet)         // in flat, not descent — lost
+	substituted := diffCandidates(descent, flatSet) // in descent, not flat — gained
+
+	treeTurns := make(map[int]struct{})
+	for _, t := range scoring.TreeLeafTurns(tree) {
+		treeTurns[t] = struct{}{}
+	}
+	class := classifyW1Divergence(missed, substituted, treeTurns, w1Epsilon)
+	switch class {
+	case w1StrictMiss:
+		s.w1DiagStrictMiss.Add(1)
+	case w1Tie:
+		s.w1DiagTie.Add(1)
+	case w1TreeMismatch:
+		s.w1DiagTreeMismatch.Add(1)
+	}
+
+	if s.ops == nil {
+		return // no substrate to log to (unit-test construction); tally still bumped
+	}
+	detail := fmt.Sprintf(
+		"class=%s flat=%s descent=%s missed=%s substituted=%s",
+		class,
+		fmtCandidates(flat),
+		fmtCandidates(descent),
+		fmtCandidates(missed),
+		fmtCandidates(substituted),
+	)
+	_ = s.ops.Log(ctx, memops.LogCategoryRecall, "W1-diag", detail)
+}
+
+// turnSet collects a candidate set's turn numbers into a lookup set.
+func turnSet(cands []scoring.ChunkCandidate) map[int]struct{} {
+	out := make(map[int]struct{}, len(cands))
+	for _, c := range cands {
+		out[c.TurnNumber] = struct{}{}
+	}
+	return out
+}
+
+// diffCandidates returns the candidates whose turn number is NOT in other —
+// the set difference at candidate granularity (so each kept candidate
+// retains its Score for the classification + log).
+func diffCandidates(cands []scoring.ChunkCandidate, other map[int]struct{}) []scoring.ChunkCandidate {
+	var out []scoring.ChunkCandidate
+	for _, c := range cands {
+		if _, ok := other[c.TurnNumber]; !ok {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// fmtCandidates renders a candidate set as a compact greppable
+// "turn:cosine" list, e.g. "[412:0.7321 88:0.6904]". Empty → "[]".
+func fmtCandidates(cands []scoring.ChunkCandidate) string {
+	if len(cands) == 0 {
+		return "[]"
+	}
+	b := make([]byte, 0, len(cands)*16)
+	b = append(b, '[')
+	for i, c := range cands {
+		if i > 0 {
+			b = append(b, ' ')
+		}
+		b = append(b, fmt.Sprintf("%d:%.4f", c.TurnNumber, c.Score)...)
+	}
+	b = append(b, ']')
+	return string(b)
 }
 
 // turnSetDifference returns the number of turn numbers present in exactly
@@ -994,7 +1178,7 @@ func (s *Service) IntraThreadDivergence(ctx context.Context, queryText, engaged 
 	if q == nil {
 		return 0
 	}
-	return s.intraThreadDivergence(q, s.cur.Load(), engaged)
+	return s.intraThreadDivergence(ctx, q, s.cur.Load(), engaged)
 }
 
 // CosineOps returns the run-total count of cosine comparisons the embedding
@@ -1011,6 +1195,17 @@ func (s *Service) CosineOps() int64 { return s.cosineOps.Load() }
 // RecallQueries returns the number of embedding-recall queries counted into
 // CosineOps. See CosineOps.
 func (s *Service) RecallQueries() int64 { return s.recallQueries.Load() }
+
+// W1DiagStrictMiss / W1DiagTie / W1DiagTreeMismatch return the run-total
+// classification tally of W1 descent-vs-flat divergences (#111 §7.1
+// diagnostic) — the headline that says whether the divergences are real
+// recall losses (strict-miss), benign equal-cosine substitutions (tie), or
+// staleness/build edges (tree-mismatch). The sim reads these post-run and
+// emits them as recall_intra_w1_strict_miss / _tie / _tree_mismatch gauges.
+// All 0 on a mock run (no divergence occurs). Pure observation.
+func (s *Service) W1DiagStrictMiss() int64   { return s.w1DiagStrictMiss.Load() }
+func (s *Service) W1DiagTie() int64          { return s.w1DiagTie.Load() }
+func (s *Service) W1DiagTreeMismatch() int64 { return s.w1DiagTreeMismatch.Load() }
 
 // truncateForEmbed bounds text sent to the embedder. Byte truncation
 // may clip a trailing multi-byte rune; embedding endpoints tolerate

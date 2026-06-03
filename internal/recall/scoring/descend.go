@@ -226,6 +226,31 @@ func DescendChunks(query []float64, root *SummaryNode, opts DescendOptions) []Ch
 	return ProposeChunks(query, leaves, ChunkOptions{Threshold: opts.Threshold, Limit: opts.Limit, Counter: opts.Counter})
 }
 
+// TreeLeafTurns returns the turn numbers of every leaf reachable in the
+// tree rooted at root, in pre-order. It is a pure topology walk used by
+// the W1 diagnostic (measure) to detect a tree-mismatch: a leaf the flat
+// scan ranked that the tree does not actually contain (a staleness/build
+// edge where the tree's leaf set drifted from snap.fine). A nil root
+// yields nil. No I/O.
+func TreeLeafTurns(root *SummaryNode) []int {
+	if root == nil {
+		return nil
+	}
+	var out []int
+	var walk func(n *SummaryNode)
+	walk = func(n *SummaryNode) {
+		if n.isLeaf() {
+			out = append(out, n.Leaf.TurnNumber)
+			return
+		}
+		for _, c := range n.Children {
+			walk(c)
+		}
+	}
+	walk(root)
+	return out
+}
+
 // hasInternal reports whether any node in the frontier is an internal
 // node (has children to descend into).
 func hasInternal(frontier []*SummaryNode) bool {

@@ -172,7 +172,7 @@ func TestIntraChunks_Descent_MatchesFlat(t *testing.T) {
 		if !sameTurnSet(got, flat) {
 			t.Errorf("axis %d: descent top-Kf %v != flat %v", axis, turns(got), turns(flat))
 		}
-		if d := svc.intraThreadDivergence(q, snap, "thr_eng"); d != 0 {
+		if d := svc.intraThreadDivergence(context.Background(), q, snap, "thr_eng"); d != 0 {
 			t.Errorf("axis %d: divergence = %d, want 0 (coherent case)", axis, d)
 		}
 	}
@@ -261,7 +261,7 @@ func TestTreeUsable_BelowThreshold_FlatFallback(t *testing.T) {
 		t.Errorf("below-threshold intraChunks %v != flat %v", turns(got), turns(want))
 	}
 	// And the divergence hook is 0 below threshold (no fast path).
-	if d := (&Service{}).intraThreadDivergence(q, snap, "thr_eng"); d != 0 {
+	if d := (&Service{}).intraThreadDivergence(context.Background(), q, snap, "thr_eng"); d != 0 {
 		t.Errorf("below-threshold divergence = %d, want 0", d)
 	}
 }
