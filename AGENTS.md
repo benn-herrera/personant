@@ -377,6 +377,7 @@ from the normal compile and bit-rot silently.
 
 *Gauges (m.Gauges):*
 - `recall_intra_hop_recall` / `recall_intra_embed_hop_recall` — symbolic (predicted) and embedding (observed) intra-thread recall by hop distance; the #109 fidelity curve. Reported, not gated to a floor — the curve is the deliverable.
+- `recall_intra_recall_bydepth` / `recall_intra_embed_recall_bydepth` — same recall, bucketed by TURN-DEPTH (currentTurn−targetTurn, log-scale powers of B=16) keyed `_d<bucket>` (+`_obs`); the multi-year-thread no-decay axis of the #109 curve. Symbolic on every run, embedding-observed live-only. Report-only — no gate, no floor.
 - `recall_intra_coherence_divergence` — symbolic oracle vs. runtime intra fine-tier disagreement; **HARD gate == 0 on mock runs** (mock embedder → symbolic oracle valid); report-only on live-embedding runs (symbolic oracle ≠ embedding recall by design, #96).
 - `recall_intra_blindspot_misses` — intra probes that missed because the target chunk was inside the debt-window blind spot (by-design lag, not loss).
 - `recall_query_cosine_ops` — measured per-query cosine comparisons (coarse + fine population + engaged-thread descent or flat scan); the headline perf-bend metric.

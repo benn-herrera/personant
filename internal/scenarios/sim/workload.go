@@ -860,11 +860,14 @@ func GenerateWorkload(cfg WorkloadConfig) scenarios.Scenario {
 		// pure function of cfg.Seed (the determinism contract). The offset is an
 		// arbitrary fixed constant; any deterministic derivation works.
 		trimRng:             rand.New(rand.NewSource(cfg.Seed ^ keepTossSeedOffset)),
-		intraHopTotal:       map[int]int{},
-		intraHopPredictHit:  map[int]int{},
-		intraHopObservedHit: map[int]int{},
-		intraHopCoherent:    map[int]int{},
-		intraHopDiverge:     map[int]int{},
+		intraHopTotal:         map[int]int{},
+		intraHopPredictHit:    map[int]int{},
+		intraHopObservedHit:   map[int]int{},
+		intraHopCoherent:      map[int]int{},
+		intraHopDiverge:       map[int]int{},
+		intraDepthTotal:       map[int]int{},
+		intraDepthPredictHit:  map[int]int{},
+		intraDepthObservedHit: map[int]int{},
 	}
 	return scenarios.Scenario{
 		Name:       fmt.Sprintf("sim-workload-seed%d-dur%s", cfg.Seed, cfg.Duration),
@@ -950,6 +953,14 @@ type intraProbe struct {
 	hops       int    // current-traj-index − queried-slot-traj-index (>=1)
 	predictHit bool   // oracle prediction: a recallable chunk clears threshold
 	blindspot  bool   // the queried slot's chunks are all inside the debt-window blind spot
+	// turnDepth is currentTurn − targetTurn: how many turns back the
+	// oracle-predicted recall target scrolled out — the TURN-DEPTH axis of the
+	// #109 H2 quality curve (recall_intra_*_recall_bydepth). It is the more
+	// causal multi-year-thread no-decay axis (vs. the topic-drift `hops` axis).
+	// Set (>=1) only when the oracle predicted a target chunk (predictHit); 0
+	// means "no predicted target turn available" → the depth tally is SKIPPED
+	// for that probe (report-only characterization, never fabricate a bucket).
+	turnDepth int
 }
 
 // wanderProbe is the per-step metadata of an abandoned-topic probe. The
@@ -960,6 +971,51 @@ type wanderProbe struct {
 	threadID   string // the probed (wandering, dormant) thread's runtime id
 	hops       int    // current-traj-index − queried-slot-traj-index (>=1)
 	predictHit bool   // oracle prediction: simJaccard(Q, retained) >= threshold
+}
+
+// depthOrZero returns the turn-depth (cur − target) when the oracle predicted
+// a target turn (target>0 and cur>target), else 0 (skip the depth tally — no
+// predicted target, never fabricate a bucket). Result is >=1 when non-zero.
+func depthOrZero(cur, target int) int {
+	if target <= 0 || cur <= target {
+		return 0
+	}
+	return cur - target
+}
+
+// intraDepthBucket maps a turn-depth (>=1) to a LOG-SCALE bucket index, using
+// powers of the summary-tree branching factor B (scoring.TreeBranchingFactor =
+// 16) so each bucket maps to one descent level of the engaged-thread summary
+// tree: d0 = depth 1..15 (leaf level), d1 = 16..255 (one internal level),
+// d2 = 256..4095, d3 = 4096..65535, … — i.e. bucket = floor(log_B(depth)).
+// Powers of 16 (over plain powers of 2) are chosen because turn-depth on the
+// long Candidate-A thread spans 1..thousands and the recall path descends that
+// exact B-ary tree, so bucket edges that track descent depth read causally
+// against the cost curve. intraDepthBucketLabel renders the legible range.
+func intraDepthBucket(depth int) int {
+	if depth < scoring.TreeBranchingFactor {
+		return 0
+	}
+	b := 0
+	for hi := scoring.TreeBranchingFactor; depth >= hi; hi *= scoring.TreeBranchingFactor {
+		b++
+	}
+	return b
+}
+
+// intraDepthBucketLabel renders the inclusive turn-distance range for bucket b
+// (B=16): d0 → "1-15", d1 → "16-255", d2 → "256-4095", … — the legible x-axis
+// label for the by-depth summary log.
+func intraDepthBucketLabel(b int) string {
+	lo := 1
+	for i := 0; i < b; i++ {
+		lo *= scoring.TreeBranchingFactor
+	}
+	hi := lo * scoring.TreeBranchingFactor
+	if b == 0 {
+		lo = 1
+	}
+	return fmt.Sprintf("%d-%d", lo, hi-1)
 }
 
 // dayBuf is one generated calendar day's steps plus the global step
@@ -1133,6 +1189,23 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 		g.intraHopTotal[p.hops]++
 		if p.predictHit {
 			g.intraHopPredictHit[p.hops]++
+		}
+		// TURN-DEPTH sibling tally (#109 H2 quality curve, turn-depth axis): the
+		// SAME observation bucketed by log-scale turn-depth (intraDepthBucket,
+		// powers of B=16) instead of topic-drift hop. Recorded only when the
+		// oracle predicted a target turn (turnDepth>=1) — a probe with no
+		// predicted target turn is skipped (no fabricated bucket, report-only).
+		// Symbolic predicted on every run; embedding-observed on a live run only,
+		// matching the hop pair's gating exactly.
+		if p.turnDepth >= 1 {
+			d := intraDepthBucket(p.turnDepth)
+			g.intraDepthTotal[d]++
+			if p.predictHit {
+				g.intraDepthPredictHit[d]++
+			}
+			if g.embeddingRun && observedHit {
+				g.intraDepthObservedHit[d]++
+			}
 		}
 		if g.embeddingRun {
 			if observedHit {
@@ -1685,6 +1758,27 @@ const (
 	// NOT read a pre-A shortfall here as recall loss.
 	metricRecallIntraEmbedHopRecall = "recall_intra_embed_hop_recall"
 
+	// metricRecallIntraRecallByDepth / metricRecallIntraEmbedRecallByDepth are
+	// the SIBLING of the hop curve above, bucketed by a different, more causal
+	// x-axis: TURN-DEPTH = currentTurn − targetTurn (how many turns back the
+	// oracle-predicted recall target scrolled out of the engaged thread). This is
+	// the multi-year-thread no-decay axis — "for a target N turns deep, what
+	// fraction does recall actually surface" — the fidelity complement to the
+	// recall_query_cosine_ops cost curve. Keyed +"_d<bucket>" (see
+	// intraDepthBucket), each with an _obs companion (the per-bucket observation
+	// count, the shared denominator). metricRecallIntraRecallByDepth is the
+	// SYMBOLIC/predicted curve (every run); metricRecallIntraEmbedRecallByDepth is
+	// the EMBEDDING-OBSERVED curve (live-embedding runs only — intra layer off on
+	// the mock run → no spine.intra-match-fire → absent, exactly as the embed-hop
+	// metric is gated). Scored on the SAME observations and denominator as the hop
+	// pair, so the two columns are a directly-comparable head-to-head by depth.
+	// REPORT-ONLY characterization — no gate, no floor (acceptance is coherence +
+	// curve, not a recall floor). A probe with no oracle-predicted target turn is
+	// SKIPPED for this tally (turnDepth==0), so the depth denominator is the
+	// predicted-target subset of the hop denominator, not the full hop set.
+	metricRecallIntraRecallByDepth      = "recall_intra_recall_bydepth"
+	metricRecallIntraEmbedRecallByDepth = "recall_intra_embed_recall_bydepth"
+
 	// metricRecallIntraCoherenceDivergence is the run-total intra-thread
 	// oracle/runtime divergence across all hops — the #109 coherence tripwire
 	// (== 0 is the pass on an embedding-live run; trivially 0 on the mock run,
@@ -2056,6 +2150,19 @@ type generator struct {
 	intraHopCoherent     map[int]int
 	intraHopDiverge      map[int]int
 	intraBlindspotMisses int
+
+	// Intra-thread per-TURN-DEPTH probe tallies (#109 H2 quality curve,
+	// turn-depth axis) — the SIBLING of the per-hop tallies above on a
+	// log-scale turn-depth bucket (intraDepthBucket, powers of B=16). Tallied at
+	// the SAME probe site on the SAME observations, but only for probes with an
+	// oracle-predicted target turn (turnDepth>=1). intraDepthTotal is the
+	// per-bucket denominator; intraDepthPredictHit is the symbolic predicted
+	// curve (recall_intra_recall_bydepth, every run); intraDepthObservedHit is
+	// the embedding-observed curve (recall_intra_embed_recall_bydepth,
+	// embedding-live runs only). Keyed by bucket index.
+	intraDepthTotal       map[int]int
+	intraDepthPredictHit  map[int]int
+	intraDepthObservedHit map[int]int
 
 	// recallBuckets accumulates per-bucket {hits, total} recall tallies for
 	// the lifecycle oracles (drift_recall_origin, drift_recall_dest,
@@ -3675,6 +3782,7 @@ func (g *generator) buildIntraProbeStep() (bufStep, bool) {
 	// earlier slot's topical tags only). Whether ANY scrolled-out chunk exists
 	// for the slot (regardless of threshold) decides the blind-spot bookkeeping.
 	predictHit, anyScrolledOut, anyRecallable := false, false, false
+	targetTurn := 0 // turn number of the oracle-predicted recall target (0 = none)
 	for _, ch := range g.shadowChunks[idx] {
 		if ch.slotIdx != queriedSlotIdx {
 			continue
@@ -3694,6 +3802,7 @@ func (g *generator) buildIntraProbeStep() (bufStep, bool) {
 		set[saltSymbol(thr.order)] = struct{}{}
 		if simJaccard(Q, set) >= simRecallThreshold {
 			predictHit = true
+			targetTurn = ch.turnNumber // the chunk this probe should retrieve
 			break
 		}
 	}
@@ -3746,6 +3855,10 @@ func (g *generator) buildIntraProbeStep() (bufStep, bool) {
 			hops:       hop,
 			predictHit: predictHit,
 			blindspot:  blindspot,
+			// turn-depth = currentTurn − targetTurn, available only when the
+			// oracle predicted a target chunk (targetTurn>0). 0 → no predicted
+			// target → the depth tally skips this probe (never fabricate a bucket).
+			turnDepth: depthOrZero(cur, targetTurn),
 		},
 	}, true
 }

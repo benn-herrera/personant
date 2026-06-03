@@ -154,6 +154,41 @@ func TestSimEmbeddingHeadToHead_Machinery(t *testing.T) {
 			t.Errorf("%s = %.4f, out of [0,1]", metricRecallIntraEmbedHopRecall+key, v)
 		}
 	}
+
+	// 5) Per-turn-depth intra-thread embedding buckets (#109 H2 quality curve,
+	//    turn-depth axis): the SIBLING of (4) on the turn-depth axis. For every
+	//    depth bucket the symbolic predicted curve observed
+	//    (recall_intra_recall_bydepth obs > 0), the embedding-observed bucket
+	//    must be present and a valid ratio, on the SAME denominator. A short rung
+	//    may yield zero depth buckets (no probe carried an oracle-predicted target
+	//    turn) — acceptable, as with the hop buckets; when they DO appear the
+	//    embedding column must be emitted for each. Bucket indices are sparse
+	//    (log-scale, powers of B=16), so iterate the symbolic _obs keys present
+	//    rather than assuming contiguity.
+	for bucket := 0; ; bucket++ {
+		key := fmt.Sprintf("_d%d", bucket)
+		obs, ok := m.Gauges[metricRecallIntraRecallByDepth+key+"_obs"]
+		if !ok {
+			// Higher buckets may still exist (sparse); probe a generous ceiling
+			// before giving up. Depth on the long thread tops out well under B^6.
+			if bucket < 6 {
+				continue
+			}
+			break
+		}
+		if obs == 0 {
+			continue
+		}
+		v, ok := m.Gauges[metricRecallIntraEmbedRecallByDepth+key]
+		if !ok {
+			t.Errorf("intra depth bucket %d had %d symbolic probe obs but no %s embedding bucket emitted",
+				bucket, int(obs), metricRecallIntraEmbedRecallByDepth+key)
+			continue
+		}
+		if v < 0 || v > 1 {
+			t.Errorf("%s = %.4f, out of [0,1]", metricRecallIntraEmbedRecallByDepth+key, v)
+		}
+	}
 }
 
 // TestSimNoEmbedder_HeadToHeadAbsent is the negative control: the mock

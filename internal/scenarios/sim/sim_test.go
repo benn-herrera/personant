@@ -799,6 +799,51 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 		}
 	}
 
+	// Intra-thread recall by TURN-DEPTH (#109 H2 quality curve, turn-depth axis)
+	// — the SIBLING of the hop curve above, bucketed by how many turns back the
+	// oracle-predicted recall target scrolled out (log-scale, powers of B=16).
+	// REPORT-ONLY characterization (no gate, no floor): the multi-year-thread
+	// no-decay fidelity, the complement to the recall_query_cosine_ops cost
+	// curve. The embedding column is 0 at every bucket on the mock run (intra
+	// layer off), exactly as the hop embedding column is. Sorted by bucket so the
+	// shallow→deep ordering reads left-to-right.
+	if intraProbeObs > 0 {
+		depthBuckets := make([]int, 0, len(gen.intraDepthTotal))
+		for b := range gen.intraDepthTotal {
+			depthBuckets = append(depthBuckets, b)
+		}
+		sort.Ints(depthBuckets)
+		if len(depthBuckets) > 0 {
+			if embeddingRun {
+				t.Logf("intra-thread recall by turn-depth (symbolic predicted vs embedding-observed = actual user recall; report-only):")
+			} else {
+				t.Logf("intra-thread recall by turn-depth (oracle PREDICTED recoverability — symbolic-only run, observed n/a; report-only):")
+			}
+		}
+		for _, b := range depthBuckets {
+			key := fmt.Sprintf("_d%d", b)
+			obs := int(m.Gauges[metricRecallIntraRecallByDepth+key+"_obs"])
+			if obs == 0 {
+				continue
+			}
+			predicted := m.Gauges[metricRecallIntraRecallByDepth+key]
+			embed := m.Gauges[metricRecallIntraEmbedRecallByDepth+key]
+			// Range-validate to [0,1] as a sanity log only (mirrors the hop
+			// curve's intent) — report-only, never fail the test on these values.
+			if predicted < 0 || predicted > 1 || embed < 0 || embed > 1 {
+				t.Logf("  WARN depth %s: ratio out of [0,1] (predicted=%.3f embed=%.3f)",
+					intraDepthBucketLabel(b), predicted, embed)
+			}
+			if embeddingRun {
+				t.Logf("  depth %s: predicted=%.3f embed=%.3f (%d obs)",
+					intraDepthBucketLabel(b), predicted, embed, obs)
+			} else {
+				t.Logf("  depth %s: predicted=%.3f (%d obs)",
+					intraDepthBucketLabel(b), predicted, obs)
+			}
+		}
+	}
+
 	// Intra-thread coherence divergence — the #109 tripwire. SCOPED MOCK-ONLY
 	// (#109/#111 Finding B). This gate compares the SYMBOLIC shadow-chunk
 	// oracle's predicted recoverability against the runtime's intra fine-tier
@@ -1733,6 +1778,25 @@ func recordIntraThreadMetrics(h *scenarios.Harness, gen *generator, liveThreads 
 		h.Metrics.Set(metricRecallIntraEmbedHopRecall+key,
 			float64(gen.intraHopObservedHit[hop])/float64(total))
 		divergence += gen.intraHopDiverge[hop]
+	}
+
+	// Per-turn-depth intra-thread recall (#109 H2 quality curve, turn-depth
+	// axis) — the SIBLING of the per-hop curve, on a log-scale turn-depth bucket
+	// (powers of B=16). Same derivation as the hop pair: symbolic predicted curve
+	// (recall_intra_recall_bydepth, every run) + an _obs companion, plus the
+	// embedding-observed curve (recall_intra_embed_recall_bydepth, 0 at every
+	// bucket on the mock run — no intra layer — exactly as the embed-hop column
+	// is). REPORT-ONLY characterization: no gate, no floor.
+	for bucket, total := range gen.intraDepthTotal {
+		if total == 0 {
+			continue
+		}
+		key := fmt.Sprintf("_d%d", bucket)
+		h.Metrics.Set(metricRecallIntraRecallByDepth+key,
+			float64(gen.intraDepthPredictHit[bucket])/float64(total))
+		h.Metrics.Set(metricRecallIntraRecallByDepth+key+"_obs", float64(total))
+		h.Metrics.Set(metricRecallIntraEmbedRecallByDepth+key,
+			float64(gen.intraDepthObservedHit[bucket])/float64(total))
 	}
 	h.Metrics.Set(metricRecallIntraCoherenceDivergence, float64(divergence))
 	h.Metrics.Set(metricRecallIntraBlindspotMisses, float64(gen.intraBlindspotMisses))
