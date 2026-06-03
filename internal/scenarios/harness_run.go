@@ -280,9 +280,15 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 	// usable tree exists — divergence is 0 by construction otherwise (W8).
 	if h.indexer != nil && step.W1Engaged != "" && h.State != nil && h.State.Recaller != nil {
 		if probe, ok := h.State.Recaller.(intraDivergenceProbe); ok {
-			div := probe.IntraThreadDivergence(context.Background(), step.UserInput, step.W1Engaged)
+			div, class := probe.IntraThreadDivergence(context.Background(), step.UserInput, step.W1Engaged)
 			h.Metrics.Counter(metricRecallIntraDescentDivergence, int64(div))
 			h.Metrics.Counter(metricRecallIntraDescentProbes, 1)
+			// Accumulate the per-probe classification tally HERE, in lockstep
+			// with the divergence counter, so a strict-miss classified on an
+			// earlier per-session Service instance is not lost when a
+			// RestartSession swaps in a fresh Service with zeroed W1 atomics
+			// (the #111 bug). div==0 returns the empty class and bumps nothing.
+			recordW1Class(h, class)
 		}
 	}
 
@@ -541,7 +547,50 @@ const (
 	// distinguish "0 because the gate passed" from "0 because no probe ran".
 	metricRecallIntraDescentDivergence = "recall_intra_descent_divergence"
 	metricRecallIntraDescentProbes     = "recall_intra_descent_probes"
+
+	// metricRecallIntraW1StrictMiss / Tie / TreeMismatch are the per-run
+	// classification tally of the W1 descent-vs-flat divergences (#111 §7.1
+	// diagnostic): of the recall_intra_descent_divergence probes, how many were
+	// a genuine recall loss (a strictly-better leaf pruned), an equal-cosine
+	// tie-boundary substitution, or a tree-mismatch (the flat scan ranked a
+	// leaf the tree does not contain). The harness accumulates these from the
+	// per-probe class IntraThreadDivergence returns, at the SAME call site and
+	// moment it accumulates the divergence counter — so the classification and
+	// the divergence count are read from one place post-run and can never
+	// disagree, regardless of how many per-session Service instances a
+	// RestartSession run created and closed (each fresh Service zeroes its own
+	// W1 atomics; the harness-held counters survive the swap). The string keys
+	// are the contract with the sim summary reader (sim's metricRecallIntraW1*).
+	// All 0 on a mock run (no divergence occurs).
+	metricRecallIntraW1StrictMiss   = "recall_intra_w1_strict_miss"
+	metricRecallIntraW1Tie          = "recall_intra_w1_tie"
+	metricRecallIntraW1TreeMismatch = "recall_intra_w1_tree_mismatch"
+
+	// w1Class* are the per-probe class strings IntraThreadDivergence returns
+	// (the string form of measure's unexported w1Class). One source of truth
+	// for the harness's class→metric mapping; they must match the measure
+	// package's w1Class constant values.
+	w1ClassStrictMiss   = "strict-miss"
+	w1ClassTie          = "tie"
+	w1ClassTreeMismatch = "tree-mismatch"
 )
+
+// recordW1Class bumps the harness's run-total W1 classification tally for one
+// divergent probe (#111 §7.1). class is the per-probe verdict the recaller
+// returned ("strict-miss" / "tie" / "tree-mismatch"); the empty string (a
+// non-divergent probe) bumps nothing. An unrecognized class is ignored — the
+// recaller's contract is the three known values, so an unknown one would be a
+// recaller bug, not something to silently miscount under one of the buckets.
+func recordW1Class(h *Harness, class string) {
+	switch class {
+	case w1ClassStrictMiss:
+		h.Metrics.Counter(metricRecallIntraW1StrictMiss, 1)
+	case w1ClassTie:
+		h.Metrics.Counter(metricRecallIntraW1Tie, 1)
+	case w1ClassTreeMismatch:
+		h.Metrics.Counter(metricRecallIntraW1TreeMismatch, 1)
+	}
+}
 
 // runSleepCycle drives one ARCHITECTURE.md sleep cycle (#108): it measures
 // the substrate .git footprint, calls h.Ops.Consolidate (substrate gc), and

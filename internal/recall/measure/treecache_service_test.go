@@ -94,7 +94,7 @@ func TestTreeCache_Service_LoadNotRebuild(t *testing.T) {
 	// And the descent is live from session start: the engaged intra-pass still
 	// recalls the probed early content (the loaded tree drives it; divergence
 	// from the flat scan is 0 by W1).
-	if d := svc2.IntraThreadDivergence(context.Background(), probe, "thr_big"); d != 0 {
+	if d, _ := svc2.IntraThreadDivergence(context.Background(), probe, "thr_big"); d != 0 {
 		t.Errorf("session 2 descent diverged from flat (loaded tree): %d, want 0", d)
 	}
 }
@@ -122,7 +122,7 @@ func TestTreeCache_Service_DeleteRebuilds(t *testing.T) {
 	if !ok || r1.IntraThread == nil {
 		t.Fatalf("session 1 intra-thread hit missing")
 	}
-	div1 := svc1.IntraThreadDivergence(context.Background(), probe, "thr_big")
+	div1, _ := svc1.IntraThreadDivergence(context.Background(), probe, "thr_big")
 	if err := svc1.Close(); err != nil {
 		t.Fatalf("Close 1: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestTreeCache_Service_DeleteRebuilds(t *testing.T) {
 	if r1.IntraThread.Turns[0] != r2.IntraThread.Turns[0] {
 		t.Errorf("best turn differs after rebuild: was %v, now %v", r1.IntraThread.Turns[0], r2.IntraThread.Turns[0])
 	}
-	div2 := svc2.IntraThreadDivergence(context.Background(), probe, "thr_big")
+	div2, _ := svc2.IntraThreadDivergence(context.Background(), probe, "thr_big")
 	if div1 != 0 || div2 != 0 {
 		t.Errorf("descent diverged from flat: session1=%d session2=%d, want 0/0 (W1)", div1, div2)
 	}

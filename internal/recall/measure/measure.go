@@ -302,16 +302,24 @@ type Service struct {
 	cosineOps     atomic.Int64
 	recallQueries atomic.Int64
 
-	// w1DiagStrictMiss / w1DiagTie / w1DiagTreeMismatch are the per-run
-	// classification tally of W1 descent-vs-flat divergences (the #111
-	// diagnostic — design within-thread-summary-hierarchy.md §7.1). Each
-	// divergent probe (descent top-Kf != flat top-Kf) is classified once
+	// w1DiagStrictMiss / w1DiagTie / w1DiagTreeMismatch are the
+	// PER-INSTANCE classification tally of W1 descent-vs-flat divergences
+	// (the #111 diagnostic — design within-thread-summary-hierarchy.md §7.1).
+	// Each divergent probe (descent top-Kf != flat top-Kf) is classified once
 	// and bumps exactly one of these (see classifyW1Divergence). They are
 	// pure observation: never gate, never alter recall. On the mock run no
 	// divergence occurs (W1==0 by construction), so all three stay 0 and no
-	// diagnostic line is emitted. Read post-run via the W1Diag* accessors
-	// (the sim emits recall_intra_w1_strict_miss / _tie / _tree_mismatch
-	// gauges) and summarized once on Close as recall.W1-diag-tally.
+	// diagnostic line is emitted. Their ONLY consumer is the per-instance
+	// recall.W1-diag-tally line emitted on Close — useful forensics beside the
+	// per-probe recall.W1-diag lines for the threads this one Service handled.
+	//
+	// They are NOT the run-total: the harness rebuilds the Service per session
+	// (every RestartSession installs a fresh one with these zeroed), so the
+	// authoritative run-total W1 classification is accumulated by the harness
+	// at the per-probe call site (recall_intra_w1_* counters), in lockstep with
+	// recall_intra_descent_divergence, from the class IntraThreadDivergence
+	// returns. Do NOT re-add a post-run accessor that reads these as a run
+	// total — that two-instance mismatch was the #111 bug.
 	w1DiagStrictMiss   atomic.Int64
 	w1DiagTie          atomic.Int64
 	w1DiagTreeMismatch atomic.Int64
@@ -971,24 +979,34 @@ func composeNodeHash(childHashes []string) string {
 // from — the flat scan IS the result). A nonzero return is the
 // zero-tolerance stop-and-root-cause signal: raise the beam or fix the
 // build side, never widen the gate.
-func (s *Service) intraThreadDivergence(ctx context.Context, q []float64, snap *indexSnapshot, engaged string) int {
+// It returns the divergence size and, when div>0, the per-probe
+// classification (one of w1StrictMiss / w1Tie / w1TreeMismatch); div==0
+// returns the empty class. The class is surfaced — not just bumped on the
+// Service atomic — so the harness can accumulate the run-total classification
+// at the SAME call site and moment it accumulates the divergence counter,
+// keeping the two structurally consistent across the per-session Service
+// instance churn a RestartSession step causes (a fresh Service has zeroed
+// atomics; the harness-held counters survive the swap).
+func (s *Service) intraThreadDivergence(ctx context.Context, q []float64, snap *indexSnapshot, engaged string) (int, w1Class) {
 	if engaged == "" {
-		return 0
+		return 0, ""
 	}
 	leaves := snap.fine[engaged]
 	if !snap.treeUsable(engaged) {
-		return 0 // no fast path → nothing to diverge from (W8)
+		return 0, "" // no fast path → nothing to diverge from (W8)
 	}
 	descent := scoring.DescendChunks(q, snap.tree[engaged], scoring.DescendOptions{Limit: Kf})
 	flat := scoring.ProposeChunks(q, leaves, scoring.ChunkOptions{Limit: Kf})
 	div := turnSetDifference(descent, flat)
-	if div > 0 {
-		// DIAGNOSTIC ONLY (#111 §7.1): classify and log the per-probe detail
-		// so a live run's 4/251 divergences can be read out of logs/. Pure
-		// observation — it does not touch div, the gate, or recall.
-		s.emitW1Diag(ctx, snap.tree[engaged], descent, flat)
+	if div == 0 {
+		return 0, ""
 	}
-	return div
+	// DIAGNOSTIC ONLY (#111 §7.1): classify and log the per-probe detail
+	// so a live run's divergences can be read out of logs/. Pure
+	// observation — it does not touch div, the gate, or recall. emitW1Diag
+	// returns the class so the caller can accumulate it without reclassifying.
+	class := s.emitW1Diag(ctx, snap.tree[engaged], descent, flat)
+	return div, class
 }
 
 // w1Epsilon is the cosine-equality tolerance for the W1 divergence
@@ -1067,11 +1085,14 @@ func bestScore(cands []scoring.ChunkCandidate) float64 {
 
 // emitW1Diag computes the per-divergence detail and writes ONE greppable
 // recall.W1-diag line to the substrate log (#111 §7.1 diagnostic). It also
-// bumps the run tally (classifyW1Divergence's verdict). Called only on a
-// divergent probe; pure observation, never gates. The log channel is the
-// same memops.LogCategoryRecall the embed-error line uses, so logs/ can be
-// grepped for `recall.W1-diag` after a live run.
-func (s *Service) emitW1Diag(ctx context.Context, tree *scoring.SummaryNode, descent, flat []scoring.ChunkCandidate) {
+// bumps the run tally on the Service atomic (classifyW1Divergence's verdict)
+// and RETURNS the class so the caller can accumulate the run-total at the
+// harness call site (the instance-churn-proof reader; see
+// intraThreadDivergence). Called only on a divergent probe; pure observation,
+// never gates. The log channel is the same memops.LogCategoryRecall the
+// embed-error line uses, so logs/ can be grepped for `recall.W1-diag` after a
+// live run.
+func (s *Service) emitW1Diag(ctx context.Context, tree *scoring.SummaryNode, descent, flat []scoring.ChunkCandidate) w1Class {
 	descSet := turnSet(descent)
 	flatSet := turnSet(flat)
 	missed := diffCandidates(flat, descSet)         // in flat, not descent — lost
@@ -1092,7 +1113,7 @@ func (s *Service) emitW1Diag(ctx context.Context, tree *scoring.SummaryNode, des
 	}
 
 	if s.ops == nil {
-		return // no substrate to log to (unit-test construction); tally still bumped
+		return class // no substrate to log to (unit-test construction); tally still bumped
 	}
 	detail := fmt.Sprintf(
 		"class=%s flat=%s descent=%s missed=%s substituted=%s",
@@ -1103,6 +1124,7 @@ func (s *Service) emitW1Diag(ctx context.Context, tree *scoring.SummaryNode, des
 		fmtCandidates(substituted),
 	)
 	_ = s.ops.Log(ctx, memops.LogCategoryRecall, "W1-diag", detail)
+	return class
 }
 
 // turnSet collects a candidate set's turn numbers into a lookup set.
@@ -1179,17 +1201,28 @@ func turnSetDifference(a, b []scoring.ChunkCandidate) int {
 //
 // It mirrors Recall's read path — one atomic snapshot load (I1), the same
 // query embedding — so the differential is measured against the exact index
-// production recall would have used. Returns 0 when no embedder is
+// production recall would have used. Returns (0, "") when no embedder is
 // configured, the query is empty, or no usable tree exists for the engaged
 // thread (the W8 flat-only case, where there is no fast path to diverge
 // from). Keeping the snapshot and tree private to measure, this is the only
 // surface the harness needs.
-func (s *Service) IntraThreadDivergence(ctx context.Context, queryText, engaged string) int {
+//
+// The second return is the per-probe classification ("strict-miss" / "tie" /
+// "tree-mismatch", empty when div==0) as a plain string so the harness — in a
+// different package, which cannot see the unexported w1Class — can accumulate
+// the run-total class tally at the SAME call site it accumulates the
+// divergence counter. That co-location is what makes the two metrics survive
+// the per-session Service instance churn a RestartSession causes: the
+// Service-side atomics (W1DiagStrictMiss et al.) belong to whichever instance
+// ran the probe, but the harness-held counters are read from one place
+// post-run regardless of how many Services the run created and closed.
+func (s *Service) IntraThreadDivergence(ctx context.Context, queryText, engaged string) (int, string) {
 	q := s.embedQuery(ctx, queryText)
 	if q == nil {
-		return 0
+		return 0, ""
 	}
-	return s.intraThreadDivergence(ctx, q, s.cur.Load(), engaged)
+	div, class := s.intraThreadDivergence(ctx, q, s.cur.Load(), engaged)
+	return div, string(class)
 }
 
 // CosineOps returns the run-total count of cosine comparisons the embedding
@@ -1206,17 +1239,6 @@ func (s *Service) CosineOps() int64 { return s.cosineOps.Load() }
 // RecallQueries returns the number of embedding-recall queries counted into
 // CosineOps. See CosineOps.
 func (s *Service) RecallQueries() int64 { return s.recallQueries.Load() }
-
-// W1DiagStrictMiss / W1DiagTie / W1DiagTreeMismatch return the run-total
-// classification tally of W1 descent-vs-flat divergences (#111 §7.1
-// diagnostic) — the headline that says whether the divergences are real
-// recall losses (strict-miss), benign equal-cosine substitutions (tie), or
-// staleness/build edges (tree-mismatch). The sim reads these post-run and
-// emits them as recall_intra_w1_strict_miss / _tie / _tree_mismatch gauges.
-// All 0 on a mock run (no divergence occurs). Pure observation.
-func (s *Service) W1DiagStrictMiss() int64   { return s.w1DiagStrictMiss.Load() }
-func (s *Service) W1DiagTie() int64          { return s.w1DiagTie.Load() }
-func (s *Service) W1DiagTreeMismatch() int64 { return s.w1DiagTreeMismatch.Load() }
 
 // truncateForEmbed bounds text sent to the embedder. Byte truncation
 // may clip a trailing multi-byte rune; embedding endpoints tolerate

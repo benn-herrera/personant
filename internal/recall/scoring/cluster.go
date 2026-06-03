@@ -216,64 +216,80 @@ func subtreeMinTurn(n *SummaryNode) int {
 }
 
 // ExemplarSummarizer is the default summary-key strategy (#111 Finding A):
-// it returns up to NodeExemplars CHILD vectors that COVER THE CLUSTER'S
-// SPREAD, so descent's max-cosine route keeps the branch alive for a query
-// near ANY region of the cluster — not just its center. It is exported as
-// the named v0.1 seam implementation so measure can wire it explicitly.
+// it returns up to NodeExemplars vectors that COVER THE CLUSTER'S SPREAD, so
+// descent's max-cosine route keeps the branch alive for a query near ANY
+// region of the cluster — not just its center. It is exported as the named
+// v0.1 seam implementation so measure can wire it explicitly.
 //
-// Method — deterministic medoid + farthest-point spread (a k-medoids-lite):
+// The candidate POOL is the UNION of every child's full exemplar set
+// (children[i].Vectors), NOT each child's primary .Vector (#111 Finding A
+// residual W1 fix). A child's .Vector is its own medoid, so spreading over
+// child primaries computes the spread over level-1 MEDOIDS — an extreme leaf
+// under a central-medoid child gets averaged away at every level above it,
+// and the one-level spread-coverage property does NOT compose up the tree.
+// Pooling the full exemplar sets keeps every extreme leaf that became a
+// lower-level exemplar a candidate to propagate to the root, so its branch
+// stays alive at the beam. Every pooled candidate is itself a real leaf
+// vector (leaves seed Vectors={leafVec} and this summarizer only ever
+// returns members of its input pool), so the pool — and the output — is
+// always real leaf vectors at every level; no synthesized/averaged vector
+// ever enters (the centroid is used only to PICK the medoid, never stored).
 //
-//  1. The MEDOID — the child whose vector is nearest the cluster centroid
-//     (max cosine to the mean) — anchors the set at the cluster's center.
-//     This is the single-centroid stand-in the old key was, but a REAL
-//     child vector (so it is a faithful point, not a meaningless average).
-//  2. Then, greedily, the child FARTHEST from the already-chosen exemplars
-//     (the one whose best/max cosine to the chosen set is LOWEST — the
-//     least-covered child) is added, NodeExemplars-1 times. Farthest-point
-//     sampling spreads the exemplars to the cluster's extremes, so every
-//     child has a near exemplar by construction → a query matching any
-//     in-cluster leaf routes through this node (the W1 recall-preservation
-//     property the spread buys).
+// Method — deterministic medoid + farthest-point spread (a k-medoids-lite)
+// over the pool:
 //
-// If the cluster has ≤ NodeExemplars children, the set is simply ALL the
-// children's vectors — full coverage, no loss (exactly the centroid-free
-// guarantee for a small cluster). Determinism (W4): ties in both the medoid
-// pick and the farthest pick break by the child's subtree-min turn number
-// (a stable, content-independent key), so the same children always yield
-// the same exemplar set → the same tree. Mismatched child dimensions are
-// handled by cosineSimilarity's defensive ragged behaviour. An empty group
-// yields nil (no signal), which descent scores as 0.
+//  1. The MEDOID — the pool member nearest the pool centroid (max cosine to
+//     the mean) — anchors the set at the cluster's center. A REAL leaf
+//     vector, not a meaningless average.
+//  2. Then, greedily, the pool member FARTHEST from the already-chosen
+//     exemplars (lowest max-cosine to the chosen set — the least-covered
+//     member) is added, NodeExemplars-1 times. Farthest-point sampling
+//     spreads the exemplars to the cluster's extremes, so a query matching
+//     any in-cluster leaf routes through this node (the W1 property).
+//
+// If the pool has ≤ NodeExemplars members, the set is simply ALL of them —
+// full coverage, no loss. Determinism (W4): every pooled candidate carries a
+// stable key (subtree-min turn of its child, index within that child's
+// Vectors, child index); ALL tie-breaks (medoid and farthest pick) use that
+// key, so the same children always yield the same exemplar set → the same
+// tree. Mismatched dims are handled by cosineSimilarity's defensive ragged
+// behaviour. An empty group yields nil (no signal), which descent scores 0.
 func ExemplarSummarizer(children []*SummaryNode) [][]float64 {
 	if len(children) == 0 {
 		return nil
 	}
-	if len(children) <= NodeExemplars {
-		// Small cluster: every child IS an exemplar — full coverage, no loss.
-		out := make([][]float64, len(children))
-		for i, c := range children {
-			out[i] = c.Vector
+
+	pool := poolExemplars(children)
+	if len(pool) == 0 {
+		return nil
+	}
+	if len(pool) <= NodeExemplars {
+		// Small pool: every candidate IS an exemplar — full coverage, no loss.
+		out := make([][]float64, len(pool))
+		for i, c := range pool {
+			out[i] = c.vec
 		}
 		return out
 	}
 
-	center := centroidOf(children)
+	center := centroidOfVecs(pool)
 	chosen := make([]int, 0, NodeExemplars)
-	taken := make([]bool, len(children))
+	taken := make([]bool, len(pool))
 
-	// 1. Medoid: the child nearest the centroid (max cosine), turn-number
+	// 1. Medoid: the pool member nearest the centroid (max cosine), stable-key
 	//    tie-break.
-	medoid := bestChild(children, func(i int) float64 {
-		return cosineSimilarity(center, children[i].Vector)
+	medoid := bestPooled(pool, func(i int) float64 {
+		return cosineSimilarity(center, pool[i].vec)
 	})
 	chosen = append(chosen, medoid)
 	taken[medoid] = true
 
-	// 2. Farthest-point spread: repeatedly add the least-covered child — the
+	// 2. Farthest-point spread: repeatedly add the least-covered member — the
 	//    one whose MAX cosine to the already-chosen exemplars is smallest
-	//    (lower cosine = farther). We pick the child MINIMISING that coverage
-	//    score, turn-number tie-break, so each addition reaches a new extreme.
+	//    (lower cosine = farther). We pick the member MINIMISING that coverage
+	//    score, stable-key tie-break, so each addition reaches a new extreme.
 	for len(chosen) < NodeExemplars {
-		next := worstCoveredChild(children, chosen, taken)
+		next := worstCoveredPooled(pool, chosen, taken)
 		if next < 0 {
 			break
 		}
@@ -283,69 +299,123 @@ func ExemplarSummarizer(children []*SummaryNode) [][]float64 {
 
 	out := make([][]float64, len(chosen))
 	for i, idx := range chosen {
-		out[i] = children[idx].Vector
+		out[i] = pool[idx].vec
 	}
 	return out
 }
 
-// centroidOf returns the element-wise mean of the children's primary
-// vectors — used only to seed the medoid pick (the centroid itself is never
-// a descent key; #111 Finding A). Ragged dims are summed up to the shortest.
-func centroidOf(children []*SummaryNode) []float64 {
-	d := len(children[0].Vector)
-	out := make([]float64, d)
-	for _, c := range children {
-		for i := 0; i < d && i < len(c.Vector); i++ {
-			out[i] += c.Vector[i]
+// pooledVec is one candidate in the exemplar pool: a real leaf vector plus
+// the stable sort key (childTurn, vecIdx, childIdx) that makes every pick and
+// tie-break deterministic (W4). The key uniquely orders pooled vectors even
+// when two share a value, which subtreeMinTurn alone no longer can (a child
+// contributes multiple pooled vectors).
+type pooledVec struct {
+	vec       []float64
+	childTurn int // child's subtree-min turn number
+	vecIdx    int // index within that child's Vectors
+	childIdx  int // child's position in the children slice
+}
+
+// less reports whether p sorts before q under the stable key — the single
+// tie-break ordering used everywhere in the spread (W4 determinism).
+func (p pooledVec) less(q pooledVec) bool {
+	if p.childTurn != q.childTurn {
+		return p.childTurn < q.childTurn
+	}
+	if p.vecIdx != q.vecIdx {
+		return p.vecIdx < q.vecIdx
+	}
+	return p.childIdx < q.childIdx
+}
+
+// poolExemplars flattens the children's full exemplar sets into one candidate
+// pool (#111 Finding A residual fix). Each child contributes every vector in
+// its Vectors (falling back to {Vector} for a node built single-key), each
+// tagged with the stable sort key. Nil/empty vectors are skipped.
+func poolExemplars(children []*SummaryNode) []pooledVec {
+	pool := make([]pooledVec, 0, len(children)*NodeExemplars)
+	for ci, c := range children {
+		ct := subtreeMinTurn(c)
+		for vi, v := range c.exemplars() {
+			if len(v) == 0 {
+				continue
+			}
+			pool = append(pool, pooledVec{vec: v, childTurn: ct, vecIdx: vi, childIdx: ci})
 		}
 	}
-	inv := 1.0 / float64(len(children))
+	return pool
+}
+
+// centroidOfVecs returns the element-wise mean of the pooled vectors — used
+// only to seed the medoid pick (the centroid itself is never a descent key;
+// #111 Finding A). Ragged dims are summed up to the shortest.
+func centroidOfVecs(pool []pooledVec) []float64 {
+	d := len(pool[0].vec)
+	out := make([]float64, d)
+	for _, p := range pool {
+		for i := 0; i < d && i < len(p.vec); i++ {
+			out[i] += p.vec[i]
+		}
+	}
+	inv := 1.0 / float64(len(pool))
 	for i := range out {
 		out[i] *= inv
 	}
 	return out
 }
 
-// bestChild returns the index of the child maximising score(i), breaking
-// ties toward the lower subtree-min turn number (W4 determinism).
-func bestChild(children []*SummaryNode, score func(i int) float64) int {
+// centroidOf returns the element-wise mean of the children's primary vectors.
+// It is the node-level convenience over centroidOfVecs (DRY) — used by tests
+// (centroidOnlySummarizer) to model the old single-centroid key. Ragged dims
+// are summed up to the shortest.
+func centroidOf(children []*SummaryNode) []float64 {
+	pool := make([]pooledVec, len(children))
+	for i, c := range children {
+		pool[i] = pooledVec{vec: c.Vector}
+	}
+	return centroidOfVecs(pool)
+}
+
+// bestPooled returns the index of the pool member maximising score(i),
+// breaking ties toward the lower stable key (W4 determinism).
+func bestPooled(pool []pooledVec, score func(i int) float64) int {
 	best := 0
 	bestScore := score(0)
-	for i := 1; i < len(children); i++ {
+	for i := 1; i < len(pool); i++ {
 		s := score(i)
-		if s > bestScore || (s == bestScore && subtreeMinTurn(children[i]) < subtreeMinTurn(children[best])) {
+		if s > bestScore || (s == bestScore && pool[i].less(pool[best])) {
 			best, bestScore = i, s
 		}
 	}
 	return best
 }
 
-// worstCoveredChild returns the index of the unchosen child least covered by
-// the chosen exemplar set — the one whose MAX cosine to any chosen exemplar
-// is lowest (farthest from the spread so far), turn-number tie-break. -1 if
-// none remain.
-func worstCoveredChild(children []*SummaryNode, chosen []int, taken []bool) int {
+// worstCoveredPooled returns the index of the unchosen pool member least
+// covered by the chosen exemplar set — the one whose MAX cosine to any chosen
+// exemplar is lowest (farthest from the spread so far), stable-key tie-break.
+// -1 if none remain.
+func worstCoveredPooled(pool []pooledVec, chosen []int, taken []bool) int {
 	worst := -1
 	var worstCoverage float64
-	for i := range children {
+	for i := range pool {
 		if taken[i] {
 			continue
 		}
-		coverage := maxCosineToChosen(children[i].Vector, children, chosen)
+		coverage := maxCosineToChosenPooled(pool[i].vec, pool, chosen)
 		if worst == -1 || coverage < worstCoverage ||
-			(coverage == worstCoverage && subtreeMinTurn(children[i]) < subtreeMinTurn(children[worst])) {
+			(coverage == worstCoverage && pool[i].less(pool[worst])) {
 			worst, worstCoverage = i, coverage
 		}
 	}
 	return worst
 }
 
-// maxCosineToChosen returns the best (max) cosine of v to any chosen
-// exemplar's vector — the child's coverage by the current spread.
-func maxCosineToChosen(v []float64, children []*SummaryNode, chosen []int) float64 {
-	best := cosineSimilarity(v, children[chosen[0]].Vector)
+// maxCosineToChosenPooled returns the best (max) cosine of v to any chosen
+// exemplar's vector — the member's coverage by the current spread.
+func maxCosineToChosenPooled(v []float64, pool []pooledVec, chosen []int) float64 {
+	best := cosineSimilarity(v, pool[chosen[0]].vec)
 	for _, idx := range chosen[1:] {
-		if c := cosineSimilarity(v, children[idx].Vector); c > best {
+		if c := cosineSimilarity(v, pool[idx].vec); c > best {
 			best = c
 		}
 	}

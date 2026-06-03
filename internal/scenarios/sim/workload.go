@@ -1697,9 +1697,16 @@ const (
 	// loss (a strictly-better leaf pruned — fixable by better keys / beam),
 	// an equal-cosine tie-boundary substitution (not lost recall — fixable by
 	// a gate tie-break), or a tree-mismatch (the flat scan ranked a leaf the
-	// tree does not contain — a staleness/build edge). Read from the recaller's
-	// W1Diag* surface post-run. All 0 on the mock run (no divergence occurs);
-	// the headline that classifies the live-run 4/251 gap.
+	// tree does not contain — a staleness/build edge). They are COUNTERS the
+	// harness accumulates at the per-probe call site, in lockstep with
+	// recall_intra_descent_divergence, from the class IntraThreadDivergence
+	// returns — so the classification survives the per-session Service instance
+	// churn a RestartSession causes (the #111 fix; a post-run read of the final
+	// instance's atomics dropped strict-misses classified before the final
+	// restart). The summary reads them from m.Counters. The string keys must
+	// match the scenarios-package harness constants (metricRecallIntraW1*). All
+	// 0 on the mock run (no divergence occurs); the headline that classifies the
+	// live-run divergence gap.
 	metricRecallIntraW1StrictMiss   = "recall_intra_w1_strict_miss"
 	metricRecallIntraW1Tie          = "recall_intra_w1_tie"
 	metricRecallIntraW1TreeMismatch = "recall_intra_w1_tree_mismatch"

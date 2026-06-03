@@ -88,14 +88,22 @@ type treeRebuilder interface {
 // to expose the W1 recall-preservation differential (#111 / design §7.1):
 // IntraThreadDivergence runs BOTH the summary-tree descent and the flat scan
 // over the engaged thread's leaves and returns the size of their top-Kf leaf
-// set difference. measure.Service implements it. The harness calls it on
-// intra-probe steps (Step.W1Engaged set) on an embedding-live run and
-// accumulates recall_intra_descent_divergence — the HARD ==0 gate (a nonzero
-// means the beam pruned a leaf the flat scan would have returned: STOP and
-// root-cause, never widen). A recaller without it (symbolic-only default) is
-// not probed.
+// set difference plus, when that size is >0, the per-probe classification
+// ("strict-miss" / "tie" / "tree-mismatch"; empty when 0). measure.Service
+// implements it. The harness calls it on intra-probe steps (Step.W1Engaged
+// set) on an embedding-live run and accumulates BOTH recall_intra_descent_
+// divergence (the HARD ==0 gate — a nonzero means the beam pruned a leaf the
+// flat scan would have returned: STOP and root-cause, never widen) AND the
+// classification tally (recall_intra_w1_*), at the SAME call site and moment,
+// so the two are structurally consistent. Accumulating the class here — not
+// reading it from a Service atomic post-run — is what makes the tally survive
+// the per-session Service instance churn a RestartSession step causes: each
+// RestartSession installs a fresh Service whose W1 atomics start at 0, so a
+// probe that classified a strict-miss on an earlier instance would be lost to
+// a post-run read of the final instance's atomic (the #111 bug). A recaller
+// without it (symbolic-only default) is not probed.
 type intraDivergenceProbe interface {
-	IntraThreadDivergence(ctx context.Context, queryText, engaged string) int
+	IntraThreadDivergence(ctx context.Context, queryText, engaged string) (int, string)
 }
 
 // cosineOpsReporter is the narrow optional interface a Recaller may satisfy to

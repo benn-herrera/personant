@@ -1,6 +1,7 @@
 package measure
 
 import (
+	"context"
 	"testing"
 
 	"personant/internal/recall/scoring"
@@ -92,5 +93,47 @@ func TestClassifyW1Divergence(t *testing.T) {
 				t.Errorf("classifyW1Divergence = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestEmitW1Diag_ReturnsClassItBumps is the #111 single-classification guard:
+// emitW1Diag must RETURN the same class it bumps on the Service atomic. The
+// harness consumes the returned class to accumulate the run-total tally (the
+// instance-churn-proof reader), so a returned class that disagreed with the
+// bumped verdict would re-introduce the very divergence the fix removes — two
+// numbers describing the same probe that can drift apart. Classification
+// happens exactly once (classifyW1Divergence), and both the atomic and the
+// return read that one verdict; this test pins that invariant.
+//
+// ops is nil (no substrate to log to), so emitW1Diag takes the early-return
+// path that still bumps the atomic and returns the class — the contract the
+// harness depends on.
+func TestEmitW1Diag_ReturnsClassItBumps(t *testing.T) {
+	leaf := func(turn int) *scoring.SummaryNode {
+		return &scoring.SummaryNode{Leaf: scoring.ChunkVector{TurnNumber: turn}}
+	}
+	cand := func(turn int, score float64) scoring.ChunkCandidate {
+		return scoring.ChunkCandidate{TurnNumber: turn, Score: score}
+	}
+
+	// Tree leaves {1,2}: flat ranks leaf 1 (cosine 0.80) which descent missed,
+	// descent substituted leaf 2 (cosine 0.60). Strictly higher missed cosine,
+	// both present in the tree → strict-miss.
+	tree := &scoring.SummaryNode{Children: []*scoring.SummaryNode{leaf(1), leaf(2)}}
+	flat := []scoring.ChunkCandidate{cand(1, 0.80), cand(2, 0.60)}
+	descent := []scoring.ChunkCandidate{cand(2, 0.60)}
+
+	s := &Service{} // ops nil → no log; atomic + return still exercised
+	got := s.emitW1Diag(context.Background(), tree, descent, flat)
+	if got != w1StrictMiss {
+		t.Fatalf("emitW1Diag returned class %q, want %q", got, w1StrictMiss)
+	}
+	// The returned class must match the bucket the atomic was bumped on — one
+	// classification, surfaced and bumped consistently.
+	if n := s.w1DiagStrictMiss.Load(); n != 1 {
+		t.Errorf("w1DiagStrictMiss = %d, want 1 (the bumped bucket must match the returned class)", n)
+	}
+	if n := s.w1DiagTie.Load() + s.w1DiagTreeMismatch.Load(); n != 0 {
+		t.Errorf("non-strict-miss buckets bumped: tie+tree_mismatch = %d, want 0", n)
 	}
 }

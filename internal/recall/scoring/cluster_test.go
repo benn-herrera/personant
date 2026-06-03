@@ -296,6 +296,180 @@ func applySummaryKey(n *SummaryNode, summarize Summarizer) {
 	}
 }
 
+// TestExemplarSet_ComposesUpTree is the #111 Finding A RESIDUAL W1 gate: the
+// exemplar-spread coverage property must COMPOSE up a multi-level tree, not
+// just hold one level. The earlier summarizer spread over each child's PRIMARY
+// vector only (its medoid), so an extreme leaf under a central-medoid level-1
+// node was averaged away at the level ABOVE it — the branch holding the single
+// highest-cosine leaf for a query was pruned at the top of a deep tree (a real
+// W1 divergence on a thread deep enough to need ≥2 internal levels). Pooling
+// the children's FULL exemplar sets keeps that extreme leaf a candidate at
+// every level, so it propagates to the root and its branch stays alive.
+//
+// The construction targets the SECOND-level prune precisely (a hand-built
+// 3-level topology, so the failure mode is controlled, not luck-of-the-
+// clusterer): BeamWidth decoy level-2 subtrees whose level-1 medoids all out-
+// cosine the query, plus ONE target level-2 subtree containing the exact-match
+// extreme leaf — but the extreme leaf sits inside a target level-1 node whose
+// MEDOID points elsewhere. Under child-primary pooling, the target level-2
+// node's exemplar set is its level-1 children's MEDOIDS (the extreme leaf's
+// own vector never propagates past its level-1 node), so the target level-2
+// node cosine-misses the query, the BeamWidth decoys fill the top-level beam,
+// and the branch is pruned. Under full-pool propagation the extreme leaf
+// remains an exemplar of its level-1 node AND therefore a candidate for its
+// level-2 node's set, so the target level-2 node scores ~1.0 and survives. The
+// test contrasts the two summary keys over the SAME hand-built topology.
+func TestExemplarSet_ComposesUpTree(t *testing.T) {
+	const dim = 64
+	axis := func(a int, mag float64) []float64 { v := make([]float64, dim); v[a] = mag; return v }
+	query := axis(0, 1) // pure axis 0 — the extreme leaf's defining direction
+
+	turn := 0
+	mkLeaf := func(v []float64) ChunkVector { lv := ChunkVector{TurnNumber: turn, Vector: v}; turn++; return lv }
+
+	// l1 builds a level-1 internal node over `count` leaves, each pointing
+	// mostly at `dom` (so the node's medoid points at `dom`) with a tiny
+	// per-leaf perturbation. Returns the node and the leaves it owns.
+	l1 := func(dom int, count int) (*SummaryNode, []ChunkVector) {
+		var lvs []ChunkVector
+		for j := 0; j < count; j++ {
+			v := axis(dom, 1.0)
+			v[(dom+1)%dim] += 0.01 * float64(j)
+			lvs = append(lvs, mkLeaf(v))
+		}
+		return &SummaryNode{Children: leafNodes(lvs)}, lvs
+	}
+
+	var allLeaves []ChunkVector
+	var level2 []*SummaryNode
+
+	// BeamWidth DECOY level-2 subtrees. Each holds two level-1 nodes whose
+	// leaves carry a moderate axis-0 component, so the decoy's level-1 medoids
+	// (and thus its level-2 exemplar set under EITHER pooling) out-cosine the
+	// query — they legitimately fill the top beam. Decoy off-axes are distinct
+	// per level-2 subtree (so decoys don't all collapse together) but reused
+	// within it; none is axis 0, and the axis-0 pull (0.7) is below the extreme
+	// leaf's (1.0) so no decoy leaf itself ranks in the flat top-Kf.
+	for d := 0; d < BeamWidth; d++ {
+		off := 1 + d // axes 1..BeamWidth
+		var l1nodes []*SummaryNode
+		for s := 0; s < 2; s++ {
+			var lvs []ChunkVector
+			for j := 0; j < 2; j++ {
+				v := axis(off, 1.0)
+				v[0] = 0.7 // shared axis-0 pull → medoid out-cosines the query
+				lvs = append(lvs, mkLeaf(v))
+			}
+			allLeaves = append(allLeaves, lvs...)
+			l1nodes = append(l1nodes, &SummaryNode{Children: leafNodes(lvs)})
+		}
+		level2 = append(level2, &SummaryNode{Children: l1nodes})
+	}
+
+	// The TARGET level-2 subtree. Its level-1 children all point at off-axes
+	// with NO axis-0 component (their medoids cosine-MISS the query), EXCEPT
+	// one level-1 node into which we plant the single exact axis-0 extreme leaf
+	// among off-axis siblings — so that node's MEDOID is off-axis too. The
+	// extreme leaf is the only axis-0 signal in the entire target subtree.
+	var targetL1 []*SummaryNode
+	for s := 0; s < 3; s++ {
+		node, lvs := l1(20+s, 3) // off-axes 20..22, no axis-0 component
+		allLeaves = append(allLeaves, lvs...)
+		targetL1 = append(targetL1, node)
+	}
+	// Plant the extreme leaf into the FIRST target level-1 node, as a minority
+	// among its off-axis siblings (so the node's medoid stays off-axis).
+	extreme := mkLeaf(axis(0, 1.0))
+	allLeaves = append(allLeaves, extreme)
+	targetL1[0].Children = append(targetL1[0].Children, &SummaryNode{Vector: extreme.Vector, Leaf: extreme})
+	level2 = append(level2, &SummaryNode{Children: targetL1})
+
+	// Two 3-level roots over the SAME topology, differing only in the summary
+	// key: child-primary pooling (the OLD behaviour) vs the full-pool spread.
+	rootOld := &SummaryNode{Children: cloneClusters(level2)}
+	rootNew := &SummaryNode{Children: cloneClusters(level2)}
+	applySummaryKey(rootNew, ExemplarSummarizer)
+	applySummaryKey(rootOld, primaryOnlyExemplarSummarizer)
+
+	if treeDepth(rootNew)-1 < 2 {
+		t.Fatalf("test setup invalid: internal depth %d, want ≥2", treeDepth(rootNew)-1)
+	}
+
+	flat := ProposeChunks(query, allLeaves, ChunkOptions{Limit: DefaultChunkLimit})
+	if _, ok := turnSet(flat)[extreme.TurnNumber]; !ok {
+		t.Fatalf("test setup invalid: flat scan did not surface the extreme leaf (turn %d); got %v", extreme.TurnNumber, turnSet(flat))
+	}
+
+	// OLD (child-primary) pooling must LOSE the extreme leaf: its vector never
+	// propagates past its level-1 node, so the target level-2 node cosine-
+	// misses the query and is pruned by the BeamWidth decoys. If this does not
+	// reproduce the miss, the construction is invalid (not a vacuous pass).
+	old := DescendChunks(query, rootOld, DescendOptions{Limit: DefaultChunkLimit})
+	if _, ok := turnSet(old)[extreme.TurnNumber]; ok {
+		t.Fatalf("test setup invalid: child-primary pooling unexpectedly KEPT the extreme leaf (turn %d) — the compositional miss is not reproduced; got %v",
+			extreme.TurnNumber, turnSet(old))
+	}
+
+	// NEW (full-pool) propagation must RECOVER it: the extreme leaf stays an
+	// exemplar of its level-1 node and a candidate for the target level-2
+	// node's set, so the branch survives to the root.
+	got := DescendChunks(query, rootNew, DescendOptions{Limit: DefaultChunkLimit})
+	if _, ok := turnSet(got)[extreme.TurnNumber]; !ok {
+		t.Errorf("full-pool descent lost the extreme leaf (turn %d) — the exemplar spread did not compose up the tree; got=%v flat=%v",
+			extreme.TurnNumber, turnSet(got), turnSet(flat))
+	}
+
+	// The property the fix depends on: every exemplar at every level is a real
+	// leaf vector — no synthesized/averaged vector ever entered the pool.
+	leafVecs := make([][]float64, len(allLeaves))
+	for i, lv := range allLeaves {
+		leafVecs[i] = lv.Vector
+	}
+	assertExemplarsAreLeafVectors(t, rootNew, leafVecs)
+}
+
+// primaryOnlyExemplarSummarizer reproduces the pre-fix behaviour: it spreads
+// over each child's PRIMARY .Vector only (not the children's full exemplar
+// sets), so a lower-level exemplar never propagates upward. Used only to
+// contrast the OLD failure mode against the full-pool fix over one topology.
+func primaryOnlyExemplarSummarizer(children []*SummaryNode) [][]float64 {
+	// Reduce each child's exemplar set to its primary, then run the real
+	// spread math — its pool is then exactly the child primaries, modelling
+	// the pre-fix candidate pool over which lower exemplars never propagate.
+	reduced := make([]*SummaryNode, len(children))
+	for i, c := range children {
+		reduced[i] = &SummaryNode{Vector: c.Vector, Vectors: [][]float64{c.Vector}, Children: c.Children}
+	}
+	return ExemplarSummarizer(reduced)
+}
+
+// assertExemplarsAreLeafVectors walks the tree and fails if any node's
+// exemplar is not an exact copy of some real leaf vector.
+func assertExemplarsAreLeafVectors(t *testing.T, n *SummaryNode, leafVecs [][]float64) {
+	t.Helper()
+	if n == nil {
+		return
+	}
+	for i, ex := range n.Vectors {
+		if !vecIsAmong(ex, leafVecs) {
+			t.Errorf("exemplar %d is not a real leaf vector — a synthesized/averaged vector entered the pool", i)
+		}
+	}
+	for _, c := range n.Children {
+		assertExemplarsAreLeafVectors(t, c, leafVecs)
+	}
+}
+
+// vecIsAmong reports whether v exactly equals one of the candidate vectors.
+func vecIsAmong(v []float64, candidates [][]float64) bool {
+	for _, c := range candidates {
+		if reflect.DeepEqual(v, c) {
+			return true
+		}
+	}
+	return false
+}
+
 // TestBuildTree_Degenerate covers the empty and single-leaf inputs.
 func TestBuildTree_Degenerate(t *testing.T) {
 	if BuildTree(nil, TreeBranchingFactor, nil) != nil {
