@@ -38,7 +38,7 @@ build: $(BINDIR)/personant
 
 $(BINDIR)/personant:
 	@mkdir -p $(BINDIR)
-	go build -o $(BINDIR) cmd
+	go build -o $(BINDIR)/personant ./cmd
 
 update-dependencies: update-agents-dependency
 	go mod tidy
