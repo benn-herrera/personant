@@ -33,8 +33,6 @@ update-agents-dependency: agents
 BINDIR := bin
 
 build: $(BINDIR)/personant
-	@# simulate expected user privacy settings for keys
-	@chmod 700 test/api_keys; chmod 600 test/api_keys/*
 
 $(BINDIR)/personant:
 	@mkdir -p $(BINDIR)
