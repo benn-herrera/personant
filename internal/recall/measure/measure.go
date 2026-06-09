@@ -564,17 +564,45 @@ func (s *Service) processJob(ctx context.Context, job indexJob) {
 		return
 	}
 
-	// Batch: coarse body first, then one chunk text per excerpt. One embed
-	// call for the whole thread (design §6.1). The body text and each
-	// excerpt text are hashed for the cache's staleness keys (§5.3) at the
-	// same point they exist, so the cache never re-reads canonical to key
-	// its write.
+	// INCREMENTAL FLUSH (#102). A turn-excerpt is immutable once written, so
+	// its content hash is stable across flushes: once a chunk is indexed, a
+	// later flush must REUSE its existing vector rather than re-embed it.
+	// Re-embedding the whole thread on every flush is O(flushes × thread_size)
+	// — the cost that grew ~2.1× from 14d→30d on a continuously-active thread.
+	//
+	// The prior indexed state is the live snapshot's fine/fineHash for this
+	// thread: it is authoritative (those vectors were embedded by a past flush
+	// or loaded from the .vec cache, which the cache built from an embed) and
+	// lock-free to read (the single indexer goroutine is the only writer, so a
+	// load here cannot race a swap). Key reuse on (turnNumber, contentHash):
+	// only an unchanged chunk at an existing turn matches, so a changed-text
+	// chunk or a new turn falls through to EMBED.
+	reuse := s.priorChunkVectors(job.threadID)
+
 	bodyText := truncateForEmbed(thr.Body)
-	texts := make([]string, 0, len(excerpts)+1)
-	texts = append(texts, bodyText)
-	for _, ex := range excerpts {
+	// The coarse body legitimately changes as the thread grows (it is the
+	// truncated whole-body), so it is always re-embedded — one call per flush,
+	// O(1). It rides slot -1 of the embed batch (index 0 below).
+	texts := []string{bodyText}
+	chunks := make([]scoring.ChunkVector, len(excerpts))
+	chunkHashes := make([]string, len(excerpts))
+	var embedSlot []int // index into chunks for each text beyond the coarse slot
+	for i, ex := range excerpts {
+		h := contentHash(ex.Text)
+		chunkHashes[i] = h
+		chunks[i].TurnNumber = ex.TurnNumber
+		if v, ok := reuse[chunkKey{turn: ex.TurnNumber, hash: h}]; ok {
+			chunks[i].Vector = v // REUSE: prior snapshot already embedded this exact chunk
+			continue
+		}
+		// EMBED: new turn, changed text, or a chunk the prior snapshot is
+		// missing (fall back to embedding — never serve a stale/missing vector).
 		texts = append(texts, truncateForEmbed(ex.Text))
+		embedSlot = append(embedSlot, i)
 	}
+
+	// One batched embed call for the coarse body + the EMBED-partition chunks
+	// (design §6.1 batch efficiency, now over the delta only).
 	vecs, err := s.embedder.Embed(ctx, texts)
 	if err != nil {
 		_ = s.ops.Log(ctx, memops.LogCategoryRecall, "index-error", fmt.Sprintf("embed %s: %v", job.threadID, err))
@@ -587,11 +615,8 @@ func (s *Service) processJob(ctx context.Context, job indexJob) {
 	}
 
 	coarse := scoring.ThreadVector{ThreadID: job.threadID, Vector: vecs[0]}
-	chunks := make([]scoring.ChunkVector, len(excerpts))
-	chunkHashes := make([]string, len(excerpts))
-	for i, ex := range excerpts {
-		chunks[i] = scoring.ChunkVector{TurnNumber: ex.TurnNumber, Vector: vecs[i+1]}
-		chunkHashes[i] = contentHash(ex.Text)
+	for j, slot := range embedSlot {
+		chunks[slot].Vector = vecs[j+1] // +1 skips the coarse slot at index 0
 	}
 
 	s.swap(job.threadID, job.dispatchTurncount, coarse, chunks, chunkHashes)
@@ -608,6 +633,41 @@ func (s *Service) processJob(ctx context.Context, job indexJob) {
 			_ = s.ops.Log(ctx, memops.LogCategoryRecall, "index-error", fmt.Sprintf("cache %s: %v", job.threadID, err))
 		}
 	}
+}
+
+// chunkKey identifies a fine-tier chunk for reuse lookup: a turn-excerpt is
+// immutable once written, so (turn number, content hash) uniquely pins one
+// embedded chunk. The hash guards against the rare case of a turn's text
+// changing — a hash mismatch at an existing turn falls through to re-embed.
+type chunkKey struct {
+	turn int
+	hash string
+}
+
+// priorChunkVectors builds the reuse lookup for an incremental flush (#102):
+// (turn, content hash) → the vector the live snapshot already holds for that
+// chunk. The snapshot's fine[threadID] and fineHash[threadID] are parallel
+// (built together at every swap), so they zip into the keyed map. Reading the
+// live snapshot here is race-free: the single indexer goroutine is the sole
+// writer of s.cur, so this load (on that goroutine) cannot observe a torn or
+// concurrently-mutated snapshot. A missing/empty prior entry (first flush of a
+// thread) yields an empty map → every chunk embeds, the from-scratch path.
+//
+// A length mismatch between fine and fineHash (which should never happen — the
+// swap always writes them together) degrades safely to no reuse: any chunk it
+// cannot confidently key is simply re-embedded.
+func (s *Service) priorChunkVectors(threadID string) map[chunkKey][]float64 {
+	snap := s.cur.Load()
+	priorChunks := snap.fine[threadID]
+	priorHashes := snap.fineHash[threadID]
+	if len(priorChunks) != len(priorHashes) {
+		return nil // defensive: cannot key reliably → re-embed everything
+	}
+	out := make(map[chunkKey][]float64, len(priorChunks))
+	for i, cv := range priorChunks {
+		out[chunkKey{turn: cv.TurnNumber, hash: priorHashes[i]}] = cv.Vector
+	}
+	return out
 }
 
 // swap publishes one thread's freshly embedded vectors under the I2
