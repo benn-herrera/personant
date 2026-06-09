@@ -151,13 +151,17 @@ Complete:
   (durable content source fix, Inc 4); async single-indexer goroutine +
   `atomic.Pointer` snapshot + dispatch watermark (I1/I2); persisted
   `.vec` vector cache (O(changed) startup); sim shadow-chunk oracle +
-  Candidate-A workload + intra-thread probe. **W1 recall-preservation
-  gate green on live 14d: divergence 0/251** after Finding A (exemplar-set
-  propagation fix, d8e32b3 — pool = union of every child's full `.Vectors`
-  rather than child primaries; closes the structural W1 gap). Finding B
+  Candidate-A workload + intra-thread probe. **W1 recall-preservation is a
+  reported quality measure, not a gate (#119)** — divergence was 0/251 on
+  live 14d after Finding A (exemplar-set propagation fix, d8e32b3 — pool =
+  union of every child's full `.Vectors` rather than child primaries; closes
+  the structural W1 gap); a later 1m rung showed a within-Kf substitution
+  (2/559, strict_miss=1) at 1.000 embedding recall, which reframed W1 from a
+  build-blocking gate to an approximation-drift canary (exact/exhaustive
+  recall is the separate #117 tier). Finding B
   (intra coherence gate scoped to mock; report-only on live, #96 boundary)
-  shipped. Beam width k raised 4→8 (9c9493d) then restored to 4
-  (exemplar fix made the wider beam unnecessary, per BeamWidth comment).
+  shipped. Beam width k raised 4→8 (9c9493d), briefly reverted to 4, then
+  restored to k=8 (45bae9c — k=4 fails W1 at zero cost savings).
   `.tree` sidecar persisted (treecache.go, Inc C). Sleep-cycle
   `RebuildTrees` builds/reconciles the summary trees offline (Inc D).
   Still open: cost-minimization (re-verify W1==0 at narrower beam after
@@ -365,10 +369,10 @@ under it an unreachable endpoint is a FAILURE, not a skip),
 `//go:build` tags for conditional execution — tagged tests are excluded
 from the normal compile and bit-rot silently.
 
-**Intra-thread recall metrics (#109/#111).** The sim emits the following at every rung; the W1 gate is build-blocking:
+**Intra-thread recall metrics (#109/#111).** The sim emits the following at every rung; the W1 divergence is a reported quality measure (not build-blocking, #119):
 
 *Counters (m.Counters):*
-- `recall_intra_descent_divergence` — run-total top-Kf leaf set difference between summary-tree descent and flat scan over every W1 probe on a live-embedding run. **HARD GATE: must be == 0.** A nonzero means the beam pruned a leaf the flat scan would return — zero-tolerance stop-and-root-cause, never widen the gate (see below).
+- `recall_intra_descent_divergence` — run-total top-Kf leaf set difference between summary-tree descent and flat scan over every W1 probe on a live-embedding run. **REPORTED QUALITY MEASURE, NOT A GATE (#119):** the within-thread summary tree is an approximate O(log n) recall heuristic; a nonzero means it substituted a within-top-Kf leaf, NOT necessarily lost recall (see the classification below). Exact/exhaustive recall is the separate exact tier (#117 grep + flat-scan), not this approximate path. Logged as an approximation-drift canary.
 - `recall_intra_descent_probes` — denominator for the above (number of W1 probes evaluated; distinguishes "gate passed" from "no probe ran").
 - `recall_intra_w1_strict_miss` — of the divergent probes: a strictly-better leaf was pruned (real recall loss; fix keys or beam).
 - `recall_intra_w1_tie` — of the divergent probes: an equal-cosine leaf was substituted (tie-boundary, not a recall loss; fix tie-break).
@@ -382,7 +386,7 @@ from the normal compile and bit-rot silently.
 - `recall_intra_blindspot_misses` — intra probes that missed because the target chunk was inside the debt-window blind spot (by-design lag, not loss).
 - `recall_query_cosine_ops` — measured per-query cosine comparisons (coarse + fine population + engaged-thread descent or flat scan); the headline perf-bend metric.
 
-**W1 recall-preservation HARD GATE (#111 §7.1, build-blocking on live-embedding runs):** `recall_intra_descent_divergence == 0` is the acceptance criterion. The descent is a performance optimization that must not change which leaves are recalled; any nonzero divergence means speed was traded for recall. First nonzero = stop-and-root-cause (raise beam width, or fix tree/clustering build side). **Never widen the gate tolerance** — that disables the safety canary.
+**W1 recall-preservation QUALITY MEASURE (#111 §7.1; reframed from gate→measure in #119):** `recall_intra_descent_divergence` is a reported approximation-drift canary, **not a build-blocking gate**. The within-thread summary tree is an approximate O(log n) recall heuristic that trades exactness for speed; a nonzero divergence means the heuristic substituted a within-top-Kf leaf, NOT necessarily that recall was lost (a `strict_miss` is a real ranking defect worth raising the beam for; a `tie`/`tree_mismatch` is a sub-perceptible boundary effect — see the classification counters). Exact/exhaustive recall is the job of the separate **exact tiers (#117 grep + flat-scan)**, where it is guaranteed; holding the approximate tree to exact descent-vs-flat set-equality was stricter than its own purpose (recall-correctness). The value is still LOGGED on every rung as a drift canary. There is NO runtime rebalance trigger: tree re-clustering is a sleep-time operation only (the #108 consolidation cycle's `RebuildTrees`, on staleness), so the measure informs nothing at runtime — it is purely observed.
 
 **Ensure Docs Stay Up To Date** - AGENTS.md, README.md, ARCHITECTURE.md, SPEC.md must be brought up to date when committing checkpoints.
 

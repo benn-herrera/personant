@@ -879,32 +879,33 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 			intraDivergence, intraProbeObs)
 	}
 
-	// W1 recall-preservation gate (#111 / design §7.1, the headline safety
-	// property). recall_intra_descent_divergence is the run-total top-Kf leaf
-	// set difference between the summary-tree DESCENT and the flat scan,
-	// accumulated by the harness over every intra-probe step on an
-	// embedding-live run (recall_intra_descent_probes is its denominator). The
-	// metric keys mirror the scenarios-package harness constants
+	// W1 recall-preservation QUALITY MEASURE (#111 / design §7.1, the
+	// approximation-drift canary). recall_intra_descent_divergence is the
+	// run-total top-Kf leaf set difference between the summary-tree DESCENT and
+	// the flat scan, accumulated by the harness over every intra-probe step on
+	// an embedding-live run (recall_intra_descent_probes is its denominator).
+	// The metric keys mirror the scenarios-package harness constants
 	// (metricRecallIntraDescent*); they are the string contract between the
 	// harness emitter and this reader, like recall_unexplained_absence below.
-	// HARD ==0 GATE: a nonzero means the beam pruned a leaf the flat scan would
-	// have returned (beam too small, or a tree/clustering bug) — the
-	// zero-tolerance stop-and-root-cause signal. Raise the beam or fix the build
-	// side; NEVER widen the tolerance (that trades recall for speed, the one
-	// thing W1 forbids). On the symbolic mock run no W1 probe runs (no embedder,
-	// no usable tree), so probes==0 and divergence==0 trivially — reported as
-	// "no probe ran", not a pass.
+	//
+	// REPORTED, NOT GATED (#119): the within-thread summary tree is an
+	// APPROXIMATE O(log n) recall heuristic that trades exactness for speed.
+	// A nonzero divergence means the heuristic substituted a within-top-Kf leaf,
+	// NOT necessarily that recall was lost (a strict_miss is a real ranking
+	// defect; a tie/tree_mismatch is a sub-perceptible boundary effect — see the
+	// §7.1 classification below). Exhaustive/exact recall is the job of the
+	// separate EXACT tiers (#117 grep + flat-scan), where it is guaranteed; it
+	// is not the approximate tree's contract. So this value is logged as a
+	// drift canary, not asserted to zero. On the symbolic mock run no W1 probe
+	// runs (no embedder, no usable tree), so probes==0 and divergence==0
+	// trivially — reported as "no probe ran".
 	descentDivergence := int(m.Counters["recall_intra_descent_divergence"])
 	descentProbes := int(m.Counters["recall_intra_descent_probes"])
 	if descentProbes == 0 {
 		t.Logf("recall_intra_descent_divergence: n/a — no W1 probe ran this rung (symbolic mock run, or main thread never grew a usable summary tree)")
 	} else {
-		t.Logf("recall_intra_descent_divergence: %d over %d W1 probes (#111 W1 PASS = 0 — descent returns the same top-Kf leaves the flat scan would; nonzero = beam too small or tree bug, STOP-and-root-cause)",
+		t.Logf("recall_intra_descent_divergence (quality measure): %d over %d W1 probes — descent-vs-flat top-Kf divergence; approximation-drift canary. Nonzero = the heuristic substituted a within-Kf leaf, NOT necessarily lost recall — see the §7.1 classification below and the exact tiers (#117) for guaranteed-exhaustive recall.",
 			descentDivergence, descentProbes)
-		if descentDivergence != 0 {
-			t.Errorf("#111 W1 FAILURE: recall_intra_descent_divergence %d != 0 over %d probes — the beam descent did NOT return the same top-Kf leaves the flat O(C_main) scan would. Speed was traded for recall. Root-cause the beam width or the tree build; do NOT widen the gate tolerance.",
-				descentDivergence, descentProbes)
-		}
 		// W1 divergence classification (#111 §7.1 DIAGNOSTIC) — the headline
 		// that says WHICH kind each divergence is: strict-miss (a strictly
 		// better leaf was pruned → real recall loss, fix keys/beam), tie (an

@@ -269,12 +269,13 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 		embedFireIDs = embedFires
 	}
 
-	// W1 recall-preservation gate (#111 / design §7.1): on an intra-probe step
-	// (W1Engaged set) on an embedding-live run, ask the recaller for the
-	// descent-vs-flat top-Kf set difference for the engaged main thread and
-	// accumulate it. The HARD ==0 assertion lives in the sim summary
-	// (recordRecallPreservationGate); here we only tally the per-step
-	// differential. Gated on h.indexer (an embedding recaller is live) and the
+	// W1 recall-preservation QUALITY MEASURE (#111 / design §7.1; gate→measure
+	// in #119): on an intra-probe step (W1Engaged set) on an embedding-live run,
+	// ask the recaller for the descent-vs-flat top-Kf set difference for the
+	// engaged main thread and accumulate it. The sim summary REPORTS this as an
+	// approximation-drift canary (no longer a hard assertion); here we only
+	// tally the per-step differential. Gated on h.indexer (an embedding recaller
+	// is live) and the
 	// optional intraDivergenceProbe interface (measure.Service satisfies it) so
 	// the symbolic-only default is untouched. Counted unconditionally when a
 	// usable tree exists — divergence is 0 by construction otherwise (W8).
@@ -536,15 +537,17 @@ const (
 	// rebalancing is not staying bounded and escalates to the hybrid MAD.
 	metricRecallIntraTreeRebuildCalls = "recall_intra_tree_rebuild_calls"
 
-	// metricRecallIntraDescentDivergence is the W1 recall-preservation gate
-	// accumulator (#111 / design §7.1): the run-total top-Kf leaf set difference
-	// between the summary-tree descent and the flat scan, summed over every
-	// intra-probe step on an embedding-live run. HARD ==0 gate in the sim
-	// summary — a nonzero means the beam pruned a leaf the flat scan would have
-	// returned (beam too small, or a tree/clustering bug), which is the
-	// zero-tolerance stop-and-root-cause signal. metricRecallIntraDescentProbes
-	// is its denominator (the number of W1 probes evaluated), so the summary can
-	// distinguish "0 because the gate passed" from "0 because no probe ran".
+	// metricRecallIntraDescentDivergence is the W1 recall-preservation QUALITY
+	// MEASURE accumulator (#111 / design §7.1; reframed from gate→measure in
+	// #119): the run-total top-Kf leaf set difference between the summary-tree
+	// descent and the flat scan, summed over every intra-probe step on an
+	// embedding-live run. REPORTED, NOT GATED — the within-thread summary tree
+	// is an approximate O(log n) heuristic; a nonzero means it substituted a
+	// within-Kf leaf, not necessarily that recall was lost (exact/exhaustive
+	// recall is the separate #117 tier). The sim summary logs it as an
+	// approximation-drift canary. metricRecallIntraDescentProbes is its
+	// denominator (the number of W1 probes evaluated), so the summary can
+	// distinguish "0 because no divergence" from "0 because no probe ran".
 	metricRecallIntraDescentDivergence = "recall_intra_descent_divergence"
 	metricRecallIntraDescentProbes     = "recall_intra_descent_probes"
 

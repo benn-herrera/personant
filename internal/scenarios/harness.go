@@ -92,8 +92,9 @@ type treeRebuilder interface {
 // ("strict-miss" / "tie" / "tree-mismatch"; empty when 0). measure.Service
 // implements it. The harness calls it on intra-probe steps (Step.W1Engaged
 // set) on an embedding-live run and accumulates BOTH recall_intra_descent_
-// divergence (the HARD ==0 gate — a nonzero means the beam pruned a leaf the
-// flat scan would have returned: STOP and root-cause, never widen) AND the
+// divergence (a REPORTED approximation-drift measure, #119 — a nonzero means
+// the approximate tree substituted a within-Kf leaf, not necessarily lost
+// recall; exact recall is the #117 tier) AND the
 // classification tally (recall_intra_w1_*), at the SAME call site and moment,
 // so the two are structurally consistent. Accumulating the class here — not
 // reading it from a Service atomic post-run — is what makes the tally survive
@@ -207,11 +208,12 @@ type Step struct {
 	RestartSession bool
 
 	// W1Engaged names the engaged thread whose intra-thread recall-preservation
-	// gate (#111 / design §7.1) the harness should evaluate on this step. When
-	// non-empty AND an embedding recaller is live, the harness calls the
-	// recaller's IntraThreadDivergence(ctx, UserInput, W1Engaged) and accumulates
-	// recall_intra_descent_divergence — the HARD ==0 gate that descent returns
-	// the same top-Kf leaves the flat scan would. The sim sets it to the
+	// QUALITY MEASURE (#111 / design §7.1; gate→measure in #119) the harness
+	// should evaluate on this step. When non-empty AND an embedding recaller is
+	// live, the harness calls the recaller's IntraThreadDivergence(ctx,
+	// UserInput, W1Engaged) and accumulates recall_intra_descent_divergence — the
+	// REPORTED approximation-drift measure of how far the descent's top-Kf leaves
+	// drift from the flat scan's (not a hard gate). The sim sets it to the
 	// Candidate-A main thread on intra-probe steps. Empty on every other step;
 	// the symbolic-only run never evaluates it (no usable tree, divergence is 0
 	// by construction). It is observability/gate wiring only — it does not touch

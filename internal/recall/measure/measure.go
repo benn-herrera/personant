@@ -963,8 +963,9 @@ func composeNodeHash(childHashes []string) string {
 // §7.1, the §7 gate mechanism). It runs BOTH the tree descent and the flat
 // scan over the SAME engaged-thread leaves and returns the size of the
 // symmetric set difference between their top-Kf turn sets — the metric
-// recall_intra_descent_divergence the sim/harness gates at == 0 (Inc E
-// wires the sim gate).
+// recall_intra_descent_divergence the sim/harness REPORTS as an
+// approximation-drift quality measure (#119; the within-thread tree is an
+// approximate O(log n) heuristic, not the exact-recall tier #117).
 //
 // This is a measurement-only seam: production recall (intraChunks, called
 // from Recall) runs only the single chosen path and never pays the double
@@ -977,8 +978,10 @@ func composeNodeHash(childHashes []string) string {
 // which leaves the beam reached. When no usable tree exists, descent is not
 // run and divergence is 0 by definition (there is no fast path to diverge
 // from — the flat scan IS the result). A nonzero return is the
-// zero-tolerance stop-and-root-cause signal: raise the beam or fix the
-// build side, never widen the gate.
+// approximation-drift signal (#119): the heuristic substituted a within-Kf
+// leaf. A strict_miss is a real ranking defect worth raising the beam for; a
+// tie/tree_mismatch is a sub-perceptible boundary effect. Exact/exhaustive
+// recall is the separate #117 tier, not this approximate path.
 // It returns the divergence size and, when div>0, the per-probe
 // classification (one of w1StrictMiss / w1Tie / w1TreeMismatch); div==0
 // returns the empty class. The class is surfaced — not just bumped on the
@@ -1083,15 +1086,32 @@ func bestScore(cands []scoring.ChunkCandidate) float64 {
 	return best
 }
 
-// emitW1Diag computes the per-divergence detail and writes ONE greppable
-// recall.W1-diag line to the substrate log (#111 §7.1 diagnostic). It also
-// bumps the run tally on the Service atomic (classifyW1Divergence's verdict)
-// and RETURNS the class so the caller can accumulate the run-total at the
-// harness call site (the instance-churn-proof reader; see
-// intraThreadDivergence). Called only on a divergent probe; pure observation,
-// never gates. The log channel is the same memops.LogCategoryRecall the
-// embed-error line uses, so logs/ can be grepped for `recall.W1-diag` after a
-// live run.
+// emitW1Diag computes the per-divergence detail, writes ONE greppable
+// recall.W1-diag line to the substrate log (#111 §7.1 diagnostic), bumps the
+// run tally on the Service atomic (classifyW1Divergence's verdict), and
+// RETURNS the class so the caller can accumulate the run-total at the harness
+// call site (the instance-churn-proof reader; see intraThreadDivergence).
+// Called only on a divergent probe; pure observation, never gates. The log
+// channel is the same memops.LogCategoryRecall the embed-error line uses, so
+// logs/ can be grepped for `recall.W1-diag` after a live run.
+//
+// CONSISTENCY CONTRACT (#119 regression fix). The forensic LINE and the
+// COUNT must never diverge: on a 1-month live rung the run tally reported
+// strict_miss=1 but NO per-probe recall.W1-diag line reached logs/, so the
+// missed-leaf cosines were unreadable — a real ranking defect could not be
+// told from a sub-perceptible boundary tie. Root cause: the tally was bumped
+// (and the class returned to the harness counter) BEFORE the log emission,
+// which sat on a separate code path — skipped when s.ops == nil and silently
+// `_`-swallowing any Log error. That is the mirror image of the d8e32b3
+// tally-instance bug: that fix made the tally survive instance churn but left
+// the line droppable. The fix here makes the LINE the gating action: it is
+// built and emitted FIRST, and only on a successful emission (or the unit-test
+// s.ops == nil path, which has no substrate by construction) is the tally
+// bumped. A Log failure on a live Service is surfaced on the index-error
+// channel, never swallowed, and leaves the count un-incremented so the tally
+// and the readable forensics stay one-for-one. Tally and line now emit at one
+// site, the structural-consistency approach the d8e32b3 fix used for the
+// counter pair.
 func (s *Service) emitW1Diag(ctx context.Context, tree *scoring.SummaryNode, descent, flat []scoring.ChunkCandidate) w1Class {
 	descSet := turnSet(descent)
 	flatSet := turnSet(flat)
@@ -1103,6 +1123,33 @@ func (s *Service) emitW1Diag(ctx context.Context, tree *scoring.SummaryNode, des
 		treeTurns[t] = struct{}{}
 	}
 	class := classifyW1Divergence(missed, substituted, treeTurns, w1Epsilon)
+
+	// Emit the forensic line FIRST, before bumping the tally, so every counted
+	// divergence is guaranteed to have a readable per-probe line. s.ops == nil
+	// is the unit-test construction (no substrate exists) — the only legitimate
+	// no-log path; the tally still bumps there because the harness consumes the
+	// returned class directly, not the log.
+	if s.ops != nil {
+		detail := fmt.Sprintf(
+			"class=%s flat=%s descent=%s missed=%s substituted=%s",
+			class,
+			fmtCandidates(flat),
+			fmtCandidates(descent),
+			fmtCandidates(missed),
+			fmtCandidates(substituted),
+		)
+		if err := s.ops.Log(ctx, memops.LogCategoryRecall, "W1-diag", detail); err != nil {
+			// A live Service that cannot write its forensic line must not bump
+			// the tally as if it had — that re-creates the count-without-line
+			// divergence. Surface the failure on the index-error channel (best
+			// effort) and return the empty class so the harness counter is not
+			// incremented for an unreadable divergence.
+			_ = s.ops.Log(ctx, memops.LogCategoryRecall, "index-error",
+				fmt.Sprintf("W1-diag emit failed: %v", err))
+			return ""
+		}
+	}
+
 	switch class {
 	case w1StrictMiss:
 		s.w1DiagStrictMiss.Add(1)
@@ -1111,19 +1158,6 @@ func (s *Service) emitW1Diag(ctx context.Context, tree *scoring.SummaryNode, des
 	case w1TreeMismatch:
 		s.w1DiagTreeMismatch.Add(1)
 	}
-
-	if s.ops == nil {
-		return class // no substrate to log to (unit-test construction); tally still bumped
-	}
-	detail := fmt.Sprintf(
-		"class=%s flat=%s descent=%s missed=%s substituted=%s",
-		class,
-		fmtCandidates(flat),
-		fmtCandidates(descent),
-		fmtCandidates(missed),
-		fmtCandidates(substituted),
-	)
-	_ = s.ops.Log(ctx, memops.LogCategoryRecall, "W1-diag", detail)
 	return class
 }
 
@@ -1193,11 +1227,12 @@ func turnSetDifference(a, b []scoring.ChunkCandidate) int {
 	return diff
 }
 
-// IntraThreadDivergence is the exported W1 recall-preservation gate seam
+// IntraThreadDivergence is the exported W1 recall-preservation measure seam
 // (design §7.1) the sim/harness calls per intra-thread probe: embed the
 // query, load the live index snapshot, and return the descent-vs-flat
-// top-Kf set difference for the engaged thread. The sim gates
-// recall_intra_descent_divergence == 0 on this (Inc E).
+// top-Kf set difference for the engaged thread. The sim REPORTS
+// recall_intra_descent_divergence as an approximation-drift quality measure
+// (#119; it is not gated to 0 — exact recall is the #117 tier).
 //
 // It mirrors Recall's read path — one atomic snapshot load (I1), the same
 // query embedding — so the differential is measured against the exact index

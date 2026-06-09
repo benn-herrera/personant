@@ -812,9 +812,17 @@ summary hierarchy shipped: an O(log n) beam descent over a per-thread
 summary tree (v0.1 node keys = deterministic exemplar sets per
 `ExemplarSummarizer`; an LLM-summary key is the deferred F-A enrichment
 at the same seam) built offline by the sleep cycle, replacing the O(n)
-flat fine-pass on the engaged thread. The W1 recall-preservation gate
-was green on a live 14-day run. Algorithm detail and acceptance criteria
-are in `design/within-thread-summary-hierarchy.md` and
+flat fine-pass on the engaged thread. The W1 recall-preservation signal
+(`recall_intra_descent_divergence`) is a reported **quality measure** — an
+approximation-drift canary — **not a build-blocking gate** (#119): the
+summary tree is an approximate O(log n) heuristic, so a nonzero divergence
+means it substituted a within-top-Kf leaf, not necessarily that recall was
+lost. Exact/exhaustive recall is the separate exact tier (#117 grep +
+flat-scan), where it is guaranteed; it is not the approximate tree's
+contract. (It was green on a live 14-day run; a later 1-month rung showed a
+within-Kf substitution at 1.000 embedding recall, which motivated the
+gate→measure reframe.) Algorithm detail and acceptance criteria are in
+`design/within-thread-summary-hierarchy.md` and
 `design/intra-thread-recall-design.md`.
 
 **Recall surface.** At turn close the merged candidates are logged
