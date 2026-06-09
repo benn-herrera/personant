@@ -853,6 +853,58 @@ func (s *Service) coarseFine(q []float64, snap *indexSnapshot, exclude map[strin
 	return out
 }
 
+// ExhaustiveIntraScan is the §3.4 SEMANTIC-EXACT tier (#117): a full,
+// UNBOUNDED flat cosine scan over EVERY indexed chunk of one thread. It is
+// the exhaustive counterpart to the approximate within-thread summary-tree
+// descent (#111) — it answers "find EVERYTHING we discussed about X" where X
+// is paraphrased and COMPLETENESS matters, the case the approximate O(log n)
+// tree deliberately trades away for speed. Expensive and rare by design; the
+// future routing layer invokes it only when a query is classified
+// exhaustive-semantic (that LLM query-class routing is DEFERRED — not this
+// method's job).
+//
+// It embeds the query (the same embedQuery the production read path uses),
+// loads the live index snapshot (one atomic load, I1), and runs the flat
+// scan over ALL of snap.fine[threadID] with NO top-Kf truncation — distinct
+// from coarseFine/intraThread, which cap at Kf, and distinct from the
+// summary-tree descent, which it must NOT use (the tree is the approximate
+// path; this is the exact O(n) scan by definition). It does NOT bypass via
+// the engaged-thread tree even when one exists.
+//
+// threshold is the minimum cosine; 0 → scoring.DefaultCosineThreshold. The
+// returned candidates are ordered score-desc then turn-number-asc, reusing
+// scoring.ScanChunks for the cosine math, sort, and threshold filter — every
+// candidate at or above threshold, nothing dropped.
+//
+// The exact tier deliberately bypasses the approximate-recall net policy
+// (scoring.capNet / scoring.NetCap, which ProposeChunks applies) by calling
+// ScanChunks directly: NetCap is the approximate path's pathological-density
+// backstop, and inheriting it would silently truncate a dense thread and
+// break the exhaustive contract this tier exists to honor.
+func (s *Service) ExhaustiveIntraScan(ctx context.Context, queryText, threadID string, threshold float64) []scoring.ChunkCandidate {
+	q := s.embedQuery(ctx, queryText)
+	if q == nil {
+		return nil
+	}
+	return exhaustiveIntraScan(q, s.cur.Load(), threadID, threshold)
+}
+
+// exhaustiveIntraScan is the pure scan half of ExhaustiveIntraScan, split out
+// so it can be driven directly from an injected snapshot with a controlled
+// query vector (the deterministic unit test) without a live embedder. It runs
+// the unbounded flat scoring.ScanChunks over the thread's fine tier — NEVER
+// the summary-tree descent (the approximate path) and NEVER ProposeChunks
+// (which would apply capNet/NetCap). An absent/empty fine tier yields nil
+// (not an error): a thread with nothing indexed has nothing exhaustive to
+// return.
+func exhaustiveIntraScan(q []float64, snap *indexSnapshot, threadID string, threshold float64) []scoring.ChunkCandidate {
+	leaves := snap.fine[threadID]
+	if len(leaves) == 0 {
+		return nil
+	}
+	return scoring.ScanChunks(q, leaves, threshold, nil)
+}
+
 // intraThread runs the §4.1 step-3 engaged-thread pass: directly over the
 // engaged thread's scrolled-out chunks, bypassing the coarse gate. Returns
 // nil when no engaged thread, no fine chunks for it, or no chunk clears the

@@ -76,20 +76,37 @@ type ChunkOptions struct {
 // chunk vectors of one thread (live-FIFO-window excerpts already
 // removed, I6).
 func ProposeChunks(query []float64, chunks []ChunkVector, opts ChunkOptions) []ChunkCandidate {
-	threshold := opts.Threshold
-	if threshold == 0 {
-		threshold = DefaultCosineThreshold
-	}
 	limit := opts.Limit
 	if limit == 0 {
 		limit = DefaultChunkLimit
+	}
+	return capNet(ScanChunks(query, chunks, opts.Threshold, opts.Counter), limit, opts.NetCapHits)
+}
+
+// ScanChunks is the exhaustive scan-and-sort primitive underneath
+// ProposeChunks: it cosine-scores EVERY chunk against the query, filters to
+// those at or above threshold, and returns them sorted score-desc / turn-asc
+// — the FULL candidate set, with NO relevance-net cap (capNet/NetCap) applied.
+// This is the exact-semantic tier's primitive (#117 ExhaustiveIntraScan):
+// every chunk ≥ threshold, nothing dropped. ProposeChunks layers the
+// approximate-recall net policy on top of this; the exact tier calls
+// ScanChunks directly so capNet/NetCap never truncates an exhaustive result.
+//
+// threshold == 0 → DefaultCosineThreshold (the same fine-pass operating
+// point). counter, when non-nil, tallies one cosine comparison per chunk
+// scanned (the MEASURED recall_query_cosine_ops instrument) — the tally lives
+// here so it is counted EXACTLY ONCE, regardless of caller. An empty query or
+// empty chunk slice returns nil.
+func ScanChunks(query []float64, chunks []ChunkVector, threshold float64, counter *CosineCounter) []ChunkCandidate {
+	if threshold == 0 {
+		threshold = DefaultCosineThreshold
 	}
 	if len(query) == 0 || len(chunks) == 0 {
 		return nil
 	}
 
 	out := make([]ChunkCandidate, 0, len(chunks))
-	opts.Counter.add(len(chunks)) // one cosine comparison per chunk scanned
+	counter.add(len(chunks)) // one cosine comparison per chunk scanned
 	for _, cv := range chunks {
 		score := cosineSimilarity(query, cv.Vector)
 		if score < threshold {
@@ -104,7 +121,7 @@ func ProposeChunks(query []float64, chunks []ChunkVector, opts ChunkOptions) []C
 		}
 		return out[i].TurnNumber < out[j].TurnNumber
 	})
-	return capNet(out, limit, opts.NetCapHits)
+	return out
 }
 
 // capNet applies the relevance-sized net cut (#111 Finding A) to a
