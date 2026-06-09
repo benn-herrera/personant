@@ -32,6 +32,16 @@ update-agents-dependency: agents
 
 BINDIR := bin
 
+# GOPKGS is the set of Go package roots. All packages live under cmd/ and
+# internal/; test/ holds NO Go code (rundata, python tools, and the
+# perms-restricted api_keys dir). A bare `./...` makes the go toolchain
+# readdir() every directory for package discovery — including test/api_keys
+# (mode 0700, benn-owned), which fails the walk for any non-owner before a
+# single package compiles. Scoping to the real roots covers 100% of the code
+# and never descends into test/, so the keys stay locked down with no perms
+# relaxation. Use $(GOPKGS), not ./..., in every vet/test/cover target.
+GOPKGS := ./cmd/... ./internal/...
+
 build: $(BINDIR)/personant
 
 $(BINDIR)/personant:
@@ -96,8 +106,8 @@ recall-corpus-fetch:
 	python3 test/tools/wikipedia_corpus.py
 
 test: build recall-madlibs
-	go vet ./...
-	go test ./... --count=1
+	go vet $(GOPKGS)
+	go test $(GOPKGS) --count=1
 
 # bench runs benchmarks only (no unit tests) for a package selected by
 # PKG, with a regexp selected by BENCH. Defaults target the recall hot
@@ -120,7 +130,7 @@ bench: build
 # a .gitignore'd derived artifact. Build-tagged tests (integration,
 # the sim rungs past 1d) are not included.
 cover: build recall-madlibs
-	go test -coverpkg=./... -coverprofile=cover.out ./... --count=1
+	go test -coverpkg=$(GOPKGS) -coverprofile=cover.out $(GOPKGS) --count=1
 	@go tool cover -func=cover.out | tail -1
 
 # sim runs the simulation rung walk — TestSim in internal/scenarios/sim/ at the
@@ -172,7 +182,7 @@ sim: build recall-madlibs
 # unreachable/misconfigured endpoint is a FAILURE, not a skip. Override
 # the endpoint with PERSONANT_REAPER_URL.
 integration-test: build
-	PERSONANT_LIVE_TESTS=1 go test ./... --count=1
+	PERSONANT_LIVE_TESTS=1 go test $(GOPKGS) --count=1
 
 clean:
 	rm -f $(BINDIR)/personant
