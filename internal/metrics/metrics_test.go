@@ -57,6 +57,46 @@ func TestSet(t *testing.T) {
 	}
 }
 
+// TestReadAccessors covers the mid-run read API (#120): CounterValue,
+// GaugeValue, and HistogramSnapshot read current state, and the histogram
+// snapshot is a defensive copy a later Record cannot mutate.
+func TestReadAccessors(t *testing.T) {
+	r := New(nil)
+	r.Counter("turns", 3)
+	r.Set("p99", 42.0)
+	r.Record("dur", 1.0)
+	r.Record("dur", 2.0)
+
+	if got := r.CounterValue("turns"); got != 3 {
+		t.Errorf("CounterValue(turns): got %d, want 3", got)
+	}
+	if got := r.CounterValue("absent"); got != 0 {
+		t.Errorf("CounterValue(absent): got %d, want 0", got)
+	}
+	if got := r.GaugeValue("p99"); got != 42.0 {
+		t.Errorf("GaugeValue(p99): got %v, want 42.0", got)
+	}
+	if got := r.GaugeValue("absent"); got != 0 {
+		t.Errorf("GaugeValue(absent): got %v, want 0", got)
+	}
+	if got := r.HistogramSnapshot("absent"); got != nil {
+		t.Errorf("HistogramSnapshot(absent): got %v, want nil", got)
+	}
+
+	snap := r.HistogramSnapshot("dur")
+	if len(snap) != 2 || snap[0] != 1.0 || snap[1] != 2.0 {
+		t.Fatalf("HistogramSnapshot(dur): got %v, want [1 2]", snap)
+	}
+	// The snapshot is a copy: a later Record must not be visible through it,
+	// and mutating it must not corrupt the backing series.
+	snap[0] = 99.0
+	r.Record("dur", 3.0)
+	again := r.HistogramSnapshot("dur")
+	if len(again) != 3 || again[0] != 1.0 {
+		t.Errorf("snapshot copy leaked: got %v, want a clean [1 2 3]", again)
+	}
+}
+
 func TestLabelsAndTimestamps(t *testing.T) {
 	r := New(map[string]string{"scenario": "single-thread", "seed": "42"})
 	r.Counter("turns", 1)

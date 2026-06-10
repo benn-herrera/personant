@@ -328,6 +328,20 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 
 	runInvariants(t, h, perStepInvariants(h, step), label)
 
+	// Per-sim-day-close handler (#120). perStepInvariants stamped dayClosePending
+	// when the pinned clock crossed a heavy-invariant cadence tick; fire the
+	// handler HERE — after the boundary's heavy invariants have run — so the
+	// run-to-date stats it snapshots are taken on settled state. Fires at most
+	// once per step (the advance is one-cadence-per-step) and only when the
+	// scenario installed a handler under a non-zero cadence.
+	if h.dayClosePending {
+		h.dayClosePending = false
+		if h.onSimDayClose != nil {
+			h.simDay++
+			h.onSimDayClose(h, h.simDay, h.dayCloseDate)
+		}
+	}
+
 	// Archival-recoverability predicate for a StepSource that measures recall
 	// against a target it did NOT declare as an expected match (the #96
 	// abandoned-topic probe). Mirrors recordRecallFidelity's filter: a

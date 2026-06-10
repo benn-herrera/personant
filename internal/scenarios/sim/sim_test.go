@@ -454,6 +454,19 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// refinement episodes — the harness sees them as ordinary steps.
 	gen := sc.StepSource.(*generator)
 
+	// Per-sim-day-close stats series (#120): at the close of every sim-day the
+	// harness fires this handler, which appends one run-to-date stats record to
+	// daily.jsonl in the scenario directory. The acceptance-ladder rung points
+	// (15/30/60/120d) and every intermediate day are then just READ from the
+	// series — one long run replaces the re-simulate-from-zero rung walk — and a
+	// run terminated mid-flight has all stats to that point safely cached. The
+	// CORRECTNESS INVARIANT is that the run-to-date record at the close of day N
+	// equals the end-of-run summary of a standalone N-day run (same seed): the
+	// shadow-derived stats come from the SAME computeIntraThreadGauges the
+	// end-of-run summary uses, and counters/percentiles are read run-to-date.
+	daily := newDailySnapshotWriter(gen)
+	sc.OnSimDayClose = daily.onDayClose
+
 	start := clock.Profiling()
 	h := scenarios.RunScenario(t, sc)
 	wall := clock.Since(start)
@@ -543,6 +556,17 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	if m, err = readMetrics(h.MetricsPath); err != nil {
 		t.Fatalf("re-read metrics blob: %v", err)
 	}
+
+	// Per-sim-day series final record (#120): emit the LAST daily.jsonl record
+	// now that the end-of-run summary inputs (finalPopulation = liveThreads, the
+	// turn-latency percentiles) are computed, using those EXACT values. The
+	// interior ticks (days 1..N-1) already fired via sc.OnSimDayClose; this is
+	// day N, carrying the trailing partial day the cadence tick at N×24h does not
+	// catch (the run ends a few jittered steps past the tick). Because it uses the
+	// summary's own inputs, this last record's run_to_date equals the end-of-run
+	// summary by construction — the #120 correctness invariant that lets the
+	// acceptance-ladder rungs be read from the series.
+	daily.finalize(h, h.PinnedClock(), finalPopulation, p50, p95, p99)
 
 	t.Logf("=== %s summary ===", label)
 	t.Logf("turns:            %d", turns)
@@ -1739,10 +1763,6 @@ func recordSynthesisMetrics(h *scenarios.Harness, gen *generator) {
 // generator (no runtime index read, F6); the generator stays
 // metrics-package-free at the seam, mirroring recordWanderMetrics.
 func recordIntraThreadMetrics(h *scenarios.Harness, gen *generator, liveThreads int, p50, p95, p99 float64) {
-	// §4.3 perf-decay series.
-	h.Metrics.Set(metricRecallIndexCoarseSize, float64(liveThreads))
-	h.Metrics.Set(metricRecallIndexFineChunks, float64(gen.totalFineChunks()))
-	h.Metrics.Set(metricRecallIndexFineChunksMain, float64(gen.mainThreadChunkCount()))
 	// MEASURED recall_query_cosine_ops (§7.2): read the recaller's actual cosine
 	// comparison tally (counted at the scoring call sites — coarse + the engaged
 	// flat-scan OR descent), divided by the queries that performed them. This
@@ -1751,6 +1771,10 @@ func recordIntraThreadMetrics(h *scenarios.Harness, gen *generator, liveThreads 
 	// ran, so the reporter reports 0 queries → the metric is 0 (honestly
 	// unavailable; the bend is measurable only on an embedding-live run, where a
 	// usable tree drives the descent). recordCosineOpsMeasured handles both.
+	//
+	// recordCosineOpsMeasured reads the LIVE recaller (not the generator shadow),
+	// so it stays here as a direct Set — it is not part of the pure shadow-derived
+	// compute the daily snapshot reuses.
 	recordCosineOpsMeasured(h)
 	// W1 divergence classification (#111 §7.1 diagnostic): the strict-miss /
 	// tie / tree-mismatch breakdown of recall_intra_descent_divergence is
@@ -1760,15 +1784,43 @@ func recordIntraThreadMetrics(h *scenarios.Harness, gen *generator, liveThreads 
 	// causes — the #111 fix. The summary below reads those counters directly
 	// (m.Counters), so no post-run remap is needed here. 0 on the mock run; the
 	// headline on a live-embedding run.
-	h.Metrics.Set(metricRecallQueryLatencyP50, p50)
-	h.Metrics.Set(metricRecallQueryLatencyP95, p95)
-	h.Metrics.Set(metricRecallQueryLatencyP99, p99)
+
+	// Every remaining gauge is a pure function of the generator shadow state +
+	// (liveThreads, p50/p95/p99); compute them once and Set them, so the daily
+	// run-to-date snapshot (#120) can call the SAME pure function mid-run without
+	// re-deriving the math or mutating the final gauges. The end-of-run numbers
+	// are byte-for-byte what computeIntraThreadGauges returns here.
+	for k, v := range computeIntraThreadGauges(gen, liveThreads, p50, p95, p99) {
+		h.Metrics.Set(k, v)
+	}
+}
+
+// computeIntraThreadGauges is the PURE shadow-derived half of
+// recordIntraThreadMetrics (#120): it returns the §4.3 perf-decay + intra-thread
+// hop/depth gauge map from the generator's CURRENT shadow state plus the supplied
+// (liveThreads, p50/p95/p99), WITHOUT touching h.Metrics. Because the generator
+// accumulates its shadow counters step-by-step, calling this mid-run yields the
+// run-to-date values; calling it at end-of-run yields the final values — and the
+// last daily snapshot therefore equals the end-of-run summary for the same seed
+// (the #120 correctness invariant). recordCosineOpsMeasured (which reads the live
+// recaller, not the shadow) and the W1 classification counters are NOT included
+// here — they are set/accumulated by their own call sites.
+func computeIntraThreadGauges(gen *generator, liveThreads int, p50, p95, p99 float64) map[string]float64 {
+	g := map[string]float64{}
+
+	// §4.3 perf-decay series.
+	g[metricRecallIndexCoarseSize] = float64(liveThreads)
+	g[metricRecallIndexFineChunks] = float64(gen.totalFineChunks())
+	g[metricRecallIndexFineChunksMain] = float64(gen.mainThreadChunkCount())
+	g[metricRecallQueryLatencyP50] = p50
+	g[metricRecallQueryLatencyP95] = p95
+	g[metricRecallQueryLatencyP99] = p99
 	// Modeled flush rate: every scrolled-out chunk is eventually flushed
 	// (flush_chunks), in batches of intraThreadDebtCap (flush_calls). This is
 	// the embed-call cost the debt cap N pays over the rung.
 	scrolledOut := gen.mainThreadScrolledOut()
-	h.Metrics.Set(metricRecallIndexFlushChunks, float64(scrolledOut))
-	h.Metrics.Set(metricRecallIndexFlushCalls, float64(scrolledOut/intraThreadDebtCap))
+	g[metricRecallIndexFlushChunks] = float64(scrolledOut)
+	g[metricRecallIndexFlushCalls] = float64(scrolledOut / intraThreadDebtCap)
 
 	// Per-hop intra-thread recall + coherence.
 	divergence := 0
@@ -1780,14 +1832,12 @@ func recordIntraThreadMetrics(h *scenarios.Harness, gen *generator, liveThreads 
 		// Symbolic predicted-recoverability curve (H2): the fraction of probes
 		// at this hop the oracle predicts recoverable. This is the #109 fidelity
 		// curve "symbolic now" — a coherence signal, NOT validated user recall.
-		h.Metrics.Set(metricRecallIntraHopRecall+key,
-			float64(gen.intraHopPredictHit[hop])/float64(total))
-		h.Metrics.Set(metricRecallIntraHopRecall+key+"_obs", float64(total))
+		g[metricRecallIntraHopRecall+key] = float64(gen.intraHopPredictHit[hop]) / float64(total)
+		g[metricRecallIntraHopRecall+key+"_obs"] = float64(total)
 		// Oracle/runtime coherence at this hop — meaningful only on an
 		// embedding-live run (the mock run leaves the observed/coherence tallies
 		// at 0, so this reads 0.0 there and is reported as "n/a — symbolic-only").
-		h.Metrics.Set(metricRecallIntraHopRecall+key+"_coherence",
-			float64(gen.intraHopCoherent[hop])/float64(total))
+		g[metricRecallIntraHopRecall+key+"_coherence"] = float64(gen.intraHopCoherent[hop]) / float64(total)
 		// Embedding-OBSERVED per-hop recall (#109/#111 Finding B head-to-head),
 		// scored against the SAME forgiven ground truth as the symbolic curve
 		// above and on the SAME denominator (intraHopTotal), so the two columns
@@ -1797,8 +1847,7 @@ func recordIntraThreadMetrics(h *scenarios.Harness, gen *generator, liveThreads 
 		// layer), exactly as metricWanderEmbedRecallByHops is on the mock run.
 		// This is the recall users actually get; mirror of how wander derives
 		// metricWanderEmbedRecallByHops from its embed-match-fire observations.
-		h.Metrics.Set(metricRecallIntraEmbedHopRecall+key,
-			float64(gen.intraHopObservedHit[hop])/float64(total))
+		g[metricRecallIntraEmbedHopRecall+key] = float64(gen.intraHopObservedHit[hop]) / float64(total)
 		divergence += gen.intraHopDiverge[hop]
 	}
 
@@ -1814,14 +1863,212 @@ func recordIntraThreadMetrics(h *scenarios.Harness, gen *generator, liveThreads 
 			continue
 		}
 		key := fmt.Sprintf("_d%d", bucket)
-		h.Metrics.Set(metricRecallIntraRecallByDepth+key,
-			float64(gen.intraDepthPredictHit[bucket])/float64(total))
-		h.Metrics.Set(metricRecallIntraRecallByDepth+key+"_obs", float64(total))
-		h.Metrics.Set(metricRecallIntraEmbedRecallByDepth+key,
-			float64(gen.intraDepthObservedHit[bucket])/float64(total))
+		g[metricRecallIntraRecallByDepth+key] = float64(gen.intraDepthPredictHit[bucket]) / float64(total)
+		g[metricRecallIntraRecallByDepth+key+"_obs"] = float64(total)
+		g[metricRecallIntraEmbedRecallByDepth+key] = float64(gen.intraDepthObservedHit[bucket]) / float64(total)
 	}
-	h.Metrics.Set(metricRecallIntraCoherenceDivergence, float64(divergence))
-	h.Metrics.Set(metricRecallIntraBlindspotMisses, float64(gen.intraBlindspotMisses))
+	g[metricRecallIntraCoherenceDivergence] = float64(divergence)
+	g[metricRecallIntraBlindspotMisses] = float64(gen.intraBlindspotMisses)
+
+	return g
+}
+
+// dailyFilename is the per-sim-day stats series the #120 day-close handler
+// appends to, inside the scenario's rundata directory (h.RunHome). One JSON
+// object per line, one line per sim-day, in day order.
+const dailyFilename = "daily.jsonl"
+
+// dailyRecord is one sim-day's stats line in daily.jsonl (#120). RunToDate is
+// the cumulative state at the close of day Day; DayDelta is the difference from
+// the prior day's close (so the series carries both the rung-point reads and a
+// per-day trajectory for spike detection). The CORRECTNESS INVARIANT: the
+// RunToDate of the LAST record equals the end-of-run summary for the same run
+// (and day-N of a long run equals an Nd run), because RunToDate is computed from
+// the same counters/percentiles/computeIntraThreadGauges the summary uses.
+type dailyRecord struct {
+	Day       int        `json:"day"`
+	SimDate   string     `json:"sim_date"`
+	RunToDate dailyStats `json:"run_to_date"`
+	DayDelta  dailyDelta `json:"day_delta"`
+}
+
+// dailyStats is the cumulative run-to-date snapshot. The headline scalars are
+// named; the full sim-derived intra-thread gauge set (the H2 depth buckets
+// recall_intra_recall_bydepth_d<k>, the per-hop recall curve, divergence,
+// flush, cosine-ops, etc.) rides in IntraGauges so the series carries the §9.2
+// curve per day without a field per bucket.
+type dailyStats struct {
+	Turns          int64   `json:"turns"`
+	PerTurnMsMean  float64 `json:"per_turn_ms_mean"`
+	LatencyP50     float64 `json:"latency_p50"`
+	LatencyP95     float64 `json:"latency_p95"`
+	LatencyP99     float64 `json:"latency_p99"`
+	ThreadsCreated int64   `json:"threads_created"`
+	SpineSize      int     `json:"spine_size"`
+	SleepCycles    int64   `json:"sleep_cycles"`
+
+	RecallQueryCosineOps     float64 `json:"recall_query_cosine_ops"`
+	RecallIndexFlushCalls    float64 `json:"recall_index_flush_calls"`
+	RecallIntraDescentDiverg int64   `json:"recall_intra_descent_divergence"`
+	RecallIntraW1StrictMiss  int64   `json:"recall_intra_w1_strict_miss"`
+	RecallIntraW1Tie         int64   `json:"recall_intra_w1_tie"`
+	RecallIntraW1TreeMism    int64   `json:"recall_intra_w1_tree_mismatch"`
+
+	// IntraGauges carries the full shadow-derived intra-thread gauge set
+	// (computeIntraThreadGauges) — H2 depth buckets, per-hop recall, divergence,
+	// blindspot, fine-chunk counts. This is the run-to-date #109 curve.
+	IntraGauges map[string]float64 `json:"intra_gauges"`
+}
+
+// dailyDelta is the per-day movement: counters diffed against the prior day's
+// close, and turn-latency percentiles computed over ONLY this day's slice of
+// the turn_duration_ms histogram (histogram[prevLen:currLen]).
+type dailyDelta struct {
+	TurnsThisDay         int64   `json:"turns_this_day"`
+	PerTurnMsMeanThisDay float64 `json:"per_turn_ms_mean_this_day"`
+	LatencyP50ThisDay    float64 `json:"latency_p50_this_day"`
+	LatencyP95ThisDay    float64 `json:"latency_p95_this_day"`
+	LatencyP99ThisDay    float64 `json:"latency_p99_this_day"`
+}
+
+// dailySnapshotWriter appends one run-to-date stats record to daily.jsonl per
+// sim-day (#120). The generator is the shadow-state source for
+// computeIntraThreadGauges; prevTurns / prevHistLen carry the prior close's
+// cumulative turns and turn_duration_ms histogram length so the per-day delta
+// is a clean diff. day is the running 1-based ordinal it stamps.
+//
+// Firing model — interior + final, mirroring the heavy-invariant cadence
+// ("always fires once at end-of-run regardless of cadence"):
+//
+//   - onDayClose fires at each interior cadence tick (days 1..N-1 of an N-day
+//     run): the simulated clock crosses 24h, 48h, …, well inside the run.
+//   - finalize fires ONCE from runSimRung after the end-of-run summary is
+//     computed (the LAST tick, N×24h, does NOT fire on its own — the run ends
+//     when simNow ≥ Duration, a few jittered steps past the tick, so the
+//     trailing partial day would otherwise be uncaptured). finalize emits day N
+//     with the EXACT end-of-run summary values, which is what makes the LAST
+//     daily record equal the end-of-run summary (the #120 correctness
+//     invariant) and "day-N of a long run == an Nd run" valid.
+type dailySnapshotWriter struct {
+	gen         *generator
+	day         int
+	prevTurns   int64
+	prevHistLen int
+}
+
+func newDailySnapshotWriter(gen *generator) *dailySnapshotWriter {
+	return &dailySnapshotWriter{gen: gen}
+}
+
+// onDayClose is the scenarios.Scenario.OnSimDayClose handler for an INTERIOR
+// sim-day tick. It computes run-to-date stats from the LIVE harness state
+// (cumulative counters + percentiles over the full turn_duration_ms histogram so
+// far, current spine size for liveThreads) and the generator shadow, then appends
+// one record. It reads h.Metrics through the read-only accessors and writes only
+// the daily file, so it NEVER mutates the final gauges — the end-of-run summary
+// is unchanged. simDate is the tick instant; the harness's `day` argument is
+// ignored in favor of the writer's own ordinal so interior and final records
+// share one monotonic counter.
+func (w *dailySnapshotWriter) onDayClose(h *scenarios.Harness, _ int, simDate time.Time) {
+	durations := h.Metrics.HistogramSnapshot("turn_duration_ms")
+	spineSize := 0
+	if recs, err := store.ReadSpine(h.Paths.Spine); err == nil {
+		spineSize = len(recs)
+	}
+	p50 := percentile(durations, 0.50)
+	p95 := percentile(durations, 0.95)
+	p99 := percentile(durations, 0.99)
+	w.appendRecord(h, simDate, durations, spineSize, p50, p95, p99)
+}
+
+// finalize emits the LAST daily record (day N) from runSimRung, AFTER the
+// end-of-run summary is computed, using the EXACT summary inputs — the final
+// histogram, the final spine population (liveThreads), and the summary's
+// p50/p95/p99 — so the record's run_to_date equals the end-of-run summary by
+// construction (#120 correctness invariant). simDate is the run's final pinned
+// instant. It must be called exactly once, after the last onDayClose.
+func (w *dailySnapshotWriter) finalize(h *scenarios.Harness, simDate time.Time, liveThreads int, p50, p95, p99 float64) {
+	durations := h.Metrics.HistogramSnapshot("turn_duration_ms")
+	w.appendRecord(h, simDate, durations, liveThreads, p50, p95, p99)
+}
+
+// appendRecord builds one dailyRecord from the supplied run-to-date inputs and
+// appends it to daily.jsonl. The shared body of onDayClose (interior, live
+// state) and finalize (end-of-run, summary state) so the two emit byte-identical
+// schema. durations is the run-to-date turn_duration_ms slice; liveThreads is the
+// run-to-date spine size (the coarse-tier vector count); p50/p95/p99 are over
+// durations. The per-day delta is over durations[prevHistLen:], the slice added
+// since the prior record.
+func (w *dailySnapshotWriter) appendRecord(h *scenarios.Harness, simDate time.Time, durations []float64, liveThreads int, p50, p95, p99 float64) {
+	w.day++
+	currHistLen := len(durations)
+	// Guard the delta slice bounds: a record can in principle be emitted with no
+	// new turns since the prior one (an empty day), so clamp prevHistLen.
+	lo := w.prevHistLen
+	if lo > currHistLen {
+		lo = currHistLen
+	}
+	dayHist := durations[lo:currHistLen]
+
+	// Run-to-date sim-derived gauges from the SAME pure function the end-of-run
+	// summary uses — fed the run-to-date liveThreads + percentiles. At finalize
+	// these are the exact end-of-run values (the #120 correctness invariant).
+	intra := computeIntraThreadGauges(w.gen, liveThreads, p50, p95, p99)
+
+	turns := h.Metrics.CounterValue("turns")
+	rec := dailyRecord{
+		Day:     w.day,
+		SimDate: simDate.Format("2006-01-02"),
+		RunToDate: dailyStats{
+			Turns:          turns,
+			PerTurnMsMean:  mean(durations),
+			LatencyP50:     p50,
+			LatencyP95:     p95,
+			LatencyP99:     p99,
+			ThreadsCreated: h.Metrics.CounterValue("threads_created"),
+			SpineSize:      liveThreads,
+			SleepCycles:    h.Metrics.CounterValue("sleep_cycles"),
+			// recall_query_cosine_ops is the LIVE-recaller gauge, NOT a shadow
+			// value (computeIntraThreadGauges does not compute it —
+			// recordCosineOpsMeasured reads the recaller directly). Read it off
+			// the gauge; 0 on the mock path, where the perf bend is unmeasurable.
+			RecallQueryCosineOps:     h.Metrics.GaugeValue(metricRecallQueryCosineOps),
+			RecallIndexFlushCalls:    intra[metricRecallIndexFlushCalls],
+			RecallIntraDescentDiverg: h.Metrics.CounterValue("recall_intra_descent_divergence"),
+			RecallIntraW1StrictMiss:  h.Metrics.CounterValue("recall_intra_w1_strict_miss"),
+			RecallIntraW1Tie:         h.Metrics.CounterValue("recall_intra_w1_tie"),
+			RecallIntraW1TreeMism:    h.Metrics.CounterValue("recall_intra_w1_tree_mismatch"),
+			IntraGauges:              intra,
+		},
+		DayDelta: dailyDelta{
+			TurnsThisDay:         turns - w.prevTurns,
+			PerTurnMsMeanThisDay: mean(dayHist),
+			LatencyP50ThisDay:    percentile(dayHist, 0.50),
+			LatencyP95ThisDay:    percentile(dayHist, 0.95),
+			LatencyP99ThisDay:    percentile(dayHist, 0.99),
+		},
+	}
+
+	line, err := json.Marshal(rec)
+	if err != nil {
+		h.T.Errorf("daily snapshot day %d: marshal: %v", w.day, err)
+		return
+	}
+	path := filepath.Join(h.RunHome, dailyFilename)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		h.T.Errorf("daily snapshot day %d: open %s: %v", w.day, path, err)
+		return
+	}
+	if _, err := f.Write(append(line, '\n')); err != nil {
+		h.T.Errorf("daily snapshot day %d: write: %v", w.day, err)
+	}
+	if err := f.Close(); err != nil {
+		h.T.Errorf("daily snapshot day %d: close: %v", w.day, err)
+	}
+
+	w.prevTurns = turns
+	w.prevHistLen = currHistLen
 }
 
 // cosineOpsReporter is the recaller surface the MEASURED recall_query_cosine_ops
@@ -2091,5 +2338,143 @@ func TestRecallExpectedMaterializationFilter(t *testing.T) {
 	// filter is a no-op once all candidates are materialized.
 	if got, want := g.recallExpectedForMaterialized(0, Q, false, 1000), g.recallExpectedFor(0, Q, false); !reflect.DeepEqual(got, want) {
 		t.Errorf("filter past all createdAtStep = %v, want sentinel result %v (must be a no-op)", got, want)
+	}
+}
+
+// TestDailyStatsSeries pins the #120 per-sim-day stats series. A short
+// multi-day MOCK sim drives the day-close hook; the test then asserts the four
+// load-bearing properties of daily.jsonl:
+//
+//	(a) exactly one record per sim-day, in monotonic day order;
+//	(b) the run-to-date cumulative counters are non-decreasing across days;
+//	(c) the LAST record's run_to_date equals the end-of-run summary for the
+//	    SAME run — the correctness invariant that lets the acceptance-ladder
+//	    rung points be READ from the series instead of re-simulated; and
+//	(d) day 1's day_delta equals its run_to_date (the first day's movement IS
+//	    the whole run so far).
+//
+// It uses the nil-recaller mock path (the daily plumbing is embedder-
+// independent) and a 2-day span — the minimum that yields an interior tick
+// (day 1) plus the end-of-run finalize record (day 2).
+func TestDailyStatsSeries(t *testing.T) {
+	corpus := loadCorpusSlots(t)
+	h := runSimRung(t, "daily-series-2d", 2*24*time.Hour, corpus, nil, false, nil, "")
+
+	recs := readDailyRecords(t, h.RunHome)
+	if len(recs) < 2 {
+		t.Fatalf("expected >=2 daily records (a multi-day run), got %d", len(recs))
+	}
+
+	// (a) one record per sim-day, in order: day field is 1,2,3,…
+	for i, r := range recs {
+		if r.Day != i+1 {
+			t.Errorf("record %d has day=%d, want %d (one-per-day, in order)", i, r.Day, i+1)
+		}
+		if r.SimDate == "" {
+			t.Errorf("record day %d has empty sim_date", r.Day)
+		}
+	}
+
+	// (b) run-to-date cumulative counters are non-decreasing across days.
+	for i := 1; i < len(recs); i++ {
+		prev, cur := recs[i-1].RunToDate, recs[i].RunToDate
+		if cur.Turns < prev.Turns {
+			t.Errorf("day %d turns %d < day %d turns %d (must be non-decreasing)", recs[i].Day, cur.Turns, recs[i-1].Day, prev.Turns)
+		}
+		if cur.ThreadsCreated < prev.ThreadsCreated {
+			t.Errorf("day %d threads_created %d < prior %d", recs[i].Day, cur.ThreadsCreated, prev.ThreadsCreated)
+		}
+		if cur.SleepCycles < prev.SleepCycles {
+			t.Errorf("day %d sleep_cycles %d < prior %d", recs[i].Day, cur.SleepCycles, prev.SleepCycles)
+		}
+		if cur.RecallIntraDescentDiverg < prev.RecallIntraDescentDiverg {
+			t.Errorf("day %d descent_divergence %d < prior %d", recs[i].Day, cur.RecallIntraDescentDiverg, prev.RecallIntraDescentDiverg)
+		}
+	}
+
+	// (c) the LAST record's run_to_date == the end-of-run summary for this run.
+	// The summary is the metrics blob runSimRung wrote (counters) plus the
+	// percentiles/gauges it computed; the daily finalize used those exact inputs,
+	// so the two must agree field-for-field.
+	m, err := readMetrics(h.MetricsPath)
+	if err != nil {
+		t.Fatalf("read metrics blob: %v", err)
+	}
+	last := recs[len(recs)-1].RunToDate
+	durations := m.Histograms["turn_duration_ms"]
+	if want := m.Counters["turns"]; last.Turns != want {
+		t.Errorf("last record turns=%d, end-of-run summary turns=%d", last.Turns, want)
+	}
+	if want := m.Counters["threads_created"]; last.ThreadsCreated != want {
+		t.Errorf("last record threads_created=%d, summary=%d", last.ThreadsCreated, want)
+	}
+	if want := m.Counters["sleep_cycles"]; last.SleepCycles != want {
+		t.Errorf("last record sleep_cycles=%d, summary=%d", last.SleepCycles, want)
+	}
+	assertFloatEq(t, "latency_p50", last.LatencyP50, percentile(durations, 0.50))
+	assertFloatEq(t, "latency_p95", last.LatencyP95, percentile(durations, 0.95))
+	assertFloatEq(t, "latency_p99", last.LatencyP99, percentile(durations, 0.99))
+	assertFloatEq(t, "per_turn_ms_mean", last.PerTurnMsMean, mean(durations))
+	// spine_size == the summary's final coarse-tier gauge (= final spine size).
+	if want := int(m.Gauges[metricRecallIndexCoarseSize]); last.SpineSize != want {
+		t.Errorf("last record spine_size=%d, summary coarse_size=%d", last.SpineSize, want)
+	}
+	// W1 + descent counters.
+	if want := m.Counters["recall_intra_descent_divergence"]; last.RecallIntraDescentDiverg != want {
+		t.Errorf("last record descent_divergence=%d, summary=%d", last.RecallIntraDescentDiverg, want)
+	}
+	// Every sim-derived intra gauge in the last record's intra_gauges map must
+	// equal the corresponding end-of-run gauge in the blob (the H2 depth buckets,
+	// per-hop recall curve, divergence, flush, fine-chunk counts).
+	if len(last.IntraGauges) == 0 {
+		t.Error("last record intra_gauges is empty; expected the §9.2 sim-derived gauge set")
+	}
+	for k, v := range last.IntraGauges {
+		assertFloatEq(t, "intra_gauge["+k+"]", v, m.Gauges[k])
+	}
+
+	// (d) day 1's day_delta == its run_to_date (first day's movement is the run
+	// so far).
+	d1 := recs[0]
+	if d1.DayDelta.TurnsThisDay != d1.RunToDate.Turns {
+		t.Errorf("day 1 delta turns=%d != run_to_date turns=%d", d1.DayDelta.TurnsThisDay, d1.RunToDate.Turns)
+	}
+	assertFloatEq(t, "day1 delta p50", d1.DayDelta.LatencyP50ThisDay, d1.RunToDate.LatencyP50)
+	assertFloatEq(t, "day1 delta p99", d1.DayDelta.LatencyP99ThisDay, d1.RunToDate.LatencyP99)
+	assertFloatEq(t, "day1 delta mean", d1.DayDelta.PerTurnMsMeanThisDay, d1.RunToDate.PerTurnMsMean)
+}
+
+// readDailyRecords reads daily.jsonl from a scenario's rundata directory and
+// returns its records in file order. A missing file is a hard failure — the
+// #120 series must exist after a multi-day sim.
+func readDailyRecords(t *testing.T, runHome string) []dailyRecord {
+	t.Helper()
+	path := filepath.Join(runHome, dailyFilename)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var recs []dailyRecord
+	for _, line := range strings.Split(strings.TrimSpace(string(body)), "\n") {
+		if line == "" {
+			continue
+		}
+		var r dailyRecord
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("parse daily record %q: %v", line, err)
+		}
+		recs = append(recs, r)
+	}
+	return recs
+}
+
+// assertFloatEq fails the test if got and want differ by more than a tiny
+// epsilon. The daily and summary values are computed by the SAME helpers over
+// the SAME inputs, so they should be bit-identical; the epsilon only guards
+// against an incidental float reassociation.
+func assertFloatEq(t *testing.T, label string, got, want float64) {
+	t.Helper()
+	if absDiff(got, want) > 1e-9 {
+		t.Errorf("%s: daily=%.6f end-of-run=%.6f (must match — #120 correctness invariant)", label, got, want)
 	}
 }

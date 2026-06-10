@@ -451,6 +451,25 @@ type Scenario struct {
 	// supplies an explicit invariant list, that exact list runs.
 	HeavyInvariantCadence time.Duration
 
+	// OnSimDayClose, when non-nil, is invoked once each time the pinned
+	// simulated clock crosses a HeavyInvariantCadence tick — i.e. at the
+	// close of every sim-day for a sim whose cadence is 24h. The harness it
+	// receives is the run's live harness (h.Metrics holds the run-to-date
+	// counters/histograms, h.Paths the substrate); day is the 1-based sim-day
+	// ordinal (1 for the first close, 2 for the second, …) and simDate is the
+	// tick instant that just closed. It fires in lockstep with the
+	// heavy-invariant cadence advance (one fire per tick crossed, paced at most
+	// once per step — the sim's per-turn gaps are minutes, far under the 24h
+	// cadence, so one fire per step is exactly one per sim-day), AFTER the
+	// step's turn has committed and the heavy invariants for that boundary have
+	// run, so the run-to-date state the handler reads is settled.
+	//
+	// The generic harness owns the trigger; the sim supplies the handler
+	// (a daily run-to-date stats snapshot, #120). It never fires when
+	// HeavyInvariantCadence is 0 (legacy per-step harness users — every
+	// handwritten scenario — are unaffected) or when the field is nil.
+	OnSimDayClose func(h *Harness, day int, simDate time.Time)
+
 	// Recaller, when non-nil, overrides the default symbolic-only recaller
 	// the harness installs on turn.State. It is a factory (not a built
 	// instance) because the harness builds State during newHarness AND
@@ -590,6 +609,20 @@ type Harness struct {
 	// heavyCadence == 0.
 	nextHeavyAt time.Time
 
+	// onSimDayClose is Scenario.OnSimDayClose — the per-sim-day-close handler
+	// (#120). Fired in lockstep with the heavy-invariant cadence advance.
+	// simDay is the running 1-based count of closes fired so far; it is the
+	// `day` argument passed to the handler. nil/zero-cadence => never fires.
+	//
+	// dayClosePending / dayCloseDate are the deferred-fire seam: perStepInvariants
+	// detects the boundary (it already owns the nextHeavyAt advance) and stamps
+	// these; runStep fires the handler AFTER the heavy invariants for the boundary
+	// have run, so the run-to-date state the handler reads is settled.
+	onSimDayClose   func(h *Harness, day int, simDate time.Time)
+	simDay          int
+	dayClosePending bool
+	dayCloseDate    time.Time
+
 	// recallerFactory is Scenario.Recaller — retained so restartSession can
 	// re-install the same custom recaller after turn.LoadSession rebuilds a
 	// nil-embedder State. nil when the scenario kept the default recaller.
@@ -658,6 +691,15 @@ func NewMockResponseWithTag(threads []string, anchors []string, body string) mod
 		Content:      tag + "\n" + body,
 		FinishReason: "stop",
 	}
+}
+
+// PinnedClock returns the harness's current pinned simulated time — the instant
+// turn.State's clock returns, advanced by each Step.TimeDelta. Post-run it is the
+// run's final simulated instant. Read-only; used by the #120 daily-snapshot
+// finalize to stamp the last record's sim_date. Safe to call post-run (runStep is
+// single-goroutine within RunScenario, which has returned by then).
+func (h *Harness) PinnedClock() time.Time {
+	return h.pinnedClock
 }
 
 // SwitchProject swaps the harness's active project to targetID,

@@ -74,6 +74,36 @@ func (r *Run) Set(name string, value float64) {
 	r.gauges[name] = value
 }
 
+// Counter reads the current value of a named counter (0 if unseen). The
+// daily run-to-date snapshot (#120) reads cumulative counters live mid-run.
+func (r *Run) CounterValue(name string) int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.counters[name]
+}
+
+// HistogramSnapshot returns a copy of the histogram series at name (nil if
+// unseen). A copy, not the backing slice, so a caller computing a percentile
+// over the run-to-date series cannot be raced by a concurrent Record.
+func (r *Run) HistogramSnapshot(name string) []float64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	src := r.histograms[name]
+	if src == nil {
+		return nil
+	}
+	out := make([]float64, len(src))
+	copy(out, src)
+	return out
+}
+
+// GaugeValue reads the current value of a named gauge (0 if unseen).
+func (r *Run) GaugeValue(name string) float64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.gauges[name]
+}
+
 // runJSON is the on-disk schema. Field order follows §11.6 prose.
 //
 // LabelsField is always emitted (possibly as {}). Counters/Histograms/

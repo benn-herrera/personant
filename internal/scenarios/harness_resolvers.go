@@ -80,6 +80,15 @@ func perStepInvariants(h *Harness, step Step) []InvariantCheck {
 		return DefaultInvariants
 	}
 	if !h.pinnedClock.Before(h.nextHeavyAt) {
+		// A sim-day boundary closed. Stamp the deferred per-sim-day-close fire
+		// (#120) so runStep invokes the handler AFTER these heavy invariants
+		// have run on settled state. The advance is by exactly one cadence
+		// (not "snap to now"), matching the heavy-invariant catch-up policy:
+		// the sim's per-turn gaps are minutes, far under the 24h cadence, so a
+		// single step never crosses more than one boundary and the deferred
+		// fire is exactly one per sim-day.
+		h.dayCloseDate = h.nextHeavyAt
+		h.dayClosePending = true
 		h.nextHeavyAt = h.nextHeavyAt.Add(h.heavyCadence)
 		return DefaultInvariants
 	}

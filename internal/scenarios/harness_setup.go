@@ -93,6 +93,7 @@ defaultModel = "harness-mock"
 		createdThreadIDs:  map[string]struct{}{},
 		archivedThreadIDs: map[string]struct{}{},
 		heavyCadence:      sc.HeavyInvariantCadence,
+		onSimDayClose:     sc.OnSimDayClose,
 		recallerFactory:   sc.Recaller,
 		liveClient:        sc.LiveClient,
 		liveModel:         sc.LiveModel,
