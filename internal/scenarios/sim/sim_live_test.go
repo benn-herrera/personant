@@ -56,7 +56,7 @@ const (
 // caller share one wording (DRY).
 const liveConfigMissingMsg = "test.providers.toml and test.config.toml are required in test/rundata/ for live-sim mode. " +
 	"Suggestion: copy ~/.personant/{config,providers}.toml to test/rundata/test.{config,providers}.toml " +
-	"(apiKeyFile paths may need to be absolute)."
+	"(apiKeyFile paths will need to be absolute)."
 
 // liveEndpoint pairs a resolved provider with the role and model it was
 // selected for, for logging + the usable-endpoint probe. vectorLength is
