@@ -349,8 +349,8 @@ make build            # bin/personant
 make test             # go vet + go test ./... --count=1
 make integration-test # live reaper embedder/recall tests (opt-in)
 make sim              # acceptance rung-walk (mock); LIVE_EMBEDDING=true / LIVE_INFERENCE=true for live-mode
-                      # DURATION=<span>  override sim span (default 1w for mock; e.g. 1d, 14d, 1m, 2m, 6m or <N>d / Go duration 168h)
-                      #   named rungs: 1d|1w|1m|2m|6m  bare-day form: <N>d (e.g. 30d, 120d)  Go duration: 168h
+                      # DURATION=<span>  override sim span (default 1w for mock; e.g. 1d, 14d, 30d or <N>d / Go duration 168h)
+                      #   named rungs: 1d|1w  bare-day form: <N>d (e.g. 30d, 120d)  Go duration: 168h
 make recall-corpus-test # corpus recall-fidelity measurement (opt-in)
 make clean
 ```

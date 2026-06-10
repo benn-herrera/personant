@@ -186,25 +186,27 @@ const simHeavyInvariantCadence = 24 * time.Hour
 // `1d` keeps `make test` (which passes no flag) on the ~27 s 1-day
 // smoke rung; longer rungs are run via `make sim DURATION=…`.
 var simDuration = flag.String("sim.duration", "1d",
-	"simulation span: 1d|1w|1m|2m|6m, or `<N>d` calendar days like 30d, or a Go duration like 168h")
+	"simulation span: 1d|1w, or `<N>d` calendar days like 30d, or a Go duration like 168h")
 
-// parseSimDuration maps the -sim.duration flag value to a span. The
-// named rungs (1d/1w/1m/2m/6m) are convenience aliases on the six-month
-// rung walk. A bare `<N>d` form (e.g. 30d, 120d) parses as N calendar
-// days, since time.ParseDuration has no day unit. Any other value falls
-// through to time.ParseDuration so an ad-hoc span like `72h` still works.
+// parseSimDuration maps the -sim.duration flag value to a span. `1d` is
+// the smoke rung and `1w` is the mock default (the §9.1 acceptance ladder
+// proper is the day-based 1d/7d smoke + 15d→30d→60d→120d). A bare `<N>d`
+// form (e.g. 30d, 120d) parses as N calendar days, since time.ParseDuration
+// has no day unit. Any other value falls through to time.ParseDuration so
+// an ad-hoc span like `72h` still works.
+//
+// The month aliases 1m/2m/6m are deliberately NOT accepted: they map to no
+// ladder rung and were a source of conflation with the real day-based
+// rungs. They must ERROR rather than silently misparse — and because
+// time.ParseDuration("1m") would otherwise succeed as one MINUTE, the
+// sub-hour range is rejected explicitly so the three stale aliases (and any
+// other degenerate `m`/`s` span) fail loudly instead of running.
 func parseSimDuration(s string) (time.Duration, error) {
 	switch s {
 	case "1d":
 		return 24 * time.Hour, nil
 	case "1w":
 		return 7 * 24 * time.Hour, nil
-	case "1m":
-		return 30 * 24 * time.Hour, nil
-	case "2m":
-		return 60 * 24 * time.Hour, nil
-	case "6m":
-		return 180 * 24 * time.Hour, nil
 	default:
 		// Whole-day `<N>d` form: time.ParseDuration has no day unit, so
 		// parse N ourselves. Fractional days (1.5d) are intentionally
@@ -214,7 +216,18 @@ func parseSimDuration(s string) (time.Duration, error) {
 				return time.Duration(n) * 24 * time.Hour, nil
 			}
 		}
-		return time.ParseDuration(s)
+		d, err := time.ParseDuration(s)
+		if err != nil {
+			return 0, err
+		}
+		// Reject sub-hour spans so the retired month aliases 1m/2m/6m (which
+		// ParseDuration reads as minutes) error instead of running a
+		// degenerate span. Sim spans are days/weeks; the `h` form covers any
+		// legitimate sub-day ad-hoc run.
+		if d < time.Hour {
+			return 0, fmt.Errorf("unsupported sim duration %q: use 1d|1w, `<N>d` calendar days, or a Go duration of at least 1h (the month aliases 1m/2m/6m were removed)", s)
+		}
+		return d, nil
 	}
 }
 
@@ -226,6 +239,7 @@ func TestParseSimDuration(t *testing.T) {
 		wantErr bool
 	}{
 		{"named 1d", "1d", 24 * time.Hour, false},
+		{"named 1w", "1w", 7 * 24 * time.Hour, false},
 		{"general 15d", "15d", 360 * time.Hour, false},
 		{"general 30d", "30d", 720 * time.Hour, false},
 		{"general 120d", "120d", 2880 * time.Hour, false},
@@ -233,6 +247,13 @@ func TestParseSimDuration(t *testing.T) {
 		{"empty", "", 0, true},
 		{"non-numeric day", "xyzd", 0, true},
 		{"zero days", "0d", 0, true},
+		// The retired month aliases must now ERROR, not silently misparse.
+		// ParseDuration reads "1m"/"2m"/"6m" as minutes; the sub-hour guard
+		// rejects them so a stale alias fails loudly instead of running a
+		// degenerate span.
+		{"retired alias 1m", "1m", 0, true},
+		{"retired alias 2m", "2m", 0, true},
+		{"retired alias 6m", "6m", 0, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -278,7 +299,7 @@ func TestParseSimDuration(t *testing.T) {
 func TestSim(t *testing.T) {
 	d, err := parseSimDuration(*simDuration)
 	if err != nil {
-		t.Fatalf("invalid -sim.duration %q: %v (use 1d|1w|1m|2m|6m, or `<N>d` calendar days like 30d, or a Go duration like 168h)",
+		t.Fatalf("invalid -sim.duration %q: %v (use 1d|1w, or `<N>d` calendar days like 30d, or a Go duration like 168h)",
 			*simDuration, err)
 	}
 

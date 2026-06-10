@@ -48,7 +48,7 @@ make sim LIVE_INFERENCE=true DURATION=1d          # real inference, capped at 1 
 make sim LIVE_EMBEDDING=true LIVE_INFERENCE=true DURATION=1d
 ```
 
-**`DURATION`** accepts: named rungs `1d|1w|1m|2m|6m`, bare-day form `<N>d` (e.g. `30d`, `120d`), or a Go duration (e.g. `168h`). Defaults to `1w` for mock runs.
+**`DURATION`** accepts: named rungs `1d|1w`, bare-day form `<N>d` (e.g. `30d`, `120d`), or a Go duration (e.g. `168h`). Defaults to `1w` for mock runs.
 
 **`LIVE_EMBEDDING=true` / `LIVE_INFERENCE=true`** opt in real inference/embedding independently. Both require `test/rundata/test.{providers,config}.toml` (user-provided, gitignored) and a reachable `reaper.local` endpoint. A missing or unreachable endpoint is a hard failure, not a skip. `LIVE_INFERENCE=true` is refused past 1 sim-day — always pair it with `DURATION=1d`.
 

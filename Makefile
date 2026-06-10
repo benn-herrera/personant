@@ -138,7 +138,7 @@ cover: build recall-madlibs
 # MOCK, deterministic acceptance gate: symbolic-only recall (nil-embedder
 # stand-in) + scripted mock responses, all hard gates active. `make test` runs
 # this same TestSim at the 1d default; `make sim DURATION=...` walks the rungs
-# (1d|1w|1m|2m|6m or a Go duration like 168h). -timeout 0 disables go test's
+# (1d|1w, <N>d like 30d, or a Go duration like 168h). -timeout 0 disables go test's
 # 10-minute default (long rungs run minutes -> ~an hour; a watched, deliberate
 # invocation — a runaway is the user's to Ctrl-C).
 #
