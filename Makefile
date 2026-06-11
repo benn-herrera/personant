@@ -1,6 +1,6 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build test cover sim integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
+.PHONY: all build test test-run cover sim integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
 
 all: build
 
@@ -107,7 +107,23 @@ recall-corpus-fetch:
 
 test: build recall-madlibs
 	go vet $(GOPKGS)
-	go test $(GOPKGS) --count=1
+	# -timeout 30m: the sim package's in-suite mock rungs (the 1d TestSim, the
+	# multi-day #120 daily-series + #121 day-off harness guards) push that one
+	# package past go test's default 10m per-package budget; 30m bounds a genuine
+	# hang without failing a healthy long run. Other packages finish in seconds.
+	go test $(GOPKGS) --count=1 -timeout 30m
+
+# test-run is the EDIT GATE — the counterpart to `test` (the CHECKPOINT GATE).
+# `make test` runs the whole suite, including the sim package's multi-day mock
+# rungs (minutes); it is for ONE run before committing a checkpoint, NOT for
+# re-running between every edit. To verify a specific edit landed, run only the
+# touched test(s): PKG selects the package, RUN a -run regexp. Seconds, not
+# minutes. (Compile-only? `make build`.)
+#   make test-run PKG=./internal/scenarios RUN=TestDayOffThroughHarness
+#   make test-run PKG=./internal/recall/scoring RUN='TestScanChunks'
+# PKG/RUN reuse the bench vars (defaulted below); pass PKG explicitly.
+test-run: build recall-madlibs
+	go test $(PKG) -run '$(RUN)' -count=1 -timeout 30m
 
 # bench runs benchmarks only (no unit tests) for a package selected by
 # PKG, with a regexp selected by BENCH. Defaults target the recall hot
@@ -118,6 +134,7 @@ test: build recall-madlibs
 #   make bench PKG=./internal/recall/scoring BENCH=.
 PKG ?= ./internal/memops/fileadapter
 BENCH ?= BenchmarkProposeRecall
+RUN ?= .
 bench: build
 	go test $(PKG) -run '^$$' -bench '$(BENCH)' -benchmem --count=1
 

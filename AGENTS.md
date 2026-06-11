@@ -345,8 +345,9 @@ Makefile                    build + agents-submodule pinning +
 ## Build / test
 
 ```sh
-make build            # bin/personant
-make test             # go vet + go test ./... --count=1
+make build            # bin/personant (compile only — the cheapest edit check)
+make test             # CHECKPOINT GATE: go vet + go test $(GOPKGS) --count=1 (full suite, incl. multi-day sim rungs)
+make test-run PKG=<pkg> RUN=<regexp>  # EDIT GATE: run only the touched test(s) — seconds, not minutes
 make integration-test # live reaper embedder/recall tests (opt-in)
 make sim              # acceptance rung-walk (mock); LIVE_EMBEDDING=true / LIVE_INFERENCE=true for live-mode
                       # DURATION=<span>  override sim span (default 1w for mock; e.g. 1d, 14d, 30d or <N>d / Go duration 168h)
@@ -356,6 +357,21 @@ make clean
 ```
 
 Go 1.26.1+.
+
+**Two gates — do not conflate them.** `make test` (full `go vet` + `go test`
+across `$(GOPKGS)`, *including* the sim package's multi-day mock rungs — minutes
+of wall-clock) is the **CHECKPOINT GATE**: run it **once, before committing a
+checkpoint**, to catch cross-package regressions. It is **not** an edit gate.
+Re-running the whole suite between edits while iterating is the failure mode that
+turns a one-line fix into an hour of mostly-irrelevant testing — don't. To verify
+a specific edit landed, use the **EDIT GATE**: `make build` (compile) plus
+`make test-run PKG=<pkg> RUN=<regexp>` to run only the touched test(s). Breaking
+the compound suite down to the relevant test is the correct tactic during
+iteration; the full suite is the final pre-commit checkpoint, not a per-edit
+reflex. **Commit at meaningful checkpoints** — a complete, self-consistent change
+— not per-edit, and run the checkpoint gate once at that point. (`make test` is
+still NEVER substituted by a raw `go test`; the slow/live opt-in tests below stay
+gated either way.)
 
 Slow / live tests use a **runtime opt-in**, not build tags: they always
 compile (so a refactor that breaks them fails `make test`), and gate

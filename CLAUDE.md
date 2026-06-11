@@ -20,6 +20,7 @@ While planning, read the primary sources the plan depends on — actual current 
 
 ## Build & validation
 - Never `go build` or `go test` or any other go commands directly. Use the appropriate make target for the task e.g. `make build` or `make test`.
+- **Two gates, never conflated (AGENTS.md "Two gates").** `make test` is the CHECKPOINT GATE — full suite, minutes, run *once before a commit*. It is NOT an edit gate: do not re-run it between edits. To verify an edit landed, use the EDIT GATE — `make build` (compile) + `make test-run PKG=<pkg> RUN=<regexp>` (only the touched test). Commit at checkpoints, not per-edit. Spawned coders inherit this via AGENTS.md; a task spec that has a coder re-run the full suite per edit (or revert→full-test→restore→full-test) is a process error — scope it to `test-run`.
 
 ## Coding
 - Use coder agents for coding work unless directed otherwise. Ensure coder agents receive AGENTS.md to understand full contract when working.
