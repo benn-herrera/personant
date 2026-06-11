@@ -1308,15 +1308,41 @@ const cadenceDayStartThreshold = 5 * time.Hour
 // re-anchored-day model. This reconstructs the timeline the harness builds by
 // accumulating TimeDeltas onto its pinned clock.
 func dayStartInstants(steps []scenarios.Step) []time.Duration {
-	var starts []time.Duration
+	out := dayStartBoundaries(steps)
+	starts := make([]time.Duration, len(out))
+	for i, b := range out {
+		starts[i] = b.instant
+	}
+	return starts
+}
+
+// dayBoundary is one re-anchored day's first step: its absolute simulated
+// instant (cumulative TimeDelta sum from t=0) and whether that step is the
+// no-turn SleepCycle day-off marker (#108) rather than a work turn. The kind
+// matters to the no-precession guard: the original guard ran only 7 days and so
+// never reached a WORK boundary AFTER a day-off, the exact slot a phase-shifting
+// day-off would corrupt.
+type dayBoundary struct {
+	instant time.Duration
+	sleep   bool
+}
+
+// dayStartBoundaries reconstructs each re-anchored day's first step the way the
+// harness's pinned clock does — by accumulating TimeDeltas from t=0 — and
+// records, per boundary, the absolute instant and whether it is the day-off
+// SleepCycle marker. The day-off marker carries the day's emergent idle as its
+// TimeDelta, so it crosses cadenceDayStartThreshold and counts as that calendar
+// day's boundary, keeping the boundary index aligned with the calendar/grid day.
+func dayStartBoundaries(steps []scenarios.Step) []dayBoundary {
+	var out []dayBoundary
 	var now time.Duration
 	for i, s := range steps {
 		now += s.TimeDelta
 		if i == 0 || s.TimeDelta >= cadenceDayStartThreshold {
-			starts = append(starts, now)
+			out = append(out, dayBoundary{instant: now, sleep: s.SleepCycle})
 		}
 	}
-	return starts
+	return out
 }
 
 // TestCadence_DayStartsNoPrecession is the #121 regression guard: with the
@@ -1325,39 +1351,136 @@ func dayStartInstants(steps []scenarios.Step) []time.Duration {
 // The prior accumulator summed 27.5 h per "day" (6h + 3.5h + 6h + 12h) and
 // drifted ~3.5 h/day, which this test would catch as both an out-of-window
 // start and a >24h+slack inter-day spacing.
+//
+// It spans ≥9 calendar days so it crosses the 7th-day day-off (index 6) AND
+// asserts the WORK days AFTER it (indices 7, 8, …) stay on the grid. This is
+// the gap the original 7-day guard missed: a day-off that fails to occupy a
+// clean 24h grid slot shifts every subsequent work-day's phase (the #121
+// residual — a ~11 h jump observed in a live run), and that shift only shows up
+// at boundary 7+, past where the 7-day run ended. The day-off is a CLEAN
+// 24h-preserving grid slot — its own dayIndex slot, on the base+N*24h grid —
+// so work resumes the next day at the SAME phase (SPEC §9.4.1).
 func TestCadence_DayStartsNoPrecession(t *testing.T) {
 	corpus := loadCorpusSlots(t)
-	// 7 calendar days: 6 work days + 1 day off — enough to accumulate
-	// precession if it existed, and to cross a day-off re-anchor.
+	// 9 calendar days: 6 work + 1 day off + 2 more work days — long enough to
+	// cross the day-off re-anchor (index 6) AND land two work boundaries after
+	// it (indices 7, 8), where a phase-shifting day-off would surface.
 	steps := drainSteps(GenerateWorkload(WorkloadConfig{
-		Seed: simSeed, Duration: 7 * 24 * time.Hour, Corpus: corpus,
+		Seed: simSeed, Duration: 9 * 24 * time.Hour, Corpus: corpus,
 	}))
-	starts := dayStartInstants(steps)
-	if len(starts) < 7 {
-		t.Fatalf("expected >=7 day-starts over a 7-day run, got %d", len(starts))
+	bounds := dayStartBoundaries(steps)
+	if len(bounds) < 9 {
+		t.Fatalf("expected >=9 day boundaries over a 9-day run, got %d", len(bounds))
 	}
 
-	// (a) each day-start is within ±dayStartJitter of its calendar anchor
-	// N*24h — the no-precession window. A precessing pattern drifts out of it.
-	for n, got := range starts {
+	// The 7th day (index 6) must be the day-off SleepCycle marker, and the days
+	// around it work turns — confirms the run actually crosses a day-off so the
+	// post-day-off anchoring below is genuinely exercised (not a coverage no-op).
+	if !bounds[6].sleep {
+		t.Errorf("boundary 6 should be the day-off SleepCycle marker, but it is a work boundary")
+	}
+	if bounds[5].sleep || bounds[7].sleep {
+		t.Errorf("boundaries 5 and 7 should be work boundaries (got sleep=%v, %v)",
+			bounds[5].sleep, bounds[7].sleep)
+	}
+
+	// (a) each day boundary — INCLUDING the work days after the day-off — is
+	// within ±dayStartJitter of its calendar anchor N*24h. The off-day occupies
+	// its own grid slot (index 6), so N counts calendar/grid days and the
+	// post-off work days sit at index 7, 8, … on the same grid. A day-off that
+	// introduced any systematic phase shift would push boundary 7+ out of this
+	// window — the regression the 7-day guard could not see.
+	for n, b := range bounds {
 		anchor := time.Duration(n) * dayLength
-		drift := got - anchor
+		drift := b.instant - anchor
 		if drift < -dayStartJitter || drift > dayStartJitter {
-			t.Errorf("day %d start at %v drifts %v from anchor %v (must be within ±%v — precession regression)",
-				n, got, drift, anchor, dayStartJitter)
+			kind := "work"
+			if b.sleep {
+				kind = "day-off"
+			}
+			t.Errorf("day %d (%s) start at %v drifts %v from anchor %v (must be within ±%v — precession/day-off-shift regression)",
+				n, kind, b.instant, drift, anchor, dayStartJitter)
 		}
 	}
 
-	// (b) consecutive day-starts are 24 h apart to within the jitter span
-	// (a ±15m start on each end → at most ±30m spacing wobble).
-	for i := 1; i < len(starts); i++ {
-		gap := starts[i] - starts[i-1]
+	// (b) consecutive day boundaries are 24 h apart to within the jitter span
+	// (a ±15m start on each end → at most ±30m spacing wobble). This holds
+	// ACROSS the day-off too: work-day-5 → day-off and day-off → work-day-7 are
+	// each one clean 24h slot, so the day-off adds no extra inter-day spacing.
+	for i := 1; i < len(bounds); i++ {
+		gap := bounds[i].instant - bounds[i-1].instant
 		lo, hi := dayLength-2*dayStartJitter, dayLength+2*dayStartJitter
 		if gap < lo || gap > hi {
-			t.Errorf("day-start gap %d→%d = %v, want ~24h within [%v, %v] (no precession)",
+			t.Errorf("day-boundary gap %d→%d = %v, want ~24h within [%v, %v] (no precession; day-off must not add phase)",
 				i-1, i, gap, lo, hi)
 		}
 	}
+}
+
+// TestCadence_DayOffPreservesPhase asserts the day-off itself advances the
+// clock by exactly one clean 24h grid slot — phase in == phase out (SPEC
+// §9.4.1). It compares the time-of-day (instant mod 24h, i.e. phase against the
+// base+N*24h grid) of the last WORK boundary BEFORE the day-off with the first
+// WORK boundary AFTER it. They must match within the jitter span: the day-off
+// must add no SYSTEMATIC offset, only the zero-mean ±15 min start fuzz on each
+// end. The OLD behavior (an additive day-off gap that knocked the anchor ~11 h
+// off the grid) would fail this; the clean 24h-preserving slot passes it.
+func TestCadence_DayOffPreservesPhase(t *testing.T) {
+	corpus := loadCorpusSlots(t)
+	steps := drainSteps(GenerateWorkload(WorkloadConfig{
+		Seed: simSeed, Duration: 9 * 24 * time.Hour, Corpus: corpus,
+	}))
+	bounds := dayStartBoundaries(steps)
+	if len(bounds) < 8 {
+		t.Fatalf("expected >=8 day boundaries, got %d", len(bounds))
+	}
+
+	// Boundary 6 is the day-off marker; 5 is the work day before it, 7 the work
+	// day after. The day-off must advance the clock by EXACTLY one clean 24h grid
+	// slot on EACH side: work-day-5 → day-off and day-off → work-day-7. An
+	// additive day-off gap (the old ~30 h idle) makes the in-gap (5→6) blow past
+	// 24h and the out-gap (6→7) fall short — phase in != phase out. Each clean
+	// slot is 24h ± the two jittered endpoints (≤ ±30 min spacing wobble).
+	if bounds[6].sleep == false {
+		t.Fatalf("boundary 6 expected to be the day-off marker; got a work boundary")
+	}
+	lo, hi := dayLength-2*dayStartJitter, dayLength+2*dayStartJitter
+	gapIn := bounds[6].instant - bounds[5].instant   // work-day-5 → day-off
+	gapOut := bounds[7].instant - bounds[6].instant  // day-off → work-day-7
+	if gapIn < lo || gapIn > hi {
+		t.Errorf("work-day → day-off advance = %v, want one clean 24h slot within [%v, %v] — "+
+			"the day-off must occupy a clean 24h grid slot, not an additive idle gap (SPEC §9.4.1)",
+			gapIn, lo, hi)
+	}
+	if gapOut < lo || gapOut > hi {
+		t.Errorf("day-off → work-day advance = %v, want one clean 24h slot within [%v, %v] — "+
+			"work must resume at the SAME phase the day before the day-off (SPEC §9.4.1)",
+			gapOut, lo, hi)
+	}
+
+	// Phase in == phase out: the work day before the day-off and the work day
+	// after sit at the SAME time-of-day on the grid. Their grid-drifts differ by
+	// at most the two ±15 min start-jitters; a systematic day-off offset would
+	// open this gap.
+	before := signedGridDrift(bounds[5].instant)
+	after := signedGridDrift(bounds[7].instant)
+	if delta := after - before; delta < -2*dayStartJitter || delta > 2*dayStartJitter {
+		t.Errorf("day-off shifted work phase by %v (before=%v after=%v); must be 0 within ±%v (SPEC §9.4.1)",
+			delta, before, after, 2*dayStartJitter)
+	}
+}
+
+// signedGridDrift folds an absolute instant onto its signed distance to the
+// nearest base+N*24h grid line, in (-12h, 12h]. A start jittered ±15 min around
+// the grid yields a drift of ±15 min regardless of which side of midnight it
+// landed, so two on-grid starts compare cleanly without a midnight-wrap
+// artifact.
+func signedGridDrift(instant time.Duration) time.Duration {
+	d := instant % dayLength
+	if d > dayLength/2 {
+		d -= dayLength
+	}
+	return d
 }
 
 // TestCadence_SessionSpansAndBreak asserts the within-day structure: each of
