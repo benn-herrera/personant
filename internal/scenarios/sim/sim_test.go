@@ -1,6 +1,7 @@
 package sim
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"personant/internal/recall/measure"
 	"personant/internal/scenarios"
 	"personant/internal/store"
+	"personant/internal/turn"
 )
 
 // corpusQueriesPath is the recall_madlibs corpus query artifact the
@@ -2234,10 +2236,17 @@ func (w *dailySnapshotWriter) appendRecord(h *scenarios.Harness, simDate time.Ti
 			SpineSize:      liveThreads,
 			SleepCycles:    h.Metrics.CounterValue("sleep_cycles"),
 			// recall_query_cosine_ops is the LIVE-recaller gauge, NOT a shadow
-			// value (computeIntraThreadGauges does not compute it —
-			// recordCosineOpsMeasured reads the recaller directly). Read it off
-			// the gauge; 0 on the mock path, where the perf bend is unmeasurable.
-			RecallQueryCosineOps:     h.Metrics.GaugeValue(metricRecallQueryCosineOps),
+			// value (computeIntraThreadGauges does not compute it). Read it
+			// DIRECTLY off the recaller's run-to-date accessors (the SAME source
+			// recordCosineOpsMeasured uses for the end-of-run gauge), NOT off
+			// metricRecallQueryCosineOps — that gauge is only Set at end-of-run,
+			// so reading it here would leave every INTERIOR day stuck at 0 even on
+			// an embedding-live run (#120 interior-record bug). The recaller's
+			// CosineOps()/RecallQueries() accumulate throughout the run, so this is
+			// a true run-to-date value; 0 on the mock path, where the perf bend is
+			// honestly unmeasurable. At finalize this equals the summary's gauge by
+			// construction (one source) — the #120 last-record==summary invariant.
+			RecallQueryCosineOps:     liveCosineOpsPerQuery(h),
 			RecallIndexFlushCalls:    intra[metricRecallIndexFlushCalls],
 			RecallIntraDescentDiverg: h.Metrics.CounterValue("recall_intra_descent_divergence"),
 			RecallIntraW1StrictMiss:  h.Metrics.CounterValue("recall_intra_w1_strict_miss"),
@@ -2286,22 +2295,34 @@ type cosineOpsReporter interface {
 	RecallQueries() int64
 }
 
-// recordCosineOpsMeasured emits the MEASURED per-query cosine-op count (§7.2):
-// the recaller's run-total cosine comparisons divided by the queries that
-// performed them. Reads the live recaller off the harness's State; emits 0 when
-// no embedding recaller is installed or no embedding query ran (the symbolic
-// mock path). Counted at the scoring call sites (scoring.CosineCounter), so the
-// O(C_main)→O(log n) bend is empirical, not modeled.
-func recordCosineOpsMeasured(h *scenarios.Harness) {
-	var perQuery float64
+// liveCosineOpsPerQuery reads the LIVE recaller's run-to-date MEASURED per-query
+// cosine-op count (§7.2): the recaller's run-total cosine comparisons divided by
+// the queries that performed them. The recaller's CosineOps()/RecallQueries()
+// accumulate throughout the run (atomic, read concurrent-safe), so this is a
+// valid run-to-date read at ANY day-close — not just end-of-run. Returns 0 when
+// no embedding recaller is installed or no embedding query ran (the symbolic mock
+// path), where the perf bend is honestly unmeasurable. Single source of truth for
+// both the end-of-run summary (recordCosineOpsMeasured) and the per-day snapshot
+// (appendRecord), so the LAST daily record equals the summary by construction.
+func liveCosineOpsPerQuery(h *scenarios.Harness) float64 {
 	if h.State != nil && h.State.Recaller != nil {
 		if rep, ok := h.State.Recaller.(cosineOpsReporter); ok {
 			if q := rep.RecallQueries(); q > 0 {
-				perQuery = float64(rep.CosineOps()) / float64(q)
+				return float64(rep.CosineOps()) / float64(q)
 			}
 		}
 	}
-	h.Metrics.Set(metricRecallQueryCosineOps, perQuery)
+	return 0
+}
+
+// recordCosineOpsMeasured emits the MEASURED per-query cosine-op count (§7.2)
+// into the end-of-run gauge. Reads the live recaller off the harness's State via
+// liveCosineOpsPerQuery; emits 0 when no embedding recaller is installed or no
+// embedding query ran (the symbolic mock path). Counted at the scoring call sites
+// (scoring.CosineCounter), so the O(C_main)→O(log n) bend is empirical, not
+// modeled.
+func recordCosineOpsMeasured(h *scenarios.Harness) {
+	h.Metrics.Set(metricRecallQueryCosineOps, liveCosineOpsPerQuery(h))
 }
 
 // closureCount counts `retire.complete` events in the harness's event
@@ -2624,6 +2645,13 @@ func TestDailyStatsSeries(t *testing.T) {
 	if want := int(m.Gauges[metricRecallIndexCoarseSize]); last.SpineSize != want {
 		t.Errorf("last record spine_size=%d, summary coarse_size=%d", last.SpineSize, want)
 	}
+	// recall_query_cosine_ops: the LIVE-recaller per-query gauge. The daily
+	// finalize reads it from the SAME live source recordCosineOpsMeasured wrote
+	// into metricRecallQueryCosineOps, so the last record must equal the summary
+	// gauge field-for-field (0 on this mock path — no embedder — but the
+	// invariant is pinned regardless). This is the #120 interior-record fix:
+	// interior days now read the live accumulator too, not a stuck end-of-run 0.
+	assertFloatEq(t, "recall_query_cosine_ops", last.RecallQueryCosineOps, m.Gauges[metricRecallQueryCosineOps])
 	// W1 + descent counters.
 	if want := m.Counters["recall_intra_descent_divergence"]; last.RecallIntraDescentDiverg != want {
 		t.Errorf("last record descent_divergence=%d, summary=%d", last.RecallIntraDescentDiverg, want)
@@ -2647,6 +2675,62 @@ func TestDailyStatsSeries(t *testing.T) {
 	assertFloatEq(t, "day1 delta p50", d1.DayDelta.LatencyP50ThisDay, d1.RunToDate.LatencyP50)
 	assertFloatEq(t, "day1 delta p99", d1.DayDelta.LatencyP99ThisDay, d1.RunToDate.LatencyP99)
 	assertFloatEq(t, "day1 delta mean", d1.DayDelta.PerTurnMsMeanThisDay, d1.RunToDate.PerTurnMsMean)
+}
+
+// fakeCosineRecaller is a minimal measure.Recaller that also satisfies
+// cosineOpsReporter, returning canned run-to-date CosineOps/RecallQueries
+// accumulator values. It exists only to drive liveCosineOpsPerQuery with a
+// NON-ZERO accumulator — the mock sim path leaves the real recaller at 0/0
+// (no embedder), so it cannot prove the daily field tracks a live, non-zero
+// accumulator rather than a stuck end-of-run gauge.
+type fakeCosineRecaller struct {
+	ops, queries int64
+}
+
+func (f *fakeCosineRecaller) Prepare(context.Context) error { return nil }
+func (f *fakeCosineRecaller) Recall(context.Context, measure.Request) ([]measure.Result, error) {
+	return nil, nil
+}
+func (f *fakeCosineRecaller) Close() error         { return nil }
+func (f *fakeCosineRecaller) CosineOps() int64     { return f.ops }
+func (f *fakeCosineRecaller) RecallQueries() int64 { return f.queries }
+
+// TestLiveCosineOpsPerQuery pins the #120 interior-record fix: the per-day
+// snapshot reads recall_query_cosine_ops from the LIVE recaller's accumulating
+// accessors (CosineOps()/RecallQueries()), NOT from the metricRecallQueryCosineOps
+// gauge that is only Set at end-of-run. Reading the gauge would leave every
+// INTERIOR daily record stuck at 0 even on an embedding-live run; reading the
+// live accumulator gives a true run-to-date per-query average at any day-close.
+//
+// The mock sim path has a nil-embedder recaller (0 ops / 0 queries), so it would
+// always read 0 — that is correct, not a bug, but it cannot prove the WIRING.
+// This test installs a recaller with a NON-ZERO accumulator and asserts the live
+// read returns the per-query average, so a non-zero accumulator → non-zero daily
+// field. liveCosineOpsPerQuery is the single source both the daily snapshot and
+// the end-of-run gauge read, so proving it here proves the interior records track
+// the accumulator.
+func TestLiveCosineOpsPerQuery(t *testing.T) {
+	// No recaller installed → 0 (the honest "unmeasurable" value, not a panic).
+	if got := liveCosineOpsPerQuery(&scenarios.Harness{}); got != 0 {
+		t.Errorf("nil State: liveCosineOpsPerQuery = %.3f, want 0", got)
+	}
+	if got := liveCosineOpsPerQuery(&scenarios.Harness{State: &turn.State{}}); got != 0 {
+		t.Errorf("nil Recaller: liveCosineOpsPerQuery = %.3f, want 0", got)
+	}
+
+	// Zero queries → 0 (no division by zero; honestly unmeasurable).
+	zeroQ := &scenarios.Harness{State: &turn.State{Recaller: &fakeCosineRecaller{ops: 500, queries: 0}}}
+	if got := liveCosineOpsPerQuery(zeroQ); got != 0 {
+		t.Errorf("zero queries: liveCosineOpsPerQuery = %.3f, want 0", got)
+	}
+
+	// Non-zero accumulator → the per-query average. This is the load-bearing
+	// case: an interior day-close reading a live, non-zero accumulator yields a
+	// non-zero daily field — exactly what the stuck end-of-run gauge could not.
+	h := &scenarios.Harness{State: &turn.State{Recaller: &fakeCosineRecaller{ops: 600, queries: 8}}}
+	if got, want := liveCosineOpsPerQuery(h), 75.0; got != want {
+		t.Errorf("liveCosineOpsPerQuery = %.3f, want %.3f (600 ops / 8 queries)", got, want)
+	}
 }
 
 // readDailyRecords reads daily.jsonl from a scenario's rundata directory and
