@@ -619,6 +619,67 @@ type Scenario struct {
 	MemoryCapBytes int64
 }
 
+// validate fails loud on contradictory or no-op-inducing Scenario field
+// combinations whose violation is otherwise a SILENT no-op or silent
+// wrong-mode — the class of bug #9 targets: a field set in good faith that
+// the run quietly ignores, so the author believes a behavior is armed when
+// it can never fire. Each check below corresponds to a hidden contract
+// documented only in a field doc-comment on Step/Scenario; validate makes
+// that prose contract a run-start gate. newHarness calls it before building
+// anything, so a misconfigured scenario fails at construction with a precise
+// message rather than producing a misleading green run.
+//
+// It deliberately does NOT flag combinations that are legitimately optional
+// (e.g. a per-Step MockResponse alongside a Scenario LiveClient: the live
+// path documents that canned bodies are simply ignored, which is the intended
+// behavior of a behavior-validation run, not a contradiction).
+func (sc Scenario) validate() error {
+	// OnSimDayClose can only fire from the day-close catch-up loop in runStep,
+	// which is gated on heavyCadence > 0. With a zero cadence the handler is
+	// installed but the loop never runs it — a silent no-op (the field's own
+	// doc: "It never fires when HeavyInvariantCadence is 0"). A handler set
+	// without the cadence that drives it is always a misconfiguration.
+	if sc.OnSimDayClose != nil && sc.HeavyInvariantCadence == 0 {
+		return fmt.Errorf("OnSimDayClose is set but HeavyInvariantCadence is 0: " +
+			"the day-close handler is gated on a non-zero cadence and can never fire " +
+			"(set HeavyInvariantCadence, e.g. 24h, to arm per-sim-day closes)")
+	}
+
+	// StepSource takes precedence over Steps (documented on both fields). A
+	// scenario that populates BOTH silently drops its Steps slice — the author
+	// believes those steps run when only the source is driven. Flag the
+	// silent-wrong-mode rather than discarding work without a word.
+	if sc.StepSource != nil && len(sc.Steps) > 0 {
+		return fmt.Errorf("both StepSource and Steps are set: StepSource takes "+
+			"precedence and the %d Steps would be silently ignored "+
+			"(supply exactly one step source)", len(sc.Steps))
+	}
+
+	// LiveModel names the chat model set on State.Model when LiveClient is
+	// installed; it is "Ignored when LiveClient is nil" (field doc). Set
+	// without a LiveClient it is a silent no-op — a dependent field whose
+	// driver is absent.
+	if sc.LiveModel != "" && sc.LiveClient == nil {
+		return fmt.Errorf("LiveModel %q is set but LiveClient is nil: "+
+			"LiveModel is only applied under inference-in-loop and is otherwise "+
+			"ignored (set LiveClient, or clear LiveModel)", sc.LiveModel)
+	}
+
+	// LiveClient drives real turns against a chat endpoint and sets State.Model
+	// = LiveModel; an empty model name would issue requests naming no model
+	// (silent wrong-mode against a real provider). The field doc frames
+	// LiveModel as the override that keeps the request off the sentinel
+	// harness DefaultModel — so under a live client it must be supplied.
+	if sc.LiveClient != nil && sc.LiveModel == "" {
+		return fmt.Errorf("LiveClient is set but LiveModel is empty: " +
+			"a live inference run sets State.Model = LiveModel, so an empty model " +
+			"name would issue requests naming no model (set LiveModel to the real " +
+			"chat model)")
+	}
+
+	return nil
+}
+
 // Harness owns the isolated test environment for one scenario run.
 //
 // Fields are exported for invariants and step builders that need to

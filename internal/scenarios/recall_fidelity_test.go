@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"personant/internal/metrics"
@@ -104,8 +105,13 @@ func TestArchivedSet_IndexDerived_DroppedLogLine(t *testing.T) {
 	seedArchiveEntry(t, h, "thr_2", "") // index entry; refreshArchivedSet runs inside
 
 	// A step that expected to recall thr_2 (now archived) must forgive it as
-	// archived-recoverable, NOT count it as an unexplained absence.
-	_, forgiven := recordRecallFidelity(t, h, 0, "f4", RecallStrict, []string{"thr_2"}, nil)
+	// archived-recoverable, NOT count it as an unexplained absence. liveSpine
+	// is the in-scope set runStep would have read (#11): thr_1 only.
+	live, err := liveSpineThreadSet(h.Paths)
+	if err != nil {
+		t.Fatalf("live spine: %v", err)
+	}
+	_, forgiven := recordRecallFidelity(t, h, 0, "f4", RecallStrict, []string{"thr_2"}, nil, live)
 	if forgiven != 0 {
 		t.Errorf("archived expected thread should be forgiven (0 kept); got %d", forgiven)
 	}
@@ -311,6 +317,94 @@ func TestScenario_RecallFidelity_Smoke(t *testing.T) {
 		),
 	}
 	RunScenario(t, sc)
+}
+
+// TestRuntimeEmitsMatchFireMarker is the #2 log-marker CONTRACT TEST. The
+// harness measures symbolic recall by substring-scraping internal/turn's
+// plain-text turn-close log for the markerMatchFire string (fireSetForMarker).
+// That coupling is a silent-failure seam: a runtime edit to the log string
+// would zero every recall_fidelity_* series AND the gate on it, which then
+// passes 0-vs-0 — a parse bug masquerading as a recall collapse (a ghost
+// regression).
+//
+// This test pins the contract directly. It drives a real turn that the runtime
+// recalls a peer thread on, then asserts the literal markerMatchFire substring
+// — exactly the bytes fireSetForMarker scrapes — is present in the raw
+// event-log files. If a future runtime change renames the marker, this fails
+// loudly with the actual log content, instead of letting the recall series go
+// silently dark. It deliberately reads the raw bytes (not matchFireSet) so the
+// assertion is on the literal contract string, not on the parser that consumes
+// it.
+func TestRuntimeEmitsMatchFireMarker(t *testing.T) {
+	sc := Scenario{
+		Name: "match-fire-marker-contract",
+		Steps: []Step{
+			{
+				UserInput: "tell me about topology — #trefoil #unknot #body-topology #electron-shape",
+				MockResponse: NewMockResponseWithTag([]string{"*new-topic*"},
+					[]string{"trefoil", "unknot", "body-topology", "electron-shape"},
+					"First pass on topology."),
+				Annotation:            "create thr_1; no peer threads → no match-fire",
+				ExpectedRecallMatches: []string{},
+			},
+			{
+				UserInput: "now switching topic: tell me about neutrinos",
+				MockResponse: NewMockResponseWithTag([]string{"*new-topic*"},
+					[]string{"neutrino", "oscillation", "flavor-mixing", "pmns-matrix"},
+					"Neutrinos oscillate between flavors."),
+				Annotation:            "create thr_2; disjoint anchors → no match-fire",
+				ExpectedRecallMatches: []string{},
+			},
+			{
+				UserInput: "going back to topology — what about #trefoil #unknot #body-topology #electron-shape?",
+				MockResponse: NewMockResponseWithTag([]string{"*new-topic*"},
+					[]string{"knot-theory", "manifold", "embedding", "topology-extra"},
+					"More on knot theory."),
+				Annotation:            "create thr_3; user-tags overlap thr_1 → runtime fires spine.match-fire",
+				ExpectedRecallMatches: []string{"thr_1"},
+			},
+		},
+	}
+	h := RunScenario(t, sc)
+
+	// Read the raw event-log bytes and assert the literal contract marker is
+	// present. The scrape strips the trailing space when cutting tokens, so
+	// the contract is the full markerMatchFire constant including it.
+	entries, err := os.ReadDir(h.Paths.LogsDir)
+	if err != nil {
+		t.Fatalf("read logs dir: %v", err)
+	}
+	var combined strings.Builder
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(h.Paths.LogsDir, e.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		combined.Write(body)
+	}
+	log := combined.String()
+	if !strings.Contains(log, markerMatchFire) {
+		t.Fatalf("runtime did not emit the harness-scraped marker %q — the recall-measurement contract is broken (ghost-regression seam); event log:\n%s",
+			markerMatchFire, log)
+	}
+	// And the parser the harness actually uses agrees: thr_1 is in the scraped
+	// set. This ties the literal-string assertion to fireSetForMarker so a
+	// change that satisfies one but not the other still fails.
+	if got := fireSetForMarker(strings.Split(log, "\n"), markerMatchFire); !contains(got, "thr_1") {
+		t.Fatalf("fireSetForMarker did not extract thr_1 from the runtime log; got %v", got)
+	}
+}
+
+func contains(ids []string, want string) bool {
+	for _, id := range ids {
+		if id == want {
+			return true
+		}
+	}
+	return false
 }
 
 func approxEqual(a, b float64) bool {

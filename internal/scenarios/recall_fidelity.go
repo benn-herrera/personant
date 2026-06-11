@@ -135,16 +135,31 @@ func liveSpineThreadSet(paths store.PersonantPaths) (map[string]struct{}, error)
 	return out, nil
 }
 
-// matchFireSet returns the sorted set of thread IDs that have a
-// `spine.match-fire` event among the given log lines (typically one
-// step's worth, freshly tailed). The set semantics — one entry per
-// thread regardless of multiple fires within the same step — is what
-// recall-fidelity precision/recall is measured against: the question
-// is *which threads* were surfaced, not *how many times*.
-func matchFireSet(lines []string) []string {
+// The three `spine.*-match-fire ` log markers the harness scrapes to
+// reconstruct each recall layer's observed match set. These are the
+// contract with internal/turn's turn-close logging — a runtime edit to
+// any of these strings silently zeros the corresponding recall series
+// (#2). markerMatchFire is the symbolic Jaccard layer; markerEmbedMatchFire
+// the layer-2 embedding-cosine analogue; markerIntraMatchFire the §7
+// intra-thread (fine-tier) analogue. TestRuntimeEmitsMatchFireMarker pins
+// the symbolic marker against a real turn so a string drift fails loudly.
+const (
+	markerMatchFire      = "spine.match-fire "
+	markerEmbedMatchFire = "spine.embed-match-fire "
+	markerIntraMatchFire = "spine.intra-match-fire "
+)
+
+// fireSetForMarker returns the sorted set of thread IDs that have an event
+// carrying the given marker among the supplied log lines (typically one
+// step's worth, freshly tailed). The set semantics — one entry per thread
+// regardless of multiple fires within the same step — is what recall-fidelity
+// precision/recall is measured against: the question is *which threads* were
+// surfaced, not *how many times*. The three recall layers differ only in the
+// marker string (markerMatchFire / markerEmbedMatchFire / markerIntraMatchFire).
+func fireSetForMarker(lines []string, marker string) []string {
 	seen := map[string]struct{}{}
 	for _, line := range lines {
-		if id, ok := eventThreadID(line, "spine.match-fire ", ""); ok {
+		if id, ok := eventThreadID(line, marker, ""); ok {
 			seen[id] = struct{}{}
 		}
 	}
@@ -156,49 +171,27 @@ func matchFireSet(lines []string) []string {
 	return out
 }
 
-// embedMatchFireSet returns the sorted set of thread IDs that have a
-// `spine.embed-match-fire` event among the given log lines — the layer-2
-// (embedding cosine) analogue of matchFireSet. The runtime logs this line
-// per embedding candidate at turn close whenever an embedder is installed
-// (turn/recall.go), so on an embedding-in-loop run it is the observed
-// embedding recall set scored head-to-head against the SAME expected set
-// the symbolic layer is scored against (#98).
+// matchFireSet returns the symbolic Jaccard layer's match set (markerMatchFire).
+func matchFireSet(lines []string) []string { return fireSetForMarker(lines, markerMatchFire) }
+
+// embedMatchFireSet returns the layer-2 embedding-cosine match set
+// (markerEmbedMatchFire). The runtime logs this line per embedding candidate
+// at turn close whenever an embedder is installed (turn/recall.go), so on an
+// embedding-in-loop run it is the observed embedding recall set scored
+// head-to-head against the SAME expected set the symbolic layer is scored
+// against (#98).
 func embedMatchFireSet(lines []string) []string {
-	seen := map[string]struct{}{}
-	for _, line := range lines {
-		if id, ok := eventThreadID(line, "spine.embed-match-fire ", ""); ok {
-			seen[id] = struct{}{}
-		}
-	}
-	out := make([]string, 0, len(seen))
-	for id := range seen {
-		out = append(out, id)
-	}
-	sort.Strings(out)
-	return out
+	return fireSetForMarker(lines, markerEmbedMatchFire)
 }
 
-// intraMatchFireSet returns the sorted set of thread IDs that have a
-// `spine.intra-match-fire` event among the given log lines — the §7
-// intra-thread (fine-tier) analogue of matchFireSet / embedMatchFireSet.
-// The runtime logs this line at turn close whenever the engaged thread's
-// scrolled-out early content matched the query (turn/recall.go), so on an
-// embedding-in-loop run it is the observed intra-thread recall set the §8.2
-// shadow-chunk oracle scores per hop. Empty on the symbolic-only default
-// (no embedder → the intra pass never fires).
+// intraMatchFireSet returns the §7 intra-thread (fine-tier) match set
+// (markerIntraMatchFire). The runtime logs this line at turn close whenever
+// the engaged thread's scrolled-out early content matched the query
+// (turn/recall.go), so on an embedding-in-loop run it is the observed
+// intra-thread recall set the §8.2 shadow-chunk oracle scores per hop. Empty
+// on the symbolic-only default (no embedder → the intra pass never fires).
 func intraMatchFireSet(lines []string) []string {
-	seen := map[string]struct{}{}
-	for _, line := range lines {
-		if id, ok := eventThreadID(line, "spine.intra-match-fire ", ""); ok {
-			seen[id] = struct{}{}
-		}
-	}
-	out := make([]string, 0, len(seen))
-	for id := range seen {
-		out = append(out, id)
-	}
-	sort.Strings(out)
-	return out
+	return fireSetForMarker(lines, markerIntraMatchFire)
 }
 
 // recordEmbedRecallFidelity records the embedding layer's per-step
@@ -279,6 +272,43 @@ func recallFidelity(expected, actual []string) (precision, recall, f1 float64) {
 	return precision, recall, f1
 }
 
+// recoverability classifies an expected/probed thread ID against the live
+// recall surface, the shared verdict both recall-measurement sites apply
+// (#7). The three cases mirror VerifyThreadAccounting's disjoint union:
+type recoverability int
+
+const (
+	// recovOnSpine: the ID is on the live spine — a real, in-scope recall
+	// target (counts as recoverable / kept).
+	recovOnSpine recoverability = iota
+	// recovArchived: off the live spine but in the canonical archive set —
+	// preserved + recoverable via explicit fetch, off the v0.1 LIVE recall
+	// surface. Forgiven: dropped from the scored expected set, not a miss.
+	recovArchived
+	// recovUnexplained: off the live spine and NOT archived — a genuine
+	// integrity bug (the recall-measurement sibling of VerifyThreadAccounting's
+	// "unexplained loss"), counted via recall_unexplained_absence and
+	// conservatively treated as a real miss. A HARD ==0 gate in the sim (#100).
+	recovUnexplained
+)
+
+// classifyRecoverability is the single source of truth for the
+// archival-forgiveness rule (#7/#97/#100/#101): given a thread ID and the
+// live-spine + archived sets, decide whether it is on-spine, forgivably
+// archived, or an unexplained absence. Callers own the counter/return-shape
+// side effects (the two sites differ: one batches two counters, the other
+// bumps one inline and returns a bool), but the classification rule lives
+// here so it can never drift between them.
+func classifyRecoverability(id string, liveSpine, archived map[string]struct{}) recoverability {
+	if _, onSpine := liveSpine[id]; onSpine {
+		return recovOnSpine
+	}
+	if _, wasArchived := archived[id]; wasArchived {
+		return recovArchived
+	}
+	return recovUnexplained
+}
+
 // recordRecallFidelity is the §9.4 metrics-blob writer for one step's
 // recall-fidelity observation. When expected is nil the step is
 // unmeasured (counted but no precision/recall/F1 sample).
@@ -301,7 +331,11 @@ func recallFidelity(expected, actual []string) (precision, recall, f1 float64) {
 // does, and feeds the kept slice to recordEmbedRecallFidelity so the
 // embedding head-to-head scores the identical forgiven ground truth (#98).
 // An unmeasured step (expected == nil) returns (nil, 0).
-func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode RecallFidelityMode, expected, actual []string) ([]string, int) {
+//
+// liveSpine is the in-scope live-spine ID set runStep already read this turn
+// (#11): passing it in avoids a redundant per-step O(threads) ReadSpine that
+// re-derived a value already in hand.
+func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode RecallFidelityMode, expected, actual []string, liveSpine map[string]struct{}) ([]string, int) {
 	t.Helper()
 	if expected == nil {
 		h.Metrics.Counter("recall_fidelity_unmeasured_steps", 1)
@@ -317,25 +351,22 @@ func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode 
 	// inherently-LIVE recall score. An expected thread that is off the
 	// spine but NOT in the archive.archived log is an unexplained absence —
 	// a genuine integrity bug, kept as a real miss and counted via
-	// recall_unexplained_absence.
-	live, err := liveSpineThreadSet(h.Paths)
-	if err != nil {
-		t.Fatalf("scenario step %d (%s): recall-fidelity: live spine: %v", idx+1, label, err)
-	}
+	// recall_unexplained_absence. The verdict comes from the shared
+	// classifyRecoverability rule (#7) so it can never drift from runStep's
+	// probe-side recoverable closure.
 	archived := h.archivedThreadIDs
 	var archivedRecoverable, unexplainedAbsent int64
 	kept := make([]string, 0, len(expected))
 	for _, id := range expected {
-		if _, onSpine := live[id]; onSpine {
+		switch classifyRecoverability(id, liveSpine, archived) {
+		case recovOnSpine:
 			kept = append(kept, id)
-			continue
-		}
-		if _, wasArchived := archived[id]; wasArchived {
+		case recovArchived:
 			archivedRecoverable++
-			continue
+		case recovUnexplained:
+			unexplainedAbsent++
+			kept = append(kept, id)
 		}
-		unexplainedAbsent++
-		kept = append(kept, id)
 	}
 	if archivedRecoverable > 0 {
 		h.Metrics.Counter("recall_archived_recoverable", archivedRecoverable)

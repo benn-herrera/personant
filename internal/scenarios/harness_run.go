@@ -158,6 +158,41 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 		return StepFeedback{Index: idx}
 	}
 
+	stepSetup(t, h, idx, label, step)
+	preSpine, _ := store.ReadSpine(h.Paths.Spine)
+	stepSetClock(h, idx, label, step)
+
+	body, elapsed := stepExecTurn(t, h, idx, label, step)
+	_ = body // body is the streamed text; harness keeps it in History via turn.Run.
+
+	postSpine, _ := store.ReadSpine(h.Paths.Spine)
+	stepUpdateEmbeddingIndex(t, h, idx, label, preSpine, postSpine)
+
+	stepLines := stepScrapeEventLog(t, h, idx, label, preSpine, postSpine)
+	livePost := spineIDSet(postSpine)
+	rec := stepMeasureRecall(t, h, idx, label, step, stepLines, livePost)
+	stepRecordMetrics(h, step, elapsed, preSpine, postSpine)
+
+	runInvariants(t, h, perStepInvariants(h, step), label)
+	stepCloseDays(h)
+
+	return StepFeedback{
+		Index:                  idx,
+		RecallMatchFires:       len(rec.matchFires),
+		RecallMatchFireIDs:     rec.matchFires,
+		EmbedMatchFireIDs:      rec.embedFireIDs,
+		IntraMatchFireIDs:      rec.intraFires,
+		RecallExpected:         len(step.ExpectedRecallMatches),
+		TargetRecoverable:      stepRecoverable(h, livePost),
+		RecallExpectedForgiven: rec.expectedForgiven,
+	}
+}
+
+// stepSetup runs the pre-turn phase: memory telemetry sampling, simulated
+// clean restart, mock-response install, and per-step resolver install. It
+// leaves h.State ready for the turn.
+func stepSetup(t *testing.T, h *Harness, idx int, label string, step Step) {
+	t.Helper()
 	// Sample memory telemetry BEFORE the step executes so even a step
 	// that crashes is preceded on disk by its memory-state record. Sample
 	// at step 0 unconditionally (the run's baseline) and then every
@@ -167,8 +202,6 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 	if idx == 0 || idx%memSampleEveryNSteps == 0 {
 		h.mem.sample(idx, h.pinnedClock)
 	}
-
-	preSpine, _ := store.ReadSpine(h.Paths.Spine)
 
 	// Simulated clean shutdown→relaunch. BEFORE running this step's turn,
 	// discard the in-memory turn.State and rebuild it from the substrate
@@ -189,18 +222,23 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 
 	h.State.RecallResolver = recallResolverFor(t, idx, label, step.RecallAck)
 	h.State.ClosureResolver = closureResolverFor(step.ClosureAck)
+}
 
-	// Slave the pinned clock to the step's absolute simulated instant
-	// (sim-time-single-clock.md §3.4): SET pinnedClock = Step.At, do NOT
-	// integrate a delta. pinnedClock becomes a copy of the generator's one
-	// re-anchored clock, so the two cannot diverge by construction (there
-	// is no independent harness accumulator to drift). The sliceSource shim
-	// stamps At for handwritten scenarios, so At is set on every step the
-	// drive loop yields. Forensic monotonic assert (§4/m3): At must never
-	// land before the prior clock — a backward jump would mean a re-anchor
-	// landed before a prior turn (the original-bug shape the deleted
-	// `td < 0 → 0` clamp used to swallow). Non-fatal: route through the log,
-	// not t.Fatalf — it is a tripwire, not a gate.
+// stepSetClock slaves the pinned clock to the step's simulated instant.
+// sim-time-single-clock.md §3.4: SET pinnedClock = Step.At, do NOT integrate
+// a delta. pinnedClock becomes a copy of the generator's one re-anchored
+// clock, so the two cannot diverge by construction (there is no independent
+// harness accumulator to drift). The sliceSource shim stamps At for
+// handwritten scenarios, so At is set on every step the drive loop yields.
+// Forensic monotonic assert (§4/m3): At must never land before the prior
+// clock — a backward jump would mean a re-anchor landed before a prior turn
+// (the original-bug shape the deleted `td < 0 → 0` clamp used to swallow).
+// Non-fatal: route through the log, not t.Fatalf — it is a tripwire, not a
+// gate.
+//
+// NOTE: the Step.At / TimeDelta clock semantics here are owned by a separate
+// burndown item (#3) and are relocated verbatim, not changed.
+func stepSetClock(h *Harness, idx int, label string, step Step) {
 	if !step.At.IsZero() {
 		if step.At.Before(h.pinnedClock) {
 			pnlog.Warn("scenario step %d (%s): non-monotonic clock: Step.At %s is before prior pinnedClock %s",
@@ -216,40 +254,50 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 		// relative bump cannot drift the day-close tick.
 		h.pinnedClock = h.pinnedClock.Add(step.TimeDelta)
 	}
+}
 
+// stepExecTurn drives the turn end-to-end and returns the streamed body and
+// the measured wall time. A turn.Run error is fatal — the runtime hit a bug
+// the scenario can't recover from.
+func stepExecTurn(t *testing.T, h *Harness, idx int, label string, step Step) (string, time.Duration) {
+	t.Helper()
 	start := clock.Profiling()
 	body, err := turn.RunWithDeltas(context.Background(), h.State, step.PreEvents, step.UserInput, io.Discard)
 	elapsed := clock.Since(start)
 	if err != nil {
 		t.Fatalf("scenario step %d (%s): turn.Run: %v", idx+1, label, err)
 	}
+	return body, elapsed
+}
 
-	postSpine, _ := store.ReadSpine(h.Paths.Spine)
-
-	// Keep the embedding index current (#98): a thread created this turn must
-	// be embedded and added to the layer-2 index, or it is structurally
-	// unrecallable by embedding for the rest of the run (the session-start
-	// Prepare embedded only the threads that existed then). Drive the
-	// incremental AddThread seam for each spine ID that appeared this turn.
-	// A no-op for the symbolic-only default (h.indexer nil). An embed failure
-	// is fatal: a silently-missing index entry would understate embedding
-	// recall and corrupt the symbolic-vs-embedding head-to-head.
-	if h.indexer != nil && len(postSpine) > len(preSpine) {
-		for _, id := range newSpineIDs(preSpine, postSpine) {
-			if err := h.indexer.AddThread(context.Background(), id); err != nil {
-				t.Fatalf("scenario step %d (%s): embedding index add %s: %v", idx+1, label, id, err)
-			}
+// stepUpdateEmbeddingIndex keeps the embedding index current (#98): a thread
+// created this turn must be embedded and added to the layer-2 index, or it is
+// structurally unrecallable by embedding for the rest of the run (the
+// session-start Prepare embedded only the threads that existed then). Drives
+// the incremental AddThread seam for each spine ID that appeared this turn. A
+// no-op for the symbolic-only default (h.indexer nil). An embed failure is
+// fatal: a silently-missing index entry would understate embedding recall and
+// corrupt the symbolic-vs-embedding head-to-head.
+func stepUpdateEmbeddingIndex(t *testing.T, h *Harness, idx int, label string, preSpine, postSpine []memops.SpineRecord) {
+	t.Helper()
+	if h.indexer == nil || len(postSpine) <= len(preSpine) {
+		return
+	}
+	for _, id := range newSpineIDs(preSpine, postSpine) {
+		if err := h.indexer.AddThread(context.Background(), id); err != nil {
+			t.Fatalf("scenario step %d (%s): embedding index add %s: %v", idx+1, label, id, err)
 		}
 	}
+}
 
-	// One incremental poll captures exactly this turn's appended log
-	// lines: the turn just completed and the next turn has not started.
-	// From those lines extract this step's match-fire set and fold any
-	// thread.created IDs into the cumulative created set. The archived set
-	// is refreshed from the canonical index (not the log) whenever the
-	// batch carried an archival/recovery line. Invariant checks between
-	// turns do not write to logs/, so they cannot pollute the next step's
-	// window.
+// stepScrapeEventLog performs one incremental poll capturing exactly this
+// turn's appended log lines (the turn just completed and the next turn has
+// not started), folds thread.created IDs into the cumulative created set, and
+// refreshes the index-derived archived set whenever an archival ran. Returns
+// the freshly-tailed lines for recall measurement. Invariant checks between
+// turns do not write to logs/, so they cannot pollute the next step's window.
+func stepScrapeEventLog(t *testing.T, h *Harness, idx int, label string, preSpine, postSpine []memops.SpineRecord) []string {
+	t.Helper()
 	stepLines, err := h.tailer.poll()
 	if err != nil {
 		t.Fatalf("scenario step %d (%s): tailer.poll: %v", idx+1, label, err)
@@ -263,8 +311,27 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 	if len(postSpine) < len(preSpine) {
 		h.refreshArchivedSet()
 	}
+	return stepLines
+}
+
+// stepRecall bundles the recall-measurement outputs of one step that
+// runStep threads into the returned StepFeedback.
+type stepRecall struct {
+	matchFires       []string
+	embedFireIDs     []string
+	intraFires       []string
+	expectedForgiven int
+}
+
+// stepMeasureRecall scores every recall layer for this step: the symbolic
+// Jaccard layer (recall_fidelity_*, the gate), the embedding head-to-head
+// (#98), the intra-thread fine tier (#109), and the W1 descent-vs-flat
+// quality measure (#111). livePost is the in-scope live-spine ID set, passed
+// to the recall-fidelity scorer to avoid a redundant ReadSpine (#11).
+func stepMeasureRecall(t *testing.T, h *Harness, idx int, label string, step Step, stepLines []string, livePost map[string]struct{}) stepRecall {
+	t.Helper()
 	matchFires := matchFireSet(stepLines)
-	keptExpected, expectedForgiven := recordRecallFidelity(t, h, idx, label, step.RecallMode, step.ExpectedRecallMatches, matchFires)
+	keptExpected, expectedForgiven := recordRecallFidelity(t, h, idx, label, step.RecallMode, step.ExpectedRecallMatches, matchFires, livePost)
 
 	// Embedding-in-loop head-to-head (#98): when an embedder is installed the
 	// turn-close path logs spine.embed-match-fire alongside spine.match-fire,
@@ -292,31 +359,47 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 		embedFireIDs = embedFires
 	}
 
-	// W1 recall-preservation QUALITY MEASURE (#111 / design §7.1; gate→measure
-	// in #119): on an intra-probe step (W1Engaged set) on an embedding-live run,
-	// ask the recaller for the descent-vs-flat top-Kf set difference for the
-	// engaged main thread and accumulate it. The sim summary REPORTS this as an
-	// approximation-drift canary (no longer a hard assertion); here we only
-	// tally the per-step differential. Gated on h.indexer (an embedding recaller
-	// is live) and the
-	// optional intraDivergenceProbe interface (measure.Service satisfies it) so
-	// the symbolic-only default is untouched. Counted unconditionally when a
-	// usable tree exists — divergence is 0 by construction otherwise (W8).
-	if h.indexer != nil && step.W1Engaged != "" && h.State != nil && h.State.Recaller != nil {
-		if probe, ok := h.State.Recaller.(intraDivergenceProbe); ok {
-			div, class := probe.IntraThreadDivergence(context.Background(), step.UserInput, step.W1Engaged)
-			h.Metrics.Counter(metricRecallIntraDescentDivergence, int64(div))
-			h.Metrics.Counter(metricRecallIntraDescentProbes, 1)
-			// Accumulate the per-probe classification tally HERE, in lockstep
-			// with the divergence counter, so a strict-miss classified on an
-			// earlier per-session Service instance is not lost when a
-			// RestartSession swaps in a fresh Service with zeroed W1 atomics
-			// (the #111 bug). div==0 returns the empty class and bumps nothing.
-			recordW1Class(h, class)
-		}
-	}
+	stepMeasureW1(h, step)
 
-	// Per-step metrics.
+	return stepRecall{
+		matchFires:       matchFires,
+		embedFireIDs:     embedFireIDs,
+		intraFires:       intraFires,
+		expectedForgiven: expectedForgiven,
+	}
+}
+
+// stepMeasureW1 records the W1 recall-preservation QUALITY MEASURE (#111 /
+// design §7.1; gate→measure in #119): on an intra-probe step (W1Engaged set)
+// on an embedding-live run, ask the recaller for the descent-vs-flat top-Kf
+// set difference for the engaged main thread and accumulate it. The sim
+// summary REPORTS this as an approximation-drift canary (no longer a hard
+// assertion); here we only tally the per-step differential. Gated on h.indexer
+// (an embedding recaller is live) and the optional intraDivergenceProbe
+// interface (measure.Service satisfies it) so the symbolic-only default is
+// untouched. Counted unconditionally when a usable tree exists — divergence
+// is 0 by construction otherwise (W8).
+func stepMeasureW1(h *Harness, step Step) {
+	if h.indexer == nil || step.W1Engaged == "" || h.State == nil || h.State.Recaller == nil {
+		return
+	}
+	probe, ok := h.State.Recaller.(intraDivergenceProbe)
+	if !ok {
+		return
+	}
+	div, class := probe.IntraThreadDivergence(context.Background(), step.UserInput, step.W1Engaged)
+	h.Metrics.Counter(metricRecallIntraDescentDivergence, int64(div))
+	h.Metrics.Counter(metricRecallIntraDescentProbes, 1)
+	// Accumulate the per-probe classification tally HERE, in lockstep with the
+	// divergence counter, so a strict-miss classified on an earlier
+	// per-session Service instance is not lost when a RestartSession swaps in a
+	// fresh Service with zeroed W1 atomics (the #111 bug). div==0 returns the
+	// empty class and bumps nothing.
+	recordW1Class(h, class)
+}
+
+// stepRecordMetrics records the per-step turn/engagement/response counters.
+func stepRecordMetrics(h *Harness, step Step, elapsed time.Duration, preSpine, postSpine []memops.SpineRecord) {
 	h.Metrics.Counter("turns", 1)
 	h.Metrics.Record("turn_duration_ms", float64(elapsed.Milliseconds()))
 	if len(postSpine) > len(preSpine) {
@@ -346,85 +429,80 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 			h.Metrics.Counter("topic_tag_missing", 1)
 		}
 	}
+}
 
-	_ = body // body is the streamed text; harness keeps it in History via turn.Run.
-
-	runInvariants(t, h, perStepInvariants(h, step), label)
-
-	// Per-sim-day-close catch-up (§3.5/M1, #120). The step set pinnedClock =
-	// Step.At above, and the boundary's heavy invariants have now run on
-	// settled state. Close every sim-day the DERIVED day index crossed,
-	// dating each close with the day it REPRESENTS: when the index has
-	// advanced from lastClosedDay to cur, days lastClosedDay..cur-1 are now
-	// complete, so fire each day d's close stamped with its OWN grid-exact
-	// date simDayCloseDate(d) (NOT d+1, and NOT the jittered Step.At —
-	// §3.5/M2 preserves sim_date 24h contiguity). This is the labeling fix:
-	// day d's just-completed work is dated the day d it represents, so the
-	// 0-turn weekly day-off (Sunday, day index 6) lands ON the Sunday record
-	// rather than the Monday after it. In normal operation §3.3's 8am
-	// mid-bucket anchor crosses exactly one boundary per step; the loop is
-	// correct by construction for a legitimate multi-day jump (the future
-	// vacation path) too, each intervening day carrying its own grid date.
-	// Gated on a non-zero cadence (heavyCadence>0): handwritten per-step
-	// scenarios never close days.
-	if h.heavyCadence > 0 {
-		cur := SimDayIndex(h.pinnedClock)
-		for d := h.lastClosedDay; d < cur; d++ {
-			if h.onSimDayClose != nil {
-				h.simDay++
-				h.onSimDayClose(h, h.simDay, simDayCloseDate(d))
-			}
+// stepCloseDays runs the per-sim-day-close catch-up (§3.5/M1, #120). The step
+// set pinnedClock = Step.At above, and the boundary's heavy invariants have
+// now run on settled state. Close every sim-day the DERIVED day index crossed,
+// dating each close with the day it REPRESENTS: when the index has advanced
+// from lastClosedDay to cur, days lastClosedDay..cur-1 are now complete, so
+// fire each day d's close stamped with its OWN grid-exact date
+// simDayCloseDate(d) (NOT d+1, and NOT the jittered Step.At — §3.5/M2
+// preserves sim_date 24h contiguity). This is the labeling fix: day d's
+// just-completed work is dated the day d it represents, so the 0-turn weekly
+// day-off (Sunday, day index 6) lands ON the Sunday record rather than the
+// Monday after it. In normal operation §3.3's 8am mid-bucket anchor crosses
+// exactly one boundary per step; the loop is correct by construction for a
+// legitimate multi-day jump (the future vacation path) too, each intervening
+// day carrying its own grid date. Gated on a non-zero cadence (heavyCadence>0):
+// handwritten per-step scenarios never close days.
+func stepCloseDays(h *Harness) {
+	if h.heavyCadence <= 0 {
+		return
+	}
+	cur := SimDayIndex(h.pinnedClock)
+	for d := h.lastClosedDay; d < cur; d++ {
+		if h.onSimDayClose != nil {
+			h.simDay++
+			h.onSimDayClose(h, h.simDay, simDayCloseDate(d))
 		}
-		h.lastClosedDay = cur
 	}
+	h.lastClosedDay = cur
+}
 
-	// Archival-recoverability predicate for a StepSource that measures recall
-	// against a target it did NOT declare as an expected match (the #96
-	// abandoned-topic probe). Mirrors recordRecallFidelity's filter: a
-	// target on the live spine is recoverable; one absent AND in the
-	// archive.archived log is off the LIVE recall surface (excluded — the
-	// thread is preserved + recoverable via explicit fetch, not lost); one
-	// absent but NOT archived is an unexplained absence — a genuine integrity
-	// bug, counted via recall_unexplained_absence (the recall-measurement
-	// sibling of VerifyThreadAccounting) and conservatively treated as a real
-	// miss. Built from postSpine (already read) so no extra spine read.
-	livePost := make(map[string]struct{}, len(postSpine))
-	for _, r := range postSpine {
-		livePost[r.ID] = struct{}{}
-	}
-	recoverable := func(id string) bool {
-		if _, onSpine := livePost[id]; onSpine {
+// stepRecoverable builds the archival-recoverability predicate for a
+// StepSource that measures recall against a target it did NOT declare as an
+// expected match (the #96 abandoned-topic probe). It applies the shared
+// classifyRecoverability rule (#7) so it can never drift from
+// recordRecallFidelity's expected-set filter: a target on the live spine is
+// recoverable; one absent AND archived is off the LIVE recall surface
+// (excluded — preserved + recoverable via explicit fetch, not lost); one
+// absent but NOT archived is an unexplained absence — a genuine integrity bug,
+// counted via recall_unexplained_absence (the recall-measurement sibling of
+// VerifyThreadAccounting) and conservatively treated as a real miss
+// (returns true).
+//
+// recall_unexplained_absence is a HARD ==0 gate in the sim (#100): the oracle
+// no longer manufactures false positives here. Previously a long-sim
+// refinement burst could name an expected thread the instant before its spine
+// record materialized (the day-ahead generation buffer creates the thread in
+// the shadow model before its creating step executes), inflating this counter
+// for a thread that was never archived and ended up on-spine. The refinement
+// oracle now excludes unmaterialized threads (recallExpectedForMaterialized),
+// so a nonzero count is a real off-spine-not-archived loss, not an oracle
+// artifact. livePost is built from postSpine (already read) so no extra spine
+// read.
+func stepRecoverable(h *Harness, livePost map[string]struct{}) func(string) bool {
+	return func(id string) bool {
+		switch classifyRecoverability(id, livePost, h.archivedThreadIDs) {
+		case recovOnSpine:
+			return true
+		case recovArchived:
+			return false
+		default: // recovUnexplained
+			h.Metrics.Counter("recall_unexplained_absence", 1)
 			return true
 		}
-		if _, wasArchived := h.archivedThreadIDs[id]; wasArchived {
-			return false
-		}
-		// Off the live spine and NOT archived: not a forgivable archival. The
-		// recall-measurement sibling of VerifyThreadAccounting's "unexplained
-		// loss" — a thread that is neither live nor recoverable-via-fetch, a
-		// genuine integrity bug. This is a HARD ==0 gate in the sim (#100):
-		// the oracle no longer manufactures false positives here. Previously a
-		// long-sim refinement burst could name an expected thread the instant
-		// before its spine record materialized (the day-ahead generation
-		// buffer creates the thread in the shadow model before its creating
-		// step executes), inflating this counter for a thread that was never
-		// archived and ended up on-spine. The refinement oracle now excludes
-		// unmaterialized threads (recallExpectedForMaterialized), so a nonzero
-		// count is a real off-spine-not-archived loss, not an oracle artifact.
-		h.Metrics.Counter("recall_unexplained_absence", 1)
-		return true
 	}
+}
 
-	return StepFeedback{
-		Index:                  idx,
-		RecallMatchFires:       len(matchFires),
-		RecallMatchFireIDs:     matchFires,
-		EmbedMatchFireIDs:      embedFireIDs,
-		IntraMatchFireIDs:      intraFires,
-		RecallExpected:         len(step.ExpectedRecallMatches),
-		TargetRecoverable:      recoverable,
-		RecallExpectedForgiven: expectedForgiven,
+// spineIDSet projects spine records to a set of their thread IDs.
+func spineIDSet(recs []memops.SpineRecord) map[string]struct{} {
+	out := make(map[string]struct{}, len(recs))
+	for _, r := range recs {
+		out[r.ID] = struct{}{}
 	}
+	return out
 }
 
 // restartSession simulates a CLEAN application shutdown→relaunch ONLY —

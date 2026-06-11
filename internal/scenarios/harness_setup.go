@@ -21,6 +21,14 @@ import (
 // RunScenario after Steps are known so the queue can be sized exactly.
 func newHarness(t *testing.T, sc Scenario) *Harness {
 	t.Helper()
+
+	// Fail loud at run start on contradictory / no-op-inducing config (#9)
+	// before building anything, so a misconfigured scenario stops here with a
+	// precise message instead of producing a misleading green run.
+	if err := sc.validate(); err != nil {
+		t.Fatalf("scenario %s: invalid configuration: %v", sc.Name, err)
+	}
+
 	tmp := runDataHome(t, sc.Name)
 	paths := store.PathsForHome(tmp)
 
