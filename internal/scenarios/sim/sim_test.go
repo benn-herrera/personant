@@ -568,7 +568,16 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// summary's own inputs, this last record's run_to_date equals the end-of-run
 	// summary by construction — the #120 correctness invariant that lets the
 	// acceptance-ladder rungs be read from the series.
-	daily.finalize(h, h.PinnedClock(), finalPopulation, p50, p95, p99)
+	// Date the finalize record grid-exact, consistent with the interior records:
+	// the close stamp is the day-start instant of the final pinned day
+	// (simDayCloseDate(SimDayIndex(pinned)) = SimClockStart + N·SimDayLength), NOT
+	// the live ~21:30 instant. The two truncate to the SAME calendar date (the
+	// final instant is within day N), so sim_date is unchanged — a consistency
+	// tidy, not a behavior change. simDayCloseDate is unexported in scenarios; its
+	// definition is SimClockStart + N·SimDayLength, computed inline here.
+	finalDay := scenarios.SimDayIndex(h.PinnedClock())
+	finalClose := scenarios.SimClockStart.Add(time.Duration(finalDay) * scenarios.SimDayLength)
+	daily.finalize(h, finalClose, finalPopulation, p50, p95, p99)
 
 	t.Logf("=== %s summary ===", label)
 	t.Logf("turns:            %d", turns)
@@ -1300,47 +1309,37 @@ func TestGenerateWorkload_Deterministic(t *testing.T) {
 // ~11 h overnight.
 const cadenceDayStartThreshold = 5 * time.Hour
 
-// dayStartInstants drains the step stream and returns the absolute simulated
-// instant (cumulative TimeDelta sum from t=0) of each re-anchored day's first
-// turn — the steps whose TimeDelta crosses cadenceDayStartThreshold, plus the
-// very first step (t=0). SleepCycle day-off markers are included as day starts
-// (they carry the day's emergent idle as their TimeDelta), matching the
-// re-anchored-day model. This reconstructs the timeline the harness builds by
-// accumulating TimeDeltas onto its pinned clock.
-func dayStartInstants(steps []scenarios.Step) []time.Duration {
-	out := dayStartBoundaries(steps)
-	starts := make([]time.Duration, len(out))
-	for i, b := range out {
-		starts[i] = b.instant
-	}
-	return starts
-}
-
 // dayBoundary is one re-anchored day's first step: its absolute simulated
-// instant (cumulative TimeDelta sum from t=0) and whether that step is the
-// no-turn SleepCycle day-off marker (#108) rather than a work turn. The kind
-// matters to the no-precession guard: the original guard ran only 7 days and so
-// never reached a WORK boundary AFTER a day-off, the exact slot a phase-shifting
-// day-off would corrupt.
+// instant expressed as an offset from SimClockStart (Step.At − SimClockStart)
+// and whether that step is the no-turn SleepCycle day-off marker (#108) rather
+// than a work turn. The kind matters to the no-precession guard: the original
+// guard ran only 7 days and so never reached a WORK boundary AFTER a day-off,
+// the exact slot a phase-shifting day-off would corrupt.
 type dayBoundary struct {
-	instant time.Duration
+	instant time.Duration // Step.At − SimClockStart
 	sleep   bool
 }
 
-// dayStartBoundaries reconstructs each re-anchored day's first step the way the
-// harness's pinned clock does — by accumulating TimeDeltas from t=0 — and
-// records, per boundary, the absolute instant and whether it is the day-off
-// SleepCycle marker. The day-off marker carries the day's emergent idle as its
-// TimeDelta, so it crosses cadenceDayStartThreshold and counts as that calendar
-// day's boundary, keeping the boundary index aligned with the calendar/grid day.
+// dayStartBoundaries reads each re-anchored day's first step straight off the
+// authoritative Step.At (the sim time single-clock model — the harness slaves
+// its pinned clock to At, no TimeDelta integration), recording per boundary the
+// offset-from-anchor instant and whether it is the day-off SleepCycle marker.
+// A day boundary is the first step plus every step whose At jumps ≥
+// cadenceDayStartThreshold past the prior step (the emergent overnight/day-off
+// idle); the SleepCycle day-off marker is one such jump, so it counts as that
+// calendar day's boundary, keeping the boundary index aligned with the grid day.
 func dayStartBoundaries(steps []scenarios.Step) []dayBoundary {
 	var out []dayBoundary
-	var now time.Duration
+	var prev time.Time
 	for i, s := range steps {
-		now += s.TimeDelta
-		if i == 0 || s.TimeDelta >= cadenceDayStartThreshold {
-			out = append(out, dayBoundary{instant: now, sleep: s.SleepCycle})
+		jump := s.At.Sub(prev)
+		if i == 0 || jump >= cadenceDayStartThreshold {
+			out = append(out, dayBoundary{
+				instant: s.At.Sub(scenarios.SimClockStart),
+				sleep:   s.SleepCycle,
+			})
 		}
+		prev = s.At
 	}
 	return out
 }
@@ -1391,7 +1390,10 @@ func TestCadence_DayStartsNoPrecession(t *testing.T) {
 	// introduced any systematic phase shift would push boundary 7+ out of this
 	// window — the regression the 7-day guard could not see.
 	for n, b := range bounds {
-		anchor := time.Duration(n) * dayLength
+		// Boundaries now sit 8h into the midnight bucket (the work-start offset,
+		// §3.3): anchor = N·dayLength + workdayStart. b.instant is the offset
+		// from the Monday-midnight SimClockStart.
+		anchor := time.Duration(n)*dayLength + scenarios.SimWorkdayStart
 		drift := b.instant - anchor
 		if drift < -dayStartJitter || drift > dayStartJitter {
 			kind := "work"
@@ -1470,15 +1472,19 @@ func TestCadence_DayOffPreservesPhase(t *testing.T) {
 	}
 }
 
-// signedGridDrift folds an absolute instant onto its signed distance to the
-// nearest base+N*24h grid line, in (-12h, 12h]. A start jittered ±15 min around
-// the grid yields a drift of ±15 min regardless of which side of midnight it
-// landed, so two on-grid starts compare cleanly without a midnight-wrap
-// artifact.
+// signedGridDrift folds an instant (offset from SimClockStart) onto its signed
+// distance to the nearest work-start grid line N·dayLength + workdayStart, in
+// (-12h, 12h]. It subtracts the 8h work-start offset before the modulo so the
+// fold lands on the work-start grid, not the midnight bucket edge; a start
+// jittered ±15 min around the grid then yields a drift of ±15 min regardless of
+// which side of the grid line it landed, so two on-grid starts compare cleanly.
 func signedGridDrift(instant time.Duration) time.Duration {
-	d := instant % dayLength
+	d := (instant - scenarios.SimWorkdayStart) % dayLength
 	if d > dayLength/2 {
 		d -= dayLength
+	}
+	if d <= -dayLength/2 {
+		d += dayLength
 	}
 	return d
 }
@@ -1495,31 +1501,36 @@ func TestCadence_SessionSpansAndBreak(t *testing.T) {
 		Seed: simSeed, Duration: simDayDuration, Corpus: corpus,
 	}))
 
-	// Reconstruct per-step absolute instants; the first step is t=0 (day
-	// start). The inter-session break is the lone in-day TimeDelta in the
-	// ~1 h band; the day's last instant minus the break splits the two
-	// sessions. Per-turn spans are ~72 s, so the break stands out cleanly.
-	var now time.Duration
-	var breakIdx = -1
-	var breakDelta, lastInstant time.Duration
+	// Read per-step absolute instants straight off the authoritative Step.At
+	// (the single-clock model). The first natural turn is the day start (~8h
+	// into the Monday-midnight bucket); the inter-session break is the lone
+	// in-day At jump in the ~1 h band; the day's last instant minus the break
+	// splits the two sessions. Per-turn spans are ~72 s, so the break stands
+	// out cleanly. firstAt anchors the spans so the 8h pre-work offset (At is
+	// absolute from SimClockStart) does not inflate session 1.
+	firstAt := steps[0].At
+	breakIdx := -1
+	var breakDelta time.Duration
+	var prevAt time.Time = firstAt
 	for i, s := range steps {
-		now += s.TimeDelta
-		lastInstant = now
 		if i == 0 {
 			continue // day start, no in-day gap
 		}
+		gap := s.At.Sub(prevAt)
+		prevAt = s.At
 		// In-day break: bigger than any per-turn span, smaller than the
 		// overnight day boundary (none in a 1-day run anyway).
-		if s.TimeDelta > 20*time.Minute && s.TimeDelta < cadenceDayStartThreshold {
+		if gap > 20*time.Minute && gap < cadenceDayStartThreshold {
 			if breakIdx != -1 {
 				t.Fatalf("found >1 in-day break (steps %d and %d) — a work day has exactly one inter-session break", breakIdx, i)
 			}
-			breakIdx, breakDelta = i, s.TimeDelta
+			breakIdx, breakDelta = i, gap
 		}
 	}
 	if breakIdx == -1 {
 		t.Fatal("no inter-session break found in a 1-day run")
 	}
+	lastInstant := steps[len(steps)-1].At.Sub(firstAt)
 
 	// (a) break ≈ 1 h, within the ±30% jitter band.
 	wantBreak := 1 * time.Hour
@@ -1530,17 +1541,10 @@ func TestCadence_SessionSpansAndBreak(t *testing.T) {
 
 	// Session 1 active span = instant just before the break (the break step's
 	// instant minus the break delta). Session 2 active span = last instant −
-	// break-step instant. Each must be ~6 h (the last turn crossing the
-	// threshold adds up to one per-turn span of slop above 6 h).
-	var breakInstant time.Duration
-	now = 0
-	for i, s := range steps {
-		now += s.TimeDelta
-		if i == breakIdx {
-			breakInstant = now
-			break
-		}
-	}
+	// break-step instant. All offsets are relative to firstAt (the day start),
+	// so the 8h pre-work offset is excluded. Each must be ~6 h (the last turn
+	// crossing the threshold adds up to one per-turn span of slop above 6 h).
+	breakInstant := steps[breakIdx].At.Sub(firstAt)
 	sess1 := breakInstant - breakDelta
 	sess2 := lastInstant - breakInstant
 	for _, sess := range []struct {
@@ -1618,6 +1622,35 @@ func TestCadence_PerTurnCenterAndTurnsPerDay(t *testing.T) {
 		t.Errorf("natural turns/day = %d, want ~600 within [450, 750]", naturalTurns)
 	}
 	t.Logf("measured natural turns/day: %d", naturalTurns)
+}
+
+// TestDayStartWithinBucket is the generator-level airtightness guard (§3.3):
+// dayStart(N) must land within [N·dayLength + workdayStart − jitter,
+// + jitter] — 8h into the midnight bucket, ±15min — so the work day never
+// spills into an adjacent bucket and the derived day index is unambiguous.
+// It calls dayStart directly across many days (each call makes the single
+// per-day jitter draw), so it verifies the anchor formula in isolation,
+// independent of the full workload assembly.
+func TestDayStartWithinBucket(t *testing.T) {
+	g := GenerateWorkload(WorkloadConfig{
+		Seed: simSeed, Duration: simDayDuration, Corpus: loadCorpusSlots(t),
+	}).StepSource.(*generator)
+
+	for n := 0; n < 40; n++ {
+		off := g.dayStart(n).Sub(scenarios.SimClockStart)
+		anchor := time.Duration(n)*dayLength + scenarios.SimWorkdayStart
+		drift := off - anchor
+		if drift < -dayStartJitter || drift > dayStartJitter {
+			t.Errorf("dayStart(%d) offset %v drifts %v from within-bucket anchor %v (must be within ±%v)",
+				n, off, drift, anchor, dayStartJitter)
+		}
+		// And it must sit strictly inside the bucket [N·dayLength, (N+1)·dayLength).
+		bucketLo := time.Duration(n) * dayLength
+		bucketHi := time.Duration(n+1) * dayLength
+		if off < bucketLo || off >= bucketHi {
+			t.Errorf("dayStart(%d) offset %v escaped its bucket [%v, %v)", n, off, bucketLo, bucketHi)
+		}
+	}
 }
 
 // TestIntraThreadWindowMirrorsRuntime asserts the intra-thread oracle's
@@ -2878,6 +2911,100 @@ func readDailyRecords(t *testing.T, runHome string) []dailyRecord {
 		recs = append(recs, r)
 	}
 	return recs
+}
+
+// TestDayOffThroughHarness is the harness-level day-off guard — the layer the
+// generator-only cadence tests miss (sim-time-single-clock.md §8). It drives a
+// ≥9-day MOCK run THROUGH the real harness (runSimRung + the #120 daily series,
+// DRY — no parallel plumbing), then asserts the load-bearing day-off properties
+// against daily.jsonl:
+//
+//	(a) exactly one 0-turn day record — the weekly day-off, which emits only the
+//	    SleepCycle marker (no turn); every other day has work turns;
+//	(b) contiguous sim_date — consecutive records are exactly 24h apart (the
+//	    grid-exact close stamp simDayCloseDate, §3.5/M2, makes this hold across
+//	    the midnight anchor);
+//	(c) the clock advances exactly 24h across the day-off (folded into (b));
+//	(d) day count == int(Duration/dayLength); and
+//	(e) the forensic monotonic / workload-shape asserts do NOT fire (a backward
+//	    re-anchor would panic the run; we reach the assertions, so they didn't).
+//
+// Labeling convention: each daily record is dated the day it REPRESENTS. The
+// day-close for day d fires at the START of day d+1's first turn (the derived
+// day index ticks then), but the close is stamped with day d's own grid date
+// (simDayCloseDate(d)) and carries day d's just-completed work. So the empty
+// weekly day-off (Sunday, day index 6) is dated ON the Sunday and carries its
+// own 0 turns; the test asserts the 0-turn record's weekday IS Sunday.
+func TestDayOffThroughHarness(t *testing.T) {
+	corpus := loadCorpusSlots(t)
+	const days = 9
+	h := runSimRung(t, "dayoff-through-harness-9d", days*24*time.Hour, corpus, nil, false, nil, "")
+
+	recs := readDailyRecords(t, h.RunHome)
+
+	// (d) day count == int(Duration/dayLength). The series has one record per
+	// closed sim-day plus the finalize record; with a clean N-day Duration the
+	// generator spans exactly N days and the series has N records.
+	if want := int((days * 24 * time.Hour) / dayLength); len(recs) != want {
+		t.Fatalf("daily series has %d records, want day count %d (== int(Duration/dayLength))", len(recs), want)
+	}
+
+	// (b)+(c) contiguous sim_date: consecutive records are exactly 24h apart —
+	// EVERY record, including the #120 finalize snapshot. All records are dated
+	// the day they represent via the grid-exact stamp simDayCloseDate(d) =
+	// clockStart + d·dayLength (the interior closes directly; the finalize from
+	// SimDayIndex(pinned), see finalize call site), so contiguity holds through
+	// the day-off AND through the final record. A jittered trigger-instant stamp
+	// would truncate to different dates either side of midnight and break this;
+	// the grid stamp is exact. This also covers "clock advances 24h across the
+	// day-off": the day-off record's neighbours are 24h apart like every pair.
+	for i := 1; i < len(recs); i++ {
+		prev, err1 := time.Parse("2006-01-02", recs[i-1].SimDate)
+		cur, err2 := time.Parse("2006-01-02", recs[i].SimDate)
+		if err1 != nil || err2 != nil {
+			t.Fatalf("record %d/%d sim_date parse: %q (%v) / %q (%v)",
+				i-1, i, recs[i-1].SimDate, err1, recs[i].SimDate, err2)
+		}
+		if gap := cur.Sub(prev); gap != dayLength {
+			t.Errorf("records %d→%d sim_date gap = %v (%s→%s), want exactly %v (contiguity)",
+				i-1, i, gap, recs[i-1].SimDate, recs[i].SimDate, dayLength)
+		}
+	}
+
+	// (a) exactly one 0-turn day record, and it is the day-off's effect — dated
+	// ON the Sunday itself (each daily record is dated the day it represents, the
+	// labeling fix). Every other day is a work day with turns.
+	zeroTurnDays := 0
+	for i, r := range recs {
+		if r.DayDelta.TurnsThisDay != 0 {
+			continue
+		}
+		// Day 1's delta == its run-to-date (the first day's whole movement), which
+		// is non-zero on a work day; a genuine 0-turn day is an interior day-off.
+		zeroTurnDays++
+		d, err := time.Parse("2006-01-02", r.SimDate)
+		if err != nil {
+			t.Fatalf("0-turn record %d sim_date parse %q: %v", i, r.SimDate, err)
+		}
+		// The 0-turn record is dated the Sunday day-off itself: each record is
+		// dated the day it represents, so the empty weekly day-off lands ON the
+		// Sunday, not the Monday after it.
+		if d.Weekday() != time.Sunday {
+			t.Errorf("0-turn record dated %s (%s) — expected the Sunday day-off itself (record must be ON the Sunday, not after it)",
+				r.SimDate, d.Weekday())
+		}
+	}
+	if zeroTurnDays != 1 {
+		t.Errorf("found %d zero-turn day records, want exactly 1 (the single weekly day-off)", zeroTurnDays)
+	}
+
+	// One sleep cycle fired (the day-off's SleepCycle consolidation). The
+	// run-to-date counter is monotonic and ends at the run's total; a 9-day run
+	// crosses exactly one Sunday.
+	last := recs[len(recs)-1].RunToDate
+	if last.SleepCycles != 1 {
+		t.Errorf("run-to-date sleep_cycles = %d at end of a 9-day run, want exactly 1 (one weekly day-off)", last.SleepCycles)
+	}
 }
 
 // assertFloatEq fails the test if got and want differ by more than a tiny

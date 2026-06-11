@@ -146,19 +146,25 @@ down. Renaming the formula does not fix it.
 - `simDayIndex(clock) := int(clock.Sub(clockStart) / dayLength)` is a single shared helper used by
   the generator, the harness, and tests — the one derivation, in one place.
 - Remove `nextHeavyAt`-as-day-close. After a step sets `pinnedClock` (§3.4), compute
-  `cur := simDayIndex(pinnedClock)`; while `lastClosedDay < cur`, fire one `onSimDayClose` per
-  intervening day (`lastClosedDay++`). With §3.3 this fires exactly once per day in normal operation,
-  but it is now **correct by construction** (day identity is unambiguous), not an epicycle fighting a
+  `cur := simDayIndex(pinnedClock)`; for each `d` in `[lastClosedDay, cur)` fire one `onSimDayClose`,
+  then set `lastClosedDay = cur`. With §3.3 this fires exactly once per day in normal operation, but it
+  is now **correct by construction** (day identity is unambiguous), not an epicycle fighting a
   coordinate mismatch.
+- **Each record is dated the day it REPRESENTS.** When the index advances from `lastClosedDay` to
+  `cur`, days `lastClosedDay..cur-1` are now complete; day `d`'s close reports day `d`'s just-completed
+  work and is dated `dayCloseDate(d)`, NOT `dayCloseDate(d+1)`. This is the labeling convention: the
+  0-turn weekly day-off (Sunday, `dayIndex 6`) lands ON the Sunday record carrying its own 0 turns,
+  not on the Monday after it.
 - **Stamp = grid-exact, trigger = jittered crossing (resolves review M2).** The day-close date MUST
   be the canonical jitter-free instant `dayCloseDate(N) := clockStart.Add(N · dayLength)`, NOT the
   triggering `pinnedClock` (which jitters ±15min around the boundary). Under the midnight anchor a
   trigger-instant stamp would truncate to different calendar dates either side of midnight and break
   `sim_date` contiguity (`TestDayOffThroughHarness` asserts consecutive `sim_date`s are exactly 24h
   apart). Consecutive grid instants are exactly 24h apart by construction → contiguity holds. In the
-  catch-up loop each intervening close `k` carries its own grid date `clockStart + k·dayLength`.
-- The day-off `SleepCycle` step sets the clock into the Sunday bucket and fires that day's close with
-  zero turns → the 0-turn day-off record falls out naturally.
+  catch-up loop each crossed day `d` carries its own grid date `clockStart + d·dayLength`.
+- The day-off `SleepCycle` step sets the clock into the Sunday bucket; the following step's catch-up
+  closes that Sunday day with zero turns → the 0-turn day-off record falls out naturally, dated ON the
+  Sunday.
 
 **Heavy-invariant cadence folds onto the same tick (resolves review M1 — this is a prerequisite, not
 an option).** `perStepInvariants` today is ONE coupled `if (!pinnedClock.Before(nextHeavyAt))` that
@@ -260,9 +266,10 @@ helper.
   Duration)` determinism preserved.
 - **Harness-level (the layer the generator-only guards missed):** drive a ≥9-day run through the
   harness; assert one day-close per calendar day in order, contiguous `sim_date`, the Sunday day-off
-  is the single 0-turn record, clock advances exactly 24h across it, and the demoted sanity assert
-  (if kept) never fires. This is the `TestDayOffThroughHarness` replacement, now backed by a sound
-  mechanism rather than reconstruction.
+  is the single 0-turn record (dated ON the Sunday — each record is dated the day it represents, §3.5),
+  clock advances exactly 24h across it, and the demoted sanity assert (if kept) never fires. This is
+  the `TestDayOffThroughHarness` replacement, now backed by a sound mechanism rather than
+  reconstruction.
 - Update `TestCadence_*`, `TestDailyStatsSeries`, SPEC §9.4.1.
 
 ## 9. Acceptance

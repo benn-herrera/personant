@@ -76,7 +76,14 @@ defaultModel = "harness-mock"
 
 	run := metrics.New(map[string]string{"scenario": sc.Name})
 
-	pinned := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	// Pin the simulated clock to the Monday-midnight anchor (§3.1). It is
+	// the one clock primitive; a Step.At (sim path) or the sliceSource
+	// shim (handwritten path) advances it, and SimDayIndex(pinnedClock)
+	// drives the derived day-close tick. The prior 2026-05-01 12:00 anchor
+	// (a Friday at noon) put grid lines at noon and landed the day-off on
+	// an arbitrary weekday; the Monday-midnight anchor makes day index 6 a
+	// real Sunday and the day-off fall out of the calendar.
+	pinned := SimClockStart
 	h := &Harness{
 		Paths:             paths,
 		Ops:               ops,
@@ -97,11 +104,12 @@ defaultModel = "harness-mock"
 		recallerFactory:   sc.Recaller,
 		liveClient:        sc.LiveClient,
 		liveModel:         sc.LiveModel,
-		// Schedule the first heavy firing one cadence-tick after the
-		// start: this puts the first firing well into the run rather than
-		// at step 1 when nothing has happened yet. End-of-run always
-		// fires heavy regardless.
-		nextHeavyAt: pinned.Add(sc.HeavyInvariantCadence),
+		// lastClosedDay starts at the pinned clock's day index — day 0
+		// under the Monday-midnight anchor. The first close fires when the
+		// derived day index first ticks to 1, well into the run rather than
+		// at step 1 when nothing has happened. End-of-run always fires heavy
+		// regardless.
+		lastClosedDay: SimDayIndex(pinned),
 	}
 
 	// Open the per-step memory telemetry. Every scenario gets a

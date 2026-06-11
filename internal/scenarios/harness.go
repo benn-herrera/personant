@@ -119,6 +119,56 @@ type cosineOpsReporter interface {
 	RecallQueries() int64
 }
 
+// SimClockStart is THE anchor of the simulated clock: a Monday at
+// 00:00 UTC (sim-time-single-clock.md §3.1). It is the single primitive
+// the whole sim time model derives from — current date is the clock,
+// elapsed is clock−SimClockStart, the day index is the floored quotient
+// (SimDayIndex), and the day-off is the real calendar's Sunday. UTC has
+// no DST, so every day is exactly SimDayLength wide and the quotient is
+// exact. Both the harness (pinnedClock default) and the sim generator
+// (its absolute simNow) anchor here, so the two cannot diverge in
+// coordinate system.
+//
+// A Monday-midnight anchor puts day index 6 (the 7th day) on a Sunday,
+// so the weekly day-off falls out of the calendar deterministically; an
+// 8h work-start offset (SimWorkdayStart) keeps the workday mid-bucket,
+// 8h from either midnight edge, so the ±15min start jitter never spills
+// a day into an adjacent bucket.
+var SimClockStart = time.Date(2026, 5, 4, 0, 0, 0, 0, time.UTC)
+
+// SimDayLength is the exact width of one simulated calendar day. The
+// single home for the 24h day primitive shared by the harness's derived
+// day-close tick, the generator's day-start grid, and the cadence tests.
+const SimDayLength = 24 * time.Hour
+
+// SimWorkdayStart is the offset into a midnight bucket at which the work
+// day begins (08:00), per §3.3. dayStart(N) = SimClockStart +
+// N·SimDayLength + SimWorkdayStart + jitter. RNG-free — added after the
+// single jitter draw (§5/m4), so it does not perturb the determinism
+// draw order.
+const SimWorkdayStart = 8 * time.Hour
+
+// SimDayIndex is the one derivation of "which simulated day": the floored
+// number of whole SimDayLength buckets between SimClockStart and clock.
+// Both the generator and the harness call THIS — same formula AND same
+// value (the harness's pinnedClock is a slaved copy of the generator's
+// emitted Step.At, §3.4) — so the day-close tick is unambiguous, not a
+// reconstruction that can drift against a rival grid.
+func SimDayIndex(clock time.Time) int {
+	return int(clock.Sub(SimClockStart) / SimDayLength)
+}
+
+// simDayCloseDate is the grid-exact, jitter-free instant at which sim-day
+// N closes: SimClockStart + N·SimDayLength (§3.5/M2). The day-close STAMP
+// must be this canonical instant, NOT the jittered Step.At that triggered
+// the crossing — under the midnight anchor a jittered trigger would
+// truncate to different calendar dates either side of midnight and break
+// sim_date 24h contiguity. Consecutive grid instants are exactly 24h
+// apart by construction, so contiguity holds.
+func simDayCloseDate(n int) time.Time {
+	return SimClockStart.Add(time.Duration(n) * SimDayLength)
+}
+
 // Step is one turn in a Scenario. Exactly one mock LLM response is
 // queued for the step; running the step calls turn.Run once. Per-step
 // invariants run after the turn completes; an empty Invariants slice
@@ -187,10 +237,31 @@ type Step struct {
 	// step (mirrors a nil RecallAck yielding a nil recall resolver).
 	ClosureAck *ClosureAck
 
-	// TimeDelta, when non-zero, advances the harness's pinned clock by
-	// that much before this step's turn. The harness pins a fixed clock
-	// by default; a non-zero TimeDelta lets a scenario cross the §3.5
-	// wall-clock decay threshold deterministically.
+	// At is the absolute simulated instant of this step's turn — the
+	// turn's position on the one simulated clock (sim-time-single-clock.md
+	// §3.4). It is the AUTHORITATIVE wire field: runStep SETS
+	// pinnedClock = At (a slaved copy of the generator's re-anchored
+	// instant), it does NOT integrate TimeDelta. Stamping the absolute
+	// instant rather than accumulating a delta is the keystone that makes
+	// the single-clock claim mechanically true — there is no independent
+	// harness-side accumulator to drift against the generator's clock.
+	//
+	// The sim generator always carries At. A handwritten scenario that
+	// advances relatively need only set TimeDelta: the sliceSource shim
+	// stamps At from a running base (SimClockStart + Σ TimeDelta) so the
+	// harness drive loop sees At on every step, keeping one authoritative
+	// field on the wire. A zero At (no shim, no generator — e.g. a test
+	// constructing a Step literal directly and driving runStep) leaves the
+	// pinned clock untouched, the pre-At-field behavior.
+	At time.Time
+
+	// TimeDelta is the legacy relative advance for handwritten scenarios:
+	// the simulated span between this step's turn and the prior one. The
+	// sliceSource shim integrates it onto a running base to derive Step.At
+	// (the authoritative field, above), so a handwritten scenario's call
+	// sites are unchanged. The sim path ignores TimeDelta for clock
+	// advancement (it sets pinnedClock from At) but still stamps it for the
+	// cadence tests that measure intra-day per-turn spans.
 	TimeDelta time.Duration
 
 	// RestartSession, when true, simulates an application shutdown+relaunch
@@ -379,9 +450,17 @@ type StepSource interface {
 // sliceSource adapts a fixed []Step to the StepSource interface so a
 // pre-built scenario and an on-demand generator share RunScenario's one
 // drive loop. It ignores the feedback — a fixed list never branches.
+//
+// It is also the §3.4 shim that stamps the authoritative Step.At for
+// handwritten scenarios: a handwritten step sets only the relative
+// TimeDelta, so sliceSource integrates a running base (SimClockStart + Σ
+// TimeDelta) and stamps At, so the harness drive loop sees At on every
+// step and never has to integrate a delta itself. A step that already
+// carries At (none today on the slice path, but harmless) is left as-is.
 type sliceSource struct {
 	steps []Step
 	pos   int
+	base  time.Time // running At base; zero until the first step seeds it
 }
 
 func (s *sliceSource) Next(_ StepFeedback) (Step, bool) {
@@ -390,6 +469,19 @@ func (s *sliceSource) Next(_ StepFeedback) (Step, bool) {
 	}
 	step := s.steps[s.pos]
 	s.pos++
+	if step.At.IsZero() {
+		// Integrate the running base from SimClockStart by each step's
+		// relative TimeDelta, exactly as the pre-At runStep did (it added
+		// each step's TimeDelta onto the pinned clock, the Monday anchor,
+		// before the turn). The first step lands at SimClockStart +
+		// TimeDelta — usually SimClockStart itself, since handwritten steps
+		// rarely set a delta on step 0.
+		if s.base.IsZero() {
+			s.base = SimClockStart
+		}
+		s.base = s.base.Add(step.TimeDelta)
+		step.At = s.base
+	}
 	return step, true
 }
 
@@ -451,18 +543,21 @@ type Scenario struct {
 	// supplies an explicit invariant list, that exact list runs.
 	HeavyInvariantCadence time.Duration
 
-	// OnSimDayClose, when non-nil, is invoked once each time the pinned
-	// simulated clock crosses a HeavyInvariantCadence tick — i.e. at the
-	// close of every sim-day for a sim whose cadence is 24h. The harness it
-	// receives is the run's live harness (h.Metrics holds the run-to-date
-	// counters/histograms, h.Paths the substrate); day is the 1-based sim-day
-	// ordinal (1 for the first close, 2 for the second, …) and simDate is the
-	// tick instant that just closed. It fires in lockstep with the
-	// heavy-invariant cadence advance (one fire per tick crossed, paced at most
-	// once per step — the sim's per-turn gaps are minutes, far under the 24h
-	// cadence, so one fire per step is exactly one per sim-day), AFTER the
-	// step's turn has committed and the heavy invariants for that boundary have
-	// run, so the run-to-date state the handler reads is settled.
+	// OnSimDayClose, when non-nil, is invoked once each time the DERIVED
+	// sim-day index (SimDayIndex of the slaved pinnedClock) ticks past a
+	// day boundary — i.e. at the close of every sim-day for a sim whose
+	// HeavyInvariantCadence is 24h. The harness it receives is the run's
+	// live harness (h.Metrics holds the run-to-date counters/histograms,
+	// h.Paths the substrate); day is the 1-based sim-day ordinal (1 for the
+	// first close, 2 for the second, …) and simDate is the GRID-EXACT close
+	// instant simDayCloseDate(N) = SimClockStart + N·SimDayLength — NOT the
+	// jittered Step.At that triggered the crossing, so consecutive simDates
+	// are exactly 24h apart (sim_date contiguity, §3.5/M2). It fires in
+	// lockstep with that day's heavy-invariant firing (one fire per crossed
+	// day; the catch-up loop fires each intervening day with its own grid
+	// date), AFTER the step's turn has committed and the heavy invariants
+	// for that boundary have run, so the run-to-date state the handler reads
+	// is settled.
 	//
 	// The generic harness owns the trigger; the sim supplies the handler
 	// (a daily run-to-date stats snapshot, #120). It never fires when
@@ -599,29 +694,31 @@ type Harness struct {
 
 	// heavyCadence is the Scenario.HeavyInvariantCadence the run was
 	// started with. Zero = fire heavy invariants every step (legacy
-	// behavior).
+	// behavior). When > 0 the harness folds BOTH the heavy-invariant
+	// firing AND the day-close onto the DERIVED day tick (SimDayIndex of
+	// the slaved pinnedClock), not a rival nextHeavyAt grid (§3.5/M1).
 	heavyCadence time.Duration
 
-	// nextHeavyAt is the simulated time at which the next heavy-invariant
-	// firing is due, when heavyCadence > 0. runStep fires the heavy
-	// invariants iff h.pinnedClock >= h.nextHeavyAt, then advances
-	// h.nextHeavyAt by h.heavyCadence. Unused (and meaningless) when
-	// heavyCadence == 0.
-	nextHeavyAt time.Time
+	// lastClosedDay is the SimDayIndex of the last sim-day the harness has
+	// closed (fired the heavy invariants + onSimDayClose for). After a
+	// step sets pinnedClock = Step.At, runStep computes cur :=
+	// SimDayIndex(pinnedClock) and closes every day in (lastClosedDay,
+	// cur] — one heavy-invariant firing + one onSimDayClose per crossed
+	// day, each stamped with its own grid-exact date simDayCloseDate(k).
+	// In normal operation §3.3's 8am mid-bucket anchor means at most one
+	// crossing per step; the catch-up loop is correct by construction for
+	// the legitimate multi-day jump (a future vacation path) too. Starts
+	// at 0 — day 0 is the run's first day and never "closes" before any
+	// turn runs. Meaningless when heavyCadence == 0.
+	lastClosedDay int
 
 	// onSimDayClose is Scenario.OnSimDayClose — the per-sim-day-close handler
-	// (#120). Fired in lockstep with the heavy-invariant cadence advance.
-	// simDay is the running 1-based count of closes fired so far; it is the
-	// `day` argument passed to the handler. nil/zero-cadence => never fires.
-	//
-	// dayClosePending / dayCloseDate are the deferred-fire seam: perStepInvariants
-	// detects the boundary (it already owns the nextHeavyAt advance) and stamps
-	// these; runStep fires the handler AFTER the heavy invariants for the boundary
-	// have run, so the run-to-date state the handler reads is settled.
-	onSimDayClose   func(h *Harness, day int, simDate time.Time)
-	simDay          int
-	dayClosePending bool
-	dayCloseDate    time.Time
+	// (#120). Fired once per crossed derived-day tick, in lockstep with the
+	// day's heavy-invariant firing. simDay is the running 1-based count of
+	// closes fired so far; it is the `day` argument passed to the handler.
+	// nil/zero-cadence => never fires.
+	onSimDayClose func(h *Harness, day int, simDate time.Time)
+	simDay        int
 
 	// recallerFactory is Scenario.Recaller — retained so restartSession can
 	// re-install the same custom recaller after turn.LoadSession rebuilds a

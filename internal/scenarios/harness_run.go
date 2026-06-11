@@ -9,8 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"personant/internal/clock"
+	pnlog "personant/internal/log"
 	"personant/internal/memops"
 	"personant/internal/model"
 	"personant/internal/store"
@@ -188,9 +190,30 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 	h.State.RecallResolver = recallResolverFor(t, idx, label, step.RecallAck)
 	h.State.ClosureResolver = closureResolverFor(step.ClosureAck)
 
-	// Advance the pinned clock before the turn so the step can cross
-	// the §3.5 wall-clock decay threshold deterministically.
-	if step.TimeDelta != 0 {
+	// Slave the pinned clock to the step's absolute simulated instant
+	// (sim-time-single-clock.md §3.4): SET pinnedClock = Step.At, do NOT
+	// integrate a delta. pinnedClock becomes a copy of the generator's one
+	// re-anchored clock, so the two cannot diverge by construction (there
+	// is no independent harness accumulator to drift). The sliceSource shim
+	// stamps At for handwritten scenarios, so At is set on every step the
+	// drive loop yields. Forensic monotonic assert (§4/m3): At must never
+	// land before the prior clock — a backward jump would mean a re-anchor
+	// landed before a prior turn (the original-bug shape the deleted
+	// `td < 0 → 0` clamp used to swallow). Non-fatal: route through the log,
+	// not t.Fatalf — it is a tripwire, not a gate.
+	if !step.At.IsZero() {
+		if step.At.Before(h.pinnedClock) {
+			pnlog.Warn("scenario step %d (%s): non-monotonic clock: Step.At %s is before prior pinnedClock %s",
+				idx+1, label, step.At.Format(time.RFC3339Nano), h.pinnedClock.Format(time.RFC3339Nano))
+		}
+		h.pinnedClock = step.At
+	} else if step.TimeDelta != 0 {
+		// Legacy relative advance for a step that carries no absolute At — the
+		// generator's execution-time-injected refinement step (a re-phrased
+		// follow-up moments after the prior turn), which the day-ahead buffer's
+		// generation-time clock cannot stamp with an absolute instant. The next
+		// buffered step re-establishes the absolute clock via its At, so this
+		// relative bump cannot drift the day-close tick.
 		h.pinnedClock = h.pinnedClock.Add(step.TimeDelta)
 	}
 
@@ -328,18 +351,31 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 
 	runInvariants(t, h, perStepInvariants(h, step), label)
 
-	// Per-sim-day-close handler (#120). perStepInvariants stamped dayClosePending
-	// when the pinned clock crossed a heavy-invariant cadence tick; fire the
-	// handler HERE — after the boundary's heavy invariants have run — so the
-	// run-to-date stats it snapshots are taken on settled state. Fires at most
-	// once per step (the advance is one-cadence-per-step) and only when the
-	// scenario installed a handler under a non-zero cadence.
-	if h.dayClosePending {
-		h.dayClosePending = false
-		if h.onSimDayClose != nil {
-			h.simDay++
-			h.onSimDayClose(h, h.simDay, h.dayCloseDate)
+	// Per-sim-day-close catch-up (§3.5/M1, #120). The step set pinnedClock =
+	// Step.At above, and the boundary's heavy invariants have now run on
+	// settled state. Close every sim-day the DERIVED day index crossed,
+	// dating each close with the day it REPRESENTS: when the index has
+	// advanced from lastClosedDay to cur, days lastClosedDay..cur-1 are now
+	// complete, so fire each day d's close stamped with its OWN grid-exact
+	// date simDayCloseDate(d) (NOT d+1, and NOT the jittered Step.At —
+	// §3.5/M2 preserves sim_date 24h contiguity). This is the labeling fix:
+	// day d's just-completed work is dated the day d it represents, so the
+	// 0-turn weekly day-off (Sunday, day index 6) lands ON the Sunday record
+	// rather than the Monday after it. In normal operation §3.3's 8am
+	// mid-bucket anchor crosses exactly one boundary per step; the loop is
+	// correct by construction for a legitimate multi-day jump (the future
+	// vacation path) too, each intervening day carrying its own grid date.
+	// Gated on a non-zero cadence (heavyCadence>0): handwritten per-step
+	// scenarios never close days.
+	if h.heavyCadence > 0 {
+		cur := SimDayIndex(h.pinnedClock)
+		for d := h.lastClosedDay; d < cur; d++ {
+			if h.onSimDayClose != nil {
+				h.simDay++
+				h.onSimDayClose(h, h.simDay, simDayCloseDate(d))
+			}
 		}
+		h.lastClosedDay = cur
 	}
 
 	// Archival-recoverability predicate for a StepSource that measures recall

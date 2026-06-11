@@ -1052,20 +1052,23 @@ func TestScenario_WallClockDecayTriggeredClosure(t *testing.T) {
 	sc := Scenario{
 		Name: "wall-clock-decay-triggered-closure",
 		Setup: func(h *Harness) error {
-			// Seed thr_1 last-engaged at the harness's pinned-clock
-			// start (2026-05-01T12:00:00Z) with last_engaged_turn=0.
-			if err := seedActiveThread(h, "thr_1", 0, "2026-05-01T12:00:00Z"); err != nil {
+			// Seed thr_1 last-engaged at the harness's pinned-clock start —
+			// the Monday-midnight anchor SimClockStart (2026-05-04T00:00:00Z,
+			// §3.1) — with last_engaged_turn=0. The sliceSource shim stamps
+			// turn 1's Step.At at this anchor.
+			if err := seedActiveThread(h, "thr_1", 0, "2026-05-04T00:00:00Z"); err != nil {
 				return err
 			}
-			// Seed thr_2 (a keep-alive) engaged 1h before turn 2's clock
-			// (2026-05-09T12:00:00Z). After the B5/PRT3-F3 fix wall-clock
-			// decay measures idle relative to the system's most-recent
-			// activity, not raw calendar time: this keep-alive thread is
-			// the system reference, so thr_1's 8-day idle is genuine
-			// neglect *while the system was in use*, not a whole-system
-			// absence (vacation), and correctly fires. Without it, a lone
-			// aged thread looks like a vacation and is suppressed.
-			return seedActiveThread(h, "thr_2", 0, "2026-05-09T11:00:00Z")
+			// Seed thr_2 (a keep-alive) engaged 1h before turn 2's clock.
+			// Turn 2 advances the shimmed clock 8 days to 2026-05-12T00:00:00Z,
+			// so the keep-alive sits at 2026-05-11T23:00:00Z. After the
+			// B5/PRT3-F3 fix wall-clock decay measures idle relative to the
+			// system's most-recent activity, not raw calendar time: this
+			// keep-alive thread is the system reference, so thr_1's 8-day idle
+			// is genuine neglect *while the system was in use*, not a
+			// whole-system absence (vacation), and correctly fires. Without it,
+			// a lone aged thread looks like a vacation and is suppressed.
+			return seedActiveThread(h, "thr_2", 0, "2026-05-11T23:00:00Z")
 		},
 		Steps: []Step{
 			{
@@ -1077,10 +1080,11 @@ func TestScenario_WallClockDecayTriggeredClosure(t *testing.T) {
 				Invariants:   closureInvariants,
 			},
 			{
-				// Turn 2: advance the pinned clock 8 days past the
-				// seed. turn-idle is still 2 (< turn threshold 8), so
-				// only the wall-clock branch (8d >= decayTime 7d) can
-				// fire. The scripted ClosureAck retires the thread.
+				// Turn 2: advance the pinned clock 8 days past the seed
+				// (the sliceSource shim integrates this TimeDelta onto the
+				// anchor → At 2026-05-12T00:00:00Z). turn-idle is still 2
+				// (< turn threshold 8), so only the wall-clock branch (8d >=
+				// decayTime 7d) can fire. The scripted ClosureAck retires it.
 				UserInput:    "much later — wall-clock decay should trigger closure",
 				MockResponse: model.Response{Content: "Another plain reply."},
 				Annotation:   "turn 2 — wall-clock decay crossed → closure offered + retired",
