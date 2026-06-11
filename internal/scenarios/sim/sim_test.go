@@ -150,11 +150,10 @@ func loadCorpusColumns(t *testing.T) map[string][][]string {
 }
 
 // simDayDuration is the simulated wall span the 1-day rung covers — one
-// calendar day. Duration is total simulated wall time (inter-turn,
-// inter-session, and overnight gaps all count toward it), so 24 h is
-// exactly one work day: two ~6 h sessions split by an inter-session
-// gap, then the overnight gap that carries the clock past 24 h and ends
-// the day loop.
+// re-anchored calendar day (SPEC §9.4). Each day is exactly 24h wide, so
+// Duration/24h is the day count and 24h is exactly one work day: two ~6 h
+// sessions split by a ~1 h break (~13 h of work), with the remaining ~11 h
+// overnight emergent from the (absent, on a 1-day run) next re-anchor.
 const simDayDuration = 24 * time.Hour
 
 // simSeed is the fixed seed for the rung. A fixed seed makes the
@@ -326,17 +325,18 @@ func TestSim(t *testing.T) {
 		reportInferenceBehavior(t, h)
 	}
 
-	// Light sanity band — a smoke rung, not a tuning gate. Derivation:
-	// a work day is 2 sessions of 6 h turn-active time = 12 h of
-	// inter-turn gaps. With the 6:1 rapid:work weighting the mean gap is
-	// ~(6*RapidGap + 1*WorkGap)/7 ≈ (6*1m + 6m)/7 ≈ 1.7m, so 12 h / 1.7m
-	// ≈ 420 NATURAL turns; ±30% jitter and weighting variance widen that to
-	// ~[250, 600]. The Candidate-A main thread (#109) then injects one EXTRA
+	// Light sanity band — a smoke rung, not a tuning gate. Derivation
+	// (re-anchored 24h day, SPEC §9.4): a work day is 2 sessions of 6 h
+	// turn-active time = 12 h of per-turn spans. With the 6:1 rapid:work
+	// weighting the mean span is ~(6*RapidGap + 1*WorkGap)/7 = (6*42s +
+	// 252s)/7 = 72 s (the deliberate ~72 s/turn center), so 12 h / 72 s
+	// ≈ 600 NATURAL turns; ±30% jitter and weighting variance widen that to
+	// ~[450, 750]. The Candidate-A main thread (#109) then injects one EXTRA
 	// rng-free engagement every mainThreadEngageEvery natural turns (plus a
 	// handful of intra-thread probes once the main thread scrolls past the
 	// assembly window), so the OBSERVED turn count is ~natural × (1 +
 	// 1/mainThreadEngageEvery) — at every-2 that is ~1.5×, widening the band
-	// to [375, 950]. Re-derive this if RapidGap/WorkGap, the rapid:work
+	// to [675, 1200]. Re-derive this if RapidGap/WorkGap, the rapid:work
 	// weights, or mainThreadEngageEvery change. The band is 1-day-specific, so
 	// it applies only when the span is exactly 24 h — longer rungs still get
 	// runSimRung's clean-completion + well-formedness assertions, just not
@@ -351,8 +351,8 @@ func TestSim(t *testing.T) {
 			t.Fatalf("read metrics blob for turn-count band: %v", err)
 		}
 		turns := m.Counters["turns"]
-		if turns < 375 || turns > 950 {
-			t.Errorf("turn count %d outside plausible band [375, 950]", turns)
+		if turns < 675 || turns > 1200 {
+			t.Errorf("turn count %d outside plausible band [675, 1200]", turns)
 		}
 	}
 }
@@ -1288,6 +1288,211 @@ func TestGenerateWorkload_Deterministic(t *testing.T) {
 	if reflect.DeepEqual(a, c) {
 		t.Errorf("different seeds produced identical step lists")
 	}
+}
+
+// cadenceDayStartThreshold separates a re-anchored day boundary from an
+// in-day session break: the emergent overnight idle is ~11 h and a day-off
+// idle is ~24+ h, while the inter-session break is ~1 h and per-turn spans are
+// ~72 s. A TimeDelta at or above this threshold marks the FIRST turn of a new
+// re-anchored calendar day. 5 h sits cleanly between the ~1 h break and the
+// ~11 h overnight.
+const cadenceDayStartThreshold = 5 * time.Hour
+
+// dayStartInstants drains the step stream and returns the absolute simulated
+// instant (cumulative TimeDelta sum from t=0) of each re-anchored day's first
+// turn — the steps whose TimeDelta crosses cadenceDayStartThreshold, plus the
+// very first step (t=0). SleepCycle day-off markers are included as day starts
+// (they carry the day's emergent idle as their TimeDelta), matching the
+// re-anchored-day model. This reconstructs the timeline the harness builds by
+// accumulating TimeDeltas onto its pinned clock.
+func dayStartInstants(steps []scenarios.Step) []time.Duration {
+	var starts []time.Duration
+	var now time.Duration
+	for i, s := range steps {
+		now += s.TimeDelta
+		if i == 0 || s.TimeDelta >= cadenceDayStartThreshold {
+			starts = append(starts, now)
+		}
+	}
+	return starts
+}
+
+// TestCadence_DayStartsNoPrecession is the #121 regression guard: with the
+// re-anchored 24h day, consecutive day-starts are ~24 h apart and stay inside
+// the ±15 min jitter window of base+N*24h — the work pattern does NOT precess.
+// The prior accumulator summed 27.5 h per "day" (6h + 3.5h + 6h + 12h) and
+// drifted ~3.5 h/day, which this test would catch as both an out-of-window
+// start and a >24h+slack inter-day spacing.
+func TestCadence_DayStartsNoPrecession(t *testing.T) {
+	corpus := loadCorpusSlots(t)
+	// 7 calendar days: 6 work days + 1 day off — enough to accumulate
+	// precession if it existed, and to cross a day-off re-anchor.
+	steps := drainSteps(GenerateWorkload(WorkloadConfig{
+		Seed: simSeed, Duration: 7 * 24 * time.Hour, Corpus: corpus,
+	}))
+	starts := dayStartInstants(steps)
+	if len(starts) < 7 {
+		t.Fatalf("expected >=7 day-starts over a 7-day run, got %d", len(starts))
+	}
+
+	// (a) each day-start is within ±dayStartJitter of its calendar anchor
+	// N*24h — the no-precession window. A precessing pattern drifts out of it.
+	for n, got := range starts {
+		anchor := time.Duration(n) * dayLength
+		drift := got - anchor
+		if drift < -dayStartJitter || drift > dayStartJitter {
+			t.Errorf("day %d start at %v drifts %v from anchor %v (must be within ±%v — precession regression)",
+				n, got, drift, anchor, dayStartJitter)
+		}
+	}
+
+	// (b) consecutive day-starts are 24 h apart to within the jitter span
+	// (a ±15m start on each end → at most ±30m spacing wobble).
+	for i := 1; i < len(starts); i++ {
+		gap := starts[i] - starts[i-1]
+		lo, hi := dayLength-2*dayStartJitter, dayLength+2*dayStartJitter
+		if gap < lo || gap > hi {
+			t.Errorf("day-start gap %d→%d = %v, want ~24h within [%v, %v] (no precession)",
+				i-1, i, gap, lo, hi)
+		}
+	}
+}
+
+// TestCadence_SessionSpansAndBreak asserts the within-day structure: each of
+// the two daily sessions covers ~6 h of turn-active time, and the break
+// between them is ~1 h (SPEC §9.4). It walks ONE work day's natural turns
+// (drained from a 1-day run, skipping zero-delta injected steps) and finds the
+// single large in-day gap (the inter-session break); the spans before and
+// after it are the two session active windows.
+func TestCadence_SessionSpansAndBreak(t *testing.T) {
+	corpus := loadCorpusSlots(t)
+	steps := drainSteps(GenerateWorkload(WorkloadConfig{
+		Seed: simSeed, Duration: simDayDuration, Corpus: corpus,
+	}))
+
+	// Reconstruct per-step absolute instants; the first step is t=0 (day
+	// start). The inter-session break is the lone in-day TimeDelta in the
+	// ~1 h band; the day's last instant minus the break splits the two
+	// sessions. Per-turn spans are ~72 s, so the break stands out cleanly.
+	var now time.Duration
+	var breakIdx = -1
+	var breakDelta, lastInstant time.Duration
+	for i, s := range steps {
+		now += s.TimeDelta
+		lastInstant = now
+		if i == 0 {
+			continue // day start, no in-day gap
+		}
+		// In-day break: bigger than any per-turn span, smaller than the
+		// overnight day boundary (none in a 1-day run anyway).
+		if s.TimeDelta > 20*time.Minute && s.TimeDelta < cadenceDayStartThreshold {
+			if breakIdx != -1 {
+				t.Fatalf("found >1 in-day break (steps %d and %d) — a work day has exactly one inter-session break", breakIdx, i)
+			}
+			breakIdx, breakDelta = i, s.TimeDelta
+		}
+	}
+	if breakIdx == -1 {
+		t.Fatal("no inter-session break found in a 1-day run")
+	}
+
+	// (a) break ≈ 1 h, within the ±30% jitter band.
+	wantBreak := 1 * time.Hour
+	if breakDelta < jitterLo(wantBreak) || breakDelta > jitterHi(wantBreak) {
+		t.Errorf("inter-session break = %v, want ~%v within jitter [%v, %v]",
+			breakDelta, wantBreak, jitterLo(wantBreak), jitterHi(wantBreak))
+	}
+
+	// Session 1 active span = instant just before the break (the break step's
+	// instant minus the break delta). Session 2 active span = last instant −
+	// break-step instant. Each must be ~6 h (the last turn crossing the
+	// threshold adds up to one per-turn span of slop above 6 h).
+	var breakInstant time.Duration
+	now = 0
+	for i, s := range steps {
+		now += s.TimeDelta
+		if i == breakIdx {
+			breakInstant = now
+			break
+		}
+	}
+	sess1 := breakInstant - breakDelta
+	sess2 := lastInstant - breakInstant
+	for _, sess := range []struct {
+		name string
+		span time.Duration
+	}{{"session 1", sess1}, {"session 2", sess2}} {
+		// Active span ≈ sessionActive; the loop ends on the first turn whose
+		// cumulative span crosses 6 h, so the realized span is [6h, 6h + one
+		// per-turn span]. Allow a generous +1 h ceiling for jitter on that last
+		// span and a small floor below 6 h.
+		if sess.span < sessionActive-30*time.Minute || sess.span > sessionActive+1*time.Hour {
+			t.Errorf("%s active span = %v, want ~%v (±jitter)", sess.name, sess.span, sessionActive)
+		}
+	}
+}
+
+// jitterLo / jitterHi are the ±30% bounds jitter() can produce for base (see
+// the [0.7, 1.3) factor). Used by the cadence tests to band a single jittered
+// duration.
+func jitterLo(base time.Duration) time.Duration { return time.Duration(float64(base) * 0.7) }
+func jitterHi(base time.Duration) time.Duration { return time.Duration(float64(base) * 1.3) }
+
+// TestCadence_PerTurnCenterAndTurnsPerDay asserts the two headline cadence
+// numbers (SPEC §9.4): the blended per-turn clock advance centers at ~72 s,
+// and a work day yields ~600 NATURAL turns. It measures the per-turn span as
+// the mean of the small (per-turn) TimeDeltas — excluding the day-start and
+// inter-session-break gaps and the zero-delta injected steps — over a 1-day run.
+func TestCadence_PerTurnCenterAndTurnsPerDay(t *testing.T) {
+	corpus := loadCorpusSlots(t)
+	steps := drainSteps(GenerateWorkload(WorkloadConfig{
+		Seed: simSeed, Duration: simDayDuration, Corpus: corpus,
+	}))
+
+	var spanSum time.Duration
+	var spanCount, naturalTurns int
+	for i, s := range steps {
+		// Natural turns are the ones that advanced the clock by a per-turn
+		// span: non-zero, sub-break TimeDelta. The first step (t=0) and the
+		// inter-session break are excluded from the per-turn mean; the
+		// zero-delta injected probe/main-thread steps are excluded too.
+		if i == 0 {
+			naturalTurns++ // the day's first turn is a natural turn (zero delta)
+			continue
+		}
+		if s.TimeDelta == 0 {
+			continue // injected zero-delta step (probe / main-thread engage)
+		}
+		// A non-zero delta is a natural turn; the inter-session break is the
+		// session-2 opener (a natural turn) but its delta is the break, not a
+		// per-turn span — count it as a turn, exclude it from the span mean.
+		naturalTurns++
+		if s.TimeDelta >= 20*time.Minute {
+			continue // inter-session break, not a per-turn span
+		}
+		spanSum += s.TimeDelta
+		spanCount++
+	}
+	if spanCount == 0 {
+		t.Fatal("no per-turn spans measured")
+	}
+
+	// (d) per-turn center ≈ 72 s. The blend of 42 s / 252 s at 6:1 is exactly
+	// 72 s; ±30% jitter and weighting variance keep the realized mean within a
+	// tight band around it.
+	meanSpan := spanSum / time.Duration(spanCount)
+	const wantCenter = 72 * time.Second
+	if meanSpan < 60*time.Second || meanSpan > 84*time.Second {
+		t.Errorf("mean per-turn span = %v, want ~%v (±~17%%)", meanSpan, wantCenter)
+	}
+	t.Logf("measured per-turn center: %v over %d spans", meanSpan, spanCount)
+
+	// (e) ~600 natural turns/day. 12 h of active time / 72 s ≈ 600; ±30%
+	// jitter and weighting variance widen the band.
+	if naturalTurns < 450 || naturalTurns > 750 {
+		t.Errorf("natural turns/day = %d, want ~600 within [450, 750]", naturalTurns)
+	}
+	t.Logf("measured natural turns/day: %d", naturalTurns)
 }
 
 // TestIntraThreadWindowMirrorsRuntime asserts the intra-thread oracle's

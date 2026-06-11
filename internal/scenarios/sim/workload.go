@@ -162,11 +162,13 @@ type WorkloadConfig struct {
 	Seed int64
 
 	// Duration is the total simulated wall span the workload covers —
-	// the simulated clock advances by this much across the whole run,
-	// counting inter-turn gaps, the inter-session gap, the overnight
-	// gap, and the weekly day-off gap alike. The generator emits whole
-	// calendar days until the simulated clock has advanced by Duration.
-	// A 1-day run passes 24*time.Hour; a 1-week run passes 7*24*time.Hour.
+	// the simulated clock advances by this much across the whole run. Each
+	// generated calendar day RE-ANCHORS to dayStart(N) = N*24h ± jitter and
+	// is EXACTLY 24h wide (the overnight idle is emergent, not additive), so
+	// Duration/24h is the number of days the run spans. The generator emits
+	// whole calendar days until the re-anchored simulated clock has reached
+	// Duration. A 1-day run passes 24*time.Hour; a 1-week run passes
+	// 7*24*time.Hour. See SPEC §9.4 for the cadence contract.
 	Duration time.Duration
 
 	// Corpus is the recall_madlibs query-slot pool a thread is bound
@@ -176,24 +178,20 @@ type WorkloadConfig struct {
 	// is a caller error surfaced as an empty Scenario.
 	Corpus []CorpusSlot
 
-	// RapidGap and WorkGap are the mean inter-turn gaps for the two
-	// turn classes. Each sampled gap carries modest multiplicative
-	// jitter (see sampleGap).
+	// RapidGap and WorkGap are the mean per-turn spans (turn duration +
+	// interstitial pause) for the two turn classes. Each sampled span
+	// carries modest multiplicative jitter (see sampleGap). The classes
+	// are retained for action-selection realism (work turns attach a
+	// file-edit cycle, draw a higher keep/toss transient rate, and are the
+	// only user-dictated-variant-eligible turns); their RapidWeight:WorkWeight
+	// BLEND centers at ~72 s, the cadence the re-anchored 24h day is paced
+	// against (SPEC §9.4).
 	RapidGap time.Duration
 	WorkGap  time.Duration
 
-	// InterSessionGap is the larger gap inserted once per work day,
-	// between that day's two sessions.
+	// InterSessionGap is the break inserted once per work day, between
+	// that day's two ~6 h sessions (~1 h, jittered at use).
 	InterSessionGap time.Duration
-
-	// OvernightGap is the idle span from the end of one work day to the
-	// start of the next (~12 h, jittered at use).
-	OvernightGap time.Duration
-
-	// DayOffGap is the idle span a weekly day off advances the clock by
-	// (~24–36 h). A day off emits no turns; the long gap is deliberate —
-	// it exercises the §3.5 wall-clock decay path.
-	DayOffGap time.Duration
 
 	// RapidWeight / WorkWeight bias turn-type selection by count. The
 	// default 6:1 yields a roughly 50/50 split by *simulated time*,
@@ -250,22 +248,18 @@ type WorkloadConfig struct {
 // by its default. Seed, Duration, and Corpus are left untouched.
 func (cfg WorkloadConfig) withDefaults() WorkloadConfig {
 	if cfg.RapidGap == 0 {
-		cfg.RapidGap = 1 * time.Minute
+		// 42 s rapid / 252 s work, weighted RapidWeight:WorkWeight = 6:1,
+		// blends to a ~72 s per-turn center: (6·42 + 252)/7 = 72 s. The 6×
+		// work:rapid span ratio preserves the documented ~50/50 split by
+		// simulated time. See SPEC §9.4.
+		cfg.RapidGap = 42 * time.Second
 	}
 	if cfg.WorkGap == 0 {
-		cfg.WorkGap = 6 * time.Minute
+		cfg.WorkGap = 252 * time.Second
 	}
 	if cfg.InterSessionGap == 0 {
-		// ~3.5 h between the day's two sessions (jittered at use).
-		cfg.InterSessionGap = 3*time.Hour + 30*time.Minute
-	}
-	if cfg.OvernightGap == 0 {
-		// ~12 h from one work day's end to the next day's start.
-		cfg.OvernightGap = 12 * time.Hour
-	}
-	if cfg.DayOffGap == 0 {
-		// ~30 h idle for a weekly day off (jittered at use).
-		cfg.DayOffGap = 30 * time.Hour
+		// ~1 h break between the day's two sessions (jittered at use).
+		cfg.InterSessionGap = 1 * time.Hour
 	}
 	if cfg.RapidWeight == 0 {
 		cfg.RapidWeight = 6
@@ -814,9 +808,25 @@ const (
 )
 
 // sessionActive is the turn-active simulated span of one session — the
-// total of its inter-turn gaps. Two of these plus the inter-session and
-// overnight gaps make up a work day.
+// total of its per-turn spans. A work day is two of these plus a ~1 h
+// inter-session break (≈13 h of work); the remaining ~11 h overnight is
+// EMERGENT from the next day's re-anchor, not an additive gap (SPEC §9.4).
 const sessionActive = 6 * time.Hour
+
+// dayLength is the exact width of a re-anchored calendar day. Day N
+// re-anchors to dayStart(N) = N*dayLength ± dayStartJitter; the clock then
+// jumps to dayStart(N+1) at end of day, so every day advances the simulated
+// clock by exactly dayLength on average and the work pattern never precesses
+// against the 24h calendar (the #121 regression). The day-log heavy-invariant
+// cadence (24h) is crossed exactly once per day.
+const dayLength = 24 * time.Hour
+
+// dayStartJitter is the ± fuzz on a day's re-anchored start time: a real
+// user does not begin at the same instant each day. Drawn from g.rng so the
+// (Seed, Duration) → output contract holds. ±15 min keeps consecutive
+// day-starts inside [N*24h − 15m, N*24h + 15m] — the no-precession window
+// the regression guard asserts.
+const dayStartJitter = 15 * time.Minute
 
 // GenerateWorkload turns a WorkloadConfig into a scenarios.Scenario
 // driven by an on-demand StepSource. Same WorkloadConfig → identical
@@ -825,12 +835,14 @@ const sessionActive = 6 * time.Hour
 //
 // It models the simulated user as a thread population evolving across
 // calendar days, emitting one scenarios.Step per turn. The day is the
-// repeating primitive: the generator emits calendar days until the
-// simulated clock has advanced by cfg.Duration. A week is 6 work days
-// plus 1 day off: a work day is two ~6 h sessions split by an
-// inter-session gap, followed by an overnight gap; a day off emits no
-// turns and simply advances the clock by DayOffGap, deliberately
-// exercising the §3.5 wall-clock decay path.
+// repeating primitive: the generator emits RE-ANCHORED 24h calendar days
+// until the day position reaches cfg.Duration (Duration/24h days). Each day
+// re-anchors to dayStart(N) = N*24h ± 15min and is exactly 24h wide. A week is
+// 6 work days plus 1 day off: a work day is two ~6 h sessions split by a ~1 h
+// break (~13 h of work) followed by an EMERGENT ~11 h overnight idle (24h −
+// work span, surfaced by the next day's re-anchor, not an additive gap); a day
+// off emits no turns, re-anchoring a full day later so its long emergent idle
+// crosses the §3.5 wall-clock decay threshold. See SPEC §9.4.
 //
 // A nil/empty Corpus yields a Scenario whose StepSource is immediately
 // exhausted — the caller must supply the recall_madlibs slot pool.
@@ -1473,19 +1485,21 @@ func (g *generator) advance() bool {
 	}
 }
 
-// generateNextDay advances the simulated calendar by exactly one day,
-// returning that day's steps. ok is false when the run is complete: an
-// empty corpus (nothing to generate) or the simulated clock having
-// reached cfg.Duration.
+// generateNextDay advances the simulated calendar by exactly one
+// re-anchored 24h day, returning that day's steps. ok is false when the run
+// is complete: an empty corpus (nothing to generate) or the day's re-anchored
+// start having reached cfg.Duration.
 //
-// The day-loop control flow is the build-all generator's verbatim: emit
-// calendar days while g.simNow < cfg.Duration; every 7th day (index 6,
-// 13, …) is the week's day off, which emits no turns. The only change
-// is that a day's steps land in a fresh per-day buffer rather than one
-// run-long slice, and the second-session restart mark is applied as the
-// day is generated rather than in a final pass.
+// Termination keys off the day's RE-ANCHORED start (dayIndex*dayLength), not
+// the accumulated clock: each day is exactly dayLength wide, so day dayIndex
+// runs iff dayIndex*dayLength < Duration — Duration/24h is the day count
+// (a 240h run = 10 days). Keying off the day position (rather than the
+// last-turn instant, which lands ~13 h into the day) is what makes a 1-day run
+// exactly one day. Every 7th day (index 6, 13, …) is the week's day off, which
+// emits no turns. The day's steps land in a fresh per-day buffer, and the
+// second-session restart mark is applied as the day is generated.
 func (g *generator) generateNextDay() (dayBuf, bool) {
-	if len(g.cfg.Corpus) == 0 || g.simNow >= g.cfg.Duration {
+	if len(g.cfg.Corpus) == 0 || g.dayStartOffset() >= g.cfg.Duration {
 		return dayBuf{}, false
 	}
 
@@ -1555,41 +1569,58 @@ func markRestartIn(day dayBuf, globalIdx int) {
 	}
 }
 
-// runWorkDay emits one work day: two ~6 h sessions separated by an
-// inter-session gap, then an overnight gap to the next day. The
-// inter-session and overnight gaps are folded into the cumulative
-// simulated clock (via pendingGap) so they count toward the Duration
-// budget — Duration spans real idle time, not just turn-active time.
-func (g *generator) runWorkDay() {
-	g.runSession(sessionActive)
-
-	// Inter-session gap. This overwrites pendingGap, intentionally
-	// discarding the trailing intra-session gap session 1's last turn
-	// sampled: the next step is the first of session 2, and the gap
-	// before it is the inter-session gap, not a normal inter-turn gap.
-	// runSession already advanced simNow by that discarded gap, so the
-	// clock subtracts it back here before adding the inter-session gap.
-	g.simNow -= g.pendingGap
-	isg := jitter(g.rng, g.cfg.InterSessionGap)
-	g.simNow += isg
-	g.pendingGap = isg
-
-	g.runSession(sessionActive)
-
-	// Overnight gap to the next day. Same discard-and-replace as the
-	// inter-session gap: drop session 2's trailing intra-session gap,
-	// substitute the overnight gap. The overnight gap is carried as the
-	// next day's first step's TimeDelta and counts toward Duration.
-	g.simNow -= g.pendingGap
-	overnight := jitter(g.rng, g.cfg.OvernightGap)
-	g.simNow += overnight
-	g.pendingGap = overnight
+// dayStart returns the re-anchored absolute simulated instant at which
+// calendar day dayIndex begins: dayIndex*dayLength ± dayStartJitter. The
+// jitter is drawn from g.rng (one draw per day) so the (Seed, Duration)
+// contract holds and the start time fuzzes like a real user's. Re-anchoring
+// — computing the start from the calendar position rather than carrying the
+// accumulated clock forward — is what keeps the work pattern from precessing
+// against the 24h calendar (#121): the prior accumulator summed 27.5 h per
+// "day" and drifted ~3.5 h/day.
+// dayStartOffset is the un-jittered calendar position of the current day
+// (g.dayIndex*dayLength), used by the termination check. It draws NO rng — the
+// jittered start (dayStart) is computed inside runWorkDay/runDayOff where its
+// single per-day draw belongs; keeping the termination check rng-free means
+// the number of days a run spans is a pure function of Duration alone, never
+// of the jitter draws.
+func (g *generator) dayStartOffset() time.Duration {
+	return time.Duration(g.dayIndex) * dayLength
 }
 
-// runDayOff emits no turns; it advances the simulated clock by a
-// jittered ~24–36 h day-off gap, carried as the next day's first step's
-// TimeDelta. The long recurring gap is deliberate — it crosses the §3.5
-// wall-clock decay threshold so the longer rungs exercise decay/closure.
+func (g *generator) dayStart(dayIndex int) time.Duration {
+	base := time.Duration(dayIndex) * dayLength
+	// Symmetric ±dayStartJitter: factor in [-1, 1).
+	off := time.Duration((g.rng.Float64()*2 - 1) * float64(dayStartJitter))
+	return base + off
+}
+
+// runWorkDay emits one re-anchored 24h work day: the day re-anchors to
+// dayStart(dayIndex), emits two ~6 h sessions of turn-active time split by a
+// ~1 h break, and ends ~13 h after dayStart. The clock does NOT carry the
+// accumulated day forward — the next day re-anchors to dayStart(dayIndex+1),
+// so the ~11 h overnight is EMERGENT (24h − work span) rather than an additive
+// constant. The first step of the day carries TimeDelta = dayStart − simNow
+// (the emergent overnight gap from the prior day's last turn); subsequent
+// steps carry per-turn spans (~72 s blended) and the ~1 h break.
+func (g *generator) runWorkDay() {
+	// Re-anchor: session 1 starts at the fuzzy day start, NOT at the
+	// accumulated clock. g.simNow is the instant of the prior day's last
+	// emitted turn; the first step's TimeDelta closes the emergent gap.
+	dayStart := g.dayStart(g.dayIndex)
+	g.runSession(dayStart, sessionActive)
+
+	// ~1 h break, then session 2 starts at simNow (the last turn of
+	// session 1) + the break. simNow already sits at session 1's last turn.
+	break1 := jitter(g.rng, g.cfg.InterSessionGap)
+	g.runSession(g.simNow+break1, sessionActive)
+}
+
+// runDayOff emits no turns; it RE-ANCHORS the calendar to dayStart(dayIndex)
+// and emits nothing else, so the next work day re-anchors a full day later.
+// The long idle (last work-day end → next work-day start, skipping a whole
+// day ≈ ~35 h) is EMERGENT from the re-anchor — it still crosses the §3.5
+// wall-clock decay threshold so the longer rungs exercise decay/closure,
+// without any additive DayOffGap constant.
 //
 // The day-off idle window is also where the ARCHITECTURE.md sleep cycle
 // runs (#108): runDayOff appends one deterministic SleepCycle marker step
@@ -1597,15 +1628,19 @@ func (g *generator) runWorkDay() {
 // h.Ops.Consolidate (substrate gc) — the generator is a stateless
 // StepSource and cannot reach Ops, so the marker is the seam. The marker
 // fires every day-off and carries no seed-dependent payload, so it does
-// not perturb the (Seed, Duration) determinism contract.
+// not perturb the (Seed, Duration) determinism contract. The SleepCycle
+// step carries the emergent-idle TimeDelta (dayStart − simNow), so the
+// pinned clock advances across the day-off and the §3.5 decay path fires.
 func (g *generator) runDayOff() {
-	g.simNow -= g.pendingGap // discard any pending intra-day gap
-	off := jitter(g.rng, g.cfg.DayOffGap)
-	g.simNow += off
-	g.pendingGap = off
-
+	dayStart := g.dayStart(g.dayIndex)
+	td := dayStart - g.simNow
+	if td < 0 {
+		td = 0
+	}
+	g.simNow = dayStart
 	g.appendStep(bufStep{step: scenarios.Step{
 		SleepCycle: true,
+		TimeDelta:  td,
 		Annotation: fmt.Sprintf("day %d: sleep-cycle (day-off consolidation)", g.dayIndex+1),
 	}})
 }
@@ -1927,8 +1962,12 @@ type generator struct {
 	// the first time a work turn engages it (see workFile).
 	files map[int]*fileState
 
-	simNow     time.Duration
-	pendingGap time.Duration // gap to apply as the next step's TimeDelta
+	// simNow is the absolute simulated instant of the most recently emitted
+	// natural turn (its position on the re-anchored timeline). Each turn's
+	// TimeDelta is turnInstant − simNow; the day primitives re-anchor against
+	// it (dayStart − simNow is the emergent overnight/day-off idle). Injected
+	// zero-delta probe/main-thread steps do not move it.
+	simNow time.Duration
 
 	// dayIndex is the 0-based calendar day the day loop is on; stepIndex
 	// is the running global 0-based index of the next step to emit (the
@@ -2271,32 +2310,40 @@ func (g *generator) inLayerB(idx int) bool {
 	return slices.Contains(g.layerB, idx)
 }
 
-// runSession emits turns until it has consumed `active` worth of
-// inter-turn gaps — i.e. the session covers `active` of turn-active
-// simulated time. The session's own intra-turn gaps advance simNow;
-// the larger inter-session/overnight/day-off gaps are folded in
-// separately by the day primitives, so session length stays decoupled
-// from those inserted gaps.
+// runSession emits turns covering `active` worth of turn-active simulated
+// time, beginning at the absolute instant `start`. Each turn fires at a
+// running turn instant; the FIRST turn fires at `start` (its TimeDelta closes
+// the emergent gap from the prior emitted turn — the overnight idle for
+// session 1, or the ~1 h break for session 2), and each later turn advances
+// the instant by a fuzzed ~72 s per-turn span until the cumulative span
+// crosses `active` (~6 h). The last turn crossing `active` gives the natural
+// end-time variation. g.simNow tracks the instant of the most recently
+// emitted natural turn, so the day primitives can re-anchor against it.
 //
-// Each turn samples a type, an action, and an inter-turn gap; the gap
-// is accumulated into simNow and emitted as the *next* step's
-// TimeDelta (the first step of the run carries a zero TimeDelta,
-// matching the harness's pinned-clock start).
-func (g *generator) runSession(active time.Duration) {
+// The injected probe / main-thread steps (rng-free, zero TimeDelta) fire at
+// the SAME simulated instant as the turn they follow and do not advance the
+// session clock, so the canonical stream stays byte-identical at a fixed seed.
+func (g *generator) runSession(start, active time.Duration) {
 	sessionStart := g.stepIndex
 	emitted := false
 	g.beginInterleaveSession()
+	turnInstant := start
 	var spent time.Duration
 	for spent < active {
 		tt := g.sampleTurnType()
 		act := g.sampleAction(g.stepIndex)
 
-		// The TimeDelta for this step is whatever gap accumulated
-		// before it: the inter-session/overnight/day-off gap (pendingGap)
-		// on the first turn after one of those, or the previous turn's
-		// sampled intra-turn gap.
-		td := g.pendingGap
-		g.pendingGap = 0
+		// TimeDelta closes the gap from the prior emitted turn's instant
+		// (g.simNow) to this turn's instant. On the first turn of session 1
+		// that is the emergent overnight idle; on session 2's first turn the
+		// ~1 h break; otherwise the prior turn's per-turn span. The clock
+		// never goes backward — re-anchoring always lands at or after the
+		// prior turn — so the delta is non-negative by construction.
+		td := turnInstant - g.simNow
+		if td < 0 {
+			td = 0
+		}
+		g.simNow = turnInstant
 
 		bs := g.buildStep(tt, act)
 		bs.step.TimeDelta = td
@@ -2357,13 +2404,14 @@ func (g *generator) runSession(active time.Duration) {
 			}
 		}
 
-		// Advance the clock by this turn's gap; it becomes the next
-		// step's TimeDelta. `spent` tracks only this session's
-		// intra-turn gaps so the session ends after `active` of them.
-		gap := g.sampleGap(tt)
-		g.simNow += gap
-		g.pendingGap = gap
-		spent += gap
+		// Advance the running turn instant by this turn's per-turn span; the
+		// next turn fires there and its TimeDelta covers this span. `spent`
+		// tracks only this session's per-turn spans, so the session ends once
+		// they cross `active` (~6 h) — the last turn crossing the threshold
+		// gives the natural session end-time variation.
+		span := g.sampleGap(tt)
+		turnInstant += span
+		spent += span
 	}
 	if emitted {
 		g.sessionStarts = append(g.sessionStarts, sessionStart)
@@ -2479,7 +2527,8 @@ func (g *generator) sampleAction(turn int) action {
 	return actNew
 }
 
-// sampleGap returns a jittered inter-turn gap for the turn type.
+// sampleGap returns a jittered per-turn span (turn duration + interstitial
+// pause) for the turn type. The RapidGap/WorkGap blend centers at ~72 s.
 func (g *generator) sampleGap(tt turnType) time.Duration {
 	if tt == turnRapid {
 		return jitter(g.rng, g.cfg.RapidGap)
