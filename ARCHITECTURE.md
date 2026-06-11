@@ -286,6 +286,8 @@ The anchor set is what makes recall possible. The summary is what makes recognit
 3. **Cross-project recall** (Layer A2 → fetch). Per-project anchor digests in A2 are scanned each turn. Same opportunistic mechanism as (2), slightly higher threshold.
 4. **Intra-thread recall of scrolled-out early content** (#109/#111). For the engaged long-running thread, the fine-tier chunk embedding index recalls early turns that have scrolled out of the FIFO assembly window. The engaged thread bypasses the coarse gate and runs directly against its own indexed chunks. On threads long enough to have a built summary tree, an O(log n) beam descent (`scoring.DescendChunks`) replaces the flat O(C_main) scan — the sleep cycle builds and maintains the per-thread summary hierarchy (`measure.RebuildTrees`); absent or stale trees fall back to the flat scan with no correctness loss (W8).
 
+**Recall layer-3 model judgment (design direction, not yet built).** Embedding recall (layer 2) delivers high recall but poor precision (~0.10 at the high-recall threshold). Layer 3 is the precision-restoration stage: a model judges the top-N embedding candidates against the query and filters/reranks before offering at most 3 to the user. Design decisions taken (2026-05-31): a separate `[recall]` provider/model reference in `config.toml` (parallel to `[chat]`/`[embedding]`) with its own configurable context ceiling (~8K, small — recall judgment is a narrow, cheap task); default to a small-tier model (E2B) because recall judgment only needs to beat the embedding baseline, and the top-3-offer + human resolver catches residual errors. The empirical discipline is measure-don't-assume: sweep E2B → E4B → 26B-A4B against the embedding-only precision baseline (already collected from the C.6 head-to-head) and pick the smallest passing tier. See SPEC §8.2.2 for the config ref shape; build unblocked after #98 (inference-in-loop) lands the live-model seam.
+
 **Decline categorization** matters for accrual:
 
 - *Not relevant* → improve matching, do not tighten threshold.
@@ -401,6 +403,57 @@ This isolation is what makes frontier-model collaboration architecturally safe r
 **Nested subminds.** The architecture is naturally recursive — a submind IS a personant; by symmetry it can spawn its own submind. Suffix composition (`thr_42-S1-S2`) gives unambiguous provenance at any depth. Merge propagates one level at a time. No structural depth limit; the real bound is the user's review-budget at each merge gate.
 
 Future consideration, post-v0.1; plausibly v2.0. The frontier-collaboration use case may end up being the primary motivator for prioritizing submind work — it turns submind from "speculative isolation mechanism" into "the natural home for inviting frontier reasoning without sacrificing family-stable substrate."
+
+### Model-family as platform (v1.0 platform coupling) {#model-family-as-platform-v10-platform-coupling}
+
+Personant v1.0 targets **one LLM model family**. Adding a second family is a per-family engineering investment — not a configuration change and not a portability layer.
+
+The reason is structural: cross-platform desktop frameworks (Qt, JVM, Flutter) rest on a *deterministic substrate* — byte arithmetic, GUI APIs, HTML/CSS semantics. You abstract over the layer above; the layer below is reliable. LLMs have no such substrate. Each family emerged from a different RLHF process on different data with different reward signals. "Helpful" lands differently. "Be terse" lands differently. "Emit valid JSON" has different failure rates. They are not different implementations of a spec; they are different organisms with somewhat-different priors.
+
+**Why a portability layer is a trap.** Cross-family mismatches don't throw errors — they produce output that "looks reasonable enough" but is subtly wrong. The failure surface is silent, gradual, and statistical only; no artifact points to anything; fixes may just exploit one model's habits rather than solving the root. For Personant this is especially dangerous: weeks of subtly-misclassified threads can accumulate before recall fidelity drops measurably, and by then you have corrupted continuity with no clean rewind.
+
+**The honest answer is gross replication** — three layers per supported family: (1) base intent prompts (model-agnostic conceptual spec), (2) family-specific implementation prompts (tuned to elicit the spec'd outcome from *this* family), (3) per-family eval suites (proving the outcome meets spec). All three require maintenance per family; engineering cost is linear. No shortcut.
+
+**Architectural mechanism.** Keep the model-family surface narrow and isolated. A `model-family-adapter` package holds system prompts, tool-call expectations, output-stream interpretation, and embedding model assumptions. Everything else (substrate, port boundaries, ack-gated tool surface, recall scoring, dedup, autonomic git) is model-agnostic and survives substrate migration cleanly. v1.0 ships with one adapter; each future family is a weeks-of-engineering addition, not a feature flip.
+
+**v1.0 target: the Gemma family** served locally via the `reaper` provider (unmetered inference on the M5 Max hardware). The local setup essentially eliminates the vendor-coupling tradeoff: worst case is local infrastructure maintenance, not vendor pricing or API deprecation. It also makes roadmap items tractable that were vendor-cost-gated: submind spawning, Python-workflow inference steps, and weight-baked consolidation runs are all free at the token level.
+
+Size tiering maps onto Personant's role split:
+
+| Tier | Role |
+|---|---|
+| E2B | Narrow classifications: symbol-extraction tiebreaks, recall judgment on borderline cases |
+| E4B | Swarm work: submind subdirectories doing parallel exploration |
+| 26B-A4B | Main interaction model (MoE — 4B compute path, large capacity) |
+| 31B dense | Heavy reasoning: closure summaries, curator decisions, Python computational workflow |
+
+**256K context is the sim/working-set design target.** This affects Layer B byte budgets, closure pressure, recall query depth, and the mock-client's need to simulate token counts for budget-exhaustion testing.
+
+A queued project will produce domain-specialized retrained variants of gemma-4-E4B (PoC) and gemma-4-31B (real target) on a physics + math knowledge base, served on `reaper` alongside the stock tiers. Same architecture, additional training overlay. This deepens the single-family commitment to the weights level and pre-validates the local fine-tuning workflow needed for the [weight-baked instinct](#weight-baked-instinct-from-outcome-history-far-future-consideration) roadmap item.
+
+### Minimize infrastructural prompts
+
+> **Every infrastructural prompt is a tax paid forever. Every deterministic algorithm is a fixed cost paid once.**
+
+This is the operating principle for Personant's prompt engineering strategy. When designing a feature, the default question is: *can deterministic code do this without involving the LLM?* If yes, it should. The LLM is non-deterministic, costly, slow, opaque, and — because of the [model-family-as-platform](#model-family-as-platform-v10-platform-coupling) principle — every infrastructural prompt multiplies: each prompt requires re-tuning per supported family.
+
+Where deterministic code already holds the load in Personant:
+
+- **Recall scoring** — deterministic Jaccard over symbol sets. The LLM provides topic tags; math decides relevance.
+- **§3.9 dedup** — deterministic byte-content hashing + clock-aging.
+- **Working-set composition** — deterministic Layer-A/B/C rendering with deterministic byte budgets.
+- **Closure decay** — deterministic engagement-count + timer thresholds.
+- **Symbol extraction** — deterministic regex passes (LLM supplements, never replaces).
+- **Spine + autogit** — all deterministic.
+
+Where the LLM legitimately earns its place (inherently fuzzy, no deterministic shortcut):
+
+- Topic-tag emission — recognizing what a turn is about from free-form conversation.
+- Chat response content — the actual work the LLM exists to do.
+- Closure summaries — compressing conversation history into key takeaways at retirement.
+- Recall layer-3 judgment — pruning embedding false positives before surfacing a recall offer (see Recall mechanisms below).
+
+The corollary: **even within LLM tasks, keep prompts narrow.** Constrain the input space; constrain the output space; validate output deterministically before trusting it. A broadened prompt expands both the family-tuning surface and the silent-drift surface.
 
 ### Concurrent sessions — multitasking one career (future consideration)
 
@@ -528,7 +581,12 @@ These are not "v0.2 / v0.3" — they are role-bounded.
 - Synonym cluster resolution (v0.2+ if empirical pressure)
 - Sub-agent runtime extension (when use case demands)
 - Phrasal-concept symbol extraction (v0.2)
-- Computational research workflow — Python only (v1.0; *not* polyglot)
+- Computational research workflow — Python only (v1.0; *not* polyglot). Tools: `python.run`, `python.format`, `python.lint`. Sandboxed subprocess; stdout/stderr into thread body subject to §6.5 budget; resource caps (wall-clock, memory, output bytes). The shell-execution exclusion in §6.1.3 lifts *only* for these targeted Python tools. Open: Python environment policy (`$PATH` python vs per-project venv vs `uv`). Held until v0.1 acceptance passes — orthogonal to the memory architecture.
+- Gemma-4 domain retraining (queued, post-v0.1): physics+math knowledge-base overlay on gemma-4-E4B (PoC) and gemma-4-31B (real target), served on `reaper` alongside stock tiers. Pre-validates the workflow for [weight-baked instinct](#weight-baked-instinct-from-outcome-history-far-future-consideration) consolidation.
+- Recall layer-3 model judgment (design direction captured; build after #98 inference-in-loop — see Recall mechanisms above)
+- Git tags for project/thread lifecycle navigation (v0.2 / Phase 4): autonomic tags in `~/.personant/.git` mark project open/close and thread create/retire/archive points. Tag namespace: `project/prj_<n>/opened/<RFC3339>`, `project/prj_<n>/closed/<RFC3339>`, `thread/thr_<n>/created/<turn-N>`, `thread/thr_<n>/retired/<turn-N>`, `thread/thr_<n>/archived/<turn-N>`. Turns O(1) archive-recovery lookups (`git show project/prj_3/closed:spine.jsonl`) into forensic wins without a bespoke index. Small bolt-on; lands when §3.5 closure and §3.8 deep cold archival become real call sites.
+- Prompt/response timestamp index (queued, 2026-05-18): a dedicated metadata index recording when every user prompt was sent and every model response was received. Kept **out-of-band** — never injected into LLM context (timestamps in context can distort model behavior). The §2.8 event log already carries clock stamps on delta events; the purpose-built index is for efficient temporal queries ("when did we discuss X?"). A recalled thread/turn must carry a retrievable timestamp to answer the "when" question — the index is the primary query path, the event log a fallback.
+- Inter-agent data-sharing security (forward-looking, not queued): deterministic containment boundaries for sharing Personant's memory with a client's agent system under NDA-class restrictions. Core principle: **exclusion, not redaction** — the secret bytes never enter the model's context. Architecture: (1) prepare a redacted base dataset offline (allow-list, default-deny hides existence); (2) rebuild all derived structures (embedding index, `derived_from` edges, A2 digests) from the clean set only — metadata spans the partition and is the primary leak vector if not regenerated; (3) `chown` the prepared tree to an unprivileged guest OS user; (4) run the liaison inside OS-level containment (mount-namespace/jail — makes the disallowed tree unaddressable, not just application-forbidden; FAIL-CLOSED: a hook bug that tries to reach across hits ENOENT/EACCES and refuses to serve, never discloses). Reuses the #44 rebuild-on-open primitive and the submind clone mechanism — three roadmap items collapse onto one. Irreducible limit: prose cross-references inside allowed content (an allowed turn can mention disallowed work in free text) require human verification at prep time; the deterministic layer guarantees structural containment only.
 - Deep cold archival via git (v0.2)
 - Offline memory-consolidation cycle — the "sleep" cycle (future; see Mechanisms)
 - Weight-baked instinct from outcome history — personal alignment LoRA from substrate's outcome record (far-future; see Mechanisms)
@@ -566,7 +624,7 @@ If you see one of these proposed (or are about to write it), stop and surface th
 | House rules for AI agents | `AGENTS.md` |
 | Field-level schemas + algorithms + APIs | `SPEC.md` |
 | User-facing description, getting started | `README.md` |
-| Substrate-level decision history | persistent memory: `project_personant_substrate.md` |
+| Substrate-level decision history | `ARCHITECTURE.md` §"Substrate non-negotiables" + `AGENTS.md` §"Substrate non-negotiables" |
 | v0.1 acceptance criteria | `SPEC.md` §9.1 |
 
 ---

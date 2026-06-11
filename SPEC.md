@@ -1616,6 +1616,20 @@ Status: queued for v0.1; not yet implemented. (The honest-coverage rule
 of §9.1 applies — this is a known substrate obligation, tracked, not
 forgotten.)
 
+**Design direction (decided 2026-05-22; not yet coded):**
+
+**No signal/interrupt handlers as a flush mechanism.** A handler doing real work during teardown is a footgun (partial flush, re-entrancy, races, can itself be SIGKILL'd) and may produce a *more* confused post-termination state. No signal handlers for canonical writes.
+
+**Per-turn transaction marker.** A file marker (`turn-in-progress` with the current turn id) is written before any canonical writes for a turn and cleared after they all complete. On open: marker absent → clean shutdown (rebuild derived); marker present → the prior turn was interrupted mid-write → reconcile/roll-back the partial turn, then rebuild derived. This handles clean shutdown and SIGKILL uniformly with no shutdown event to catch, and bounds possible inconsistency to exactly one in-flight turn.
+
+**Turn-level (cross-file) atomicity is the real gap.** Current writes use `store.WriteFileAtomic` (deterministic sibling temp file `tmp-<target>` + `os.Rename`) — atomic per file, but a turn rewrites two canonical files that must stay mutually consistent: `spine.jsonl` and the owner thread's `.md`. An interrupt *between* those two renames leaves canonical internally inconsistent (spine `turn_count` ahead of the `.md`); rebuilding derived state does not fix this. The chosen solution: **git commit per turn as the atomic boundary** — the substrate is already a git repo, each commit preserves the prior state, and crash recovery can `reset --hard HEAD` to discard a partial in-flight turn. (Note: the §3.11 commit-on-structural-change cadence commits only on structural changes; the per-turn transaction boundary is a finer-grain commit that fires on *every* turn for durability. Both coexist: the §3.11 commit may absorb the per-turn commit on structural turns.)
+
+**Durability bar: at most one turn may ever be lost**, no matter how pathologically timed the termination. Even that one turn must be made as rare as practical — the in-flight turn carries user prompt + model response: real, expensive-to-recreate in-task-flow state. Protect the raw `(user-prompt, model-response)` bytes by writing them to a **durable append log as the first action of the turn** — before any multi-file canonical writes — so a kill during the canonical commit can recover turn content on restart even when spine/.md writes were partially applied. Structural/derived state is always reconstructable; the content bytes are the genuinely irreplaceable part.
+
+**Temp file naming.** Use deterministic sibling names (`tmp-spine.jsonl`, `tmp-thr_42.md`) rather than random-suffix temps. Rationale: (a) a leftover temp after a crash maps clearly to its target and is visible as untracked; (b) `O_TRUNC` handles a stale leftover from a prior crashed write; (c) deterministic temp→target mapping is what a roll-forward redo-log recovery needs.
+
+**Testing methodology (must be built):** deliberate fault injection — partial file-set writes (apply only some of a turn's renames, in every ordering), torn/truncated writes — followed by recovery and verification that the substrate ends in a runnable state that lost ≤1 turn. Fold these as sim/recovery scenarios, not one-off manual checks.
+
 ---
 
 ## 5. Model interaction
@@ -2069,6 +2083,7 @@ vectorLength = 768
 - `[chat] defaultModel` — the default chat provider/model.
 - `[embedding] model` — the embedding provider/model. This pin is **mandatory for embedding recall** and must be explicit: the embedding model defines the vector space, and an inferred or drifting model would silently invalidate the existing embedding cache.
 - `[embedding] vectorLength` — optional; for matryoshka-capable embedding models, requests this truncated dimensionality (passed as the `dimensions` parameter on the embeddings call).
+- `[recall] model` — (future, not yet built) the recall layer-3 judge model (`provider/model`). A separate reference from `[chat]` so the judge's **context ceiling can be tuned independently** of the main chat model's large window; a small dedicated window (~8K) is intentional (the judge's input is: a query + N ≤150-char candidate summaries). Default: a small-tier model (E2B). The empirical discipline: measure E2B → E4B → 26B against the embedding-only precision baseline; pick the smallest passing tier. See ARCHITECTURE.md §"Minimize infrastructural prompts" and §"Recall mechanisms" (layer-3 judgment).
 
 Model references are `"provider/model"`, split on the **first** `/` (the model portion may itself contain slashes, e.g. `openrouter/google/gemma-4-31b-it`).
 

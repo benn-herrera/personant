@@ -420,8 +420,11 @@ from the normal compile and bit-rot silently.
     gitops/policy refactor). Do not pull these in speculatively; do
     pull them in when the consumer arrives.
   - **`langchaingo/llms`** is *compatible* but excluded on dep-hygiene
-    + scope grounds — see substrate-decisions memory for the revisit
-    conditions.
+    + scope grounds for v0.1 (30+ transitive deps; a thin OpenAI-compatible
+    HTTP client at ~200–300 LoC covers the single-provider need). Revisit in
+    v0.2+ if any of: (1) genuine multi-provider need with format-normalization
+    burden; (2) `langchaingo/embeddings` covers the §3.4 embedding-recall path
+    well; (3) a future capability costs >500 LoC of custom writing.
 - **Application code talks to `MemoryOps`, not to the substrate directly.**
   `internal/turn`, `internal/chat`, `internal/recall/measure`, cmd/*, and
   the scenarios harness all depend on the port (`memops.MemoryOps`).
