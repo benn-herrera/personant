@@ -996,84 +996,63 @@ func TestKeepTossTrim_DeterministicAndShrinksLeafSet(t *testing.T) {
 	}
 }
 
-// TestIntraProbeOracle_BlindSpotBoundary is a focused logic test of the
-// intra-thread oracle's three-band scroll-out predicate (§8.2): a chunk is
-// (1) still in the assembly window → not index material; (2) scrolled out but
-// inside the debt-window blind spot → predicted MISS (by-design lag); (3)
-// scrolled out past the blind spot AND clearing the threshold → predicted HIT.
-// It seeds the main thread's shadow chunks directly and drives one probe,
-// asserting the oracle's prediction matches the band the queried slot's
-// oldest chunk falls in.
-func TestIntraProbeOracle_BlindSpotBoundary(t *testing.T) {
+// TestIntraProbeOracle_Completeness is the SPEC §3.4 recall-completeness
+// regression guard on the oracle side (#124, mirroring the runtime's #123 fix):
+// the intra-thread oracle predicts recall for a queried slot's chunk as soon as
+// it scrolls out of the assembly window — there is NO debt-window dead zone. It
+// drives the boundary case the retracted blind-spot model used to predict a
+// MISS: a chunk that scrolled out only a FEW turns ago (cur-turn just past the
+// window, well inside the former blindspot band cur-turn < window+debtCap). The
+// oracle must now predict a HIT, because the runtime's bounded lexical
+// completeness floor keeps it findable continuously through the async-flush lag.
+func TestIntraProbeOracle_Completeness(t *testing.T) {
 	corpus := loadCorpusSlots(t)
-	g := GenerateWorkload(WorkloadConfig{Seed: simSeed, Duration: simDayDuration, Corpus: corpus}).
-		StepSource.(*generator)
 
-	// Stand up a main thread with two trajectory slots: an EARLY slot whose
-	// chunks are deep in the past (well past the blind spot) and a CURRENT
-	// slot. cur = total chunk count.
-	earlySlot := 0
-	currentSlot := 1
-	for g.model.slots[currentSlot].Topic == g.model.slots[earlySlot].Topic {
-		currentSlot++ // ensure a distinct topic so the trajectory is a real wander
-	}
-	g.mainThreadIdx = g.createThread(len(g.threads), earlySlot)
-	g.threads[g.mainThreadIdx].traj = []int{earlySlot, currentSlot}
-	g.threads[g.mainThreadIdx].cur = currentSlot
+	probe := func(t *testing.T, tail int) *intraProbe {
+		t.Helper()
+		g := GenerateWorkload(WorkloadConfig{Seed: simSeed, Duration: simDayDuration, Corpus: corpus}).
+			StepSource.(*generator)
+		earlySlot := 0
+		currentSlot := 1
+		for g.model.slots[currentSlot].Topic == g.model.slots[earlySlot].Topic {
+			currentSlot++ // ensure a distinct topic so the trajectory is a real wander
+		}
+		g.mainThreadIdx = g.createThread(len(g.threads), earlySlot)
+		g.threads[g.mainThreadIdx].traj = []int{earlySlot, currentSlot}
+		g.threads[g.mainThreadIdx].cur = currentSlot
 
-	earlyTags := nonLooseTags(g.model.slots[earlySlot])
-	if len(earlyTags) == 0 {
-		t.Skip("early slot has no non-loose tags; pick another corpus")
-	}
-	// One early chunk far in the past (recallable), then enough current-slot
-	// chunks to push the early chunk well past window+debtCap.
-	g.shadowChunks[g.mainThreadIdx] = []chunkRecord{
-		{turnNumber: 1, slotIdx: earlySlot, tags: earlyTags},
-	}
-	for n := 2; n <= store.ThreadTurnWindow+intraThreadDebtCap+50; n++ {
-		g.shadowChunks[g.mainThreadIdx] = append(g.shadowChunks[g.mainThreadIdx],
-			chunkRecord{turnNumber: n, slotIdx: currentSlot, tags: nonLooseTags(g.model.slots[currentSlot])})
-	}
-
-	// Force the probe to query hop 1 (the early slot).
-	g.intraProbeHopCursor = 0
-	bs, ok := g.buildIntraProbeStep()
-	if !ok {
-		t.Fatal("buildIntraProbeStep returned ok=false; expected a probe with a scrolled-out early slot")
-	}
-	if bs.intraProbe == nil {
-		t.Fatal("probe bufStep carries no intraProbe metadata")
-	}
-	if !bs.intraProbe.predictHit {
-		t.Errorf("oracle predicted MISS for an early chunk well past the blind spot that re-issues its own tags; want HIT")
-	}
-	if bs.intraProbe.blindspot {
-		t.Errorf("oracle flagged blind spot for a chunk scrolled out far past window+debtCap; want false")
+		earlyTags := nonLooseTags(g.model.slots[earlySlot])
+		if len(earlyTags) == 0 {
+			t.Skip("early slot has no non-loose tags; pick another corpus")
+		}
+		// One early chunk (turn 1), then `tail` current-slot chunks. The early
+		// chunk's age is cur-1; `tail` sets which side of the former blindspot
+		// boundary it lands on. Both must now predict a HIT (completeness).
+		g.shadowChunks[g.mainThreadIdx] = []chunkRecord{{turnNumber: 1, slotIdx: earlySlot, tags: earlyTags}}
+		for n := 2; n <= tail; n++ {
+			g.shadowChunks[g.mainThreadIdx] = append(g.shadowChunks[g.mainThreadIdx],
+				chunkRecord{turnNumber: n, slotIdx: currentSlot, tags: nonLooseTags(g.model.slots[currentSlot])})
+		}
+		g.intraProbeHopCursor = 0
+		bs, ok := g.buildIntraProbeStep()
+		if !ok {
+			t.Fatal("buildIntraProbeStep returned ok=false; expected a probe with a scrolled-out early slot")
+		}
+		if bs.intraProbe == nil {
+			t.Fatal("probe bufStep carries no intraProbe metadata")
+		}
+		return bs.intraProbe
 	}
 
-	// Now make the early chunk's age land INSIDE the blind spot: shrink the
-	// current-slot tail so cur - 1 sits in [window, window+debtCap).
-	g2 := GenerateWorkload(WorkloadConfig{Seed: simSeed, Duration: simDayDuration, Corpus: corpus}).
-		StepSource.(*generator)
-	g2.mainThreadIdx = g2.createThread(len(g2.threads), earlySlot)
-	g2.threads[g2.mainThreadIdx].traj = []int{earlySlot, currentSlot}
-	g2.threads[g2.mainThreadIdx].cur = currentSlot
-	g2.shadowChunks[g2.mainThreadIdx] = []chunkRecord{{turnNumber: 1, slotIdx: earlySlot, tags: earlyTags}}
-	// cur such that cur-1 is >= window (scrolled out) but < window+debtCap (blind spot).
-	for n := 2; n <= store.ThreadTurnWindow+intraThreadDebtCap/2; n++ {
-		g2.shadowChunks[g2.mainThreadIdx] = append(g2.shadowChunks[g2.mainThreadIdx],
-			chunkRecord{turnNumber: n, slotIdx: currentSlot, tags: nonLooseTags(g2.model.slots[currentSlot])})
+	// Deep past — well beyond the former window+debtCap boundary.
+	if p := probe(t, store.ThreadTurnWindow+embeddingDebtCap+50); !p.predictHit {
+		t.Errorf("oracle predicted MISS for a deep-past early chunk re-issuing its own tags; want HIT")
 	}
-	g2.intraProbeHopCursor = 0
-	bs2, ok := g2.buildIntraProbeStep()
-	if !ok {
-		t.Fatal("buildIntraProbeStep (blind-spot case) returned ok=false")
-	}
-	if bs2.intraProbe.predictHit {
-		t.Errorf("oracle predicted HIT for an early chunk INSIDE the debt-window blind spot; want MISS (by-design lag)")
-	}
-	if !bs2.intraProbe.blindspot {
-		t.Errorf("oracle did not flag blind spot for a chunk scrolled out < debtCap turns ago; want true")
+	// Recent tail — the early chunk scrolled out only a few turns ago, INSIDE
+	// the former debt-window blind spot. Per §3.4 it must STILL predict a HIT:
+	// no dead zone (#123/#124).
+	if p := probe(t, store.ThreadTurnWindow+embeddingDebtCap/2); !p.predictHit {
+		t.Errorf("oracle predicted MISS for an early chunk just past the assembly window (former blind spot); want HIT — completeness asserted (§3.4)")
 	}
 }
 
@@ -1391,8 +1370,8 @@ func recordSynthesisMetrics(h *scenarios.Harness, gen *generator) {
 //     the modeled flush call/chunk rate (the cost N pays).
 //   - the per-hop intra-thread recall curve (recall_intra_hop_recall, the
 //     symbolic predicted-recoverability curve — H2, NOT embedding quality),
-//     its _obs denominators and _coherence companions, the blind-spot miss
-//     count, and the run-total coherence divergence (the #109 tripwire).
+//     its _obs denominators and _coherence companions, and the run-total
+//     coherence divergence (the #109 tripwire).
 //
 // liveThreads is the final spine size T; p50/p95/p99 are the turn-latency
 // percentiles already computed by the caller. All shadow reads go through the
@@ -1452,11 +1431,11 @@ func computeIntraThreadGauges(gen *generator, liveThreads int, p50, p95, p99 flo
 	g[metricRecallQueryLatencyP95] = p95
 	g[metricRecallQueryLatencyP99] = p99
 	// Modeled flush rate: every scrolled-out chunk is eventually flushed
-	// (flush_chunks), in batches of intraThreadDebtCap (flush_calls). This is
+	// (flush_chunks), in batches of embeddingDebtCap (flush_calls). This is
 	// the embed-call cost the debt cap N pays over the rung.
 	scrolledOut := gen.mainThreadScrolledOut()
 	g[metricRecallIndexFlushChunks] = float64(scrolledOut)
-	g[metricRecallIndexFlushCalls] = float64(scrolledOut / intraThreadDebtCap)
+	g[metricRecallIndexFlushCalls] = float64(scrolledOut / embeddingDebtCap)
 
 	// Per-hop intra-thread recall + coherence.
 	divergence := 0
@@ -1504,7 +1483,6 @@ func computeIntraThreadGauges(gen *generator, liveThreads int, p50, p95, p99 flo
 		g[metricRecallIntraEmbedRecallByDepth+key] = float64(gen.intraDepthObservedHit[bucket]) / float64(total)
 	}
 	g[metricRecallIntraCoherenceDivergence] = float64(divergence)
-	g[metricRecallIntraBlindspotMisses] = float64(gen.intraBlindspotMisses)
 
 	return g
 }

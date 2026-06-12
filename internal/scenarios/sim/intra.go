@@ -72,15 +72,16 @@ const (
 	// action-selection stream. An arbitrary fixed constant.
 	keepTossSeedOffset = 0x6b656570 // "keep"
 
-	// intraThreadDebtCap mirrors the runtime's embeddingDebtCap (turn/lru.go,
-	// =16): a chunk that scrolled out fewer than this many turns ago may still
-	// be in unflushed debt — not yet in the fine tier — so the oracle predicts
-	// it a MISS (the §6.5 by-design blind spot). A chunk is RECALLABLE
-	// (predict-hit eligible) only once it has been scrolled out >= this many
-	// turns: turnNumber <= cur - store.ThreadTurnWindow - intraThreadDebtCap.
-	// Modeling the blind spot is what keeps the oracle from penalizing the
-	// runtime for the by-design lag — a divergence inside it is a real bug.
-	intraThreadDebtCap = 16
+	// embeddingDebtCap mirrors the runtime's embeddingDebtCap (turn/lru.go, =16):
+	// the fine-tier flush batch size — the runtime flushes a thread's
+	// scrolled-out debt every this-many turns of accumulated scroll-out. The
+	// flush-rate model divides scrolled-out chunks by this cap to report
+	// recall_index_flush_calls (the embed-call cost N pays, §9.2). It is NO
+	// LONGER a recall blind spot: per SPEC §3.4 the runtime's bounded lexical
+	// completeness floor (#123) keeps durable scrolled-out content findable
+	// continuously through the async-flush lag, so the oracle predicts recall
+	// across the FULL scrolled-out range with no dead zone.
+	embeddingDebtCap = 16
 )
 
 // chunkRecord is the generator's shadow of ONE fine-tier chunk: the
@@ -114,7 +115,6 @@ type intraProbe struct {
 	threadID   string // the probed main thread's runtime id
 	hops       int    // current-traj-index − queried-slot-traj-index (>=1)
 	predictHit bool   // oracle prediction: a recallable chunk clears threshold
-	blindspot  bool   // the queried slot's chunks are all inside the debt-window blind spot
 	// turnDepth is currentTurn − targetTurn: how many turns back the
 	// oracle-predicted recall target scrolled out — the TURN-DEPTH axis of the
 	// #109 H2 quality curve (recall_intra_*_recall_bydepth). It is the more
@@ -324,19 +324,17 @@ func (g *generator) buildMainThreadStep() bufStep {
 // the fine-tier threshold.
 //
 // The oracle predicts a hit iff SOME shadow chunk of the queried slot is
-// (a) scrolled out of the assembly window (turnNumber <= cur - window),
-// (b) past the debt-window blind spot (turnNumber <= cur - window - debtCap;
-//
-//	§6.5 — a chunk scrolled out < debtCap turns ago may be unflushed, so
-//	it is predicted MISS, NOT a divergence), AND
-//
-// (c) clears simRecallThreshold against the query under simJaccard, scored
+// (a) scrolled out of the assembly window (turnNumber <= cur - window), AND
+// (b) clears simRecallThreshold against the query under simJaccard, scored
 //
 //	PER CHUNK (the same set/union semantics the runtime applies per chunk
-//	vector — §8.2 coherence). blindspot is true when the queried slot has
+//	vector — §8.2 coherence).
 //
-// scrolled-out chunks but ALL of them are inside the blind spot, separating
-// by-design lag from real loss (recall_intra_blindspot_misses).
+// There is NO debt-window blind spot: per SPEC §3.4 the runtime now keeps
+// durable scrolled-out content findable continuously through the async-flush
+// lag (the bounded lexical completeness floor, #123), so the oracle asserts
+// recall across the FULL scrolled-out range. A real miss of any scrolled-out
+// chunk is now a divergence (a bug), not a tolerated lag.
 //
 // The hop distance is (current traj index − queried traj index): hop >= 1 is
 // an EARLIER abandoned topic. probeIntraHopCursor round-robins so every
@@ -369,13 +367,13 @@ func (g *generator) buildIntraProbeStep() (bufStep, bool) {
 	}
 
 	// Oracle prediction over the generator's own shadow chunks (F6): scan the
-	// queried slot's chunks for one that is scrolled out, past the blind spot,
-	// AND clears the threshold per-chunk. Salt is unioned into each chunk's set
-	// defensively (the runtime folds the thread salt into history_symbols, so
-	// the per-chunk denominator carries it); Q carries no salt (the query is the
-	// earlier slot's topical tags only). Whether ANY scrolled-out chunk exists
-	// for the slot (regardless of threshold) decides the blind-spot bookkeeping.
-	predictHit, anyScrolledOut, anyRecallable := false, false, false
+	// queried slot's chunks for one that is scrolled out AND clears the threshold
+	// per-chunk. Salt is unioned into each chunk's set defensively (the runtime
+	// folds the thread salt into history_symbols, so the per-chunk denominator
+	// carries it); Q carries no salt (the query is the earlier slot's topical
+	// tags only). Per SPEC §3.4 every scrolled-out chunk is recall-eligible —
+	// no debt-window dead zone (#123 completeness floor).
+	predictHit, anyScrolledOut := false, false
 	targetTurn := 0 // turn number of the oracle-predicted recall target (0 = none)
 	for _, ch := range g.shadowChunks[idx] {
 		if ch.slotIdx != queriedSlotIdx {
@@ -385,10 +383,6 @@ func (g *generator) buildIntraProbeStep() (bufStep, bool) {
 			continue // still in the assembly window — not index material (I6)
 		}
 		anyScrolledOut = true
-		if cur-ch.turnNumber < store.ThreadTurnWindow+intraThreadDebtCap {
-			continue // inside the debt-window blind spot — predicted miss (§6.5)
-		}
-		anyRecallable = true
 		set := make(map[string]struct{}, len(ch.tags)+1)
 		for _, t := range ch.tags {
 			set[t] = struct{}{}
@@ -403,9 +397,6 @@ func (g *generator) buildIntraProbeStep() (bufStep, bool) {
 	if !anyScrolledOut {
 		return bufStep{}, false // nothing of this slot has scrolled out yet
 	}
-	// blindspot: the queried slot has scrolled-out chunks but none are past
-	// the blind spot — its recallability is gated entirely by the by-design lag.
-	blindspot := !anyRecallable
 
 	var mentions strings.Builder
 	for i, s := range Q {
@@ -448,7 +439,6 @@ func (g *generator) buildIntraProbeStep() (bufStep, bool) {
 			threadID:   thr.threadID(),
 			hops:       hop,
 			predictHit: predictHit,
-			blindspot:  blindspot,
 			// turn-depth = currentTurn − targetTurn, available only when the
 			// oracle predicted a target chunk (targetTurn>0). 0 → no predicted
 			// target → the depth tally skips this probe (never fabricate a bucket).

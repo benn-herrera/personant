@@ -951,14 +951,6 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 			} else {
 				g.intraHopDiverge[p.hops]++
 			}
-			// Blind-spot miss: the target's chunks are all inside the debt-window
-			// blind spot (predicted miss) AND the runtime missed too. This
-			// separates the by-design lag (§6.5) from a real recall loss — a
-			// divergence INSIDE the blind spot would be a real bug, but a matched
-			// predicted+observed miss there is the expected staleness window.
-			if p.blindspot && !observedHit {
-				g.intraBlindspotMisses++
-			}
 		}
 	}
 	g.lastIntraProbe = nil
@@ -1532,12 +1524,6 @@ const (
 	metricRecallIndexFlushCalls  = "recall_index_flush_calls"
 	metricRecallIndexFlushChunks = "recall_index_flush_chunks"
 
-	// metricRecallIntraBlindspotMisses is the count of intra-thread probes that
-	// missed BECAUSE the target chunk was inside the debt-window blind spot
-	// (predicted+observed miss) — separating by-design lag from real loss
-	// (§9.2). Embedding-live runs only.
-	metricRecallIntraBlindspotMisses = "recall_intra_blindspot_misses"
-
 	// metricRecallIntraHopRecall is the per-hop intra-thread recall curve (the
 	// #109 fidelity curve), keyed metricRecallIntraHopRecall+"_h<N>". SYMBOLIC
 	// now (the oracle's predicted recoverability — the H2 coherence curve), with
@@ -1977,16 +1963,14 @@ type generator struct {
 	// recall_intra_hop_recall); intraHopObservedHit is the runtime's observed
 	// spine.intra-match-fire (embedding-live runs only); intraHopCoherent /
 	// intraHopDiverge tally oracle/runtime agreement (embedding-live only;
-	// divergence is the criterion-(b) tripwire — 0 is the pass).
-	// intraBlindspotMisses counts probes whose target chunk is inside the
-	// debt-window blind spot AND observed a miss — separating by-design lag
-	// from real loss (§9.2 recall_intra_blindspot_misses).
-	intraHopTotal        map[int]int
-	intraHopPredictHit   map[int]int
-	intraHopObservedHit  map[int]int
-	intraHopCoherent     map[int]int
-	intraHopDiverge      map[int]int
-	intraBlindspotMisses int
+	// divergence is the criterion-(b) tripwire — 0 is the pass). Per SPEC §3.4
+	// every scrolled-out chunk is recall-eligible (no debt-window dead zone,
+	// #123), so a divergence at ANY depth is a real defect, never tolerated lag.
+	intraHopTotal       map[int]int
+	intraHopPredictHit  map[int]int
+	intraHopObservedHit map[int]int
+	intraHopCoherent    map[int]int
+	intraHopDiverge     map[int]int
 
 	// Intra-thread per-TURN-DEPTH probe tallies (#109 H2 quality curve,
 	// turn-depth axis) — the SIBLING of the per-hop tallies above on a
@@ -2271,8 +2255,8 @@ func (g *generator) runSession(start time.Time, active time.Duration) {
 		// re-issuing one of the main thread's EARLIER scrolled-out trajectory
 		// slots, predicting whether the runtime should surface the main thread
 		// via spine.intra-match-fire. rng-free + zero-TimeDelta (determinism-
-		// safe); skipped (ok=false) until the main thread has a scrolled-out,
-		// past-blind-spot earlier slot to query.
+		// safe); skipped (ok=false) until the main thread has a scrolled-out
+		// earlier slot to query.
 		g.emittedSinceIntraProbe++
 		if g.emittedSinceIntraProbe >= mainThreadProbeEvery {
 			if ibs, ok := g.buildIntraProbeStep(); ok {

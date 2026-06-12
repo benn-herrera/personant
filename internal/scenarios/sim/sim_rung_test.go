@@ -459,7 +459,7 @@ func logRungSummary(t *testing.T, label string, rep rungReport, gen *generator) 
 	t.Logf("recall_query_latency:     P50=%.1fms P95=%.1fms P99=%.1fms (I3 gate: P99 flat across the rung ladder)",
 		m.Gauges[metricRecallQueryLatencyP50], m.Gauges[metricRecallQueryLatencyP95], m.Gauges[metricRecallQueryLatencyP99])
 	t.Logf("recall_index_flush:       %d calls / %d chunks (modeled debt-cap N=%d flush rate — the cost N pays)",
-		int(m.Gauges[metricRecallIndexFlushCalls]), int(m.Gauges[metricRecallIndexFlushChunks]), intraThreadDebtCap)
+		int(m.Gauges[metricRecallIndexFlushCalls]), int(m.Gauges[metricRecallIndexFlushChunks]), embeddingDebtCap)
 
 	intraProbeObs := 0
 	for _, total := range gen.intraHopTotal {
@@ -490,8 +490,6 @@ func logRungSummary(t *testing.T, label string, rep rungReport, gen *generator) 
 				m.Gauges[metricRecallIntraEmbedHopRecall+key],
 				m.Gauges[metricRecallIntraHopRecall+key+"_coherence"], obs)
 		}
-		t.Logf("recall_intra_blindspot_misses: %d (predicted+observed miss inside the debt-window blind spot — by-design lag, not loss)",
-			int(m.Gauges[metricRecallIntraBlindspotMisses]))
 	} else {
 		// Symbolic-only (mock) run: the intra layer never fires (no embedder), so
 		// only the oracle's PREDICTED recoverability curve is meaningful; observed

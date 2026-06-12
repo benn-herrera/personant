@@ -17,16 +17,6 @@ import (
 // §9 calibration window, not a frozen value.
 const embeddingDebtCap = 16
 
-// EmbeddingDebt returns the count of turn-excerpts threadID has accrued
-// scrolled-out-of-the-assembly-window that are NOT YET flushed to the §3.4
-// fine tier — i.e. the live §6.5 debt-window depth. 0 means just-flushed (or
-// unknown thread). It climbs to just under the internal flush cap between
-// flushes, so an observer reads ACTUAL recallability lag instead of re-deriving
-// the boundary from a copied constant.
-func (s *State) EmbeddingDebt(threadID string) int {
-	return s.embeddingDebt[threadID]
-}
-
 // flushEnqueuer is the narrow optional interface a Recaller may satisfy to
 // receive §3.4 index-flush signals (design §11.3, I7). The embedding
 // measure.Service implements EnqueueFlush; the symbolic-only default does
@@ -50,7 +40,7 @@ type flushEnqueuer interface {
 // the debt hooks are (I7): with no embedder there is no fine tier, so no lag
 // dead zone exists and the symbolic-only path keeps its byte-identical prior
 // behaviour (0 → the Service skips the debt pass entirely). The CAP, not the
-// live EmbeddingDebt depth, because a debt-cap flush resets the live counter
+// live per-thread debt depth, because a debt-cap flush resets the live counter
 // to 0 while its embed is still in flight — bounding by the cap keeps the
 // floor continuous across that window (see measure.Request.EngagedDebtWindow).
 func debtWindowBound(state *State, engagedOwner string) int {

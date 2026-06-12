@@ -17,9 +17,9 @@ package scenarios
 //
 // SCOPE: only the cross-seam keys live here. Keys declared AND consumed
 // entirely within package sim (the §4.3 perf-decay series — coarse_size /
-// fine_chunks / cosine_ops / latency / flush / hop / depth / coherence /
-// blindspot) are already single-source within that package and are NOT mirrored
-// here — moving them would not close a seam.
+// fine_chunks / cosine_ops / latency / flush / hop / depth / coherence) are
+// already single-source within that package and are NOT mirrored here — moving
+// them would not close a seam.
 //
 // JSON struct tags in the sim daily-record cannot reference a const (a Go
 // language limitation), so any daily-record tag encoding one of these keys is
