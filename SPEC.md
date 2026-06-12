@@ -720,6 +720,37 @@ For task-class deltas (§3.10.1), extracted symbols enter the staging buffer (§
 
 ### 3.4 Recall matching
 
+> **Recall-completeness invariant (load-bearing — no dead zones).**
+> All **non-transient** turn content MUST be locatable by recall at every stage
+> of its lifecycle — from creation, through assembly-window residency,
+> scroll-out and durable storage, archival (§3.8), and any later
+> summarization/retirement (§3.5). **The ONLY content that may be unfindable by
+> contract is transient data that has been deliberately discarded** per the
+> §3.10 transient-data lifecycle (uncited task-class symbols / raw task-bytes
+> evicted at window close, §3.10.5–§3.10.6) — that data was never promised to
+> persist, so its absence is the contract. Every other classification is durable
+> and must remain locatable.
+>
+> "Locatable" is **mechanism-agnostic**: findable by *some* recall path —
+> symbolic, embedding coarse/fine tier, summary tree, or the exact lexical /
+> flat-scan tier (#117). The consumer neither knows nor cares which; the recall
+> mechanism is an implementation detail, completeness is the contract.
+>
+> **There must be no window in which durable content is hidden.** A piece of
+> content that is retained on disk but momentarily absent from one index — e.g.
+> scrolled out of the assembly window but still pending its *asynchronous*
+> fine-tier embedding flush — is NOT permitted to be unfindable in the interim.
+> Completeness holds **continuously, not eventually**: the recall path must cover
+> such content by another mechanism (e.g. an exact pass over the bounded
+> not-yet-flushed set, which is on disk) so there is no lag-window dead zone.
+>
+> **Enforcement.** A measurement harness must assert this completeness directly
+> and may **NOT** model any "by-design blind spot" or acceptable-lag in which
+> durable content is unfindable — such a window is a correctness defect to fix in
+> the runtime, never a behavior to certify. (This invariant was previously
+> unstated; its absence let the embedding-flush debt window become an unflagged
+> recall dead zone the sim oracle accommodated instead of catching.)
+
 Three layers, run as **parallel signals**, not a strict cost cascade:
 
 1. **Symbolic Jaccard** over the symbol index — high precision, low
