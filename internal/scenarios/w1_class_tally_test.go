@@ -65,14 +65,14 @@ func TestW1ClassTally_SurvivesRecallerSwap(t *testing.T) {
 
 	// Both strict-misses must be present — the pre-restart one is exactly what
 	// a final-instance atomic read dropped.
-	if got := doc.Counters[metricRecallIntraW1StrictMiss]; got != 2 {
+	if got := doc.Counters[MetricRecallIntraW1StrictMiss]; got != 2 {
 		t.Errorf("%s = %d, want 2 (both pre- and post-swap strict-misses must survive the recaller swap)",
-			metricRecallIntraW1StrictMiss, got)
+			MetricRecallIntraW1StrictMiss, got)
 	}
-	if got := doc.Counters[metricRecallIntraW1Tie]; got != 1 {
-		t.Errorf("%s = %d, want 1", metricRecallIntraW1Tie, got)
+	if got := doc.Counters[MetricRecallIntraW1Tie]; got != 1 {
+		t.Errorf("%s = %d, want 1", MetricRecallIntraW1Tie, got)
 	}
-	if got := doc.Counters[metricRecallIntraW1TreeMismatch]; got != 1 {
-		t.Errorf("%s = %d, want 1", metricRecallIntraW1TreeMismatch, got)
+	if got := doc.Counters[MetricRecallIntraW1TreeMismatch]; got != 1 {
+		t.Errorf("%s = %d, want 1", MetricRecallIntraW1TreeMismatch, got)
 	}
 }

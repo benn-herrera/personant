@@ -386,15 +386,13 @@ const sleepCycleDayOffPeriod = 7
 // and asserts nothing (the marker simply never fired).
 func reportSleepCycles(t *testing.T, m metricsBlob, d time.Duration) {
 	t.Helper()
-	// Metric keys match the harness-side constants in package scenarios
-	// (harness_run.go): sleep_cycles, git_dir_bytes_pre_gc/post_gc,
-	// git_dir_bytes_reclaimed. The harness owns the emit-side constants; the
-	// metrics blob is consumed cross-package by string key, the same
-	// convention as "turns"/"turn_duration_ms" elsewhere in this file.
-	cycles := m.Counters["sleep_cycles"]
-	pre := m.Histograms["git_dir_bytes_pre_gc"]
-	post := m.Histograms["git_dir_bytes_post_gc"]
-	reclaimed := m.Counters["git_dir_bytes_reclaimed"]
+	// Metric keys come from the cross-seam registry in package scenarios
+	// (metric_keys.go) — one source of truth shared with the harness emitter,
+	// so a writer-side rename cannot silently zero these reads (burndown #1).
+	cycles := m.Counters[scenarios.MetricSleepCycles]
+	pre := m.Histograms[scenarios.MetricGitDirBytesPreGC]
+	post := m.Histograms[scenarios.MetricGitDirBytesPostGC]
+	reclaimed := m.Counters[scenarios.MetricGitDirBytesReclaimed]
 
 	t.Logf("=== sleep cycles (#108) ===")
 	t.Logf("sleep_cycles:     %d", cycles)
@@ -1568,6 +1566,38 @@ type dailyStats struct {
 	IntraGauges map[string]float64 `json:"intra_gauges"`
 }
 
+// TestMetricKeyTagsMatchRegistry pins the dailyStats JSON struct tags that
+// encode a cross-seam metric key to their scenarios-package registry const
+// (burndown #1). A Go struct tag cannot reference a const, so a registry
+// rename that forgets to update the matching tag here would otherwise pass
+// silently — the daily-record JSON key and the live metric key would drift
+// apart. This test fails loudly on that drift: it walks dailyStats by field
+// name and asserts each tagged field's json tag equals the registry const that
+// owns the same key. Only registry-owned keys are pinned; sim-internal keys
+// (recall_query_cosine_ops, recall_index_flush_calls) are single-source within
+// this package already and are intentionally not covered here.
+func TestMetricKeyTagsMatchRegistry(t *testing.T) {
+	want := map[string]string{
+		"SleepCycles":              scenarios.MetricSleepCycles,
+		"RecallIntraDescentDiverg": scenarios.MetricRecallIntraDescentDivergence,
+		"RecallIntraW1StrictMiss":  scenarios.MetricRecallIntraW1StrictMiss,
+		"RecallIntraW1Tie":         scenarios.MetricRecallIntraW1Tie,
+		"RecallIntraW1TreeMism":    scenarios.MetricRecallIntraW1TreeMismatch,
+	}
+	ty := reflect.TypeOf(dailyStats{})
+	for fieldName, key := range want {
+		f, ok := ty.FieldByName(fieldName)
+		if !ok {
+			t.Errorf("dailyStats has no field %q (renamed or removed?)", fieldName)
+			continue
+		}
+		if got := f.Tag.Get("json"); got != key {
+			t.Errorf("dailyStats.%s json tag = %q, registry const = %q — tag drifted from the metric-key registry (metric_keys.go)",
+				fieldName, got, key)
+		}
+	}
+}
+
 // dailyDelta is the per-day movement: counters diffed against the prior day's
 // close, and turn-latency percentiles computed over ONLY this day's slice of
 // the turn_duration_ms histogram (histogram[prevLen:currLen]).
@@ -1675,7 +1705,7 @@ func (w *dailySnapshotWriter) appendRecord(h *scenarios.Harness, simDate time.Ti
 			LatencyP99:     p99,
 			ThreadsCreated: h.Metrics.CounterValue("threads_created"),
 			SpineSize:      liveThreads,
-			SleepCycles:    h.Metrics.CounterValue("sleep_cycles"),
+			SleepCycles:    h.Metrics.CounterValue(scenarios.MetricSleepCycles),
 			// recall_query_cosine_ops is the LIVE-recaller gauge, NOT a shadow
 			// value (computeIntraThreadGauges does not compute it). Read it
 			// DIRECTLY off the recaller's run-to-date accessors (the SAME source
@@ -1689,10 +1719,10 @@ func (w *dailySnapshotWriter) appendRecord(h *scenarios.Harness, simDate time.Ti
 			// construction (one source) — the #120 last-record==summary invariant.
 			RecallQueryCosineOps:     liveCosineOpsPerQuery(h),
 			RecallIndexFlushCalls:    intra[metricRecallIndexFlushCalls],
-			RecallIntraDescentDiverg: h.Metrics.CounterValue("recall_intra_descent_divergence"),
-			RecallIntraW1StrictMiss:  h.Metrics.CounterValue("recall_intra_w1_strict_miss"),
-			RecallIntraW1Tie:         h.Metrics.CounterValue("recall_intra_w1_tie"),
-			RecallIntraW1TreeMism:    h.Metrics.CounterValue("recall_intra_w1_tree_mismatch"),
+			RecallIntraDescentDiverg: h.Metrics.CounterValue(scenarios.MetricRecallIntraDescentDivergence),
+			RecallIntraW1StrictMiss:  h.Metrics.CounterValue(scenarios.MetricRecallIntraW1StrictMiss),
+			RecallIntraW1Tie:         h.Metrics.CounterValue(scenarios.MetricRecallIntraW1Tie),
+			RecallIntraW1TreeMism:    h.Metrics.CounterValue(scenarios.MetricRecallIntraW1TreeMismatch),
 			IntraGauges:              intra,
 		},
 		DayDelta: dailyDelta{
@@ -2075,7 +2105,7 @@ func TestDailyStatsSeries(t *testing.T) {
 	if want := m.Counters["threads_created"]; last.ThreadsCreated != want {
 		t.Errorf("last record threads_created=%d, summary=%d", last.ThreadsCreated, want)
 	}
-	if want := m.Counters["sleep_cycles"]; last.SleepCycles != want {
+	if want := m.Counters[scenarios.MetricSleepCycles]; last.SleepCycles != want {
 		t.Errorf("last record sleep_cycles=%d, summary=%d", last.SleepCycles, want)
 	}
 	assertFloatEq(t, "latency_p50", last.LatencyP50, percentile(durations, 0.50))
@@ -2094,7 +2124,7 @@ func TestDailyStatsSeries(t *testing.T) {
 	// interior days now read the live accumulator too, not a stuck end-of-run 0.
 	assertFloatEq(t, "recall_query_cosine_ops", last.RecallQueryCosineOps, m.Gauges[metricRecallQueryCosineOps])
 	// W1 + descent counters.
-	if want := m.Counters["recall_intra_descent_divergence"]; last.RecallIntraDescentDiverg != want {
+	if want := m.Counters[scenarios.MetricRecallIntraDescentDivergence]; last.RecallIntraDescentDiverg != want {
 		t.Errorf("last record descent_divergence=%d, summary=%d", last.RecallIntraDescentDiverg, want)
 	}
 	// Every sim-derived intra gauge in the last record's intra_gauges map must

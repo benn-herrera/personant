@@ -388,8 +388,8 @@ func stepMeasureW1(h *Harness, step Step) {
 		return
 	}
 	div, class := probe.IntraThreadDivergence(context.Background(), step.UserInput, step.W1Engaged)
-	h.Metrics.Counter(metricRecallIntraDescentDivergence, int64(div))
-	h.Metrics.Counter(metricRecallIntraDescentProbes, 1)
+	h.Metrics.Counter(MetricRecallIntraDescentDivergence, int64(div))
+	h.Metrics.Counter(MetricRecallIntraDescentProbes, 1)
 	// Accumulate the per-probe classification tally HERE, in lockstep with the
 	// divergence counter, so a strict-miss classified on an earlier
 	// per-session Service instance is not lost when a RestartSession swaps in a
@@ -644,59 +644,15 @@ func (h *Harness) refreshArchivedSet() {
 // same code path for every entry, so a sample is sufficient to exercise it.
 const recoveryGaugeSample = 5
 
-// Sleep-cycle metric keys (#108). One source of truth for the harness
-// emitter and any downstream summary/baseline comparison.
+// The harness↔sim metric KEY strings (sleep-cycle #108, W1/tree-rebuild #111)
+// are owned by the registry in metric_keys.go (Metric* consts) so the writer
+// here and the sim reader share one source of truth — see that file for why.
+
+// w1Class* are the per-probe class strings IntraThreadDivergence returns: one
+// source of truth for the harness's class→metric mapping. They are the measure
+// package's w1Class string form (NOT metric keys — they stay local), so they
+// must match the measure package's w1Class constant values.
 const (
-	// metricSleepCycles counts how many sleep/consolidation passes the run
-	// fired (one per day-off).
-	metricSleepCycles = "sleep_cycles"
-	// metricGitDirBytesPreGC / PostGC are histograms — one sample per sleep
-	// cycle — of the substrate .git directory size immediately before and
-	// after the gc. The post < pre delta is the reclamation proof.
-	metricGitDirBytesPreGC  = "git_dir_bytes_pre_gc"
-	metricGitDirBytesPostGC = "git_dir_bytes_post_gc"
-	// metricGitDirBytesReclaimed accumulates total bytes reclaimed across all
-	// sleep cycles (pre − post, clamped at 0 so a cycle that grew .git — e.g.
-	// a fresh pack larger than the loose pile it replaced — does not subtract).
-	metricGitDirBytesReclaimed = "git_dir_bytes_reclaimed"
-	// metricRecallIntraTreeRebuildCalls counts within-thread summary-tree
-	// (re)builds across the run — the design §7.2 / fork-F-B trip-wire (#111):
-	// if it trends up with main-thread length on the long rungs, semantic
-	// rebalancing is not staying bounded and escalates to the hybrid MAD.
-	metricRecallIntraTreeRebuildCalls = "recall_intra_tree_rebuild_calls"
-
-	// metricRecallIntraDescentDivergence is the W1 recall-preservation QUALITY
-	// MEASURE accumulator (#111 / design §7.1; reframed from gate→measure in
-	// #119): the run-total top-Kf leaf set difference between the summary-tree
-	// descent and the flat scan, summed over every intra-probe step on an
-	// embedding-live run. REPORTED, NOT GATED — the within-thread summary tree
-	// is an approximate O(log n) heuristic; a nonzero means it substituted a
-	// within-Kf leaf, not necessarily that recall was lost (exact/exhaustive
-	// recall is the separate #117 tier). The sim summary logs it as an
-	// approximation-drift canary. metricRecallIntraDescentProbes is its
-	// denominator (the number of W1 probes evaluated), so the summary can
-	// distinguish "0 because no divergence" from "0 because no probe ran".
-	metricRecallIntraDescentDivergence = "recall_intra_descent_divergence"
-	metricRecallIntraDescentProbes     = "recall_intra_descent_probes"
-
-	// metricRecallIntraW1StrictMiss / Tie / TreeMismatch are the per-run
-	// classification tally of the W1 descent-vs-flat divergences (#111 §7.1
-	// diagnostic): of the recall_intra_descent_divergence probes, how many were
-	// a genuine recall loss (a strictly-better leaf pruned), an equal-cosine
-	// tie-boundary substitution, or a tree-mismatch (the flat scan ranked a
-	// leaf the tree does not contain). The harness accumulates these from the
-	// per-probe class IntraThreadDivergence returns, at the SAME call site and
-	// moment it accumulates the divergence counter — so the classification and
-	// the divergence count are read from one place post-run and can never
-	// disagree, regardless of how many per-session Service instances a
-	// RestartSession run created and closed (each fresh Service zeroes its own
-	// W1 atomics; the harness-held counters survive the swap). The string keys
-	// are the contract with the sim summary reader (sim's metricRecallIntraW1*).
-	// All 0 on a mock run (no divergence occurs).
-	metricRecallIntraW1StrictMiss   = "recall_intra_w1_strict_miss"
-	metricRecallIntraW1Tie          = "recall_intra_w1_tie"
-	metricRecallIntraW1TreeMismatch = "recall_intra_w1_tree_mismatch"
-
 	// w1Class* are the per-probe class strings IntraThreadDivergence returns
 	// (the string form of measure's unexported w1Class). One source of truth
 	// for the harness's class→metric mapping; they must match the measure
@@ -715,11 +671,11 @@ const (
 func recordW1Class(h *Harness, class string) {
 	switch class {
 	case w1ClassStrictMiss:
-		h.Metrics.Counter(metricRecallIntraW1StrictMiss, 1)
+		h.Metrics.Counter(MetricRecallIntraW1StrictMiss, 1)
 	case w1ClassTie:
-		h.Metrics.Counter(metricRecallIntraW1Tie, 1)
+		h.Metrics.Counter(MetricRecallIntraW1Tie, 1)
 	case w1ClassTreeMismatch:
-		h.Metrics.Counter(metricRecallIntraW1TreeMismatch, 1)
+		h.Metrics.Counter(MetricRecallIntraW1TreeMismatch, 1)
 	}
 }
 
@@ -759,18 +715,18 @@ func runSleepCycle(t *testing.T, h *Harness, idx int, label string) {
 				t.Fatalf("scenario step %d (%s): RebuildTrees: %v", idx+1, label, err)
 			}
 			if rebuilt > 0 {
-				h.Metrics.Counter(metricRecallIntraTreeRebuildCalls, int64(rebuilt))
+				h.Metrics.Counter(MetricRecallIntraTreeRebuildCalls, int64(rebuilt))
 			}
 		}
 	}
 
 	post := gitDirBytes(h.Paths.Home)
 
-	h.Metrics.Counter(metricSleepCycles, 1)
-	h.Metrics.Record(metricGitDirBytesPreGC, float64(pre))
-	h.Metrics.Record(metricGitDirBytesPostGC, float64(post))
+	h.Metrics.Counter(MetricSleepCycles, 1)
+	h.Metrics.Record(MetricGitDirBytesPreGC, float64(pre))
+	h.Metrics.Record(MetricGitDirBytesPostGC, float64(post))
 	if pre > post {
-		h.Metrics.Counter(metricGitDirBytesReclaimed, pre-post)
+		h.Metrics.Counter(MetricGitDirBytesReclaimed, pre-post)
 	}
 }
 

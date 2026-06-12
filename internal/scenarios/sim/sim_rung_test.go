@@ -563,8 +563,8 @@ func logRungSummary(t *testing.T, label string, rep rungReport, gen *generator) 
 	// approximation-drift canary). REPORTED, NOT GATED (#119): a nonzero
 	// divergence means the heuristic substituted a within-top-Kf leaf, NOT
 	// necessarily lost recall. On the symbolic mock run no W1 probe runs.
-	descentDivergence := int(m.Counters["recall_intra_descent_divergence"])
-	descentProbes := int(m.Counters["recall_intra_descent_probes"])
+	descentDivergence := int(m.Counters[scenarios.MetricRecallIntraDescentDivergence])
+	descentProbes := int(m.Counters[scenarios.MetricRecallIntraDescentProbes])
 	if descentProbes == 0 {
 		t.Logf("recall_intra_descent_divergence: n/a — no W1 probe ran this rung (symbolic mock run, or main thread never grew a usable summary tree)")
 	} else {
@@ -574,16 +574,16 @@ func logRungSummary(t *testing.T, label string, rep rungReport, gen *generator) 
 		// tree-mismatch breakdown — settles whether a divergence is key-quality or
 		// structural. Pure observation; per-probe detail is in logs/.
 		t.Logf("recall_intra_w1 classification: strict_miss=%d tie=%d tree_mismatch=%d (#111 §7.1 diagnostic — strict_miss=real loss/fix keys; tie=equal-cosine/fix tie-break; tree_mismatch=staleness/build edge)",
-			int(m.Counters[metricRecallIntraW1StrictMiss]),
-			int(m.Counters[metricRecallIntraW1Tie]),
-			int(m.Counters[metricRecallIntraW1TreeMismatch]))
+			int(m.Counters[scenarios.MetricRecallIntraW1StrictMiss]),
+			int(m.Counters[scenarios.MetricRecallIntraW1Tie]),
+			int(m.Counters[scenarios.MetricRecallIntraW1TreeMismatch]))
 	}
 
 	// F-B rebuild trip-wire (#111 / design §7.2, fork F-B). A WATCH metric, NOT a
 	// hard gate: if it trends up with main-thread length on the long rungs,
 	// semantic rebalancing is not staying bounded.
 	t.Logf("recall_intra_tree_rebuild_calls: %d (F-B trip-wire — semantic-rebalance churn; watch, no gate; escalates to the hybrid MAD if it trends with main-thread length)",
-		int(m.Counters["recall_intra_tree_rebuild_calls"]))
+		int(m.Counters[scenarios.MetricRecallIntraTreeRebuildCalls]))
 
 	t.Logf("wall-clock runtime: %s", rep.wall.Round(time.Millisecond))
 
