@@ -275,6 +275,70 @@ func ReadThreadExcerpts(paths PersonantPaths, threadID string) ([]memops.ThreadE
 	return out, nil
 }
 
+// ReadDebtWindowExcerpts reads ONLY the bounded "embedding-debt window" of a
+// thread: the at-most maxN turn-excerpts that have scrolled out of the
+// most-recent ThreadTurnWindow assembly window but sit immediately below it —
+// the recent tail that is durable on disk yet (in the live runtime) may not
+// yet be in the §3.4 fine-tier embedding index. It is the on-disk completeness
+// floor for the recall-completeness invariant (SPEC §3.4): the recall path
+// scans this bounded set so durable content in the async-flush lag window is
+// still findable, with no unbounded per-query scan.
+//
+// "Bounded" is the whole point and the difference from ReadThreadExcerpts: it
+// reads at most maxN excerpt FILES (the directory listing is the only
+// per-thread-size cost — just names, already paid by every excerpt op), never
+// the full retained set, so the per-query cost does NOT grow with thread age.
+// maxN <= 0 returns (nil, nil).
+//
+// The window arithmetic mirrors ReadThreadBody's windowFloor: excerpts are
+// turn-number sorted; the most-recent ThreadTurnWindow are the assembly window
+// (excluded — they are still in the assembled context, I6), and the maxN
+// excerpts at ordinal positions [windowFloor-maxN, windowFloor) are the debt
+// window. A thread shorter than the assembly window has no scrolled-out
+// excerpts, so it returns (nil, nil). Returned in turn-number order
+// (oldest→newest), matching ReadThreadExcerpts.
+func ReadDebtWindowExcerpts(paths PersonantPaths, threadID string, maxN int) ([]memops.ThreadExcerpt, error) {
+	if maxN <= 0 {
+		return nil, nil
+	}
+	turnsDir := ThreadTurnsDir(paths, threadID)
+	nums, err := turnFileNumbers(turnsDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read debt-window excerpts %s: %w", threadID, err)
+	}
+	// windowFloor is the lowest ordinal still inside the assembly window; the
+	// debt window sits in [windowFloor-maxN, windowFloor). A thread at or below
+	// the assembly window has windowFloor==0 → no scrolled-out excerpts.
+	windowFloor := 0
+	if len(nums) > ThreadTurnWindow {
+		windowFloor = len(nums) - ThreadTurnWindow
+	}
+	if windowFloor == 0 {
+		return nil, nil
+	}
+	lo := windowFloor - maxN
+	if lo < 0 {
+		lo = 0
+	}
+	out := make([]memops.ThreadExcerpt, 0, windowFloor-lo)
+	for i := lo; i < windowFloor; i++ {
+		n := nums[i]
+		path := filepath.Join(turnsDir, turnFileName(n))
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read debt-window excerpts %s: read %s: %w", threadID, path, err)
+		}
+		out = append(out, memops.ThreadExcerpt{
+			TurnNumber: n,
+			Text:       strings.TrimRight(string(data), "\n"),
+		})
+	}
+	return out, nil
+}
+
 // LoadThread is the convenience whole-thread read: LoadThreadFrontmatter
 // plus ReadThreadBody with no byte budget. For callers that genuinely
 // need the entire thread (the closure curator). Index, verify, and the

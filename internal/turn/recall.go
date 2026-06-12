@@ -94,6 +94,15 @@ func surfaceRecallCandidates(ctx context.Context, state *State, userInput string
 		Project:      state.ActiveProject.ID,
 		Exclude:      engagedSet,
 		Engaged:      engagedOwner,
+		// Bound for the §3.4 recall-completeness lexical pass (#123): the
+		// embedding-debt CAP, the max scrolled-out tail that may be awaiting
+		// its async fine-tier flush. Passed only when an embedder-capable
+		// recaller is installed (debtWindowBound), so the fine tier — and thus
+		// the lag dead zone — actually exists; a symbolic-only setup has no
+		// fine tier and keeps its byte-identical prior behaviour (0 → no debt
+		// pass). The cap, not the live debt, so the floor stays continuous
+		// across a debt-cap flush's in-flight window (see Request docs).
+		EngagedDebtWindow: debtWindowBound(state, engagedOwner),
 	})
 	if err != nil {
 		return fmt.Errorf("recall: %w", err)

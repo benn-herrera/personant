@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -606,5 +607,88 @@ func TestListThreadIDsIgnoresLooseFiles(t *testing.T) {
 	}
 	if !sort.StringsAreSorted(got) || !reflect.DeepEqual(got, []string{"thr_1", "thr_2"}) {
 		t.Errorf("ListThreadIDs = %v, want [thr_1 thr_2]", got)
+	}
+}
+
+// TestReadDebtWindowExcerpts is the #123 bounded-read boundary test: the
+// debt-window read returns exactly the maxN excerpts immediately below the
+// assembly window (the recent scrolled-out tail), never the full retained set,
+// and nothing when nothing has scrolled out.
+func TestReadDebtWindowExcerpts(t *testing.T) {
+	paths := newThreadHome(t)
+	const id = "thr_1"
+	if err := SaveThreadFrontmatter(paths, id, memops.ThreadMeta{
+		ID: id, Project: "prj_1", Summary: id, State: memops.ThreadActive,
+		Created: "2026-04-01T00:00:00Z", LastEngaged: "2026-04-01T00:00:00Z",
+		StateChanged: "2026-04-01T00:00:00Z", TurnCount: 1,
+	}); err != nil {
+		t.Fatalf("seed frontmatter: %v", err)
+	}
+
+	// total = window + 5: turns 1..5 have scrolled out; the debt window is
+	// those, immediately below the most-recent ThreadTurnWindow.
+	const extra = 5
+	total := ThreadTurnWindow + extra
+	for turn := 1; turn <= total; turn++ {
+		if err := AppendThreadTurn(paths, id, turn, "content "+strconv.Itoa(turn)); err != nil {
+			t.Fatalf("append turn %d: %v", turn, err)
+		}
+	}
+
+	// maxN larger than the scrolled-out count: clamps to the available tail
+	// (turns 1..5), in turn order.
+	got, err := ReadDebtWindowExcerpts(paths, id, 16)
+	if err != nil {
+		t.Fatalf("ReadDebtWindowExcerpts: %v", err)
+	}
+	if len(got) != extra {
+		t.Fatalf("got %d debt excerpts, want %d (the scrolled-out tail)", len(got), extra)
+	}
+	for i, ex := range got {
+		if ex.TurnNumber != i+1 {
+			t.Fatalf("debt excerpt[%d].TurnNumber = %d, want %d", i, ex.TurnNumber, i+1)
+		}
+	}
+
+	// maxN smaller than the scrolled-out count: returns only the maxN
+	// excerpts immediately below the window (turns 4..5 here), the most
+	// recently scrolled out.
+	got2, err := ReadDebtWindowExcerpts(paths, id, 2)
+	if err != nil {
+		t.Fatalf("ReadDebtWindowExcerpts(2): %v", err)
+	}
+	if len(got2) != 2 || got2[0].TurnNumber != 4 || got2[1].TurnNumber != 5 {
+		t.Fatalf("bounded read = %+v, want turns [4 5]", got2)
+	}
+
+	// maxN <= 0 is a no-op.
+	if g, err := ReadDebtWindowExcerpts(paths, id, 0); err != nil || g != nil {
+		t.Fatalf("ReadDebtWindowExcerpts(0) = (%v, %v), want (nil, nil)", g, err)
+	}
+}
+
+// TestReadDebtWindowExcerpts_NoScrollOut: a thread at or below the assembly
+// window has no scrolled-out excerpts, so the debt window is empty.
+func TestReadDebtWindowExcerpts_NoScrollOut(t *testing.T) {
+	paths := newThreadHome(t)
+	const id = "thr_1"
+	if err := SaveThreadFrontmatter(paths, id, memops.ThreadMeta{
+		ID: id, Project: "prj_1", Summary: id, State: memops.ThreadActive,
+		Created: "2026-04-01T00:00:00Z", LastEngaged: "2026-04-01T00:00:00Z",
+		StateChanged: "2026-04-01T00:00:00Z", TurnCount: 1,
+	}); err != nil {
+		t.Fatalf("seed frontmatter: %v", err)
+	}
+	for turn := 1; turn <= ThreadTurnWindow; turn++ { // exactly the window, nothing scrolled out
+		if err := AppendThreadTurn(paths, id, turn, "content "+strconv.Itoa(turn)); err != nil {
+			t.Fatalf("append turn %d: %v", turn, err)
+		}
+	}
+	got, err := ReadDebtWindowExcerpts(paths, id, 16)
+	if err != nil {
+		t.Fatalf("ReadDebtWindowExcerpts: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("got %d debt excerpts on a window-sized thread, want none", len(got))
 	}
 }

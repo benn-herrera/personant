@@ -29,6 +29,7 @@ import (
 
 	"personant/internal/memops"
 	"personant/internal/model"
+	"personant/internal/recall/exact"
 	"personant/internal/recall/scoring"
 )
 
@@ -228,6 +229,24 @@ type Request struct {
 	// early content of the long-running thread (the #109 intra-thread
 	// case). Empty → no intra-thread pass.
 	Engaged string
+	// EngagedDebtWindow bounds the §3.4 recall-completeness lexical pass
+	// (#123): the maximum number of the engaged thread's most-recent
+	// scrolled-out excerpts that may be awaiting their fine-tier embedding
+	// flush — the runtime's §6.5 debt CAP, not the instantaneous debt depth.
+	// When > 0, the intra-thread pass adds a BOUNDED lexical scan over up to
+	// that many recent scrolled-out excerpts (loaded on demand) so durable
+	// content not yet embedded stays findable — the completeness floor that
+	// closes the async-flush lag dead zone.
+	//
+	// It is the CAP, not the live count, on purpose: a debt-cap flush resets
+	// the live counter to 0 and embeds asynchronously, so a live-count bound
+	// would re-open the dead zone for exactly the cap-sized batch during the
+	// flush's in-flight window. Bounding by the cap guarantees the lexical
+	// floor always covers the whole possibly-unflushed tail, continuously. The
+	// redundant overlap with already-flushed excerpts is harmless (≤ cap short
+	// excerpts, de-duped in the union). 0 → no debt pass (byte-identical prior
+	// behaviour). Sourced from the runtime's own debt-cap constant.
+	EngagedDebtWindow int
 }
 
 // SymbolicHit is the layer-1 detail for a recalled thread.
@@ -850,6 +869,25 @@ func (s *Service) Recall(ctx context.Context, req Request) ([]Result, error) {
 		s.recallQueries.Add(1)
 	}
 
+	// §3.4 recall-completeness floor (#123). The fine embedding tier lags
+	// scroll-out by up to the §6.5 debt cap: durable content scrolled out of
+	// the assembly window but not yet flushed to the fine tier is invisible to
+	// the embedding intra-pass above (it has no vector yet) — a dead-zone the
+	// invariant forbids. Close it with a BOUNDED, embedder-independent LEXICAL
+	// pass over exactly the engaged thread's debt-window excerpts (≤ debt cap,
+	// loaded on demand) and union the matched turns into the intra hit. Runs
+	// outside the q != nil block on purpose: completeness must not depend on a
+	// query embedding being produced. No-op unless there is an engaged thread,
+	// known debt, and query symbols to match against.
+	if turns := s.debtWindowTurns(ctx, req.Engaged, req.EngagedDebtWindow, req.QuerySymbols); len(turns) > 0 {
+		r := merged[req.Engaged]
+		if r == nil {
+			r = &Result{ThreadID: req.Engaged}
+			merged[req.Engaged] = r
+		}
+		r.IntraThread = unionIntraTurns(r.IntraThread, turns)
+	}
+
 	out := make([]Result, 0, len(merged))
 	for _, r := range merged {
 		out = append(out, *r)
@@ -989,6 +1027,66 @@ func (s *Service) intraThread(q []float64, snap *indexSnapshot, engaged string, 
 		turns[i] = c.TurnNumber
 	}
 	return &IntraThreadHit{Turns: turns, Score: chunks[0].Score}
+}
+
+// debtWindowTurns is the §3.4 recall-completeness floor (#123): a BOUNDED
+// LEXICAL pass over the engaged thread's embedding-debt window — the recent
+// scrolled-out excerpts not yet flushed to the fine embedding tier — returning
+// the turn numbers whose text lexically matches any query symbol. The union of
+// these with the fine-tier intra hit guarantees durable content is findable
+// even during the async-flush lag, with no dead zone (completeness is
+// continuous, not eventual).
+//
+// Bounded by construction: it loads at most window (the §6.5 debt cap)
+// excerpts via LoadDebtWindowExcerpts — a small, fixed-bound disk read that
+// does NOT grow with thread age — then lexically matches them. No embedding is
+// performed (the debt tail has no vectors yet; that is the gap), so this adds
+// no per-query embedding cost and no unbounded scan. A load error is logged
+// and swallowed: the completeness floor is opportunistic and must never abort
+// recall. Returns nil unless there is an engaged thread, a positive window
+// bound, and query symbols.
+func (s *Service) debtWindowTurns(ctx context.Context, engaged string, window int, symbols []string) []int {
+	if engaged == "" || window <= 0 || len(symbols) == 0 {
+		return nil
+	}
+	excerpts, err := s.ops.LoadDebtWindowExcerpts(ctx, engaged, window)
+	if err != nil {
+		_ = s.ops.Log(ctx, memops.LogCategoryRecall, "debt-window-error",
+			fmt.Sprintf("thread=%s window=%d err=%v", engaged, window, err))
+		return nil
+	}
+	return exact.MatchExcerptsBySymbols(excerpts, symbols)
+}
+
+// unionIntraTurns merges the lexical debt-window turns into the (possibly nil)
+// embedding intra hit, producing the combined IntraThreadHit the caller stores.
+// When there is no prior embedding hit, the lexical turns stand alone with a
+// zero Score — they are a completeness signal, not a ranked cosine match, so
+// they surface the thread without claiming an embedding similarity. When an
+// embedding hit exists, its Score is preserved (the embedding match is the
+// stronger relevance signal) and the turn sets are merged, sorted, and
+// de-duplicated.
+func unionIntraTurns(prior *IntraThreadHit, lexicalTurns []int) *IntraThreadHit {
+	seen := make(map[int]struct{}, len(lexicalTurns))
+	var turns []int
+	score := 0.0
+	if prior != nil {
+		score = prior.Score
+		for _, t := range prior.Turns {
+			if _, ok := seen[t]; !ok {
+				seen[t] = struct{}{}
+				turns = append(turns, t)
+			}
+		}
+	}
+	for _, t := range lexicalTurns {
+		if _, ok := seen[t]; !ok {
+			seen[t] = struct{}{}
+			turns = append(turns, t)
+		}
+	}
+	sort.Ints(turns)
+	return &IntraThreadHit{Turns: turns, Score: score}
 }
 
 // intraChunks returns the engaged thread's top-Kf chunk candidates, taking

@@ -805,8 +805,9 @@ swaps an `atomic`-pointer index so recall reads never block; a
 embed never overwrites a fresher vector when a thread re-activates and
 re-decays mid-job. Two flush triggers feed the one index: an
 **embedding-debt cap** (flush after N turns of accumulated scrolled-out
-content — N a §9 calibration window, with a small blind-spot for content
-scrolled-out-but-not-yet-flushed, the §3.11-shaped gap) and the
+content — N a §9 calibration window; the scrolled-out-but-not-yet-flushed
+content this lags is NOT a recall blind spot — the automatic intra path
+covers it with the bounded lexical completeness floor above, #123) and the
 **dormancy transition** (flush a thread's remaining debt when it decays
 out of the working set, so its full body is indexed before it becomes a
 pure recall target). Mid-session threads and mid-thread content thus
@@ -835,7 +836,18 @@ length grow into the thousands.
 *Implementation — shipped.* Tasks #102 and #109 were designed and built
 as one: chunk unit = turn-excerpt (`internal/recall/scoring/chunk.go`);
 coarse→fine Kc/Kf cutoffs implemented; debt-window N=16 (embedding-debt
-cap) implemented with the §3.11 blind-spot described above; persisted
+cap) implemented — and, per the recall-completeness invariant above, the
+automatic intra-thread path now closes the former debt-window dead zone
+(#123): after the fine-tier scan it adds a **bounded lexical pass** over
+exactly the engaged thread's debt-window excerpts (the recent scrolled-out
+tail awaiting its async flush, loaded ≤ the debt cap via
+`MemoryOps.LoadDebtWindowExcerpts`, matched against the query symbols by
+`recall/exact.MatchExcerptsBySymbols`) and unions the hits into the
+intra-thread result. This is the on-disk completeness floor: durable content
+stays findable continuously through the async-flush lag, with no per-query
+embedding and no unbounded scan. The bound passed is the debt **cap** (not
+the live debt depth), so coverage stays continuous across a cap-flush's
+in-flight window. Persisted
 cache = `.vec` + `.tree` sidecars under `.recall-cache/`
 (`internal/recall/measure/veccache.go`, `treecache.go`); shadow-chunk
 oracle implemented in the sim. On top of this, the #111 within-thread

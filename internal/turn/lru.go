@@ -39,6 +39,30 @@ type flushEnqueuer interface {
 	EnqueueFlush(threadID string, dispatchTurncount int)
 }
 
+// debtWindowBound is the bound for the §3.4 recall-completeness lexical pass
+// (#123): the embedding-debt CAP when an embedder-capable recaller is
+// installed and a thread is engaged, else 0. It is the MAX scrolled-out tail
+// that may be awaiting an async fine-tier flush — the window the recall path
+// lexically scans so durable, not-yet-embedded content stays findable
+// continuously, closing the flush-lag dead zone.
+//
+// Gated on flushEnqueuer (the embedder-capable recaller) for the same reason
+// the debt hooks are (I7): with no embedder there is no fine tier, so no lag
+// dead zone exists and the symbolic-only path keeps its byte-identical prior
+// behaviour (0 → the Service skips the debt pass entirely). The CAP, not the
+// live EmbeddingDebt depth, because a debt-cap flush resets the live counter
+// to 0 while its embed is still in flight — bounding by the cap keeps the
+// floor continuous across that window (see measure.Request.EngagedDebtWindow).
+func debtWindowBound(state *State, engagedOwner string) int {
+	if engagedOwner == "" {
+		return 0
+	}
+	if _, ok := state.Recaller.(flushEnqueuer); !ok {
+		return 0
+	}
+	return embeddingDebtCap
+}
+
 // recordExcerptScrollOut is the §6.2 debt-cap hook. The owner-excerpt
 // write path calls it once per turn-excerpt that scrolls out of a thread's
 // assembly window (a newer excerpt pushed it past the most-recent

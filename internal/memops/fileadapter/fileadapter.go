@@ -175,6 +175,21 @@ func (a *FileAdapter) LoadThreadExcerpts(ctx context.Context, threadID string) (
 	return ex, nil
 }
 
+// LoadDebtWindowExcerpts returns the bounded embedding-debt window (the
+// scrolled-out-but-recent tail, at most maxN excerpts) — the recall-
+// completeness floor (§3.4). Delegates to store.ReadDebtWindowExcerpts, which
+// reads only the maxN files below the assembly window.
+func (a *FileAdapter) LoadDebtWindowExcerpts(ctx context.Context, threadID string, maxN int) ([]memops.ThreadExcerpt, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	ex, err := store.ReadDebtWindowExcerpts(a.paths, threadID, maxN)
+	if err != nil {
+		return nil, fmt.Errorf("fileadapter: load debt-window excerpts: %w", err)
+	}
+	return ex, nil
+}
+
 // FindThread looks up the spine record for threadID.
 func (a *FileAdapter) FindThread(ctx context.Context, threadID string) (memops.SpineRecord, bool, error) {
 	if err := ctx.Err(); err != nil {

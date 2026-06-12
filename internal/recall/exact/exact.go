@@ -155,6 +155,86 @@ func GrepThreads(ctx context.Context, src excerptSource, threadIDs []string, pat
 	return out, nil
 }
 
+// MatchExcerptsBySymbols is the bounded lexical completeness floor for the
+// §3.4 recall-completeness invariant: given an ALREADY-LOADED, bounded set of
+// excerpts (the engaged thread's embedding-debt window — durable content
+// scrolled out of the assembly window but not yet in the fine embedding tier)
+// and the turn's query symbols, it returns the turn numbers whose excerpt text
+// lexically contains any query symbol. The union of these turns with the
+// fine-tier (embedding) intra-thread hit closes the async-flush lag dead zone:
+// durable content stays findable continuously, by the lexical path, while its
+// embedding flush is pending.
+//
+// It is pure (no I/O — the caller supplies the bounded excerpt slice, so this
+// imposes no per-query disk or embedding cost) and lexical (no embedder — the
+// debt-window tail is not embedded yet; an embedding match is impossible by
+// construction, which is exactly the gap this fills). A query symbol matches
+// an excerpt iff any of the symbol's word-tokens appears as a whole word
+// (case-insensitive) in the excerpt. Multi-word normalized anchors (e.g.
+// "quasar-redshift") are split on '-' and whitespace so they match the prose
+// surface form ("quasar redshift ...") the excerpt stores. Matching ANY token
+// favors completeness (the invariant's intent: never hide durable content),
+// mirroring the fine pass surfacing any chunk over threshold.
+//
+// Returned turn numbers are sorted ascending and de-duplicated. Empty symbols
+// or excerpts → nil.
+func MatchExcerptsBySymbols(excerpts []memops.ThreadExcerpt, symbols []string) []int {
+	tokens := symbolWordTokens(symbols)
+	if len(tokens) == 0 || len(excerpts) == 0 {
+		return nil
+	}
+	var out []int
+	for _, ex := range excerpts {
+		hay := strings.ToLower(ex.Text)
+		if anyTokenPresent(hay, tokens) {
+			out = append(out, ex.TurnNumber)
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+// symbolWordTokens lowercases the query symbols and splits each into its
+// constituent word-tokens (on '-' and any non-alphanumeric run), so a
+// normalized multi-word anchor matches the excerpt's prose surface form.
+// Empty / whitespace-only tokens are dropped; the result is de-duplicated.
+func symbolWordTokens(symbols []string) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, s := range symbols {
+		for _, tok := range strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+			return !isWordRune(r)
+		}) {
+			if tok != "" {
+				out[tok] = struct{}{}
+			}
+		}
+	}
+	return out
+}
+
+// anyTokenPresent reports whether any token appears as a whole word in the
+// already-lowercased haystack. Whole-word so a short token (e.g. "ai") does
+// not spuriously match inside an unrelated word ("brain"); the excerpt text is
+// split on the same word-rune rule as the symbols.
+func anyTokenPresent(lowerHay string, tokens map[string]struct{}) bool {
+	for _, w := range strings.FieldsFunc(lowerHay, func(r rune) bool {
+		return !isWordRune(r)
+	}) {
+		if _, ok := tokens[w]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// isWordRune is the word-token rune class shared by symbolWordTokens and
+// anyTokenPresent so the query side and the excerpt side tokenize identically.
+// ASCII letters/digits only — the symbol surface forms Normalize produces are
+// lowercase ASCII words joined by '-'.
+func isWordRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+}
+
 // appendMatches finds every non-overlapping match of re in text and appends
 // one Match per hit, located by line and byte offset. Line numbers are
 // 1-based; the offset is the absolute byte offset within text. Lines are

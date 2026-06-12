@@ -241,3 +241,71 @@ func seedThreadWithTurns(t *testing.T, paths store.PersonantPaths, id string, tu
 		}
 	}
 }
+
+// TestMatchExcerptsBySymbols covers the #123 recall-completeness lexical
+// matcher: token-level, case-insensitive, whole-word, multi-word-anchor
+// splitting, and turn ordering/de-dup — the independently verifiable logic of
+// the bounded debt-window pass.
+func TestMatchExcerptsBySymbols(t *testing.T) {
+	ex := func(turn int, text string) memops.ThreadExcerpt {
+		return memops.ThreadExcerpt{TurnNumber: turn, Text: text}
+	}
+	tests := []struct {
+		name     string
+		excerpts []memops.ThreadExcerpt
+		symbols  []string
+		want     []int
+	}{
+		{
+			name:     "single token whole-word match",
+			excerpts: []memops.ThreadExcerpt{ex(3, "the quasar spectrum"), ex(7, "unrelated content")},
+			symbols:  []string{"quasar"},
+			want:     []int{3},
+		},
+		{
+			name:     "case-insensitive",
+			excerpts: []memops.ThreadExcerpt{ex(5, "Redshift And Luminosity")},
+			symbols:  []string{"redshift"},
+			want:     []int{5},
+		},
+		{
+			name:     "multi-word anchor splits on hyphen, matches prose surface form",
+			excerpts: []memops.ThreadExcerpt{ex(2, "quasar redshift spectroscopy")},
+			symbols:  []string{"quasar-redshift"},
+			want:     []int{2},
+		},
+		{
+			name:     "whole-word only — no substring false positive",
+			excerpts: []memops.ThreadExcerpt{ex(4, "the brainstem region")},
+			symbols:  []string{"ai"}, // must not match inside "brainstem"
+			want:     nil,
+		},
+		{
+			name:     "multiple turns matched, sorted ascending",
+			excerpts: []memops.ThreadExcerpt{ex(9, "enzyme kinetics"), ex(1, "enzyme catalysis")},
+			symbols:  []string{"enzyme"},
+			want:     []int{1, 9},
+		},
+		{
+			name:     "any-token match across distinct symbols",
+			excerpts: []memops.ThreadExcerpt{ex(1, "glacier moraine"), ex(2, "neutrino flavor")},
+			symbols:  []string{"glacier", "neutrino"},
+			want:     []int{1, 2},
+		},
+		{name: "no symbols", excerpts: []memops.ThreadExcerpt{ex(1, "anything")}, symbols: nil, want: nil},
+		{name: "no excerpts", excerpts: nil, symbols: []string{"x"}, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := exact.MatchExcerptsBySymbols(tt.excerpts, tt.symbols)
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("got %v, want %v", got, tt.want)
+				}
+			}
+		})
+	}
+}

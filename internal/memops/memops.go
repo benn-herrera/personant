@@ -167,6 +167,20 @@ type MemoryOps interface {
 	// (nil, nil).
 	LoadThreadExcerpts(ctx context.Context, threadID string) ([]ThreadExcerpt, error)
 
+	// LoadDebtWindowExcerpts returns ONLY the bounded "embedding-debt window"
+	// of a thread: at most maxN retained turn-excerpts that have scrolled out
+	// of the most-recent assembly window but sit immediately below it — the
+	// recent tail that is durable on disk yet may not yet be in the §3.4
+	// fine-tier embedding index. It is the recall-completeness floor (SPEC
+	// §3.4): the recall path lexically scans this bounded set so durable
+	// content in the async-flush lag window stays findable, with no unbounded
+	// per-query scan. Unlike LoadThreadExcerpts (which loads the full retained
+	// set), this reads at most maxN excerpt files, so the per-query cost does
+	// not grow with thread age. maxN <= 0, or a thread shorter than the
+	// assembly window (nothing scrolled out), returns (nil, nil). Excerpts are
+	// returned in turn-number order.
+	LoadDebtWindowExcerpts(ctx context.Context, threadID string, maxN int) ([]ThreadExcerpt, error)
+
 	// FindThread looks up the spine record for threadID. The second
 	// return is false when no record exists. Folds in
 	// store.FindSpineRecord. An I/O error on the underlying spine
