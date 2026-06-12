@@ -7,6 +7,7 @@ import (
 	"personant/internal/prompt"
 	"personant/internal/recall/scoring"
 	"personant/internal/scenarios"
+	"personant/internal/store"
 	"personant/internal/turn"
 )
 
@@ -45,15 +46,6 @@ const (
 	// stream, determinism-safe), bucketed by hop distance.
 	mainThreadProbeEvery = 16
 
-	// intraThreadTurnWindow mirrors store.ThreadTurnWindow — the assembly
-	// window past which a turn-excerpt has scrolled out of context and is fine-
-	// tier index material (I6). A shadow chunk with turnNumber t is scrolled
-	// out at main-thread turn `cur` iff cur-t >= intraThreadTurnWindow. Kept as
-	// a named mirror (not store.ThreadTurnWindow directly) only because the sim
-	// package does not import store; if the runtime window moves, this must
-	// move with it — asserted equal in TestIntraThreadWindowMirrorsRuntime.
-	intraThreadTurnWindow = 512
-
 	// convoTransientPct / toolTransientPct are the PRNG keep/toss model's
 	// transient RATES (#111 / design §7.3): the sim's deterministic stand-in for
 	// the production §3.10.8 `lifetime:` marker. Per retained-excerpt-to-be, a
@@ -85,7 +77,7 @@ const (
 	// be in unflushed debt — not yet in the fine tier — so the oracle predicts
 	// it a MISS (the §6.5 by-design blind spot). A chunk is RECALLABLE
 	// (predict-hit eligible) only once it has been scrolled out >= this many
-	// turns: turnNumber <= cur - intraThreadTurnWindow - intraThreadDebtCap.
+	// turns: turnNumber <= cur - store.ThreadTurnWindow - intraThreadDebtCap.
 	// Modeling the blind spot is what keeps the oracle from penalizing the
 	// runtime for the by-design lag — a divergence inside it is a real bug.
 	intraThreadDebtCap = 16
@@ -221,10 +213,10 @@ func (g *generator) mainThreadScrolledOut() int {
 		return 0
 	}
 	cur := len(g.shadowChunks[g.mainThreadIdx])
-	if cur <= intraThreadTurnWindow {
+	if cur <= store.ThreadTurnWindow {
 		return 0
 	}
-	return cur - intraThreadTurnWindow
+	return cur - store.ThreadTurnWindow
 }
 
 // isMainThread reports whether idx is the Candidate-A long-running main
@@ -389,11 +381,11 @@ func (g *generator) buildIntraProbeStep() (bufStep, bool) {
 		if ch.slotIdx != queriedSlotIdx {
 			continue
 		}
-		if cur-ch.turnNumber < intraThreadTurnWindow {
+		if cur-ch.turnNumber < store.ThreadTurnWindow {
 			continue // still in the assembly window — not index material (I6)
 		}
 		anyScrolledOut = true
-		if cur-ch.turnNumber < intraThreadTurnWindow+intraThreadDebtCap {
+		if cur-ch.turnNumber < store.ThreadTurnWindow+intraThreadDebtCap {
 			continue // inside the debt-window blind spot — predicted miss (§6.5)
 		}
 		anyRecallable = true

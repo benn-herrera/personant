@@ -936,22 +936,6 @@ func TestDayStartWithinBucket(t *testing.T) {
 	}
 }
 
-// TestIntraThreadWindowMirrorsRuntime asserts the intra-thread oracle's
-// scroll-out boundary (intraThreadTurnWindow) tracks the runtime's assembly
-// window (store.ThreadTurnWindow). The two MUST agree or the oracle's "this
-// chunk is index material" predicate diverges from the runtime's I6 boundary,
-// silently breaking intra-thread coherence. The sim package cannot import
-// turn's unexported embeddingDebtCap, so the debt-cap mirror is a documented
-// invariant (intraThreadDebtCap == turn.embeddingDebtCap == 16) checked by
-// hand; the window mirror is machine-checked here.
-func TestIntraThreadWindowMirrorsRuntime(t *testing.T) {
-	if intraThreadTurnWindow != store.ThreadTurnWindow {
-		t.Fatalf("intraThreadTurnWindow=%d must mirror store.ThreadTurnWindow=%d "+
-			"(the I6 scroll-out boundary the runtime and the intra-thread oracle share)",
-			intraThreadTurnWindow, store.ThreadTurnWindow)
-	}
-}
-
 // TestKeepTossTrim_DeterministicAndShrinksLeafSet exercises the PRNG keep/toss
 // model (#111 / design §7.3): the durable (kept) leaf count must (a) be
 // deterministic for a given seed — two generators draw the identical
@@ -1046,7 +1030,7 @@ func TestIntraProbeOracle_BlindSpotBoundary(t *testing.T) {
 	g.shadowChunks[g.mainThreadIdx] = []chunkRecord{
 		{turnNumber: 1, slotIdx: earlySlot, tags: earlyTags},
 	}
-	for n := 2; n <= intraThreadTurnWindow+intraThreadDebtCap+50; n++ {
+	for n := 2; n <= store.ThreadTurnWindow+intraThreadDebtCap+50; n++ {
 		g.shadowChunks[g.mainThreadIdx] = append(g.shadowChunks[g.mainThreadIdx],
 			chunkRecord{turnNumber: n, slotIdx: currentSlot, tags: nonLooseTags(g.model.slots[currentSlot])})
 	}
@@ -1076,7 +1060,7 @@ func TestIntraProbeOracle_BlindSpotBoundary(t *testing.T) {
 	g2.threads[g2.mainThreadIdx].cur = currentSlot
 	g2.shadowChunks[g2.mainThreadIdx] = []chunkRecord{{turnNumber: 1, slotIdx: earlySlot, tags: earlyTags}}
 	// cur such that cur-1 is >= window (scrolled out) but < window+debtCap (blind spot).
-	for n := 2; n <= intraThreadTurnWindow+intraThreadDebtCap/2; n++ {
+	for n := 2; n <= store.ThreadTurnWindow+intraThreadDebtCap/2; n++ {
 		g2.shadowChunks[g2.mainThreadIdx] = append(g2.shadowChunks[g2.mainThreadIdx],
 			chunkRecord{turnNumber: n, slotIdx: currentSlot, tags: nonLooseTags(g2.model.slots[currentSlot])})
 	}
