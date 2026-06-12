@@ -1036,6 +1036,52 @@ func TestScenario_DecayTriggeredClosure(t *testing.T) {
 	RunScenario(t, sc)
 }
 
+// TestStepSetClock_RefinementNormalizesToPriorClock pins burndown #3: there is
+// exactly ONE clock-advance path. A step carrying an absolute At sets
+// pinnedClock = At; the execution-time refinement step (zero At, nonzero
+// TimeDelta) is NORMALIZED to prior-pinnedClock + TimeDelta — the prior
+// EXECUTED instant, not the generator's day-ahead frontier — and then takes
+// the same single set path. The refinement's advance is TRANSIENT: the next
+// buffered step's absolute At re-anchors the clock to the planned timeline.
+func TestStepSetClock_RefinementNormalizesToPriorClock(t *testing.T) {
+	h := &Harness{pinnedClock: SimClockStart}
+
+	// Step 1: a normal buffered step carries an absolute At mid-day — the
+	// authoritative wire field; the clock slaves to it.
+	priorTurn := SimClockStart.Add(10 * time.Hour)
+	stepSetClock(h, 0, "buffered turn", Step{At: priorTurn})
+	if !h.pinnedClock.Equal(priorTurn) {
+		t.Fatalf("absolute At: pinnedClock = %s, want %s", h.pinnedClock, priorTurn)
+	}
+
+	// Step 2: the refinement — zero At, only a small rapid-gap TimeDelta. Its
+	// At must be derived from the prior EXECUTED instant (pinnedClock), NOT
+	// from any generation-frontier value. Assert clock == priorTurn + delta.
+	const gap = 42 * time.Second
+	stepSetClock(h, 1, "refinement attempt 2", Step{TimeDelta: gap})
+	wantRefine := priorTurn.Add(gap)
+	if !h.pinnedClock.Equal(wantRefine) {
+		t.Fatalf("refinement: pinnedClock = %s, want prior+gap %s", h.pinnedClock, wantRefine)
+	}
+	// Transience + monotonicity: the refinement advanced only a few seconds and
+	// stays the same calendar day, far from a midnight day-close boundary.
+	if SimDayIndex(wantRefine) != SimDayIndex(priorTurn) {
+		t.Fatalf("refinement crossed a day boundary: day %d → %d",
+			SimDayIndex(priorTurn), SimDayIndex(wantRefine))
+	}
+
+	// Step 3: the next buffered step carries its own absolute At >= the
+	// refinement's instant — re-anchoring the clock to the planned timeline.
+	nextTurn := priorTurn.Add(time.Hour)
+	if nextTurn.Before(wantRefine) {
+		t.Fatalf("test setup: next buffered At %s must be >= refinement %s", nextTurn, wantRefine)
+	}
+	stepSetClock(h, 2, "next buffered turn", Step{At: nextTurn})
+	if !h.pinnedClock.Equal(nextTurn) {
+		t.Fatalf("re-anchor: pinnedClock = %s, want %s", h.pinnedClock, nextTurn)
+	}
+}
+
 // TestScenario_WallClockDecayTriggeredClosure drives §3.5 through the
 // wall-clock OR-branch end-to-end: a thread whose turn-idle count stays
 // below the turn threshold but whose last_engaged timestamp is older

@@ -246,22 +246,29 @@ type Step struct {
 	// the single-clock claim mechanically true — there is no independent
 	// harness-side accumulator to drift against the generator's clock.
 	//
-	// The sim generator always carries At. A handwritten scenario that
-	// advances relatively need only set TimeDelta: the sliceSource shim
-	// stamps At from a running base (SimClockStart + Σ TimeDelta) so the
-	// harness drive loop sees At on every step, keeping one authoritative
-	// field on the wire. A zero At (no shim, no generator — e.g. a test
-	// constructing a Step literal directly and driving runStep) leaves the
-	// pinned clock untouched, the pre-At-field behavior.
+	// Most sim steps carry At directly. The lone exception is the
+	// execution-time-injected refinement step (workload.go
+	// buildRefinementStep): the generator's day-ahead buffer cannot stamp
+	// it, because the generator's simNow is the generation frontier (running
+	// AHEAD of execution) — it does NOT know the prior-EXECUTED turn's
+	// instant. That step carries only TimeDelta; stepSetClock normalizes its
+	// At from pinnedClock (the authoritative executed instant) + TimeDelta
+	// BEFORE the single set. A handwritten scenario that advances relatively
+	// likewise need only set TimeDelta: the sliceSource shim stamps At from a
+	// running base (SimClockStart + Σ TimeDelta). So whether At arrives on the
+	// wire or is derived from TimeDelta, stepSetClock has exactly one
+	// clock-advance path (pinnedClock = At) — there is no rival integrate
+	// branch (burndown #3).
 	At time.Time
 
-	// TimeDelta is the legacy relative advance for handwritten scenarios:
-	// the simulated span between this step's turn and the prior one. The
-	// sliceSource shim integrates it onto a running base to derive Step.At
-	// (the authoritative field, above), so a handwritten scenario's call
-	// sites are unchanged. The sim path ignores TimeDelta for clock
-	// advancement (it sets pinnedClock from At) but still stamps it for the
-	// cadence tests that measure intra-day per-turn spans.
+	// TimeDelta is the relative advance: the simulated span between this
+	// step's turn and the prior one. For handwritten scenarios the
+	// sliceSource shim integrates it onto a running base to derive Step.At;
+	// for the execution-time refinement step (which has no At) stepSetClock
+	// normalizes At = pinnedClock + TimeDelta against the executed instant.
+	// On a sim step that already carries At, TimeDelta is informational only
+	// (the cadence tests that measure intra-day per-turn spans read it); the
+	// clock advance comes from At.
 	TimeDelta time.Duration
 
 	// RestartSession, when true, simulates an application shutdown+relaunch

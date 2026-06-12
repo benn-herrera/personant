@@ -225,35 +225,44 @@ func stepSetup(t *testing.T, h *Harness, idx int, label string, step Step) {
 }
 
 // stepSetClock slaves the pinned clock to the step's simulated instant.
-// sim-time-single-clock.md §3.4: SET pinnedClock = Step.At, do NOT integrate
-// a delta. pinnedClock becomes a copy of the generator's one re-anchored
-// clock, so the two cannot diverge by construction (there is no independent
-// harness accumulator to drift). The sliceSource shim stamps At for
-// handwritten scenarios, so At is set on every step the drive loop yields.
+// sim-time-single-clock.md §3.4 / burndown #3: there is exactly ONE
+// clock-advance path — SET pinnedClock = Step.At. pinnedClock becomes a copy
+// of the generator's one re-anchored clock, so the two cannot diverge by
+// construction (there is no independent harness accumulator to drift).
+//
+// At is mandatory: every emitted step carries an absolute At. The sliceSource
+// shim stamps it for handwritten scenarios (SimClockStart + Σ TimeDelta), and
+// every sim step stamps its own turnInstant — EXCEPT the generator's
+// execution-time-injected refinement step (workload.go buildRefinementStep),
+// which the day-ahead generation buffer cannot stamp: the generator's simNow
+// is the generation frontier, running AHEAD of execution, so it does NOT know
+// the prior-EXECUTED turn's instant. The refinement's correct reference is the
+// instant of the turn it follows — which is exactly h.pinnedClock at the
+// moment this runs (the prior executed step set it from its own At). So when a
+// step arrives At-less carrying only TimeDelta, NORMALIZE its At here from the
+// authoritative executed instant (pinnedClock + TimeDelta) BEFORE the single
+// set. This makes the refinement's advance TRANSIENT: the next buffered step
+// carries its own absolute At (>= this one, mid-day, far from any day-close),
+// re-anchoring the clock to the planned timeline. There is no rival integrate
+// branch — relative steps are normalized to absolute, then the one set runs.
+//
 // Forensic monotonic assert (§4/m3): At must never land before the prior
 // clock — a backward jump would mean a re-anchor landed before a prior turn
 // (the original-bug shape the deleted `td < 0 → 0` clamp used to swallow).
 // Non-fatal: route through the log, not t.Fatalf — it is a tripwire, not a
 // gate.
-//
-// NOTE: the Step.At / TimeDelta clock semantics here are owned by a separate
-// burndown item (#3) and are relocated verbatim, not changed.
 func stepSetClock(h *Harness, idx int, label string, step Step) {
-	if !step.At.IsZero() {
-		if step.At.Before(h.pinnedClock) {
-			pnlog.Warn("scenario step %d (%s): non-monotonic clock: Step.At %s is before prior pinnedClock %s",
-				idx+1, label, step.At.Format(time.RFC3339Nano), h.pinnedClock.Format(time.RFC3339Nano))
-		}
-		h.pinnedClock = step.At
-	} else if step.TimeDelta != 0 {
-		// Legacy relative advance for a step that carries no absolute At — the
-		// generator's execution-time-injected refinement step (a re-phrased
-		// follow-up moments after the prior turn), which the day-ahead buffer's
-		// generation-time clock cannot stamp with an absolute instant. The next
-		// buffered step re-establishes the absolute clock via its At, so this
-		// relative bump cannot drift the day-close tick.
-		h.pinnedClock = h.pinnedClock.Add(step.TimeDelta)
+	at := step.At
+	if at.IsZero() {
+		// Execution-time refinement step: stamp At from the authoritative
+		// executed instant (the prior turn's pinnedClock) + its relative gap.
+		at = h.pinnedClock.Add(step.TimeDelta)
 	}
+	if at.Before(h.pinnedClock) {
+		pnlog.Warn("scenario step %d (%s): non-monotonic clock: Step.At %s is before prior pinnedClock %s",
+			idx+1, label, at.Format(time.RFC3339Nano), h.pinnedClock.Format(time.RFC3339Nano))
+	}
+	h.pinnedClock = at
 }
 
 // stepExecTurn drives the turn end-to-end and returns the streamed body and
