@@ -71,17 +71,6 @@ const (
 	// trim draws are deterministic for a given seed yet isolated from g.rng's
 	// action-selection stream. An arbitrary fixed constant.
 	keepTossSeedOffset = 0x6b656570 // "keep"
-
-	// embeddingDebtCap mirrors the runtime's embeddingDebtCap (turn/lru.go, =16):
-	// the fine-tier flush batch size — the runtime flushes a thread's
-	// scrolled-out debt every this-many turns of accumulated scroll-out. The
-	// flush-rate model divides scrolled-out chunks by this cap to report
-	// recall_index_flush_calls (the embed-call cost N pays, §9.2). It is NO
-	// LONGER a recall blind spot: per SPEC §3.4 the runtime's bounded lexical
-	// completeness floor (#123) keeps durable scrolled-out content findable
-	// continuously through the async-flush lag, so the oracle predicts recall
-	// across the FULL scrolled-out range with no dead zone.
-	embeddingDebtCap = 16
 )
 
 // chunkRecord is the generator's shadow of ONE fine-tier chunk: the
@@ -202,21 +191,6 @@ func durableChunkCount(chunks []chunkRecord) int {
 		}
 	}
 	return kept
-}
-
-// mainThreadScrolledOut returns the count of the main thread's chunks that
-// have scrolled out of the assembly window (turnNumber <= cur - window) —
-// the fine-tier debt the flush triggers pay down. Used to MODEL the flush
-// call/chunk rate (§9.2) from the shadow rather than instrument the runtime.
-func (g *generator) mainThreadScrolledOut() int {
-	if g.mainThreadIdx < 0 {
-		return 0
-	}
-	cur := len(g.shadowChunks[g.mainThreadIdx])
-	if cur <= store.ThreadTurnWindow {
-		return 0
-	}
-	return cur - store.ThreadTurnWindow
 }
 
 // isMainThread reports whether idx is the Candidate-A long-running main

@@ -1517,12 +1517,17 @@ const (
 	metricRecallQueryLatencyP95 = "recall_query_latency_p95"
 	metricRecallQueryLatencyP99 = "recall_query_latency_p99"
 
-	// metricRecallIndexFlushCalls / _Chunks are the embed-call rate from the
-	// debt-cap + dormancy flush triggers — the cost N pays (§6.2/§9.2). Modeled
-	// from the main thread's scrolled-out chunk count and the debt cap:
-	// flush_calls ≈ scrolled-out / debtCap, flush_chunks ≈ scrolled-out.
-	metricRecallIndexFlushCalls  = "recall_index_flush_calls"
-	metricRecallIndexFlushChunks = "recall_index_flush_chunks"
+	// metricRecallIndexFlushCalls / _Chunks are the §6.5 fine-tier flush cost —
+	// the embed-call rate the debt-cap + dormancy triggers pay (§6.2/§9.2).
+	// OBSERVED from the runtime, not modeled (#126): the harness folds the actual
+	// turn.State flush counters into these run-total Metrics counters, so the
+	// gauge reports what the runtime DID rather than dividing scrolled-out chunks
+	// by a mirror of the internal embeddingDebtCap. These keys cross the
+	// harness↔sim seam (harness writes the counter, the sim reads it), so they
+	// are owned by the metric-key registry; the local names alias the registry
+	// consts to keep the §4.3-series call sites uniform with the others.
+	metricRecallIndexFlushCalls  = scenarios.MetricRecallIndexFlushCalls
+	metricRecallIndexFlushChunks = scenarios.MetricRecallIndexFlushChunks
 
 	// metricRecallIntraHopRecall is the per-hop intra-thread recall curve (the
 	// #109 fidelity curve), keyed metricRecallIntraHopRecall+"_h<N>". SYMBOLIC

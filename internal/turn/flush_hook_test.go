@@ -158,33 +158,53 @@ func TestTouchActiveLRU_DemotionFlushes(t *testing.T) {
 	}
 }
 
-// TestFlushHooks_SymbolicOnlyNoOp: with the symbolic-only default Recaller
-// (no flushEnqueuer), the debt and dormancy hooks are inert — no debt map
-// is allocated and no enqueue occurs. This is the I7 determinism guard:
-// nil-embedder behavior is byte-identical to before Inc 4.
-func TestFlushHooks_SymbolicOnlyNoOp(t *testing.T) {
+// TestFlushHooks_SymbolicOnlyCountsButNoDispatch: with a Recaller that does
+// NOT satisfy flushEnqueuer (the symbolic-only path), the §6.5 flush COST is
+// still observed — the debt accrues and the flushCalls/flushChunks counters
+// bump on a debt-cap fire — but no index DISPATCH happens (EnqueueFlush is not
+// satisfied). This is the #126 contract: the flush cost gauge reports what the
+// policy actually did, which is the same cost an embedding run would pay for
+// this workload; only the embed work below the turn layer is gated on the
+// embedder (I7, now narrowed from "no debt tracking" to "no dispatch").
+func TestFlushHooks_SymbolicOnlyCountsButNoDispatch(t *testing.T) {
 	paths, meta := newTestHome(t)
 	ops := fileadapter.NewFileAdapter(paths)
 	state := NewState(ops, meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
-	// NewState installs a symbolic-only measure.Service (embedder nil). It is
-	// a Recaller but its EnqueueFlush is a no-op; the turn-side seam guards on
-	// the flushEnqueuer assertion, which measure.Service DOES satisfy — so the
-	// real I7 guard for the symbolic-only path is that EnqueueFlush no-ops
-	// (jobs==nil) below the turn layer. Here we additionally confirm the debt
-	// map stays unallocated when a recaller does not satisfy flushEnqueuer.
-	state.Recaller = symbolicOnlyRecaller{}
+	state.Recaller = symbolicOnlyRecaller{} // a Recaller, deliberately NOT a flushEnqueuer
 	state.TurnNumber = 3
 	state.Budget = memops.Budget{BTopK: 1}
 
+	// embeddingDebtCap+5 scroll-outs on one thread → exactly one cap fire (the
+	// remaining 5 sit below the next cap and do not flush yet).
 	for i := 0; i < embeddingDebtCap+5; i++ {
 		recordExcerptScrollOut(state, "thr_1")
 	}
-	touchActiveLRU(state, "thr_a")
-	touchActiveLRU(state, "thr_b") // demotes thr_a
-	flushOnDormancy(state, "thr_z")
+	if state.FlushCalls() != 1 {
+		t.Errorf("symbolic-only debt-cap flush count = %d, want 1 (cost observed without an embedder)", state.FlushCalls())
+	}
+	if state.FlushChunks() != embeddingDebtCap {
+		t.Errorf("symbolic-only flush chunks = %d, want %d (one cap's worth)", state.FlushChunks(), embeddingDebtCap)
+	}
 
-	if state.embeddingDebt != nil {
-		t.Errorf("debt map allocated for a non-flushEnqueuer recaller: %v", state.embeddingDebt)
+	// A dormancy demotion ALWAYS fires a flush (the coarse-body re-embed cost),
+	// even when the demoted thread carries no excerpt debt — so a no-debt
+	// demotion counts a call but adds no chunks.
+	touchActiveLRU(state, "thr_a")
+	touchActiveLRU(state, "thr_b") // demotes thr_a (no debt) → +1 call, +0 chunks
+	if state.FlushCalls() != 2 {
+		t.Errorf("a no-debt dormancy demotion must still count one flush call; calls=%d, want 2", state.FlushCalls())
+	}
+	if state.FlushChunks() != embeddingDebtCap {
+		t.Errorf("a no-debt demotion must add no chunks; chunks=%d, want %d", state.FlushChunks(), embeddingDebtCap)
+	}
+
+	// A dormancy flush of thr_1 carries its remaining +5 debt tail.
+	flushOnDormancy(state, "thr_1")
+	if state.FlushCalls() != 3 {
+		t.Errorf("dormancy flush of a debt-carrying thread must count; calls=%d, want 3", state.FlushCalls())
+	}
+	if state.FlushChunks() != embeddingDebtCap+5 {
+		t.Errorf("flush chunks after dormancy = %d, want %d", state.FlushChunks(), embeddingDebtCap+5)
 	}
 }
 

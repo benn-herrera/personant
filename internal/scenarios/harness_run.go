@@ -572,6 +572,15 @@ func restartSession(t *testing.T, h *Harness, idx int, label string) {
 	// that exists at relaunch. A no-op when no factory is set.
 	h.installRecaller(t, rebuilt)
 
+	// Drain the pre-shutdown session's §6.5 flush cost into the run-total
+	// counter BEFORE the State is discarded (#126): a relaunch rebuilds a fresh
+	// State whose flush counters reset to 0, so the count this ended session
+	// accrued would be lost otherwise. The new session resumes counting from 0;
+	// the LIVE read (flushCostRunToDate) adds the current session's not-yet-
+	// drained count on top of this counter, so the run-to-date total is always
+	// correct without ever draining (and double-counting) the live session.
+	foldEndedSessionFlushCost(h)
+
 	h.State = rebuilt
 
 	if err := AssertSessionRestored(before, rebuilt); err != nil {
@@ -742,6 +751,46 @@ func runSleepCycle(t *testing.T, h *Harness, idx int, label string) {
 	if pre > post {
 		h.Metrics.Counter(MetricGitDirBytesReclaimed, pre-post)
 	}
+}
+
+// foldEndedSessionFlushCost drains a NOW-ENDING session's OBSERVED §6.5 flush
+// cost (turn.State.FlushCalls/FlushChunks) into the run-total counters (#126).
+// It is called at every RestartSession, just before the pre-shutdown State is
+// discarded, so the ended session's count is preserved across the per-session
+// State churn a relaunch causes. The live (current) session is NOT drained
+// here — FlushCostRunToDate adds its not-yet-drained count to these counters at
+// read time, so the run-to-date total is correct at any point without
+// double-counting. A no-op when there is no live State (defensive). The counted
+// cost is the §6.2 debt-cap + dormancy policy's flush rate — the real cost N
+// pays, replacing the prior model that divided scrolled-out chunks by a mirror
+// of the internal embeddingDebtCap.
+func foldEndedSessionFlushCost(h *Harness) {
+	if h.State == nil {
+		return
+	}
+	if calls := h.State.FlushCalls(); calls > 0 {
+		h.Metrics.Counter(MetricRecallIndexFlushCalls, int64(calls))
+	}
+	if chunks := h.State.FlushChunks(); chunks > 0 {
+		h.Metrics.Counter(MetricRecallIndexFlushChunks, int64(chunks))
+	}
+}
+
+// FlushCostRunToDate returns the OBSERVED §6.5 flush cost run-to-date (#126):
+// the run-total counters (drained from sessions that have already ended at a
+// RestartSession) plus the live current session's not-yet-drained
+// FlushCalls/FlushChunks. This is the true run-to-date at ANY point — interior
+// day-close or end-of-run — mirroring how the cosine-ops gauge reads the live
+// recaller's accumulating accessor rather than a stale drained value. Returns
+// (calls, chunks).
+func (h *Harness) FlushCostRunToDate() (calls, chunks int64) {
+	calls = h.Metrics.CounterValue(MetricRecallIndexFlushCalls)
+	chunks = h.Metrics.CounterValue(MetricRecallIndexFlushChunks)
+	if h.State != nil {
+		calls += int64(h.State.FlushCalls())
+		chunks += int64(h.State.FlushChunks())
+	}
+	return calls, chunks
 }
 
 // gitDirBytes returns the total on-disk size of home's .git directory in

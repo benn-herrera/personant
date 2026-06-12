@@ -458,8 +458,8 @@ func logRungSummary(t *testing.T, label string, rep rungReport, gen *generator) 
 		m.Gauges[metricRecallQueryCosineOps])
 	t.Logf("recall_query_latency:     P50=%.1fms P95=%.1fms P99=%.1fms (I3 gate: P99 flat across the rung ladder)",
 		m.Gauges[metricRecallQueryLatencyP50], m.Gauges[metricRecallQueryLatencyP95], m.Gauges[metricRecallQueryLatencyP99])
-	t.Logf("recall_index_flush:       %d calls / %d chunks (modeled debt-cap N=%d flush rate — the cost N pays)",
-		int(m.Gauges[metricRecallIndexFlushCalls]), int(m.Gauges[metricRecallIndexFlushChunks]), embeddingDebtCap)
+	t.Logf("recall_index_flush:       %d calls / %d chunks (OBSERVED §6.5 debt-cap + dormancy flush rate — the cost N pays; folded from the runtime's turn.State counters, not modeled)",
+		int(m.Gauges[metricRecallIndexFlushCalls]), int(m.Gauges[metricRecallIndexFlushChunks]))
 
 	intraProbeObs := 0
 	for _, total := range gen.intraHopTotal {

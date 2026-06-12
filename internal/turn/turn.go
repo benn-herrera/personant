@@ -183,6 +183,21 @@ type State struct {
 	// or no indexer-capable recaller is installed so debt is never tracked).
 	embeddingDebt map[string]int
 
+	// flushCalls / flushChunks are the OBSERVED §6.5 fine-tier flush cost of
+	// THIS session: the number of times the debt-cap or dormancy trigger fired
+	// a flush, and the total turn-excerpt count those flushes carried into the
+	// fine tier. They count the flush DECISION (the §6.2 policy), not the embed
+	// dispatch — so they accrue even on the symbolic-only path where
+	// EnqueueFlush no-ops (no embedder), which is exactly the cost an
+	// embedding-enabled run WOULD pay for this workload. The harness reads them
+	// via the FlushCalls/FlushChunks accessors and folds each session's count
+	// into a run-total before the session is discarded (a restart rebuilds a
+	// fresh State, so a single field cannot hold the run total — see the §6.5
+	// flush-cost gauge in the sim harness). Session-scoped, reset per LoadSession
+	// like embeddingDebt.
+	flushCalls  int
+	flushChunks int
+
 	// structuralCreates / structuralCloses count the §3.11 structural
 	// changes that occurred during the in-flight turn: thread creations
 	// (createNewThread) and §3.5 closure/retire writes (applyClosureResolution).

@@ -1044,14 +1044,17 @@ func TestIntraProbeOracle_Completeness(t *testing.T) {
 		return bs.intraProbe
 	}
 
-	// Deep past — well beyond the former window+debtCap boundary.
-	if p := probe(t, store.ThreadTurnWindow+embeddingDebtCap+50); !p.predictHit {
+	// Deep past — well beyond the assembly window. The offset (66) is an
+	// arbitrary "comfortably scrolled out" depth; it no longer mirrors any
+	// runtime cap (#126 removed the sim-side embeddingDebtCap).
+	if p := probe(t, store.ThreadTurnWindow+66); !p.predictHit {
 		t.Errorf("oracle predicted MISS for a deep-past early chunk re-issuing its own tags; want HIT")
 	}
-	// Recent tail — the early chunk scrolled out only a few turns ago, INSIDE
-	// the former debt-window blind spot. Per §3.4 it must STILL predict a HIT:
-	// no dead zone (#123/#124).
-	if p := probe(t, store.ThreadTurnWindow+embeddingDebtCap/2); !p.predictHit {
+	// Recent tail — the early chunk scrolled out only a few turns ago, in the
+	// band that USED to be a debt-window blind spot. Per §3.4 it must STILL
+	// predict a HIT: no dead zone (#123/#124). 8 is an arbitrary small offset
+	// just past the assembly window, not a cap reference.
+	if p := probe(t, store.ThreadTurnWindow+8); !p.predictHit {
 		t.Errorf("oracle predicted MISS for an early chunk just past the assembly window (former blind spot); want HIT — completeness asserted (§3.4)")
 	}
 }
@@ -1391,6 +1394,12 @@ func recordIntraThreadMetrics(h *scenarios.Harness, gen *generator, liveThreads 
 	// so it stays here as a direct Set — it is not part of the pure shadow-derived
 	// compute the daily snapshot reuses.
 	recordCosineOpsMeasured(h)
+	// OBSERVED §6.5 flush cost (#126): surface the run-total flush counters the
+	// harness folded from turn.State as the end-of-run gauges. Like cosine_ops
+	// this is read from the live run (here, the harness Counter the
+	// foldFlushCost drain accumulated), NOT the generator shadow, so it Sets
+	// directly here and is not part of the pure computeIntraThreadGauges map.
+	recordFlushCostObserved(h)
 	// W1 divergence classification (#111 §7.1 diagnostic): the strict-miss /
 	// tie / tree-mismatch breakdown of recall_intra_descent_divergence is
 	// accumulated by the HARNESS at the per-probe call site (the
@@ -1430,12 +1439,12 @@ func computeIntraThreadGauges(gen *generator, liveThreads int, p50, p95, p99 flo
 	g[metricRecallQueryLatencyP50] = p50
 	g[metricRecallQueryLatencyP95] = p95
 	g[metricRecallQueryLatencyP99] = p99
-	// Modeled flush rate: every scrolled-out chunk is eventually flushed
-	// (flush_chunks), in batches of embeddingDebtCap (flush_calls). This is
-	// the embed-call cost the debt cap N pays over the rung.
-	scrolledOut := gen.mainThreadScrolledOut()
-	g[metricRecallIndexFlushChunks] = float64(scrolledOut)
-	g[metricRecallIndexFlushCalls] = float64(scrolledOut / embeddingDebtCap)
+	// The §6.5 flush cost (recall_index_flush_calls/_chunks) is OBSERVED from
+	// the runtime, not modeled here (#126) — the harness folds the actual
+	// turn.State flush counters into run-total Metrics counters. It is therefore
+	// NOT part of this pure shadow-derived map; recordIntraThreadMetrics and the
+	// daily snapshot read it directly off h.Metrics, exactly as cosine_ops is
+	// read off the live recaller.
 
 	// Per-hop intra-thread recall + coherence.
 	divergence := 0
@@ -1542,11 +1551,14 @@ type dailyStats struct {
 // apart. This test fails loudly on that drift: it walks dailyStats by field
 // name and asserts each tagged field's json tag equals the registry const that
 // owns the same key. Only registry-owned keys are pinned; sim-internal keys
-// (recall_query_cosine_ops, recall_index_flush_calls) are single-source within
-// this package already and are intentionally not covered here.
+// (recall_query_cosine_ops) are single-source within this package already and
+// are intentionally not covered here. recall_index_flush_calls became a
+// registry key in #126 (it now crosses the seam — harness writes, sim reads),
+// so it IS pinned here.
 func TestMetricKeyTagsMatchRegistry(t *testing.T) {
 	want := map[string]string{
 		"SleepCycles":              scenarios.MetricSleepCycles,
+		"RecallIndexFlushCalls":    scenarios.MetricRecallIndexFlushCalls,
 		"RecallIntraDescentDiverg": scenarios.MetricRecallIntraDescentDivergence,
 		"RecallIntraW1StrictMiss":  scenarios.MetricRecallIntraW1StrictMiss,
 		"RecallIntraW1Tie":         scenarios.MetricRecallIntraW1Tie,
@@ -1685,8 +1697,17 @@ func (w *dailySnapshotWriter) appendRecord(h *scenarios.Harness, simDate time.Ti
 			// a true run-to-date value; 0 on the mock path, where the perf bend is
 			// honestly unmeasurable. At finalize this equals the summary's gauge by
 			// construction (one source) — the #120 last-record==summary invariant.
-			RecallQueryCosineOps:     liveCosineOpsPerQuery(h),
-			RecallIndexFlushCalls:    intra[metricRecallIndexFlushCalls],
+			RecallQueryCosineOps: liveCosineOpsPerQuery(h),
+			// recall_index_flush_calls is the OBSERVED §6.5 flush cost (#126), read
+			// run-to-date via h.FlushCostRunToDate (drained-counter + live session) —
+			// NOT a shadow-modeled value (computeIntraThreadGauges no longer computes
+			// it) and NOT off the end-of-run gauge (which is only Set at finalize, so
+			// reading it here would leave interior days stuck at 0). Because the read
+			// adds the LIVE session it tracks correctly on every interior day, not
+			// just after a restart drain. At finalize this equals the summary's gauge
+			// by construction (one FlushCostRunToDate source) — the #120
+			// last-record==summary invariant, exactly as cosine_ops.
+			RecallIndexFlushCalls:    flushCallsRunToDate(h),
 			RecallIntraDescentDiverg: h.Metrics.CounterValue(scenarios.MetricRecallIntraDescentDivergence),
 			RecallIntraW1StrictMiss:  h.Metrics.CounterValue(scenarios.MetricRecallIntraW1StrictMiss),
 			RecallIntraW1Tie:         h.Metrics.CounterValue(scenarios.MetricRecallIntraW1Tie),
@@ -1754,6 +1775,18 @@ func liveCosineOpsPerQuery(h *scenarios.Harness) float64 {
 	return 0
 }
 
+// flushCallsRunToDate reads the OBSERVED §6.5 flush-CALL count run-to-date
+// (#126) for the daily record's named field, via h.FlushCostRunToDate (drained
+// counter + live session). Single source of truth shared with the end-of-run
+// gauge (recordFlushCostObserved), so the LAST daily record's
+// recall_index_flush_calls equals the summary gauge by construction (the #120
+// invariant). Returns 0 before any flush fired (e.g. a rung too short to scroll
+// the main thread past the assembly window).
+func flushCallsRunToDate(h *scenarios.Harness) float64 {
+	calls, _ := h.FlushCostRunToDate()
+	return float64(calls)
+}
+
 // recordCosineOpsMeasured emits the MEASURED per-query cosine-op count (§7.2)
 // into the end-of-run gauge. Reads the live recaller off the harness's State via
 // liveCosineOpsPerQuery; emits 0 when no embedding recaller is installed or no
@@ -1762,6 +1795,20 @@ func liveCosineOpsPerQuery(h *scenarios.Harness) float64 {
 // modeled.
 func recordCosineOpsMeasured(h *scenarios.Harness) {
 	h.Metrics.Set(metricRecallQueryCosineOps, liveCosineOpsPerQuery(h))
+}
+
+// recordFlushCostObserved surfaces the OBSERVED §6.5 fine-tier flush cost
+// (#126) as the end-of-run gauges. h.FlushCostRunToDate sums the run-total
+// counter (sessions drained at each RestartSession) with the live session's
+// not-yet-drained count, giving the whole-run flush cost the §6.2 debt-cap +
+// dormancy policy actually paid — the real number, not the old
+// scrolled-out/embeddingDebtCap estimate. Reading from the SAME
+// FlushCostRunToDate the daily snapshot reads makes the last daily record equal
+// the summary by construction (the #120 invariant), exactly as cosine_ops does.
+func recordFlushCostObserved(h *scenarios.Harness) {
+	calls, chunks := h.FlushCostRunToDate()
+	h.Metrics.Set(metricRecallIndexFlushCalls, float64(calls))
+	h.Metrics.Set(metricRecallIndexFlushChunks, float64(chunks))
 }
 
 // closureCount counts `retire.complete` events in the harness's event

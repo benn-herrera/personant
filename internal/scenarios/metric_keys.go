@@ -39,6 +39,20 @@ const (
 	// (re)builds across the run — the design §7.2 / fork-F-B trip-wire (#111).
 	MetricRecallIntraTreeRebuildCalls = "recall_intra_tree_rebuild_calls"
 
+	// §6.5 fine-tier flush cost — the embed-call rate the debt-cap + dormancy
+	// triggers pay (§6.2/§9.2). MetricRecallIndexFlushCalls is the run-total
+	// number of flushes the runtime fired; MetricRecallIndexFlushChunks the
+	// total turn-excerpts those flushes carried into the fine tier. OBSERVED,
+	// not modeled (#126): the harness folds each session's
+	// turn.State.FlushCalls/FlushChunks into these run-totals (a restart rebuilds
+	// State, so the per-session counts are drained before the State is discarded),
+	// rather than dividing scrolled-out chunks by a mirror of the internal
+	// embeddingDebtCap. They cross the harness↔sim seam (harness writes the
+	// counter, the sim summary/daily-record reads it), so they live in the
+	// registry like the other cross-seam keys.
+	MetricRecallIndexFlushCalls  = "recall_index_flush_calls"
+	MetricRecallIndexFlushChunks = "recall_index_flush_chunks"
+
 	// W1 descent-vs-flat quality measure (#111 / design §7.1; gate→measure in
 	// #119). MetricRecallIntraDescentDivergence is the run-total top-Kf leaf set
 	// difference between the summary-tree descent and the flat scan;

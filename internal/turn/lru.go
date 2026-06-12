@@ -58,23 +58,30 @@ func debtWindowBound(state *State, engagedOwner string) int {
 // assembly window (a newer excerpt pushed it past the most-recent
 // ThreadTurnWindow boundary — it stays retained on disk but leaves the
 // assembled context). It accrues per-thread embedding debt; when debt
-// reaches embeddingDebtCap it enqueues a fine-tier flush of that thread
+// reaches embeddingDebtCap it fires a fine-tier flush of that thread
 // (passing state.TurnNumber as the I2 dispatch watermark) and resets the
 // counter.
 //
-// A no-op when the installed Recaller does not satisfy flushEnqueuer
-// (symbolic-only default → no embedder → no debt tracking, I7).
+// The debt accrual and the flush-cost COUNTERS (flushCalls/flushChunks) run
+// unconditionally — they are the §6.5 policy's observed cost for this
+// workload, which is the same whether or not an embedder is installed. Only
+// the actual index DISPATCH (EnqueueFlush) is gated on flushEnqueuer: with no
+// embedder there is no fine tier to fill, so the dispatch is skipped while the
+// cost the policy WOULD pay is still measured (the harness reads it as the
+// recall_index_flush_* gauge). Recall behavior is unchanged on the
+// symbolic-only path — debtWindowBound stays embedder-gated, so the debt map's
+// population here never reaches the recall path (I7).
 func recordExcerptScrollOut(state *State, threadID string) {
-	enq, ok := state.Recaller.(flushEnqueuer)
-	if !ok {
-		return
-	}
 	if state.embeddingDebt == nil {
 		state.embeddingDebt = make(map[string]int)
 	}
 	state.embeddingDebt[threadID]++
 	if state.embeddingDebt[threadID] >= embeddingDebtCap {
-		enq.EnqueueFlush(threadID, state.TurnNumber)
+		state.flushCalls++
+		state.flushChunks += state.embeddingDebt[threadID]
+		if enq, ok := state.Recaller.(flushEnqueuer); ok {
+			enq.EnqueueFlush(threadID, state.TurnNumber)
+		}
 		state.embeddingDebt[threadID] = 0
 	}
 }
@@ -82,19 +89,36 @@ func recordExcerptScrollOut(state *State, threadID string) {
 // flushOnDormancy is the §6.2 dormancy hook. touchActiveLRU calls it when
 // a thread is demoted out of Layer B (decays out of the working set), so
 // the thread's remaining debt is flushed into the fine tier before it
-// becomes a pure recall target. It enqueues a flush (passing
-// state.TurnNumber as the I2 dispatch watermark) and clears the thread's
-// debt counter so the next active episode starts clean.
+// becomes a pure recall target. It fires a flush (passing state.TurnNumber
+// as the I2 dispatch watermark) and clears the thread's debt counter so the
+// next active episode starts clean.
 //
-// A no-op when the installed Recaller does not satisfy flushEnqueuer (I7).
+// As in recordExcerptScrollOut, the flush-cost counters accrue regardless of
+// embedder (the §6.5 policy fired); only the EnqueueFlush dispatch is gated.
+// A dormancy flush ALWAYS fires (and counts one call), matching the dispatch
+// contract: a flush re-embeds the thread's coarse body — one embed call — even
+// when no excerpt debt remains, so the call cost is real with or without a
+// chunk tail. flushChunks accrues the remaining debt (0 when the thread had
+// nothing scrolled out).
 func flushOnDormancy(state *State, threadID string) {
-	enq, ok := state.Recaller.(flushEnqueuer)
-	if !ok {
-		return
+	state.flushCalls++
+	state.flushChunks += state.embeddingDebt[threadID]
+	if enq, ok := state.Recaller.(flushEnqueuer); ok {
+		enq.EnqueueFlush(threadID, state.TurnNumber)
 	}
-	enq.EnqueueFlush(threadID, state.TurnNumber)
 	delete(state.embeddingDebt, threadID)
 }
+
+// FlushCalls returns this session's observed §6.5 fine-tier flush count: how
+// many times the debt-cap or dormancy trigger fired a flush. FlushChunks
+// returns the total turn-excerpts those flushes carried into the fine tier.
+// Both are the §6.2 policy's OBSERVED cost — they accrue even on the
+// symbolic-only path (where the embed dispatch no-ops), so the harness can
+// report the real flush cost N pays instead of modeling it from the internal
+// debt cap. Session-scoped; a restart rebuilds a fresh State, so the harness
+// folds each session's count into the run total before discarding it.
+func (s *State) FlushCalls() int  { return s.flushCalls }
+func (s *State) FlushChunks() int { return s.flushChunks }
 
 // fetchThreadForReprompt loads thread thrID from disk, fires a
 // thread.fetched context delta, and promotes the thread into
