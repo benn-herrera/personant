@@ -440,6 +440,8 @@ func logRungSummary(t *testing.T, label string, rep rungReport, gen *generator) 
 	divergence := int(m.Gauges[metricWanderCoherenceDivergence])
 	t.Logf("wander coherence divergence: %d (criterion b PASS = 0; decay is expected, divergence is the failure)",
 		divergence)
+	t.Logf("layerb shadow divergence:   %d (burndown #8 PASS = 0 when runtime follows the plan; shadow LRU vs runtime ActiveThreads)",
+		int(m.Gauges[metricLayerBShadowDivergence]))
 
 	// Intra-thread recall (#109, §9.2). The §4.3 perf-decay series (the I3/I4
 	// gates) and the intra-thread oracle's per-hop coherence curve. H2 HONESTY:
@@ -654,6 +656,27 @@ func evalRungGates(t *testing.T, label string, rep rungReport, gen *generator, p
 		// not a coherence break. Report, do not fail.
 		t.Logf("wander coherence divergence %d over %d probe obs (live-inference: oracle blind — not asserted)",
 			divergence, totalProbeObs)
+	}
+
+	// Layer-B shadow cross-check (burndown #8): the generator's shadow LRU vs
+	// the runtime's authoritative ActiveThreads. The comparison is purely
+	// structural (LRU membership), independent of the embedder — it holds on
+	// the mock and the live-EMBEDDING run (both follow the canned plan), so it
+	// is hard ==0 whenever the runtime follows the plan (oracleGatesAssert).
+	// Under live INFERENCE the real model engages a different thread set than
+	// the plan, so the shadow legitimately diverges → report only.
+	layerBDivergence := int(m.Gauges[metricLayerBShadowDivergence])
+	if policy.oracleGatesAssert() {
+		if layerBDivergence != 0 {
+			t.Errorf("burndown #8 FAILURE: Layer-B shadow divergence %d != 0 — the generator's shadow LRU and the "+
+				"runtime's ActiveThreads disagree (a runtime-resident thread the shadow did not predict). The recall "+
+				"oracle's expected-sets are computed off the shadow, so a divergence silently corrupts them. Root-cause "+
+				"the shadow engage()/eviction model against the runtime LRU (see the forensic log for the offending ids).",
+				layerBDivergence)
+		}
+	} else {
+		t.Logf("Layer-B shadow divergence %d (live-inference: real model engages off-plan — shadow legitimately diverges, not asserted)",
+			layerBDivergence)
 	}
 
 	// Intra-thread coherence divergence — the #109 tripwire. SCOPED MOCK-ONLY

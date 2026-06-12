@@ -185,6 +185,11 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 		RecallExpected:         len(step.ExpectedRecallMatches),
 		TargetRecoverable:      stepRecoverable(h, livePost),
 		RecallExpectedForgiven: rec.expectedForgiven,
+		// Burndown #8: expose the runtime's authoritative Layer-B set so a
+		// shadow-keeping StepSource can cross-check. Copy it — ActiveThreads is
+		// turn.State's live, mutable slice; the source must read a stable
+		// snapshot, not alias state that the next turn rewrites.
+		RuntimeLayerB: append([]string(nil), h.State.ActiveThreads...),
 	}
 }
 

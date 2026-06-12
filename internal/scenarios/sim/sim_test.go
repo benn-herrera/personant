@@ -1343,6 +1343,12 @@ func recordWanderMetrics(h *scenarios.Harness, gen *generator) {
 		divergence += gen.wanderHopDiverge[hop]
 	}
 	h.Metrics.Set(metricWanderCoherenceDivergence, float64(divergence))
+
+	// Layer-B shadow cross-check (burndown #8): the run-total count of
+	// runtime-resident threads the generator's shadow LRU failed to predict.
+	// The gate lives in evalRungGates (hard == 0 when the runtime follows the
+	// canned plan).
+	h.Metrics.Set(metricLayerBShadowDivergence, float64(gen.layerBShadowDivergence))
 }
 
 // recordSynthesisMetrics folds the synthesis-thread telemetry (§2.7.3,

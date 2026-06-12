@@ -424,6 +424,20 @@ type StepFeedback struct {
 	// (the source must nil-guard; drainSteps measures nothing).
 	TargetRecoverable func(id string) bool
 
+	// RuntimeLayerB is a snapshot of the runtime's authoritative Layer-B
+	// membership (turn.State.ActiveThreads) AFTER the just-run turn —
+	// the thread IDs the working set renders as full bodies, most-recently-
+	// engaged first, capped at Budget.BTopK. It is the §2.6.1 layer.b set
+	// the runtime actually holds, exposed so a StepSource that keeps its own
+	// shadow model of Layer-B residency can cross-check the shadow against
+	// the real thing (sim-harness review burndown #8). Before this field the
+	// generator's shadow LRU and the runtime LRU were never cross-checked;
+	// an eviction-order or tie-break divergence would silently make the
+	// recall oracle compute wrong expected-sets. nil on the zero-feedback
+	// drainSteps path (the source must nil-guard). Read-only — the source
+	// must not retain or mutate the backing slice.
+	RuntimeLayerB []string
+
 	// RecallExpectedForgiven is the count of expected matches that remain
 	// recoverable after removing archived / absent-from-spine threads —
 	// the same forgiveness the F1/precision path applies in

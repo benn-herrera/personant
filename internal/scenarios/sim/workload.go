@@ -733,6 +733,18 @@ type bufStep struct {
 	// bucket the spine.intra-match-fire observation by hop distance and detect
 	// oracle/runtime divergence on the fine tier.
 	intraProbe *intraProbe
+
+	// layerBSnapshot is the generator's shadow Layer-B (thread indices,
+	// most-recently-engaged first) as it stood when THIS step was generated —
+	// i.e. after this step's engage() applied. It is captured at appendStep
+	// time because the generator runs a day-ahead buffer: the live g.layerB
+	// has already advanced to the GENERATION frontier (hundreds of steps
+	// ahead) by the time this step EXECUTES and its feedback arrives, so the
+	// live shadow cannot be compared against this step's post-turn runtime
+	// ActiveThreads. This per-step snapshot is the shadow that step's recall
+	// oracle actually used, and is what the runtime's post-turn Layer-B must
+	// agree with (burndown #8 cross-check).
+	layerBSnapshot []int
 }
 
 // dayBuf is one generated calendar day's steps plus the global step
@@ -776,6 +788,12 @@ func dayHasTurn(day dayBuf) bool {
 // (Seed, Duration, Corpus) — the determinism contract drainSteps
 // relies on.
 func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool) {
+	// Cross-check the shadow Layer-B model against the runtime's
+	// authoritative set (burndown #8). Observational only — it reads
+	// feedback and bumps a counter; it draws no rng and emits no step, so
+	// the canonical stream stays byte-identical at a fixed seed.
+	g.crossCheckLayerB(feedback)
+
 	// Tally the just-run step into its lifecycle recall bucket, if any. The
 	// hit predicate matches the episode loop's: observed match-fires meet
 	// the FORGIVEN expected count (archived/absent-from-spine expectations
@@ -964,7 +982,13 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 		case g.recallAttempts < 3:
 			// MISS with attempts remaining — inject a refinement turn
 			// (a different slot of the same topic, same primary thread).
+			// The refinement re-engages layerB[0] (an LRU no-op on both the
+			// shadow and the runtime), so it cannot introduce Layer-B drift;
+			// it is also injected at EXECUTION time, not via appendStep, so it
+			// carries no snapshot. Arm a nil snapshot so the burndown-#8
+			// cross-check skips it rather than re-using the prior step's.
 			g.recallAttempts++
+			g.lastLayerBSnapshot = nil
 			return g.buildRefinementStep(), true
 		default:
 			// MISS on the 3rd attempt — close as unresolved.
@@ -994,6 +1018,7 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 	g.lastVagueTurn = bs.vagueCampaignTurn
 	g.lastProbe = bs.probe
 	g.lastIntraProbe = bs.intraProbe
+	g.lastLayerBSnapshot = bs.layerBSnapshot
 
 	// If this buffered step opens a new recall opportunity, start an
 	// episode — UNLESS it is a campaign step (suppressEpisode), whose
@@ -1448,6 +1473,17 @@ const (
 	// (b) tripwire. Zero (or a tiny rounding band) is the pass; any real
 	// divergence means the §4.3 eviction-free coherence assumption broke.
 	metricWanderCoherenceDivergence = "wander_coherence_divergence"
+
+	// metricLayerBShadowDivergence is the run-total count of cross-check
+	// failures between the generator's shadow Layer-B model and the runtime's
+	// authoritative ActiveThreads (sim-harness review burndown #8): a
+	// runtime-resident thread (minus the carrier) the shadow did not predict.
+	// 0 is the pass; hard-gated == 0 when the runtime follows the canned plan
+	// (oracleGatesAssert). Defined here (not the cross-seam registry) because
+	// it is computed and asserted entirely within package sim, exactly like
+	// metricWanderCoherenceDivergence — the registry holds only keys that
+	// cross the harness↔sim writer/reader seam.
+	metricLayerBShadowDivergence = "layerb_shadow_divergence"
 )
 
 // Intra-thread recall metric keys (§9.2, #109). Defined here so the
@@ -1684,6 +1720,22 @@ type generator struct {
 	// the last ResumeWindowTurns turns.
 	lastEngagedTurn []int
 
+	// layerBShadowDivergence is the run-total count of cross-check failures
+	// between this shadow `layerB` model and the runtime's authoritative
+	// Layer-B set (StepFeedback.RuntimeLayerB / turn.State.ActiveThreads) —
+	// sim-harness review burndown #8. Each Next() compares the two: every
+	// runtime-resident thread (minus the measurement carrier, which the
+	// generator deliberately never enters into its shadow) MUST be present
+	// in the shadow; a runtime thread the shadow does not predict means the
+	// two LRUs have diverged (a tie-break or eviction-order subtlety), which
+	// would silently corrupt the recall oracle's expected-sets. 0 on a clean
+	// run; hard-gated == 0 when the runtime follows the canned plan
+	// (oracleGatesAssert; report-only under live inference, where the real
+	// model engages a different thread set than the plan). Each divergent
+	// step also routes a forensic pnlog.Warn so a CI failure has the
+	// offending id-sets without a re-run.
+	layerBShadowDivergence int
+
 	// files[idx] is the §3.9 tracked-file state for thread idx: the
 	// deterministic file path and the file's current content, which grows
 	// by one line on every `work`-turn write. A thread gets a fileState
@@ -1911,6 +1963,14 @@ type generator struct {
 	lastIntraProbe *intraProbe
 	embeddingRun   bool
 
+	// lastLayerBSnapshot is the just-RUN step's shadow Layer-B snapshot
+	// (bufStep.layerBSnapshot), armed when the step is drawn so the next
+	// Next()'s feedback cross-checks the runtime's post-turn ActiveThreads
+	// against the shadow that step's oracle used (burndown #8). nil for a
+	// step that carries no snapshot (the execution-time refinement, which is
+	// an LRU no-op) — the cross-check skips those.
+	lastLayerBSnapshot []int
+
 	// Intra-thread per-hop probe tallies (§9.2, #109). intraHopTotal is the
 	// per-hop observation count (the shared denominator); intraHopPredictHit
 	// is the oracle's predicted recoverability (the symbolic hop-recall curve,
@@ -1990,7 +2050,14 @@ type recallTally struct {
 // metadata into the current day, and advances the global step counter.
 // It is the on-demand replacement for the build-all generator's
 // `g.steps = append(g.steps, step)`.
+//
+// It also captures this step's shadow Layer-B snapshot (burndown #8): every
+// step's engage() has already run by the time the builder returns it, so
+// g.layerB here is exactly the post-engage shadow that step's recall oracle
+// used — the state the runtime's post-turn ActiveThreads must agree with. The
+// snapshot is copied because g.layerB is rewritten by every later engage().
 func (g *generator) appendStep(bs bufStep) {
+	bs.layerBSnapshot = append([]int(nil), g.layerB...)
 	g.day.steps = append(g.day.steps, bs)
 	g.stepIndex++
 }
@@ -2039,6 +2106,69 @@ func (g *generator) resumeCandidates(turn int) []int {
 // inLayerB reports whether thread index idx is currently in Layer B.
 func (g *generator) inLayerB(idx int) bool {
 	return slices.Contains(g.layerB, idx)
+}
+
+// crossCheckLayerB compares the just-run step's shadow Layer-B (the snapshot
+// armed from its bufStep) against the runtime's authoritative set
+// (StepFeedback.RuntimeLayerB, a snapshot of turn.State.ActiveThreads taken
+// after that turn) — sim-harness review burndown #8. The shadow and the real
+// LRU were never cross-checked before; an eviction-order or tie-break
+// divergence would silently make the recall oracle compute wrong expected-sets
+// ("two models of one truth, assumed to agree").
+//
+// It compares the PER-STEP snapshot, not the live g.layerB, because the
+// generator runs a day-ahead buffer: by the time this step executes, the live
+// shadow has advanced hundreds of steps to the generation frontier. The
+// snapshot is the shadow as of this step's own engagement — the state the
+// runtime's post-turn Layer-B must agree with.
+//
+// The contract is a SUBSET, not strict equality, because of the measurement
+// carrier (§2.6 carrierIdx): when a carrier-hosted probe runs, the RUNTIME
+// engages the carrier (it lands at the front of ActiveThreads), but the
+// generator deliberately never runs the carrier through engage() — so the
+// shadow legitimately lacks the carrier, and the carrier may also have
+// displaced a genuine tail thread the shadow still holds. Removing the carrier
+// from the runtime side and asserting every remaining runtime-resident thread
+// is PRESENT in the shadow tolerates that modeled exclusion while still
+// catching the target defect: a thread the runtime put in Layer-B that the
+// generator's LRU model did not predict. The shadow being a strict superset
+// (it retains a thread the carrier evicted) is expected, not a divergence.
+//
+// Observational only: it bumps a counter and routes a forensic warn; it draws
+// no rng and emits no step, so the canonical stream stays byte-identical.
+// Skips the zero-feedback drainSteps path (Index < 0), a sleep-cycle step
+// (RuntimeLayerB nil), and a step with no snapshot (the execution-time
+// refinement, an LRU no-op — lastLayerBSnapshot nil).
+func (g *generator) crossCheckLayerB(feedback scenarios.StepFeedback) {
+	if feedback.Index < 0 || feedback.RuntimeLayerB == nil || g.lastLayerBSnapshot == nil {
+		return
+	}
+	// This step's shadow Layer-B id set (indices → thr_N ids).
+	shadow := make(map[string]struct{}, len(g.lastLayerBSnapshot))
+	for _, idx := range g.lastLayerBSnapshot {
+		shadow[g.threads[idx].threadID()] = struct{}{}
+	}
+	// The carrier is a measurement artifact the shadow never models; exclude it
+	// from the runtime side so its expected presence is not scored as drift.
+	var carrierID string
+	if g.carrier >= 0 {
+		carrierID = g.threads[g.carrier].threadID()
+	}
+	var divergent []string
+	for _, id := range feedback.RuntimeLayerB {
+		if id == carrierID {
+			continue
+		}
+		if _, ok := shadow[id]; !ok {
+			divergent = append(divergent, id)
+		}
+	}
+	if len(divergent) == 0 {
+		return
+	}
+	g.layerBShadowDivergence += len(divergent)
+	pnlog.Warn("sim step %d: Layer-B shadow divergence: runtime-resident %v absent from shadow %v (carrier=%q) — burndown #8 LRU drift",
+		feedback.Index, divergent, g.lastLayerBSnapshot, carrierID)
 }
 
 // runSession emits turns covering `active` worth of turn-active simulated
