@@ -2409,4 +2409,24 @@ The generated workload's simulated clock is a **single UTC `time.Time` primitive
 - **Determinism.** The `(Seed, Duration)` → output contract is byte-exact: all fuzz (the ±15min start, the ~72 s per-turn spans, the ~1h break, the 6h session boundary) draws from the single seeded RNG in a fixed order, and the day count is a pure function of `Duration` alone (the termination check keys off the un-jittered day position, drawing no RNG). Same seed + duration → identical step stream.
 - **Staccato clock; logical time is `TurnNumber` (realism ledger: accounted-for / not-simulated / benign).** The simulated clock advances **once per step** and is **frozen within a turn** — every `clock.Timeline()` read inside one `turn.Run` returns the same instant; it jumps at the next step. So intra-turn elapsed time is zero (a turn's own processing takes no simulated time; provenance timestamps within a turn collide). This is **not simulated and is benign** because the system's *logical* clock is `TurnNumber` (a strictly-increasing integer): closure/decay (`TurnNumber − LastEngagedTurn ≥ decayTurns`), staging, file-chain aging, and history ordering all key off `TurnNumber`, never wall-clock. `clock.Timeline()` is consumed only at coarse granularity — §3.5 wall-clock decay (days/hours; the inter-turn advance still moves it) and provenance/display timestamps — so zero intra-turn time changes no logic, no ordering, no measurement. **Revisit only if** sub-turn logic is added that orders events by timestamp, or metrics become timestamp-grained (which could then produce odd same-instant entries, knowingly discountable). Cheap fidelity fix if ever wanted: split the per-turn advance into intra-turn-processing + inter-turn-pause — buys log realism only, no correctness.
 
+#### 9.4.2 Harness state-ownership and generator ↔ harness protocol
+
+See ARCHITECTURE.md §"Simulation-harness structure" for the file-layout map and state-ownership table. This subsection specifies the protocol contracts that the structural map depends on.
+
+**Log-marker contract.** The harness derives its measurement signal by scraping specific strings from the runtime's event log (§2.8) — not by introspecting internal runtime state. The scraped markers are:
+
+| Log event string | Used for |
+|---|---|
+| `spine.match-fire` | Symbolic recall hit — feeds `RecallMatchFireIDs` in `StepFeedback`. |
+| `spine.embed-match-fire` | Embedding recall hit — feeds `EmbedMatchFireIDs`. |
+| `spine.intra-match-fire` | Intra-thread (fine-tier) recall hit — feeds `IntraMatchFireIDs`. |
+| `thread.created` | Folds into `Harness.createdThreadIDs` (thread accounting + archival-forgiveness). |
+| `archive.archived` | Folds into `Harness.archivedThreadIDs` (archival-forgiveness predicate). |
+
+These strings are pinned by contract tests so a rename in the runtime's log emission fails a test rather than silently zeroing a measurement series.
+
+**`StepFeedback.RuntimeLayerB` cross-check contract.** After each turn the harness captures the runtime's authoritative `ActiveThreads` slice and populates `RuntimeLayerB`. The generator's shadow Layer-B LRU is cross-checked against it with a hard divergence gate (==0 difference required). A divergence means the generator's recall oracle — which computes expected-match sets from the shadow LRU — has drifted from the runtime's actual working set; any tolerated divergence would silently produce wrong expected-sets and corrupt recall metrics.
+
+**Archival-forgiveness contract.** An expected-match thread that the runtime has archived off the spine (present in `archivedThreadIDs`) can never produce a `spine.match-fire`; counting it as a miss would penalise the oracle for naming a correctly-archived thread. The forgiveness predicate (`TargetRecoverable`) and the forgiven count (`RecallExpectedForgiven`) are carried in `StepFeedback` so the generator's per-step scoring uses the same forgiveness logic the harness's `recordRecallFidelity` applies. The `recall_unexplained_absence` counter tracks threads that are off-spine AND absent from the archive index — a non-zero value is always a substrate integrity failure, never an expected archival outcome (see ARCHITECTURE.md §"Unexplained-absence = zero tolerance").
+
 

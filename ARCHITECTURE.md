@@ -554,6 +554,48 @@ When making technique changes (parameter tweaks, algorithm adjustments), the que
 
 **Next testing change on deck — user-contributed file content.** The §3.9 file-editing workload currently models the *agentic* edit shape: file content arrives via `fs.read`/`fs.write` tool deltas while the user prompt stays generic. The planned variant models the *user-dictated* shape — the user prompt itself carries the literal values and lines being added. The §3.9 reverse-delta store is content-agnostic to source, so storage / dedup / clock-aging is already covered; the variant exists to exercise the upstream paths that differ — user-prompt symbol extraction, the §3.0 transient-data classification (`RetentionDecision` vs `RetentionTask`), and the §3.9.2/§3.9.4 live-window handling of the same literal appearing in both the prompt and the file.
 
+### Simulation-harness structure
+
+The harness's load-bearing role (above) and the single-clock temporal model (SPEC §9.4.1) are the design constraints. This subsection maps the implementation onto them — the structural inventory a developer needs to orient without re-deriving it from the code.
+
+**File layout — `internal/scenarios/`**
+
+| File | Responsibility |
+|---|---|
+| `harness.go` | Core types: `Step`, `Scenario`, `Harness`, `StepSource`, `StepFeedback`, `RecallAck`, `ClosureAck`, `RecallFidelityMode`. Narrow optional interfaces (`threadIndexer`, `cacheSweeper`, `treeRebuilder`, `intraDivergenceProbe`, `cosineOpsReporter`). The `sliceSource` shim that adapts a fixed `[]Step` to `StepSource`. `SimClockStart`, `SimDayLength`, `SimWorkdayStart`, `SimDayIndex`. |
+| `harness_setup.go` | `newHarness` (per-scenario isolation, clock default, telemetry wiring) and `scriptedCurator`. |
+| `harness_run.go` | `RunScenario`, `runStep` (the six named phase helpers: `stepSetup` / `stepSetClock` / `stepExecTurn` / `stepScrapeEventLog` / `stepMeasureRecall` / `stepRecordMetrics` / `stepCloseDays`), `restartSession`, and the final-gauge helpers (`foldEventLines`, `peakHistorySymbols`). |
+| `harness_resolvers.go` | Per-step resolver builders (`recallResolverFor`, `closureResolverFor`) and the invariant-cadence policy (`perStepInvariants`, `runInvariants`). |
+| `recall_fidelity.go` | Recall-fidelity measurement (`recordRecallFidelity`), the incremental log-tailer (`logTailer`), and `classifyRecoverability`. |
+| `invariants.go` | The full invariant validator set (`VerifySpineIntegrity`, `VerifyIndexFresh`, `VerifyEngagementConsistency`, `VerifyArchiveResolvable`, `VerifyProjectReferences`, `VerifyLastActiveValid`, `VerifyNoBudgetOverflow`, `VerifyDedupConsistency`). `DefaultInvariants` and `cheapDefaultInvariants` slices. |
+| `metric_keys.go` | Cross-seam metric-key registry (see "State-ownership map" below). |
+| `sim/workload.go` | On-demand workload generator (`generator`, `GenerateWorkload`, `runWorkDay`/`runSession`/`runDayOff`). |
+| `sim/campaign.go`, `sim/wander.go`, `sim/intra.go` | Specialized step-sequence builders for the campaign, within-thread wander, and intra-thread recall workload variants. |
+| `sim/telemetry.go` | Per-day snapshot emission and the sim daily-record schema. |
+| `sim/sim_test.go`, `sim/sim_rung_test.go` | `TestSim` (acceptance ladder entry point) and rung-by-rung regression guards. |
+
+**State-ownership map — single source for every mutable harness value**
+
+The "silent lie" failure mode (above) comes from two independent sources claiming the same value. Each of the following is owned in exactly one place:
+
+| Value | Owner | Rule |
+|---|---|---|
+| Simulated clock | `Harness.pinnedClock` — a **slaved copy** of `Step.At`. `stepSetClock` does `pinnedClock = Step.At`, never integrates a delta. One clock advance path; see SPEC §9.4.1 for the single-clock rationale. | Never set `pinnedClock` from a delta except as described for the execution-time refinement step (which normalises `At = pinnedClock + TimeDelta` before the set). |
+| Day index | Derived: `SimDayIndex(pinnedClock)`. Never a parallel counter. | Any code that needs "which sim-day is this?" calls `SimDayIndex(h.pinnedClock)`. |
+| Cross-seam metric keys | `metric_keys.go` — the single const block. Harness writes them; sim reads them. | A key rename is one edit; a compile error if a reference is missed. Keys owned entirely inside `sim/` are NOT mirrored here. |
+| Archived thread set | `Harness.archivedThreadIDs` — folded incrementally from tailed `archive.archived` log lines. | The archival-forgiveness filter in recall fidelity and `VerifyThreadAccounting` both read this set; neither re-walks the full log. |
+| Created thread set | `Harness.createdThreadIDs` — folded incrementally from tailed `thread.created` log lines. | Same pattern as above. |
+| W1 divergence tally | Accumulated directly in `runStep` (not read from `measure.Service` atomics post-run), so the tally survives `RestartSession`-driven Service churn. | A restart installs a fresh Service whose atomics start at zero; reading post-run would lose probes from prior sessions. |
+| Layer-B shadow | Generator-owned. Cross-checked each step against `StepFeedback.RuntimeLayerB` (the runtime's authoritative `ActiveThreads`) with a hard ==0 divergence gate. | The shadow LRU is the generator's oracle for expected-match sets; a silent divergence would make recall measurements wrong. |
+
+**Generator ↔ harness protocol**
+
+The `StepSource` interface is the only coupling between the on-demand workload generator and the harness drive loop. The protocol is:
+
+1. The generator emits `Step` structs carrying an **absolute `Step.At`** (the step's position on the simulated clock, derived from `SimClockStart`). This field is mandatory for sim steps; `stepSetClock` sets `pinnedClock = Step.At`.
+2. After each turn, the harness passes `StepFeedback` back into `StepSource.Next`. `StepFeedback` carries: `RecallMatchFireIDs` / `EmbedMatchFireIDs` / `IntraMatchFireIDs` (what the runtime surfaced), `RuntimeLayerB` (the authoritative Layer-B membership for shadow cross-check), `TargetRecoverable` (archival-forgiveness predicate for probe scoring), and `RecallExpectedForgiven` (the forgiven expected count the hit/miss counter must use).
+3. Two pinned contracts prevent silent drift: **(a) log-marker contract** — the harness scrapes specific runtime log strings (`spine.match-fire`, `spine.embed-match-fire`, `spine.intra-match-fire`, `thread.created`, `archive.archived`) as the measurement signal; these strings are pinned by contract tests so a rename breaks a test, not a measurement; **(b) metric-key contract** — every counter or histogram key that crosses the seam is in `metric_keys.go`; a rename compiles only if every reference is updated.
+
 ---
 
 ## Out of scope (deliberately)
