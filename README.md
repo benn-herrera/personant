@@ -145,13 +145,18 @@ Two independently-versioned tracks:
 - Anchor-lifecycle redesign: `anchors` as a deterministic projection of active `history_symbols`; superseded anchors retained (not evicted); validated across the acceptance ladder.
 - Recall-fidelity test infrastructure (C.1–C.6): mad-libs query generator, adversarial templates, 152-article Wikipedia corpus (~1090 fragments), LLM-assisted template authoring, calibration sweep, embedding head-to-head measurement.
 
+**Implemented and wired into the turn loop (pending full acceptance-validation):**
+
+- Thread closure / retirement (§3.5): curator-drafted summary + human-ack flow; the decay-triggered closure scan fires at turn close.
+- Recoverable deep-cold archival (§3.8): `internal/turn/archival.go` + `internal/memops/fileadapter/fileadapter_archive.go`; the cardinality-pressure archival scan fires at turn close.
+- Working-set content dedup / git minimization (§3.9): `internal/dedup` + `AgeFileChains`, applied per engaged thread.
+
 **Queued:**
 
-- Phase 4: thread closure / retirement (curator-drafted summaries, ack flow, spine state transitions).
 - Phase 5: cross-project digest, fallback dissection, directive accrual.
 - Startup recovery after unclean shutdown.
 - Inference-/embedding-in-loop coverage (LIVE_INFERENCE / LIVE_EMBEDDING sim paths).
-- v0.2: deep cold archival, working-set content dedup, transient-data compaction.
+- v0.2: transient-data event-log compaction.
 
 ## Design Principles
 

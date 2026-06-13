@@ -255,9 +255,16 @@ In progress:
   contract loosening + SPEC deltas → coupled sim workload + metrics) and
   validated across the acceptance ladder.
 
+Implemented and wired into the turn loop (pending full acceptance-validation):
+- Thread closure / retirement (§3.5): curator-drafted summary + ack flow;
+  `internal/turn/closure.go` decay-triggered scan fires at turn close.
+- Recoverable deep-cold archival (§3.8): `internal/turn/archival.go` +
+  `internal/memops/fileadapter/fileadapter_archive.go`; cardinality-pressure
+  scan fires at turn close.
+- Working-set content dedup / git minimization (§3.9): `internal/dedup` +
+  `AgeFileChains`, applied per engaged thread.
+
 Queued:
-- Phase 4: closure / retirement (curator-drafted summaries; ack flow;
-  spine state transitions).
 - Phase 5: cross-project digest, fallback dissection, directive
   accrual.
 - Startup recovery after unclean shutdown (v0.1 substrate requirement,
