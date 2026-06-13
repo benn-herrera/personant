@@ -310,6 +310,58 @@ func TestSurfaceRecall_AcceptPromotesToLayerB(t *testing.T) {
 	}
 }
 
+// TestSurfaceRecall_AcceptFiresThreadFetchedDelta — the §3.0.5 "no gaps"
+// fix (M3 / guest G-F3): a recall-accept promotion mutates Layer B, so it
+// must go through the §3.0 hook chain like every other working-window
+// fetch — parity with fetchThreadForReprompt (§5.5). Accepting thr_1 must
+// fire a thread.fetched delta through onContextDelta, whose observable
+// effect is the chain's step-5 substrate event (context.modified
+// source=thread.fetched). The declined thr_2 fires no such delta, so
+// exactly one is expected.
+func TestSurfaceRecall_AcceptFiresThreadFetchedDelta(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
+	seedThreadWithAnchors(t, paths, meta.ID, "thr_2", []string{"alpha", "beta", "zeta", "eta"})
+
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state.coalesce.addSymbol("alpha", "alpha", memops.SourceUser)
+	state.coalesce.addSymbol("beta", "beta", memops.SourceUser)
+
+	state.RecallResolver = func(_ context.Context, offer RecallOffer) (RecallResolution, error) {
+		for i, c := range offer.Candidates {
+			if c.ThreadID == "thr_1" {
+				return RecallResolution{Accept: []int{i}, Reason: DeclineNotRelevant}, nil
+			}
+		}
+		t.Errorf("thr_1 not present in offer.Candidates: %v", offer.Candidates)
+		return RecallResolution{Reason: DeclineNotRelevant}, nil
+	}
+
+	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
+		t.Fatalf("surfaceRecallCandidates: %v", err)
+	}
+
+	logBody := readDayLog(t, paths)
+	// The chain's step-5 event is the observable proof the recall-accept
+	// promotion ran through onContextDelta. The fetched body is non-empty,
+	// so bytes>0; assert on the source token (the bytes count is incidental).
+	const fetchedEvent = "context.modified source=thread.fetched"
+	if !strings.Contains(logBody, fetchedEvent) {
+		t.Errorf("accepted promotion did not fire a thread.fetched delta through the chain;\nlog body:\n%s", logBody)
+	}
+	// Exactly one — the accepted thr_1 fires it; the declined thr_2 does not.
+	if got := strings.Count(logBody, fetchedEvent); got != 1 {
+		t.Errorf("thread.fetched delta count: got %d want 1 (only the accepted thread)\nlog body:\n%s", got, logBody)
+	}
+	// Sanity: the promotion still happened and the accept was logged.
+	if !slices.Contains(state.ActiveThreads, "thr_1") {
+		t.Errorf("thr_1 accepted but not promoted to ActiveThreads: %v", state.ActiveThreads)
+	}
+	if !strings.Contains(logBody, "recall.accept thr=thr_1") {
+		t.Errorf("recall.accept thr=thr_1 not logged:\n%s", logBody)
+	}
+}
+
 // TestSurfaceRecall_DeclineAllLogsReason — a resolver that accepts
 // nothing declines every offered candidate, each decline carrying the
 // resolution's Reason. Proves Layer B is untouched on a full decline
