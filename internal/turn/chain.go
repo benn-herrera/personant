@@ -109,13 +109,22 @@ func onContextDelta(ctx context.Context, state *State, delta Delta) error {
 	// the caller's explicit override). The current file adapter ignores
 	// the field; a future transient-data-aware adapter will route on it.
 	//
-	// §3.9 content minimization: for fs.read / fs.write the full file
-	// content lives in the tracked-file store (buffered above); the event
-	// log records only a short metadata summary so the file content is
-	// not duplicated into the log. The buffered entry keeps the full
-	// content untouched — only this logged copy is summarized.
+	// §3.10.6 task-class content minimization: the raw bytes of a
+	// task-class delta — file content from fs.read/fs.write, tool output
+	// from tool.result, captured output from user.shell-capture, plus the
+	// fs.commit pointer event — are NEVER written in full to the persistent
+	// event log. Their durable home is elsewhere (the per-thread
+	// tracked-file store for fs.* content, §3.9.1; tool/shell output is
+	// transient by design). The event log records only a short metadata
+	// summary (source, path, byte count) in their place. The gate is the
+	// retention class, so this minimization tracks provisionalRetention's
+	// task-class set exactly and never drifts out from under a newly-added
+	// task-class source. Symbol extraction (step 1) already ran over the
+	// FULL unmodified delta above, so summarizing here loses no signal; the
+	// buffered file-edit entry (step 3) keeps the full content untouched —
+	// only this logged copy is reduced to metadata.
 	logContent := delta.Content
-	if delta.Source == memops.SourceFSRead || delta.Source == memops.SourceFSWrite {
+	if provisionalRetention(delta.Source) == memops.RetentionTask {
 		logContent = fmt.Sprintf("%s path=%s bytes=%d",
 			delta.Source, delta.Meta["path"], len(delta.Content))
 	}
@@ -180,8 +189,7 @@ func provisionalRetention(source string) memops.RetentionClass {
 		// event log — the event-log line is just the event record.
 		return memops.RetentionTask
 	case memops.SourceUserPrompt, memops.SourceModelResponse,
-		memops.SourceThreadFetched, memops.SourceDigestRefresh,
-		memops.SourceSlashInjected, memops.SourceDirectiveReloaded:
+		memops.SourceThreadFetched:
 		return memops.RetentionDecision
 	default:
 		return memops.RetentionDecision
@@ -194,9 +202,8 @@ func provisionalRetention(source string) memops.RetentionClass {
 //   - user.prompt: hash-tag regex → SourceUser
 //   - model.response: topic-tag parser → SourceModel
 //
-// Other sources (tool.result, thread.fetched, slash.injected,
-// digest.refresh, directive.reloaded, user.shell-capture) currently
-// contribute through the deterministic pass only.
+// Other sources (tool.result, thread.fetched, user.shell-capture)
+// currently contribute through the deterministic pass only.
 func extractSymbols(ctx context.Context, state *State, delta Delta) error {
 	deterministicExtract(ctx, state, delta)
 
@@ -239,8 +246,7 @@ func extractSymbols(ctx context.Context, state *State, delta Delta) error {
 
 	default:
 		// Deterministic pass already ran above; no source-specific
-		// extractor for tool.result, thread.fetched, slash.injected,
-		// digest.refresh, directive.reloaded, user.shell-capture.
+		// extractor for tool.result, thread.fetched, user.shell-capture.
 		return nil
 	}
 }

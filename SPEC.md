@@ -520,9 +520,26 @@ extract, dedup, or budget-check.
 | `model.response` | LLM emits final reply (or response segment) | response text + optional tool-call envelope |
 | `tool.result` | each tool dispatch returns | tool output bytes |
 | `thread.fetched` | topic tag triggered a thread load into Layer B | thread body + frontmatter |
-| `digest.refresh` | cross-project Layer A2 digest regenerated | digest content |
-| `slash.injected` | `/cd-project`, `/back-to`, `/project switch`, etc. inject content | varies |
-| `directive.reloaded` | a directive file changed and the runtime re-read it | merged parameter set |
+
+This taxonomy is exhaustive of the events the runtime actually emits as
+context-modification deltas through the §3.0 chain. It deliberately
+**excludes** content that enters the working window by other documented
+paths and is therefore not a chain delta:
+
+- **Cross-project digest content** reaches Layer A2 through
+  `workset.Compose` (§3.1), which renders the digest directly into the
+  composed context — it is not announced as a `digest.refresh` delta.
+- Slash-command effects (`/cd-project`, `/back-to`, etc.) and
+  directive-file reloads change *which* content `workset.Compose`
+  assembles; the content they surface arrives through the existing
+  `user.prompt` / `thread.fetched` / Layer-A2 paths, not through a
+  dedicated chain delta.
+
+Earlier drafts listed `digest.refresh`, `slash.injected`, and
+`directive.reloaded` here, but the runtime never emits them as deltas;
+they were pruned (m2) so the taxonomy matches the emitted event set —
+the §3.0 "no gaps" principle requires the table to enumerate the actual
+chain inputs, not aspirational ones.
 
 Future capabilities (deep-cold recovery, dedup-promotion of identifiers
 back to literal) add more event types via the same chain.
@@ -1168,7 +1185,7 @@ source (§3.0.1); no content inspection is required.
 | Source | Provisional class |
 |---|---|
 | `tool.result`, `user.shell-capture`, `fs.read`, `fs.write`, `fs.commit` | `task` (provisional-transient) |
-| `user.prompt`, `model.response`, `thread.fetched`, `digest.refresh`, `slash.injected`, `directive.reloaded` | `decision` (provisional-persistent) |
+| `user.prompt`, `model.response`, `thread.fetched` | `decision` (provisional-persistent) |
 | unknown source | `decision` (safe default — unknown content is never silently dropped) |
 
 The classification is **provisional**: it governs where extracted symbols
@@ -1263,9 +1280,15 @@ The following content is **never** written to persistent substrate:
 
 - Raw bytes of task-class deltas (file content from `fs.read`/`fs.write`,
   tool output from `tool.result`, captured output from
-  `user.shell-capture`). These exist only in the turn-local context
-  window during their relevant turns; the event log records a
-  short metadata summary in their place (source, path, byte count).
+  `user.shell-capture`, and the `fs.commit` pointer event). These exist
+  only in the turn-local context window during their relevant turns; the
+  event log records a short metadata summary in their place (source,
+  path, byte count). This minimization is gated on the **retention class**
+  (§3.10.1): the §3.0 chain (`internal/turn/chain.go`, step 5) summarizes
+  every source whose provisional class is `task` — i.e. the full
+  task-class set above, not a hand-picked subset — so no raw task-class
+  body ever reaches the persistent event log, and a newly-added
+  task-class source inherits the minimization automatically.
 - Symbols extracted from task-class deltas that are not cited by any
   decision delta within K turns. These are evicted from staging without
   entering any persistent index.

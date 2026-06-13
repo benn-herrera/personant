@@ -61,9 +61,6 @@ func TestProvisionalRetention_KnownSources(t *testing.T) {
 		{"tool.result", "tool.result", memops.RetentionTask},
 		{"user.shell-capture", "user.shell-capture", memops.RetentionTask},
 		{"thread.fetched", "thread.fetched", memops.RetentionDecision},
-		{"digest.refresh", "digest.refresh", memops.RetentionDecision},
-		{"slash.injected", "slash.injected", memops.RetentionDecision},
-		{"directive.reloaded", "directive.reloaded", memops.RetentionDecision},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
