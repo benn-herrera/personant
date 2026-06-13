@@ -294,6 +294,83 @@ func TestSurfaceArchival_FiresAtTurnClose(t *testing.T) {
 	}
 }
 
+// TestSurfaceArchival_EvictsFromWorkingSet is the P2-1 dead-zone guard
+// (finding M2): an archived thread must be removed from the working-set
+// LRU (ActiveThreads / DormantThreads), not just from the spine+disk. A
+// phantom entry left in those lists would otherwise be persisted by
+// SaveWorkingSet (turn.go step 5d) and resurface across sessions pointing
+// at a thread that no longer exists. This asserts eviction happens AND
+// survives a SaveWorkingSet → LoadSession reload round-trip.
+func TestSurfaceArchival_EvictsFromWorkingSet(t *testing.T) {
+	paths, meta := newTestHome(t)
+
+	// Seed a spine over the high-water mark, all retired so the whole
+	// over-budget surplus is archival-eligible. The coldest (total -
+	// archiveLowWater) threads are archived; thr_1 is coldest (rank 0).
+	const total = archiveHighWater + 30
+	for rank := 0; rank < total; rank++ {
+		seedArchivalThread(t, paths, meta.ID, fmt.Sprintf("thr_%d", rank+1),
+			memops.ThreadResolved, monotonicTS(rank))
+	}
+
+	// thr_1 / thr_2 are the coldest → archived; thr_230 is warmest →
+	// survives. Confirm that band split holds for the seeded watermarks.
+	archivedBand := total - archiveLowWater // coldest ranks [0, archivedBand) archived
+	if archivedBand < 2 {
+		t.Fatalf("test premise broken: archived band %d < 2 needed seed ids", archivedBand)
+	}
+	if total-1 < archivedBand {
+		t.Fatalf("test premise broken: survivor thr_%d falls inside archived band", total)
+	}
+	const archivedActiveID = "thr_1"  // archived; seeded into ActiveThreads
+	const archivedDormantID = "thr_2" // archived; seeded into DormantThreads
+	survivorID := fmt.Sprintf("thr_%d", total) // warmest retired thread, survives
+
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state.ActiveThreads = []string{archivedActiveID, survivorID}
+	state.DormantThreads = []string{archivedDormantID}
+
+	if err := surfaceArchivalCandidates(context.Background(), state); err != nil {
+		t.Fatalf("surfaceArchivalCandidates: %v", err)
+	}
+
+	assertAbsent := func(label string, list []string, id string) {
+		t.Helper()
+		for _, v := range list {
+			if v == id {
+				t.Errorf("%s still contains archived thread %s — phantom entry not evicted", label, id)
+			}
+		}
+	}
+	assertPresent := func(label string, list []string, id string) {
+		t.Helper()
+		for _, v := range list {
+			if v == id {
+				return
+			}
+		}
+		t.Errorf("%s no longer contains live thread %s — survivor was wrongly evicted", label, id)
+	}
+
+	// In-memory: archived IDs gone from both lists; the survivor stays.
+	assertAbsent("ActiveThreads", state.ActiveThreads, archivedActiveID)
+	assertAbsent("DormantThreads", state.DormantThreads, archivedDormantID)
+	assertPresent("ActiveThreads", state.ActiveThreads, survivorID)
+
+	// Persist the evicted membership and reload it from disk — the phantom
+	// must not resurface across the session boundary.
+	if err := state.Ops.SaveWorkingSet(context.Background(), state.ActiveThreads, state.DormantThreads); err != nil {
+		t.Fatalf("SaveWorkingSet: %v", err)
+	}
+	reloaded, err := LoadSession(context.Background(), fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	assertAbsent("reloaded ActiveThreads", reloaded.ActiveThreads, archivedActiveID)
+	assertAbsent("reloaded DormantThreads", reloaded.DormantThreads, archivedDormantID)
+	assertPresent("reloaded ActiveThreads", reloaded.ActiveThreads, survivorID)
+}
+
 // TestSurfaceArchival_UnderDrain seeds a spine over the high-water mark
 // whose retired threads are fewer than the drain target. Archival cannot
 // reach low-water — it settles ABOVE archiveLowWater — and emits an

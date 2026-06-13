@@ -114,6 +114,14 @@ func surfaceArchivalCandidates(ctx context.Context, state *State) error {
 	for _, o := range res.Outcomes {
 		if o.Archived {
 			archived++
+			// P2-1 dead-zone fix: an archived thread is gone from spine+disk,
+			// so it must also leave the working-set LRU. Without this, the ID
+			// lingers in ActiveThreads/DormantThreads as a phantom that
+			// SaveWorkingSet (turn.go step 5d) persists across sessions,
+			// pointing at a thread that no longer exists. Mirror the closure
+			// path's eviction (closure.go) with the same removeString helper.
+			state.ActiveThreads = removeString(state.ActiveThreads, o.ThrID)
+			state.DormantThreads = removeString(state.DormantThreads, o.ThrID)
 			continue
 		}
 		if o.Skipped {
