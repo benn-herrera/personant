@@ -7,10 +7,11 @@ import (
 )
 
 // ProjectAnchors re-derives a thread's headline anchor set as a
-// deterministic projection of its active history_symbols (spec §2.2 /
-// §2.7.x; anchor-lifecycle Inc 2). It ranks the active symbols, takes the
-// top-max as the projected anchor set, latches lifecycle state on the
-// mutated symbol slice, and reports whether the projected SET changed.
+// deterministic projection of its history_symbols by current salience
+// (spec §2.2 / §2.7.4; anchor-lifecycle Inc 2 / C1). It ranks ALL retained
+// symbols, takes the top-max as the projected anchor set, latches lifecycle
+// state on the mutated symbol slice, and reports whether the projected SET
+// changed.
 //
 // Ranking discipline (shared with topByWeight via symbolRankLess):
 //   - class: B11 high-specificity OR ever-central symbols rank above
@@ -20,15 +21,21 @@ import (
 //     descending (newest first);
 //   - then Normalized ascending as a stable final tiebreak.
 //
-// Lifecycle transitions (deterministic, no TTL — SOLUTION C2):
+// Candidacy is current salience, not lifecycle: ALL retained symbols —
+// active and superseded alike — compete on rank for the top-max slots.
+// "Superseded" is a descriptive / eviction-priority label, never a
+// candidacy gate.
+//
+// Lifecycle transitions (deterministic, no TTL — SOLUTION C2) fall out of
+// the ranking, they are not driven by it:
 //   - a symbol that enters the active projection this turn latches
 //     EverCentral=true and has its LastActiveTurn set to turn;
 //   - a symbol that WAS ever-central but falls out of the top-max
 //     projection flips to LifecycleSuperseded (rank-dropout);
-//   - a symbol re-entering the projection returns to LifecycleActive.
-//
-// Only active symbols are projection candidates; superseded symbols are
-// retained in history (still matchable) but never re-enter the headline.
+//   - a previously-superseded symbol whose salience has since risen
+//     re-ranks into the top-max and is thereby flipped back to active. This
+//     reappearance is EMERGENT from current-salience ranking — there is no
+//     special "return to active" pathway, just the same entry transition.
 //
 // Returns the projected anchor list (the symbols' Normalized forms, in
 // rank order, length <= max), the mutated symbol slice (a copy — the input
@@ -62,12 +69,17 @@ func ProjectAnchors(syms []memops.HistorySymbol, max, turn int) (anchors []strin
 	prior := rankedNormalized(updated, priorActive, max)
 	priorSet := toSet(prior)
 
-	// Candidate set for the new projection: active symbols only.
+	// Candidate set for the new projection: ALL retained symbols, active and
+	// superseded alike. The projection is a pure function of current salience
+	// (rank), not of lifecycle label — "superseded" is a descriptive /
+	// eviction-priority marker, never a candidacy gate. A superseded symbol
+	// whose Count has since risen competes on equal footing and, if it
+	// re-ranks into the top-max, is re-admitted by the transition logic below
+	// (flipped back to active). Reappearance is therefore EMERGENT from
+	// current-salience ranking, not a special "return to active" pathway.
 	candidates := make([]int, 0, len(updated))
 	for i := range updated {
-		if isActive(updated[i].Lifecycle) {
-			candidates = append(candidates, i)
-		}
+		candidates = append(candidates, i)
 	}
 	top := topRanked(updated, candidates, max)
 

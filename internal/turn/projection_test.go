@@ -121,6 +121,64 @@ func TestProjectAnchorsSupersession(t *testing.T) {
 	}
 }
 
+// TestProjectAnchorsSupersededReentry is the C1 acceptance test: supersession
+// is NOT terminal. A symbol superseded by rank-dropout whose Count later rises
+// re-enters the top-max projection on current salience alone and flips back to
+// LifecycleActive — with no re-entry machinery, just the ordinary entry
+// transition firing because the symbol out-ranks the cut. The projection is a
+// pure function of current salience; "superseded" is a label, not a candidacy
+// gate.
+func TestProjectAnchorsSupersededReentry(t *testing.T) {
+	// Turn A: "old" is central; two stronger symbols arrive and supersede it at
+	// max=2 (the TestProjectAnchorsSupersession setup).
+	symsA := []memops.HistorySymbol{
+		{Raw: "old", Normalized: "old", FirstSeenTurn: 1, Count: 3, Source: memops.SourceModel, EverCentral: true, Lifecycle: memops.LifecycleActive, LastActiveTurn: 1},
+		sym("new1", 10, 5),
+		sym("new2", 9, 5),
+	}
+	_, afterA, _ := ProjectAnchors(symsA, 2, 6)
+
+	// Precondition: "old" is now superseded but still retained as a candidate.
+	var old *memops.HistorySymbol
+	for i := range afterA {
+		if afterA[i].Normalized == "old" {
+			old = &afterA[i]
+		}
+	}
+	if old == nil {
+		t.Fatalf("setup: 'old' missing from retained symbols")
+	}
+	if old.Lifecycle != memops.LifecycleSuperseded {
+		t.Fatalf("setup: 'old' lifecycle = %q, want superseded before re-entry", old.Lifecycle)
+	}
+
+	// Turn B: "old"'s Count climbs back above the cut (the premise becomes
+	// salient again) while it is STILL labelled superseded. It must compete and
+	// re-enter on rank alone — no special "return" pathway.
+	old.Count = 20 // now out-ranks new1 (10) and new2 (9)
+	anchors, afterB, changed := ProjectAnchors(afterA, 2, 7)
+
+	if got := strings.Join(anchors, ","); got != "old,new1" {
+		t.Errorf("re-entry: projection = %q, want old,new1 (old re-ranked in)", got)
+	}
+	if !changed {
+		t.Errorf("re-entry: changed=false, want true (headline moved back onto 'old')")
+	}
+	for _, s := range afterB {
+		if s.Normalized == "old" {
+			if s.Lifecycle != memops.LifecycleActive {
+				t.Errorf("re-entered 'old' lifecycle = %q, want active (supersession is not terminal)", s.Lifecycle)
+			}
+			if s.LastActiveTurn != 7 {
+				t.Errorf("re-entered 'old' LastActiveTurn = %d, want 7 (recency refreshed on entry)", s.LastActiveTurn)
+			}
+			if !s.EverCentral {
+				t.Errorf("re-entered 'old' EverCentral cleared; must never clear")
+			}
+		}
+	}
+}
+
 // TestProjectAnchorsChangedFlag: re-projecting an already-projected set with
 // no rank change yields changed=false (idempotent-write guard input).
 func TestProjectAnchorsChangedFlag(t *testing.T) {

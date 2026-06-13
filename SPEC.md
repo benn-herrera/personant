@@ -433,11 +433,11 @@ A thread's evolving identity lives in `history_symbols` (§2.3): it accretes per
 
 **Lifecycle states** (`HistorySymbol.lifecycle`):
 
-- `active` — currently in, or eligible for, the active anchor projection. The zero value `""` decodes as `active`.
-- `superseded` — a once-central symbol that has fallen out of the top-`AnchorProjectionMax` projection (rank-dropout). **Retained, not evicted** — it stays in `history_symbols`, so an abandoned premise remains a findable recall handle.
+- `active` — currently occupying a top-`AnchorProjectionMax` projection slot. The zero value `""` decodes as `active`.
+- `superseded` — a once-central symbol that has fallen out of the top-`AnchorProjectionMax` projection (rank-dropout). A **descriptive / eviction-priority label, not a candidacy gate** — a superseded symbol still competes for the projection on equal footing every turn (see "The projection function": candidacy is current salience, not lifecycle). **Retained, not evicted** — it stays in `history_symbols`, so an abandoned premise remains a findable recall handle.
 - *evicted* is **not** a stored value — it is the *absence* of the entry (capacity eviction per §2.3).
 
-**The projection function** (`ProjectAnchors`). Over a thread's `active` history_symbols, rank by:
+**The projection function** (`ProjectAnchors`). The projection is a pure function of **current salience** over **all** retained history_symbols — active and superseded alike compete; lifecycle is never a candidacy filter. Rank by:
 
 1. **class** — a §2.7.2 high-specificity (B11) identifier (URL, file path, git SHA) ranks above an ordinary symbol of equal count;
 2. **count** descending;
@@ -446,11 +446,10 @@ A thread's evolving identity lives in `history_symbols` (§2.3): it accretes per
 
 Take the top-`AnchorProjectionMax` as the active slice → `SpineRecord.anchors` (in rank order). Zero active symbols project to an empty anchor list (the legal vague start). **`ever_central` is deliberately not a ranking tier** — it is the eviction-retention discriminator only (below). If it boosted rank, a once-central premise could never be outranked and supersession (the inversion case) would be impossible.
 
-**State transitions** (deterministic; **no TTL** — a timer would wrongly demote still-valid anchors in a quiescent thread and would miss inversion):
+**State transitions** (deterministic; **no TTL** — a timer would wrongly demote still-valid anchors in a quiescent thread and would miss inversion). These transitions are **emergent labels read off the re-ranked top-`AnchorProjectionMax` each turn**, not a state machine that gates candidacy. There is exactly **one entry transition and one exit transition**:
 
-- a symbol that enters the active projection this turn latches `ever_central = true` (never cleared), sets `last_active_turn = turn`, and is `active`;
-- a symbol that *was* `ever_central` but falls out of the top-`AnchorProjectionMax` projection flips to `superseded` (rank-dropout supersession — captures a still-mentioned-but-outranked premise demoting);
-- a `superseded` symbol re-entering the projection returns to `active`.
+- *entry* — a symbol that occupies a projection slot this turn latches `ever_central = true` (never cleared), sets `last_active_turn = turn`, and is `active`. This is the SAME transition whether the symbol is newly central for the first time OR was previously `superseded` and has now re-ranked back in. **Reappearance of a superseded symbol is not a distinct "return to active" pathway** — its rank simply rose (e.g. its `count` climbed) above the top-`AnchorProjectionMax` cut, so the ordinary entry transition fires. Implementers must NOT build re-entry machinery; there is nothing to build beyond ranking all symbols and re-labelling the result.
+- *exit* — a symbol that *was* `ever_central` but no longer holds a top-`AnchorProjectionMax` slot flips to `superseded` (rank-dropout supersession — captures a still-mentioned-but-outranked premise demoting).
 
 **Ever-central = projection-entry latch.** A symbol is "historically central" iff it has *ever* made the headline projection — not merely been mentioned often. This single latched bool (plus `last_active_turn`) is the whole representation; no peak-rank/peak-weight magnitude is stored (no algorithm consumes it; the eviction tiebreak uses `count`).
 
