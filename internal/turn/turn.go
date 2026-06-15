@@ -291,15 +291,46 @@ const maxRePromptsPerTurn = 1
 // is model choices only), flipped only to A/B the cadence in the sim.
 const commitOnStructuralChange = true
 
-// Run drives one complete user turn end-to-end (spec §3.0). It is a
-// thin wrapper around RunWithDeltas with no pre-prompt deltas; see
-// RunWithDeltas for the step-by-step contract.
+// TurnInfo carries cheaply-available per-turn measurements a caller may
+// observe without re-deriving them from the substrate or the event log.
+// It is populated by RunWithInfo and intentionally minimal: only fields
+// available for free from the in-flight turn belong here.
+//
+// PromptTokens is the provider's reported prompt-token count for the
+// fully-assembled request (system prompt + history + userInput + any
+// pre-prompt/tool-result deltas) — model.Response.Usage.PromptTokens from
+// the turn's chat round-trip. It is the only honest measurement of the
+// assembled-request size; the byte budget and composed-memory-only counts
+// are true-by-construction and cannot stand in for it. On the mock path it
+// is whatever Usage the mock client reports (often a canned value or 0):
+// no special-casing — the number flows through honestly.
+type TurnInfo struct {
+	PromptTokens int
+}
+
+// Run drives one complete user turn end-to-end (spec §3.0). It is a thin
+// wrapper around RunWithInfo with no pre-prompt deltas, dropping the
+// TurnInfo; see RunWithDeltas for the step-by-step contract.
 func Run(ctx context.Context, state *State, userInput string, out io.Writer) (string, error) {
-	return RunWithDeltas(ctx, state, nil, userInput, out)
+	body, _, err := RunWithInfo(ctx, state, nil, userInput, out)
+	return body, err
 }
 
 // RunWithDeltas drives one complete user turn (spec §3.0) with an
-// optional slot for pre-prompt deltas. Step ordering:
+// optional slot for pre-prompt deltas. It is a thin wrapper around
+// RunWithInfo that drops the TurnInfo, preserving the existing
+// (body, err) signature for callers that do not need the per-turn
+// measurements. See RunWithInfo for the step-by-step contract.
+func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInput string, out io.Writer) (string, error) {
+	body, _, err := RunWithInfo(ctx, state, preEvents, userInput, out)
+	return body, err
+}
+
+// RunWithInfo drives one complete user turn (spec §3.0) with an
+// optional slot for pre-prompt deltas, returning the response body, a
+// TurnInfo with cheaply-available per-turn measurements (notably
+// usage.prompt_tokens for the fully-assembled request), and any error.
+// Step ordering:
 //
 //  1. Bump TurnNumber + window-close GC on staging (B.4 lifecycle).
 //  2. Fire each preEvent through the §3.0 chain. preEvents are emitted
@@ -331,12 +362,12 @@ func Run(ctx context.Context, state *State, userInput string, out io.Writer) (st
 // out receives the streamed response body with the §5.1 topic tag
 // suppressed; pass io.Discard to keep the streaming behavior without
 // presenting tokens (e.g. tests that only assert on side-effects).
-func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInput string, out io.Writer) (string, error) {
+func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput string, out io.Writer) (string, TurnInfo, error) {
 	if state == nil {
-		return "", errors.New("turn: nil state")
+		return "", TurnInfo{}, errors.New("turn: nil state")
 	}
 	if state.Client == nil {
-		return "", errors.New("turn: nil model client")
+		return "", TurnInfo{}, errors.New("turn: nil model client")
 	}
 	if out == nil {
 		out = io.Discard
@@ -380,13 +411,13 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 	// can stage task-class symbols for that prompt to cite.
 	for _, pre := range preEvents {
 		if err := onContextDelta(ctx, state, pre); err != nil {
-			return "", err
+			return "", TurnInfo{}, err
 		}
 	}
 
 	// Step 1: user.prompt delta.
 	if err := onContextDelta(ctx, state, Delta{Source: memops.SourceUserPrompt, Content: userInput}); err != nil {
-		return "", err
+		return "", TurnInfo{}, err
 	}
 
 	// Step 2: compose working-set and assemble the system prompt.
@@ -414,7 +445,7 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 
 	systemPrompt, err := buildSystemPrompt()
 	if err != nil {
-		return "", fmt.Errorf("turn: compose working set: %w", err)
+		return "", TurnInfo{}, fmt.Errorf("turn: compose working set: %w", err)
 	}
 
 	// Step 3: LLM round-trip (streaming) with §5.5 mid-turn re-prompt.
@@ -446,13 +477,13 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 
 		sr, err := state.Client.ConsultStream(ctx, req)
 		if err != nil {
-			return "", fmt.Errorf("turn: model consult: %w", err)
+			return "", TurnInfo{}, fmt.Errorf("turn: model consult: %w", err)
 		}
 
 		pre, err := readPreamble(sr)
 		if err != nil {
 			_ = sr.Close()
-			return "", fmt.Errorf("turn: read preamble: %w", err)
+			return "", TurnInfo{}, fmt.Errorf("turn: read preamble: %w", err)
 		}
 
 		// §5.5 mid-turn fetch: if the preamble is a topic tag referencing
@@ -472,7 +503,7 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 					"fetched="+strconv.Itoa(fetched)+" attempt="+strconv.Itoa(attempt+1))
 				systemPrompt, err = buildSystemPrompt()
 				if err != nil {
-					return "", fmt.Errorf("turn: recompose working set: %w", err)
+					return "", TurnInfo{}, fmt.Errorf("turn: recompose working set: %w", err)
 				}
 				continue
 			}
@@ -484,7 +515,7 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 		// while forwarding the surrounding text.
 		if _, werr := filter.Write(pre.head); werr != nil {
 			_ = sr.Close()
-			return "", fmt.Errorf("turn: filter write head: %w", werr)
+			return "", TurnInfo{}, fmt.Errorf("turn: filter write head: %w", werr)
 		}
 		var streamErr error
 		if !pre.ended {
@@ -496,10 +527,10 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 		closeErr := sr.Close()
 
 		if streamErr != nil {
-			return "", fmt.Errorf("turn: stream: %w", streamErr)
+			return "", TurnInfo{}, fmt.Errorf("turn: stream: %w", streamErr)
 		}
 		if flushErr != nil {
-			return "", fmt.Errorf("turn: flush stream filter: %w", flushErr)
+			return "", TurnInfo{}, fmt.Errorf("turn: flush stream filter: %w", flushErr)
 		}
 		if closeErr != nil {
 			// Close-after-EOF errors are usually benign (e.g. the body was
@@ -513,13 +544,13 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 	// Step 4: model.response delta with the full accumulated body —
 	// fired once, not per chunk (spec §3.0.5).
 	if err := onContextDelta(ctx, state, Delta{Source: memops.SourceModelResponse, Content: full.Content}); err != nil {
-		return "", err
+		return "", TurnInfo{}, err
 	}
 
 	// Step 5: turn close — fire deferred engagement updates with the
 	// coalesced symbol set.
 	if err := closeTurnAndUpdateEngagement(ctx, state, userInput, full.Content); err != nil {
-		return "", fmt.Errorf("turn: close: %w", err)
+		return "", TurnInfo{}, fmt.Errorf("turn: close: %w", err)
 	}
 
 	// Step 5b: §3.5 decay-triggered closure scan. Runs on EVERY turn —
@@ -597,5 +628,5 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 		state.History = append(state.History[:0:0], state.History[drop:]...)
 	}
 
-	return body, nil
+	return body, TurnInfo{PromptTokens: full.Usage.PromptTokens}, nil
 }
