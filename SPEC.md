@@ -1036,6 +1036,16 @@ The archive index entry is **kept** as a forensic breadcrumb (the
 `personant archive list` / `personant archive recover <thr_id>` surface
 deep-cold history.
 
+**Two recovery surfaces, deliberately different strength.** Archived
+*threads* recover via `RecoverThread` from Personant's **own** home git —
+which Personant owns and never rewrites — so it is a *strong, unconditional*
+guarantee. Aged-out *file versions* recover via `GetFileVersion` (§3.9.1)
+from the **workspace** git — which the **user** owns and may amend/rebase/gc
+— so it is a *conditional* guarantee, gated by the `CommitReachable` check
+that also refuses to age an unreachable hash. The asymmetry is intentional:
+the strength of each recovery surface follows the ownership of the git repo
+it reads from.
+
 #### 3.8.4 Recall treatment of archived threads (v0.1: off-recall)
 
 Archived-recoverable threads are **off the live recall surface** in v0.1.
@@ -1099,14 +1109,34 @@ This keeps the current state fully formed and hot while giving
 forensic-quality history at bounded storage cost.
 
 **Git-minimization bound.** Once a tracked file is committed to the
-project's git repo, its committed state is recoverable by commit hash, so
-Personant's reverse-delta chain of the *pre-commit* edit history is pure
-duplication of what git already holds. After a retention window
-(`FileChainRetentionTurns` turns OR `FileChainRetentionDays` days,
-whichever trips first), the chain is clock-aged out and only the commit
-hash is retained as a recovery pointer. The forensic history of
-*committed* states is therefore bounded by what the project git repo
-already holds; uncommitted edit history is unaffected.
+project's git repo, its committed state is recoverable from that repo by
+commit hash. Personant's reverse-delta chain of the *pre-commit* edit
+history is then duplicative of what git holds, **for as long as the commit
+stays reachable in the workspace repo**. After a retention window
+(`FileChainRetentionTurns` turns OR `FileChainRetentionDays` days, whichever
+trips first), the chain is aged out — **but only after the runtime confirms
+the commit hash is reachable in the workspace repo** (a read-only
+reachability check, §6.1.3, via the `CommitReachable` predicate). If the
+hash is not reachable — the user amended, rebased, gc'd, or moved the
+workspace — **aging is refused and the chain is retained**, and the refusal
+is logged (`dedup/chain-age-refused`, carrying thread, path, hash, reason).
+Recovery of an aged-out committed state goes through the `GetFileVersion`
+recovery op, which reads the blob read-only from the workspace tree (chain
+fast path first: a still-retained chain recovers with no git access).
+Uncommitted edit history lives only in the retained chain and is unaffected
+by minimization.
+
+**External-git dependency (honest statement).** The workspace repo is the
+**user's**, not Personant's (§6.1.3 — Personant never mutates workspace git
+and does not monitor its history). The recoverability of an aged-out
+committed state therefore depends on the user not having orphaned the
+commit. Personant's contract is narrower and keepable: it will not *drop* a
+chain while the commit is unreachable, so no content is lost *by aging* — at
+worst a chain is retained longer than the window. If `git` is unavailable at
+all there is no second copy to minimize against, so every chain is retained
+and the condition is logged once. The same reachability predicate gates both
+surfaces: recovery succeeds exactly when aging would have been permitted to
+drop.
 
 **Symbol lifecycle for file-edit events.** `fs.read`, `fs.write`, and
 `fs.commit` deltas are task-class events (§3.10.1). Symbols extracted

@@ -1,10 +1,31 @@
 package store
 
 import (
+	"go/parser"
+	"go/token"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
+
+// TestThreadFilesIsGitFree is the M1 acceptance A5 structural guard: the
+// §3.9 aging-policy decision in threadfiles.go must stay free of any
+// workspace-git dependency. The reachability gate lives only in the adapter
+// + gitworkspace.go; threadfiles.go computes candidates purely in memory.
+func TestThreadFilesIsGitFree(t *testing.T) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "threadfiles.go", nil, parser.ImportsOnly)
+	if err != nil {
+		t.Fatalf("parse threadfiles.go: %v", err)
+	}
+	for _, imp := range f.Imports {
+		path := strings.Trim(imp.Path.Value, `"`)
+		if path == "os/exec" || strings.HasSuffix(path, "gitworkspace") {
+			t.Errorf("threadfiles.go imports %q — workspace-git dependency must live in the adapter + gitworkspace.go, not here", path)
+		}
+	}
+}
 
 func TestThreadFilesPath(t *testing.T) {
 	paths := PathsForHome("/home/x")
@@ -198,16 +219,25 @@ func newCommittedEntry(t *testing.T, content string, committedTurn int) ThreadFi
 
 func TestAgeOutTurnThreshold(t *testing.T) {
 	tf := newCommittedEntry(t, "committed-content", 5)
-	// currentTurn - committedTurn = FileChainRetentionTurns exactly → ages.
+	// currentTurn - committedTurn = FileChainRetentionTurns exactly →
+	// candidate. AgeOut is decision-only and must NOT mutate.
 	now := ageOutCommitTime // same instant, so the day threshold cannot trip
-	aged, freed := tf.AgeOut(5+FileChainRetentionTurns, now)
-	if len(aged) != 1 || aged[0] != "f.txt" {
-		t.Fatalf("aged = %v, want [f.txt]", aged)
+	cands := tf.AgeOut(5+FileChainRetentionTurns, now)
+	if len(cands) != 1 || cands[0] != "f.txt" {
+		t.Fatalf("candidates = %v, want [f.txt]", cands)
+	}
+	e, _ := tf.Entry("f.txt")
+	if e.Chain.Len() != 1 {
+		t.Errorf("AgeOut mutated chain (must be decision-only): Len = %d, want 1", e.Chain.Len())
+	}
+	// The effect is applied by DropChain.
+	freed, ok := tf.DropChain("f.txt")
+	if !ok {
+		t.Fatal("DropChain reported path not tracked")
 	}
 	if freed != len("committed-content") {
 		t.Errorf("bytesFreed = %d, want %d", freed, len("committed-content"))
 	}
-	e, _ := tf.Entry("f.txt")
 	if e.Chain.Len() != 0 {
 		t.Errorf("chain not dropped: Len = %d, want 0", e.Chain.Len())
 	}
@@ -217,12 +247,13 @@ func TestAgeOutDayThreshold(t *testing.T) {
 	tf := newCommittedEntry(t, "content", 5)
 	// Turn delta is below the turn threshold; only the day threshold trips.
 	now := ageOutCommitTime.AddDate(0, 0, FileChainRetentionDays)
-	aged, freed := tf.AgeOut(6, now)
-	if len(aged) != 1 || aged[0] != "f.txt" {
-		t.Fatalf("aged = %v, want [f.txt]", aged)
+	cands := tf.AgeOut(6, now)
+	if len(cands) != 1 || cands[0] != "f.txt" {
+		t.Fatalf("candidates = %v, want [f.txt]", cands)
 	}
-	if freed != len("content") {
-		t.Errorf("bytesFreed = %d, want %d", freed, len("content"))
+	freed, ok := tf.DropChain("f.txt")
+	if !ok || freed != len("content") {
+		t.Errorf("DropChain = (%d, %v), want (%d, true)", freed, ok, len("content"))
 	}
 	e, _ := tf.Entry("f.txt")
 	if e.Chain.Len() != 0 {
@@ -234,12 +265,9 @@ func TestAgeOutUnderBothThresholds(t *testing.T) {
 	tf := newCommittedEntry(t, "content", 5)
 	// Just under the turn threshold and just under the day threshold.
 	now := ageOutCommitTime.AddDate(0, 0, FileChainRetentionDays).Add(-time.Second)
-	aged, freed := tf.AgeOut(5+FileChainRetentionTurns-1, now)
-	if len(aged) != 0 {
-		t.Errorf("aged = %v, want none (under both thresholds)", aged)
-	}
-	if freed != 0 {
-		t.Errorf("bytesFreed = %d, want 0", freed)
+	cands := tf.AgeOut(5+FileChainRetentionTurns-1, now)
+	if len(cands) != 0 {
+		t.Errorf("candidates = %v, want none (under both thresholds)", cands)
 	}
 	e, _ := tf.Entry("f.txt")
 	if e.Chain.Len() != 1 {
@@ -252,9 +280,9 @@ func TestAgeOutUncommittedNeverAges(t *testing.T) {
 	tf.RecordWrite("f.txt", "uncommitted")
 	// Far past both thresholds — but the entry was never committed.
 	now := ageOutCommitTime.AddDate(1, 0, 0)
-	aged, freed := tf.AgeOut(100000, now)
-	if len(aged) != 0 || freed != 0 {
-		t.Errorf("uncommitted entry aged: aged=%v freed=%d", aged, freed)
+	cands := tf.AgeOut(100000, now)
+	if len(cands) != 0 {
+		t.Errorf("uncommitted entry is a candidate: %v", cands)
 	}
 	e, _ := tf.Entry("f.txt")
 	if e.Chain.Len() != 1 {
@@ -267,29 +295,35 @@ func TestAgeOutCorruptCommittedAtSkipped(t *testing.T) {
 	e, _ := tf.Entry("f.txt")
 	e.CommittedAt = "not-a-timestamp"
 	// The day threshold cannot be evaluated; the turn delta is below
-	// threshold, so the corrupt entry must be skipped, not dropped.
+	// threshold, so the corrupt entry must be skipped, not a candidate.
 	now := ageOutCommitTime.AddDate(0, 0, 365)
-	aged, freed := tf.AgeOut(6, now)
-	if len(aged) != 0 || freed != 0 {
-		t.Errorf("corrupt-timestamp entry aged via day path: aged=%v freed=%d", aged, freed)
+	cands := tf.AgeOut(6, now)
+	if len(cands) != 0 {
+		t.Errorf("corrupt-timestamp entry is a candidate via day path: %v", cands)
 	}
 	if e.Chain.Len() != 1 {
 		t.Errorf("corrupt-timestamp chain dropped: Len = %d, want 1", e.Chain.Len())
 	}
 	// The turn threshold still works independently of the timestamp.
-	aged, _ = tf.AgeOut(5+FileChainRetentionTurns, now)
-	if len(aged) != 1 {
-		t.Errorf("turn-threshold aging blocked by corrupt timestamp: aged=%v", aged)
+	cands = tf.AgeOut(5+FileChainRetentionTurns, now)
+	if len(cands) != 1 {
+		t.Errorf("turn-threshold candidate blocked by corrupt timestamp: %v", cands)
 	}
 }
 
-func TestAgeOutKeepsHash(t *testing.T) {
+func TestDropChainKeepsHash(t *testing.T) {
 	tf := newCommittedEntry(t, "content", 5)
-	aged, _ := tf.AgeOut(5+FileChainRetentionTurns, ageOutCommitTime)
-	if len(aged) != 1 {
-		t.Fatalf("entry did not age: %v", aged)
+	cands := tf.AgeOut(5+FileChainRetentionTurns, ageOutCommitTime)
+	if len(cands) != 1 {
+		t.Fatalf("entry not a candidate: %v", cands)
+	}
+	if _, ok := tf.DropChain("f.txt"); !ok {
+		t.Fatal("DropChain reported path not tracked")
 	}
 	e, _ := tf.Entry("f.txt")
+	if e.Chain.Len() != 0 {
+		t.Errorf("chain not dropped: Len = %d, want 0", e.Chain.Len())
+	}
 	if e.LastCommit != "hash-abc" {
 		t.Errorf("LastCommit = %q, want hash-abc (recovery pointer must survive)", e.LastCommit)
 	}
@@ -301,5 +335,13 @@ func TestAgeOutKeepsHash(t *testing.T) {
 	}
 	if e.Path != "f.txt" {
 		t.Errorf("Path = %q, want f.txt (preserved)", e.Path)
+	}
+}
+
+func TestDropChainUntrackedPath(t *testing.T) {
+	tf := newCommittedEntry(t, "content", 5)
+	freed, ok := tf.DropChain("absent.txt")
+	if ok || freed != 0 {
+		t.Errorf("DropChain on untracked path = (%d, %v), want (0, false)", freed, ok)
 	}
 }

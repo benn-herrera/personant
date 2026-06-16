@@ -639,13 +639,62 @@ func (a *FileAdapter) RecordFileCommit(ctx context.Context, threadID, path, hash
 	return nil
 }
 
+// workspaceGitRoot resolves the workspace git root for threadID's project
+// (Q1 — adapter-internal resolution, keeping the port path-free): thread →
+// spine record → project → CurrentRootPath → store.FindGitRoot walked from
+// it. Returns ok=false when the chain cannot be completed (thread/project
+// absent, no recorded root, root not under a git repo, or the recorded path
+// is stale/moved). A false ok is the SAFE answer — it makes the aging gate
+// refuse to drop and the recovery path return ErrFileVersionUnreachable. A
+// non-nil error is reserved for an I/O failure that prevented resolution
+// (it must not be swallowed into a silent "not reachable").
+func (a *FileAdapter) workspaceGitRoot(threadID string) (root string, ok bool, err error) {
+	rec, found, err := store.FindSpineRecord(a.paths, threadID)
+	if err != nil {
+		return "", false, fmt.Errorf("find spine: %w", err)
+	}
+	if !found || rec.Project == "" {
+		return "", false, nil
+	}
+	meta, err := store.LoadProjectMeta(a.paths, rec.Project)
+	if err != nil {
+		if errors.Is(err, memops.ErrProjectNotFound) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("load project %s: %w", rec.Project, err)
+	}
+	if meta.CurrentRootPath == "" {
+		return "", false, nil
+	}
+	gitRoot, found, err := store.FindGitRoot(meta.CurrentRootPath)
+	if err != nil {
+		return "", false, fmt.Errorf("find git root: %w", err)
+	}
+	if !found {
+		return "", false, nil
+	}
+	return gitRoot, true, nil
+}
+
 // AgeFileChains applies the §3.9 git-minimization policy to threadID's
-// tracked-file store via store.ThreadFiles.AgeOut. A thread with no
+// tracked-file store, gated by workspace-git reachability. A thread with no
 // tracked-file sidecar (zero files) is a no-op — no empty sidecar is
-// written. When anything ages, the updated sidecar is saved and one
+// written.
+//
+// store.ThreadFiles.AgeOut computes the window-expired CANDIDATES (pure, no
+// git, no mutation). For each candidate the adapter consults the headline
+// §3.9.1 reachability gate: a chain is dropped (via tf.DropChain) ONLY IF
+// the commit hash is confirmed reachable in the workspace repo
+// (store.CommitReachable). An unreachable hash — amend/rebase/gc/move, or
+// git unavailable — REFUSES aging: the chain is retained and a
+// dedup/chain-age-refused event is logged. No durable content is ever aged
+// away without an application-reachable recovery path.
+//
+// When anything actually ages, the updated sidecar is saved and one
 // dedup/chain-aged event-log line records the aged paths and bytes freed
 // (the demand-sizing forensic data — kept exact, like the archival byte
-// counts).
+// counts). A pass that refuses every candidate writes no sidecar (nothing
+// changed) but still logs each refusal.
 func (a *FileAdapter) AgeFileChains(ctx context.Context, threadID string, currentTurn int) ([]string, int, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
@@ -659,8 +708,54 @@ func (a *FileAdapter) AgeFileChains(ctx context.Context, threadID string, curren
 		// materialize an empty sidecar where none existed.
 		return nil, 0, nil
 	}
-	agedPaths, bytesFreed := tf.AgeOut(currentTurn, clock.Timeline())
+	candidates := tf.AgeOut(currentTurn, clock.Timeline())
+	if len(candidates) == 0 {
+		return nil, 0, nil
+	}
+
+	root, rootOK, err := a.workspaceGitRoot(threadID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("fileadapter: age file chains %s: resolve workspace root: %w", threadID, err)
+	}
+
+	var agedPaths []string
+	var bytesFreed int
+	for _, path := range candidates {
+		e, ok := tf.Entry(path)
+		if !ok {
+			continue // defensive: candidate disappeared between calls
+		}
+		reachable := false
+		reason := "workspace-root-unresolved"
+		if rootOK {
+			r, rerr := store.CommitReachable(root, e.LastCommit)
+			if rerr != nil {
+				return agedPaths, bytesFreed, fmt.Errorf("fileadapter: age file chains %s: reachability %s: %w", threadID, path, rerr)
+			}
+			reachable = r
+			if !reachable {
+				reason = "commit-unreachable"
+			}
+		}
+		if !reachable {
+			// Refuse to age: retain the chain, log the skipped reclamation
+			// so it is forensically visible (Inv 3). Details are adapter-
+			// built (path, hash, reason) — never user content.
+			if logErr := eventlog.Log(a.paths, "dedup", "chain-age-refused",
+				fmt.Sprintf("thr=%s path=%s hash=%s reason=%s", threadID, path, e.LastCommit, reason)); logErr != nil {
+				return agedPaths, bytesFreed, fmt.Errorf("fileadapter: age file chains %s: log refusal: %w", threadID, logErr)
+			}
+			continue
+		}
+		if freed, ok := tf.DropChain(path); ok {
+			bytesFreed += freed
+			agedPaths = append(agedPaths, path)
+		}
+	}
+
 	if len(agedPaths) == 0 {
+		// Every candidate was refused — nothing mutated, so no sidecar
+		// write. Refusals were already logged above.
 		return nil, 0, nil
 	}
 	if err := store.SaveThreadFiles(a.paths, tf); err != nil {
@@ -671,6 +766,48 @@ func (a *FileAdapter) AgeFileChains(ctx context.Context, threadID string, curren
 		return agedPaths, bytesFreed, fmt.Errorf("fileadapter: age file chains %s: log: %w", threadID, err)
 	}
 	return agedPaths, bytesFreed, nil
+}
+
+// GetFileVersion recovers a tracked file's committed content at a recorded
+// commit hash — the §3.9.1 recovery path (port doc on MemoryOps). Fast
+// path: when the path's chain is still retained and the hash matches
+// LastCommit, the live literal is returned with no git access. Otherwise
+// the blob is read read-only from the workspace git tree
+// (store.ShowFileAtCommit). ErrFileVersionUnreachable when the hash is
+// unreachable / the blob is absent / the workspace root cannot be resolved.
+// Never returns ("", nil).
+func (a *FileAdapter) GetFileVersion(ctx context.Context, threadID, path, hash string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	tf, err := store.LoadThreadFiles(a.paths, threadID)
+	if err != nil {
+		return "", fmt.Errorf("fileadapter: get file version %s: load: %w", threadID, err)
+	}
+	// Fast path: retained chain whose LastCommit matches — return the live
+	// literal directly, no workspace git. Aging only fires post-commit on an
+	// unchanged-since-commit entry, so Chain.Current() is the committed
+	// state. (Recovering an older in-chain version by a non-LastCommit hash
+	// is out of scope — only LastCommit is a hash, §3.9.1.)
+	if e, ok := tf.Entry(path); ok && e.LastCommit == hash && e.Chain.Len() > 0 {
+		return e.Chain.Current(), nil
+	}
+
+	root, rootOK, err := a.workspaceGitRoot(threadID)
+	if err != nil {
+		return "", fmt.Errorf("fileadapter: get file version %s: resolve workspace root: %w", threadID, err)
+	}
+	if !rootOK {
+		return "", fmt.Errorf("fileadapter: get file version %s %s@%s: %w", threadID, path, hash, memops.ErrFileVersionUnreachable)
+	}
+	content, present, err := store.ShowFileAtCommit(root, hash, path)
+	if err != nil {
+		return "", fmt.Errorf("fileadapter: get file version %s: show: %w", threadID, err)
+	}
+	if !present {
+		return "", fmt.Errorf("fileadapter: get file version %s %s@%s: %w", threadID, path, hash, memops.ErrFileVersionUnreachable)
+	}
+	return content, nil
 }
 
 // ---------- Bootstrap and verification ----------

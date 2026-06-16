@@ -186,33 +186,39 @@ func (tf *ThreadFiles) RecordCommit(path, hash, committedAt string, committedTur
 	return nil
 }
 
-// AgeOut applies the §3.9 git-minimization policy: for every committed
-// file (LastCommit != ""), once the retention window has elapsed the
-// reverse-delta chain — which by the checkpoint-5c invariant is purely
-// the pre-commit edit history, a duplicate of what the project git repo
-// already holds at the commit hash — is dropped.
+// AgeOut computes the §3.9 git-minimization aging *decision*: it returns
+// the sorted list of committed files (LastCommit != "") whose retention
+// window has elapsed and whose chains are therefore candidates to be
+// dropped. It is a pure read — it does NOT mutate any entry.
 //
-// An entry is aged out when EITHER threshold trips first (OR-drop):
+// The decision is split from the effect so the I/O-dependent reachability
+// gate can interpose: a candidate's chain is dropped (via DropChain) only
+// after the adapter has confirmed the commit hash is reachable in the
+// workspace repo, so durable content is never aged away without an
+// application-reachable recovery path (SPEC §3.9.1). Keeping the gate out
+// of this method is deliberate: this file stays git-free — the
+// workspace-git dependency lives only in the adapter + gitworkspace.go.
+//
+// An entry is a candidate when EITHER threshold trips first (OR-drop):
 //   - currentTurn - CommittedTurn >= FileChainRetentionTurns, or
 //   - now is >= FileChainRetentionDays days after CommittedAt.
 //
 // CommittedAt is parsed as RFC3339; a parse failure is treated as
 // not-yet-ageable and the entry is skipped — a corrupt timestamp must not
-// silently drop data, only the turn threshold can then age it.
-//
-// Aging replaces the entry's Chain with a fresh empty dedup.Chain (the
-// committed literal is NOT retained — git + the hash recover it) and
-// keeps Path, LastCommit, CommittedAt, CommittedTurn so the hash remains
-// a recovery pointer. Uncommitted entries (LastCommit == "") never age.
-//
-// Returns the sorted list of aged paths and the total bytes freed,
-// measured as the summed length of the dropped chains' live literals
-// (sum of len(Chain.Current())) — a simple proxy that feeds demand-sizing
-// stats alongside the archival byte counts.
-func (tf *ThreadFiles) AgeOut(currentTurn int, now time.Time) (agedPaths []string, bytesFreed int) {
+// silently drop data, only the turn threshold can then age it. Uncommitted
+// entries (LastCommit == "") never age, and an already-aged entry (chain
+// dropped to empty) is never a candidate again — aging is idempotent.
+func (tf *ThreadFiles) AgeOut(currentTurn int, now time.Time) (candidatePaths []string) {
 	cutoff := now.AddDate(0, 0, -FileChainRetentionDays)
 	for path, e := range tf.Files {
 		if e.LastCommit == "" {
+			continue
+		}
+		// Already aged (chain dropped to empty) — nothing left to age, so
+		// it is not a candidate. This keeps aging idempotent: a second pass
+		// over an aged entry is a no-op, never a re-report (SPEC §3.9.1 Inv:
+		// a file already aged stays aged).
+		if e.Chain.Len() == 0 {
 			continue
 		}
 		byTurn := currentTurn-e.CommittedTurn >= FileChainRetentionTurns
@@ -223,12 +229,30 @@ func (tf *ThreadFiles) AgeOut(currentTurn int, now time.Time) (agedPaths []strin
 		if !byTurn && !byDay {
 			continue
 		}
-		bytesFreed += len(e.Chain.Current())
-		e.Chain = dedup.Chain{}
-		agedPaths = append(agedPaths, path)
+		candidatePaths = append(candidatePaths, path)
 	}
-	sort.Strings(agedPaths)
-	return agedPaths, bytesFreed
+	sort.Strings(candidatePaths)
+	return candidatePaths
+}
+
+// DropChain applies the aging *effect* to one path: it replaces the entry's
+// Chain with a fresh empty dedup.Chain (the committed literal is NOT
+// retained — git + the hash recover it) and keeps Path, LastCommit,
+// CommittedAt, CommittedTurn so the hash remains a recovery pointer. It
+// returns the bytes freed (len of the dropped chain's live literal) for
+// demand-sizing forensics, and ok=false when path is not tracked (no
+// mutation in that case).
+//
+// The caller (the adapter) invokes DropChain only for AgeOut candidates
+// whose commit hash it has confirmed reachable in the workspace repo.
+func (tf *ThreadFiles) DropChain(path string) (bytesFreed int, ok bool) {
+	e, ok := tf.Files[path]
+	if !ok {
+		return 0, false
+	}
+	bytesFreed = len(e.Chain.Current())
+	e.Chain = dedup.Chain{}
+	return bytesFreed, true
 }
 
 // Entry returns the tracked-file entry for path, if present.

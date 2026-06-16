@@ -161,3 +161,117 @@ func TestGetGitOriginURL_EmptyRoot(t *testing.T) {
 		t.Fatal("expected error for empty gitRoot, got nil")
 	}
 }
+
+// gitCommitFile writes path:=content under repo, stages and commits it, and
+// returns the resulting commit hash. Identity is set locally so the commit
+// succeeds in a bare CI environment with no global git user.
+func gitCommitFile(t *testing.T, repo, path, content, msg string) string {
+	t.Helper()
+	full := filepath.Join(repo, path)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir for %s: %v", path, err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+	gitRun(t, repo, "-c", "user.email=t@example.com", "-c", "user.name=t",
+		"add", path)
+	gitRun(t, repo, "-c", "user.email=t@example.com", "-c", "user.name=t",
+		"commit", "-q", "-m", msg)
+	cmd := exec.Command("git", "-C", repo, "rev-parse", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	return string(bytes.TrimSpace(out))
+}
+
+func TestCommitReachable_Reachable(t *testing.T) {
+	hasGit(t)
+	repo := t.TempDir()
+	gitInit(t, repo)
+	hash := gitCommitFile(t, repo, "f.txt", "hello\n", "add f")
+
+	ok, err := CommitReachable(repo, hash)
+	if err != nil {
+		t.Fatalf("CommitReachable: %v", err)
+	}
+	if !ok {
+		t.Errorf("CommitReachable(%s) = false, want true", hash)
+	}
+}
+
+func TestCommitReachable_Absent(t *testing.T) {
+	hasGit(t)
+	repo := t.TempDir()
+	gitInit(t, repo)
+	gitCommitFile(t, repo, "f.txt", "hello\n", "add f")
+
+	// A well-formed but never-committed hash is unreachable: false, no error.
+	ok, err := CommitReachable(repo, "0123456789012345678901234567890123456789")
+	if err != nil {
+		t.Fatalf("CommitReachable on absent hash: unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("CommitReachable on absent hash = true, want false")
+	}
+}
+
+func TestCommitReachable_EmptyArgs(t *testing.T) {
+	if _, err := CommitReachable("", "abc"); err == nil {
+		t.Error("expected error for empty gitRoot")
+	}
+	if _, err := CommitReachable("/tmp", ""); err == nil {
+		t.Error("expected error for empty hash")
+	}
+}
+
+func TestShowFileAtCommit_Present(t *testing.T) {
+	hasGit(t)
+	repo := t.TempDir()
+	gitInit(t, repo)
+	hash := gitCommitFile(t, repo, "dir/f.txt", "committed-bytes\n", "add f")
+
+	content, ok, err := ShowFileAtCommit(repo, hash, "dir/f.txt")
+	if err != nil {
+		t.Fatalf("ShowFileAtCommit: %v", err)
+	}
+	if !ok {
+		t.Fatal("ShowFileAtCommit ok=false, want true")
+	}
+	if content != "committed-bytes\n" {
+		t.Errorf("content = %q, want %q", content, "committed-bytes\n")
+	}
+}
+
+func TestShowFileAtCommit_AbsentPath(t *testing.T) {
+	hasGit(t)
+	repo := t.TempDir()
+	gitInit(t, repo)
+	hash := gitCommitFile(t, repo, "f.txt", "x\n", "add f")
+
+	// Path absent at that commit → ok=false, no error.
+	_, ok, err := ShowFileAtCommit(repo, hash, "missing.txt")
+	if err != nil {
+		t.Fatalf("ShowFileAtCommit absent path: unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("ShowFileAtCommit on absent path = ok true, want false")
+	}
+}
+
+func TestShowFileAtCommit_UnreachableCommit(t *testing.T) {
+	hasGit(t)
+	repo := t.TempDir()
+	gitInit(t, repo)
+	gitCommitFile(t, repo, "f.txt", "x\n", "add f")
+
+	// Unreachable commit hash → ok=false, no error (same "cannot recover").
+	_, ok, err := ShowFileAtCommit(repo, "0123456789012345678901234567890123456789", "f.txt")
+	if err != nil {
+		t.Fatalf("ShowFileAtCommit unreachable commit: unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("ShowFileAtCommit on unreachable commit = ok true, want false")
+	}
+}

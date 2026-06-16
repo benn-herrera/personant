@@ -434,12 +434,46 @@ type MemoryOps interface {
 	// pure duplication of what the project git repo holds at the commit
 	// hash — is dropped once a retention window has elapsed, leaving only
 	// the hash as a recovery pointer. Folds in store.LoadThreadFiles +
-	// ThreadFiles.AgeOut + store.SaveThreadFiles.
+	// ThreadFiles.AgeOut/DropChain + store.SaveThreadFiles.
+	//
+	// Reachability gate (the headline §3.9.1 invariant): a window-expired
+	// entry's chain is dropped ONLY IF its commit hash is confirmed
+	// reachable in the workspace repo (the same predicate GetFileVersion
+	// recovers through). A hash that is NOT reachable — the user amended,
+	// rebased, gc'd, or moved the workspace — causes aging to be REFUSED:
+	// the chain is RETAINED, not dropped, and a dedup/chain-age-refused
+	// event is logged (thread, path, hash, reason). No durable content is
+	// ever aged away without an application-reachable recovery path. If git
+	// is unavailable there is no second copy to minimize against, so every
+	// chain is retained and the refusal is logged once.
 	//
 	// A thread with no tracked-file sidecar is a no-op: (nil, 0, nil) with
 	// no sidecar written. Returns the sorted aged paths and total bytes
 	// freed (demand-sizing forensic data, also written to the event log).
 	AgeFileChains(ctx context.Context, threadID string, currentTurn int) (agedPaths []string, bytesFreed int, err error)
+
+	// GetFileVersion retrieves the committed content of a tracked file at a
+	// recorded commit hash — the §3.9.1 recovery path that makes the
+	// "recoverable by commit hash" claim deliverable end-to-end.
+	//
+	// Resolution order:
+	//   1. If the path's chain is still retained (not yet aged out) and the
+	//      hash matches the entry's LastCommit, the live literal is returned
+	//      from the chain directly — no git access.
+	//   2. Otherwise the adapter reads the blob from the workspace git tree
+	//      at that hash (read-only `git show <hash>:<path>`-class query,
+	//      §6.1.3).
+	//
+	// Returns ErrFileVersionUnreachable (sentinel, errors.Is) when the hash
+	// is not reachable in the workspace repo or the blob is absent at that
+	// path (amend/rebase/gc orphaned it, or the workspace moved). This is
+	// the same condition that causes AgeFileChains to REFUSE to age — the
+	// recovery path and the aging precondition share one reachability
+	// predicate. Never returns ("", nil): an unrecoverable hash is always a
+	// sentinel, never an empty-string success.
+	//
+	// Read-only: never mutates the workspace tree.
+	GetFileVersion(ctx context.Context, threadID, path, hash string) (content string, err error)
 
 	// ---------- Substrate recovery points ----------
 

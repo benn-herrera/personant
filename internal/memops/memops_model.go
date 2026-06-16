@@ -470,4 +470,12 @@ var (
 	// ErrProjectNotFound is returned by LoadProject when a
 	// non-default project's meta.json is absent.
 	ErrProjectNotFound = errors.New("store: project not found")
+	// ErrFileVersionUnreachable is returned by GetFileVersion when an
+	// aged-out committed file version cannot be recovered: the commit hash
+	// is not reachable in the workspace repo, or the blob is absent at that
+	// path (amend/rebase/gc orphaned it, or the workspace moved). It is the
+	// §3.9.1 "recovery path unreachable" sentinel — distinguished via
+	// errors.Is from a recovered-empty-file success, which the op never
+	// signals as ("", nil).
+	ErrFileVersionUnreachable = errors.New("memops: file version unreachable in workspace repo")
 )
