@@ -38,6 +38,8 @@ make clean                # remove bin/personant
 
 `make sim` runs `TestSim` in `internal/scenarios/sim/`. By default it is the **mock, deterministic acceptance gate**: symbolic-only recall with scripted mock responses.
 
+> **Recall-completeness is symbolic-only until the embedder-enabled rung is green (B1).** The default `make sim` / `make test` gate runs with a nil embedder, so the §3.4 embedding fine tier and its bounded lexical completeness floor (#123) do **not** execute there. The recall-completeness claim (no dead zones) is proven for the embedding-flush-lag case only by the **`make sim-completeness-rung`** rung below; until it is wired and green, treat that claim as symbolic-only-validated.
+
 ```sh
 make sim                                          # mock gate, default span (1w)
 make sim DURATION=1d                              # named span
@@ -46,9 +48,13 @@ make sim DURATION=168h                            # Go duration form
 make sim LIVE_EMBEDDING=true                      # real §3.4 embedder (reaper required)
 make sim LIVE_INFERENCE=true DURATION=1d          # real inference, capped at 1 sim-day
 make sim LIVE_EMBEDDING=true LIVE_INFERENCE=true DURATION=1d
+make sim-completeness-rung                        # B1: §3.4 completeness floor (live embedder, several sim-days)
+make sim-tokenceiling-rung                        # X4: whole-request token ceiling (live inference, 1 sim-day)
 ```
 
 **`DURATION`** accepts: named rungs `1d|1w`, bare-day form `<N>d` (e.g. `30d`, `120d`), or a Go duration (e.g. `168h`). Defaults to `1w` for mock runs.
+
+**B1+X4 embedder-enabled rung.** `make sim-completeness-rung` (live embedder + mock inference) drives the main thread past the assembly window so a probe target lands in the flush-lag dead zone, then asserts the §3.4 lexical completeness floor surfaced it (with a non-vacuity guard that at least one dead-zone probe was observed). `make sim-tokenceiling-rung` (live inference, capped at 1 sim-day) injects large verbose tool-result payloads and asserts the fully-assembled request's `usage.prompt_tokens` stays within the configured ceiling. Both are bounded and **not** part of `make test`. They MEASURE the X4-PROD violation; the production token bound is #127's work.
 
 **`LIVE_EMBEDDING=true` / `LIVE_INFERENCE=true`** opt in real inference/embedding independently. Both require `test/rundata/test.{providers,config}.toml` (user-provided, gitignored) and a reachable `reaper.local` endpoint. A missing or unreachable endpoint is a hard failure, not a skip. `LIVE_INFERENCE=true` is refused past 1 sim-day — always pair it with `DURATION=1d`.
 

@@ -1493,6 +1493,16 @@ func computeIntraThreadGauges(gen *generator, liveThreads int, p50, p95, p99 flo
 	}
 	g[metricRecallIntraCoherenceDivergence] = float64(divergence)
 
+	// B1 completeness-floor (flush-lag dead-zone) tally (§3.4 / #123): the
+	// denominator (dead-zone probes observed) and the runtime's hits. The
+	// completeness gate (completenessFloorAsserts) reads these directly:
+	// non-vacuity requires _total > 0, and the floor holds iff _hit == _total.
+	// Both 0 on the mock run (no intra layer); the headline on a live-embedding
+	// run. Plain run-to-date counts (the daily snapshot reuses this pure compute,
+	// so they must be cumulative shadow state — which they are).
+	g[metricRecallCompletenessDeadZoneTotal] = float64(gen.intraDeadZoneTotal)
+	g[metricRecallCompletenessDeadZoneHit] = float64(gen.intraDeadZoneObservedHit)
+
 	return g
 }
 

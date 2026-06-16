@@ -243,6 +243,31 @@ type WorkloadConfig struct {
 	// any dormant same-slot thread to surface, so recall would never be
 	// exercised. 0 → default of 2.
 	FamilySize int
+
+	// LargeInputEveryN and LargeInputBytes are the B1+X4 token-ceiling stress
+	// knobs (X4-PROD fix 2 / design §2.3). DEFAULT OFF (LargeInputEveryN == 0):
+	// no inflation, so the mock acceptance gate's step stream stays BYTE-IDENTICAL
+	// (rung invariant 8 / TestGenerateWorkload_Deterministic) and the symbolic
+	// recall oracle is untouched. The rung turns them on to push the assembled
+	// model request toward the configured token ceiling, exercising the
+	// post-flight usage.prompt_tokens assertion against a payload that COULD blow
+	// the window (rung invariant 6).
+	//
+	// When LargeInputEveryN > 0, every LargeInputEveryN-th WORK turn carries an
+	// inflated payload of ~LargeInputBytes deterministic filler. Per #127 Q3 the
+	// production live-turn sub-policy REJECTS oversize user-authored input but
+	// TRUNCATION-bounds tool results — so the stress is injected via the
+	// verbose-TOOL-RESULT path (an oversized fs.read content delta), which grows
+	// the request rather than being rejected; the large-USER-INPUT path is NOT
+	// injected here (it would exercise the reject path, not request growth, and
+	// the rung's job is to stress the ceiling assertion). The filler carries NO
+	// new recall-bearing tags (it is topic-free noise appended to the existing
+	// tagged content), so ExpectedRecallMatches and the shadow chunk model are
+	// unaffected (design §2.3 negative constraint). Seed-deterministic: placement
+	// is keyed off the work-turn count and the bytes are a fixed pattern, so a
+	// run with the same (Seed, Duration, Corpus, LargeInput*) is reproducible.
+	LargeInputEveryN int
+	LargeInputBytes  int
 }
 
 // withDefaults returns a copy of cfg with any zero rate field replaced
@@ -952,6 +977,21 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 				g.intraHopDiverge[p.hops]++
 			}
 		}
+		// B1 completeness-floor (flush-lag dead-zone) tally. A probe whose
+		// oracle-predicted target chunk landed in the dead zone (inDebtWindow:
+		// scrolled out, not yet flushed → only the #123 lexical floor can hit) is
+		// counted on EVERY run for the denominator; the observed hit is meaningful
+		// only on an embedding-live run (the mock run has no intra layer, so
+		// observedHit is by-construction false there and the gate is off). The
+		// completeness gate asserts intraDeadZoneObservedHit==intraDeadZoneTotal
+		// AND intraDeadZoneTotal>0 (non-vacuity) — see evalRungGates /
+		// completenessFloorAsserts.
+		if p.inDebtWindow {
+			g.intraDeadZoneTotal++
+			if g.embeddingRun && observedHit {
+				g.intraDeadZoneObservedHit++
+			}
+		}
 	}
 	g.lastIntraProbe = nil
 
@@ -1587,6 +1627,22 @@ const (
 	// where the intra layer is off and no observed-vs-predicted tally runs).
 	metricRecallIntraCoherenceDivergence = "recall_intra_coherence_divergence"
 
+	// metricRecallCompletenessDeadZoneTotal / *Hit are the B1 embedder-enabled
+	// recall-completeness floor (§3.4 / #123) tally — the DIRECT assertion the
+	// B1+X4 rung adds. *Total counts intra probes whose oracle-predicted target
+	// chunk landed in the FLUSH-LAG DEAD ZONE (scrolled out, not yet flushed →
+	// only the bounded lexical floor can surface it); *Hit counts those the
+	// runtime actually surfaced. The completeness gate (completenessFloorAsserts,
+	// live-embedding only) asserts *Hit == *Total AND *Total > 0 (non-vacuity,
+	// design invariant 3). Both 0 on the mock run (no intra layer, gate off).
+	// Sim-owned (declared and consumed inside package sim — folded into h.Metrics
+	// by recordIntraThreadMetrics, read by evalRungGates), so NOT in the
+	// cross-seam registry. Distinct from the report-only #96 coherence tripwire
+	// above: that is whole-range and report-only under live embedding; this is the
+	// dead-zone subset and is the hard B1 floor assertion.
+	metricRecallCompletenessDeadZoneTotal = "recall_completeness_deadzone_total"
+	metricRecallCompletenessDeadZoneHit   = "recall_completeness_deadzone_hit"
+
 	// The W1 descent-vs-flat classification keys (recall_intra_w1_strict_miss /
 	// _tie / _tree_mismatch) are WRITTEN by the harness (package scenarios) and
 	// read here, so they are owned by the cross-seam registry
@@ -1807,6 +1863,14 @@ type generator struct {
 	// exercises.
 	userDictatedCount int
 
+	// workTurnSeq counts WORK turns emitted so far (incremented once per
+	// buildWorkPreEvents call) — the deterministic placement key for the B1+X4
+	// large-input injection (cfg.LargeInputEveryN). Every LargeInputEveryN-th
+	// work turn carries the inflated verbose-tool-result payload. Pure (no rng),
+	// so it does not perturb the action stream's determinism; 0/unused when the
+	// knob is off (LargeInputEveryN == 0).
+	workTurnSeq int
+
 	// Synthesis-thread telemetry (§2.7.3, #47/#42). synthesisEvents counts
 	// new-thread creations converted into synthesis threads;
 	// synthesisParentCounts records the parent count of each such event
@@ -1989,6 +2053,22 @@ type generator struct {
 	intraDepthTotal       map[int]int
 	intraDepthPredictHit  map[int]int
 	intraDepthObservedHit map[int]int
+
+	// B1 completeness-floor (flush-lag dead-zone) tally — the embedder-enabled
+	// recall-completeness assertion (§3.4 / #123). intraDeadZoneTotal counts
+	// intra probes whose oracle-predicted target chunk landed strictly in the
+	// flush-lag dead zone (scrolled out, not yet flushed → only the bounded
+	// lexical floor can hit; intraProbe.inDebtWindow). intraDeadZoneObservedHit
+	// counts those the runtime actually surfaced (spine.intra-match-fire for the
+	// engaged thread). On a live-EMBEDDING run the completeness gate
+	// (completenessFloorAsserts) requires observedHit==total (every dead-zone
+	// probe surfaced) AND total>0 (non-vacuity, design invariant 3). Both are 0
+	// on the mock run (no intra layer fires), where the gate is off. Distinct
+	// from the report-only #96 coherence tripwire: that compares the WHOLE
+	// scrolled-out range and is report-only under live embedding; THIS targets
+	// the dead-zone subset and is the hard B1 assertion.
+	intraDeadZoneTotal       int
+	intraDeadZoneObservedHit int
 
 	// recallBuckets accumulates per-bucket {hits, total} recall tallies for
 	// the lifecycle oracles (drift_recall_origin, drift_recall_dest,
@@ -2966,13 +3046,32 @@ func buildMockResponse(isNew bool, threadID string, anchorTags []string, slot Co
 // both deltas, exercising the §3.9.2/§3.9.4 live-window dedup path.
 // Otherwise the agentic-edit default line is used. Mutates the
 // thread's fileState (content, writeCount).
+//
+// B1+X4 stress (cfg.LargeInputEveryN > 0): every LargeInputEveryN-th work turn
+// ALSO emits a separate verbose-tool-result delta — an oversized fs.read of a
+// synthetic large file (largeToolResultDelta) sized ~LargeInputBytes. Per #127
+// Q3 a tool result is TRUNCATION-bounded by the production live-turn sub-policy
+// (not rejected like oversize user input), so it grows the assembled request,
+// pushing usage.prompt_tokens toward the ceiling — the X4-PROD payload the mock
+// mad-libs turns never produce. It is a STANDALONE delta carrying tag-free
+// filler; the thread's persistent fs.content is NOT inflated, so dedup, the
+// fs diff, the shadow chunk model, and the recall oracle are all unaffected
+// (design §2.3 negative constraint). The knob defaults off → this is skipped →
+// the mock step stream is byte-identical.
 func (g *generator) buildWorkPreEvents(idx int, slot CorpusSlot, userDictated bool) []turn.Delta {
+	g.workTurnSeq++
 	fs := g.workFile(idx)
 	preEvents := []turn.Delta{{
 		Source:  memops.SourceFSRead,
 		Content: fs.content,
 		Meta:    map[string]string{"path": fs.path},
 	}}
+	// B1+X4 verbose-tool-result injection — placed right after the genuine
+	// fs.read so the inflated bytes ride into THIS turn's assembled request
+	// (preEvents fire before the user.prompt delta). Off by default.
+	if g.cfg.LargeInputEveryN > 0 && g.workTurnSeq%g.cfg.LargeInputEveryN == 0 {
+		preEvents = append(preEvents, largeToolResultDelta(g.workTurnSeq, g.cfg.LargeInputBytes))
+	}
 	fs.writeCount++
 	if userDictated {
 		fs.content += fmt.Sprintf("\n// edit %d: %s — #%s\n",
@@ -2997,6 +3096,50 @@ func (g *generator) buildWorkPreEvents(idx int, slot CorpusSlot, userDictated bo
 	}
 	return preEvents
 }
+
+// largeToolResultDelta builds a B1+X4 verbose-tool-result delta: a synthetic
+// fs.read of an oversized "log dump" sized to ~bytes, used to stress the
+// token-ceiling assertion (X4-PROD fix 2). The content is deterministic
+// (seed-free — a fixed pattern keyed off seq) so the step stream stays
+// reproducible, and it carries NO #-tags or corpus vocabulary — it is topic-free
+// filler, so the runtime's symbol extraction yields nothing recall-bearing and
+// the recall oracle is unperturbed (design §2.3). A distinct synthetic path per
+// seq keeps the delta from being mistaken for the thread's tracked work file.
+func largeToolResultDelta(seq, bytes int) turn.Delta {
+	if bytes <= 0 {
+		bytes = defaultLargeInputBytes
+	}
+	return turn.Delta{
+		Source:  memops.SourceFSRead,
+		Content: largeFiller(seq, bytes),
+		Meta:    map[string]string{"path": fmt.Sprintf("build/logs/run-%d.log", seq)},
+	}
+}
+
+// largeFiller returns ~bytes of deterministic, tag-free filler text. Each line
+// is a fixed-shape log line carrying the seq and a line counter — no '#'
+// characters and no corpus tags, so the deterministic symbol-extraction pass
+// finds no recall-bearing identifier in it (it is noise around the real tagged
+// content, not new ground truth). The exact byte count is approximate (whole
+// lines), which is fine: the token-ceiling assertion reads the provider's true
+// post-assembly count, not this estimate.
+func largeFiller(seq, bytes int) string {
+	const line = "log line %06d: synthetic verbose tool output for run %d — padding to stress the live-turn payload budget\n"
+	var b strings.Builder
+	b.Grow(bytes + len(line))
+	for i := 0; b.Len() < bytes; i++ {
+		fmt.Fprintf(&b, line, i, seq)
+	}
+	return b.String()
+}
+
+// defaultLargeInputBytes is the fallback verbose-tool-result size when the rung
+// sets LargeInputEveryN but leaves LargeInputBytes zero. ~48 KB is a meaningful
+// fraction of the ~500 KB (= ceiling × ~2.5 B/tok) the #127 partition implies,
+// and a handful per session compounds toward the ceiling (design §5 starting
+// guess: tens-of-KB tool results). A calibration starting point — tune from the
+// first run's request_prompt_tokens max (rung criterion 3).
+const defaultLargeInputBytes = 48 * 1024
 
 // syntheticHash returns a short deterministic hex digest of content, used
 // as the synthetic git-commit hash on an fs.commit delta. It is a content

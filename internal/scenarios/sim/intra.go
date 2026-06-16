@@ -71,6 +71,23 @@ const (
 	// trim draws are deterministic for a given seed yet isolated from g.rng's
 	// action-selection stream. An arbitrary fixed constant.
 	keepTossSeedOffset = 0x6b656570 // "keep"
+
+	// simEmbeddingDebtCap MIRRORS turn.embeddingDebtCap (unexported in
+	// internal/turn): the §6.5 debt-window depth — the count of turn-excerpts a
+	// thread may accrue scrolled out of the assembly window before the runtime
+	// flushes them into the §3.4 fine tier. It is the depth of the FLUSH-LAG DEAD
+	// ZONE: a scrolled-out excerpt within the most-recent simEmbeddingDebtCap
+	// below the assembly-window floor has NO fine-tier vector yet (the embed is
+	// in flight or not yet triggered), so ONLY the #123 bounded lexical
+	// completeness floor (debtWindowTurns, bounded by exactly this cap via
+	// debtWindowBound→EngagedDebtWindow) can surface it. The B1 completeness
+	// assertion (completenessFloorAsserts) targets probes whose oracle-predicted
+	// target chunk lands in this band — see buildIntraProbeStep's inDebtWindow
+	// tagging. This is the ONE place the sim mirrors the cap (the flush COST is
+	// OBSERVED from the runtime, not modeled — #126 — so no other mirror exists);
+	// a runtime change to embeddingDebtCap must update this constant, guarded by
+	// TestSimDebtCapMirrorsRuntime.
+	simEmbeddingDebtCap = 16
 )
 
 // chunkRecord is the generator's shadow of ONE fine-tier chunk: the
@@ -112,6 +129,21 @@ type intraProbe struct {
 	// means "no predicted target turn available" → the depth tally is SKIPPED
 	// for that probe (report-only characterization, never fabricate a bucket).
 	turnDepth int
+
+	// inDebtWindow marks the FLUSH-LAG DEAD ZONE probe (B1 completeness floor,
+	// #123): the oracle-predicted target chunk (predictHit) scrolled out of the
+	// assembly window AND sits within the most-recent simEmbeddingDebtCap below
+	// the window floor — i.e. ThreadTurnWindow <= turnDepth < ThreadTurnWindow +
+	// simEmbeddingDebtCap. In this band the §3.4 EMBEDDING fine tier has no
+	// vector for the target yet (the debt-cap flush has not embedded it), so a
+	// runtime intra hit can ONLY come from the bounded lexical completeness floor
+	// (debtWindowTurns). This is the exact case the floor exists to cover and the
+	// one place where surfacing the thread PROVES the floor fired (design FM2).
+	// The completeness assertion (completenessFloorAsserts) requires an observed
+	// hit for every such probe, and FAILS if zero were observed (non-vacuity,
+	// design invariant 3). Set only when predictHit (an unpredicted probe has no
+	// target turn to classify); false otherwise.
+	inDebtWindow bool
 }
 
 // depthOrZero returns the turn-depth (cur − target) when the oracle predicted
@@ -122,6 +154,18 @@ func depthOrZero(cur, target int) int {
 		return 0
 	}
 	return cur - target
+}
+
+// inDebtWindowDepth reports whether a turn-depth (cur − target) lands strictly
+// in the FLUSH-LAG DEAD ZONE: scrolled out of the assembly window
+// (depth >= ThreadTurnWindow) AND within the most-recent simEmbeddingDebtCap
+// below the window floor (depth < ThreadTurnWindow + simEmbeddingDebtCap). In
+// that band the §3.4 embedding fine tier has no vector yet, so a runtime intra
+// hit can come ONLY from the #123 bounded lexical completeness floor — the B1
+// assertion target. depth must be the predicted-target depth (>=1); 0 (no
+// predicted target) is never in the dead zone.
+func inDebtWindowDepth(depth int) bool {
+	return depth >= store.ThreadTurnWindow && depth < store.ThreadTurnWindow+simEmbeddingDebtCap
 }
 
 // intraDepthBucket maps a turn-depth (>=1) to a LOG-SCALE bucket index, using
@@ -417,6 +461,12 @@ func (g *generator) buildIntraProbeStep() (bufStep, bool) {
 			// oracle predicted a target chunk (targetTurn>0). 0 → no predicted
 			// target → the depth tally skips this probe (never fabricate a bucket).
 			turnDepth: depthOrZero(cur, targetTurn),
+			// B1 dead-zone classification: the predicted target chunk is in the
+			// flush-lag band (scrolled out, not yet flushed → only the #123 lexical
+			// floor can surface it). Only meaningful when the oracle predicted a
+			// target (predictHit); inDebtWindowDepth(0) is false for an unpredicted
+			// probe, so the && predictHit guard is belt-and-suspenders.
+			inDebtWindow: predictHit && inDebtWindowDepth(depthOrZero(cur, targetTurn)),
 		},
 	}, true
 }

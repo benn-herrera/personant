@@ -273,13 +273,29 @@ func stepSetClock(h *Harness, idx int, label string, step Step) {
 // stepExecTurn drives the turn end-to-end and returns the streamed body and
 // the measured wall time. A turn.Run error is fatal — the runtime hit a bug
 // the scenario can't recover from.
+//
+// It drives turn.RunWithInfo (not RunWithDeltas) so the per-turn
+// TurnInfo.PromptTokens — the provider's count for the FULLY-assembled request
+// (system + history + userInput + tool-result deltas) — is observable. On a
+// live-inference run that number is the only honest measurement of the
+// assembled-request size and the source for the B1+X4 token-ceiling gate
+// (X4-PROD FM3: a byte-budget-derived or composed-memory-only count is
+// true-by-construction). One sample/turn is recorded into request_prompt_tokens
+// — but ONLY when a live chat client is installed: the mock client reports a
+// canned PromptTokens=8 (mockllm.go), so recording it on the mock path would
+// both inject a vacuous series into the gate AND perturb the mock metrics blob.
+// Gating the Record on h.liveClient keeps the mock run byte-identical (rung
+// invariant 8) and the gate non-vacuous (rung invariant 4).
 func stepExecTurn(t *testing.T, h *Harness, idx int, label string, step Step) (string, time.Duration) {
 	t.Helper()
 	start := clock.Profiling()
-	body, err := turn.RunWithDeltas(context.Background(), h.State, step.PreEvents, step.UserInput, io.Discard)
+	body, info, err := turn.RunWithInfo(context.Background(), h.State, step.PreEvents, step.UserInput, io.Discard)
 	elapsed := clock.Since(start)
 	if err != nil {
 		t.Fatalf("scenario step %d (%s): turn.Run: %v", idx+1, label, err)
+	}
+	if h.liveClient != nil {
+		h.Metrics.Record(MetricRequestPromptTokens, float64(info.PromptTokens))
 	}
 	return body, elapsed
 }

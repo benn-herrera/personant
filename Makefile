@@ -1,6 +1,6 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build test test-run cover sim integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
+.PHONY: all build test test-run cover sim sim-completeness-rung sim-tokenceiling-rung integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
 
 all: build
 
@@ -190,6 +190,39 @@ LIVE_INFERENCE ?= false
 sim: build recall-madlibs
 	$(SIM_WRAP) go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 \
 	  -sim.duration=$(DURATION) -sim.live-embedding=$(LIVE_EMBEDDING) -sim.live-inference=$(LIVE_INFERENCE)
+
+# B1+X4 embedder-enabled acceptance rung (closes the B1 §3.4 recall-completeness
+# blind spot + the X4 / X4-PROD whole-request token-ceiling blind spot). The rung
+# is SPLIT into two invocation profiles (design Q1), each run in its valid regime
+# and BOUNDED — NOT part of the default `make test`, NOT a steady-state ladder
+# rung. Both read the USER-provided, gitignored test/rundata/test.{providers,
+# config}.toml and FAIL (not skip) on missing/unreachable endpoints. This rung
+# MEASURES the X4-PROD violation; it does NOT add the production bound (#127's).
+#
+#   sim-completeness-rung — the §3.4 completeness FLOOR (B1). Live embedder +
+#     MOCK inference (fast, coherent) over several sim-days so the main thread
+#     scrolls a probe target into the flush-lag dead zone, where ONLY the bounded
+#     lexical floor (#123) can hit. The completeness gate asserts every dead-zone
+#     probe surfaced AND that at least one was observed (non-vacuity). Mock
+#     inference keeps the recall oracle valid; the span (default 4 sim-days) is
+#     capped well below the ladder. Override with DURATION (e.g. DURATION=7d) if a
+#     longer scroll-in is needed.
+#
+#   sim-tokenceiling-rung — the whole-request token CEILING (X4 / X4-PROD). Live
+#     inference at the 24h short cap (liveInferenceMaxDuration), with the
+#     large-input workload injection ON (verbose tool-result deltas sized to
+#     approach the ceiling). The token-ceiling gate asserts max(prompt_tokens) <=
+#     the configured ceiling on the FULL assembled request and reports max + P99
+#     so a reviewer can confirm the payload approached the ceiling. The 24h cap is
+#     enforced by setupLiveElements (a longer span is refused).
+B1X4_COMPLETENESS_DURATION ?= 4d
+sim-completeness-rung: build recall-madlibs
+	$(SIM_WRAP) go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 \
+	  -sim.duration=$(B1X4_COMPLETENESS_DURATION) -sim.live-embedding=true -sim.live-inference=false
+
+sim-tokenceiling-rung: build recall-madlibs
+	$(SIM_WRAP) go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 \
+	  -sim.duration=1d -sim.live-embedding=false -sim.live-inference=true
 
 # integration-test runs the live-inference tests — they require the
 # `reaper` provider reachable. The tests ALWAYS COMPILE (part of the

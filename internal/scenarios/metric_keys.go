@@ -68,4 +68,20 @@ const (
 	MetricRecallIntraW1StrictMiss   = "recall_intra_w1_strict_miss"
 	MetricRecallIntraW1Tie          = "recall_intra_w1_tie"
 	MetricRecallIntraW1TreeMismatch = "recall_intra_w1_tree_mismatch"
+
+	// MetricRequestPromptTokens is the per-turn provider-reported prompt-token
+	// count for the FULLY-assembled model request (system prompt + replayed
+	// history + userInput + tool-result deltas) — turn.TurnInfo.PromptTokens,
+	// sourced from model.Response.Usage.PromptTokens. The harness records ONE
+	// sample per turn into this histogram, but ONLY on a live-inference run
+	// (h.liveClient != nil): on the mock path the value is the mock's canned 8
+	// (mockllm.go), which is true-by-construction and cannot stand in for the
+	// token-ceiling gate (X4-PROD FM3), so it is deliberately NOT recorded there
+	// — keeping the mock metrics blob byte-identical (B1+X4 rung invariant 8).
+	// The token-ceiling gate (tokenCeilingAsserts) reads max(this) and asserts
+	// <= the configured ceiling; the rung also reports max + P99 (the FM4
+	// non-vacuity forensic — a max far below the ceiling means the large-input
+	// workload never stressed the assembled request). Cross-seam: harness writes,
+	// sim gate reads.
+	MetricRequestPromptTokens = "request_prompt_tokens"
 )

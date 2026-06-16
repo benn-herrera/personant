@@ -13,6 +13,40 @@ import (
 	"testing"
 )
 
+// defaultRequestTokenCeiling is the whole-request token ceiling the B1+X4
+// token-ceiling gate (tokenCeilingAsserts) asserts against: the fully-assembled
+// model request's usage.prompt_tokens must stay <= this. It is the #127 seam
+// (design §4): #127 owns the ceiling VALUE and its config representation
+// (~200K tokens, token-denominated, partitioned response-reserve +
+// live-turn-reserve + memory-budget). This rung is a CONSUMER of the ceiling,
+// never a definer, and does NOT add the production bound (that is #127's) — it
+// only MEASURES whether the assembled request stays within it.
+//
+// Read from ONE named constant in ONE place (rung invariant 5): a bare 200000
+// literal scattered in test code would drift out of sync with #127 and hide the
+// ceiling from a grep. When #127 lands its config field, this single read point
+// switches to it in one edit.
+//
+// TODO(#127): read from cfg once the field lands (loadLiveEndpoints → cfg →
+// the live-config token ceiling); until then this constant is the source.
+const defaultRequestTokenCeiling = 200000
+
+// largeInputRungEveryN / largeInputRungBytes are the B1+X4 token-ceiling
+// profile's large-input injection knobs (design §2.3, criterion 3): on the
+// live-inference rung, every largeInputRungEveryN-th work turn carries a
+// ~largeInputRungBytes verbose-tool-result payload, so a handful per session
+// compound toward the ceiling. ~48 KB is a meaningful fraction of the
+// ceiling × ~2.5 B/tok ≈ 500 KB the #127 partition implies; every-3rd work turn
+// keeps a steady payload without saturating every turn. Calibration starting
+// points (design §5) — tune from the first run's request_prompt_tokens max
+// (rung criterion 3: the recorded max must be a meaningful fraction of the
+// ceiling). Only consulted on the live-inference profile; the mock gate and the
+// live-embedding completeness profile keep the knob off.
+const (
+	largeInputRungEveryN = 3
+	largeInputRungBytes  = 48 * 1024
+)
+
 // gatePolicy is the single source of truth for which §9.4 acceptance gates
 // fire as hard t.Errorf asserts versus downgrade to logged observations on a
 // given rung. It replaces the scatter of inline `oracleBlind` / `*liveEmbedding`
@@ -58,6 +92,36 @@ func (p gatePolicy) oracleGatesAssert() bool { return !p.oracleBlind }
 func (p gatePolicy) intraDivergenceAsserts() bool {
 	return !p.oracleBlind && !p.liveEmbedding
 }
+
+// tokenCeilingAsserts reports whether the B1+X4 whole-request token-ceiling gate
+// (X4 / X4-PROD invariant 4) fires as a hard assert. TRUE iff a live chat client
+// is installed — which is EXACTLY oracleBlind, since setupLiveElements sets
+// oracleBlind in lockstep with installing the live chat client (only
+// -sim.live-inference does both). Only then is request_prompt_tokens a REAL
+// provider count (the mock client reports a canned 8); the harness records the
+// metric only on that path, so on every other run the series is absent and the
+// gate has nothing to assert.
+//
+// This gate does NOT depend on the recall oracle: it reads the provider's own
+// usage.prompt_tokens for the assembled request, not anything the plan-derived
+// oracle predicts. So unlike oracleGatesAssert it stays HARD even though
+// oracleBlind is true on this very run — the same "substrate-invariant gates
+// stay live under blinding" reasoning the R6 / thread-id-wellformedness gates
+// use. The blinding disables the gates whose GROUND TRUTH is the canned plan;
+// the token ceiling's ground truth is the model server's token count.
+func (p gatePolicy) tokenCeilingAsserts() bool { return p.oracleBlind }
+
+// completenessFloorAsserts reports whether the B1 §3.4 recall-completeness floor
+// gate fires as a hard assert. TRUE iff live embedding is installed: only then
+// does the §3.4 fine tier exist, the debt-window lexical floor (#123) run, and
+// spine.intra-match-fire fire — so only then is a dead-zone hit observable. On
+// the mock run the intra layer is off (no embedder), so the dead-zone tally is
+// 0/0 and the gate is correctly off. Distinct from intraDivergenceAsserts (the
+// report-only #96 coherence tripwire, which is OFF under live embedding): this
+// targets the flush-lag dead-zone subset, where the embedding fine tier cannot
+// cover the target and only the lexical floor can — a VALID assertion under
+// live embedding (design invariant 2).
+func (p gatePolicy) completenessFloorAsserts() bool { return p.liveEmbedding }
 
 // rungReport is the write-once-read-many owner of a rung's materialized
 // telemetry (sim-harness burndown #6). runSimRung used to write→re-read→mutate→
@@ -116,11 +180,25 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	liveClient model.Client, liveModel string) *scenarios.Harness {
 	t.Helper()
 
-	sc := GenerateWorkload(WorkloadConfig{
+	cfg := WorkloadConfig{
 		Seed:     simSeed,
 		Duration: d,
 		Corpus:   corpus,
-	})
+	}
+	// B1+X4 token-ceiling profile: ONLY when a live chat client is installed
+	// (the -sim.live-inference rung, paired with oracleBlind) do we turn on the
+	// large-input injection that stresses the assembled request toward the token
+	// ceiling. The mock acceptance gate (liveClient == nil) and the
+	// live-embedding completeness profile both keep the knob OFF, so their step
+	// streams stay byte-identical (rung invariant 8 / oracle-clean). The injection
+	// is only meaningful when the prompt-token count is a REAL provider number;
+	// with the mock client (canned PromptTokens=8) it would inflate the request
+	// for no observable gain and perturb the determinism contract.
+	if liveClient != nil {
+		cfg.LargeInputEveryN = largeInputRungEveryN
+		cfg.LargeInputBytes = largeInputRungBytes
+	}
+	sc := GenerateWorkload(cfg)
 	sc.Recaller = recaller
 	// Inference-in-loop (#98, Inc 3): when a live chat client is supplied the
 	// harness drives turns against it instead of the scripted mock, and
@@ -760,4 +838,120 @@ func evalRungGates(t *testing.T, label string, rep rungReport, gen *generator, p
 				"runtime diverged — canary not asserted)", absent)
 		}
 	}
+
+	assertTokenCeiling(t, label, m, policy)
+	assertCompletenessFloor(t, label, m, policy)
+}
+
+// assertTokenCeiling is the B1+X4 whole-request token-ceiling gate (X4 /
+// X4-PROD invariant 4). On a live-inference run (tokenCeilingAsserts) it reads
+// the request_prompt_tokens histogram the harness recorded per turn from
+// turn.TurnInfo.PromptTokens — the provider's count for the FULLY-assembled
+// request — and asserts max <= defaultRequestTokenCeiling. It also reports max +
+// P99 (rung invariant 6 forensic): a recorded max that is a tiny fraction of the
+// ceiling means the large-input workload never stressed the assembled request
+// (FM4) and the gate, though green, is suspect — flagged in review.
+//
+// It is OFF on every non-live-inference run (the mock client reports a canned
+// PromptTokens=8 and the harness does not even record the series there), so it
+// never fires on the mock acceptance gate. It does NOT depend on the recall
+// oracle — it reads the model server's own count — so it stays HARD even though
+// oracleBlind is true on the very run it asserts (tokenCeilingAsserts rationale).
+func assertTokenCeiling(t *testing.T, label string, m metricsBlob, policy gatePolicy) {
+	t.Helper()
+	if !policy.tokenCeilingAsserts() {
+		// Mock / live-embedding-only run: no real prompt-token count was recorded.
+		// Nothing to assert; stay silent so the mock summary is unchanged.
+		return
+	}
+	samples := m.Histograms[scenarios.MetricRequestPromptTokens]
+	if len(samples) > 0 {
+		t.Logf("%s request_prompt_tokens: max=%.0f P99=%.0f over %d turns (ceiling %d; "+
+			"a max far below the ceiling means the large-input workload did not stress the payload — FM4)",
+			label, maxOf(samples), percentile(samples, 0.99), len(samples), defaultRequestTokenCeiling)
+	}
+	if fail := checkTokenCeiling(samples); fail != "" {
+		t.Errorf("%s %s", label, fail)
+	}
+}
+
+// checkTokenCeiling is the PURE B1+X4 token-ceiling predicate (testable in
+// isolation — design §3 criterion 2 mutation test): given the per-turn
+// request_prompt_tokens samples from a live-inference run, it returns a failure
+// message if the gate should fail, or "" if it passes. An empty series is a
+// wiring defect (the gate cannot observe the assembled request); a max above the
+// ceiling is the X4-PROD violation the rung measures. Caller has already
+// confirmed tokenCeilingAsserts (this runs only on the live-inference profile).
+func checkTokenCeiling(samples []float64) string {
+	if len(samples) == 0 {
+		return "token-ceiling gate: live inference ran but request_prompt_tokens has 0 samples — " +
+			"the assembled-request token count was never observed (check stepExecTurn's RunWithInfo plumb). " +
+			"The gate cannot certify the ceiling against an empty series."
+	}
+	if maxTok := maxOf(samples); int(maxTok) > defaultRequestTokenCeiling {
+		return fmt.Sprintf("X4-PROD FAILURE: max request_prompt_tokens %.0f exceeds the configured ceiling %d — "+
+			"the fully-assembled model request (system + history + userInput + tool-result deltas) blew the "+
+			"token window. This is the X4-PROD boundary the rung MEASURES; the production bound is #127's.",
+			maxTok, defaultRequestTokenCeiling)
+	}
+	return ""
+}
+
+// assertCompletenessFloor is the B1 §3.4 recall-completeness floor gate
+// (invariant 2+3). On a live-embedding run (completenessFloorAsserts) it reads
+// the flush-lag dead-zone tally (recall_completeness_deadzone_total / _hit) the
+// generator accumulated: probes whose oracle-predicted target chunk landed in
+// the band where the embedding fine tier has no vector yet, so ONLY the bounded
+// lexical floor (#123) can surface it. It asserts (a) NON-VACUITY — at least one
+// dead-zone probe was observed (else the rung cannot prove §3.4, design
+// invariant 3), and (b) the floor FIRED — every dead-zone probe was surfaced.
+//
+// This is the anti-vacuity proof's target: with the debtWindowTurns floor
+// disabled (or debtWindowBound forced to 0) the runtime cannot surface a
+// dead-zone target (no vector, no lexical pass), so _hit < _total and this gate
+// FAILS — exactly the mutation test in design §3 criterion 1. It is OFF on the
+// mock run (no embedder → no intra layer → 0/0) and report-only nowhere: under
+// live embedding it is the HARD B1 assertion (the report-only #96 coherence
+// tripwire is a different, whole-range measure — see completenessFloorAsserts).
+func assertCompletenessFloor(t *testing.T, label string, m metricsBlob, policy gatePolicy) {
+	t.Helper()
+	if !policy.completenessFloorAsserts() {
+		// Mock / live-inference-only run: the §3.4 fine tier and its lexical floor
+		// do not run, so there is no dead-zone observation to assert. Silent.
+		return
+	}
+	total := int(m.Gauges[metricRecallCompletenessDeadZoneTotal])
+	hit := int(m.Gauges[metricRecallCompletenessDeadZoneHit])
+	t.Logf("%s recall-completeness floor (§3.4/#123): %d/%d flush-lag dead-zone probes surfaced "+
+		"(only the bounded lexical floor can hit this band — the embedding fine tier has no vector yet)",
+		label, hit, total)
+	if fail := checkCompletenessFloor(hit, total); fail != "" {
+		t.Errorf("%s %s", label, fail)
+	}
+}
+
+// checkCompletenessFloor is the PURE B1 §3.4 completeness-floor predicate
+// (testable in isolation — design §3 criterion 1 mutation test): given the
+// flush-lag dead-zone (hit, total) tally from a live-embedding run, it returns a
+// failure message if the gate should fail, or "" if it passes. total==0 is the
+// non-vacuity failure (design invariant 3 — no dead-zone probe was exercised, so
+// §3.4 is unproven); hit<total is the floor-missed failure (the lexical floor
+// did not surface a dead-zone target — the mutation-test signal: disabling
+// debtWindowTurns drives hit below total). Caller has already confirmed
+// completenessFloorAsserts (this runs only on the live-embedding profile).
+func checkCompletenessFloor(hit, total int) string {
+	if total == 0 {
+		return fmt.Sprintf("B1 FAILURE: completeness floor never exercised — 0 flush-lag dead-zone probes observed, "+
+			"so the rung cannot prove §3.4 recall-completeness. The embedding-only span/cadence must scroll a "+
+			"main-thread probe target into the debt window (ThreadTurnWindow..+%d). Lengthen the run or raise the "+
+			"main-thread engage cadence.", simEmbeddingDebtCap)
+	}
+	if hit != total {
+		return fmt.Sprintf("B1 FAILURE: recall-completeness floor missed %d/%d flush-lag dead-zone probes — a probe whose "+
+			"target scrolled out but is NOT yet flushed to the fine tier was not surfaced. ONLY the §3.4 bounded "+
+			"lexical completeness floor (#123) can cover this band (no embedding vector yet), so a miss means the "+
+			"floor did not fire. Root-cause debtWindowTurns / debtWindowBound — do NOT widen the dead-zone band "+
+			"(that disables the canary).", total-hit, total)
+	}
+	return ""
 }

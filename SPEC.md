@@ -782,6 +782,17 @@ For task-class deltas (§3.10.1), extracted symbols enter the staging buffer (§
 > the runtime, never a behavior to certify. (This invariant was previously
 > unstated; its absence let the embedding-flush debt window become an unflagged
 > recall dead zone the sim oracle accommodated instead of catching.)
+>
+> **Interim claim caveat (B1).** The default acceptance gate (`make test` / `make
+> sim`) runs with a **nil embedder**, so the §3.4 fine tier and its bounded
+> lexical completeness floor (#123) **do not execute** there — the floor's effect
+> is unobserved on the mock gate. Until the **embedder-enabled completeness rung**
+> (`make sim-completeness-rung`: live embedder + mock inference over several
+> sim-days, asserting that every flush-lag dead-zone probe is surfaced and at
+> least one was observed) is wired and **green**, the recall-completeness claim
+> above is proven only for the **symbolic** path; the embedding-flush-lag half is
+> **symbolic-only-validated until that rung is green**. The rung is the direct
+> proof of this invariant's continuous-completeness clause.
 
 Three layers, run as **parallel signals**, not a strict cost cascade:
 
