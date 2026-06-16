@@ -225,35 +225,64 @@ type WorksetLayers struct {
 	LayerC string
 }
 
-// Budget is the per-layer byte allocation for the working set
-// (spec §3.1, parameters from §2.6.1).
+// Budget is the token-denominated whole-request context budget (spec
+// §3.1, parameters from §2.6.1). It carries one authoritative token
+// ceiling plus the derived per-layer *byte* allocations that drive
+// truncation.
 //
-// v0.1 uses bytes as a token proxy. Real tokenizer integration is
-// deferred until empirical pressure requires it (see §6.5).
+// Token vs byte split (#127):
+//   - TokenCeiling is the I1 gate — the fully-assembled request
+//     (system prompt + history + current user input + injected fetches)
+//     must not exceed it in tokens. It is checked post-flight against
+//     the provider's usage.prompt_tokens, the only modality-agnostic
+//     authoritative count.
+//   - The per-layer byte fields (LayerE/A1/A2/B/C) and LiveTurnReserve
+//     are the truncation *driver* (I4): they are derived from the token
+//     ceiling via bytesPerTokenConservative so byte-truncation
+//     under-fills rather than over-fills the token window. Bytes are a
+//     deliberately conservative proxy reconciled empirically later
+//     (§6.5 / #118 / #98).
 //
-// Total = LayerE + LayerA1 + LayerA2 + LayerB + LayerC + CurrentTurn.
-// CurrentTurn is the user-input + model-response budget, not part of
-// the system prompt; it is tracked here for accounting symmetry with
-// §2.6.1's `layer.budget.percentages` and is not consumed by
-// workset.Compose.
+// Byte total = LayerE + LayerA1 + LayerA2 + LayerB + LayerC +
+// LiveTurnReserve. LiveTurnReserve is the I2 reservation for the live
+// turn (current user input + current-turn tool.result deltas + a
+// bounded recent-history tail). It is NOT consumed by workset.Compose
+// (which sees only the memory layers); the live-turn sub-policy in
+// package turn owns it. It replaces the dead CurrentTurn accounting
+// field.
 type Budget struct {
-	// Total is the overall context byte budget.
+	// TokenCeiling is the authoritative whole-request token gate (I1).
+	// ~DefaultTokenCeiling by default. The per-layer byte fields are
+	// derived from this; assertions check assembled tokens against it.
+	TokenCeiling int
+	// ResponseReserveTokens mirrors model.Request.MaxTokens (I3): the
+	// response headroom reserved below the model window so that
+	// TokenCeiling + ResponseReserveTokens ≤ window. The Budget and the
+	// request must agree (see turn.go).
+	ResponseReserveTokens int
+
+	// Total is the overall context byte budget (TokenCeiling × the
+	// conservative bytes/token ratio). It is the byte envelope the
+	// per-layer + live-turn shares partition.
 	Total int
-	// LayerE is directives + conventions (§2.6.1: E=8% of Total).
+	// LayerE is directives + conventions (§2.6.1: E=12% of the memory
+	// byte budget).
 	LayerE int
-	// LayerA1 is the current project's spine display
-	// (§2.6.1: A1=8%).
+	// LayerA1 is the current project's spine display (fixed portion of
+	// the 18% high tier).
 	LayerA1 int
-	// LayerA2 is cross-project digests
-	// (§2.6.1: variable; bounded per-project).
+	// LayerA2 is cross-project digests (residue of the 18% high tier).
 	LayerA2 int
-	// LayerB is active thread bodies (§2.6.1: B=50%).
+	// LayerB is active thread bodies (§2.6.1: B=55%).
 	LayerB int
 	// LayerC is dormant thread summaries (§2.6.1: C=15%).
 	LayerC int
-	// CurrentTurn is the user-input + model-response budget
-	// (§2.6.1: current_turn=15%).
-	CurrentTurn int
+	// LiveTurnReserve is the byte reservation for the live turn — current
+	// user input + current-turn tool.result deltas + a bounded
+	// recent-history tail (§2.6.1: live_turn=15% of Total). Owned by the
+	// live-turn sub-policy in package turn (I2); never consumed by
+	// workset.Compose.
+	LiveTurnReserve int
 	// BTopK caps the number of threads in Layer B
 	// (§2.6.1: layer.b-top-k; default 3).
 	BTopK int
@@ -262,24 +291,56 @@ type Budget struct {
 	PerProjectDigestBytes int
 }
 
-// DefaultByteBudget is the v0.1 total context byte-budget. ~16K tokens
-// at ~4 chars/token. Will be exposed to the directive layer as
-// `context.byte-budget` once directive plumbing lands in Phase 3+.
-const DefaultByteBudget = 65536
+// DefaultTokenCeiling is the v0.1 whole-request token ceiling (#127): the
+// I1 gate value. ~200K bakes in headroom below the 256K gemma-4 window
+// for response reserve (DefaultResponseReserveTokens) and attention
+// attenuation. Exposed to the directive layer as `context.token-budget`
+// once directive plumbing lands; until then NewState reads it from this
+// const (or a constructor override).
+const DefaultTokenCeiling = 200000
 
-// Default percentage allocations for each layer (§2.6.1
-// layer.budget.percentages). LayerA2 is "variable" in the spec; we
-// allocate the residue (100% - sum of fixed layers) to A2 so the layers
-// total exactly DefaultByteBudget.
+// DefaultResponseReserveTokens mirrors model.DefaultRequest's MaxTokens
+// (16384). I3: TokenCeiling + DefaultResponseReserveTokens ≤ the 256K
+// window. The Budget value and the request's MaxTokens must agree; the
+// turn loop asserts this (A6). It lives here so the partition arithmetic
+// is testable without importing package model (no dependency inversion).
+const DefaultResponseReserveTokens = 16384
+
+// bytesPerTokenConservative is the single chars-per-token ratio used to
+// derive the byte truncation budget from the token ceiling (I4, #127
+// DECISIONS). Deliberately conservative (code/JSON tokenizes denser than
+// prose) so byte-truncation under-fills the token window rather than
+// overshooting it; the post-flight token assertion is the real gate.
+//
+// TEXT-ONLY. Image/multimodal content tokenizes by patch count, not byte
+// size — bytes/2.5 is invalid for images. The runtime is text-only today
+// (#128 tracks multimodal token estimation); the byte→token pre-flight
+// estimate is valid only for text. The post-flight usage.prompt_tokens
+// assertion remains correct regardless of modality.
+const bytesPerTokenConservative = 2.5
+
+// Default percentage allocations (§2.6.1 layer.budget.percentages, #127
+// re-denomination). LiveTurnReserve takes 15% of the byte Total off the
+// top; the remaining 85% (the memory byte budget) is partitioned
+// 12/18/15/55 over non-volatile→E / high→A1+A2 / medium→C / low→B.
+// LayerA2 is the residue of the 18% high tier (A1 fixed, A2 = high − A1),
+// matching SPEC §3.1's "A2 is variable / residue".
 const (
-	defaultPctLayerE      = 8
-	defaultPctLayerA1     = 8
-	defaultPctLayerB      = 50
-	defaultPctLayerC      = 15
-	defaultPctCurrentTurn = 15
-	// A2 is the residue: 100 - 8 - 8 - 50 - 15 - 15 = 4%.
-	defaultPctLayerA2 = 100 - defaultPctLayerE - defaultPctLayerA1 -
-		defaultPctLayerB - defaultPctLayerC - defaultPctCurrentTurn
+	// defaultPctLiveTurn is carved from the byte Total before the memory
+	// partition (§2.6.1: live_turn=15%).
+	defaultPctLiveTurn = 15
+
+	// The memory partition percentages are taken over the MEMORY byte
+	// budget (Total − live-turn reserve), not over Total.
+	defaultPctLayerE  = 12
+	defaultPctHighA   = 18 // A1 + A2 combined high tier
+	defaultPctLayerC  = 15
+	defaultPctLayerB  = 55
+	// defaultPctLayerA1 is the fixed portion of the high tier; A2 is the
+	// residue (defaultPctHighA − defaultPctLayerA1). 10/8 is a
+	// calibration starting point (§9.4).
+	defaultPctLayerA1 = 10
+	defaultPctLayerA2 = defaultPctHighA - defaultPctLayerA1
 
 	// DefaultBTopK matches §2.6.1's layer.b-top-k.
 	DefaultBTopK = 3
@@ -289,20 +350,39 @@ const (
 	DefaultPerProjectDigestBytes = 150
 )
 
-// DefaultBudget returns a Budget computed from DefaultByteBudget at the
-// §2.6.1 percentages. Rounding is integer truncation; the layers sum
-// to ≤ Total (any rounding remainder is discarded rather than padded
-// onto an arbitrary layer, so the budget never overshoots).
+// DefaultBudget returns a Budget computed from DefaultTokenCeiling. The
+// token ceiling is the authoritative number; the byte Total is derived
+// (ceiling × bytesPerTokenConservative), then the live-turn reserve is
+// carved off and the memory remainder partitioned at the §2.6.1
+// percentages. Rounding is integer truncation; shares sum to ≤ Total
+// (any remainder is discarded, never padded, so the budget never
+// overshoots).
 func DefaultBudget() Budget {
-	total := DefaultByteBudget
+	return BudgetForCeiling(DefaultTokenCeiling)
+}
+
+// BudgetForCeiling computes a Budget for an explicit token ceiling. It is
+// the single source of truth for the partition (I7): NewState and
+// LoadSession route any directive/override ceiling through here so no
+// call site re-derives a layer's byte share by hand. A non-positive
+// ceiling falls back to DefaultTokenCeiling.
+func BudgetForCeiling(tokenCeiling int) Budget {
+	if tokenCeiling <= 0 {
+		tokenCeiling = DefaultTokenCeiling
+	}
+	total := int(float64(tokenCeiling) * bytesPerTokenConservative)
+	liveTurn := total * defaultPctLiveTurn / 100
+	memory := total - liveTurn
 	return Budget{
+		TokenCeiling:          tokenCeiling,
+		ResponseReserveTokens: DefaultResponseReserveTokens,
 		Total:                 total,
-		LayerE:                total * defaultPctLayerE / 100,
-		LayerA1:               total * defaultPctLayerA1 / 100,
-		LayerA2:               total * defaultPctLayerA2 / 100,
-		LayerB:                total * defaultPctLayerB / 100,
-		LayerC:                total * defaultPctLayerC / 100,
-		CurrentTurn:           total * defaultPctCurrentTurn / 100,
+		LayerE:                memory * defaultPctLayerE / 100,
+		LayerA1:               memory * defaultPctLayerA1 / 100,
+		LayerA2:               memory * defaultPctLayerA2 / 100,
+		LayerB:                memory * defaultPctLayerB / 100,
+		LayerC:                memory * defaultPctLayerC / 100,
+		LiveTurnReserve:       liveTurn,
 		BTopK:                 DefaultBTopK,
 		PerProjectDigestBytes: DefaultPerProjectDigestBytes,
 	}

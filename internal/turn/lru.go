@@ -156,9 +156,10 @@ func fetchThreadForReprompt(ctx context.Context, state *State, thrID string) boo
 
 // promoteToLayerB promotes thrID into state.ActiveThreads at the front
 // (de-duped, capped by Budget.BTopK), demoting the displaced tail to the
-// head of state.DormantThreads and capping that slice at
-// dormantThreadsCap. Used by the §5.5 mid-turn fetch and by the §3.4
-// recall-accept path (Part B).
+// head of state.DormantThreads. The dormant slice is bounded by Layer C's
+// byte budget at render time (workset.Compose), not by a count cap (the
+// v0.1 count cap was dropped in #127). Used by the §5.5 mid-turn fetch
+// and by the §3.4 recall-accept path (Part B).
 //
 // This is the shared recall-promotion chokepoint, so it owns the §2.7.3
 // recallSurfaced marking for BOTH callers: fetchThreadForReprompt (§5.5
@@ -179,10 +180,11 @@ func promoteToLayerB(state *State, thrID string) {
 
 // touchActiveLRU is the §3.1 Layer B/C LRU primitive: lift thrID to the
 // front of state.ActiveThreads, demoting any Budget.BTopK overflow to
-// the head of state.DormantThreads, and cap the dormant slice at
-// dormantThreadsCap. The single-id operation shared by both the
-// per-engagement loop in updateLayerLRU and the single-promotion
-// callers (promoteToLayerB).
+// the head of state.DormantThreads. The dormant slice is bounded by
+// Layer C's byte budget at render time (workset.Compose), not a count
+// cap (#127 dropped the v0.1 cap). The single-id operation shared by
+// both the per-engagement loop in updateLayerLRU and the
+// single-promotion callers (promoteToLayerB).
 func touchActiveLRU(state *State, thrID string) {
 	bTopK := state.Budget.BTopK
 	if bTopK <= 0 {
@@ -204,10 +206,9 @@ func touchActiveLRU(state *State, thrID string) {
 		state.DormantThreads = append([]string{demoted}, state.DormantThreads...)
 		flushOnDormancy(state, demoted)
 	}
-	// Cap DormantThreads by count.
-	if len(state.DormantThreads) > dormantThreadsCap {
-		state.DormantThreads = state.DormantThreads[:dormantThreadsCap]
-	}
+	// DormantThreads is not count-capped (#127): Layer C's byte budget
+	// truncates the rendered dormant set at workset.Compose time, which is
+	// the real bound and avoids the m3 silent-drop of the count cap.
 }
 
 // updateLayerLRU applies the §3.1 Layer B/C eviction policy after a

@@ -373,11 +373,10 @@ func applyClosureResolution(ctx context.Context, state *State, threadID string, 
 	state.DormantThreads = removeString(state.DormantThreads, threadID)
 
 	if res.Outcome == ClosureWIP {
-		// WIP leaves the active window but stays a known thread.
+		// WIP leaves the active window but stays a known thread. The
+		// dormant slice is bounded by Layer C's byte budget at render time
+		// (#127 dropped the v0.1 count cap), so no count truncation here.
 		state.DormantThreads = append([]string{threadID}, state.DormantThreads...)
-		if len(state.DormantThreads) > dormantThreadsCap {
-			state.DormantThreads = state.DormantThreads[:dormantThreadsCap]
-		}
 		return state.Ops.Log(ctx, memops.LogCategoryRetire, "ack", "thr="+threadID+" resolution=wip")
 	}
 

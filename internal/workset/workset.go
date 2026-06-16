@@ -288,10 +288,15 @@ func renderLayerB(in Inputs, budget memops.Budget) string {
 }
 
 // minPerThreadBudget is the floor for a single Layer B thread's per-thread
-// share. With LayerB / BTopK arithmetic, a tight overall budget could push
-// the share to zero; the floor keeps every selected thread visible
-// rather than dropping to "header only" or empty.
-const minPerThreadBudget = 256
+// share — the "Layer B floored against recency starvation" guarantee
+// (#127): the most-recently-engaged thread always gets a meaningfully
+// visible share even if peers are large. With LayerB / BTopK arithmetic,
+// a tight overall budget could push the share to zero; the floor keeps
+// every selected thread visible rather than dropping to "header only" or
+// empty. Raised from 256 to 4096 alongside the #127 token-denominated
+// budget so "floored" means a visible header + excerpt, not a bare
+// frontmatter line, at the ~16× larger budget.
+const minPerThreadBudget = 4096
 
 // PerThreadBudget is the per-thread byte share for Layer B given the
 // total Layer B budget and the number of threads chosen for rendering.

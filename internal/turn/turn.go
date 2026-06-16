@@ -74,9 +74,11 @@ type State struct {
 	// user/assistant cleanly. Per MAD architecture review burn-down item
 	// B1 (= T1-2): before this cap, History grew unbounded → linear input
 	// growth per turn → production context-window exhaustion in long
-	// sessions. Token-byte budget enforcement is intentionally NOT added
-	// here; turn-pair count is the v0.1 cap. A byte/token budget can
-	// layer on later if measurement justifies it.
+	// sessions. The turn-pair count caps PERSISTENCE; #127 additionally
+	// bounds the REPLAYED tail per request — boundHistoryTail recency-bounds
+	// the slice sent to the model to its live-turn share (pair-aligned), so
+	// a long session's replayed history stays within the whole-request
+	// budget independent of the count cap.
 	History []model.Message
 
 	// ActiveThreads is Layer B membership: thread IDs the working set
@@ -87,14 +89,16 @@ type State struct {
 
 	// DormantThreads is Layer C membership: thread IDs the working set
 	// renders as spine display lines. Index 0 is the most-recently
-	// demoted (or independently engaged) thread. The list is capped by
-	// dormantThreadsCap; the on-disk byte budget is honored at render
-	// time by workset.Compose.
+	// demoted (or independently engaged) thread. The slice is bounded
+	// solely by Layer C's byte budget at render time (workset.Compose);
+	// the v0.1 count cap was dropped in #127 in favor of byte truncation
+	// (design §4 / Q2), which removes the m3 silent-drop behavior.
 	DormantThreads []string
 
-	// Budget is the byte budget composed into the working set. Defaults
-	// to memops.DefaultBudget() at NewState; future directive plumbing
-	// (Phase 3+) will recompute this per-turn.
+	// Budget is the token-denominated whole-request budget (#127).
+	// memops.DefaultBudget() at NewState unless WithTokenCeiling overrides
+	// the ceiling; future directive plumbing (Phase 3+) will read
+	// context.token-budget from the directive layer into the ceiling.
 	Budget memops.Budget
 
 	// turn-scoped state
@@ -212,14 +216,6 @@ type State struct {
 	structuralCloses  int
 }
 
-// dormantThreadsCap is the v0.1 maximum count for State.DormantThreads.
-// The byte budget on Layer C is enforced at workset.Compose render
-// time; this count cap is a coarser upstream bound to keep the slice
-// from growing unboundedly across a long session. Once the directive
-// layer can plumb actual byte counts to the LRU update path (Phase
-// 3+), the count cap goes away.
-const dormantThreadsCap = 20
-
 // sessionHistoryCapTurns bounds State.History to N user/assistant turn
 // pairs (i.e. up to 2*N messages). Picked to match the v0.1
 // working-set discipline of dormantThreadsCap=20: a coarse count cap
@@ -230,11 +226,33 @@ const dormantThreadsCap = 20
 // architecture-review burn-down item B1 for the rationale.
 const sessionHistoryCapTurns = 20
 
+// StateOption customizes a State at construction. It is the #127
+// constructor-override seam: the budget's token ceiling (and, later,
+// other directive parameters) flow in here rather than being hardcoded.
+// NewState and LoadSession both apply options after building the default
+// State, so an option overrides the default.
+type StateOption func(*State)
+
+// WithTokenCeiling overrides the whole-request token ceiling (#127),
+// recomputing Budget from it via memops.BudgetForCeiling — the single
+// source of truth for the partition (I7). A non-positive ceiling is
+// ignored (keeps the default). This is path (b) of design §3.4: the
+// ceiling is settable at the constructor today; the directive-file
+// parser that feeds context.token-budget here lands in a later task.
+func WithTokenCeiling(tokenCeiling int) StateOption {
+	return func(s *State) {
+		if tokenCeiling > 0 {
+			s.Budget = memops.BudgetForCeiling(tokenCeiling)
+		}
+	}
+}
+
 // NewState constructs a State for a chat session. The coalesce buffer
 // is initialized empty; Client must be non-nil (the chat REPL passes
-// either an HTTPClient or a MockClient, never nil).
-func NewState(ops memops.MemoryOps, project memops.ProjectMeta, provider memops.Provider, client model.Client) *State {
-	return &State{
+// either an HTTPClient or a MockClient, never nil). Options (e.g.
+// WithTokenCeiling) override defaults after construction.
+func NewState(ops memops.MemoryOps, project memops.ProjectMeta, provider memops.Provider, client model.Client, opts ...StateOption) *State {
+	s := &State{
 		Ops:               ops,
 		ActiveProject:     project,
 		Provider:          provider,
@@ -247,6 +265,10 @@ func NewState(ops memops.MemoryOps, project memops.ProjectMeta, provider memops.
 		// provider replace this with an embedding-enabled Service.
 		Recaller: measure.NewService(ops, nil),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // LoadSession constructs a State for a chat session and reloads the
@@ -263,8 +285,8 @@ func NewState(ops memops.MemoryOps, project memops.ProjectMeta, provider memops.
 // Only the working-set membership is reloaded. TurnNumber, the
 // coalesce/staging buffers, and closureDeferUntil are session-volatile
 // and correctly start fresh.
-func LoadSession(ctx context.Context, ops memops.MemoryOps, project memops.ProjectMeta, provider memops.Provider, client model.Client) (*State, error) {
-	state := NewState(ops, project, provider, client)
+func LoadSession(ctx context.Context, ops memops.MemoryOps, project memops.ProjectMeta, provider memops.Provider, client model.Client, opts ...StateOption) (*State, error) {
+	state := NewState(ops, project, provider, client, opts...)
 	active, dormant, err := ops.LoadWorkingSet(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("turn: load session working set: %w", err)
@@ -372,6 +394,21 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	if out == nil {
 		out = io.Discard
 	}
+	// Ensure the budget is materialized before any live-turn bounding so
+	// the reject check below and the post-flight ceiling assertion read a
+	// real ceiling, not the zero value.
+	if state.Budget.Total == 0 {
+		state.Budget = memops.DefaultBudget()
+	}
+	// #127 live-turn reject (design §3.4 / Q3): a single user-authored
+	// userInput that exceeds its live-turn reserve is rejected with a
+	// user-facing message BEFORE any chain step fires — rejecting after
+	// staging GC / delta emission would leave half-applied side effects.
+	// Non-user-authored live-turn components (tool.result deltas, the
+	// history tail) are bounded by truncation/recency below, not rejected.
+	if err := checkUserInput(userInput, state.Budget); err != nil {
+		return "", TurnInfo{}, err
+	}
 	if state.coalesce == nil {
 		state.coalesce = newCoalesceBuffer()
 	}
@@ -409,6 +446,12 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	// etc.). Emitted AFTER staging GC and BEFORE the user.prompt delta so
 	// they share the same TurnNumber as the user.prompt that follows and
 	// can stage task-class symbols for that prompt to cite.
+	//
+	// #127: bound current-turn tool.result content (truncate-with-marker)
+	// before it enters the chain so a single verbose tool result (design
+	// m1) cannot balloon the request via staging/memory. Non-user-authored,
+	// so truncated rather than rejected (design §3.4).
+	preEvents = boundToolResultDeltas(preEvents, state.Budget)
 	for _, pre := range preEvents {
 		if err := onContextDelta(ctx, state, pre); err != nil {
 			return "", TurnInfo{}, err
@@ -421,9 +464,7 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	}
 
 	// Step 2: compose working-set and assemble the system prompt.
-	if state.Budget.Total == 0 {
-		state.Budget = memops.DefaultBudget()
-	}
+	// (Budget is materialized at the top of Run, before the reject check.)
 	buildSystemPrompt := func() (string, error) {
 		ws, err := state.Ops.ComposeWorkingSet(ctx, memops.WorksetInput{
 			ActiveProject:  state.ActiveProject,
@@ -461,9 +502,16 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 
 	var full model.Response
 	for attempt := 0; ; attempt++ {
-		messages := make([]model.Message, 0, 2+len(state.History))
+		// #127: recency-bound the replayed history tail to its live-turn
+		// share (pair-aligned, I5) so the live turn stays within
+		// LiveTurnReserve. This implements the byte/token bound the
+		// State.History godoc flagged as deferred. The full History is
+		// kept in state (the FIFO cap still governs persistence); only the
+		// replayed slice for THIS request is bounded.
+		historyTail := boundHistoryTail(state.History, state.Budget)
+		messages := make([]model.Message, 0, 2+len(historyTail))
 		messages = append(messages, model.Message{Role: "system", Content: systemPrompt})
-		messages = append(messages, state.History...)
+		messages = append(messages, historyTail...)
 		messages = append(messages, model.Message{Role: "user", Content: userInput})
 
 		req := model.DefaultRequest(chosenModel, messages)
@@ -539,6 +587,22 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		}
 		full = sr.Final()
 		break
+	}
+
+	// #127 post-flight integrity gate (I1, design §3.3): the provider's
+	// usage.prompt_tokens is the only modality-agnostic authoritative
+	// count of the fully-assembled request. A count above Budget.TokenCeiling
+	// means the byte-driven pre-flight bounding under-estimated tokens (or
+	// something bypassed it) — a zero-tolerance integrity finding routed
+	// through the structured logger, never swallowed. The ceiling is read
+	// from the budget, not hardcoded. On the mock path PromptTokens is a
+	// canned small value, so this never fires there (the assertion is
+	// meaningful only on the real-model rung); that is correct — the
+	// mock-independent guarantee is the byte pre-flight above.
+	if state.Budget.TokenCeiling > 0 && full.Usage.PromptTokens > state.Budget.TokenCeiling {
+		_ = state.Ops.Log(ctx, memops.LogCategorySystem, "context-ceiling-breach",
+			fmt.Sprintf("prompt_tokens=%d ceiling=%d turn=%d",
+				full.Usage.PromptTokens, state.Budget.TokenCeiling, state.TurnNumber))
 	}
 
 	// Step 4: model.response delta with the full accumulated body —

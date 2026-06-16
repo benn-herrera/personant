@@ -382,19 +382,28 @@ func TestUpdateLayerLRUDormantPromotionDeduplication(t *testing.T) {
 	}
 }
 
-// TestUpdateLayerLRUDormantCap — DormantThreads must not exceed
-// dormantThreadsCap.
-func TestUpdateLayerLRUDormantCap(t *testing.T) {
+// TestUpdateLayerLRUDormantNoCountCap — #127 dropped the v0.1
+// dormantThreadsCap in favor of Layer C byte truncation (design §4 / Q2):
+// the dormant slice is NOT count-capped, so it accumulates every demoted
+// thread. The real bound is Layer C's byte budget at workset.Compose
+// render time. This is the A5 / m3 contract on the LRU side: no silent
+// count-cap drop. (Demotion past BTopK pushes the previous active head to
+// dormant; with BTopK=3 and N sequential single-thread engagements, the
+// dormant slice grows to N-1.)
+func TestUpdateLayerLRUDormantNoCountCap(t *testing.T) {
 	state := &State{
 		Budget: memops.Budget{BTopK: 3},
 	}
-	// Engage many threads in sequence, far exceeding the cap.
-	count := dormantThreadsCap + 10
+	const count = 35 // well past the old cap of 20
 	for i := 1; i <= count; i++ {
 		updateLayerLRU(state, []string{itoaThreadID(i)})
 	}
-	if len(state.DormantThreads) > dormantThreadsCap {
-		t.Errorf("DormantThreads exceeded cap: got %d want <= %d", len(state.DormantThreads), dormantThreadsCap)
+	// BTopK=3 retains 3 in ActiveThreads; the rest demote to dormant. No
+	// count cap → dormant holds count-3.
+	wantDormant := count - 3
+	if len(state.DormantThreads) != wantDormant {
+		t.Errorf("DormantThreads: got %d want %d (no count cap; byte budget is the bound)",
+			len(state.DormantThreads), wantDormant)
 	}
 }
 

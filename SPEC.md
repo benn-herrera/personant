@@ -364,9 +364,16 @@ engagement.decay-time: 7d           # wall-clock equivalent (Go duration string)
 recall.symbolic-threshold: 0.4      # Jaccard threshold for opportunistic recall surfacing
 recall.cross-project-threshold: 0.5 # higher bar for cross-project surface
 layer.b-top-k: 3                    # max active threads in Layer B
-layer.budget.percentages: {E: 8, A1: 8, A2: variable, B: 50, C: 15, current_turn: 15}
-context.byte-budget: 65536          # total system-prompt byte budget; v0.1
-                                    # uses bytes as a token proxy (see §6.5)
+layer.budget.percentages: {E: 12, A1: 10, A2: variable, B: 55, C: 15, live_turn: 15}
+                                    # live_turn is carved from the byte total first;
+                                    # E/A1/A2/B/C partition the remaining memory budget
+                                    # (A1+A2 = 18% high tier; A2 is the residue)
+context.token-budget: 200000        # whole-request TOKEN ceiling (#127); the
+                                    # authoritative gate. Per-layer BYTE shares are
+                                    # derived (ceiling × ~2.5 conservative B/tok, TEXT-ONLY)
+                                    # and drive truncation; usage.prompt_tokens is the gate.
+                                    # v0.1 reads this from a const + constructor override
+                                    # (directive-file plumbing lands later).
 recall.superseded-weight: 1.0       # numerator weight for a matched symbol that is superseded in a thread (§3.4); §9 calibration window — 1.0 = no down-weight (today's behavior)
 history.cap-per-thread: 40          # max history symbols per thread
 anchor.projection-max: 8            # AnchorProjectionMax: top-N active history_symbols projected to spine anchors (§2.2/§2.7.4); §9 calibration window
@@ -633,9 +640,18 @@ entry point as a bug.
 ### 3.1 Working-set composition
 
 The working set is rendered into the system prompt as five layers, each
-truncated to a byte budget derived from `context.byte-budget` and the
-`layer.budget.percentages` table (§2.6.1). Bytes serve as the token
-proxy (see §6.5).
+truncated to a byte budget derived from `context.token-budget` and the
+`layer.budget.percentages` table (§2.6.1). The token ceiling is the
+authoritative whole-request gate (#127); the per-layer **byte** shares
+are derived from it (ceiling × a conservative ~2.5 chars/token ratio,
+text-only) and serve as the truncation driver. The live-turn reserve
+(`live_turn`, 15%) is carved from the byte total first; the memory layers
+E/A1/A2/B/C partition the remainder (12/18/15/55, with the 18% high tier
+split between A1 fixed and A2 residue). The whole assembled request — system
+prompt + replayed history tail + current user input — is bounded against
+the token ceiling: bytes pre-flight (this composition + the live-turn
+sub-policy in `internal/turn`), `usage.prompt_tokens` post-flight as the
+real-model gate (see §6.5).
 
 **Layer order and contents** (§2.1 maps these to on-disk sources):
 
@@ -657,7 +673,7 @@ After per-turn engagements commit, for each engaged thread id:
 - If `len(ActiveThreads) > layer.b-top-k`, demote the tail to the head
   of `DormantThreads`.
 
-`DormantThreads` is bounded by a count cap (default 20). 20 is calibrated against the Layer C byte budget: at max summary length (200 chars per §2.2) × 20 ≈ 4 KB, within the 15% C allocation at the default 64 KB context budget (`context.byte-budget` in §2.6.1).
+`DormantThreads` is **not count-capped** (#127): Layer C's byte budget truncates the rendered dormant set at composition time, which is the real bound. The v0.1 count cap (default 20) was dropped — at the token-denominated budget (`context.token-budget` in §2.6.1) the byte share is large enough that a 20-thread count cap would leave it mostly empty (dead budget), and dropping the cap removes the silent-drop-oldest behavior the count cap caused. The byte-truncation marker on Layer C is the visible, honest overflow indicator.
 
 **Truncation policy:** each layer's rendered string is truncated to its
 byte budget at a UTF-8 rune boundary, with a marker

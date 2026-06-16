@@ -482,10 +482,15 @@ func TestPerThreadBudgetFloor(t *testing.T) {
 	if got := PerThreadBudget(100, 0); got != 100 {
 		t.Errorf("n=0: got %d, want 100", got)
 	}
-	if got := PerThreadBudget(2048, 4); got != 512 {
-		t.Errorf("2048/4: got %d, want 512", got)
+	// Above the floor: 40960/4 = 10240 (> minPerThreadBudget).
+	if got := PerThreadBudget(40960, 4); got != 10240 {
+		t.Errorf("40960/4: got %d, want 10240", got)
 	}
-	if got := PerThreadBudget(100, 10); got != 256 {
-		t.Errorf("floor: got %d, want 256", got)
+	// Below the floor: share floors to minPerThreadBudget (#127: 4096).
+	if got := PerThreadBudget(2048, 4); got != minPerThreadBudget {
+		t.Errorf("floor (small budget): got %d, want %d", got, minPerThreadBudget)
+	}
+	if got := PerThreadBudget(100, 10); got != minPerThreadBudget {
+		t.Errorf("floor: got %d, want %d", got, minPerThreadBudget)
 	}
 }
