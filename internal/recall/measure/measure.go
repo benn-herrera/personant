@@ -1193,14 +1193,14 @@ func composeNodeHash(childHashes []string) string {
 // tie/tree_mismatch is a sub-perceptible boundary effect. Exact/exhaustive
 // recall is the separate #117 tier, not this approximate path.
 // It returns the divergence size and, when div>0, the per-probe
-// classification (one of w1StrictMiss / w1Tie / w1TreeMismatch); div==0
+// classification (one of W1StrictMiss / W1Tie / W1TreeMismatch); div==0
 // returns the empty class. The class is surfaced — not just bumped on the
 // Service atomic — so the harness can accumulate the run-total classification
 // at the SAME call site and moment it accumulates the divergence counter,
 // keeping the two structurally consistent across the per-session Service
 // instance churn a RestartSession step causes (a fresh Service has zeroed
 // atomics; the harness-held counters survive the swap).
-func (s *Service) intraThreadDivergence(ctx context.Context, q []float64, snap *indexSnapshot, engaged string) (int, w1Class) {
+func (s *Service) intraThreadDivergence(ctx context.Context, q []float64, snap *indexSnapshot, engaged string) (int, W1Class) {
 	if engaged == "" {
 		return 0, ""
 	}
@@ -1231,28 +1231,34 @@ func (s *Service) intraThreadDivergence(ctx context.Context, q []float64, snap *
 // a tie. It classifies a measurement, never gates.
 const w1Epsilon = 1e-9
 
-// w1Class is the diagnostic classification of one W1 divergence (#111
+// W1Class is the diagnostic classification of one W1 divergence (#111
 // §7.1). It says whether the divergence is a genuine recall loss or a
 // benign equal-cosine substitution — the empirical question the
 // instrumentation settles.
-type w1Class string
+//
+// It is EXPORTED as the single source of truth for the per-probe class label
+// strings that cross the harness↔measure seam: IntraThreadDivergence returns
+// the string form and the scenarios harness maps it to the recall_intra_w1_*
+// counters by referencing W1StrictMiss/W1Tie/W1TreeMismatch directly (burndown
+// BD-3), rather than mirroring the literals with a comment-only "must match".
+type W1Class string
 
 const (
-	// w1StrictMiss: the best leaf the flat scan ranked but descent missed
+	// W1StrictMiss: the best leaf the flat scan ranked but descent missed
 	// has STRICTLY higher cosine (beyond w1Epsilon) than the best leaf
 	// descent substituted for it — a real recall loss (a better leaf was
 	// pruned). Fixable by better keys / beam (F-A), not a gate refinement.
-	w1StrictMiss w1Class = "strict-miss"
-	// w1Tie: the best missed leaf and the best substituted leaf are within
+	W1StrictMiss W1Class = "strict-miss"
+	// W1Tie: the best missed leaf and the best substituted leaf are within
 	// w1Epsilon — descent picked a DIFFERENT leaf of EQUAL cosine at the
 	// top-Kf cut. Not lost recall; fixable by a gate-correctness refinement
 	// (a deterministic tie-break), not by better keys.
-	w1Tie w1Class = "tie"
-	// w1TreeMismatch: a missed leaf is not present among the tree's leaves
+	W1Tie W1Class = "tie"
+	// W1TreeMismatch: a missed leaf is not present among the tree's leaves
 	// at all — the flat scan ranked a leaf the descent tree does not
 	// contain. A staleness/build edge (the tree's leaf set drifted from
 	// snap.fine), not a key-quality or tie issue.
-	w1TreeMismatch w1Class = "tree-mismatch"
+	W1TreeMismatch W1Class = "tree-mismatch"
 )
 
 // classifyW1Divergence classifies one W1 divergence from the missed set
@@ -1270,18 +1276,18 @@ const (
 // set) and the missed leaf has a real positive cosine, bestSub is 0 and the
 // row is a strict-miss — descent dropped a leaf the flat scan surfaced and
 // put nothing in its place, a genuine loss.
-func classifyW1Divergence(missed, substituted []scoring.ChunkCandidate, treeTurns map[int]struct{}, eps float64) w1Class {
+func classifyW1Divergence(missed, substituted []scoring.ChunkCandidate, treeTurns map[int]struct{}, eps float64) W1Class {
 	for _, m := range missed {
 		if _, ok := treeTurns[m.TurnNumber]; !ok {
-			return w1TreeMismatch
+			return W1TreeMismatch
 		}
 	}
 	bestMissed := bestScore(missed)
 	bestSub := bestScore(substituted)
 	if bestMissed > bestSub+eps {
-		return w1StrictMiss
+		return W1StrictMiss
 	}
-	return w1Tie
+	return W1Tie
 }
 
 // bestScore returns the highest cosine Score in a candidate set, or 0 for
@@ -1322,7 +1328,7 @@ func bestScore(cands []scoring.ChunkCandidate) float64 {
 // and the readable forensics stay one-for-one. Tally and line now emit at one
 // site, the structural-consistency approach the d8e32b3 fix used for the
 // counter pair.
-func (s *Service) emitW1Diag(ctx context.Context, tree *scoring.SummaryNode, descent, flat []scoring.ChunkCandidate) w1Class {
+func (s *Service) emitW1Diag(ctx context.Context, tree *scoring.SummaryNode, descent, flat []scoring.ChunkCandidate) W1Class {
 	descSet := turnSet(descent)
 	flatSet := turnSet(flat)
 	missed := diffCandidates(flat, descSet)         // in flat, not descent — lost
@@ -1361,11 +1367,11 @@ func (s *Service) emitW1Diag(ctx context.Context, tree *scoring.SummaryNode, des
 	}
 
 	switch class {
-	case w1StrictMiss:
+	case W1StrictMiss:
 		s.w1DiagStrictMiss.Add(1)
-	case w1Tie:
+	case W1Tie:
 		s.w1DiagTie.Add(1)
-	case w1TreeMismatch:
+	case W1TreeMismatch:
 		s.w1DiagTreeMismatch.Add(1)
 	}
 	return class
@@ -1452,10 +1458,12 @@ func turnSetDifference(a, b []scoring.ChunkCandidate) int {
 // from). Keeping the snapshot and tree private to measure, this is the only
 // surface the harness needs.
 //
-// The second return is the per-probe classification ("strict-miss" / "tie" /
-// "tree-mismatch", empty when div==0) as a plain string so the harness — in a
-// different package, which cannot see the unexported w1Class — can accumulate
-// the run-total class tally at the SAME call site it accumulates the
+// The second return is the per-probe classification as a plain string (the
+// string form of the exported W1Class labels — W1StrictMiss / W1Tie /
+// W1TreeMismatch, empty when div==0). It is a bare string, not W1Class, to keep
+// the scenarios-side probe interface free of a measure-type dependency; the
+// harness maps it back through the exported W1Class consts (BD-3). The harness
+// accumulates the run-total class tally at the SAME call site it accumulates the
 // divergence counter. That co-location is what makes the two metrics survive
 // the per-session Service instance churn a RestartSession causes: the
 // Service-side atomics (W1DiagStrictMiss et al.) belong to whichever instance

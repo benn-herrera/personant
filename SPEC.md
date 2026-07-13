@@ -2301,9 +2301,18 @@ The v0.1 acceptance criterion:
   emitted at every event (§9.4): recall hit rate, engagement accuracy,
   retirement timing, round-trip information-preservation through
   retire→archive→recover.
-- **Zero out-of-context-space events.** The layered budget (E/A1/A2/B/C)
-  must never overflow; bumpable layers must always free enough room
-  before the next event lands. Any overflow is a fail.
+- **Zero out-of-context-space events.** The **normative** criterion is the
+  X4 whole-request **token** ceiling (`context.token-budget`, #127): the
+  fully-assembled request (system prompt + replayed history tail + current
+  user input + injected fetches) must never exceed it, checked post-flight
+  against `usage.prompt_tokens` (the only modality-agnostic authoritative
+  count). Any overflow is a fail. The per-layer **byte** budget
+  (E/A1/A2/B/C) is a derived, deliberately-conservative truncation *driver*
+  (§3.1): on mock rungs `VerifyNoBudgetOverflow` asserts each rendered layer
+  stayed within its byte allocation as a cheap **belt-and-suspenders** check
+  on that truncation contract, catching a future render-time bypass before it
+  can inflate the token count. Turn-time (delta-time) budget enforcement
+  (T3-3) stays **deferred** past v0.1 — see §3.0.2 step 4.
 - **Operation runtime costs measured and within bounds.** Wall-clock
   P50/P95/P99 latency for: engagement update, spine match, thread
   fetch, retirement, archival, recovery, index rebuild, index check.
@@ -2507,7 +2516,7 @@ The measurement regime drives four test layers — scenario, churn, calibration,
 
 - **Recall fidelity:** precision/recall/F1 measured per scenario step against `Step.ExpectedRecallMatches` ground truth. `RecallStrict` mode fails the test on mismatch; `RecallMeasureOnly` mode records adversarial probes without failing. Regressions tracked via baseline comparison against `testdata/baselines/<scenario>.json`. Metric series: `recall_fidelity_{precision,recall,f1}` and `recall_fidelity_adversarial_{precision,recall,f1}`.
 - **Engagement accuracy:** tagged-engaged threads match canonical-by-construction ground truth in synthetic scenarios.
-- **Heap bounded / zero overflow:** `VerifyNoBudgetOverflow` — no layer exceeds its allocation cap across any turn in the simulation.
+- **Heap bounded / zero overflow:** the normative gate is the X4 whole-request **token** ceiling checked against `usage.prompt_tokens` (§9.1, #127). `VerifyNoBudgetOverflow` is the **mock-rung belt-and-suspenders**: after composition it asserts each rendered layer stayed within its derived per-layer **byte** allocation (the §3.1 truncation contract held) across every turn. It is skipped on live-inference rungs, where the token ceiling governs. Turn-time (delta-time) enforcement (T3-3) is deferred — §3.0.2 step 4.
 - **Steady-state trajectory:** working-set size, spine cardinality, and per-operation latency (P50/P95/P99) are flat after four simulated months (120 days) — not creeping upward.
 - **Round-trip fidelity:** archive → recover → diff against original; information-preservation rate measured.
 - **Operation latency within bounds:** engagement update, spine match, thread fetch, retirement, archival, recovery, index rebuild, index check — all stable as accumulated state grows.

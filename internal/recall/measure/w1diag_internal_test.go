@@ -34,35 +34,35 @@ func TestClassifyW1Divergence(t *testing.T) {
 		missed      []scoring.ChunkCandidate
 		substituted []scoring.ChunkCandidate
 		tree        map[int]struct{}
-		want        w1Class
+		want        W1Class
 	}{
 		{
 			name:        "strict-miss: missed cosine strictly beats substituted",
 			missed:      []scoring.ChunkCandidate{cand(1, 0.80)},
 			substituted: []scoring.ChunkCandidate{cand(2, 0.60)},
 			tree:        tree,
-			want:        w1StrictMiss,
+			want:        W1StrictMiss,
 		},
 		{
 			name:        "tie: missed and substituted within epsilon",
 			missed:      []scoring.ChunkCandidate{cand(1, 0.7000000000)},
 			substituted: []scoring.ChunkCandidate{cand(2, 0.7000000005)}, // < w1Epsilon apart
 			tree:        tree,
-			want:        w1Tie,
+			want:        W1Tie,
 		},
 		{
 			name:        "tie: exactly equal cosines",
 			missed:      []scoring.ChunkCandidate{cand(1, 0.73)},
 			substituted: []scoring.ChunkCandidate{cand(2, 0.73)},
 			tree:        tree,
-			want:        w1Tie,
+			want:        W1Tie,
 		},
 		{
 			name:        "tie: substituted strictly higher (descent gained a better leaf, no loss)",
 			missed:      []scoring.ChunkCandidate{cand(1, 0.60)},
 			substituted: []scoring.ChunkCandidate{cand(2, 0.80)},
 			tree:        tree,
-			want:        w1Tie,
+			want:        W1Tie,
 		},
 		{
 			name: "strict-miss: descent dropped a positive-cosine leaf with no substitute",
@@ -73,21 +73,21 @@ func TestClassifyW1Divergence(t *testing.T) {
 			missed:      []scoring.ChunkCandidate{cand(3, 0.50)},
 			substituted: nil,
 			tree:        tree,
-			want:        w1StrictMiss,
+			want:        W1StrictMiss,
 		},
 		{
 			name:        "tree-mismatch: a missed leaf is absent from the tree",
 			missed:      []scoring.ChunkCandidate{cand(99, 0.90)}, // 99 not in tree
 			substituted: []scoring.ChunkCandidate{cand(2, 0.10)},
 			tree:        tree,
-			want:        w1TreeMismatch,
+			want:        W1TreeMismatch,
 		},
 		{
 			name:        "tree-mismatch wins over a strict cosine gap",
 			missed:      []scoring.ChunkCandidate{cand(1, 0.80), cand(42, 0.95)}, // 42 absent
 			substituted: []scoring.ChunkCandidate{cand(2, 0.10)},
 			tree:        tree,
-			want:        w1TreeMismatch,
+			want:        W1TreeMismatch,
 		},
 	}
 
@@ -130,8 +130,8 @@ func TestEmitW1Diag_ReturnsClassItBumps(t *testing.T) {
 
 	s := &Service{} // ops nil → no log; atomic + return still exercised
 	got := s.emitW1Diag(context.Background(), tree, descent, flat)
-	if got != w1StrictMiss {
-		t.Fatalf("emitW1Diag returned class %q, want %q", got, w1StrictMiss)
+	if got != W1StrictMiss {
+		t.Fatalf("emitW1Diag returned class %q, want %q", got, W1StrictMiss)
 	}
 	// The returned class must match the bucket the atomic was bumped on — one
 	// classification, surfaced and bumped consistently.

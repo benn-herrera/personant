@@ -1,11 +1,14 @@
 package scenarios
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
+	"personant/internal/autogit"
 	"personant/internal/memops"
 	"personant/internal/store"
 	"personant/internal/verify"
@@ -46,8 +49,15 @@ var DefaultInvariants = append(append([]InvariantCheck{}, cheapDefaultInvariants
 // no folds over cumulative state that grows with the run. Safe to fire on
 // every step in any scenario, including the six-month sim, without
 // contributing to per-step wall-time growth.
+//
+// VerifyNoBudgetOverflow re-composes the working set (the same bounded work
+// the turn itself does — active/dormant membership + active-project spine,
+// all flat in steady state), so its per-step cost does not grow with run
+// length; it belongs with the cheap tier per D1 (a per-step belt-and-
+// suspenders on the mock-rung byte budget).
 var cheapDefaultInvariants = []InvariantCheck{
 	VerifyLastActiveValid,
+	VerifyNoBudgetOverflow,
 }
 
 // heavyDefaultInvariants are the substrate-scale checks: each one does
@@ -64,6 +74,13 @@ var heavyDefaultInvariants = []InvariantCheck{
 	VerifyProjectReferences,
 	VerifyThreadMetaMatchesSpine,
 	VerifyThreadAccounting,
+	// §3.8/§3.9 checks are substrate-scale: VerifyArchiveResolvable walks the
+	// archive index doing git object lookups (NOT cheap), VerifyDedupConsistency
+	// reads every live thread's files.json sidecar. They ride the same
+	// heavy-cadence the other full-spine checks use — per-step on handwritten
+	// scenarios, day-cadenced + end-of-run on the sim.
+	VerifyArchiveResolvable,
+	VerifyDedupConsistency,
 }
 
 // VerifySpineIntegrity wraps verify.Verify and surfaces any errors.
@@ -310,15 +327,43 @@ func VerifyClosedThreadConsistency(h *Harness) error {
 //   - Both → the thread is on the spine yet recorded as archived — ID
 //     reuse or archival corruption.
 //
+// It is TWO-DIRECTIONAL (BD-2):
+//
+//   - Forward (created ⟶ spine⊎archived): every created ID ends in exactly one
+//     of {on-spine, archived}. Neither = unexplained loss; both = ID reuse /
+//     corruption.
+//   - Reverse (run-created spine ⟶ created): every thread the runtime CREATED
+//     DURING THE RUN and left on the spine must appear in the harness's created
+//     set. A gap means the harness never observed a real creation — the
+//     silent-failure mode a renamed `thread.created` marker
+//     (turn/engage.go) produces, which the forward direction alone cannot
+//     catch (it only inspects IDs the harness already folded).
+//   - Non-vacuity: an entirely empty created set while the spine holds
+//     run-created threads is the canonical marker-drift signature and is called
+//     out distinctly.
+//
+// The reverse direction is scoped to threads CREATED DURING THE RUN, excluding
+// pre-seeded fixtures. The seed-vs-create boundary is the thread's Created
+// timestamp: the runtime stamps every thread it creates with the simulated
+// clock (clock.Timeline(), pinned by the harness to a value never preceding
+// SimClockStart within a run), whereas fixtures written straight to the spine
+// by store.SeedThread to represent pre-existing history carry an earlier
+// historical timestamp and never emit a marker (see threadCreatedDuringRun).
+//
 // All violations are collected, sorted, and reported in one error.
 func VerifyThreadAccounting(h *Harness) error {
 	created := h.createdThreadIDs
 	archived := h.archivedThreadIDs
-	onSpine, err := liveSpineThreadSet(h.Paths)
+	recs, err := store.ReadSpine(h.Paths.Spine)
 	if err != nil {
-		return fmt.Errorf("VerifyThreadAccounting: %w", err)
+		return fmt.Errorf("VerifyThreadAccounting: read spine: %w", err)
+	}
+	onSpine := make(map[string]struct{}, len(recs))
+	for _, r := range recs {
+		onSpine[r.ID] = struct{}{}
 	}
 
+	// Forward direction.
 	var lost, both []string
 	for id := range created {
 		_, isSpine := onSpine[id]
@@ -330,11 +375,26 @@ func VerifyThreadAccounting(h *Harness) error {
 			both = append(both, id)
 		}
 	}
-	if len(lost) == 0 && len(both) == 0 {
+
+	// Reverse direction + non-vacuity.
+	var unobserved []string
+	runCreatedOnSpine := 0
+	for _, r := range recs {
+		if !threadCreatedDuringRun(r.Created) {
+			continue // pre-seeded fixture — the harness never observes its creation
+		}
+		runCreatedOnSpine++
+		if _, ok := created[r.ID]; !ok {
+			unobserved = append(unobserved, r.ID)
+		}
+	}
+
+	if len(lost) == 0 && len(both) == 0 && len(unobserved) == 0 {
 		return nil
 	}
 	sort.Strings(lost)
 	sort.Strings(both)
+	sort.Strings(unobserved)
 	var parts []string
 	if len(lost) > 0 {
 		parts = append(parts, fmt.Sprintf("unexplained loss (created but neither on-spine nor archived): %s",
@@ -344,21 +404,202 @@ func VerifyThreadAccounting(h *Harness) error {
 		parts = append(parts, fmt.Sprintf("on-spine and archived simultaneously (ID reuse or archival corruption): %s",
 			strings.Join(both, ", ")))
 	}
+	if len(unobserved) > 0 {
+		if len(created) == 0 {
+			parts = append(parts, fmt.Sprintf(
+				"created set is EMPTY while %d run-created thread(s) are on the spine — thread.created marker drift? %s",
+				runCreatedOnSpine, strings.Join(unobserved, ", ")))
+		} else {
+			parts = append(parts, fmt.Sprintf(
+				"run-created but never observed in the created set (thread.created marker gap): %s",
+				strings.Join(unobserved, ", ")))
+		}
+	}
 	return fmt.Errorf("VerifyThreadAccounting: %s", strings.Join(parts, "; "))
 }
 
-// VerifyArchiveResolvable is reserved for v0.2 deep-cold archival
-// (spec §3.8). The archive index does not exist in v0.1; the function
-// is wired up so scenarios can reference it today and the check
-// activates when the underlying feature lands.
-func VerifyArchiveResolvable(_ *Harness) error {
-	return errSkipPhase("v0.2-archive")
+// threadCreatedDuringRun reports whether a spine record's Created timestamp
+// falls at or after the simulated-run clock anchor (SimClockStart) — the
+// seed-vs-create boundary VerifyThreadAccounting's reverse direction uses. An
+// unparseable timestamp is treated as NOT run-created: a malformed Created is
+// VerifySpineIntegrity's channel, and swallowing it here avoids a spurious
+// accounting failure on a record another check already owns.
+func threadCreatedDuringRun(created string) bool {
+	t, err := time.Parse(time.RFC3339, created)
+	if err != nil {
+		return false
+	}
+	return !t.Before(SimClockStart)
 }
 
-// VerifyDedupConsistency is reserved for v0.2 working-set dedup (spec
-// §3.9). Same wiring rationale as VerifyArchiveResolvable.
-func VerifyDedupConsistency(_ *Harness) error {
-	return errSkipPhase("v0.2-dedup")
+// VerifyArchiveResolvable asserts every §3.8 archive-index entry is
+// structurally recoverable — the runtime evidence that the recoverable
+// git-based archival path (fileadapter_archive.go) never strands a thread off
+// the spine without a way back.
+//
+// For each archive/index.jsonl entry it mirrors RecoverThread's preconditions
+// without mutating anything:
+//   - CommitHash must be non-empty (RecoverThread's first guard: an un-stamped
+//     entry sits in the deletion↔stamp crash window and cannot self-resolve).
+//   - A drift entry (empty TreeHash) recovers record-only from the index
+//     snapshot; there is no on-disk body and nothing further to resolve.
+//   - A content entry's bytes live in the capture commit (the deletion commit's
+//     parent). Resolve the parent exactly as recovery does — prefer the stored
+//     ParentCommitHash, else walk CommitHash's first parent — then confirm the
+//     committed subtree hash matches the stored integrity token. TreeHashAt
+//     loads the commit + tree objects, so a present, matching result proves
+//     both are in the home repo and a recovery lookup is possible.
+//
+// Recovered entries (RecoveredAt set) are checked too: their capture commit
+// stays reachable in history, so it must still resolve.
+//
+// This is a heavy check: it touches git per content entry. It runs at the
+// heavy cadence, not per step (see heavyDefaultInvariants).
+func VerifyArchiveResolvable(h *Harness) error {
+	entries, err := store.LoadArchiveIndex(h.Paths)
+	if err != nil {
+		return fmt.Errorf("VerifyArchiveResolvable: load archive index: %w", err)
+	}
+	ctx := context.Background()
+	var problems []string
+	for _, e := range entries {
+		if e.CommitHash == "" {
+			problems = append(problems, fmt.Sprintf("%s: empty commit_hash (un-stamped; cannot self-recover)", e.ThrID))
+			continue
+		}
+		if e.TreeHash == "" {
+			continue // drift entry — record-only recovery, no git tree to resolve
+		}
+		parent := e.ParentCommitHash
+		if parent == "" {
+			parent, err = autogit.ParentCommitHash(ctx, h.Paths, e.CommitHash)
+			if err != nil {
+				problems = append(problems, fmt.Sprintf("%s: resolve parent of %s: %v", e.ThrID, e.CommitHash, err))
+				continue
+			}
+		}
+		got, err := autogit.TreeHashAt(ctx, h.Paths, parent, e.OriginalPath)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("%s: subtree %q at %s unresolvable: %v", e.ThrID, e.OriginalPath, parent, err))
+			continue
+		}
+		if got != e.TreeHash {
+			problems = append(problems, fmt.Sprintf("%s: tree-hash mismatch (index %s != commit %s)", e.ThrID, e.TreeHash, got))
+		}
+	}
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return fmt.Errorf("VerifyArchiveResolvable: %d unresolvable archive entries: %s",
+			len(problems), strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// VerifyDedupConsistency asserts every live thread's §3.9 tracked-file sidecar
+// (threads/<id>/files.json) round-trips: it loads, and every reverse-delta
+// chain reconstructs byte-exactly.
+//
+// A present-but-corrupt sidecar fails LoadThreadFiles (a missing one is the
+// benign fresh state and loads as empty). For each tracked file, every recorded
+// version must Reconstruct without error — a broken delta or missing literal
+// anchor surfaces here — and Current() must agree with the newest reconstructed
+// version (the newest is always stored as a literal). Chains are short (bounded
+// by the live window + anchor cadence), so the per-file cost is small; the
+// enumeration over live threads is what puts it in the heavy tier.
+func VerifyDedupConsistency(h *Harness) error {
+	recs, err := store.ReadSpine(h.Paths.Spine)
+	if err != nil {
+		return fmt.Errorf("VerifyDedupConsistency: read spine: %w", err)
+	}
+	var problems []string
+	for _, r := range recs {
+		tf, err := store.LoadThreadFiles(h.Paths, r.ID)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("%s: sidecar unloadable: %v", r.ID, err))
+			continue
+		}
+		for path, fe := range tf.Files {
+			if fe == nil {
+				problems = append(problems, fmt.Sprintf("%s:%s: nil file entry", r.ID, path))
+				continue
+			}
+			chain := &fe.Chain
+			n := chain.Len()
+			for v := 0; v < n; v++ {
+				if _, rerr := chain.Reconstruct(v); rerr != nil {
+					problems = append(problems, fmt.Sprintf("%s:%s: version %d unreconstructable: %v", r.ID, path, v, rerr))
+				}
+			}
+			if n > 0 {
+				if cur, rerr := chain.Reconstruct(n - 1); rerr == nil && cur != chain.Current() {
+					problems = append(problems, fmt.Sprintf("%s:%s: Current() disagrees with newest reconstructed version", r.ID, path))
+				}
+			}
+		}
+	}
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return fmt.Errorf("VerifyDedupConsistency: %d inconsistent tracked-file chain(s): %s",
+			len(problems), strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// VerifyNoBudgetOverflow asserts the §3.1 render-time truncation contract held:
+// after composition, each rendered working-set layer is within its Budget byte
+// allocation. It re-composes via the harness's live session (h.Ops /
+// h.State) — the same ComposeWorkingSet the turn drives — and compares each
+// layer's byte length against the derived per-layer cap. workset.Compose
+// truncates every layer to its cap, so a violation means a future change
+// bypassed that truncation (the bypass this invariant exists to catch).
+//
+// Per D1 (SPEC §9.1): the X4 whole-request TOKEN ceiling is the NORMATIVE
+// zero-overflow gate. This per-layer BYTE check is a cheap belt-and-suspenders
+// on MOCK rungs; on a live-inference rung the token ceiling governs the
+// assembled request and this deterministic byte check is not the load-bearing
+// signal, so it is skipped there.
+func VerifyNoBudgetOverflow(h *Harness) error {
+	if h.State == nil || h.Ops == nil {
+		// The substrate-only invariant harness has no live session to compose;
+		// budget composition is only meaningful against a running turn.State.
+		return nil
+	}
+	if h.liveClient != nil {
+		return nil // live-inference rung — the X4 token ceiling is the gate (D1)
+	}
+	budget := h.State.Budget
+	if budget.Total == 0 {
+		budget = memops.DefaultBudget()
+	}
+	ws, err := h.Ops.ComposeWorkingSet(context.Background(), memops.WorksetInput{
+		ActiveProject:  h.State.ActiveProject,
+		ActiveThreads:  h.State.ActiveThreads,
+		DormantThreads: h.State.DormantThreads,
+		Budget:         budget,
+	})
+	if err != nil {
+		return fmt.Errorf("VerifyNoBudgetOverflow: compose working set: %w", err)
+	}
+	layers := []struct {
+		name        string
+		got, budget int
+	}{
+		{"E", len(ws.LayerE), budget.LayerE},
+		{"A1", len(ws.LayerA1), budget.LayerA1},
+		{"A2", len(ws.LayerA2), budget.LayerA2},
+		{"B", len(ws.LayerB), budget.LayerB},
+		{"C", len(ws.LayerC), budget.LayerC},
+	}
+	var over []string
+	for _, l := range layers {
+		if l.got > l.budget {
+			over = append(over, fmt.Sprintf("layer %s: %d > %d bytes", l.name, l.got, l.budget))
+		}
+	}
+	if len(over) > 0 {
+		return fmt.Errorf("VerifyNoBudgetOverflow: %s (§3.1 truncation contract bypassed)", strings.Join(over, "; "))
+	}
+	return nil
 }
 
 // skipPhaseErr is the sentinel error type used by phase-deferred

@@ -183,7 +183,7 @@ func reportInferenceBehavior(t *testing.T, h *scenarios.Harness) {
 	if err != nil {
 		t.Fatalf("reportInferenceBehavior: read metrics blob: %v", err)
 	}
-	turns := m.Counters["turns"]
+	turns := m.Counters[scenarios.MetricTurns]
 	tagMissing := logEventCount(t, h, "topic.tag-missing")
 	tagParsed := int(turns) - tagMissing
 	parsedRate := 0.0
@@ -196,9 +196,9 @@ func reportInferenceBehavior(t *testing.T, h *scenarios.Harness) {
 	t.Logf("topic-tag discipline:     %d/%d parseable (%.3f); %d missing (runtime `topic.tag-missing`)",
 		tagParsed, int(turns), parsedRate, tagMissing)
 	t.Logf("threads created:          %d (real-model tags/anchors that drove §3.0.4 creation)",
-		m.Counters["threads_created"])
+		m.Counters[scenarios.MetricThreadsCreated])
 	t.Logf("engaged existing threads: %d (real-model tags naming a live thr_<n>)",
-		m.Counters["engaged_existing_threads"])
+		m.Counters[scenarios.MetricEngagedExistingThreads])
 	t.Logf("topic.warning lines:      %d (malformed-tag drift the runtime tolerated)",
 		logEventCount(t, h, "topic.warning"))
 	t.Logf("§5.5 mid-turn re-prompts: %d (dormant-resumption re-prompts handled with no queue desync)",

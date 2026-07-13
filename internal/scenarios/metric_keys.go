@@ -84,4 +84,45 @@ const (
 	// workload never stressed the assembled request). Cross-seam: harness writes,
 	// sim gate reads.
 	MetricRequestPromptTokens = "request_prompt_tokens"
+
+	// Per-turn workload counters written by stepRecordMetrics (harness_run.go)
+	// and read by the sim rung/daily summary + the daily-record schema
+	// (sim_test.go/sim_rung_test.go). MetricTurnDurationMs is a histogram (the
+	// latency-percentile source, §9.2/I3); the others are counters.
+	MetricTurns                  = "turns"
+	MetricThreadsCreated         = "threads_created"
+	MetricTurnDurationMs         = "turn_duration_ms"
+	MetricEngagedExistingThreads = "engaged_existing_threads"
+
+	// MetricRecallUnexplainedAbsence is the #100 HARD ==0 genuine-loss canary:
+	// a recall expectation named a thread that is off the live spine AND NOT
+	// archived (an unexplained absence, not a forgivable archival). Written by
+	// BOTH recall-measurement sites (recordRecallFidelity in recall_fidelity.go
+	// and the stepRecoverable probe closure in harness_run.go) and read as the
+	// hard gate by the sim rung summary (sim_rung_test.go). This is the
+	// highest-value entry in the registry — a writer-side rename that silently
+	// zeroed this reader would disable the canary (feedback: unexplained_* is
+	// zero-tolerance).
+	MetricRecallUnexplainedAbsence = "recall_unexplained_absence"
+
+	// Symbolic Jaccard recall-fidelity series written by recall_fidelity.go and
+	// read by the sim summaries. The main measured precision/recall/f1 samples
+	// are asserted inline in recordRecallFidelity (the gate is the t.Errorf, not
+	// a sim read), so only the step COUNT and the adversarial (RecallMeasureOnly)
+	// series cross the seam.
+	MetricRecallFidelityMeasuredSteps        = "recall_fidelity_measured_steps"
+	MetricRecallFidelityAdversarialSteps     = "recall_fidelity_adversarial_steps"
+	MetricRecallFidelityAdversarialPrecision = "recall_fidelity_adversarial_precision"
+	MetricRecallFidelityAdversarialRecall    = "recall_fidelity_adversarial_recall"
+	MetricRecallFidelityAdversarialF1        = "recall_fidelity_adversarial_f1"
+
+	// Embedding head-to-head recall-fidelity series (#98) written by
+	// recordEmbedRecallFidelity (recall_fidelity.go) and read by the embedding
+	// rung/summary (sim_embed_test.go/sim_rung_test.go). The unmeasured-steps
+	// counter is written but never read across the seam, so it stays a local
+	// literal on the write side.
+	MetricEmbedRecallFidelitySteps     = "embed_recall_fidelity_steps"
+	MetricEmbedRecallFidelityPrecision = "embed_recall_fidelity_precision"
+	MetricEmbedRecallFidelityRecall    = "embed_recall_fidelity_recall"
+	MetricEmbedRecallFidelityF1        = "embed_recall_fidelity_f1"
 )

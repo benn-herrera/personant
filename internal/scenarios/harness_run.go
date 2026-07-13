@@ -15,6 +15,7 @@ import (
 	pnlog "personant/internal/log"
 	"personant/internal/memops"
 	"personant/internal/model"
+	"personant/internal/recall/measure"
 	"personant/internal/store"
 	"personant/internal/turn"
 )
@@ -430,15 +431,15 @@ func stepMeasureW1(h *Harness, step Step) {
 
 // stepRecordMetrics records the per-step turn/engagement/response counters.
 func stepRecordMetrics(h *Harness, step Step, elapsed time.Duration, preSpine, postSpine []memops.SpineRecord) {
-	h.Metrics.Counter("turns", 1)
-	h.Metrics.Record("turn_duration_ms", float64(elapsed.Milliseconds()))
+	h.Metrics.Counter(MetricTurns, 1)
+	h.Metrics.Record(MetricTurnDurationMs, float64(elapsed.Milliseconds()))
 	if len(postSpine) > len(preSpine) {
-		h.Metrics.Counter("threads_created", int64(len(postSpine)-len(preSpine)))
+		h.Metrics.Counter(MetricThreadsCreated, int64(len(postSpine)-len(preSpine)))
 	} else if len(postSpine) == len(preSpine) {
 		// Existing-thread engagement (or no engagement at all). Don't
 		// double-count: only mark engagement if the body itself implies
 		// a tag was present and at least one record's turn_count moved.
-		h.Metrics.Counter("engaged_existing_threads", 1)
+		h.Metrics.Counter(MetricEngagedExistingThreads, 1)
 	}
 
 	// Response size + topic-tag presence accounting. Under mock inference these
@@ -520,7 +521,7 @@ func stepRecoverable(h *Harness, livePost map[string]struct{}) func(string) bool
 		case recovArchived:
 			return false
 		default: // recovUnexplained
-			h.Metrics.Counter("recall_unexplained_absence", 1)
+			h.Metrics.Counter(MetricRecallUnexplainedAbsence, 1)
 			return true
 		}
 	}
@@ -687,34 +688,30 @@ const recoveryGaugeSample = 5
 // are owned by the registry in metric_keys.go (Metric* consts) so the writer
 // here and the sim reader share one source of truth — see that file for why.
 
-// w1Class* are the per-probe class strings IntraThreadDivergence returns: one
-// source of truth for the harness's class→metric mapping. They are the measure
-// package's w1Class string form (NOT metric keys — they stay local), so they
-// must match the measure package's w1Class constant values.
-const (
-	// w1Class* are the per-probe class strings IntraThreadDivergence returns
-	// (the string form of measure's unexported w1Class). One source of truth
-	// for the harness's class→metric mapping; they must match the measure
-	// package's w1Class constant values.
-	w1ClassStrictMiss   = "strict-miss"
-	w1ClassTie          = "tie"
-	w1ClassTreeMismatch = "tree-mismatch"
-)
-
 // recordW1Class bumps the harness's run-total W1 classification tally for one
 // divergent probe (#111 §7.1). class is the per-probe verdict the recaller
-// returned ("strict-miss" / "tie" / "tree-mismatch"); the empty string (a
-// non-divergent probe) bumps nothing. An unrecognized class is ignored — the
-// recaller's contract is the three known values, so an unknown one would be a
-// recaller bug, not something to silently miscount under one of the buckets.
+// returned; the empty string (a non-divergent probe) bumps nothing. The
+// recognized verdicts are the exported measure-package labels (measure.W1Class),
+// referenced directly rather than mirrored as local literals (burndown BD-3) so
+// a label rename in measure is a single-edit compile-checked change.
+//
+// An UNKNOWN non-empty class is a seam break — the recaller returned a verdict
+// the harness has no bucket for — not benign noise: it means measure grew a
+// class the harness silently drops, zeroing a divergence that really occurred.
+// Log it loudly on the harness's *testing.T so it surfaces in the run output.
 func recordW1Class(h *Harness, class string) {
-	switch class {
-	case w1ClassStrictMiss:
+	switch measure.W1Class(class) {
+	case "":
+		// Non-divergent probe: nothing to record.
+	case measure.W1StrictMiss:
 		h.Metrics.Counter(MetricRecallIntraW1StrictMiss, 1)
-	case w1ClassTie:
+	case measure.W1Tie:
 		h.Metrics.Counter(MetricRecallIntraW1Tie, 1)
-	case w1ClassTreeMismatch:
+	case measure.W1TreeMismatch:
 		h.Metrics.Counter(MetricRecallIntraW1TreeMismatch, 1)
+	default:
+		h.T.Errorf("recordW1Class: unknown W1 divergence class %q from IntraThreadDivergence — "+
+			"a measure-package class the harness has no bucket for (seam break; recall_intra_w1_* undercounts)", class)
 	}
 }
 

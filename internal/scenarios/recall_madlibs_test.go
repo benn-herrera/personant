@@ -176,8 +176,8 @@ func TestRecallMadlibs_AdversarialBehavior(t *testing.T) {
 		q := q
 		t.Run(q.ID, func(t *testing.T) {
 			h := runMadlibsMetrics(t, doc, q)
-			rec := h.Histograms["recall_fidelity_adversarial_recall"]
-			prec := h.Histograms["recall_fidelity_adversarial_precision"]
+			rec := h.Histograms[MetricRecallFidelityAdversarialRecall]
+			prec := h.Histograms[MetricRecallFidelityAdversarialPrecision]
 			if len(rec) != 1 || len(prec) != 1 {
 				t.Fatalf("%s: expected one adversarial sample, got recall=%v precision=%v",
 					q.ID, rec, prec)
@@ -189,7 +189,7 @@ func TestRecallMadlibs_AdversarialBehavior(t *testing.T) {
 				t.Errorf("%s: adversarial precision got %v want ≤ %v", q.ID, prec[0], exp.precisionMax)
 			}
 			// Adversarial steps must never touch the clean series.
-			if c := h.Counters["recall_fidelity_measured_steps"]; c != 0 {
+			if c := h.Counters[MetricRecallFidelityMeasuredSteps]; c != 0 {
 				t.Errorf("%s: adversarial step leaked into clean measured_steps (%d)", q.ID, c)
 			}
 		})

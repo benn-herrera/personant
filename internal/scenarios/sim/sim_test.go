@@ -351,7 +351,7 @@ func TestSim(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read metrics blob for turn-count band: %v", err)
 		}
-		turns := m.Counters["turns"]
+		turns := m.Counters[scenarios.MetricTurns]
 		if turns < 675 || turns > 1200 {
 			t.Errorf("turn count %d outside plausible band [675, 1200]", turns)
 		}
@@ -471,7 +471,7 @@ func recordLifecycleMetrics(t *testing.T, h *scenarios.Harness, gen *generator) 
 	// materialize-then-read fold (#6), and h.Metrics already holds the series
 	// RunScenario recorded.
 	h.Metrics.Set("superseded_precision",
-		mean(h.Metrics.HistogramSnapshot("recall_fidelity_adversarial_precision")))
+		mean(h.Metrics.HistogramSnapshot(scenarios.MetricRecallFidelityAdversarialPrecision)))
 
 	// Post-run frontmatter + spine: per-thread lifecycle steady-state.
 	fms, err := store.LoadAllThreadFrontmatter(h.Paths, nil)
@@ -1332,6 +1332,7 @@ func recordWanderMetrics(h *scenarios.Harness, gen *generator) {
 	// The gate lives in evalRungGates (hard == 0 when the runtime follows the
 	// canned plan).
 	h.Metrics.Set(metricLayerBShadowDivergence, float64(gen.layerBShadowDivergence))
+	h.Metrics.Set(metricLayerBShadowReverseDivergence, float64(gen.layerBShadowReverseDivergence))
 }
 
 // recordSynthesisMetrics folds the synthesis-thread telemetry (§2.7.3,
@@ -1568,6 +1569,8 @@ type dailyStats struct {
 // so it IS pinned here.
 func TestMetricKeyTagsMatchRegistry(t *testing.T) {
 	want := map[string]string{
+		"Turns":                    scenarios.MetricTurns,
+		"ThreadsCreated":           scenarios.MetricThreadsCreated,
 		"SleepCycles":              scenarios.MetricSleepCycles,
 		"RecallIndexFlushCalls":    scenarios.MetricRecallIndexFlushCalls,
 		"RecallIntraDescentDiverg": scenarios.MetricRecallIntraDescentDivergence,
@@ -1639,7 +1642,7 @@ func newDailySnapshotWriter(gen *generator) *dailySnapshotWriter {
 // ignored in favor of the writer's own ordinal so interior and final records
 // share one monotonic counter.
 func (w *dailySnapshotWriter) onDayClose(h *scenarios.Harness, _ int, simDate time.Time) {
-	durations := h.Metrics.HistogramSnapshot("turn_duration_ms")
+	durations := h.Metrics.HistogramSnapshot(scenarios.MetricTurnDurationMs)
 	spineSize := 0
 	if recs, err := store.ReadSpine(h.Paths.Spine); err == nil {
 		spineSize = len(recs)
@@ -1657,7 +1660,7 @@ func (w *dailySnapshotWriter) onDayClose(h *scenarios.Harness, _ int, simDate ti
 // construction (#120 correctness invariant). simDate is the run's final pinned
 // instant. It must be called exactly once, after the last onDayClose.
 func (w *dailySnapshotWriter) finalize(h *scenarios.Harness, simDate time.Time, liveThreads int, p50, p95, p99 float64) {
-	durations := h.Metrics.HistogramSnapshot("turn_duration_ms")
+	durations := h.Metrics.HistogramSnapshot(scenarios.MetricTurnDurationMs)
 	w.appendRecord(h, simDate, durations, liveThreads, p50, p95, p99)
 }
 
@@ -1684,7 +1687,7 @@ func (w *dailySnapshotWriter) appendRecord(h *scenarios.Harness, simDate time.Ti
 	// these are the exact end-of-run values (the #120 correctness invariant).
 	intra := computeIntraThreadGauges(w.gen, liveThreads, p50, p95, p99)
 
-	turns := h.Metrics.CounterValue("turns")
+	turns := h.Metrics.CounterValue(scenarios.MetricTurns)
 	rec := dailyRecord{
 		Day:     w.day,
 		SimDate: simDate.Format("2006-01-02"),
@@ -1694,7 +1697,7 @@ func (w *dailySnapshotWriter) appendRecord(h *scenarios.Harness, simDate time.Ti
 			LatencyP50:     p50,
 			LatencyP95:     p95,
 			LatencyP99:     p99,
-			ThreadsCreated: h.Metrics.CounterValue("threads_created"),
+			ThreadsCreated: h.Metrics.CounterValue(scenarios.MetricThreadsCreated),
 			SpineSize:      liveThreads,
 			SleepCycles:    h.Metrics.CounterValue(scenarios.MetricSleepCycles),
 			// recall_query_cosine_ops is the LIVE-recaller gauge, NOT a shadow
@@ -2124,11 +2127,11 @@ func TestDailyStatsSeries(t *testing.T) {
 		t.Fatalf("read metrics blob: %v", err)
 	}
 	last := recs[len(recs)-1].RunToDate
-	durations := m.Histograms["turn_duration_ms"]
-	if want := m.Counters["turns"]; last.Turns != want {
+	durations := m.Histograms[scenarios.MetricTurnDurationMs]
+	if want := m.Counters[scenarios.MetricTurns]; last.Turns != want {
 		t.Errorf("last record turns=%d, end-of-run summary turns=%d", last.Turns, want)
 	}
-	if want := m.Counters["threads_created"]; last.ThreadsCreated != want {
+	if want := m.Counters[scenarios.MetricThreadsCreated]; last.ThreadsCreated != want {
 		t.Errorf("last record threads_created=%d, summary=%d", last.ThreadsCreated, want)
 	}
 	if want := m.Counters[scenarios.MetricSleepCycles]; last.SleepCycles != want {

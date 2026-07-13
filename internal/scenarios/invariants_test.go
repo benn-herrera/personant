@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"personant/internal/dedup"
 	"personant/internal/memops"
 	"personant/internal/store"
 )
@@ -269,21 +270,82 @@ func TestVerifyEngagementConsistency_FailsOnDrift(t *testing.T) {
 	}
 }
 
-func TestVerifyArchiveResolvable_Skipped(t *testing.T) {
+func TestVerifyArchiveResolvable_PassOnEmptyIndex(t *testing.T) {
 	h := invariantHarness(t)
-	err := VerifyArchiveResolvable(h)
-	var sk skipPhaseErr
-	if !errors.As(err, &sk) {
-		t.Fatalf("expected skipPhaseErr, got %v", err)
+	if err := VerifyArchiveResolvable(h); err != nil {
+		t.Fatalf("empty archive index should pass, got %v", err)
 	}
 }
 
-func TestVerifyDedupConsistency_Skipped(t *testing.T) {
+func TestVerifyArchiveResolvable_FailsOnUnstampedEntry(t *testing.T) {
+	// An entry with an empty commit_hash is the deletion↔stamp crash window:
+	// it cannot self-resolve its parent, and RecoverThread refuses it.
 	h := invariantHarness(t)
-	err := VerifyDedupConsistency(h)
-	var sk skipPhaseErr
-	if !errors.As(err, &sk) {
-		t.Fatalf("expected skipPhaseErr, got %v", err)
+	e := memops.ArchiveEntry{
+		ThrID:        "thr_9",
+		CommitHash:   "", // un-stamped
+		TreeHash:     "cafebabecafebabecafebabecafebabecafebabe",
+		ArchivedAt:   "2026-05-05T12:00:00Z",
+		OriginalPath: "threads/thr_9",
+		Project:      "prj_1",
+	}
+	if err := store.AppendArchiveEntries(h.Paths, []memops.ArchiveEntry{e}); err != nil {
+		t.Fatalf("append archive entry: %v", err)
+	}
+	if err := VerifyArchiveResolvable(h); err == nil {
+		t.Fatalf("expected fail on un-stamped entry; passed")
+	}
+}
+
+func TestVerifyArchiveResolvable_PassOnDriftRecordEntry(t *testing.T) {
+	// A drift entry (empty tree_hash) recovers record-only from the index
+	// snapshot — no git tree to resolve — so a stamped one resolves fine.
+	h := invariantHarness(t)
+	e := memops.ArchiveEntry{
+		ThrID:        "thr_9",
+		CommitHash:   "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		TreeHash:     "", // drift: no on-disk body
+		ArchivedAt:   "2026-05-05T12:00:00Z",
+		OriginalPath: "threads/thr_9",
+		Project:      "prj_1",
+	}
+	if err := store.AppendArchiveEntries(h.Paths, []memops.ArchiveEntry{e}); err != nil {
+		t.Fatalf("append archive entry: %v", err)
+	}
+	if err := VerifyArchiveResolvable(h); err != nil {
+		t.Fatalf("drift-record entry should resolve, got %v", err)
+	}
+}
+
+func TestVerifyDedupConsistency_PassOnValidSidecar(t *testing.T) {
+	h := invariantHarness(t)
+	seedThread(t, h, validRecord()) // thr_1 on the spine
+	ch := dedup.New()
+	ch.Append("line one\n")
+	ch.Append("line one\nline two\n")
+	ch.Append("line one\nline two\nline three\n")
+	tf := store.ThreadFiles{
+		ThreadID: "thr_1",
+		Files: map[string]*store.FileEntry{
+			"src/foo.go": {Path: "src/foo.go", Chain: *ch},
+		},
+	}
+	if err := store.SaveThreadFiles(h.Paths, tf); err != nil {
+		t.Fatalf("save thread files: %v", err)
+	}
+	if err := VerifyDedupConsistency(h); err != nil {
+		t.Fatalf("valid sidecar should pass, got %v", err)
+	}
+}
+
+func TestVerifyDedupConsistency_FailsOnCorruptSidecar(t *testing.T) {
+	h := invariantHarness(t)
+	seedThread(t, h, validRecord()) // thr_1 on the spine
+	if err := os.WriteFile(store.ThreadFilesPath(h.Paths, "thr_1"), []byte("{ not json"), 0o644); err != nil {
+		t.Fatalf("corrupt sidecar: %v", err)
+	}
+	if err := VerifyDedupConsistency(h); err == nil {
+		t.Fatalf("expected fail on corrupt sidecar; passed")
 	}
 }
 
@@ -376,6 +438,42 @@ func TestVerifyThreadAccounting_RecoveredLeavesArchivedSet(t *testing.T) {
 	}
 	if err := VerifyThreadAccounting(h); err != nil {
 		t.Fatalf("recovered thread on spine must not trip accounting; got %v", err)
+	}
+}
+
+// TestVerifyNoBudgetOverflow_PassOnComposedSession drives a real turn (which
+// composes the working set) and confirms every rendered layer sits within its
+// byte allocation — the §3.1 truncation contract holding on a mock rung. The
+// substrate-only invariantHarness has no live session, so this uses a full
+// scenario harness whose h.State/h.Ops VerifyNoBudgetOverflow can compose.
+func TestVerifyNoBudgetOverflow_PassOnComposedSession(t *testing.T) {
+	sc := Scenario{
+		Name: "budget-overflow-composed",
+		Steps: []Step{
+			{
+				UserInput: "new topic about topology — #trefoil #unknot #body-topology #electron-shape",
+				MockResponse: NewMockResponseWithTag([]string{"*new-topic*"},
+					[]string{"trefoil", "unknot", "body-topology", "electron-shape"},
+					"First pass on topology."),
+				Annotation:            "create thr_1; compose working set",
+				ExpectedRecallMatches: []string{},
+			},
+		},
+	}
+	h := RunScenario(t, sc)
+	if err := VerifyNoBudgetOverflow(h); err != nil {
+		t.Fatalf("composed layers should be within budget, got %v", err)
+	}
+}
+
+// TestVerifyNoBudgetOverflow_NoopWithoutSession confirms the substrate-only
+// invariant harness (no h.State/h.Ops) is a clean no-op rather than a panic —
+// the guard that lets VerifyNoBudgetOverflow sit in DefaultInvariants without
+// breaking substrate-only invariant tests.
+func TestVerifyNoBudgetOverflow_NoopWithoutSession(t *testing.T) {
+	h := invariantHarness(t)
+	if err := VerifyNoBudgetOverflow(h); err != nil {
+		t.Fatalf("expected no-op nil without a live session, got %v", err)
 	}
 }
 

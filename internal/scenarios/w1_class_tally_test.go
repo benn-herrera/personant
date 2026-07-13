@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"personant/internal/metrics"
+	"personant/internal/recall/measure"
 )
 
 // TestW1ClassTally_SurvivesRecallerSwap is the #111 regression guard: the W1
@@ -33,8 +34,8 @@ func TestW1ClassTally_SurvivesRecallerSwap(t *testing.T) {
 
 	// Probes on the first Service instance (pre-restart): one strict-miss, one
 	// tie, plus a non-divergent probe (empty class — bumps nothing).
-	recordW1Class(h, w1ClassStrictMiss)
-	recordW1Class(h, w1ClassTie)
+	recordW1Class(h, string(measure.W1StrictMiss))
+	recordW1Class(h, string(measure.W1Tie))
 	recordW1Class(h, "") // div==0 probe: must not bump any bucket
 
 	// --- RestartSession here: the recaller is rebuilt. A post-run read of the
@@ -43,8 +44,8 @@ func TestW1ClassTally_SurvivesRecallerSwap(t *testing.T) {
 
 	// Probes on the second Service instance (post-restart, max history): the
 	// run-end strict-miss the original bug dropped, plus a tree-mismatch.
-	recordW1Class(h, w1ClassStrictMiss)
-	recordW1Class(h, w1ClassTreeMismatch)
+	recordW1Class(h, string(measure.W1StrictMiss))
+	recordW1Class(h, string(measure.W1TreeMismatch))
 
 	// Read back through the exact surface the sim uses: write the blob and
 	// decode its Counters (sim's readMetrics → m.Counters[...]).

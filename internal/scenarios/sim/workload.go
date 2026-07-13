@@ -1516,6 +1516,16 @@ const (
 	// metricWanderCoherenceDivergence — the registry holds only keys that
 	// cross the harness↔sim writer/reader seam.
 	metricLayerBShadowDivergence = "layerb_shadow_divergence"
+
+	// metricLayerBShadowReverseDivergence is the OPPOSITE-direction cross-check
+	// (BD-4): the run-total count of threads the shadow still holds that the
+	// runtime EVICTED (shadow-retained / runtime-evicted) — the class the forward
+	// subset metric structurally cannot see. It is REPORT-ONLY, not a == 0 gate:
+	// the shadow legitimately over-retains via persistent carrier displacement
+	// and closure/retirement, neither of which its LRU model replicates (see
+	// crossCheckLayerB). The counter quantifies that over-retention as a monitored
+	// quality signal. Same package-local rationale as the forward key.
+	metricLayerBShadowReverseDivergence = "layerb_shadow_reverse_divergence"
 )
 
 // Intra-thread recall metric keys (§9.2, #109). Defined here so the
@@ -1782,6 +1792,16 @@ type generator struct {
 	// step also routes a forensic pnlog.Warn so a CI failure has the
 	// offending id-sets without a re-run.
 	layerBShadowDivergence int
+
+	// layerBShadowReverseDivergence is the OPPOSITE-direction tally (BD-4): the
+	// run-total count of threads the shadow retains that the runtime EVICTED
+	// (shadow-retained / runtime-evicted). The forward `layerBShadowDivergence`
+	// only catches a runtime thread the shadow lacks; this catches a shadow
+	// thread the runtime lacks. REPORT-ONLY, not gated == 0: the shadow
+	// legitimately over-retains via persistent carrier displacement and
+	// closure/retirement, which its engage()-only LRU model does not replicate
+	// (see crossCheckLayerB). A monitored quality signal, not a defect gate.
+	layerBShadowReverseDivergence int
 
 	// files[idx] is the §3.9 tracked-file state for thread idx: the
 	// deterministic file path and the file's current content, which grows
@@ -2223,21 +2243,55 @@ func (g *generator) crossCheckLayerB(feedback scenarios.StepFeedback) {
 	if g.carrier >= 0 {
 		carrierID = g.threads[g.carrier].threadID()
 	}
+	// Forward direction (#8): a runtime-resident thread (minus the carrier) the
+	// shadow did not predict. Also build the carrier-free runtime set for the
+	// reverse direction below.
+	runtimeSet := make(map[string]struct{}, len(feedback.RuntimeLayerB))
 	var divergent []string
 	for _, id := range feedback.RuntimeLayerB {
 		if id == carrierID {
 			continue
 		}
+		runtimeSet[id] = struct{}{}
 		if _, ok := shadow[id]; !ok {
 			divergent = append(divergent, id)
 		}
 	}
-	if len(divergent) == 0 {
-		return
+	if len(divergent) > 0 {
+		g.layerBShadowDivergence += len(divergent)
+		pnlog.Warn("sim step %d: Layer-B shadow divergence: runtime-resident %v absent from shadow %v (carrier=%q) — burndown #8 LRU drift",
+			feedback.Index, divergent, g.lastLayerBSnapshot, carrierID)
 	}
-	g.layerBShadowDivergence += len(divergent)
-	pnlog.Warn("sim step %d: Layer-B shadow divergence: runtime-resident %v absent from shadow %v (carrier=%q) — burndown #8 LRU drift",
-		feedback.Index, divergent, g.lastLayerBSnapshot, carrierID)
+
+	// Reverse direction (BD-4): threads the shadow still holds that the runtime
+	// EVICTED (shadow-retained / runtime-evicted) — the divergence class the
+	// forward subset check structurally cannot see.
+	//
+	// This is a REPORT-ONLY over-retention measure, NOT a == 0 gate. BD-4's
+	// premise was that the carrier is the only legitimate reason the shadow is a
+	// superset of the runtime, so the reverse could be gated == 0 after excluding
+	// it. Empirically that premise does not hold: the shadow legitimately
+	// over-retains for TWO reasons its simple LRU model does not replicate —
+	//   1. Persistent carrier displacement: a carrier probe evicts a real tail
+	//      thread from the RUNTIME's Layer-B; that thread stays evicted even
+	//      after the carrier itself ages out, but the carrier-free shadow never
+	//      dropped it (so divergence persists with the carrier NOT resident).
+	//   2. Closure / retirement: the runtime removes a retired thread from
+	//      ActiveThreads (§3.5); the shadow's engage()-only model never does.
+	// Both are legitimate, not LRU bugs, and neither is bounded by carrier
+	// residency — so a reverse == 0 gate would false-fail constantly. Modeling
+	// them in the shadow (to recover a == 0 gate) is a deliberate expansion of
+	// the generator oracle, deferred. Until then the counter quantifies the
+	// shadow's over-retention as a monitored quality signal; the forward
+	// direction remains the hard == 0 LRU-agreement gate.
+	var reverseDivergent []string
+	for _, idx := range g.lastLayerBSnapshot {
+		id := g.threads[idx].threadID()
+		if _, ok := runtimeSet[id]; !ok {
+			reverseDivergent = append(reverseDivergent, id)
+		}
+	}
+	g.layerBShadowReverseDivergence += len(reverseDivergent)
 }
 
 // runSession emits turns covering `active` worth of turn-active simulated

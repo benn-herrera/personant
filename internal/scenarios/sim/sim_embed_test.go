@@ -60,7 +60,7 @@ func TestSimEmbeddingHeadToHead_Machinery(t *testing.T) {
 	//    embedding recall on at least one ground-truth step, in lockstep with
 	//    the symbolic adversarial series (both fire on a recall-opportunity
 	//    step). A zero here means the embedder/index seam never engaged.
-	embedSteps := m.Counters["embed_recall_fidelity_steps"]
+	embedSteps := m.Counters[scenarios.MetricEmbedRecallFidelitySteps]
 	if embedSteps == 0 {
 		t.Fatal("embed_recall_fidelity_steps == 0: the embedding head-to-head never scored a step — " +
 			"the Recaller seam or the spine.embed-match-fire parse is not wired")
@@ -70,7 +70,7 @@ func TestSimEmbeddingHeadToHead_Machinery(t *testing.T) {
 	// step count is the apples-to-apples companion. They need not be equal
 	// (RecallStrict vs RecallMeasureOnly split the symbolic series), but the
 	// embedding count must not exceed the total measured-ground-truth steps.
-	symSteps := m.Counters["recall_fidelity_adversarial_steps"] + m.Counters["recall_fidelity_measured_steps"]
+	symSteps := m.Counters[scenarios.MetricRecallFidelityAdversarialSteps] + m.Counters[scenarios.MetricRecallFidelityMeasuredSteps]
 	if embedSteps > symSteps {
 		t.Errorf("embed_recall_fidelity_steps %d exceeds total symbolic measured steps %d — "+
 			"the head-to-head is scoring steps the symbolic path did not", embedSteps, symSteps)
@@ -79,9 +79,9 @@ func TestSimEmbeddingHeadToHead_Machinery(t *testing.T) {
 	// 2) The three embedding metric histograms must each carry one sample per
 	//    scored step — the metric MATH ran, not just the counter.
 	for _, key := range []string{
-		"embed_recall_fidelity_recall",
-		"embed_recall_fidelity_precision",
-		"embed_recall_fidelity_f1",
+		scenarios.MetricEmbedRecallFidelityRecall,
+		scenarios.MetricEmbedRecallFidelityPrecision,
+		scenarios.MetricEmbedRecallFidelityF1,
 	} {
 		if n := int64(len(m.Histograms[key])); n != embedSteps {
 			t.Errorf("%s has %d samples, want %d (one per scored step)", key, n, embedSteps)
@@ -89,9 +89,9 @@ func TestSimEmbeddingHeadToHead_Machinery(t *testing.T) {
 	}
 	// recall/precision/F1 are ratios — every sample must be in [0,1].
 	for _, key := range []string{
-		"embed_recall_fidelity_recall",
-		"embed_recall_fidelity_precision",
-		"embed_recall_fidelity_f1",
+		scenarios.MetricEmbedRecallFidelityRecall,
+		scenarios.MetricEmbedRecallFidelityPrecision,
+		scenarios.MetricEmbedRecallFidelityF1,
 	} {
 		for i, v := range m.Histograms[key] {
 			if v < 0 || v > 1 {
@@ -203,14 +203,14 @@ func TestSimNoEmbedder_HeadToHeadAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read metrics blob: %v", err)
 	}
-	if got := m.Counters["embed_recall_fidelity_steps"]; got != 0 {
+	if got := m.Counters[scenarios.MetricEmbedRecallFidelitySteps]; got != 0 {
 		t.Errorf("embed_recall_fidelity_steps = %d on the no-embedder run, want 0 — "+
 			"the embedding head-to-head must not run without an installed embedder", got)
 	}
 	for _, key := range []string{
-		"embed_recall_fidelity_recall",
-		"embed_recall_fidelity_precision",
-		"embed_recall_fidelity_f1",
+		scenarios.MetricEmbedRecallFidelityRecall,
+		scenarios.MetricEmbedRecallFidelityPrecision,
+		scenarios.MetricEmbedRecallFidelityF1,
 	} {
 		if n := len(m.Histograms[key]); n != 0 {
 			t.Errorf("%s has %d samples on the no-embedder run, want 0", key, n)
@@ -218,7 +218,7 @@ func TestSimNoEmbedder_HeadToHeadAbsent(t *testing.T) {
 	}
 	// The symbolic adversarial series must STILL be present — the mock run is
 	// unchanged, recall is still measured symbolic-only.
-	if m.Counters["recall_fidelity_adversarial_steps"] == 0 {
+	if m.Counters[scenarios.MetricRecallFidelityAdversarialSteps] == 0 {
 		t.Error("recall_fidelity_adversarial_steps == 0 on the mock run — the symbolic measurement regressed")
 	}
 }

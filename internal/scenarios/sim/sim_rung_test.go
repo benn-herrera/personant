@@ -283,7 +283,7 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 // The two reads the folds appear to need are served in-memory rather than via an
 // intermediate blob round-trip: the turn-latency percentiles (for
 // recordIntraThreadMetrics' latency gauges and the daily finalize) come from
-// h.Metrics.HistogramSnapshot("turn_duration_ms"); recordLifecycleMetrics' own
+// h.Metrics.HistogramSnapshot(scenarios.MetricTurnDurationMs); recordLifecycleMetrics' own
 // adversarial-precision read is likewise an in-memory snapshot. Both carry the
 // same data the blob would, so the single end read is byte-identical to the
 // prior three-round-trip flow.
@@ -316,7 +316,7 @@ func materializeRungMetrics(t *testing.T, h *scenarios.Harness, gen *generator, 
 	// Turn-latency percentiles from the live in-memory histogram (no blob read
 	// needed): the same turn_duration_ms series the blob would carry. They feed
 	// recordIntraThreadMetrics' latency gauges below and the daily finalize.
-	durations := h.Metrics.HistogramSnapshot("turn_duration_ms")
+	durations := h.Metrics.HistogramSnapshot(scenarios.MetricTurnDurationMs)
 	p50 := percentile(durations, 0.50)
 	p95 := percentile(durations, 0.95)
 	p99 := percentile(durations, 0.99)
@@ -350,8 +350,8 @@ func materializeRungMetrics(t *testing.T, h *scenarios.Harness, gen *generator, 
 
 	return rungReport{
 		m:               m,
-		turns:           int(m.Counters["turns"]),
-		threadsCreated:  m.Counters["threads_created"],
+		turns:           int(m.Counters[scenarios.MetricTurns]),
+		threadsCreated:  m.Counters[scenarios.MetricThreadsCreated],
 		closures:        closures,
 		finalPopulation: finalPopulation,
 		p50:             p50,
@@ -385,11 +385,11 @@ func logRungSummary(t *testing.T, label string, rep rungReport, gen *generator) 
 	// rung. Truth-in-labeling (sim-vs-reality MAD T0-1): this figure measures
 	// ONLY the symbolic Jaccard layer; the acceptance run uses a nil embedder, so
 	// it is labeled "symbolic-only recall" until embedding recall is measured.
-	if steps := m.Counters["recall_fidelity_adversarial_steps"]; steps > 0 {
+	if steps := m.Counters[scenarios.MetricRecallFidelityAdversarialSteps]; steps > 0 {
 		t.Logf("symbolic-only recall (Jaccard):  measured over %d steps, mean symbolic-only recall=%.3f mean F1=%.3f",
 			steps,
-			mean(m.Histograms["recall_fidelity_adversarial_recall"]),
-			mean(m.Histograms["recall_fidelity_adversarial_f1"]))
+			mean(m.Histograms[scenarios.MetricRecallFidelityAdversarialRecall]),
+			mean(m.Histograms[scenarios.MetricRecallFidelityAdversarialF1]))
 	} else {
 		t.Logf("symbolic-only recall (Jaccard):  no measured steps this run")
 	}
@@ -398,16 +398,16 @@ func logRungSummary(t *testing.T, label string, rep rungReport, gen *generator) 
 	// embedding-in-loop run (embed_recall_fidelity_steps > 0); the mock
 	// acceptance run never installs an embedder, so the series is absent and this
 	// block is skipped — keeping the mock summary unchanged.
-	if esteps := m.Counters["embed_recall_fidelity_steps"]; esteps > 0 {
+	if esteps := m.Counters[scenarios.MetricEmbedRecallFidelitySteps]; esteps > 0 {
 		t.Logf("=== embedding-vs-symbolic recall head-to-head (#98) ===")
 		t.Logf("embedding recall: measured over %d steps, mean recall=%.3f mean precision=%.3f mean F1=%.3f",
 			esteps,
-			mean(m.Histograms["embed_recall_fidelity_recall"]),
-			mean(m.Histograms["embed_recall_fidelity_precision"]),
-			mean(m.Histograms["embed_recall_fidelity_f1"]))
+			mean(m.Histograms[scenarios.MetricEmbedRecallFidelityRecall]),
+			mean(m.Histograms[scenarios.MetricEmbedRecallFidelityPrecision]),
+			mean(m.Histograms[scenarios.MetricEmbedRecallFidelityF1]))
 		t.Logf("(symbolic adversarial mean recall=%.3f over %d steps — compare; embedding closes the #96 gap iff it recovers what symbolic misses)",
-			mean(m.Histograms["recall_fidelity_adversarial_recall"]),
-			m.Counters["recall_fidelity_adversarial_steps"])
+			mean(m.Histograms[scenarios.MetricRecallFidelityAdversarialRecall]),
+			m.Counters[scenarios.MetricRecallFidelityAdversarialSteps])
 	}
 
 	// Miss → refinement episode summary. queries-to-hit is a per-episode sample
@@ -473,7 +473,7 @@ func logRungSummary(t *testing.T, label string, rep rungReport, gen *generator) 
 		m.Gauges[metricWanderCurrentRecall], int(m.Gauges[metricWanderCurrentRecall+"_obs"]))
 	// Per-hop decay + coherence curve (hop 0 = current topic). embedHeadToHead
 	// gates the per-hop embedding column so the mock summary stays unchanged.
-	embedHeadToHead := m.Counters["embed_recall_fidelity_steps"] > 0
+	embedHeadToHead := m.Counters[scenarios.MetricEmbedRecallFidelitySteps] > 0
 	for hop := 0; hop < wanderMaxHops; hop++ {
 		key := fmt.Sprintf("_h%d", hop)
 		obs := int(m.Gauges[metricWanderOriginRecallByHops+key+"_obs"])
@@ -503,6 +503,9 @@ func logRungSummary(t *testing.T, label string, rep rungReport, gen *generator) 
 		divergence)
 	t.Logf("layerb shadow divergence:   %d (burndown #8 PASS = 0 when runtime follows the plan; shadow LRU vs runtime ActiveThreads)",
 		int(m.Gauges[metricLayerBShadowDivergence]))
+	// Report-only: legitimately nonzero (closure/retirement + persistent carrier displacement are not modeled by the shadow — see crossCheckLayerB doc). No ==0 gate.
+	t.Logf("layerb shadow reverse div:  %d (BD-4 report-only over-retention: shadow-held / runtime-evicted; no gate)",
+		int(m.Gauges[metricLayerBShadowReverseDivergence]))
 
 	// Intra-thread recall (#109, §9.2). The §4.3 perf-decay series (the I3/I4
 	// gates) and the intra-thread oracle's per-hop coherence curve. H2 HONESTY:
@@ -725,6 +728,9 @@ func evalRungGates(t *testing.T, label string, rep rungReport, gen *generator, p
 	// Under live INFERENCE the real model engages a different thread set than
 	// the plan, so the shadow legitimately diverges → report only.
 	layerBDivergence := int(m.Gauges[metricLayerBShadowDivergence])
+	// Report-only: legitimately nonzero (closure/retirement + persistent carrier displacement are not modeled by the shadow — see crossCheckLayerB doc). No ==0 gate.
+	t.Logf("Layer-B shadow reverse divergence %d (BD-4 report-only over-retention: shadow-held / runtime-evicted; no gate)",
+		int(m.Gauges[metricLayerBShadowReverseDivergence]))
 	if policy.oracleGatesAssert() {
 		if layerBDivergence != 0 {
 			t.Errorf("burndown #8 FAILURE: Layer-B shadow divergence %d != 0 — the generator's shadow LRU and the "+
@@ -808,7 +814,7 @@ func evalRungGates(t *testing.T, label string, rep rungReport, gen *generator, p
 	// archive.archived log — a thread that is neither recall-live nor
 	// recoverable-via-fetch. The oracle no longer manufactures these, so any
 	// nonzero value is a real off-spine-not-archived data loss. Gate hard on ==0.
-	if absent := m.Counters["recall_unexplained_absence"]; absent != 0 {
+	if absent := m.Counters[scenarios.MetricRecallUnexplainedAbsence]; absent != 0 {
 		// The canary keys off the recall oracle's expected set (built from canned
 		// tags). Under inference-in-loop the runtime engages/creates threads the
 		// plan never named, manufacturing false absences. Report, do not fail.

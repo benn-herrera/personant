@@ -210,10 +210,10 @@ func recordEmbedRecallFidelity(h *Harness, keptExpected, actual []string, measur
 		return
 	}
 	precision, recall, f1 := recallFidelity(keptExpected, actual)
-	h.Metrics.Counter("embed_recall_fidelity_steps", 1)
-	h.Metrics.Record("embed_recall_fidelity_precision", precision)
-	h.Metrics.Record("embed_recall_fidelity_recall", recall)
-	h.Metrics.Record("embed_recall_fidelity_f1", f1)
+	h.Metrics.Counter(MetricEmbedRecallFidelitySteps, 1)
+	h.Metrics.Record(MetricEmbedRecallFidelityPrecision, precision)
+	h.Metrics.Record(MetricEmbedRecallFidelityRecall, recall)
+	h.Metrics.Record(MetricEmbedRecallFidelityF1, f1)
 }
 
 // recallFidelity is the per-step measurement of the symbolic Jaccard
@@ -372,7 +372,7 @@ func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode 
 		h.Metrics.Counter("recall_archived_recoverable", archivedRecoverable)
 	}
 	if unexplainedAbsent > 0 {
-		h.Metrics.Counter("recall_unexplained_absence", unexplainedAbsent)
+		h.Metrics.Counter(MetricRecallUnexplainedAbsence, unexplainedAbsent)
 	}
 	expected = kept
 	// Forgiven expected count: what remains recoverable after archival/
@@ -383,14 +383,14 @@ func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode 
 	precision, recall, f1 := recallFidelity(expected, actual)
 
 	if mode == RecallMeasureOnly {
-		h.Metrics.Counter("recall_fidelity_adversarial_steps", 1)
-		h.Metrics.Record("recall_fidelity_adversarial_precision", precision)
-		h.Metrics.Record("recall_fidelity_adversarial_recall", recall)
-		h.Metrics.Record("recall_fidelity_adversarial_f1", f1)
+		h.Metrics.Counter(MetricRecallFidelityAdversarialSteps, 1)
+		h.Metrics.Record(MetricRecallFidelityAdversarialPrecision, precision)
+		h.Metrics.Record(MetricRecallFidelityAdversarialRecall, recall)
+		h.Metrics.Record(MetricRecallFidelityAdversarialF1, f1)
 		return expected, expectedForgiven
 	}
 
-	h.Metrics.Counter("recall_fidelity_measured_steps", 1)
+	h.Metrics.Counter(MetricRecallFidelityMeasuredSteps, 1)
 	h.Metrics.Record("recall_fidelity_precision", precision)
 	h.Metrics.Record("recall_fidelity_recall", recall)
 	h.Metrics.Record("recall_fidelity_f1", f1)
