@@ -10,26 +10,9 @@ import (
 	"personant/internal/model"
 	"personant/internal/recall/measure"
 	"personant/internal/scenarios"
+	"personant/internal/turn"
 	"testing"
 )
-
-// defaultRequestTokenCeiling is the whole-request token ceiling the B1+X4
-// token-ceiling gate (tokenCeilingAsserts) asserts against: the fully-assembled
-// model request's usage.prompt_tokens must stay <= this. It is the #127 seam
-// (design §4): #127 owns the ceiling VALUE and its config representation
-// (~200K tokens, token-denominated, partitioned response-reserve +
-// live-turn-reserve + memory-budget). This rung is a CONSUMER of the ceiling,
-// never a definer, and does NOT add the production bound (that is #127's) — it
-// only MEASURES whether the assembled request stays within it.
-//
-// Read from ONE named constant in ONE place (rung invariant 5): a bare 200000
-// literal scattered in test code would drift out of sync with #127 and hide the
-// ceiling from a grep. When #127 lands its config field, this single read point
-// switches to it in one edit.
-//
-// TODO(#127): read from cfg once the field lands (loadLiveEndpoints → cfg →
-// the live-config token ceiling); until then this constant is the source.
-const defaultRequestTokenCeiling = 200000
 
 // largeInputRungEveryN / largeInputRungBytes are the B1+X4 token-ceiling
 // profile's large-input injection knobs (design §2.3, criterion 3): on the
@@ -847,7 +830,7 @@ func evalRungGates(t *testing.T, label string, rep rungReport, gen *generator, p
 // X4-PROD invariant 4). On a live-inference run (tokenCeilingAsserts) it reads
 // the request_prompt_tokens histogram the harness recorded per turn from
 // turn.TurnInfo.PromptTokens — the provider's count for the FULLY-assembled
-// request — and asserts max <= defaultRequestTokenCeiling. It also reports max +
+// request — and asserts max <= memops.DefaultTokenCeiling. It also reports max +
 // P99 (rung invariant 6 forensic): a recorded max that is a tiny fraction of the
 // ceiling means the large-input workload never stressed the assembled request
 // (FM4) and the gate, though green, is suspect — flagged in review.
@@ -864,11 +847,18 @@ func assertTokenCeiling(t *testing.T, label string, m metricsBlob, policy gatePo
 		// Nothing to assert; stay silent so the mock summary is unchanged.
 		return
 	}
+	// The ceiling VALUE is #127's exported memops.DefaultTokenCeiling
+	// (token-denominated ~200K whole-request bound). This rung is a CONSUMER of
+	// the ceiling, never a definer: it only MEASURES whether the assembled request
+	// stays within it. Reading the exported const directly keeps it grep-visible
+	// and a single source of truth — no scattered 200000 literal to drift.
+	// TODO(#127): read a State-constructor-overridden ceiling once that config
+	// field is plumbed to the gate; until then the memops default is the source.
 	samples := m.Histograms[scenarios.MetricRequestPromptTokens]
 	if len(samples) > 0 {
 		t.Logf("%s request_prompt_tokens: max=%.0f P99=%.0f over %d turns (ceiling %d; "+
 			"a max far below the ceiling means the large-input workload did not stress the payload — FM4)",
-			label, maxOf(samples), percentile(samples, 0.99), len(samples), defaultRequestTokenCeiling)
+			label, maxOf(samples), percentile(samples, 0.99), len(samples), memops.DefaultTokenCeiling)
 	}
 	if fail := checkTokenCeiling(samples); fail != "" {
 		t.Errorf("%s %s", label, fail)
@@ -888,11 +878,11 @@ func checkTokenCeiling(samples []float64) string {
 			"the assembled-request token count was never observed (check stepExecTurn's RunWithInfo plumb). " +
 			"The gate cannot certify the ceiling against an empty series."
 	}
-	if maxTok := maxOf(samples); int(maxTok) > defaultRequestTokenCeiling {
+	if maxTok := maxOf(samples); int(maxTok) > memops.DefaultTokenCeiling {
 		return fmt.Sprintf("X4-PROD FAILURE: max request_prompt_tokens %.0f exceeds the configured ceiling %d — "+
 			"the fully-assembled model request (system + history + userInput + tool-result deltas) blew the "+
 			"token window. This is the X4-PROD boundary the rung MEASURES; the production bound is #127's.",
-			maxTok, defaultRequestTokenCeiling)
+			maxTok, memops.DefaultTokenCeiling)
 	}
 	return ""
 }
@@ -944,7 +934,7 @@ func checkCompletenessFloor(hit, total int) string {
 		return fmt.Sprintf("B1 FAILURE: completeness floor never exercised — 0 flush-lag dead-zone probes observed, "+
 			"so the rung cannot prove §3.4 recall-completeness. The embedding-only span/cadence must scroll a "+
 			"main-thread probe target into the debt window (ThreadTurnWindow..+%d). Lengthen the run or raise the "+
-			"main-thread engage cadence.", simEmbeddingDebtCap)
+			"main-thread engage cadence.", turn.EmbeddingDebtCap)
 	}
 	if hit != total {
 		return fmt.Sprintf("B1 FAILURE: recall-completeness floor missed %d/%d flush-lag dead-zone probes — a probe whose "+

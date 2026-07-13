@@ -209,18 +209,20 @@ The principle: **raw task-class bytes are always discardable; only the symbols t
 
 ## The layered working set
 
-Per-turn context is composed from layers with explicit byte budgets:
+Per-turn context is composed under an authoritative whole-request **token** ceiling (`context.token-budget`, default 200000 — #127). The token ceiling is the gate; the per-layer **byte** budgets are *derived* from it (ceiling × a conservative ~2.5 bytes/token, text-only) and drive pre-flight truncation, while the post-flight `usage.prompt_tokens` count is the real check. From that derived byte total, the **live_turn** reserve (15% of the total) is carved off first and owned by the turn package (current user input — rejected if oversize — plus current-turn tool-result deltas and a bounded, truncation-limited recent-history tail). The remaining **memory budget** (85% of the total) is partitioned across the memory layers:
 
 | Layer | Content | Default | Loading |
 |---|---|---|---|
-| E | directives + project conventions | 8% | always |
-| A1 | active project's spine entries (full) | 8% | always |
-| A2 | other projects' digests (compressed) | residue ~4% | always |
-| B | actively engaged threads (top-K full bodies) | 50% | populated by topic tag |
+| live_turn | user input + current-turn tool-result deltas + bounded history tail | 15% of total | reserved (owned by `internal/turn`) |
+| E | directives + project conventions | 12% | always |
+| A1 | active project's spine entries (full) | 10% | always |
+| A2 | other projects' digests (compressed) | residue (~8%) | always |
+| B | actively engaged threads (top-K full bodies) | 55% | populated by topic tag |
 | C | recently dormant threads (summaries) | 15% | decay-driven from B |
-| current_turn | user input + model response | 15% | reserved |
 
-**Eviction order under budget pressure:** C-oldest → B-oldest (compressed to summary). A and E are sacrosanct.
+The E/A1/A2/B/C percentages are shares of the **memory budget** (total − live_turn), not of the total; A1+A2 together form an 18% high tier with A1 fixed and A2 the residue. `context.token-budget` is v0.1-read from a const (`memops.DefaultTokenCeiling`) plus a constructor override; directive-file plumbing lands later.
+
+**Eviction order under budget pressure:** C-oldest → B-oldest (compressed to summary). A and E are sacrosanct. Layer C's dormant set is **not count-capped** (#127): its byte budget truncates the rendered dormant threads at composition time (the honest overflow marker), replacing the dropped v0.1 count cap.
 
 Layers E and A are the *recognition* surface; Layer B is *active engagement*. The model recognizes prior topics from A1 + A2; emits a topic tag → corresponding threads fetched into B → response generated against augmented context.
 

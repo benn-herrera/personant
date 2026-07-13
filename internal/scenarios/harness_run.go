@@ -779,7 +779,7 @@ func runSleepCycle(t *testing.T, h *Harness, idx int, label string) {
 // double-counting. A no-op when there is no live State (defensive). The counted
 // cost is the §6.2 debt-cap + dormancy policy's flush rate — the real cost N
 // pays, replacing the prior model that divided scrolled-out chunks by a mirror
-// of the internal embeddingDebtCap.
+// of turn.EmbeddingDebtCap.
 func foldEndedSessionFlushCost(h *Harness) {
 	if h.State == nil {
 		return

@@ -1046,7 +1046,8 @@ func TestIntraProbeOracle_Completeness(t *testing.T) {
 
 	// Deep past — well beyond the assembly window. The offset (66) is an
 	// arbitrary "comfortably scrolled out" depth; it no longer mirrors any
-	// runtime cap (#126 removed the sim-side embeddingDebtCap).
+	// runtime cap (the sim-side mirror of turn.EmbeddingDebtCap is gone — the
+	// band bound now reads the exported const directly).
 	if p := probe(t, store.ThreadTurnWindow+66); !p.predictHit {
 		t.Errorf("oracle predicted MISS for a deep-past early chunk re-issuing its own tags; want HIT")
 	}
@@ -1812,7 +1813,7 @@ func recordCosineOpsMeasured(h *scenarios.Harness) {
 // counter (sessions drained at each RestartSession) with the live session's
 // not-yet-drained count, giving the whole-run flush cost the §6.2 debt-cap +
 // dormancy policy actually paid — the real number, not the old
-// scrolled-out/embeddingDebtCap estimate. Reading from the SAME
+// scrolled-out/turn.EmbeddingDebtCap estimate. Reading from the SAME
 // FlushCostRunToDate the daily snapshot reads makes the last daily record equal
 // the summary by construction (the #120 invariant), exactly as cosine_ops does.
 func recordFlushCostObserved(h *scenarios.Harness) {

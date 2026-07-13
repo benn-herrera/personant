@@ -51,21 +51,21 @@ func newHookState(t *testing.T) (*State, *recordingRecaller) {
 
 // TestRecordExcerptScrollOut_DebtCapEnqueues: the debt counter accrues one
 // per scrolled-out excerpt and enqueues exactly one flush when it reaches
-// embeddingDebtCap, carrying the dispatch turncount (state.TurnNumber),
+// EmbeddingDebtCap, carrying the dispatch turncount (state.TurnNumber),
 // then resets. A second cap's worth enqueues a second flush.
 func TestRecordExcerptScrollOut_DebtCapEnqueues(t *testing.T) {
 	state, rec := newHookState(t)
 	state.TurnNumber = 1000
 
 	// One short of the cap → no enqueue yet.
-	for i := 0; i < embeddingDebtCap-1; i++ {
+	for i := 0; i < EmbeddingDebtCap-1; i++ {
 		recordExcerptScrollOut(state, "thr_1")
 	}
 	if len(rec.calls) != 0 {
 		t.Fatalf("enqueued before reaching cap: %d calls", len(rec.calls))
 	}
-	if got := state.embeddingDebt["thr_1"]; got != embeddingDebtCap-1 {
-		t.Fatalf("debt = %d, want %d", got, embeddingDebtCap-1)
+	if got := state.embeddingDebt["thr_1"]; got != EmbeddingDebtCap-1 {
+		t.Fatalf("debt = %d, want %d", got, EmbeddingDebtCap-1)
 	}
 
 	// The cap-th scroll-out fires exactly one flush and resets the counter.
@@ -82,7 +82,7 @@ func TestRecordExcerptScrollOut_DebtCapEnqueues(t *testing.T) {
 
 	// A second full cap enqueues again, at the (possibly newer) turncount.
 	state.TurnNumber = 1500
-	for i := 0; i < embeddingDebtCap; i++ {
+	for i := 0; i < EmbeddingDebtCap; i++ {
 		recordExcerptScrollOut(state, "thr_1")
 	}
 	if len(rec.calls) != 2 {
@@ -99,7 +99,7 @@ func TestRecordExcerptScrollOut_DebtCapEnqueues(t *testing.T) {
 func TestRecordExcerptScrollOut_PerThreadDebt(t *testing.T) {
 	state, rec := newHookState(t)
 	state.TurnNumber = 1
-	for i := 0; i < embeddingDebtCap; i++ {
+	for i := 0; i < EmbeddingDebtCap; i++ {
 		recordExcerptScrollOut(state, "thr_1")
 		recordExcerptScrollOut(state, "thr_2")
 	}
@@ -120,7 +120,7 @@ func TestRecordExcerptScrollOut_PerThreadDebt(t *testing.T) {
 func TestFlushOnDormancy_Enqueues(t *testing.T) {
 	state, rec := newHookState(t)
 	state.TurnNumber = 42
-	state.embeddingDebt = map[string]int{"thr_1": embeddingDebtCap - 3}
+	state.embeddingDebt = map[string]int{"thr_1": EmbeddingDebtCap - 3}
 
 	flushOnDormancy(state, "thr_1")
 
@@ -174,16 +174,16 @@ func TestFlushHooks_SymbolicOnlyCountsButNoDispatch(t *testing.T) {
 	state.TurnNumber = 3
 	state.Budget = memops.Budget{BTopK: 1}
 
-	// embeddingDebtCap+5 scroll-outs on one thread → exactly one cap fire (the
+	// EmbeddingDebtCap+5 scroll-outs on one thread → exactly one cap fire (the
 	// remaining 5 sit below the next cap and do not flush yet).
-	for i := 0; i < embeddingDebtCap+5; i++ {
+	for i := 0; i < EmbeddingDebtCap+5; i++ {
 		recordExcerptScrollOut(state, "thr_1")
 	}
 	if state.FlushCalls() != 1 {
 		t.Errorf("symbolic-only debt-cap flush count = %d, want 1 (cost observed without an embedder)", state.FlushCalls())
 	}
-	if state.FlushChunks() != embeddingDebtCap {
-		t.Errorf("symbolic-only flush chunks = %d, want %d (one cap's worth)", state.FlushChunks(), embeddingDebtCap)
+	if state.FlushChunks() != EmbeddingDebtCap {
+		t.Errorf("symbolic-only flush chunks = %d, want %d (one cap's worth)", state.FlushChunks(), EmbeddingDebtCap)
 	}
 
 	// A dormancy demotion ALWAYS fires a flush (the coarse-body re-embed cost),
@@ -194,8 +194,8 @@ func TestFlushHooks_SymbolicOnlyCountsButNoDispatch(t *testing.T) {
 	if state.FlushCalls() != 2 {
 		t.Errorf("a no-debt dormancy demotion must still count one flush call; calls=%d, want 2", state.FlushCalls())
 	}
-	if state.FlushChunks() != embeddingDebtCap {
-		t.Errorf("a no-debt demotion must add no chunks; chunks=%d, want %d", state.FlushChunks(), embeddingDebtCap)
+	if state.FlushChunks() != EmbeddingDebtCap {
+		t.Errorf("a no-debt demotion must add no chunks; chunks=%d, want %d", state.FlushChunks(), EmbeddingDebtCap)
 	}
 
 	// A dormancy flush of thr_1 carries its remaining +5 debt tail.
@@ -203,8 +203,8 @@ func TestFlushHooks_SymbolicOnlyCountsButNoDispatch(t *testing.T) {
 	if state.FlushCalls() != 3 {
 		t.Errorf("dormancy flush of a debt-carrying thread must count; calls=%d, want 3", state.FlushCalls())
 	}
-	if state.FlushChunks() != embeddingDebtCap+5 {
-		t.Errorf("flush chunks after dormancy = %d, want %d", state.FlushChunks(), embeddingDebtCap+5)
+	if state.FlushChunks() != EmbeddingDebtCap+5 {
+		t.Errorf("flush chunks after dormancy = %d, want %d", state.FlushChunks(), EmbeddingDebtCap+5)
 	}
 }
 

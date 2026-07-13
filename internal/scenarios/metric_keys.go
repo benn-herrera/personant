@@ -46,8 +46,8 @@ const (
 	// not modeled (#126): the harness folds each session's
 	// turn.State.FlushCalls/FlushChunks into these run-totals (a restart rebuilds
 	// State, so the per-session counts are drained before the State is discarded),
-	// rather than dividing scrolled-out chunks by a mirror of the internal
-	// embeddingDebtCap. They cross the harness↔sim seam (harness writes the
+	// rather than dividing scrolled-out chunks by a mirror of
+	// turn.EmbeddingDebtCap. They cross the harness↔sim seam (harness writes the
 	// counter, the sim summary/daily-record reads it), so they live in the
 	// registry like the other cross-seam keys.
 	MetricRecallIndexFlushCalls  = "recall_index_flush_calls"

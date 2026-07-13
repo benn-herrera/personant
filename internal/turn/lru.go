@@ -6,7 +6,7 @@ import (
 	"personant/internal/memops"
 )
 
-// embeddingDebtCap is the §6.5 debt window: the count of turn-excerpts a
+// EmbeddingDebtCap is the §6.5 debt window: the count of turn-excerpts a
 // thread may accrue scrolled-out-of-the-assembly-window before the turn
 // loop enqueues a §3.4 fine-tier flush of that thread (and resets its
 // debt). At ThreadTurnWindow=512 a cap of 16 means the fine tier lags the
@@ -15,7 +15,15 @@ import (
 // keep recent early content recallable within a bounded lag, infrequent
 // enough that the embed-call rate stays well under one batch per turn. A
 // §9 calibration window, not a frozen value.
-const embeddingDebtCap = 16
+//
+// PUBLIC CONTRACT. This value is exported because it is the boundary of the
+// flush-lag dead zone the acceptance sim's B1 completeness-floor band
+// legitimately consumes (internal/scenarios/sim references it directly to
+// mark which probe targets only the #123 lexical floor can surface). Per
+// ARCHITECTURE.md's harness↔system coupling rule, a contract value the
+// harness depends on is exported and referenced — never hand-mirrored into a
+// second const that can silently drift.
+const EmbeddingDebtCap = 16
 
 // flushEnqueuer is the narrow optional interface a Recaller may satisfy to
 // receive §3.4 index-flush signals (design §11.3, I7). The embedding
@@ -50,7 +58,7 @@ func debtWindowBound(state *State, engagedOwner string) int {
 	if _, ok := state.Recaller.(flushEnqueuer); !ok {
 		return 0
 	}
-	return embeddingDebtCap
+	return EmbeddingDebtCap
 }
 
 // recordExcerptScrollOut is the §6.2 debt-cap hook. The owner-excerpt
@@ -58,7 +66,7 @@ func debtWindowBound(state *State, engagedOwner string) int {
 // assembly window (a newer excerpt pushed it past the most-recent
 // ThreadTurnWindow boundary — it stays retained on disk but leaves the
 // assembled context). It accrues per-thread embedding debt; when debt
-// reaches embeddingDebtCap it fires a fine-tier flush of that thread
+// reaches EmbeddingDebtCap it fires a fine-tier flush of that thread
 // (passing state.TurnNumber as the I2 dispatch watermark) and resets the
 // counter.
 //
@@ -76,7 +84,7 @@ func recordExcerptScrollOut(state *State, threadID string) {
 		state.embeddingDebt = make(map[string]int)
 	}
 	state.embeddingDebt[threadID]++
-	if state.embeddingDebt[threadID] >= embeddingDebtCap {
+	if state.embeddingDebt[threadID] >= EmbeddingDebtCap {
 		state.flushCalls++
 		state.flushChunks += state.embeddingDebt[threadID]
 		if enq, ok := state.Recaller.(flushEnqueuer); ok {

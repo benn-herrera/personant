@@ -1562,7 +1562,7 @@ const (
 	// OBSERVED from the runtime, not modeled (#126): the harness folds the actual
 	// turn.State flush counters into these run-total Metrics counters, so the
 	// gauge reports what the runtime DID rather than dividing scrolled-out chunks
-	// by a mirror of the internal embeddingDebtCap. These keys cross the
+	// by a mirror of turn.EmbeddingDebtCap. These keys cross the
 	// harness↔sim seam (harness writes the counter, the sim reads it), so they
 	// are owned by the metric-key registry; the local names alias the registry
 	// consts to keep the §4.3-series call sites uniform with the others.

@@ -3,7 +3,9 @@ package sim
 import (
 	"testing"
 
+	"personant/internal/memops"
 	"personant/internal/store"
+	"personant/internal/turn"
 )
 
 // B1+X4 embedder-enabled acceptance rung — anti-vacuity proofs (design §3).
@@ -63,18 +65,18 @@ func TestCompletenessFloor_NonVacuity(t *testing.T) {
 func TestTokenCeiling_MutationFailsOnOversizeTurn(t *testing.T) {
 	// Healthy run: every turn's prompt-token count is comfortably under the
 	// ceiling. The gate passes.
-	within := []float64{1000, 16384, defaultRequestTokenCeiling - 1, 42000}
+	within := []float64{1000, 16384, memops.DefaultTokenCeiling - 1, 42000}
 	if fail := checkTokenCeiling(within); fail != "" {
 		t.Fatalf("under-ceiling case should PASS, got failure: %s", fail)
 	}
 
 	// MUTATION: one oversize turn pushes the assembled request past the ceiling.
 	// The gate MUST fail — max over the series exceeds the bound.
-	oversize := append(append([]float64(nil), within...), defaultRequestTokenCeiling+1)
+	oversize := append(append([]float64(nil), within...), memops.DefaultTokenCeiling+1)
 	if fail := checkTokenCeiling(oversize); fail == "" {
 		t.Errorf("MUTATION (one turn at ceiling+1 = %d) must FAIL the token-ceiling gate, but checkTokenCeiling "+
 			"returned no failure — the gate is not reading the full assembled request (FM3/FM4)",
-			defaultRequestTokenCeiling+1)
+			memops.DefaultTokenCeiling+1)
 	}
 
 	// An empty series on the live-inference profile is a wiring defect, not a
@@ -115,44 +117,29 @@ func TestGatePolicyPredicates(t *testing.T) {
 
 // TestInDebtWindowDepth pins the flush-lag dead-zone boundary: a turn-depth is in
 // the dead zone iff it has scrolled out of the assembly window
-// (depth >= ThreadTurnWindow) AND is within the most-recent simEmbeddingDebtCap
-// below the window floor (depth < ThreadTurnWindow + simEmbeddingDebtCap). This
+// (depth >= ThreadTurnWindow) AND is within the most-recent turn.EmbeddingDebtCap
+// below the window floor (depth < ThreadTurnWindow + turn.EmbeddingDebtCap). This
 // is the band where ONLY the lexical floor can hit (the embedding fine tier has
-// no vector yet) — the exact subset the B1 completeness gate targets.
+// no vector yet) — the exact subset the B1 completeness gate targets. The band
+// bound reads the runtime's exported turn.EmbeddingDebtCap directly, so there is
+// a single source of truth and no mirror to drift (#126).
 func TestInDebtWindowDepth(t *testing.T) {
 	w := store.ThreadTurnWindow
 	cases := []struct {
 		depth int
 		want  bool
 	}{
-		{0, false},                             // never scrolled out
-		{w - 1, false},                         // still in the assembly window
-		{w, true},                              // first scrolled-out excerpt — dead zone floor
-		{w + simEmbeddingDebtCap - 1, true},    // last dead-zone excerpt
-		{w + simEmbeddingDebtCap, false},       // just past the debt window — flushed, fine tier covers
-		{w + simEmbeddingDebtCap + 100, false}, // deep history — flushed long ago
+		{0, false},                               // never scrolled out
+		{w - 1, false},                           // still in the assembly window
+		{w, true},                                // first scrolled-out excerpt — dead zone floor
+		{w + turn.EmbeddingDebtCap - 1, true},    // last dead-zone excerpt
+		{w + turn.EmbeddingDebtCap, false},       // just past the debt window — flushed, fine tier covers
+		{w + turn.EmbeddingDebtCap + 100, false}, // deep history — flushed long ago
 	}
 	for _, c := range cases {
 		if got := inDebtWindowDepth(c.depth); got != c.want {
 			t.Errorf("inDebtWindowDepth(%d) = %v, want %v (window=%d cap=%d)",
-				c.depth, got, c.want, w, simEmbeddingDebtCap)
+				c.depth, got, c.want, w, turn.EmbeddingDebtCap)
 		}
-	}
-}
-
-// TestSimDebtCapMirrorsRuntime guards the simEmbeddingDebtCap mirror of the
-// unexported turn.embeddingDebtCap. The two cannot be compared directly across
-// the package boundary (the runtime const is unexported), so this pins the
-// mirrored value with explicit provenance: if turn.embeddingDebtCap changes, the
-// dead-zone band the completeness gate uses drifts out of sync with the runtime
-// floor it asserts, so this tripwire fails and points the editor at both
-// constants. (The live rung is the end-to-end proof; this catches a silent
-// drift at `make test` time without an endpoint.)
-func TestSimDebtCapMirrorsRuntime(t *testing.T) {
-	const runtimeEmbeddingDebtCap = 16 // MUST equal turn.embeddingDebtCap (internal/turn/lru.go)
-	if simEmbeddingDebtCap != runtimeEmbeddingDebtCap {
-		t.Errorf("simEmbeddingDebtCap (%d) must mirror turn.embeddingDebtCap (%d); the dead-zone band the B1 "+
-			"completeness gate uses has drifted from the runtime flush floor. Update both, or the gate mislabels "+
-			"which probes only the lexical floor can hit.", simEmbeddingDebtCap, runtimeEmbeddingDebtCap)
 	}
 }

@@ -178,7 +178,7 @@ type State struct {
 	// embeddingDebt accrues per thread the count of turn-excerpts that have
 	// scrolled out of the *assembly* window (ThreadTurnWindow) but are not
 	// yet in the §3.4 fine-tier embedding index. It is the trigger for the
-	// debt-cap flush (§6.2): when a thread's debt reaches embeddingDebtCap,
+	// debt-cap flush (§6.2): when a thread's debt reaches EmbeddingDebtCap,
 	// recordExcerptScrollOut enqueues a flush of the engaged-thread index
 	// and resets the counter to 0. Session-scoped, like the other LRU /
 	// coalesce runtime state — a fresh session starts at zero debt and the
