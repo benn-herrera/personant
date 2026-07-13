@@ -309,6 +309,109 @@ func TestM1_AgingIdempotent(t *testing.T) {
 	})
 }
 
+// BD-11: the COMMIT is reachable but the recorded PATH is absent at that
+// commit (path-form mismatch / rename before commit / case divergence). The
+// old commit-only gate would confirm the commit and drop the only copy while
+// GetFileVersion's blob-at-path read fails — violating "no drop without a
+// recovery path". The blob-at-path gate must REFUSE (chain retained, reason
+// blob-unreachable), keeping the content recoverable, and the git recovery
+// predicate must agree (sentinel once the chain is gone).
+func TestM1_AgingRefusedWhenPathAbsentAtCommit(t *testing.T) {
+	hasGitT(t)
+	ctx := context.Background()
+	a := newAdapter(t)
+
+	// The commit contains present.txt but never ghost.txt.
+	repo, hash := newWorkspaceRepo(t, "present.txt", "z\n")
+	thr := seedThreadInProject(t, a, ctx, repo)
+
+	const ghost = "ghost.txt"
+	const literal = "chain-literal\n"
+	if err := a.RecordFileWrite(ctx, thr, ghost, literal); err != nil {
+		t.Fatalf("RecordFileWrite: %v", err)
+	}
+	if err := a.RecordFileCommit(ctx, thr, ghost, hash, 5); err != nil {
+		t.Fatalf("RecordFileCommit: %v", err)
+	}
+
+	aged, freed, err := a.AgeFileChains(ctx, thr, agePastTurnWindow(5))
+	if err != nil {
+		t.Fatalf("AgeFileChains: %v", err)
+	}
+	if len(aged) != 0 || freed != 0 {
+		t.Fatalf("aged=%v freed=%d, want refusal (commit reachable, path absent)", aged, freed)
+	}
+	// Chain retained — the invariant: content not dropped without a recovery path.
+	tf, err := store.LoadThreadFiles(a.paths, thr)
+	if err != nil {
+		t.Fatalf("LoadThreadFiles: %v", err)
+	}
+	if e, ok := tf.Entry(ghost); !ok || e.Chain.Len() == 0 {
+		t.Fatalf("chain dropped despite path absent at commit (invariant violated): entry=%v", e)
+	}
+	// New refusal reason logged.
+	if log := readEventLog(t, a); !strings.Contains(log, "reason=blob-unreachable") {
+		t.Errorf("expected reason=blob-unreachable in refusal log:\n%s", log)
+	}
+	// Content is still recoverable (via the retained chain fast path).
+	got, err := a.GetFileVersion(ctx, thr, ghost, hash)
+	if err != nil {
+		t.Fatalf("GetFileVersion (retained chain): %v", err)
+	}
+	if got != literal {
+		t.Errorf("recovered = %q, want %q", got, literal)
+	}
+	// Gate/recovery share one predicate: had the gate wrongly aged, git
+	// recovery would fail. Drop the chain and confirm the sentinel — proving
+	// the refusal above was necessary, not conservative.
+	tf.DropChain(ghost)
+	if err := store.SaveThreadFiles(a.paths, tf); err != nil {
+		t.Fatalf("SaveThreadFiles: %v", err)
+	}
+	if _, rerr := a.GetFileVersion(ctx, thr, ghost, hash); !errors.Is(rerr, memops.ErrFileVersionUnreachable) {
+		t.Fatalf("git recovery err = %v, want ErrFileVersionUnreachable (gate/recovery must agree)", rerr)
+	}
+}
+
+// BD-11 path-form: a tracked path recorded in ABSOLUTE form (an unnormalized
+// caller supplying delta.Meta["path"]) must still be gated and recovered
+// correctly. gitPathForShow rebases it to the git-root-relative form that
+// BOTH the gate (BlobReachable) and recovery (ShowFileAtCommit) consult, so
+// the file ages when reachable and recovers end-to-end through git.
+func TestM1_AbsolutePathNormalizedAgesAndRecovers(t *testing.T) {
+	hasGitT(t)
+	ctx := context.Background()
+	a := newAdapter(t)
+
+	const rel = "sub/f.txt"
+	const content = "committed-bytes\n"
+	repo, hash := newWorkspaceRepo(t, rel, content)
+	thr := seedThreadInProject(t, a, ctx, repo)
+
+	abs := filepath.Join(repo, rel) // caller stored an absolute path
+	if err := a.RecordFileWrite(ctx, thr, abs, content); err != nil {
+		t.Fatalf("RecordFileWrite: %v", err)
+	}
+	if err := a.RecordFileCommit(ctx, thr, abs, hash, 5); err != nil {
+		t.Fatalf("RecordFileCommit: %v", err)
+	}
+	aged, _, err := a.AgeFileChains(ctx, thr, agePastTurnWindow(5))
+	if err != nil {
+		t.Fatalf("AgeFileChains: %v", err)
+	}
+	if len(aged) != 1 || aged[0] != abs {
+		t.Fatalf("aged=%v, want [%s] (absolute path must normalize and age)", aged, abs)
+	}
+	// Chain now gone → recovery goes through git, which also normalizes.
+	got, err := a.GetFileVersion(ctx, thr, abs, hash)
+	if err != nil {
+		t.Fatalf("GetFileVersion: %v", err)
+	}
+	if got != content {
+		t.Errorf("recovered = %q, want %q", got, content)
+	}
+}
+
 // Git-absent degradation (Q4): when the workspace root cannot be resolved to
 // a git repo, every candidate is refused-and-retained (no second copy to
 // minimize against). Exercised here via an unresolvable root, which the

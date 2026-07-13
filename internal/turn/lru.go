@@ -49,8 +49,12 @@ type flushEnqueuer interface {
 // dead zone exists and the symbolic-only path keeps its byte-identical prior
 // behaviour (0 → the Service skips the debt pass entirely). The CAP, not the
 // live per-thread debt depth, because a debt-cap flush resets the live counter
-// to 0 while its embed is still in flight — bounding by the cap keeps the
-// floor continuous across that window (see measure.Request.EngagedDebtWindow).
+// to 0 while its embed is still in flight — a live-count bound would re-open
+// the dead zone for the in-flight batch. The cap alone does not span that
+// window either once scroll-outs continue past the flush (BD-8): the recall
+// Service, which alone knows a flush is unpublished, widens the lexical scan
+// by its per-thread pending-flush depth — this side always passes the plain
+// cap (see measure.Request.EngagedDebtWindow).
 func debtWindowBound(state *State, engagedOwner string) int {
 	if engagedOwner == "" {
 		return 0
@@ -128,6 +132,28 @@ func flushOnDormancy(state *State, threadID string) {
 func (s *State) FlushCalls() int  { return s.flushCalls }
 func (s *State) FlushChunks() int { return s.flushChunks }
 
+// crossProjectDecline is the single owner of the §3.2 cross-project policy
+// and its decline-log convention. It reports whether a thread belonging to
+// `project` must be declined because it is not the active project, logging the
+// decline (LogCategoryThread + the "thr=/project=/active=" detail convention)
+// when so. Cross-project engagement is reserved for Phase 5; v0.1 declines to
+// touch or promote another project's thread.
+//
+// Shared by the two seams that resolve a tagged thr_<n> against the active
+// project: the turn-close engagement resolver (resolveEngagedThread) and the
+// §5.5 mid-turn fetch (fetchThreadForReprompt). `act` names the calling seam's
+// log act ("engaged-cross-project" / "fetch-cross-project") so each stays
+// forensically distinct while the decision + detail format live in ONE place.
+// The empty project sentinel is never cross-project (a project-less legacy
+// record engages under the active project, matching the prior inline check).
+func crossProjectDecline(ctx context.Context, state *State, threadID, project, act string) (declined bool, err error) {
+	if project == "" || project == state.ActiveProject.ID {
+		return false, nil
+	}
+	return true, state.Ops.Log(ctx, memops.LogCategoryThread, act,
+		"thr="+threadID+" project="+project+" active="+state.ActiveProject.ID)
+}
+
 // fetchThreadForReprompt loads thread thrID from disk, fires a
 // thread.fetched context delta, and promotes the thread into
 // state.ActiveThreads (de-duped, capped by Budget.BTopK; overflow
@@ -146,6 +172,16 @@ func fetchThreadForReprompt(ctx context.Context, state *State, thrID string) boo
 	if err != nil {
 		_ = state.Ops.Log(ctx, memops.LogCategoryThread, "fetch-miss",
 			"thr="+thrID+" err="+memops.SanitizeDetail(err.Error()))
+		return false
+	}
+	// §3.2 cross-project decline (parity with the turn-close engagement
+	// resolver, resolveEngagedThread): a mid-turn fetch never promotes a
+	// thread that belongs to another project. Cross-project engagement is
+	// reserved for Phase 5; v0.1 declines. Checked BEFORE the thread.fetched
+	// delta so a foreign thread's body never enters the context/coalesce, and
+	// before promoteToLayerB so it never reaches the working set. A log error
+	// is swallowed (as on the fetch-miss path) — the decline still holds.
+	if declined, _ := crossProjectDecline(ctx, state, thrID, thr.Meta.Project, "fetch-cross-project"); declined {
 		return false
 	}
 	if err := onContextDelta(ctx, state, Delta{

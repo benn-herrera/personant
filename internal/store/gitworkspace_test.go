@@ -226,6 +226,71 @@ func TestCommitReachable_EmptyArgs(t *testing.T) {
 	}
 }
 
+func TestBlobReachable_Present(t *testing.T) {
+	hasGit(t)
+	repo := t.TempDir()
+	gitInit(t, repo)
+	hash := gitCommitFile(t, repo, "dir/f.txt", "hello\n", "add f")
+
+	ok, err := BlobReachable(repo, hash, "dir/f.txt")
+	if err != nil {
+		t.Fatalf("BlobReachable: %v", err)
+	}
+	if !ok {
+		t.Errorf("BlobReachable(%s:dir/f.txt) = false, want true", hash)
+	}
+}
+
+// The load-bearing BD-11 case: the COMMIT is reachable but the queried PATH
+// is absent from its tree. CommitReachable answers true (too weak); the
+// blob-at-path predicate correctly answers false, so the aging gate refuses.
+func TestBlobReachable_CommitReachablePathAbsent(t *testing.T) {
+	hasGit(t)
+	repo := t.TempDir()
+	gitInit(t, repo)
+	hash := gitCommitFile(t, repo, "f.txt", "x\n", "add f")
+
+	// Sanity: the commit itself resolves — this is the gap the old gate had.
+	if ok, err := CommitReachable(repo, hash); err != nil || !ok {
+		t.Fatalf("CommitReachable = (%v,%v), want (true,nil)", ok, err)
+	}
+	// But the recorded path is not in that commit → blob unreachable.
+	ok, err := BlobReachable(repo, hash, "not-in-tree.txt")
+	if err != nil {
+		t.Fatalf("BlobReachable absent path: unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("BlobReachable(commit-reachable, path-absent) = true, want false")
+	}
+}
+
+func TestBlobReachable_UnreachableCommit(t *testing.T) {
+	hasGit(t)
+	repo := t.TempDir()
+	gitInit(t, repo)
+	gitCommitFile(t, repo, "f.txt", "x\n", "add f")
+
+	ok, err := BlobReachable(repo, "0123456789012345678901234567890123456789", "f.txt")
+	if err != nil {
+		t.Fatalf("BlobReachable unreachable commit: unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("BlobReachable on unreachable commit = true, want false")
+	}
+}
+
+func TestBlobReachable_EmptyArgs(t *testing.T) {
+	if _, err := BlobReachable("", "abc", "f.txt"); err == nil {
+		t.Error("expected error for empty gitRoot")
+	}
+	if _, err := BlobReachable("/tmp", "", "f.txt"); err == nil {
+		t.Error("expected error for empty hash")
+	}
+	if _, err := BlobReachable("/tmp", "abc", ""); err == nil {
+		t.Error("expected error for empty path")
+	}
+}
+
 func TestShowFileAtCommit_Present(t *testing.T) {
 	hasGit(t)
 	repo := t.TempDir()

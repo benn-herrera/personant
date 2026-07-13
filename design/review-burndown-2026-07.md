@@ -113,3 +113,12 @@ synced to the real validator set.
    — revisit if a second adapter arrives); unbounded `DormantThreads`
    count under slow closure (sim will measure); non-ASCII symbols
    invisible to `exact.isWordRune` lexical floor.
+4. Added during Wave 2 (adversarial-review residue): sim slow-embedder
+   mode so the (1+P)×cap transient band becomes observable and the B1
+   dead-zone classifier can widen meaningfully (until then the 1×cap band
+   is the deterministic lexical-only band, documented in `intra.go`);
+   shadow-LRU closure/carrier-displacement modeling to recover a reverse
+   ==0 Layer-B gate (BD-4 amendment); single re-enqueue-on-failure for
+   flush jobs if the session-bounded failed-embed gap ever shows up in
+   live-run data. Wave 4 pickup: delete `store.CommitReachable` (zero
+   production callers since BD-11 moved the gate to `BlobReachable`).

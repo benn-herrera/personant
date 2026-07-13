@@ -124,6 +124,35 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 	turnSymbols := state.coalesce.coalescedList()
 	turnAnchors := turnAnchorList(responseBody, state.coalesce.symbolList())
 
+	// Resolve every referenced thr_<n> against the spine FIRST. Per spec
+	// §3.2 ownership assignment is a runtime decision and the topic tag is
+	// advisory — this resolution pass is the runtime exercising that
+	// authority (BD-7 / decision D2): an id that does not resolve — not in
+	// the spine (engaged-miss) or belonging to another project
+	// (cross-project decline) — is a phantom. It is logged for forensics
+	// and dropped here, so it can never enter `engaged`, ActiveThreads, or
+	// the persisted working set, own the turn, or receive the §3.9
+	// file-edit binding.
+	ids := state.coalesce.threadList()
+	hasNewTopic := false
+	validIDs := make([]string, 0, len(ids))
+	resolved := make(map[string]memops.SpineRecord, len(ids))
+	for _, id := range ids {
+		if id == prompt.NewTopicLiteral {
+			hasNewTopic = true
+			continue
+		}
+		rec, ok, err := resolveEngagedThread(ctx, state, id)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue // phantom: logged by resolveEngagedThread, dropped
+		}
+		resolved[id] = rec
+		validIDs = append(validIDs, id)
+	}
+
 	// Determine this turn's single owner (spec §3.2). A turn belongs to
 	// exactly one thread — the one that receives the excerpt and the
 	// turn_count++. Every other referenced thread is engaged-but-not-
@@ -138,8 +167,13 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 	//     (genesis turn — the only available owner).
 	//   - mixed [thr_N, *new-topic*]: the existing thr_N owns; the new
 	//     thread is created metadata-only.
-	ids := state.coalesce.threadList()
+	//
+	// D2 fallback (i): when the tag's would-be owner is a phantom, the
+	// most-recently-engaged VALID thread from this turn owns instead.
 	ownerExisting := lowestExistingThreadID(ids)
+	if _, ok := resolved[ownerExisting]; !ok {
+		ownerExisting = mostRecentEngagedID(validIDs, resolved)
+	}
 
 	// Engaged thread IDs in this turn — includes resolved IDs for the
 	// *new-topic* sentinel. Used to update the Layer B/C LRU below. The
@@ -149,32 +183,45 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 
 	// Owner first.
 	if ownerExisting != "" {
-		if err := updateExistingThread(ctx, state, ownerExisting, true, userInput, responseBody, now, turnSymbols, turnAnchors); err != nil {
+		if err := updateExistingThread(ctx, state, resolved[ownerExisting], true, userInput, responseBody, now, turnSymbols, turnAnchors); err != nil {
 			return err
 		}
 		engaged = append(engaged, ownerExisting)
 	}
 
-	for _, threadID := range ids {
-		if threadID == prompt.NewTopicLiteral {
-			// The new thread owns only when no existing thread was
-			// referenced (pure *new-topic*). In the mixed case the
-			// existing thread already owns, so the new thread is created
-			// metadata-only (no excerpt, TurnCount 0).
-			newID, err := createNewThread(ctx, state, ownerExisting == "", userInput, responseBody, now, turnSymbols, turnAnchors)
-			if err != nil {
-				return err
-			}
-			engaged = append(engaged, newID)
-			continue
+	if hasNewTopic {
+		// The new thread owns only when no VALID existing thread was
+		// referenced (pure *new-topic*, or every referenced thr_<n> was a
+		// phantom). In the mixed case the existing thread already owns, so
+		// the new thread is created metadata-only (no excerpt, TurnCount 0).
+		newID, err := createNewThread(ctx, state, ownerExisting == "", userInput, responseBody, now, turnSymbols, turnAnchors)
+		if err != nil {
+			return err
 		}
+		engaged = append(engaged, newID)
+	}
+
+	for _, threadID := range validIDs {
 		if threadID == ownerExisting {
 			continue // already handled as owner
 		}
-		if err := updateExistingThread(ctx, state, threadID, false, userInput, responseBody, now, turnSymbols, turnAnchors); err != nil {
+		if err := updateExistingThread(ctx, state, resolved[threadID], false, userInput, responseBody, now, turnSymbols, turnAnchors); err != nil {
 			return err
 		}
 		engaged = append(engaged, threadID)
+	}
+
+	// D2 fallback (ii): every referenced thread was a phantom and no
+	// *new-topic* sentinel was tagged. The turn's excerpt is NEVER dropped
+	// — create a new thread that owns this turn, exactly as a pure
+	// *new-topic* tag would (excerpt, turn_count=1, description from the
+	// prompt per spec §2.3).
+	if len(engaged) == 0 {
+		newID, err := createNewThread(ctx, state, true, userInput, responseBody, now, turnSymbols, turnAnchors)
+		if err != nil {
+			return err
+		}
+		engaged = append(engaged, newID)
 	}
 
 	// §3.9 step-3 close: apply this turn's buffered file edits to the
@@ -323,30 +370,68 @@ func threadIDNum(id string) (int, bool) {
 	return n, true
 }
 
-// updateExistingThread applies this turn's engagement to an existing
-// thread. When owner is true the thread receives the turn excerpt and a
-// turn_count++ (it owns this turn's content per spec §3.2); when false
-// it is engaged-but-not-owner — recency (last_engaged / last_engaged_turn)
-// and history_symbols merge and state→active resurrection apply, but NO
-// excerpt is written and turn_count is left unchanged.
-func updateExistingThread(ctx context.Context, state *State, threadID string, owner bool, userInput, responseBody, now string, turnSymbols []coalescedSymbol, turnAnchors []string) error {
+// resolveEngagedThread resolves a tagged thr_<n> id against the spine.
+// ok=true carries the spine record for an existing thread in the active
+// project. Per spec §3.2 the topic tag is advisory — ownership and
+// engagement are runtime decisions — so an id that fails to resolve is a
+// phantom the runtime refuses to engage (BD-7 / D2):
+//   - not in the spine → thread.engaged-miss (the model named a thread
+//     that does not exist; kept forensically visible — future phases may
+//     surface it as a recall miss or a hallucination signal);
+//   - another project's record → thread.engaged-cross-project
+//     (cross-project engagement is reserved for Phase 5; v0.1 warns and
+//     declines to mutate a record that belongs to another project).
+//
+// A non-nil error is a substrate failure (FindThread / Log), never the
+// phantom signal itself.
+func resolveEngagedThread(ctx context.Context, state *State, threadID string) (memops.SpineRecord, bool, error) {
 	rec, found, err := state.Ops.FindThread(ctx, threadID)
 	if err != nil {
-		return err
+		return memops.SpineRecord{}, false, err
 	}
 	if !found {
-		// The model named a thread that does not exist. v0.1 logs and
-		// continues; future phases may surface this as a recall miss or a
-		// hallucination signal.
-		return state.Ops.Log(ctx, memops.LogCategoryThread, "engaged-miss",
+		return memops.SpineRecord{}, false, state.Ops.Log(ctx, memops.LogCategoryThread, "engaged-miss",
 			"thr="+threadID+" reason=not-in-spine")
 	}
-	if rec.Project != "" && rec.Project != state.ActiveProject.ID {
-		// Cross-project engagement is reserved for Phase 5; v0.1 warns and
-		// declines to mutate a record that belongs to another project.
-		return state.Ops.Log(ctx, memops.LogCategoryThread, "engaged-cross-project",
-			"thr="+threadID+" project="+rec.Project+" active="+state.ActiveProject.ID)
+	// Cross-project decline (shared policy, see crossProjectDecline): another
+	// project's record is a phantom this seam refuses to mutate. A log error
+	// (declined==true, err!=nil) propagates as a substrate failure; a clean
+	// decline returns ok=false with nil error.
+	if declined, err := crossProjectDecline(ctx, state, threadID, rec.Project, "engaged-cross-project"); declined || err != nil {
+		return memops.SpineRecord{}, false, err
 	}
+	return rec, true, nil
+}
+
+// mostRecentEngagedID returns the D2 fallback-(i) owner: among the
+// turn's VALID engaged threads, the one most recently engaged before
+// this turn (highest LastEngagedTurn; ties broken by lowest thr_<n> id
+// for determinism). Returns "" when validIDs is empty — the caller then
+// falls through to fallback (ii), new-thread creation.
+func mostRecentEngagedID(validIDs []string, resolved map[string]memops.SpineRecord) string {
+	best := ""
+	bestTurn, bestN := -1, -1
+	for _, id := range validIDs {
+		rec := resolved[id]
+		n, _ := threadIDNum(id)
+		if best == "" || rec.LastEngagedTurn > bestTurn ||
+			(rec.LastEngagedTurn == bestTurn && n < bestN) {
+			best, bestTurn, bestN = id, rec.LastEngagedTurn, n
+		}
+	}
+	return best
+}
+
+// updateExistingThread applies this turn's engagement to an existing
+// thread whose spine record rec has already been resolved (and
+// project-checked) by resolveEngagedThread. When owner is true the
+// thread receives the turn excerpt and a turn_count++ (it owns this
+// turn's content per spec §3.2); when false it is engaged-but-not-owner
+// — recency (last_engaged / last_engaged_turn) and history_symbols merge
+// and state→active resurrection apply, but NO excerpt is written and
+// turn_count is left unchanged.
+func updateExistingThread(ctx context.Context, state *State, rec memops.SpineRecord, owner bool, userInput, responseBody, now string, turnSymbols []coalescedSymbol, turnAnchors []string) error {
+	threadID := rec.ID
 
 	// Load only the thread's frontmatter — the new format appends one
 	// turn-excerpt file per engagement, so the prior body is never

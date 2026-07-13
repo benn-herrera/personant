@@ -13,10 +13,14 @@ import (
 func vec(a, b float64) []float64 { return []float64{a, b} }
 
 // TestSwap_DropsStaleWatermark is the AC3 monotonicity check (I2/F5): a
-// vector whose dispatch watermark is not strictly greater than the
-// thread's recorded watermark is dropped on swap, so a stale in-flight
-// embed never overwrites a fresher vector. Exercised directly on the
-// swap method (no goroutine) for determinism.
+// vector whose dispatch watermark is STRICTLY LOWER than the thread's
+// recorded watermark is dropped on swap, so a stale in-flight embed never
+// overwrites a fresher vector. An EQUAL watermark PUBLISHES (BD-8): with the
+// single FIFO indexer an equal-watermark result was loaded later — the
+// same-turn double-enqueue — so it is fresher, and dropping it lost content
+// (see TestIndexer_WatermarkTieSecondFlushPublishes for the end-to-end
+// proof). Exercised directly on the swap method (no goroutine) for
+// determinism.
 func TestSwap_DropsStaleWatermark(t *testing.T) {
 	s := &Service{}
 	s.cur.Store(emptySnapshot())
@@ -47,11 +51,17 @@ func TestSwap_DropsStaleWatermark(t *testing.T) {
 		t.Errorf("stale embed overwrote fresher vector: fine=%+v", snap.fine["thr_1"])
 	}
 
-	// An equal watermark is also dropped (strictly-greater rule).
-	s.swap("thr_1", 100, scoring.ThreadVector{ThreadID: "thr_1", Vector: vec(0, 1)}, nil, nil)
+	// An equal watermark PUBLISHES (BD-8 strictly-less rule): the FIFO-later
+	// same-turn job loaded fresher state, so its result replaces the prior
+	// one — here the equal-watermark chunk set wins.
+	tie := scoring.ChunkVector{TurnNumber: 6, Vector: vec(0, 1)}
+	s.swap("thr_1", 100, scoring.ThreadVector{ThreadID: "thr_1", Vector: vec(0, 1)}, []scoring.ChunkVector{tie}, []string{"h6"})
 	snap = s.cur.Load()
-	if len(snap.fine["thr_1"]) != 1 || snap.fine["thr_1"][0].TurnNumber != 5 {
-		t.Errorf("equal-watermark swap was not dropped: fine=%+v", snap.fine["thr_1"])
+	if snap.watermark["thr_1"] != 100 {
+		t.Errorf("watermark after equal swap = %d, want 100", snap.watermark["thr_1"])
+	}
+	if len(snap.fine["thr_1"]) != 1 || snap.fine["thr_1"][0].TurnNumber != 6 {
+		t.Errorf("equal-watermark swap did not publish: fine=%+v", snap.fine["thr_1"])
 	}
 
 	// A strictly newer embed wins and may shrink the fine tier to empty.

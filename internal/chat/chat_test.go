@@ -248,6 +248,68 @@ func TestRunOneTurnPrintsBody(t *testing.T) {
 	}
 }
 
+func TestRunUnknownExplicitProviderIsFatal(t *testing.T) {
+	paths := scaffoldHome(t) // pool: "local"
+	var stdout, stderr bytes.Buffer
+	// The error fires at provider resolution, before any stdin read.
+	in := strings.NewReader("")
+	err := Run(Options{
+		Ops:          newOps(paths),
+		ProviderName: "nonesuch",
+		Stdin:        in,
+		Stdout:       &stdout,
+		Stderr:       &stderr,
+		Client:       model.NewScriptedMock(nil, nil),
+	})
+	if err == nil {
+		t.Fatalf("expected a hard error for an unknown explicit --provider")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, `"nonesuch"`) {
+		t.Errorf("error must name the unknown provider; got %q", msg)
+	}
+	if !strings.Contains(msg, "local") {
+		t.Errorf("error must list the available providers; got %q", msg)
+	}
+	// Case (c): the unknown-provider error is distinct from the empty-pool
+	// "no providers configured" message.
+	if strings.Contains(msg, "no provider") {
+		t.Errorf("unknown-provider error must not read as an empty pool; got %q", msg)
+	}
+}
+
+func TestRunAbsentProviderFallsBackToDefault(t *testing.T) {
+	paths := scaffoldHome(t)
+	// Pool WITHOUT the conventional "local" default; no --provider given and
+	// no config.toml [chat] pin. The documented default-selection (alphabetical
+	// fallback) must still resolve — an absent default is not a hard error.
+	if err := os.WriteFile(paths.Providers, []byte(`
+[zephyr]
+baseUrl = "http://127.0.0.1:0/v1"
+defaultModel = "test-model"
+`), 0o644); err != nil {
+		t.Fatalf("write providers: %v", err)
+	}
+	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
+
+	mock := model.NewScriptedMock(nil, nil)
+	var stdout, stderr bytes.Buffer
+	in := strings.NewReader("/quit\n")
+	if err := Run(Options{
+		Ops:             newOps(paths),
+		ExplicitProject: "prj_1",
+		Stdin:           in,
+		Stdout:          &stdout,
+		Stderr:          &stderr,
+		Client:          mock,
+	}); err != nil {
+		t.Fatalf("Run should fall back to the sole provider, got: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "active: alpha (prj_1)") {
+		t.Errorf("session did not start on the default path: %q", stdout.String())
+	}
+}
+
 func TestRunNoProvidersIsFatal(t *testing.T) {
 	tmp := t.TempDir()
 	paths := store.PathsForHome(tmp)

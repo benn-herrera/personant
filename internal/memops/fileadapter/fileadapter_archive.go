@@ -449,18 +449,42 @@ func (a *FileAdapter) RecoverThread(ctx context.Context, thrID string) (memops.S
 		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: load recovered frontmatter: %w", thrID, err)
 	}
 	now := clock.Timeline().Format(time.RFC3339)
+	// BD-9: stamp BOTH engagement-recency fields the §3.5 decay scan reads so a
+	// just-recovered thread cannot be immediately re-offered for retirement, and
+	// so the rebuilt spine record does not silently diverge from the restored
+	// frontmatter (a spine↔frontmatter sync violation checkThreads would not
+	// catch — it compares only id/project).
+	//
+	//   - LastEngaged=now is the wall-clock recency signal (turn.decayEligible's
+	//     idle=sysRef-LastEngaged measure); recovery IS activity now, so it
+	//     cannot read as idle-past-decayTime.
+	//   - LastEngagedTurn is the turn-denominated recency the scan reads. This
+	//     adapter is session-agnostic (no current TurnNumber reaches it), so the
+	//     honest value is the frontmatter's own last_engaged_turn — the same
+	//     value written back below, keeping spine and frontmatter in agreement.
+	//     A stored turn from the pre-archival session is > a fresh session's low
+	//     TurnNumber, which decayEligible treats as "prior session, skip the turn
+	//     signal" — exactly the intended no-immediate-retire behavior. Leaving it
+	//     0 (the old bug) reads as "very old this session" and trips decay.
+	//   - AnchorsProjectedAtTurn: the frontmatter carries no dedicated field, so
+	//     the honest watermark is fm.TurnCount — the recovered Anchors reflect
+	//     the projection as of the thread's last owned turn (the createNewThread
+	//     / closure convention: project-at-turn-count). Leaving it 0 would falsely
+	//     read as "anchors never re-projected".
 	rec := memops.SpineRecord{
-		ID:           thrID,
-		Project:      fm.Project,
-		Anchors:      fm.Anchors,
-		Summary:      fm.Summary,
-		Description:  fm.Description,
-		State:        memops.ThreadWIP,
-		Created:      fm.Created,
-		LastEngaged:  now,
-		StateChanged: now,
-		TurnCount:    fm.TurnCount,
-		RecallFires:  fm.RecallFires,
+		ID:                     thrID,
+		Project:                fm.Project,
+		Anchors:                fm.Anchors,
+		Summary:                fm.Summary,
+		Description:            fm.Description,
+		State:                  memops.ThreadWIP,
+		Created:                fm.Created,
+		LastEngaged:            now,
+		StateChanged:           now,
+		TurnCount:              fm.TurnCount,
+		RecallFires:            fm.RecallFires,
+		LastEngagedTurn:        fm.LastEngagedTurn,
+		AnchorsProjectedAtTurn: fm.TurnCount,
 	}
 	if err := store.AppendSpineRecord(a.paths, rec); err != nil {
 		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: append spine: %w", thrID, err)

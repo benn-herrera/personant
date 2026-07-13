@@ -907,6 +907,120 @@ func TestRecoverThread_UnknownIDNotFound(t *testing.T) {
 	}
 }
 
+// decayTripsForTest mirrors the ACTIVE-thread read path of
+// turn.decayEligible (internal/turn/closure.go): a thread trips the §3.5
+// decay scan when it is idle past EITHER the turn-count threshold OR the
+// wall-clock threshold. It is replicated here (not imported) to keep this
+// adapter test decoupled from package turn; the field semantics it
+// exercises — WHICH recency fields the scan reads — are the point of BD-9.
+// A stored turn LARGER than the current turnNumber is treated as a prior
+// session and the turn signal is skipped, exactly as decayEligible does.
+func decayTripsForTest(lastEngagedTurn int, lastEngaged string, turnNumber int, sysRef time.Time) bool {
+	const decayTurns = 8
+	const decayTime = 7 * 24 * time.Hour
+	if turnNumber >= lastEngagedTurn && turnNumber-lastEngagedTurn >= decayTurns {
+		return true
+	}
+	if t, err := time.Parse(time.RFC3339, lastEngaged); err == nil {
+		if sysRef.Sub(t) >= decayTime {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRecoverThread_StampsRecencyForDecay is the BD-9 guard: recovery must
+// stamp the recovered spine record's engagement-recency fields so the §3.5
+// decay scan cannot immediately re-offer a just-recovered thread for
+// retirement, and the rebuilt spine record must agree with the restored
+// frontmatter on those fields (a spine↔frontmatter sync violation
+// checkThreads — which compares only id/project — would not catch).
+func TestRecoverThread_StampsRecencyForDecay(t *testing.T) {
+	when := pinClock(t)
+	a := newAdapter(t)
+	ctx := context.Background()
+
+	// Seed a thread whose frontmatter carries a realistic pre-archival
+	// engagement history: engaged at global session turn 42, having owned 5
+	// turns. (LastEngagedTurn is the global session index; TurnCount is the
+	// thread's own owned-turn count — different denominations, so 42 vs 5 is
+	// normal.)
+	const seedEngagedTurn = 42
+	const seedTurnCount = 5
+	rec := validSpine("thr_1", "prj_1")
+	rec.TurnCount = seedTurnCount
+	rec.LastEngagedTurn = seedEngagedTurn
+	rec.AnchorsProjectedAtTurn = seedTurnCount
+	fm := validFrontmatter(rec)
+	fm.TurnCount = seedTurnCount
+	fm.LastEngagedTurn = seedEngagedTurn
+	if err := a.CreateThread(ctx, memops.ThreadWrite{Spine: rec, Meta: fm, TurnExcerpt: "## Turn 1\n\nbody\n"}); err != nil {
+		t.Fatalf("seed CreateThread: %v", err)
+	}
+
+	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
+		t.Fatalf("ArchiveThread: %v", err)
+	}
+	got, err := a.RecoverThread(ctx, "thr_1")
+	if err != nil {
+		t.Fatalf("RecoverThread: %v", err)
+	}
+
+	wantNow := when.Format(time.RFC3339)
+
+	// (1) The returned record stamps all three recency fields.
+	if got.LastEngaged != wantNow {
+		t.Errorf("recovered LastEngaged: got %q want %q (recovery stamp)", got.LastEngaged, wantNow)
+	}
+	if got.LastEngagedTurn != seedEngagedTurn {
+		t.Errorf("recovered LastEngagedTurn: got %d want %d (mirror restored frontmatter)", got.LastEngagedTurn, seedEngagedTurn)
+	}
+	if got.AnchorsProjectedAtTurn != seedTurnCount {
+		t.Errorf("recovered AnchorsProjectedAtTurn: got %d want %d (project-at-turn-count)", got.AnchorsProjectedAtTurn, seedTurnCount)
+	}
+
+	// (2) Persisted spine and frontmatter AGREE on the recency fields — the
+	// sync guarantee BD-9 requires at write time.
+	spineOut, found, err := store.FindSpineRecord(a.paths, "thr_1")
+	if err != nil || !found {
+		t.Fatalf("FindSpineRecord after recovery: found=%v err=%v", found, err)
+	}
+	fmOut, err := store.LoadThreadFrontmatter(a.paths, "thr_1")
+	if err != nil {
+		t.Fatalf("LoadThreadFrontmatter after recovery: %v", err)
+	}
+	if spineOut.LastEngagedTurn != fmOut.LastEngagedTurn {
+		t.Errorf("spine↔frontmatter LastEngagedTurn diverge: spine=%d fm=%d", spineOut.LastEngagedTurn, fmOut.LastEngagedTurn)
+	}
+	if spineOut.LastEngaged != fmOut.LastEngaged {
+		t.Errorf("spine↔frontmatter LastEngaged diverge: spine=%q fm=%q", spineOut.LastEngaged, fmOut.LastEngaged)
+	}
+	if spineOut.LastEngagedTurn != seedEngagedTurn {
+		t.Errorf("persisted spine LastEngagedTurn: got %d want %d", spineOut.LastEngagedTurn, seedEngagedTurn)
+	}
+	if spineOut.AnchorsProjectedAtTurn != seedTurnCount {
+		t.Errorf("persisted spine AnchorsProjectedAtTurn: got %d want %d", spineOut.AnchorsProjectedAtTurn, seedTurnCount)
+	}
+
+	// (3) The decay-scan predicate does NOT trip immediately. Model the
+	// realistic post-recovery flow: a fresh session resumes and runs a few
+	// turns (turnNumber past decayTurns), then a decay scan runs. sysRef is the
+	// recovery stamp (the most-recent system activity). The recovered thread's
+	// turn-recency is from the pre-archival session (42 > 10 → prior-session
+	// skip) and its wall-clock recency is now, so it must NOT be decay-eligible.
+	const freshSessionTurn = 10 // > decayTurns (8), so the bug would bite here
+	sysRef := when
+	if decayTripsForTest(got.LastEngagedTurn, got.LastEngaged, freshSessionTurn, sysRef) {
+		t.Errorf("recovered thread is decay-eligible immediately (turnNumber=%d): LastEngagedTurn=%d LastEngaged=%q",
+			freshSessionTurn, got.LastEngagedTurn, got.LastEngaged)
+	}
+	// Non-vacuity: the old behavior (LastEngagedTurn unstamped → 0) WOULD trip
+	// at the same turn, confirming the stamp is what prevents re-retirement.
+	if !decayTripsForTest(0, got.LastEngaged, freshSessionTurn, sysRef) {
+		t.Errorf("unstamped LastEngagedTurn=0 must trip decay at turnNumber=%d — test is vacuous otherwise", freshSessionTurn)
+	}
+}
+
 // TestArchiveThreads_Batch — a batch of K threads archives in ONE call:
 // every thread leaves the spine and disk, every thread gets a sorted index
 // entry sharing one deletion commit, and an unknown id in the batch is a

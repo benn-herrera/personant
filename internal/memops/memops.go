@@ -437,15 +437,21 @@ type MemoryOps interface {
 	// ThreadFiles.AgeOut/DropChain + store.SaveThreadFiles.
 	//
 	// Reachability gate (the headline §3.9.1 invariant): a window-expired
-	// entry's chain is dropped ONLY IF its commit hash is confirmed
-	// reachable in the workspace repo (the same predicate GetFileVersion
-	// recovers through). A hash that is NOT reachable — the user amended,
-	// rebased, gc'd, or moved the workspace — causes aging to be REFUSED:
-	// the chain is RETAINED, not dropped, and a dedup/chain-age-refused
-	// event is logged (thread, path, hash, reason). No durable content is
-	// ever aged away without an application-reachable recovery path. If git
-	// is unavailable there is no second copy to minimize against, so every
-	// chain is retained and the refusal is logged once.
+	// entry's chain is dropped ONLY IF the BLOB at its recorded commit hash
+	// AND path is confirmed reachable in the workspace repo — the exact
+	// `hash:path` GetFileVersion recovers through, not merely the commit.
+	// (Checking the commit alone is too weak: a commit can resolve while the
+	// recorded path is absent from its tree — path-form mismatch, a rename
+	// before commit, case divergence — so a commit-only gate could drop the
+	// only copy while recovery fails. Blob-at-path is the single shared
+	// predicate; a reachable blob implies a reachable commit.) A blob that
+	// is NOT reachable — the user amended, rebased, gc'd, moved the
+	// workspace, or the path is absent at that commit — causes aging to be
+	// REFUSED: the chain is RETAINED, not dropped, and a dedup/chain-age-
+	// refused event is logged (thread, path, hash, reason). No durable
+	// content is ever aged away without an application-reachable recovery
+	// path. If git is unavailable there is no second copy to minimize
+	// against, so every chain is retained and the refusal is logged once.
 	//
 	// A thread with no tracked-file sidecar is a no-op: (nil, 0, nil) with
 	// no sidecar written. Returns the sorted aged paths and total bytes
@@ -464,12 +470,15 @@ type MemoryOps interface {
 	//      at that hash (read-only `git show <hash>:<path>`-class query,
 	//      §6.1.3).
 	//
-	// Returns ErrFileVersionUnreachable (sentinel, errors.Is) when the hash
-	// is not reachable in the workspace repo or the blob is absent at that
-	// path (amend/rebase/gc orphaned it, or the workspace moved). This is
-	// the same condition that causes AgeFileChains to REFUSE to age — the
-	// recovery path and the aging precondition share one reachability
-	// predicate. Never returns ("", nil): an unrecoverable hash is always a
+	// Returns ErrFileVersionUnreachable (sentinel, errors.Is) when the blob
+	// at `hash:path` is not reachable in the workspace repo — the hash is
+	// unresolvable or the path is absent at that commit (amend/rebase/gc
+	// orphaned it, the workspace moved, or a path-form mismatch). This is
+	// the exact condition that causes AgeFileChains to REFUSE to age: both
+	// consult store.BlobReachable/ShowFileAtCommit on the same normalized
+	// `hash:path`, so the recovery path and the aging precondition share one
+	// literal predicate — the gate drops a chain iff this method could
+	// recover it. Never returns ("", nil): an unrecoverable hash is always a
 	// sentinel, never an empty-string success.
 	//
 	// Read-only: never mutates the workspace tree.

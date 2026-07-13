@@ -131,6 +131,7 @@ func Run(opts Options) error {
 	// both; ValidateConfig has already verified the reference is
 	// well-formed and names a provider in the pool.
 	providerName := opts.ProviderName
+	explicitProvider := opts.ProviderName != ""
 	chatModel := opts.Model
 	if cfg.Chat.DefaultModel != "" {
 		cp, cm, _ := memops.ParseModelRef(cfg.Chat.DefaultModel)
@@ -146,11 +147,22 @@ func Run(opts Options) error {
 	}
 	provider, ok := providers[providerName]
 	if !ok {
-		// If the conventional default isn't there, pick the first by name.
-		provider, providerName = firstProvider(providers)
-		if providerName == "" {
-			return fmt.Errorf("chat: provider %q not found in providers.toml", opts.ProviderName)
+		// An explicitly-requested provider (--provider) that doesn't resolve
+		// is a HARD bootstrap error: silently retargeting to another endpoint
+		// would send traffic to an unintended provider. Name the unknown value
+		// and list the available provider names (names only — never key
+		// material or apiKeyFile paths). config.toml [chat] pins are not
+		// checked here: ValidateConfig has already verified they name a
+		// provider in the pool, so a pinned name always resolves above.
+		if explicitProvider {
+			return fmt.Errorf("chat: unknown provider %q; available providers: %s",
+				providerName, strings.Join(sortedProviderNames(providers), ", "))
 		}
+		// No explicit provider and the conventional default ("local") isn't in
+		// the pool: keep the documented default-selection behavior and pick the
+		// first provider by name. The empty pool is already rejected above, so
+		// this always resolves.
+		provider, providerName = firstProvider(providers)
 	}
 
 	cwd, err := os.Getwd()
@@ -277,12 +289,20 @@ func Run(opts Options) error {
 	return nil
 }
 
-func firstProvider(providers map[string]memops.Provider) (memops.Provider, string) {
+// sortedProviderNames returns the pool's provider names in deterministic
+// order. Names only — never key material or apiKeyFile paths — so the
+// result is safe to surface in an error message.
+func sortedProviderNames(providers map[string]memops.Provider) []string {
 	names := make([]string, 0, len(providers))
 	for name := range providers {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	return names
+}
+
+func firstProvider(providers map[string]memops.Provider) (memops.Provider, string) {
+	names := sortedProviderNames(providers)
 	if len(names) == 0 {
 		return memops.Provider{}, ""
 	}
@@ -546,31 +566,29 @@ func promptConfirmation(opts Options, in *bufio.Reader, ops memops.MemoryOps, cw
 		return promptFallback(opts, in, ops, cwd)
 	}
 	ctx := context.Background()
-	for {
-		if candidate.LastActive == "" {
-			fmt.Fprintf(opts.Stdout, "Resume work on '%s'? [y]es / [n]o / <other-name-or-id>: ",
-				candidate.Name)
-		} else {
-			fmt.Fprintf(opts.Stdout, "Resume work on '%s' (last active %s)? [y]es / [n]o / <other-name-or-id>: ",
-				candidate.Name, candidate.LastActive)
+	if candidate.LastActive == "" {
+		fmt.Fprintf(opts.Stdout, "Resume work on '%s'? [y]es / [n]o / <other-name-or-id>: ",
+			candidate.Name)
+	} else {
+		fmt.Fprintf(opts.Stdout, "Resume work on '%s' (last active %s)? [y]es / [n]o / <other-name-or-id>: ",
+			candidate.Name, candidate.LastActive)
+	}
+	ans, err := readLine(in)
+	if err != nil {
+		return memops.ProjectMeta{}, err
+	}
+	ans = strings.TrimSpace(ans)
+	switch ans {
+	case "", "y", "Y", "yes":
+		if err := ops.SetLastActiveProject(ctx, candidate.ID); err != nil {
+			return memops.ProjectMeta{}, fmt.Errorf("chat: write last-active: %w", err)
 		}
-		ans, err := readLine(in)
-		if err != nil {
-			return memops.ProjectMeta{}, err
-		}
-		ans = strings.TrimSpace(ans)
-		switch ans {
-		case "", "y", "Y", "yes":
-			if err := ops.SetLastActiveProject(ctx, candidate.ID); err != nil {
-				return memops.ProjectMeta{}, fmt.Errorf("chat: write last-active: %w", err)
-			}
-			return *candidate, nil
-		case "n", "N", "no":
-			return promptFallback(opts, in, ops, cwd)
-		default:
-			// Treat as <other-name-or-id> — re-resolve with explicit override.
-			return bootstrapProjectWithExplicit(opts, in, ops, cwd, ans)
-		}
+		return *candidate, nil
+	case "n", "N", "no":
+		return promptFallback(opts, in, ops, cwd)
+	default:
+		// Treat as <other-name-or-id> — re-resolve with explicit override.
+		return bootstrapProjectWithExplicit(opts, in, ops, cwd, ans)
 	}
 }
 

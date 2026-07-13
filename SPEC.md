@@ -689,7 +689,11 @@ aborts the in-flight stream, loads the missing thread, fires a
 `ActiveThreads` (front, BTopK-capped — overflow demotes the tail to
 `DormantThreads`), and re-issues the request with the recomposed
 system prompt. The user-visible response is the second stream's body.
-The re-prompt is capped at 1 per turn.
+The re-prompt is capped at 1 per turn. A fetched thread that belongs to
+another project is declined at the fetch seam
+(`thread.fetch-cross-project`) — the same §3.2 cross-project policy the
+turn-close engagement resolver applies — and is neither promoted nor
+re-prompted for.
 
 The close-time LRU update still picks up any thread that the mid-turn
 fetch couldn't service (an unloadable thread file logs
@@ -724,6 +728,24 @@ the topic tag (§5.1.1) is advisory input, not a directive.
 The Layer B/C LRU (§3.1) and recall surfacing operate over all engaged
 threads (owner + non-owner); only excerpt and `turn_count` ownership is
 restricted. The §3.9 file-edit application binds to the owner.
+
+**Phantom resolution and owner fallback (D2).** Every referenced
+`thr_<n>` is resolved against the spine at turn close — the tag is
+advisory input; the runtime owns the decision. An id that does not
+resolve is a *phantom*: not in the spine (`thread.engaged-miss`) or
+belonging to another project (`thread.engaged-cross-project` —
+cross-project engagement is reserved for Phase 5; v0.1 declines). A
+phantom is logged for forensics and dropped: it never enters the
+engaged set, `ActiveThreads`, or the persisted working set; never owns
+the turn or receives the §3.9 file-edit binding; and a declined
+cross-project record is never mutated. When the tag's would-be owner
+(the lowest-id existing referenced thread) is a phantom, ownership
+falls back to the most recently engaged **valid** referenced thread —
+highest `last_engaged_turn`, ties broken by lowest `thr_<n>` id for
+determinism. When every referenced thread is a phantom: a tagged
+`*new-topic*` thread owns the turn; with no `*new-topic*` either, a new
+thread is created from the turn exactly as a pure `*new-topic*` tag
+would be. In every case the turn's excerpt is never dropped.
 
 **Anchor projection at owner-turn close.** After the owner's
 `history_symbols` merge, the runtime re-derives the thread's `anchors`
@@ -883,14 +905,35 @@ cap) implemented — and, per the recall-completeness invariant above, the
 automatic intra-thread path now closes the former debt-window dead zone
 (#123): after the fine-tier scan it adds a **bounded lexical pass** over
 exactly the engaged thread's debt-window excerpts (the recent scrolled-out
-tail awaiting its async flush, loaded ≤ the debt cap via
+tail awaiting its async flush, loaded via
 `MemoryOps.LoadDebtWindowExcerpts`, matched against the query symbols by
 `recall/exact.MatchExcerptsBySymbols`) and unions the hits into the
 intra-thread result. This is the on-disk completeness floor: durable content
 stays findable continuously through the async-flush lag, with no per-query
-embedding and no unbounded scan. The bound passed is the debt **cap** (not
-the live debt depth), so coverage stays continuous across a cap-flush's
-in-flight window. Persisted
+embedding and no unbounded scan. The bound is the debt **cap** (not the live
+debt depth — a cap-flush resets the live counter while its embed is still in
+flight) **widened by the recall service's per-thread count of enqueued-but-
+unpublished flush jobs**: the scan covers `(1 + pending) × cap` excerpts,
+which spans the whole unflushed tail because at most cap excerpts accrue
+between consecutive flush triggers and everything older was published by the
+last completed flush (BD-8; the cap alone left the in-flight batch's oldest
+excerpts transiently unfindable once scroll-outs continued past the flush).
+`pending` is 0 in the steady state — the scan is exactly one cap — and under
+backlog is bounded by the indexer's queue depth plus one job in process plus
+one blocked enqueue (the sender counts itself before the send): 258 at the
+v0.1 queue depth of 256. The guarantee thus holds continuously across
+in-flight *and queued* cap-flush windows while the scan stays fixed-bound.
+A flush arriving at an *equal* dispatch watermark (the same-turn cap-flush +
+dormancy-flush double-enqueue) always publishes: the single-FIFO indexer
+loaded it later, so it is fresher — ties are never dropped (BD-8), leaving a
+genuinely *failed* flush as the only path that retires a pending job without
+publishing. (Residual, accepted: a **single transient** embed/load failure
+opens a gap for that job's batch lasting until the next **successful** flush
+for the thread republishes the retained set — for an engaged-but-idle thread
+that can span the rest of the session (the next cap-flush needs more
+scroll-out), healed by the dormancy-demotion flush or the next session's
+startup reconcile. The floor guarantees against async-flush *lag*, not
+against failed flushes.) Persisted
 cache = `.vec` + `.tree` sidecars under `.recall-cache/`
 (`internal/recall/measure/veccache.go`, `treecache.go`); shadow-chunk
 oracle implemented in the sim. On top of this, the #111 within-thread

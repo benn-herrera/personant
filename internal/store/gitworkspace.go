@@ -172,6 +172,58 @@ func CommitReachable(gitRoot, hash string) (bool, error) {
 	return false, fmt.Errorf("commit reachable %s: %w: %s", hash, err, string(msg))
 }
 
+// BlobReachable reports whether the blob at `hash:path` is present and
+// reachable in the workspace repo at gitRoot — the §3.9.1 aging gate's
+// recovery precondition. It is strictly stronger than CommitReachable: it
+// confirms not just that the commit resolves but that the RECORDED PATH
+// exists in that commit's tree, which is exactly what the recovery read
+// (ShowFileAtCommit → `git show <hash>:<path>`) needs. A blob being
+// reachable implies its commit is reachable, so this is the single
+// predicate the gate consults before dropping a chain: durable content is
+// never aged away unless the same `hash:path` the recovery path reads is
+// confirmed present (SPEC §3.9.1, §6.1.3).
+//
+// Implemented as `git cat-file -e <hash>:<path>`: exit 0 ⇒ reachable
+// (true). A non-zero git exit ⇒ not reachable (false, no error): git exits
+// 128 both when the revision does not resolve and when the path is absent
+// from that commit's tree (path-form mismatch, rename before commit, case
+// divergence) — both are the same "this blob is not an application-
+// reachable recovery point" answer, and the safe direction is "not
+// reachable" so the caller retains the chain. Only a failure to invoke git
+// at all is an error. Read-only; never mutates the workspace tree.
+func BlobReachable(gitRoot, hash, path string) (bool, error) {
+	if gitRoot == "" {
+		return false, errors.New("blob reachable: gitRoot is empty")
+	}
+	if hash == "" {
+		return false, errors.New("blob reachable: hash is empty")
+	}
+	if path == "" {
+		return false, errors.New("blob reachable: path is empty")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		return false, fmt.Errorf("blob reachable: %w", err)
+	}
+	cmd := exec.Command("git", "-C", gitRoot, "cat-file", "-e", hash+":"+path)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	// Any clean git exit (object absent / path not in tree / unresolvable
+	// revision) is the negative answer, not a hard error — retain-the-chain
+	// is safe.
+	if _, ok := err.(*exec.ExitError); ok {
+		return false, nil
+	}
+	msg := bytes.TrimSpace(stderr.Bytes())
+	if len(msg) == 0 {
+		return false, fmt.Errorf("blob reachable %s:%s: %w", hash, path, err)
+	}
+	return false, fmt.Errorf("blob reachable %s:%s: %w: %s", hash, path, err, string(msg))
+}
+
 // ShowFileAtCommit returns the bytes of path as of commit hash in the
 // workspace repo at gitRoot — the §3.9.1 recovery read for an aged-out
 // committed file. Implemented as a read-only `git show <hash>:<path>`.

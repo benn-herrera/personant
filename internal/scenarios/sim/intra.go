@@ -149,6 +149,17 @@ func depthOrZero(cur, target int) int {
 // intra hit can come ONLY from the #123 bounded lexical completeness floor — the
 // B1 assertion target. depth must be the predicted-target depth (>=1); 0 (no
 // predicted target) is never in the dead zone.
+//
+// DELIBERATELY the 1×cap band (BD-8). The runtime's lexical floor transiently
+// widens to (1+P)×cap while P flush jobs are enqueued-but-unpublished
+// (measure.Request.EngagedDebtWindow), but that transient band exists only
+// under an in-flight flush — a condition this sim cannot sustain: the mock
+// embedder returns immediately, so the indexer drains each flush before the
+// next probe fires and P is 0 at every measurement point. Widening this
+// classifier to (1+P)×cap without a sim slow-embedder mode would therefore
+// mark probes whose targets the ordinary embedding tier covers anyway —
+// asserting nothing about the widened floor. If a slow-embedder sim mode
+// lands, widen this band together with it; do not widen the band alone.
 func inDebtWindowDepth(depth int) bool {
 	return depth >= store.ThreadTurnWindow && depth < store.ThreadTurnWindow+turn.EmbeddingDebtCap
 }

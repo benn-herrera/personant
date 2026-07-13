@@ -42,9 +42,12 @@ BINDIR := bin
 # relaxation. Use $(GOPKGS), not ./..., in every vet/test/cover target.
 GOPKGS := ./cmd/... ./internal/...
 
-build: $(BINDIR)/personant
-
-$(BINDIR)/personant:
+# build is the compile EDIT GATE — a .PHONY target (declared above) that ALWAYS
+# recompiles. It is deliberately NOT a $(BINDIR)/personant file target: a
+# file target with no prerequisites no-ops once bin/personant exists, so an
+# edit-then-`make build` check silently passed against a stale binary. Compile
+# is cheap; correctness of the gate beats a stale-file micro-optimization.
+build:
 	@mkdir -p $(BINDIR)
 	go build -o $(BINDIR)/personant ./cmd
 

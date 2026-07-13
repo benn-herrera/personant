@@ -241,9 +241,13 @@ type Request struct {
 	// It is the CAP, not the live count, on purpose: a debt-cap flush resets
 	// the live counter to 0 and embeds asynchronously, so a live-count bound
 	// would re-open the dead zone for exactly the cap-sized batch during the
-	// flush's in-flight window. Bounding by the cap guarantees the lexical
-	// floor always covers the whole possibly-unflushed tail, continuously. The
-	// redundant overlap with already-flushed excerpts is harmless (≤ cap short
+	// flush's in-flight window. The cap alone is NOT sufficient either (BD-8):
+	// while a flush is in flight, further scroll-outs push the in-flight
+	// batch's oldest excerpts below the newest-cap band, so the Service
+	// widens the scan internally to (1 + its pending-flush depth) × this
+	// value — the caller still passes the plain cap and needs no knowledge of
+	// indexer state (see debtWindowTurns for the bound derivation). The
+	// redundant overlap with already-flushed excerpts is harmless (short
 	// excerpts, de-duped in the union). 0 → no debt pass (byte-identical prior
 	// behaviour). Sourced from the runtime's own debt-cap constant.
 	EngagedDebtWindow int
@@ -343,7 +347,50 @@ type Service struct {
 	w1DiagTie          atomic.Int64
 	w1DiagTreeMismatch atomic.Int64
 
+	// pendingFlush counts, per thread, flush jobs enqueued but not yet
+	// FINISHED by the indexer (BD-8). It is the in-flight-window signal the
+	// §3.4 lexical completeness floor widens by: after a cap-flush fires, the
+	// runtime resets its per-thread debt counter while the flush job is still
+	// unpublished, so new scroll-outs accrue ON TOP of the in-flight batch and
+	// the truly-unflushed scrolled-out depth can exceed one debt cap (up to
+	// (pending+1)×cap — see debtWindowTurns for the bound derivation).
+	// Incremented in EnqueueFlush before the job is sent; decremented when
+	// processJob returns (success OR failure — the failed-flush caveat is
+	// documented at debtWindowTurns). Guarded by pendingMu; lazily created.
+	pendingMu    sync.Mutex
+	pendingFlush map[string]int
+
 	closeOnce sync.Once
+}
+
+// addPendingFlush adjusts the per-thread pending-flush count by d, dropping
+// the entry at zero so the steady state (index caught up) costs nothing.
+// Returns the new count (0 when the entry was dropped) so EnqueueFlush can
+// read the post-increment depth without a second lock acquisition.
+func (s *Service) addPendingFlush(threadID string, d int) int {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	n := s.pendingFlush[threadID] + d
+	if n <= 0 {
+		delete(s.pendingFlush, threadID)
+		return 0
+	}
+	if s.pendingFlush == nil {
+		s.pendingFlush = make(map[string]int)
+	}
+	s.pendingFlush[threadID] = n
+	return n
+}
+
+// pendingFlushDepth reports how many flush jobs for threadID are queued or
+// in flight. Bounded by the jobs channel: at most jobQueueDepth queued, plus
+// one being processed, plus one blocked sender — EnqueueFlush increments the
+// count BEFORE the channel send, so a sender blocked on a full queue is
+// already counted. Worst case jobQueueDepth+2 (BD-8).
+func (s *Service) pendingFlushDepth(threadID string) int {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	return s.pendingFlush[threadID]
 }
 
 // recallCacheLocator is the optional interface a MemoryOps adapter
@@ -473,6 +520,15 @@ func (s *Service) buildCoarse(ctx context.Context) (*indexSnapshot, error) {
 // turn loop blocking on a busy indexer.
 const jobQueueDepth = 256
 
+// pendingFlushWarnThreshold is the per-thread pending-flush depth above which
+// EnqueueFlush emits a flush-backlog log line (BD-8 backlog forensic). In the
+// steady state pending is 0-1; a depth past a handful means the indexer is
+// falling behind the flush triggers (slow embedder, stalled endpoint) — the
+// widened §3.4 lexical band keeps completeness intact, but the backlog is a
+// cost/latency signal worth a greppable trace before it reaches the
+// jobQueueDepth+2 worst case. Cheap: one comparison per enqueue.
+const pendingFlushWarnThreshold = 8
+
 // AddThread enqueues a full flush for one thread — the incremental
 // counterpart to Prepare's batch build. A long-lived session creates
 // threads continuously; without per-thread upkeep the embedding layer
@@ -504,6 +560,13 @@ func (s *Service) AddThread(ctx context.Context, threadID string) error {
 func (s *Service) EnqueueFlush(threadID string, dispatchTurncount int) {
 	if s.jobs == nil {
 		return
+	}
+	// Count the job as pending BEFORE it is visible to the indexer, so the
+	// §3.4 lexical floor is already widened by the time the job could race a
+	// concurrent Recall (BD-8). The matching decrement is processJob's defer.
+	if n := s.addPendingFlush(threadID, 1); n > pendingFlushWarnThreshold {
+		_ = s.ops.Log(context.Background(), memops.LogCategoryRecall, "flush-backlog",
+			fmt.Sprintf("thread=%s pending=%d threshold=%d", threadID, n, pendingFlushWarnThreshold))
 	}
 	s.jobs <- indexJob{threadID: threadID, dispatchTurncount: dispatchTurncount}
 }
@@ -572,6 +635,11 @@ func (s *Service) runIndexer() {
 // swallowed — indexing is advisory; a failed job leaves the prior vectors
 // in place rather than blanking the thread.
 func (s *Service) processJob(ctx context.Context, job indexJob) {
+	// The pending count drops only when the job is DONE (published or
+	// abandoned), never at pickup: while the embed is in flight the flushed
+	// excerpts are in neither the fine tier nor, necessarily, the newest-cap
+	// lexical band, and the widened floor is what keeps them findable (BD-8).
+	defer s.addPendingFlush(job.threadID, -1)
 	thr, err := s.ops.LoadThread(ctx, job.threadID)
 	if err != nil {
 		_ = s.ops.Log(ctx, memops.LogCategoryRecall, "index-error", fmt.Sprintf("load %s: %v", job.threadID, err))
@@ -702,7 +770,26 @@ func (s *Service) priorChunkVectors(threadID string) map[chunkKey][]float64 {
 func (s *Service) swap(threadID string, dispatchTurncount int, coarse scoring.ThreadVector, chunks []scoring.ChunkVector, chunkHashes []string) {
 	for {
 		old := s.cur.Load()
-		if dispatchTurncount <= old.watermark[threadID] {
+		// STRICTLY-LESS only (BD-8). The guard exists to stop a STALE
+		// in-flight embed overwriting fresher vectors across a
+		// re-activate/re-decay cycle — a cycle that spans turns, so a
+		// genuinely stale job always carries a strictly LOWER watermark. An
+		// EQUAL watermark is the same-turn double-enqueue (cap-flush at the
+		// scroll-out hook, then dormancy flush at demotion, both stamped with
+		// the one state.TurnNumber): with a single FIFO indexer the
+		// equal-watermark job was enqueued later AND loaded canonical state
+		// later (the indexer finishes one job — including its publish —
+		// before loading the next), so its content is a fresh superset and
+		// publishing it is strictly fresher. Dropping it on equality lost
+		// that delta and decremented pendingFlush without publishing —
+		// shrinking the §3.4 lexical band over an unpublished batch that, on
+		// a dormant thread, nothing else covered. Note freshness here is
+		// decided by FIFO load order, not by which clock stamped the
+		// watermark, so the pre-existing AddThread rec.TurnCount vs
+		// state.TurnNumber clock mixing (see AddThread) is unaffected:
+		// strict-less only publishes MORE FIFO-later jobs than <= did, and
+		// every FIFO-later publish is fresh by the load-order argument.
+		if dispatchTurncount < old.watermark[threadID] {
 			return // stale embed — a fresher vector already published (I2/F5)
 		}
 		next := old.with(threadID, coarse, chunks, chunkHashes, dispatchTurncount)
@@ -802,6 +889,28 @@ func (s *indexSnapshot) with(threadID string, coarse scoring.ThreadVector, chunk
 func (s *Service) Recall(ctx context.Context, req Request) ([]Result, error) {
 	merged := map[string]*Result{}
 
+	// BD-8: capture the engaged thread's in-flight flush depth BEFORE the
+	// index snapshot is loaded below, and widen the §3.4 lexical floor by it
+	// (bound derivation at debtWindowTurns). The ordering is load-bearing: a
+	// flush that completes between these two reads is covered either way —
+	// still counted here (widened lexical band) or already published into the
+	// snapshot the embedding pass reads (fine tier). Read in the reverse
+	// order, a flush completing in the gap would be covered by neither.
+	//
+	// SINGLE-GOROUTINE ASSUMPTION (load-bearing, silent if broken): excerpt
+	// appends/scroll-outs and this Recall run on the same turn-loop
+	// goroutine, so no NEW excerpt can land between this P-read and the
+	// debtWindowTurns disk read below — the widened band computed here still
+	// bounds the unflushed tail at the moment it is scanned. If Recall ever
+	// runs concurrently with the turn loop, a scroll-out landing in that gap
+	// shifts the band under the scan and the coverage argument breaks with
+	// no error surfaced. Revisit this read (and the bound derivation at
+	// debtWindowTurns) before making Recall concurrent.
+	debtWindow := req.EngagedDebtWindow
+	if debtWindow > 0 && req.Engaged != "" {
+		debtWindow *= 1 + s.pendingFlushDepth(req.Engaged)
+	}
+
 	symbolic, err := s.ops.ProposeRecall(ctx, req.QuerySymbols, memops.RecallOptions{
 		Project: req.Project,
 		Exclude: req.Exclude,
@@ -879,7 +988,7 @@ func (s *Service) Recall(ctx context.Context, req Request) ([]Result, error) {
 	// outside the q != nil block on purpose: completeness must not depend on a
 	// query embedding being produced. No-op unless there is an engaged thread,
 	// known debt, and query symbols to match against.
-	if turns := s.debtWindowTurns(ctx, req.Engaged, req.EngagedDebtWindow, req.QuerySymbols); len(turns) > 0 {
+	if turns := s.debtWindowTurns(ctx, req.Engaged, debtWindow, req.QuerySymbols); len(turns) > 0 {
 		r := merged[req.Engaged]
 		if r == nil {
 			r = &Result{ThreadID: req.Engaged}
@@ -1037,14 +1146,46 @@ func (s *Service) intraThread(q []float64, snap *indexSnapshot, engaged string, 
 // even during the async-flush lag, with no dead zone (completeness is
 // continuous, not eventual).
 //
-// Bounded by construction: it loads at most window (the §6.5 debt cap)
-// excerpts via LoadDebtWindowExcerpts — a small, fixed-bound disk read that
-// does NOT grow with thread age — then lexically matches them. No embedding is
-// performed (the debt tail has no vectors yet; that is the gap), so this adds
-// no per-query embedding cost and no unbounded scan. A load error is logged
-// and swallowed: the completeness floor is opportunistic and must never abort
+// IN-FLIGHT WIDENING (BD-8). window is the §6.5 debt cap ALREADY widened by
+// Recall to (1 + pending flushes) × cap — the plain cap covers only the
+// accrual since the last flush enqueue, NOT a flush that has fired but not
+// yet published: the runtime resets its debt counter at enqueue, so new
+// scroll-outs accrue on top of the in-flight batch and push its oldest
+// excerpts below the newest-cap band — unembedded AND unscanned, the
+// transient dead zone §3.4 forbids. The widened bound covers the whole
+// unflushed tail because (a) between two consecutive flush enqueues for a
+// thread at most cap excerpts scroll out (the cap trigger fires AT cap; a
+// dormancy flush fires with ≤ cap debt), so P pending jobs plus the live
+// accrual span at most (P+1)×cap excerpts, and (b) everything older than
+// the oldest pending job's enqueue was published by the last COMPLETED
+// flush (a flush embeds the thread's full retained excerpt set as of its
+// load time) and is findable through the fine tier. The widening lives in
+// Recall, not here, because it must be read BEFORE the index snapshot load
+// (see the ordering comment there).
+//
+// Still bounded by construction: it loads at most (P+1)×window excerpts via
+// LoadDebtWindowExcerpts — P is 0 in the steady state (identical cost and
+// behaviour to the unwidened floor) and exceeds 1 only while the indexer is
+// backlogged, where P ≤ jobQueueDepth+2 caps the worst case (queued jobs +
+// one in process + one blocked sender, which EnqueueFlush counts before its
+// send — see pendingFlushDepth). The scan does NOT grow with thread age. No
+// embedding is performed (the debt tail has no vectors yet; that is the
+// gap), so this adds no per-query embedding cost. A load error is logged and
+// swallowed: the completeness floor is opportunistic and must never abort
 // recall. Returns nil unless there is an engaged thread, a positive window
 // bound, and query symbols.
+//
+// KNOWN GAP (accepted, pre-existing): the ONLY decrement-without-publish
+// path is a flush job that genuinely FAILS (load or embed error) — the
+// former equal-watermark drop no longer exists (swap publishes on ties,
+// BD-8). A SINGLE transient embed failure opens a gap for that job's batch
+// lasting until the NEXT SUCCESSFUL flush for the thread republishes the
+// full retained set: for an engaged-but-idle thread that can span the rest
+// of the session (the next cap-flush needs more scroll-out), healed by the
+// dormancy-demotion flush or by the next session's Prepare reconcile. Not
+// merely an "embedder outage" scenario — one failure is enough. Indexing is
+// advisory (failures are logged index-error and swallowed); the floor
+// guarantees against async-flush LAG, not against failed flushes.
 func (s *Service) debtWindowTurns(ctx context.Context, engaged string, window int, symbols []string) []int {
 	if engaged == "" || window <= 0 || len(symbols) == 0 {
 		return nil

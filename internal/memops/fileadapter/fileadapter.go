@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -676,6 +677,32 @@ func (a *FileAdapter) workspaceGitRoot(threadID string) (root string, ok bool, e
 	return gitRoot, true, nil
 }
 
+// gitPathForShow normalizes a tracked-file path into the git-root-relative
+// form that `git show <hash>:<path>` / `git cat-file -e <hash>:<path>`
+// require. §3.9 tracked paths are caller-supplied (delta.Meta["path"]) and
+// documented as workspace-relative, but nothing enforces that at this
+// boundary; an absolute path would make git reject the pathspec. An
+// absolute path under gitRoot is rebased to gitRoot; anything else (an
+// already-relative path, or an absolute path that escapes gitRoot) is
+// returned unchanged.
+//
+// This is the ONE shared normalization used by BOTH the aging gate
+// (BlobReachable) and the recovery read (ShowFileAtCommit), so the two
+// consult git with identical inputs. That is what keeps the "one shared
+// predicate" claim literally true: for any given (root, hash, path) the
+// gate refuses aging exactly when recovery would fail, and drops a chain
+// exactly when recovery would succeed — they can never diverge.
+func gitPathForShow(gitRoot, path string) string {
+	if !filepath.IsAbs(path) {
+		return path
+	}
+	rel, err := filepath.Rel(gitRoot, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return path // not under gitRoot — git rejects it identically in both paths
+	}
+	return rel
+}
+
 // AgeFileChains applies the §3.9 git-minimization policy to threadID's
 // tracked-file store, gated by workspace-git reachability. A thread with no
 // tracked-file sidecar (zero files) is a no-op — no empty sidecar is
@@ -684,11 +711,13 @@ func (a *FileAdapter) workspaceGitRoot(threadID string) (root string, ok bool, e
 // store.ThreadFiles.AgeOut computes the window-expired CANDIDATES (pure, no
 // git, no mutation). For each candidate the adapter consults the headline
 // §3.9.1 reachability gate: a chain is dropped (via tf.DropChain) ONLY IF
-// the commit hash is confirmed reachable in the workspace repo
-// (store.CommitReachable). An unreachable hash — amend/rebase/gc/move, or
-// git unavailable — REFUSES aging: the chain is retained and a
-// dedup/chain-age-refused event is logged. No durable content is ever aged
-// away without an application-reachable recovery path.
+// the BLOB at the recorded commit hash AND path is confirmed reachable in
+// the workspace repo (store.BlobReachable — the same `hash:path` the
+// recovery read consults, not merely the commit). An unreachable blob —
+// amend/rebase/gc/move, a path absent at that commit (path-form mismatch,
+// rename before commit), or git unavailable — REFUSES aging: the chain is
+// retained and a dedup/chain-age-refused event is logged. No durable
+// content is ever aged away without an application-reachable recovery path.
 //
 // When anything actually ages, the updated sidecar is saved and one
 // dedup/chain-aged event-log line records the aged paths and bytes freed
@@ -728,13 +757,13 @@ func (a *FileAdapter) AgeFileChains(ctx context.Context, threadID string, curren
 		reachable := false
 		reason := "workspace-root-unresolved"
 		if rootOK {
-			r, rerr := store.CommitReachable(root, e.LastCommit)
+			r, rerr := store.BlobReachable(root, e.LastCommit, gitPathForShow(root, path))
 			if rerr != nil {
 				return agedPaths, bytesFreed, fmt.Errorf("fileadapter: age file chains %s: reachability %s: %w", threadID, path, rerr)
 			}
 			reachable = r
 			if !reachable {
-				reason = "commit-unreachable"
+				reason = "blob-unreachable"
 			}
 		}
 		if !reachable {
@@ -800,7 +829,7 @@ func (a *FileAdapter) GetFileVersion(ctx context.Context, threadID, path, hash s
 	if !rootOK {
 		return "", fmt.Errorf("fileadapter: get file version %s %s@%s: %w", threadID, path, hash, memops.ErrFileVersionUnreachable)
 	}
-	content, present, err := store.ShowFileAtCommit(root, hash, path)
+	content, present, err := store.ShowFileAtCommit(root, hash, gitPathForShow(root, path))
 	if err != nil {
 		return "", fmt.Errorf("fileadapter: get file version %s: show: %w", threadID, err)
 	}
