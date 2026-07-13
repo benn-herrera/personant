@@ -999,6 +999,19 @@ Engagement decay fires when `last_engaged` exceeds `engagement.decay-turns` OR `
 
 The curator-drafted summary targets 100–150 chars. This balances two constraints: summary + anchors must fit within the Layer A1 budget at realistic spine cardinality (~400 threads × ~200 chars ≈ 80 KB, within the 8% A1 share at 64 KB context); the gist must also be sufficient for the model to recognize prior engagement without fetching the thread body.
 
+**Ack-quality instrumentation (front-end v0.1 requirement, spec'd
+2026-07-13 — not yet implemented).** The closure ack is a load-bearing
+integrity gate only while the human actually reads the draft; a
+rubber-stamped ack is worse than none, because it launders an unread
+summary as human-verified. The canary is **ack-edit-rate**: when the
+front-end ack UI lands, the `retire.ack` event detail (§2.8) must record
+`edited=yes|no` (whether the user modified the curator draft before
+acking), and the front-end U/X phase evaluates the rate — a user who
+edits 0% of drafts over months is either being served perfection or has
+stopped reading, and the distinction must be probed, not assumed. This
+is deliberately a front-end-phase deliverable: it needs a real human,
+so it is a §9.1 category-3 known-unknown until then.
+
 ### 3.6 Fallback dissection
 
 Budget-pressure trigger → dissector LLM clusters the oldest content →
@@ -2505,6 +2518,30 @@ as runs surface new gaps):
   (the sim-vs-reality review's Lens-B gaps).
 - **Transient-data lifecycle (§3.10)** fidelity — a prerequisite to an
   *honest* recall-fidelity measurement.
+- **Topic-tag fidelity under real inference** (added 2026-07-13, design
+  assessment). Topic-tag emission is the single LLM function the whole
+  recognition architecture leans on — the mock regime scripts it, so tag
+  *quality* is entirely unmeasured. The inference-in-loop increment must
+  treat tag-fidelity metrics as a first-class deliverable, not a
+  side-effect: re-engagement miss rate (turn engages a known thread, tag
+  omits it), spurious `*new-topic*` rate (tag cuts a new thread where the
+  oracle expects re-engagement), and anchor-emission overlap vs. the
+  deterministic extraction pass. A live rung without these instruments
+  exercises real tags while measuring nothing about them.
+- **Spine-cardinality stress / A1-saturation handoff** (added 2026-07-13,
+  design assessment). Layer-1 model-native recognition depends on the
+  active project's spine lines fitting Layer A1's byte budget; at
+  spine-display line lengths and the current partition, A1 saturates in
+  the low hundreds of threads, while a multi-year career accrues
+  thousands. The 120-day top rung cannot reach this region organically.
+  Required: a stress rung with a synthetic pre-seeded multi-thousand-
+  thread spine measuring (a) recognition quality across the A1
+  truncation boundary, (b) whether opportunistic recall (layers 2/3)
+  picks up the recognition load for threads that fell off the rendered
+  surface, and (c) §3.8 archival onset behavior under genuine
+  cardinality pressure. This is the least-validated transition in the
+  long-career design; the mechanisms exist (§3.1 truncation, §3.8
+  archival) but no instrument is pointed at the handoff.
 
 **Two version lines.** The substrate (this spec's runtime + the
 `MemoryOps` API) and the front end (U/X + feature logic atop it) are

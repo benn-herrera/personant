@@ -298,6 +298,18 @@ The anchor set is what makes recall possible. The summary is what makes recognit
 
 Without this distinction, declined offers due to bad matches accidentally suppress good offers too. (Spec §3.4.)
 
+**Guarantee boundary — findability, not reminiscence.** The recall stack
+guarantees that durable content is *findable* (the §3.4 completeness
+invariant) and that overlapping context *surfaces opportunistically*
+(the layers above). It deliberately does not promise spontaneous
+cross-domain reminiscence: a connection between today's problem and
+years-old work in a different vocabulary surfaces only if anchors or
+embeddings overlap. Per the founding tenet, the serendipitous bridge
+("this reminds me of…") is the *human's* contribution to the braid — a
+feature that tries to make the agent volunteer it is the
+anticipate-the-user anti-pattern. State this boundary when setting user
+expectations; do not "fix" it.
+
 ### Closure and retirement
 
 The ack is the **integrity gate** at the highest-leverage moment. The user catches misclassification at retirement, the only point where its accuracy matters most.
