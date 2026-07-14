@@ -498,16 +498,16 @@ Actions ending in `-error` (and `warning`) are forensic diagnostics, not measure
 | Category | Events |
 |---|---|
 | `system` | `bootstrap`, `context-ceiling-breach`; *(vocabulary; not yet emitted)* `shutdown`, `error`, `config-reload` |
-| `thread` | `engaged`, `engaged-non-owner`, `engaged-cross-project`, `engaged-miss`, `created`, `created-meta-only`, `state-change`, `fetch-miss`, `fetch-cross-project`, `anchor-projection-overflow`; *(vocabulary)* `summary-generated` |
+| `thread` | `engaged`, `engaged-non-owner`, `engaged-cross-project`, `engaged-miss`, `created`, `created-meta-only`, `state-change`, `fetch-miss`, `fetch-cross-project`, `anchor-projection-overflow`, `tag-defaulted` (with `thr=` — the bound owner, `cause=missing-tag`, `reprompted=yes\|no`; §3.3 owner-default) |
 | `spine` | `match-fire`, `embed-match-fire`, `intra-match-fire`; *(vocabulary)* `match-miss`, `entry-updated` |
 | `recall` | `offer` (with `count=N`), `accept` (with `thr=`, `layers=`), `decline` (with `thr=`, `reason=not-relevant\|wrong-project\|already-known`), `net-cap-hit`, `flush-backlog`, `W1-diag`, `fire-error`, `error`, `index-error`, `embed-error`, `debt-window-error`, `tree-error`; *(vocabulary)* `cross-project-fire` |
 | `retire` | `prompt` (with `thr=` and `inactivity=`\|`trigger=manual`), `ack` (EVERY acked closure — retire or WIP — with `resolution=` and `edited=yes\|no`, §3.5), `defer`, `complete` (with `resolution=`), `curator-error`, `load-error`, `resolver-error`, `apply-error`, `error` |
 | `archive` | `archived`, `recovered`, `recovered-record`, `skip`, `under-drain`, `error` |
 | `consolidate` | `sleep-cycle` |
 | `dedup` | `chain-aged`, `chain-age-refused`, `error` |
-| `fs` | `edit-no-path`, `write-error`, `commit-untracked`, `unsynced-no-topic-tag` |
+| `fs` | `edit-no-path`, `write-error`, `commit-untracked` (`unsynced-no-topic-tag` is **retracted** with the missing-tag abort — §3.3 recovery means edits always bind) |
 | `staging` | `promoted`, `evicted` (window-close GC, §3.10) |
-| `topic` | `re-prompt`, `tag-missing`, `warning` |
+| `topic` | `re-prompt` (with `cause=missing-thread` + `fetched=` for the §5.5 fetch, or `cause=missing-tag` for the §3.3 tag recovery), `tag-missing`, `warning` |
 | `session` | `ended`, `working-set-save-error`, `checkpoint-error` |
 | `project` | `created`, `switched`, `renamed`; *(vocabulary)* `cd-changed`, `remote-adopted`, `remote-updated`, `remote-collision-prompt`, `meta-updated` |
 | `model` | `stream-close-warn` |
@@ -759,7 +759,18 @@ highest `last_engaged_turn`, ties broken by lowest `thr_<n>` id for
 determinism. When every referenced thread is a phantom: a tagged
 `*new-topic*` thread owns the turn; with no `*new-topic*` either, a new
 thread is created from the turn exactly as a pure `*new-topic*` tag
-would be. In every case the turn's excerpt is never dropped.
+would be. In every case the turn's excerpt is never dropped. A turn with
+**no tag at all** whose deltas require owner binding takes the same
+never-drop stance via the §3.3 missing-tag recovery (re-prompt once →
+owner-default) — but ranks its candidates by the persisted Layer-B
+recency order, NOT this fallback's `last_engaged_turn` ordering (§3.3;
+`last_engaged_turn` is session-scoped and inverts recency across a
+relaunch). This fallback deliberately keeps `last_engaged_turn`: its
+candidates are the turn's own tagged ids — all engaged this turn either
+way, so ownership placement among model-named threads is a bounded
+misbind — and Layer-B order cannot rank them (a tagged id may sit
+outside Layer B, and a same-turn §5.5 fetch reorders the list by fetch
+order, not engagement recency).
 
 **Anchor projection at owner-turn close.** After the owner's
 `history_symbols` merge, the runtime re-derives the thread's `anchors`
@@ -785,6 +796,56 @@ Three passes per §3.0.2 step 1, ordered cheapest first:
 3. **Curator** — at retirement, the curator drafts the closure summary (§3.5). It does **not** select anchors: the anchor set is the deterministic re-derived projection of active `history_symbols` (§2.7.4), recomputed every owner turn with no LLM. (Pass 3 is named for the curator's *summary* role at the same lifecycle point, not an anchor-selection step.)
 
 For task-class deltas (§3.10.1), extracted symbols enter the staging buffer (§3.10.2) instead of feeding the coalesce buffer directly; they reach `symbols.jsonl` only on citation-window promotion (§3.10.4).
+
+**Missing-tag protocol recovery (D6 — violation → recovery, never abort).**
+A model response with no valid topic tag is a protocol violation only in
+the advisory sense; the runtime recovers, it does not refuse the turn
+(the former `ErrFileEditWithoutTopicTag` abort is **retracted** — live
+data showed a real model omits the tag intermittently, and aborting
+discards a coherent turn). Two regimes, split by whether the turn's
+deltas require owner binding (buffered §3.9 file edits):
+
+- **No binding required** (plain conversational turn): the turn proceeds
+  tag-less — no engagement update, no excerpt, no owner; `topic.tag-missing`
+  is logged for calibration. This is the pre-D6 behavior, kept
+  deliberately: nothing on such a turn needs an owner, so a re-prompt or
+  a defaulted engagement would spend cost to recover advisory metadata.
+- **Binding required**: two recovery stages.
+  1. *Single re-prompt* (`topic.re-prompt cause=missing-tag`): the
+     in-flight stream is aborted and the request re-issued with a terse
+     system-side reminder appended (§5.1.3 `TopicTagReminder`), via the
+     same §5.5 re-issue machinery. Capped at 1 per turn for this cause
+     (combined bound: §5.5).
+  2. *Owner-default* (`thread.tag-defaulted`): if the re-prompted
+     response still lacks a tag, the turn binds to the thread that would
+     own it absent any tag — the most recently engaged valid Layer-B
+     thread, ranked by the **persisted `ActiveThreads` order** (index 0 =
+     most recently engaged; the first resolving candidate wins). The list
+     order is the honest recency signal: it survives the working-set
+     save/reload across a relaunch, whereas `last_engaged_turn` stores
+     the session-scoped turn counter (resets on session load) and ranked
+     ANTI-recency after a restart — a stale prior-session thread's high
+     count outranked the thread actively worked this session. (The §3.2
+     D2 fallback-(i) ordering keeps `last_engaged_turn` for its own,
+     tagged-ids-only scope — see §3.2.) When no Layer-B candidate
+     resolves, a new thread is created from the turn
+     (the D2 fallback-(ii) terminal). The excerpt and the §3.9 edits are
+     never dropped, and all recovered content still flows through the
+     §3.0.5 `onContextDelta` chain. The binding-integrity concern the old
+     abort answered is answered instead by determinism + the forensic
+     `thread.tag-defaulted` line (`thr=`, `cause=missing-tag`,
+     `reprompted=yes|no`).
+
+  *Classification note — `fs.read` (open calibration question).* The
+  "binding required" predicate is "any buffered §3.9 file-edit event",
+  and `fs.read` deltas buffer a write entry exactly like `fs.write`
+  (the read content enters the tracked-file version chain — pre-existing
+  §3.9 classification). A tag-less **read-only** turn therefore pays the
+  full recovery cost (re-prompt → owner-default) even though it mutated
+  nothing outside the sidecar. Whether a pure-`fs.read` turn should
+  instead be conversational-class for this predicate is flagged as a
+  calibration/classification question awaiting live data; no behavior
+  change is specified here.
 
 ### 3.4 Recall matching
 
@@ -1894,11 +1955,13 @@ count is owned by the runtime's projection, not the emission. The
 `≤ AnchorProjectionMax` bound is a runtime self-assertion (the projection
 enforces it), surfaced by `personant verify` as a substrate-bug check, not
 a model contract. **Deleted:** `ErrAnchorCardinalityViolation`,
-`MinAnchorsPerThread`, the 4-floor, and the over-8 abort. **Retained
-fail-loud:** `ErrFileEditWithoutTopicTag` (ownership binding) and
-synthetic-stub / malformed-tag rejection remain the only topic-tag
-fail-loud paths (§3.0/§3.3) — a file edit with no owning topic tag still
-fails the turn loud.
+`MinAnchorsPerThread`, the 4-floor, and the over-8 abort. **Also deleted
+(D6):** `ErrFileEditWithoutTopicTag` — a file edit with no owning topic
+tag no longer fails the turn; the runtime recovers per §3.3 (single
+re-prompt with the `TopicTagReminder` appended, then deterministic
+owner-default with a `thread.tag-defaulted` forensic line). There are no
+remaining topic-tag fail-loud paths: a missing or malformed tag is at
+worst a re-prompt plus a defaulted binding, never an abort.
 
 The single-line form is deliberate: no multi-line state for the parser
 to track, no envelope syntax that varies across providers, no JSON
@@ -1934,6 +1997,12 @@ start. The template lives in `internal/prompt/template.go` as a compiled
 constant (`TopicTagDirective`, exposed with a stable identifier). Runtime
 hot-reload for empirical tuning is deferred (future work) — v0.1 requires
 a rebuild to change the template.
+
+`TopicTagReminder` (same file) is the terse system-side reminder appended
+to the system prompt for the §3.3 missing-tag re-prompt: it names the
+discard reason, restates the tag form, and demands the tag as the first
+line. Once appended it survives any later same-turn recomposition (e.g. a
+subsequent §5.5 fetch re-prompt).
 
 ### 5.2 Curator prompt for retirement summary
 
@@ -1980,9 +2049,19 @@ to *decide* (workspace reads, web fetch, model.consult) keeps the
 model's decision-making narrow. Topic tag is the request; system
 injection is the fulfillment.
 
-Re-prompt is capped at 1 per turn. Latency cost on a turn that
-triggers a fetch is up to 2× the no-fetch case (one aborted stream +
-one full stream); turns that don't trigger a fetch pay nothing.
+**Combined mid-turn re-prompt bound (with §3.3 missing-tag recovery).**
+Re-prompts are capped at **1 per cause**, and there are exactly two
+causes — missing-thread (this section) and missing-tag (§3.3) — so a
+turn issues at most 2 re-prompts (≤ 3 model streams). One per cause
+because the causes are independent failure modes with independent
+interventions (context augmentation vs. protocol reminder); both firing
+in one turn requires two distinct model failures, so the worst case is
+bounded and rare. Never two for the same cause: a repeat would re-run an
+intervention that just demonstrably failed, so the second miss falls
+through to the cause's deterministic close-time fallback (LRU pickup
+here; owner-default for §3.3). Latency cost on a turn that triggers a
+fetch is up to 2× the no-fetch case (one aborted stream + one full
+stream); turns that trigger neither cause pay nothing.
 Speculative pre-fetch is rejected as an explicit non-goal (every
 loaded thread is loaded because the model said it was needed; see
 ARCHITECTURE.md "No speculative prefetch").

@@ -61,6 +61,25 @@ Examples:
 After the tag, write your response normally. The runtime parses the tag
 deterministically; getting the format exactly right matters.`, NewTopicLiteral, NewTopicLiteral)
 
+// TopicTagReminder is the terse system-side reminder appended to the
+// system prompt for the D6 missing-tag re-prompt (spec §3.3 recovery /
+// §5.5 re-issue machinery): the model's previous response omitted the
+// required topic tag on a turn whose workspace file edits must bind to a
+// thread, so the request is re-issued with the requirement made
+// unmissable. Exposed like TopicTagDirective so tests can assert verbatim
+// presence in the re-issued request.
+var TopicTagReminder = fmt.Sprintf(`PROTOCOL REMINDER — TOPIC TAG MISSING
+
+Your previous response was discarded because it did not begin with the
+required topic tag. This turn recorded workspace file edits, which MUST
+bind to a thread. Re-send your full response, beginning with the tag line
+in this exact form:
+
+    *topic: <thread-list> [<anchor-list>]*
+
+e.g. "*topic: thr_7 [alpha, beta]*", or "*topic: %s [alpha, beta]*" to
+start a new thread. The tag must be the first line of your response.`, NewTopicLiteral)
+
 // layerSection holds one layer's header and rendered content. The order of
 // sections in the assembled prompt is fixed by the slice order in
 // BuildSystemPrompt; the section is omitted entirely if its content is

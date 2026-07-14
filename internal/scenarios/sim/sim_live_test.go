@@ -166,19 +166,41 @@ func chatEndpoint(t *testing.T, endpoints []liveEndpoint) liveEndpoint {
 // measures:
 //
 //   - tag-emission discipline: the runtime logs `topic.tag-missing` whenever
-//     the model's response carried no parseable §5.1 topic tag. The parseable
-//     rate = (turns - tag-missing) / turns is the headline. A high miss rate
-//     is a real model regression on the tag contract the whole substrate rests
-//     on — the signal the mock can never produce.
+//     the FINAL response of a turn carried no parseable §5.1 topic tag. The
+//     parseable rate = (turns - tag-missing) / turns is the headline. A high
+//     miss rate is a real model regression on the tag contract the whole
+//     substrate rests on — the signal the mock can never produce.
+//     HONEST ACCOUNTING: a D6-recovered omission (first stream tag-less →
+//     re-prompt → second stream tagged) never logs `topic.tag-missing`, so
+//     that line alone UNDERCOUNTS model omissions. True omission events =
+//     topic.tag-missing + topic.re-prompt(cause=missing-tag) — a stream-level
+//     count: a double-miss turn emits BOTH lines (one omission each for its
+//     two streams), so the sum is not a turn count and the two series must
+//     not be naively added to the turn-denominated rate. Both are reported
+//     below.
 //   - real symbol extraction (observability): threads_created + match-fires
 //     count what the real model's tags/anchors drove through the runtime.
 //   - streaming: turn.Run drives ConsultStream; the run reaching this point
 //     with no turn.Run error (RunScenario t.Fatalf's otherwise) confirms the
 //     harness drained a real streaming endpoint cleanly.
-//   - §5.5 mid-turn re-prompt: `topic.re-prompt` counts dormant-resumption
-//     re-prompts the real model drove and the runtime handled without desync.
-func reportInferenceBehavior(t *testing.T, h *scenarios.Harness) {
+//   - mid-turn re-prompts: `topic.re-prompt` is split by cause= —
+//     missing-thread (§5.5 dormant-resumption fetches) and missing-tag (D6
+//     protocol reminders) — and each series is reported separately; both
+//     confirm the runtime handled the extra stream without desync.
+func reportInferenceBehavior(t *testing.T, h *scenarios.Harness, d time.Duration, corpus []CorpusSlot) {
 	t.Helper()
+
+	// A2 tag-fidelity grader (live-inference only). It regenerates the canonical
+	// plan for the SAME cfg the run used (Seed/Duration/Corpus + the live-inference
+	// large-input profile runSimRung installs), grades the model's tag discipline
+	// against plan intent, and re-writes the metrics blob with the three
+	// tag-fidelity series. Gated inside recordTagFidelityMetrics (liveInference
+	// true here) — the mock path never reaches it, keeping the mock blob clean.
+	cfg := WorkloadConfig{Seed: simSeed, Duration: d, Corpus: corpus}
+	cfg.LargeInputEveryN = largeInputRungEveryN
+	cfg.LargeInputBytes = largeInputRungBytes
+	recordTagFidelityMetrics(t, h, cfg, true)
+
 	m, err := readMetrics(h.MetricsPath)
 	if err != nil {
 		t.Fatalf("reportInferenceBehavior: read metrics blob: %v", err)
@@ -190,25 +212,174 @@ func reportInferenceBehavior(t *testing.T, h *scenarios.Harness) {
 	if turns > 0 {
 		parsedRate = float64(tagParsed) / float64(turns)
 	}
+	// Split the shared topic.re-prompt act by cause=: the two series measure
+	// different failure modes (§5.5 dormant-resumption fetch vs D6 tag
+	// omission) and folding them together misreports both.
+	fetchReprompts := logEventCount(t, h, "topic.re-prompt cause=missing-thread")
+	tagReprompts := logEventCount(t, h, "topic.re-prompt cause=missing-tag")
+	// Stream-level model omissions (see the doc comment above): recovered
+	// re-prompts leave no topic.tag-missing line, and a double-miss turn
+	// emits one line of EACH — the sum counts omitted streams, not turns.
+	omissionEvents := tagMissing + tagReprompts
 
 	t.Logf("=== inference-in-loop behavior validation (#98, oracle BLIND — no recall claim) ===")
 	t.Logf("turns:                    %d (live chat model, streaming via ConsultStream)", turns)
-	t.Logf("topic-tag discipline:     %d/%d parseable (%.3f); %d missing (runtime `topic.tag-missing`)",
+	t.Logf("topic-tag discipline:     %d/%d parseable (%.3f); %d missing (runtime `topic.tag-missing`, FINAL responses only)",
 		tagParsed, int(turns), parsedRate, tagMissing)
+	t.Logf("model tag omissions:      %d stream-level events (= %d tag-missing + %d missing-tag re-prompts; "+
+		"a double-miss turn emits both — not a turn count)",
+		omissionEvents, tagMissing, tagReprompts)
 	t.Logf("threads created:          %d (real-model tags/anchors that drove §3.0.4 creation)",
 		m.Counters[scenarios.MetricThreadsCreated])
 	t.Logf("engaged existing threads: %d (real-model tags naming a live thr_<n>)",
 		m.Counters[scenarios.MetricEngagedExistingThreads])
 	t.Logf("topic.warning lines:      %d (malformed-tag drift the runtime tolerated)",
 		logEventCount(t, h, "topic.warning"))
-	t.Logf("§5.5 mid-turn re-prompts: %d (dormant-resumption re-prompts handled with no queue desync)",
-		logEventCount(t, h, "topic.re-prompt"))
+	t.Logf("§5.5 mid-turn re-prompts: %d (cause=missing-thread dormant-resumption fetches, no queue desync)",
+		fetchReprompts)
+	t.Logf("D6 tag re-prompts:        %d (cause=missing-tag protocol reminders; recovered omissions log no tag-missing)",
+		tagReprompts)
 	t.Logf("spine.match-fire:         %d (symbolic recall fires off real-model symbols — observability only)",
 		logEventCount(t, h, "spine.match-fire "))
 	if *liveEmbedding {
 		t.Logf("spine.embed-match-fire:   %d (embedding recall fires; fullest live mode, still oracle-blind)",
 			logEventCount(t, h, "spine.embed-match-fire "))
 	}
+}
+
+// recordTagFidelityMetrics is the A2 tag-fidelity live-inference entry point. It
+// builds the plan (ground-truth intent) / observed (event-log tag outcomes) /
+// live (post-run spine) inputs, grades the re-engagement series, computes the
+// anchor-emission overlap from the post-run frontmatter, and writes all three
+// registry series (plus diagnostic companions) into the metrics blob. It NO-OPS
+// when liveInference is false — the mock-run vacuity guard: a scripted mock's
+// tags are true-by-construction, so the series would be vacuous (the
+// request_prompt_tokens liveClient-gating precedent).
+//
+// It re-writes the metrics blob after Setting the series because runSimRung
+// already wrote it once; h.Metrics still holds every prior series, so the
+// re-write is the full blob plus the tag-fidelity additions. It never fails the
+// test on an embedder problem — an unreachable/unconfigured embedder degrades the
+// residue to unadjudicated (logged, counted); only a blob-rewrite fault is fatal.
+func recordTagFidelityMetrics(t *testing.T, h *scenarios.Harness, cfg WorkloadConfig, liveInference bool) {
+	t.Helper()
+	if !liveInference {
+		return // vacuity guard — no series on the mock path
+	}
+	ctx := context.Background()
+
+	plan := buildPlanTurns(cfg)
+	observed := buildObservedTurns(h.Paths.LogsDir)
+	live := buildLiveThreads(h.Paths)
+
+	// Observed groups with no plan instant (execution-time refinement/injected
+	// turns carry no canonical Step.At, so they never join) — a forensic count;
+	// a large value means the plan↔observed join is degrading.
+	unmatched := 0
+	planInstants := make(map[string]struct{}, len(plan))
+	for _, p := range plan {
+		planInstants[p.instant] = struct{}{}
+	}
+	for inst := range observed {
+		if _, ok := planInstants[inst]; !ok {
+			unmatched++
+		}
+	}
+
+	emb := resolveGraderEmbedder(ctx) // nil when unreachable/unconfigured
+	res := gradeTagFidelity(ctx, emb, plan, observed, live, tagFidelityRankK, tagFidelityBorderlineEps)
+	res.unmatchedGroups = unmatched
+
+	overlap, overlapObs := anchorEmissionOverlap(h.Paths)
+
+	// Miss rate over DECIDED turns (hits+misses); borderline/unadjudicated held
+	// out. 0 when nothing was decided (honest "unmeasured", not a false 0 rate).
+	decided := res.hits + res.misses
+	missRate := 0.0
+	if decided > 0 {
+		missRate = float64(res.misses) / float64(decided)
+	}
+	spuriousRate := 0.0
+	if res.reengageIntent > 0 {
+		spuriousRate = float64(res.spuriousNewTopic) / float64(res.reengageIntent)
+	}
+
+	h.Metrics.Set(scenarios.MetricTagFidelityReengageMissRate, missRate)
+	h.Metrics.Set(scenarios.MetricTagFidelitySpuriousNewTopicRate, spuriousRate)
+	h.Metrics.Set(scenarios.MetricTagFidelityAnchorOverlap, overlap)
+
+	h.Metrics.Set(metricTagFidelityReengageIntent, float64(res.reengageIntent))
+	h.Metrics.Set(metricTagFidelityHits, float64(res.hits))
+	h.Metrics.Set(metricTagFidelityMisses, float64(res.misses))
+	h.Metrics.Set(metricTagFidelitySpuriousCount, float64(res.spuriousNewTopic))
+	h.Metrics.Set(metricTagFidelityTagMissing, float64(res.tagMissing))
+	h.Metrics.Set(metricTagFidelityBorderline, float64(res.borderline))
+	h.Metrics.Set(metricTagFidelityUnadjudicated, float64(res.unadjudicated))
+	h.Metrics.Set(metricTagFidelityAnchorObs, float64(overlapObs))
+
+	embState := "reachable"
+	if emb == nil {
+		embState = "none (residue unadjudicated)"
+	}
+	log.Info("=== tag-fidelity (A2, oracle=plan-intent, embedder=%s) ===", embState)
+	log.Info("re-engagement intent turns: %d (decided=%d)", res.reengageIntent, decided)
+	log.Info("  miss rate:        %.3f (misses=%d)", missRate, res.misses)
+	log.Info("  spurious *new-topic* rate: %.3f (count=%d)", spuriousRate, res.spuriousNewTopic)
+	log.Info("  tag-missing:      %d  borderline:%d  unadjudicated:%d", res.tagMissing, res.borderline, res.unadjudicated)
+	log.Info("  anchor overlap:   %.3f (obs=%d threads)", overlap, overlapObs)
+	log.Info("  unmatched observed groups (refinement/injected): %d", unmatched)
+
+	if err := h.Metrics.WriteJSON(h.MetricsPath); err != nil {
+		t.Fatalf("tag-fidelity: rewrite metrics blob: %v", err)
+	}
+}
+
+// resolveGraderEmbedder builds the grader's OWN embedder from the sim-live
+// provider config (test/rundata) — the same config the sim-live install path
+// reads — WITHOUT touching the runtime Recaller (oracle independence). It is
+// non-fatal: a missing config, unresolvable embedding ref, or unreachable
+// endpoint returns nil so the residue falls back to unadjudicated. The chat-only
+// live-inference rung need not configure an embedding endpoint; a nil handle is
+// the honest "no adjudication available" signal.
+func resolveGraderEmbedder(ctx context.Context) graderEmbedder {
+	providersPath := filepath.Join(rundataDir, liveProvidersFile)
+	configPath := filepath.Join(rundataDir, liveConfigFile)
+	for _, p := range []string{providersPath, configPath} {
+		if _, err := os.Stat(p); err != nil {
+			return nil
+		}
+	}
+	providers, _, err := store.LoadProviders(providersPath)
+	if err != nil {
+		return nil
+	}
+	cfg, err := store.LoadConfig(configPath)
+	if err != nil || cfg.Embedding.Model == "" {
+		return nil
+	}
+	providerName, modelName, ok := memops.ParseModelRef(cfg.Embedding.Model)
+	if !ok {
+		return nil
+	}
+	provider, ok := providers.Get(providerName)
+	if !ok || provider.BaseURL == "" {
+		return nil
+	}
+	// Reachability probe: a live server answers /models quickly; an unreachable
+	// endpoint yields a nil handle (residue → unadjudicated).
+	if client, ok := model.NewHTTPClient(provider).(*model.HTTPClient); ok {
+		pctx, cancel := context.WithTimeout(ctx, liveProbeTimeout)
+		_, perr := client.ListModels(pctx)
+		cancel()
+		if perr != nil {
+			log.Warn("tag-fidelity: grader embedder %s/%s unreachable (%v) — residue unadjudicated",
+				providerName, modelName, perr)
+			return nil
+		}
+	}
+	log.Info("tag-fidelity: grader embedder = %s/%s dims=%d (measurement-side, independent of runtime recaller)",
+		providerName, modelName, cfg.Embedding.VectorLength)
+	return model.NewHTTPEmbedder(provider, modelName, cfg.Embedding.VectorLength)
 }
 
 // embeddingEndpoint returns the resolved embedding endpoint from the

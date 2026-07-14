@@ -403,3 +403,53 @@ func splitTrim(s string) []string {
 	}
 	return out
 }
+
+// TestMockGeneratedTagOmission — the D6 tag-omission knob. With
+// OmitTagEveryN=3, every third response omits the topic-tag line; every
+// other response — and the omitted responses' BODIES — are byte-identical
+// to a same-seed run with the knob off, proving the knob perturbs neither
+// the RNG stream nor the sim's determinism contract when disabled.
+func TestMockGeneratedTagOmission(t *testing.T) {
+	const seed = 99
+	opts := GeneratedMockOpts{
+		ThreadPool: []string{"thr_1", "thr_2"},
+		AnchorPool: []string{"alpha", "beta", "gamma", "delta", "epsilon"},
+	}
+	off := NewGeneratedMock(seed, opts)
+
+	optsOn := opts
+	optsOn.OmitTagEveryN = 3
+	on := NewGeneratedMock(seed, optsOn)
+
+	ctx := context.Background()
+	for i := 1; i <= 9; i++ {
+		base, err := off.Consult(ctx, Request{})
+		if err != nil {
+			t.Fatalf("off consult %d: %v", i, err)
+		}
+		got, err := on.Consult(ctx, Request{})
+		if err != nil {
+			t.Fatalf("on consult %d: %v", i, err)
+		}
+
+		baseFirstLine, baseBody, found := strings.Cut(base.Content, "\n")
+		if !found || !topicTagRe.MatchString(baseFirstLine) {
+			t.Fatalf("response %d: knob-off mock must always emit a leading tag: %q", i, base.Content)
+		}
+
+		if i%3 == 0 {
+			// Omitted response: exactly the tag line (and its newline) gone.
+			if got.Content != baseBody {
+				t.Errorf("response %d: omitted content must equal knob-off body\n got: %q\nwant: %q",
+					i, got.Content, baseBody)
+			}
+			if first, _, _ := strings.Cut(got.Content, "\n"); topicTagRe.MatchString(first) {
+				t.Errorf("response %d: tag line present on an omission response: %q", i, first)
+			}
+		} else if got.Content != base.Content {
+			// Non-omitted responses byte-identical to the knob-off run.
+			t.Errorf("response %d: non-omitted content diverged\n got: %q\nwant: %q",
+				i, got.Content, base.Content)
+		}
+	}
+}

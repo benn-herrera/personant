@@ -112,6 +112,16 @@ type State struct {
 	// threads. Reset at the top of every Run alongside coalesce.
 	turnOwner string
 
+	// tagReprompted records that this turn's D6 missing-tag re-prompt was
+	// spent: the first stream lacked a leading topic tag while §3.9 file
+	// edits were buffered, so the request was re-issued with
+	// prompt.TopicTagReminder appended. Read by the close-time
+	// owner-default (closeTurnAndUpdateEngagement) for the
+	// thread.tag-defaulted line's reprompted= field, and by the re-issue
+	// loop as the per-cause cap. Reset at the top of every Run alongside
+	// turnOwner.
+	tagReprompted bool
+
 	// fileEdits buffers §3.9 file-edit events (fs.read / fs.write /
 	// fs.commit) observed across the deltas of one turn. File-edit deltas
 	// arrive before the turn's engaged thread is known (engagement is
@@ -301,13 +311,25 @@ func LoadSession(ctx context.Context, ops memops.MemoryOps, project memops.Proje
 	return state, nil
 }
 
-// maxRePromptsPerTurn caps the §5.5 system-injected mid-turn re-prompt at
-// 1 per turn. Total LLM stream attempts within a turn ≤ 1 +
-// maxRePromptsPerTurn = 2. The constant exists for symmetry with future
-// directive plumbing (§2.6.1) that may expose it as a parameter; the
-// six-month simulation (§11.1) will measure incidence and steady-state
-// latency cost.
-const maxRePromptsPerTurn = 1
+// Mid-turn re-prompt bound (§5.5 + D6). A turn allows AT MOST ONE
+// system-injected re-prompt PER CAUSE, and there are exactly two causes:
+//
+//   - missing-thread (§5.5): the tag references a thr_<n> not in Layer B —
+//     the intervention is context augmentation (fetch + recompose).
+//   - missing-tag (D6): the response lacks a leading tag on a turn whose
+//     §3.9 buffered file edits require owner binding — the intervention is
+//     a protocol reminder (prompt.TopicTagReminder appended).
+//
+// Combined bound: ≤ 2 re-prompts, ≤ 3 model streams per turn. One per
+// cause because the causes are independent failure modes with independent
+// interventions; both firing in one turn requires two distinct model
+// failures, so the worst case is bounded AND rare. Never two for the same
+// cause: a repeat would re-run an intervention that just demonstrably
+// failed — no new information, only latency — so the second miss falls
+// through to the cause's deterministic close-time fallback (LRU pickup for
+// missing-thread, owner-default for missing-tag). The per-cause caps are
+// the fetchReprompted / state.tagReprompted flags in RunWithInfo; a bool
+// per cause IS the cap, so there is no tunable constant.
 
 // commitOnStructuralChange gates the §3.11 turn-close commit cadence: when
 // true (the default), a turn that produced ≥1 structural change (thread
@@ -372,8 +394,11 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 //     chunks through a topic-tag stream filter to out as they arrive.
 //     If the model's topic tag references a thread not in Layer B, the
 //     in-flight stream is aborted, the missing thread is fetched (per
-//     §5.5), and the request is re-issued with augmented context. The
-//     re-prompt is capped at maxRePromptsPerTurn per turn.
+//     §5.5), and the request is re-issued with augmented context. If the
+//     response lacks a tag while §3.9 file edits are buffered, the stream
+//     is aborted and re-issued with prompt.TopicTagReminder appended (D6).
+//     Re-prompts are capped at 1 per cause, ≤ 2 per turn (see the bound
+//     comment above NewState).
 //  6. Fire model.response context-modify event (parses topic tag,
 //     accumulates symbols, defers engagement) after the stream completes.
 //     Per §3.0.5 the model.response delta fires once with the full body,
@@ -427,6 +452,10 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	// The single-owner stamp is per-turn — clear it so the prior turn's
 	// owner cannot trip this turn's claim guard.
 	state.turnOwner = ""
+	// The D6 tag re-prompt flag is per-turn — clear it so a prior turn's
+	// re-prompt neither caps this turn's nor mislabels its
+	// thread.tag-defaulted line.
+	state.tagReprompted = false
 	// §3.11 structural-change counters are per-turn — clear them so the
 	// turn-close cadence check sees only this turn's creates/retires/wips.
 	state.structuralCreates = 0
@@ -471,6 +500,10 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 
 	// Step 2: compose working-set and assemble the system prompt.
 	// (Budget is materialized at the top of Run, before the reject check.)
+	// Once the D6 tag re-prompt has fired (state.tagReprompted), every
+	// recomposition — including a later §5.5 fetch recompose in the same
+	// turn — re-appends the reminder, so the fetch path cannot silently
+	// drop it.
 	buildSystemPrompt := func() (string, error) {
 		ws, err := state.Ops.ComposeWorkingSet(ctx, memops.WorksetInput{
 			ActiveProject:  state.ActiveProject,
@@ -481,13 +514,17 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		if err != nil {
 			return "", err
 		}
-		return prompt.BuildSystemPrompt(prompt.SystemPromptElements{
+		sp := prompt.BuildSystemPrompt(prompt.SystemPromptElements{
 			LayerE:  ws.LayerE,
 			LayerA1: ws.LayerA1,
 			LayerA2: ws.LayerA2,
 			LayerB:  ws.LayerB,
 			LayerC:  ws.LayerC,
-		}), nil
+		})
+		if state.tagReprompted {
+			sp += "\n\n" + prompt.TopicTagReminder
+		}
+		return sp, nil
 	}
 
 	systemPrompt, err := buildSystemPrompt()
@@ -505,6 +542,11 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	// body. It is created once and only receives writes on the final
 	// (non-aborted) attempt; aborted attempts never touch out.
 	filter := prompt.NewStreamFilter(out)
+
+	// Per-cause re-prompt caps (see the mid-turn re-prompt bound comment
+	// above NewState). fetchReprompted is loop-local; the tag cause lives
+	// on State because the close-time owner-default reads it.
+	fetchReprompted := false
 
 	var full model.Response
 	for attempt := 0; ; attempt++ {
@@ -540,10 +582,10 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 			return "", TurnInfo{}, fmt.Errorf("turn: read preamble: %w", err)
 		}
 
-		// §5.5 mid-turn fetch: if the preamble is a topic tag referencing
-		// a thr_<n> not in Layer B, abort the stream, fetch the thread,
-		// and re-prompt. Capped at maxRePromptsPerTurn per turn.
-		if attempt < maxRePromptsPerTurn && pre.tag != nil {
+		// §5.5 mid-turn fetch (cause: missing-thread): if the preamble is a
+		// topic tag referencing a thr_<n> not in Layer B, abort the stream,
+		// fetch the thread, and re-prompt. Once per turn for this cause.
+		if !fetchReprompted && pre.tag != nil {
 			missing := missingFromActiveB(pre.tag.Threads, state.ActiveThreads)
 			fetched := 0
 			for _, thrID := range missing {
@@ -552,15 +594,40 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 				}
 			}
 			if fetched > 0 {
+				fetchReprompted = true
 				_ = sr.Close()
 				_ = state.Ops.Log(ctx, memops.LogCategoryTopic, "re-prompt",
-					"fetched="+strconv.Itoa(fetched)+" attempt="+strconv.Itoa(attempt+1))
+					"cause=missing-thread fetched="+strconv.Itoa(fetched)+" attempt="+strconv.Itoa(attempt+1))
 				systemPrompt, err = buildSystemPrompt()
 				if err != nil {
 					return "", TurnInfo{}, fmt.Errorf("turn: recompose working set: %w", err)
 				}
 				continue
 			}
+		}
+
+		// D6 tag re-prompt (cause: missing-tag): the response conclusively
+		// lacks a leading topic tag AND this turn's deltas require owner
+		// binding (§3.9 buffered file edits — complete by now, since fs.*
+		// deltas arrive as pre-prompt events; nothing after the stream adds
+		// to the buffer). Abort the stream and re-issue with the reminder
+		// appended (buildSystemPrompt reads state.tagReprompted). Once per
+		// turn for this cause; a still-tag-less second response falls
+		// through to the close-time owner-default. A tag-less turn WITHOUT
+		// buffered edits is deliberately not re-prompted — it proceeds
+		// tag-less (see closeTurnAndUpdateEngagement's conversational
+		// branch). Mutually exclusive with the fetch branch above within
+		// one attempt (that one requires pre.tag != nil).
+		if !state.tagReprompted && len(state.fileEdits) > 0 && preambleLacksTag(pre) {
+			state.tagReprompted = true
+			_ = sr.Close()
+			_ = state.Ops.Log(ctx, memops.LogCategoryTopic, "re-prompt",
+				"cause=missing-tag attempt="+strconv.Itoa(attempt+1))
+			systemPrompt, err = buildSystemPrompt()
+			if err != nil {
+				return "", TurnInfo{}, fmt.Errorf("turn: recompose working set: %w", err)
+			}
+			continue
 		}
 
 		// No re-prompt — drain the stream through the filter, starting

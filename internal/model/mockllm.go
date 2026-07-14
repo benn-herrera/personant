@@ -102,6 +102,19 @@ type GeneratedMockOpts struct {
 	// BodyWords is the lorem-ipsum-ish word count of the generated
 	// response body. 0 → defaultBodyWords.
 	BodyWords int
+
+	// OmitTagEveryN — when > 0, every Nth synthesized response (response
+	// counter divisible by N) omits the §5.1 topic-tag line entirely,
+	// modeling the intermittent tag omission real models exhibit (D6
+	// missing-tag recovery, burn-down 2026-07b A1). The tag is still
+	// drawn from the RNG before being dropped, so the pseudo-random
+	// stream — and therefore every other response, and the omitted
+	// response's BODY — is byte-identical to the same seed/opts run with
+	// the knob off; only the tag line and its newline are absent from the
+	// omitted response. 0 (the default) disables omission: the synthesize
+	// path is byte-identical to the pre-knob mock, preserving the sim's
+	// determinism contract.
+	OmitTagEveryN int
 }
 
 const (
@@ -298,10 +311,18 @@ func WithPreamble(resp Response, preamble string) Response {
 // by the caller (Consult).
 func (m *MockClient) synthesize() Response {
 	m.counter++
+	// The tag is ALWAYS drawn, even when this response omits it — see the
+	// OmitTagEveryN doc: keeping the RNG draw makes an omission-mode run's
+	// stream byte-identical to the knob-off run everywhere except the
+	// dropped tag line itself.
 	tag := m.makeTopicTag()
 	body := m.makeBody(m.counter)
+	content := tag + "\n" + body
+	if n := m.genOpts.OmitTagEveryN; n > 0 && m.counter%n == 0 {
+		content = body
+	}
 	return Response{
-		Content:      tag + "\n" + body,
+		Content:      content,
 		FinishReason: "stop",
 		Usage: Usage{
 			PromptTokens:     8,

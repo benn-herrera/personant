@@ -1148,3 +1148,154 @@ func TestScenario_WallClockDecayTriggeredClosure(t *testing.T) {
 	}
 	RunScenario(t, sc)
 }
+
+// runLogBody concatenates every day-log file under h.Paths.LogsDir for
+// whole-run substring/count assertions made after RunScenario returns.
+func runLogBody(t *testing.T, h *Harness) string {
+	t.Helper()
+	entries, err := os.ReadDir(h.Paths.LogsDir)
+	if err != nil {
+		t.Fatalf("runLogBody: read logs dir: %v", err)
+	}
+	var all strings.Builder
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(h.Paths.LogsDir, e.Name()))
+		if err != nil {
+			t.Fatalf("runLogBody: read %s: %v", e.Name(), err)
+		}
+		all.Write(body)
+	}
+	return all.String()
+}
+
+// tagOmissionMock builds the generated mock the two tag-omission scenarios
+// drive through the Scenario.LiveClient seam. The scenario harness's own
+// scripted mock re-serves ONE canned response per step, so it cannot model
+// "first stream tag-less, re-prompted stream tagged" — the generated mock
+// synthesizes a FRESH response per consult, and OmitTagEveryN drops the tag
+// on every Nth one, which is exactly the intermittent-omission shape the D6
+// recovery was built for (A1 acceptance: scenarios were locked during A1,
+// so this is the knob's first scenario-level consumer).
+func tagOmissionMock(omitEveryN int) *model.MockClient {
+	return model.NewGeneratedMock(1, model.GeneratedMockOpts{
+		ThreadPool:    []string{"*new-topic*"},
+		AnchorPool:    []string{"alpha", "beta", "gamma", "delta"},
+		OmitTagEveryN: omitEveryN,
+	})
+}
+
+// fsWritePre is the §3.9 pre-prompt delta that makes a scenario turn
+// binding-required (the D6 recovery trigger).
+func fsWritePre(path string) []turn.Delta {
+	return []turn.Delta{{
+		Source:  memops.SourceFSWrite,
+		Content: "v1",
+		Meta:    map[string]string{"path": path},
+	}}
+}
+
+// TestScenario_TagOmissionRepromptRecovers drives the D6 stage-1 recovery
+// end-to-end under `make test` via the mock OmitTagEveryN knob (A1
+// acceptance): with N=2, step 2's first consult (counter 2) omits the tag on
+// a binding-required turn, the runtime fires the missing-tag re-prompt, and
+// the re-issued consult (counter 3) tags — the turn binds normally with no
+// owner-default.
+func TestScenario_TagOmissionRepromptRecovers(t *testing.T) {
+	sc := Scenario{
+		Name:       "tag-omission-reprompt-recovers",
+		LiveClient: tagOmissionMock(2),
+		LiveModel:  "generated-mock-omit-2",
+		Steps: []Step{
+			{
+				// Consult 1 (tagged *new-topic*) → thr_1.
+				UserInput:  "start some work",
+				Annotation: "turn 1 — tagged, creates thr_1",
+				Invariants: []InvariantCheck{assertThreadCount(1)},
+			},
+			{
+				// Consult 2 omits the tag (counter 2, N=2) on a turn with a
+				// buffered fs.write → re-prompt; consult 3 tags *new-topic* →
+				// thr_2 owns the turn and the edit binds there.
+				PreEvents:  fsWritePre("src/a.go"),
+				UserInput:  "edit the file",
+				Annotation: "turn 2 — omitted tag recovered by re-prompt",
+				Invariants: []InvariantCheck{
+					assertThreadCount(2),
+					assertThreadTurnCount("thr_2", 1),
+					assertLogContains("topic.re-prompt cause=missing-tag"),
+				},
+			},
+		},
+	}
+	h := RunScenario(t, sc)
+
+	logBody := runLogBody(t, h)
+	if got := strings.Count(logBody, "topic.re-prompt cause=missing-tag"); got != 1 {
+		t.Errorf("missing-tag re-prompt count: got %d want 1:\n%s", got, logBody)
+	}
+	if strings.Contains(logBody, "thread.tag-defaulted") {
+		t.Errorf("owner-default fired though the re-prompt recovered the tag:\n%s", logBody)
+	}
+	tf, err := store.LoadThreadFiles(h.Paths, "thr_2")
+	if err != nil {
+		t.Fatalf("LoadThreadFiles thr_2: %v", err)
+	}
+	if _, ok := tf.Entry("src/a.go"); !ok {
+		t.Error("sidecar missing src/a.go on thr_2 (recovered tag did not bind the edit)")
+	}
+}
+
+// TestScenario_TagOmissionDoubleMissOwnerDefault is the double-miss variant:
+// with N=1 EVERY consult omits the tag, so each binding-required turn spends
+// its re-prompt AND still lacks a tag — the close-time owner-default binds
+// it. Turn 1 has no Layer-B candidate (fresh home) → new-thread terminal;
+// turn 2's default binds the now-resident thr_1.
+func TestScenario_TagOmissionDoubleMissOwnerDefault(t *testing.T) {
+	sc := Scenario{
+		Name:       "tag-omission-double-miss-owner-default",
+		LiveClient: tagOmissionMock(1),
+		LiveModel:  "generated-mock-omit-1",
+		Steps: []Step{
+			{
+				PreEvents:  fsWritePre("src/a.go"),
+				UserInput:  "edit one",
+				Annotation: "turn 1 — double miss, no candidate → new thr_1 owns",
+				Invariants: []InvariantCheck{
+					assertThreadCount(1),
+					assertThreadTurnCount("thr_1", 1),
+					assertLogContains("thread.tag-defaulted thr=thr_1 cause=missing-tag reprompted=yes"),
+				},
+			},
+			{
+				PreEvents:  fsWritePre("src/b.go"),
+				UserInput:  "edit two",
+				Annotation: "turn 2 — double miss, defaults to resident thr_1",
+				Invariants: []InvariantCheck{
+					assertThreadCount(1),
+					assertThreadTurnCount("thr_1", 2),
+				},
+			},
+		},
+	}
+	h := RunScenario(t, sc)
+
+	logBody := runLogBody(t, h)
+	if got := strings.Count(logBody, "topic.re-prompt cause=missing-tag"); got != 2 {
+		t.Errorf("missing-tag re-prompt count: got %d want 2 (one per turn):\n%s", got, logBody)
+	}
+	if got := strings.Count(logBody, "thread.tag-defaulted thr=thr_1 cause=missing-tag reprompted=yes"); got != 2 {
+		t.Errorf("tag-defaulted count: got %d want 2:\n%s", got, logBody)
+	}
+	tf, err := store.LoadThreadFiles(h.Paths, "thr_1")
+	if err != nil {
+		t.Fatalf("LoadThreadFiles thr_1: %v", err)
+	}
+	for _, p := range []string{"src/a.go", "src/b.go"} {
+		if _, ok := tf.Entry(p); !ok {
+			t.Errorf("sidecar missing %s on default owner thr_1", p)
+		}
+	}
+}

@@ -112,6 +112,43 @@ func classifyPreamble(head []byte, ended bool) preambleResult {
 	return res
 }
 
+// preambleLacksTag reports whether a streamed response conclusively lacks
+// a leading §5.1.2 topic tag — the D6 missing-tag re-prompt trigger. The
+// bounded preamble scan is the runtime's operational definition of
+// "response start" (the same authority behind the §5.5 fetch decision and
+// the stream-filter tag suppression), so a tag buried past the scan bound
+// (PreambleScanLineCap lines / PreambleScanByteCap bytes) counts as
+// missing here.
+//
+// That bound is an ASYMMETRY against the close-time parser, not a shared
+// convention: prompt.Parse at turn close binds a valid tag found ANYWHERE
+// in the body, unbounded. So a response whose only tag sits past the scan
+// bound is treated as tag-less by this trigger even though the close-time
+// parse would have bound it — the stream is discarded and re-prompted.
+// The cost is one wasted model stream on that (rare, deep-tag) shape; the
+// failure mode is graceful: the re-issued response's tag binds normally,
+// and a still-deep second tag binds at close (the coalesce is non-empty,
+// so the owner-default never fires). Accepted as the price of a bounded
+// streaming hold — closing the asymmetry would mean buffering the whole
+// stream before the re-prompt decision.
+//
+// One refinement keeps the trigger honest at stream end: when EOF arrived
+// before the scan resolved (pre.ended), the ENTIRE response is already in
+// pre.head, so the complete-body Parse is exact and free. That prevents a
+// wasted model round-trip for a tag on an unterminated final line (which
+// PreambleScan cannot classify but the close-time parse would bind
+// normally).
+func preambleLacksTag(pre preambleResult) bool {
+	if pre.tag != nil {
+		return false
+	}
+	if pre.ended {
+		_, err := prompt.Parse(string(pre.head))
+		return err != nil
+	}
+	return true
+}
+
 // missingFromActiveB returns thread ids from threads that are not
 // present in active. The literal "*new-topic*" sentinel never needs
 // fetching and is filtered out unconditionally.

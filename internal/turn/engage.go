@@ -14,27 +14,28 @@ import (
 	"personant/internal/store"
 )
 
-// Topic-tag protocol violation surface (MAD B2 / T1-3). When an LLM emits
-// fs.write tool calls without a same-turn topic tag, the workspace file is
-// already written (OS-level fs.write is irreversible) but no engaged thread
-// exists to bind the canonical §3.9 sidecar entry against. The runtime
-// fails the turn loudly: substrate state does not advance, the unsynced
-// paths are logged for human reconciliation, and the error names the
-// paths so an upstream tutoring system can surface the violation.
+// Topic-tag protocol recovery surface (D6, burn-down 2026-07b A1). When an
+// LLM response omits the topic tag on a turn whose deltas require owner
+// binding (buffered §3.9 file edits), the workspace file is already written
+// (OS-level fs.write is irreversible) and a canonical sidecar entry must
+// bind to SOME thread. The former fail-loud abort
+// (ErrFileEditWithoutTopicTag, MAD B2 / T1-3) is retracted: the 1d
+// live-inference run showed a real model intermittently omits the tag
+// (turn 91 abort after ~90 coherent turns), so refusing the turn punishes
+// the user for a model hiccup. Recovery instead (spec §3.3):
 //
-// Future hardening: enforce topic-tag-first at stream parse time so the
-// fs.write tool call can be rejected before the OS-level write. Out of
-// scope for B2 — see MAD T1-3 follow-up.
-const (
-	logCatFS                          = "fs"
-	logActUnsyncedNoTopicTag          = "unsynced-no-topic-tag"
-	errMsgFileEditWithoutTopicTagHead = "turn aborted: fs.write without topic tag (spec §3.0/§3.3 protocol violation); substrate state not advanced; unsynced paths: "
-)
-
-// ErrFileEditWithoutTopicTag is returned by closeTurnAndUpdateEngagement
-// when a turn buffers file edits but engages no thread. Callers and
-// tests can match via errors.Is.
-var ErrFileEditWithoutTopicTag = errors.New("fs.write without topic tag")
+//  1. RunWithInfo issues a single mid-turn tag re-prompt (§5.5 machinery,
+//     cause=missing-tag) before this close-time code ever sees the turn.
+//  2. If the response is STILL tag-less, the turn binds to the
+//     deterministic owner-default below (defaultOwnerForTagless), with a
+//     `thread.tag-defaulted` forensic line. The integrity concern the old
+//     abort answered — an edit silently absorbed by the wrong thread — is
+//     answered by determinism + forensic visibility, not refusal.
+//
+// logActTagDefaulted is that forensic line's act. Emitted once per
+// defaulted turn, after the owner is known: thr=<bound owner>,
+// cause=missing-tag, reprompted=yes|no.
+const logActTagDefaulted = "tag-defaulted"
 
 // ErrTurnAlreadyOwned is returned by claimTurnOwner when a second thread
 // attempts to take ownership of a turn whose excerpt has already been
@@ -92,32 +93,42 @@ func claimTurnOwner(state *State, threadID string) error {
 // re-prompt for). Those threads enter ActiveThreads at turn close so
 // the next turn's prompt includes them.
 func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, responseBody string) error {
+	// tagDefaulted records that this turn's owner was chosen by the D6
+	// owner-default (no tag survived the re-prompt); the forensic line is
+	// emitted below once engaged[0] — the actually-bound owner — is known.
+	tagDefaulted := false
 	if len(state.coalesce.threads) == 0 {
-		// No thread was engaged this turn. If §3.9 file edits are buffered,
-		// the LLM has violated the spec §3.0/§3.3 topic-tag protocol: a
-		// canonical workspace write must travel with a topic tag so the
-		// edit binds to a thread's tracked-file sidecar. The workspace file
-		// already exists on disk (OS-level fs.write is irreversible) but
-		// the substrate has no thread to attach to. Silently dropping the
-		// edit would mask the violation, so fail the turn loudly: do not
-		// advance substrate state, log each unsynced path so a human can
-		// reconcile, and return an error naming the paths.
-		//
-		// Future: enforce topic-tag-first at stream parse time to reject
-		// the fs.write tool call before the OS-level write — see MAD T1-3
-		// follow-up.
-		if len(state.fileEdits) > 0 {
-			paths := unsyncedEditPaths(state.fileEdits)
-			for _, p := range paths {
-				_ = state.Ops.Log(ctx, logCatFS, logActUnsyncedNoTopicTag,
-					"path="+memops.SanitizeDetail(p)+" reason=no-engaged-thread")
-			}
-			return fmt.Errorf("%s%s: %w",
-				errMsgFileEditWithoutTopicTagHead,
-				strings.Join(paths, ", "),
-				ErrFileEditWithoutTopicTag)
+		if len(state.fileEdits) == 0 {
+			// Tag-less conversational turn: nothing requires owner binding,
+			// so the turn proceeds tag-less — no engagement update, no
+			// excerpt, no owner; the response still reaches the user and
+			// session History. extractSymbols already logged
+			// topic.tag-missing for calibration. This asymmetry with the
+			// binding-required branch below is deliberate (D6): a
+			// conversational turn's content has no canonical write that
+			// needs an owner, so spending a model round-trip (re-prompt) or
+			// inventing an engagement (owner-default) to recover advisory
+			// metadata would be machinery without a customer.
+			return nil
 		}
-		return nil
+		// D6 owner-default (recovery stage 2 — see the file-top comment):
+		// §3.9 file edits are buffered but no tag survived the mid-turn
+		// re-prompt. Bind the turn to the thread that would own it absent
+		// any tag; when no candidate resolves, fall through to new-thread
+		// creation exactly like the D2 fallback-(ii) path (the turn's
+		// excerpt and edits are never dropped). The chosen id is injected
+		// into the coalesce buffer so the normal resolution/ownership/
+		// binding machinery below runs unmodified — the default is an
+		// input to the standard path, not a parallel one.
+		defaultID, err := defaultOwnerForTagless(ctx, state)
+		if err != nil {
+			return err
+		}
+		if defaultID == "" {
+			defaultID = prompt.NewTopicLiteral
+		}
+		state.coalesce.addThread(defaultID)
+		tagDefaulted = true
 	}
 
 	now := clock.Timeline().Format(time.RFC3339)
@@ -224,6 +235,34 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 		engaged = append(engaged, newID)
 	}
 
+	// D6 forensic line: the owner-default bound this turn. Emitted here —
+	// after the engagement blocks — so thr= names the ACTUAL bound owner
+	// (engaged[0]), including a freshly created thr_<n> from the
+	// no-candidate fallback. reprompted= records whether the mid-turn tag
+	// re-prompt fired first.
+	//
+	// The reprompted=no arm is currently UNREACHABLE, kept as
+	// defense-in-depth. Reaching owner-default requires the FINAL response
+	// to lack a valid tag (a valid tag ⇒ non-empty coalesce ⇒ this branch
+	// never runs), on a turn with buffered §3.9 edits. All fs.* deltas
+	// arrive as pre-prompt events, so the edit buffer is complete before
+	// any stream; the per-cause flag is fresh each turn; and the close-time
+	// parser is strictly more permissive than the preamble scan (a tag the
+	// scan finds, Parse finds). So the drain attempt of a tag-less binding
+	// turn can only be reached with state.tagReprompted already true — the
+	// re-prompt always fired first. The arm would become live if a future
+	// change lets the edit buffer grow after the drain decision (mid-stream
+	// fs deltas), or adds a policy that skips the re-prompt (cost cap,
+	// offline mode). Until then reprompted=no in a log is itself a finding.
+	if tagDefaulted {
+		reprompted := "no"
+		if state.tagReprompted {
+			reprompted = "yes"
+		}
+		_ = state.Ops.Log(ctx, memops.LogCategoryThread, logActTagDefaulted,
+			"thr="+engaged[0]+" cause=missing-tag reprompted="+reprompted)
+	}
+
 	// §3.9 step-3 close: apply this turn's buffered file edits to the
 	// primary engaged thread (engaged[0] — for a `work` turn that is the
 	// turn's single engaged thread). A RecordFileCommit error (an
@@ -266,21 +305,49 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 	return nil
 }
 
-// unsyncedEditPaths returns the de-duplicated, insertion-ordered list of
-// file paths in edits. Used by the fail-loud topic-tag-protocol branch in
-// closeTurnAndUpdateEngagement so each path is logged exactly once and the
-// returned error names paths in the order they were buffered.
-func unsyncedEditPaths(edits []fileEdit) []string {
-	out := make([]string, 0, len(edits))
-	seen := make(map[string]struct{}, len(edits))
-	for _, fe := range edits {
-		if _, ok := seen[fe.path]; ok {
+// defaultOwnerForTagless picks the D6 owner-default: the thread that would
+// own this turn had no tag ever been required — the most recently engaged
+// valid thread in the model's working window. Candidates are Layer B
+// (state.ActiveThreads): those are the threads whose bodies the model was
+// looking at when it emitted the tag-less response, so the conversation's
+// current thread is among them whenever one exists.
+//
+// Ranking is state.ActiveThreads ORDER (index 0 = most recently engaged;
+// the first resolving candidate wins). The list order is the persisted
+// honest recency signal (turn.go State.ActiveThreads): it survives
+// SaveWorkingSet/LoadSession across a relaunch. The earlier ranking by
+// spine LastEngagedTurn (shared with mostRecentEngagedID) was
+// ANTI-recency after a restart: LastEngagedTurn stores the SESSION-scoped
+// State.TurnNumber, which resets on LoadSession, so a stale prior-session
+// thread (turn 91) outranked the thread actively worked this session
+// (turn 3) — exactly inverted. The D2 fallback-(i) ranking
+// (mostRecentEngagedID) deliberately does NOT share this fix; see its doc.
+//
+// Candidates that fail to resolve — not in the spine, or another project's
+// record — are skipped SILENTLY: this scan judges the runtime's own LRU,
+// not a model emission, so the engaged-miss / engaged-cross-project
+// forensic lines (which attribute a phantom to the tag) would mislabel the
+// event. A FindThread failure is a substrate error and propagates — D6
+// forbids aborting for a missing TAG, not for a broken substrate.
+//
+// Returns "" when no candidate resolves (empty Layer B, or every entry
+// stale); the caller then routes to new-thread creation, the same terminal
+// the D2 fallback-(ii) path uses.
+func defaultOwnerForTagless(ctx context.Context, state *State) (string, error) {
+	for _, id := range state.ActiveThreads {
+		rec, found, err := state.Ops.FindThread(ctx, id)
+		if err != nil {
+			return "", fmt.Errorf("resolve owner-default candidate %s: %w", id, err)
+		}
+		if !found {
 			continue
 		}
-		seen[fe.path] = struct{}{}
-		out = append(out, fe.path)
+		if rec.Project != "" && rec.Project != state.ActiveProject.ID {
+			continue
+		}
+		return id, nil
 	}
-	return out
+	return "", nil
 }
 
 // applyFileEdits flushes this turn's buffered §3.9 file-edit events into
@@ -408,6 +475,26 @@ func resolveEngagedThread(ctx context.Context, state *State, threadID string) (m
 // this turn (highest LastEngagedTurn; ties broken by lowest thr_<n> id
 // for determinism). Returns "" when validIDs is empty — the caller then
 // falls through to fallback (ii), new-thread creation.
+//
+// This ranking deliberately KEEPS LastEngagedTurn despite the F1
+// session-scoped-counter finding that moved defaultOwnerForTagless to
+// ActiveThreads order (LastEngagedTurn resets meaning across a relaunch,
+// so cross-session comparisons invert recency). Two reasons, decided on
+// the evidence:
+//   - The candidates here are the turn's OWN tagged ids — threads the
+//     model explicitly named this turn. All of them get engaged either
+//     way; ranking only picks which receives the excerpt / edit binding,
+//     so a stale-ranked choice is still a thread the model asserted is
+//     relevant NOW. The tag-less default (F1's scope) chooses among
+//     threads the model did NOT name, where anti-recency binds an edit
+//     to unrelated stale work — a categorically worse misbind.
+//   - ActiveThreads order cannot rank this candidate set: a tagged id
+//     may sit outside Layer B entirely (no rank), and a just-completed
+//     §5.5 fetch puts the fetched id at index 0 — fetch order, not
+//     engagement recency, which would corrupt the tiebreak it was meant
+//     to fix. The latent cross-session inversion here requires a phantom
+//     would-be owner PLUS ≥2 valid tagged threads whose LastEngagedTurn
+//     values span sessions; revisit only if forensics ever show it.
 func mostRecentEngagedID(validIDs []string, resolved map[string]memops.SpineRecord) string {
 	best := ""
 	bestTurn, bestN := -1, -1

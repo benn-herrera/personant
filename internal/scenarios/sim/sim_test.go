@@ -322,7 +322,7 @@ func TestSim(t *testing.T) {
 	// live model even though the recall oracle is blind. Skipped on the mock
 	// path (where -sim.live-inference is off).
 	if *liveInference {
-		reportInferenceBehavior(t, h)
+		reportInferenceBehavior(t, h, d, corpus)
 	}
 
 	// Light sanity band — a smoke rung, not a tuning gate. Derivation
@@ -1149,7 +1149,11 @@ func TestSim_DormantResumptionDrivesMidTurnFetch(t *testing.T) {
 
 	h := scenarios.RunScenario(t, sc)
 
-	reprompts := logEventCount(t, h, "topic.re-prompt")
+	// Count ONLY cause=missing-thread lines: `topic.re-prompt` is shared
+	// with the D6 missing-tag cause, and a missing-tag re-prompt fetches
+	// nothing — folding it in would spuriously fail the fetched≥reprompts
+	// bound on any rung whose mock omits tags.
+	reprompts := logEventCount(t, h, "topic.re-prompt cause=missing-thread")
 	if reprompts == 0 {
 		t.Fatalf("no §5.5 mid-turn fetch observed: the generated workload " +
 			"scheduled no resumption that reached the runtime")
@@ -1160,7 +1164,7 @@ func TestSim_DormantResumptionDrivesMidTurnFetch(t *testing.T) {
 	// it must be at least the re-prompt count (one re-prompt may fetch
 	// ≥1 thread).
 	if fetched := logEventCount(t, h, "source=thread.fetched"); fetched < reprompts {
-		t.Errorf("thread.fetched count %d < re-prompt count %d", fetched, reprompts)
+		t.Errorf("thread.fetched count %d < missing-thread re-prompt count %d", fetched, reprompts)
 	}
 }
 

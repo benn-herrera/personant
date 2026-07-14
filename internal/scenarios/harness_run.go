@@ -450,8 +450,14 @@ func stepRecordMetrics(h *Harness, step Step, elapsed time.Duration, preSpine, p
 	// reach the harness (turn.Run streams + tag-strips the body), and its tag
 	// discipline is measured authoritatively from the runtime's own
 	// `topic.tag-missing` log line (counted by the live behavior-validation
-	// summary), not from the canned plan. Skip them in live mode to avoid
-	// recording the plan as if it were the model.
+	// summary), not from the canned plan. Honest-accounting caveat:
+	// `topic.tag-missing` fires only for a turn's FINAL response — a
+	// D6-recovered omission (re-prompt succeeded) leaves no tag-missing line,
+	// so true model omissions = topic.tag-missing +
+	// topic.re-prompt(cause=missing-tag), stream-level; a double-miss turn
+	// emits BOTH lines, so the two series must not be naively summed into a
+	// turn-denominated rate (see reportInferenceBehavior). Skip them in live
+	// mode to avoid recording the plan as if it were the model.
 	if h.liveClient == nil {
 		h.Metrics.Record("response_bytes", float64(len(step.MockResponse.Content)))
 		if strings.Contains(step.MockResponse.Content, "*topic:") {

@@ -125,4 +125,34 @@ const (
 	MetricEmbedRecallFidelityPrecision = "embed_recall_fidelity_precision"
 	MetricEmbedRecallFidelityRecall    = "embed_recall_fidelity_recall"
 	MetricEmbedRecallFidelityF1        = "embed_recall_fidelity_f1"
+
+	// Tag-fidelity series (A2 / SPEC §9.1) — the live-inference tag-discipline
+	// grader in sim/tagfidelity.go. They are EMITTED ONLY on a live-inference
+	// rung (a scripted mock's tags are true-by-construction, so a mock-run series
+	// would be vacuous — the same liveClient-gating discipline as
+	// MetricRequestPromptTokens). Ground truth is the generator's PLAN INTENT
+	// (never a shadow thread-id, which is id-blind under live inference); the
+	// grader is hybrid: a symbolic anchor-overlap fast path plus RANK-based
+	// embedding adjudication of the non-overlapping residue (C.6: ranking is
+	// drift-invariant). They live in the registry rather than as sim-local
+	// literals per the A2 directive (single-source discipline; a future
+	// harness-side emitter can reference them without re-declaring a copy).
+	//
+	//   - MetricTagFidelityReengageMissRate: of the re-engagement-intent turns
+	//     the grader could DECIDE (hits + misses; borderline/unadjudicated
+	//     excluded), the fraction the model failed to bind to a thread matching
+	//     the prompted topic (spurious *new-topic*, missing tag, or a tagged
+	//     thread that is neither a symbolic overlap nor a top/near-top cosine
+	//     rank for the prompted content).
+	//   - MetricTagFidelitySpuriousNewTopicRate: of ALL re-engagement-intent
+	//     turns, the fraction the model tagged *new-topic* instead of the known
+	//     topic. Log-only (no embedder needed).
+	//   - MetricTagFidelityAnchorOverlap: mean per-thread Jaccard overlap between
+	//     the model-emitted anchors (history_symbols with source=model) and the
+	//     deterministic extraction pass's symbols (source=deterministic), over
+	//     threads carrying ≥1 model anchor. 0 with a 0 obs count is honest
+	//     "nothing to measure", not a defect.
+	MetricTagFidelityReengageMissRate     = "tag_fidelity_reengage_miss_rate"
+	MetricTagFidelitySpuriousNewTopicRate = "tag_fidelity_spurious_new_topic_rate"
+	MetricTagFidelityAnchorOverlap        = "tag_fidelity_anchor_overlap"
 )

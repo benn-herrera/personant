@@ -678,6 +678,10 @@ func GenerateWorkload(cfg WorkloadConfig) scenarios.Scenario {
 		// simNow seeds to the anchor so day 0's first turn's emergent gap is
 		// measured from clockStart (a few hours, since dayStart(0) ≈ 08:00).
 		simNow: scenarios.SimClockStart,
+		// execClock mirrors the harness pinnedClock, which also defaults to
+		// SimClockStart (harness_setup.go) — the two share one seed so the
+		// mirror is exact from step 0.
+		execClock: scenarios.SimClockStart,
 		model: corpusModel{
 			slots:      cfg.Corpus,
 			familySize: cfg.FamilySize,
@@ -1021,7 +1025,9 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 			// cross-check skips it rather than re-using the prior step's.
 			g.recallAttempts++
 			g.lastLayerBSnapshot = nil
-			return g.buildRefinementStep(), true
+			ref := g.buildRefinementStep()
+			g.reconcileAt(&ref)
+			return ref, true
 		default:
 			// MISS on the 3rd attempt — close as unresolved.
 			g.closeEpisodeUnresolved()
@@ -1065,7 +1071,61 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 		g.openEpisode(bs)
 	}
 
+	g.reconcileAt(&bs.step)
 	return bs.step, true
+}
+
+// reconcileAt keeps every emitted step's absolute At monotonically
+// at-or-after the harness's pinned clock, which the generator mirrors in
+// g.execClock. It is the burndown A3 fix — applied at the generator (the
+// source), so the harness's stepSetClock tripwire stays a pure canary and is
+// never itself the fix.
+//
+// The generator buffers a day of steps AHEAD of execution and stamps each with
+// an absolute At on the planned timeline. But the miss→refinement loop injects
+// EXTRA turns at EXECUTION time (buildRefinementStep), and the harness advances
+// pinnedClock by each refinement's TimeDelta. Those advances are NOT on the
+// planned timeline, so a step buffered to fire at the turn that spawned them —
+// the zero-TimeDelta wander/main/intra injected steps SHARE the preceding
+// natural turn's instant, and a following rapid turn can sit inside the
+// refinement window — carries an At that now PRECEDES the advanced pinnedClock.
+// Emitting it verbatim regresses the clock (the 1d live run's step-51 shape: a
+// main-thread engage trailing refined steps).
+//
+// The design contract (TestStepSetClock_RefinementNormalizesToPriorClock) is
+// that the next buffered step re-anchors the clock FORWARD to the planned
+// timeline — i.e. its At is >= the refinement-advanced clock. This enforces
+// that contract at the source: a step whose planned At predates a refinement
+// advance is re-anchored up to execClock rather than emitting a regressing At.
+// The advance stays TRANSIENT — once the planned timeline overtakes execClock
+// no bump fires and the clock rejoins the grid, so there is no permanent
+// precession off the 24h day grid.
+//
+// SleepCycle steps are skipped: the harness routes them off the clock path
+// (runStep returns before stepSetClock), so they neither read nor advance
+// pinnedClock, and the mirror must not either. An At-less step (the refinement)
+// advances execClock by its TimeDelta — mirroring the harness normalize
+// (pinnedClock + TimeDelta) — and keeps its At-less form so the harness derives
+// the identical instant.
+//
+// Determinism: on the zero-feedback drainSteps path (and every mock run's
+// canonical stream) no refinement is injected, so execClock never runs ahead of
+// the monotonic planned timeline; no bump ever fires and the emitted stream
+// stays byte-identical — TestGenerateWorkload_Deterministic holds.
+func (g *generator) reconcileAt(step *scenarios.Step) {
+	if step.SleepCycle {
+		return
+	}
+	if step.At.IsZero() {
+		// Execution-time refinement: the harness normalizes At to
+		// pinnedClock + TimeDelta. Mirror that advance; leave At unset.
+		g.execClock = g.execClock.Add(step.TimeDelta)
+		return
+	}
+	if step.At.Before(g.execClock) {
+		step.At = g.execClock
+	}
+	g.execClock = step.At
 }
 
 // openEpisode begins a new recall episode for the just-emitted buffered
@@ -1825,6 +1885,25 @@ type generator struct {
 	// pinnedClock both derive from it, so generator and harness share one
 	// coordinate system — the keystone that retires the dual-clock bug.
 	clockStart time.Time
+
+	// execClock is the generator's exact mirror of the harness's pinnedClock —
+	// the EXECUTION clock, distinct from simNow (the day-ahead GENERATION
+	// frontier). It seeds to SimClockStart (== the harness pinnedClock default,
+	// harness_setup.go) and advances only via reconcileAt, which replicates the
+	// single pinnedClock-advance path (stepSetClock): every emitted step sets
+	// pinnedClock = its At, an At-less refinement adds its TimeDelta, and a
+	// SleepCycle step is routed off the clock path (no advance). Because those
+	// are the ONLY pinnedClock mutations and each flows from one generator step,
+	// execClock == pinnedClock at all times.
+	//
+	// Its job is burndown A3: the miss→refinement loop injects EXTRA turns at
+	// execution time that advance pinnedClock OFF the planned timeline, so a step
+	// buffered to fire at (or just after) the turn that spawned them can carry an
+	// At that now PRECEDES the advanced clock — a regressing At that trips the
+	// stepSetClock tripwire. reconcileAt uses execClock to re-anchor such a step
+	// FORWARD to the current instant at the source, honoring the design contract
+	// that the next buffered step re-anchors the clock to the planned timeline.
+	execClock time.Time
 
 	// stepIndex is the running global 0-based index of the next step to emit
 	// (the build-all generator read this as len(g.steps)). There is NO stored

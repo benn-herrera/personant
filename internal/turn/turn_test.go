@@ -3,7 +3,6 @@ package turn
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"strconv"
 	"strings"
@@ -1268,22 +1267,23 @@ func TestRunFileCommitUntrackedIsNonFatal(t *testing.T) {
 	}
 }
 
-// TestRunFileEditWithoutTopicTagFailsLoud — MAD B2 / T1-3 fail-loud
-// branch. When fs.write is buffered but the model emits NO topic tag,
-// the turn must abort with ErrFileEditWithoutTopicTag, no spine record
-// must be appended, no thread sidecar must be created, and the
-// unsynced workspace paths must be logged via internal/log.
-//
-// The workspace file itself is out of scope here — fs.write at the
-// tool-call layer is OS-level and irreversible; the substrate's
-// contract is only that the canonical record does not silently absorb
-// the edit.
-func TestRunFileEditWithoutTopicTagFailsLoud(t *testing.T) {
+// TestRunFileEditWithoutTopicTagOwnerDefaultsToNewThread — D6 recovery
+// terminal with an EMPTY working window. fs.write is buffered, the model
+// never emits a tag (the single-slot mock re-serves the same tag-less
+// response to the re-prompt), and Layer B holds no candidate — so the
+// owner-default falls through to new-thread creation: the turn completes,
+// the new thread owns it (excerpt, TurnCount 1), both edits bind to its
+// sidecar, and the thread.tag-defaulted line names the created thread with
+// reprompted=yes. This replaces the retracted fail-loud abort
+// (ErrFileEditWithoutTopicTag, MAD B2 / T1-3): the 1d live run proved a
+// real model omits the tag intermittently, so the turn is never refused.
+func TestRunFileEditWithoutTopicTagOwnerDefaultsToNewThread(t *testing.T) {
 	paths, meta := newTestHome(t)
 
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "Just a plain response with no topic tag."},
 	}, nil)
+	mock.RecordCalls = true
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
 	pinClock(t, time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC))
 
@@ -1292,43 +1292,47 @@ func TestRunFileEditWithoutTopicTagFailsLoud(t *testing.T) {
 		{Source: "fs.write", Content: "v1", Meta: map[string]string{"path": "src/b.go"}},
 	}
 	_, err := RunWithDeltas(context.Background(), state, pre, "edit it", io.Discard)
-	if err == nil {
-		t.Fatal("RunWithDeltas must return an error when fs.write is buffered without a topic tag")
+	if err != nil {
+		t.Fatalf("RunWithDeltas must never abort for a missing tag: %v", err)
 	}
-	if !errors.Is(err, ErrFileEditWithoutTopicTag) {
-		t.Errorf("error = %v; want errors.Is ErrFileEditWithoutTopicTag", err)
-	}
-	// The error message must name the unsynced paths so an upstream
-	// tutoring/diagnostic layer can teach the model what it omitted.
-	msg := err.Error()
-	for _, want := range []string{"src/a.go", "src/b.go"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("error %q missing path %q", msg, want)
-		}
+	// The single missing-tag re-prompt was spent before defaulting.
+	if got := len(mock.Calls()); got != 2 {
+		t.Fatalf("mock call count: got %d want 2 (first stream + one tag re-prompt)", got)
 	}
 
-	// Substrate state must NOT have advanced: no spine records, no
-	// thread sidecar for either path. The workspace file itself is not
-	// the substrate's responsibility — only the canonical record is
-	// asserted here.
+	// A new thread owns the turn: one spine record, TurnCount 1.
 	records, rerr := store.ReadSpine(paths.Spine)
 	if rerr != nil {
 		t.Fatalf("read spine: %v", rerr)
 	}
-	if len(records) != 0 {
-		t.Errorf("spine must not advance on protocol-violation abort; got %d records", len(records))
+	if len(records) != 1 {
+		t.Fatalf("spine records: got %d want 1 (owner-default new thread)", len(records))
+	}
+	newID := records[0].ID
+	if records[0].TurnCount != 1 {
+		t.Errorf("new thread TurnCount: got %d want 1", records[0].TurnCount)
 	}
 
-	// Log surface: one unsynced-no-topic-tag line per distinct path,
-	// so a human can reconcile the workspace if they care.
-	logBody := readDayLog(t, paths)
-	for _, want := range []string{
-		"unsynced-no-topic-tag path=src/a.go",
-		"unsynced-no-topic-tag path=src/b.go",
-	} {
-		if !strings.Contains(logBody, want) {
-			t.Errorf("log missing %q:\n%s", want, logBody)
+	// Both edits bound to the new thread's tracked-file sidecar.
+	tf, terr := store.LoadThreadFiles(paths, newID)
+	if terr != nil {
+		t.Fatalf("LoadThreadFiles: %v", terr)
+	}
+	for _, p := range []string{"src/a.go", "src/b.go"} {
+		if _, ok := tf.Entry(p); !ok {
+			t.Errorf("sidecar missing entry for %s", p)
 		}
+	}
+
+	// Forensic surface: exactly the tag-defaulted line, naming the bound
+	// thread; the retracted abort's unsynced lines must be gone.
+	logBody := readDayLog(t, paths)
+	want := "thread.tag-defaulted thr=" + newID + " cause=missing-tag reprompted=yes"
+	if !strings.Contains(logBody, want) {
+		t.Errorf("log missing %q:\n%s", want, logBody)
+	}
+	if strings.Contains(logBody, "unsynced-no-topic-tag") {
+		t.Errorf("retracted unsynced-no-topic-tag line still emitted:\n%s", logBody)
 	}
 }
 
