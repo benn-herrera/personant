@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"personant/internal/memops"
 	"personant/internal/model"
@@ -49,6 +50,18 @@ type vecCache struct {
 	ops      memops.MemoryOps // canonical reads only (no git, no paths beyond dir)
 	embedder model.Embedder   // partial-miss re-embeds during Reconcile
 	dir      string           // $PERSONANT_HOME/.recall-cache
+
+	// manifestMu serializes the manifest.json read-modify-write cycle. Write
+	// runs on the indexer goroutine (processJob write-through) while Sweep runs
+	// on the sleep-cycle owner goroutine (SweepCache); both do
+	// loadManifest → mutate → saveManifest, so without this lock a Sweep
+	// interleaving a Write silently loses whichever side's entry landed first —
+	// a lost .vec cached vector masquerading as a surprise re-embed next
+	// startup. The lock spans the whole RMW (not just saveManifest), so the
+	// load and the store are one atomic section. Reconcile takes it too (it
+	// calls Write) but runs before the indexer goroutine starts, so it is
+	// uncontended there.
+	manifestMu sync.Mutex
 }
 
 // newVecCache constructs the cache rooted at dir (the adapter's cache
@@ -346,6 +359,10 @@ func (c *vecCache) Write(ctx context.Context, e cacheEntry) error {
 		return fmt.Errorf("write vec %s: %w", e.threadID, err)
 	}
 
+	// Manifest RMW under the lock so a concurrent Sweep cannot lose this entry
+	// (the .vec write above is per-thread atomic and needs no lock).
+	c.manifestMu.Lock()
+	defer c.manifestMu.Unlock()
 	m, err := c.loadManifest()
 	if err != nil {
 		return err
@@ -367,6 +384,12 @@ func (c *vecCache) Sweep(ctx context.Context, liveIDs []string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// Manifest RMW under the lock so a concurrent indexer Write cannot lose an
+	// entry across this load-modify-save (see manifestMu). The .vec/.tree
+	// removals are held under the lock too so the on-disk files and the manifest
+	// stay consistent w.r.t. a racing Write.
+	c.manifestMu.Lock()
+	defer c.manifestMu.Unlock()
 	m, err := c.loadManifest()
 	if err != nil {
 		return err

@@ -104,6 +104,15 @@ func encodeDemoted(idx int, oldContent, newContent string) version {
 	if idx%AnchorCadence == 0 {
 		return version{Kind: kindLiteral, Literal: oldContent}
 	}
+	// LCS memory guard: makeDiff builds an (n+1)×(m+1) int table (diff.go
+	// lcs) that can demand gigabytes for a large tracked file. When the
+	// line-count product exceeds lcsLineProductMax, skip delta-encoding and
+	// keep the full literal — correctness is preserved (Reconstruct handles
+	// literals), only this version's compression is sacrificed. See
+	// lcsLineProductMax for the memory-budget arithmetic.
+	if countLines(oldContent)*countLines(newContent) > lcsLineProductMax {
+		return version{Kind: kindLiteral, Literal: oldContent}
+	}
 	delta := makeDiff(newContent, oldContent)
 	// Threshold: a delta that is too large relative to the literal it
 	// would replace does not earn its keep.

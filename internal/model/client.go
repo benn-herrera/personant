@@ -151,7 +151,11 @@ type Response struct {
 // Content but a non-empty FinishReason and Usage. Tool-call streaming
 // is best-effort for v0.1 — providers vary in how they fragment tool
 // calls; the runtime surfaces what arrives per chunk and does not merge
-// deltas across chunks.
+// deltas across chunks. Because per-chunk deltas cannot be safely merged
+// (id/name arrive once, argument strings are fragmented by index), the
+// httpStreamReader does NOT accumulate them into Final().ToolCalls — it
+// drops the fragments and logs a guard. Callers needing tool calls use
+// Consult, not ConsultStream.
 type Chunk struct {
 	Content      string
 	ToolCalls    []ToolCall
@@ -192,3 +196,14 @@ type Usage struct {
 // ErrMockExhausted is returned by a scripted MockClient when its response
 // queue has been drained. Tests check for this with errors.Is.
 var ErrMockExhausted = errors.New("model: mock client exhausted")
+
+// ErrConsultUnsupported is returned by a Client whose transport genuinely
+// cannot serve a blocking Consult (a hypothetical stream-only backend).
+// It is the ONLY error that authorizes a caller to fall back from Consult
+// to ConsultStream — every other Consult error (transient network, HTTP
+// status, decode) is a real failure and must propagate, not trigger a
+// second (cost-doubling) round-trip. No current client returns this; it
+// exists so a future stream-only client can opt into the fallback
+// explicitly rather than the fallback firing on any error. Match with
+// errors.Is.
+var ErrConsultUnsupported = errors.New("model: blocking Consult not supported by this client; use ConsultStream")

@@ -92,7 +92,15 @@ func (c *HTTPCurator) consult(ctx context.Context, req model.Request) (string, e
 	if err == nil {
 		return resp.Content, nil
 	}
-	// Fallback: drain a stream if Consult is unsupported by the client.
+	// The stream fallback exists ONLY for a client that genuinely can't
+	// serve a blocking Consult (signaled by model.ErrConsultUnsupported).
+	// Every other Consult error — transient network, HTTP status, decode —
+	// is a real failure; retrying it via ConsultStream would double the
+	// cost on a flake, so propagate it unchanged.
+	if !errors.Is(err, model.ErrConsultUnsupported) {
+		return "", err
+	}
+	// Fallback: drain a stream because blocking Consult is unsupported.
 	sr, serr := c.client.ConsultStream(ctx, req)
 	if serr != nil {
 		return "", err

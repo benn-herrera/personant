@@ -52,6 +52,37 @@ func splitLines(s string) []string {
 	return lines
 }
 
+// lcsLineProductMax bounds the memory the LCS dynamic-programming table
+// (lcs, below) is allowed to demand. lcs allocates an (n+1)×(m+1) table of
+// int, so delta-encoding a large tracked file (tens of thousands of lines)
+// can require gigabytes: two 100k-line versions would need
+// ~100k × 100k × 8 B = 80 GB. Above this line-count product, the caller
+// (encodeDemoted) skips delta-encoding and keeps the full literal instead.
+// Correctness is preserved — Chain.Reconstruct handles literals natively;
+// only this one version's compression is sacrificed for a bounded memory
+// ceiling.
+//
+// Budget arithmetic: cap the worst-case table at ~64 MB. An int is 8 bytes,
+// so 64 MiB / 8 B = 8,388,608 table entries; rounded down to a clean
+// lcsLineProductMax = 8,000,000 line-pairs (a ~61 MB worst-case table).
+const lcsLineProductMax = 8_000_000
+
+// countLines returns the number of lines splitLines would produce for s,
+// without allocating the slice — used to size-check the LCS table before
+// building it. It mirrors splitLines exactly: the empty string is zero
+// lines; otherwise the count is the number of '\n' bytes plus one when the
+// final line has no trailing newline.
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	n := strings.Count(s, "\n")
+	if !strings.HasSuffix(s, "\n") {
+		n++
+	}
+	return n
+}
+
 // lcs returns the longest common subsequence of a and b as a slice of
 // index pairs (ai, bi) such that a[ai] == b[bi], in increasing order.
 func lcs(a, b []string) [][2]int {

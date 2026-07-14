@@ -3,6 +3,7 @@ package dedup
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -118,6 +119,54 @@ func TestDiffLiteralThreshold(t *testing.T) {
 	if want := "totally different content here\nnothing in common at all\n"; got != want {
 		t.Fatalf("Reconstruct(1) = %q, want %q", got, want)
 	}
+}
+
+// TestLCSSizeGuard confirms that demoting a version whose line-count
+// product with its successor exceeds lcsLineProductMax skips delta-encoding
+// and stores the full literal — bounding the LCS table memory — while the
+// chain still reconstructs byte-exactly.
+func TestLCSSizeGuard(t *testing.T) {
+	// nLines chosen so nLines² exceeds lcsLineProductMax, tripping the
+	// guard for a demotion between two large versions.
+	const nLines = 3000
+	if nLines*nLines <= lcsLineProductMax {
+		t.Fatalf("test setup: %d² = %d does not exceed guard %d", nLines, nLines*nLines, lcsLineProductMax)
+	}
+	makeBody := func(mutatedLine int) string {
+		var sb strings.Builder
+		for i := 0; i < nLines; i++ {
+			if i == mutatedLine {
+				fmt.Fprintf(&sb, "line %d MUTATED\n", i)
+			} else {
+				fmt.Fprintf(&sb, "line %d\n", i)
+			}
+		}
+		return sb.String()
+	}
+
+	c := New()
+	// v0: small anchor literal (idx 0 is always an anchor literal).
+	small := "tiny header\n"
+	// v1 (A) and v2 (B): two large bodies differing by a single line. A
+	// normal delta between them would be tiny — well under the 0.7
+	// threshold — so if idx 1 is stored as a literal it can only be the
+	// size guard, not the diff-literal threshold, that forced it.
+	bigA := makeBody(-1)          // no mutation
+	bigB := makeBody(nLines / 2)  // one line differs
+	c.Append(small)
+	c.Append(bigA)
+	c.Append(bigB)
+
+	// idx 1 is non-anchor (1 % AnchorCadence != 0); the guard must have
+	// forced it to a literal despite the tiny would-be delta.
+	if c.Versions[1].Kind != kindLiteral {
+		t.Fatalf("version 1 (large-product demotion) expected literal via LCS guard, got %s", c.Versions[1].Kind)
+	}
+	if c.Versions[1].Delta != "" {
+		t.Fatalf("version 1 should carry no delta, got %d bytes", len(c.Versions[1].Delta))
+	}
+
+	assertReconstructAll(t, c, []string{small, bigA, bigB})
 }
 
 func TestEdgeCases(t *testing.T) {

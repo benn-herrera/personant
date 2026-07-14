@@ -39,12 +39,26 @@ func Run(ops memops.MemoryOps, opts Options) error {
 		timeout = 30 * time.Second
 	}
 
-	providers, _, err := ops.LoadProviders(context.Background())
+	providers, faults, err := ops.LoadProviders(context.Background())
 	if err != nil {
 		return fmt.Errorf("models: load providers: %w", err)
 	}
+	// Surface providers dropped from the pool (e.g. an unreadable
+	// apiKeyFile) as warnings. ProviderFault.Reason is path/IO detail
+	// only, never key material (spec §8.2.1).
+	for _, f := range faults {
+		fmt.Fprintf(opts.Stderr, "models: provider %q unavailable: %s\n", f.Name, f.Reason)
+	}
 	p, ok := providers[provider]
 	if !ok {
+		// Distinguish a provider that faulted out of the pool from one that
+		// was never declared — otherwise a dropped provider looks identical
+		// to a typo.
+		for _, f := range faults {
+			if f.Name == provider {
+				return fmt.Errorf("models: provider %q failed to load: %s", provider, f.Reason)
+			}
+		}
 		return fmt.Errorf("models: provider %q not found in providers.toml", provider)
 	}
 

@@ -2,11 +2,18 @@ package ping
 
 import (
 	"bytes"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
+	"personant/internal/store"
 )
 
 // TestRunWithClientStreamsToStdout: a multi-chunk scripted mock should land
@@ -39,6 +46,67 @@ func TestRunWithClientStreamsToStdout(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "tokens=4/6/10") {
 		t.Errorf("token counts missing from summary: %q", stderr.String())
+	}
+}
+
+// writeProvidersWithFault writes a providers.toml with a healthy provider
+// (good) and a faulted one (bad, referencing a missing apiKeyFile). Returns
+// the paths.
+func writeProvidersWithFault(t *testing.T, baseURL string) store.PersonantPaths {
+	t.Helper()
+	home := t.TempDir()
+	body := fmt.Sprintf(`[good]
+baseUrl = %q
+apiKey = "dummy"
+defaultModel = "m"
+
+[bad]
+baseUrl = "http://unused.example"
+apiKeyFile = "does-not-exist.key"
+defaultModel = "m"
+`, baseURL)
+	if err := os.WriteFile(filepath.Join(home, "providers.toml"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write providers.toml: %v", err)
+	}
+	return store.PathsForHome(home)
+}
+
+// TestRunSurfacesLoadFaultsAsWarnings: a provider dropped for an unreadable
+// apiKeyFile must appear on stderr as a warning while a healthy provider
+// still pings successfully.
+func TestRunSurfacesLoadFaultsAsWarnings(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	paths := writeProvidersWithFault(t, srv.URL)
+	var stdout, stderr bytes.Buffer
+	if err := Run(fileadapter.NewFileAdapter(paths), Options{
+		Provider: "good", Prompt: "hi", Stdout: &stdout, Stderr: &stderr,
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(stderr.String(), `provider "bad" unavailable`) {
+		t.Errorf("stderr should warn about the faulted provider; got %q", stderr.String())
+	}
+}
+
+// TestRunFaultedProviderRequestedNamesFault: requesting the faulted
+// provider returns an error saying it failed to load — distinct from a
+// typo's "not found".
+func TestRunFaultedProviderRequestedNamesFault(t *testing.T) {
+	paths := writeProvidersWithFault(t, "http://unused.example")
+	var stdout, stderr bytes.Buffer
+	err := Run(fileadapter.NewFileAdapter(paths), Options{
+		Provider: "bad", Prompt: "hi", Stdout: &stdout, Stderr: &stderr,
+	})
+	if err == nil {
+		t.Fatal("expected error for faulted provider, got nil")
+	}
+	if !strings.Contains(err.Error(), `provider "bad" failed to load`) {
+		t.Errorf("error should name the load fault; got %v", err)
 	}
 }
 

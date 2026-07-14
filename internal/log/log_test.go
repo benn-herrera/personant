@@ -238,6 +238,53 @@ func TestLevelNoneSuppressesAllStderr(t *testing.T) {
 	// being above LevelError is verified by ParseLevel returning it correctly
 }
 
+// TestLevelNoneSurvivesSetGetRoundTrip pins the item-1(c) fix: LevelNone
+// must round-trip through the uint32 atomic level word, so GetLevel()
+// reports LevelNone after SetLevel(LevelNone). math.MaxInt truncated on
+// store and broke this equality.
+func TestLevelNoneSurvivesSetGetRoundTrip(t *testing.T) {
+	defer restoreGlobal(t)()
+	cl := &compactLogger{stderrW: os.Stderr}
+	cl.stderrLevel.Store(uint32(LevelInfo))
+	global.Store(cl)
+
+	SetLevel(LevelNone)
+	if got := GetLevel(); got != LevelNone {
+		t.Errorf("GetLevel() = %d after SetLevel(LevelNone); want LevelNone (%d)", got, LevelNone)
+	}
+	// Suppression semantics preserved: LevelNone sits above every real level.
+	if !(LevelNone > LevelError) {
+		t.Errorf("LevelNone (%d) must exceed LevelError (%d) to suppress output", LevelNone, LevelError)
+	}
+}
+
+// TestFileLinePrefixFallback pins item-1(b): a caller file path that does
+// not live under the computed repo-root prefix must not be sliced (which
+// could panic or mis-trim) — it falls back to the full path. Driven
+// through a logger whose pathPrefix cannot match the test file's real
+// path, with file/line prefixing on.
+func TestFileLinePrefixFallback(t *testing.T) {
+	defer restoreGlobal(t)()
+	var buf strings.Builder
+	cl := &compactLogger{
+		stderrW:    &buf,
+		pathPrefix: "/nonexistent/repo/root/that/will/never/match/",
+	}
+	cl.stderrLevel.Store(uint32(LevelInfo))
+	cl.showFileLine.Store(true)
+	global.Store(cl)
+
+	Info("prefix-fallback-probe") // must not panic despite prefix mismatch
+	out := buf.String()
+	if !strings.Contains(out, "prefix-fallback-probe") {
+		t.Fatalf("message missing: %q", out)
+	}
+	// The full caller path ends in log_test.go — the fallback kept it whole.
+	if !strings.Contains(out, "log_test.go(") {
+		t.Errorf("expected full caller path with file/line, got %q", out)
+	}
+}
+
 // TestParseLevel covers the ParseLevel helper directly.
 func TestParseLevel(t *testing.T) {
 	cases := []struct {

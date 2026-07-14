@@ -9,6 +9,8 @@ import (
 	"io"
 	"strings"
 	"sync"
+
+	"personant/internal/log"
 )
 
 // sseMaxLineBytes is the buffer cap for a single SSE line. The bufio.Scanner
@@ -34,7 +36,11 @@ type httpStreamReader struct {
 	content      strings.Builder
 	finishReason string
 	usage        Usage
-	toolCalls    []ToolCall
+
+	// toolCallGuardLogged tracks whether the streamed-tool-call guard has
+	// already logged for this reader, so a multi-chunk tool-call stream
+	// logs once rather than per delta.
+	toolCallGuardLogged bool
 
 	closeOnce sync.Once
 	closeErr  error
@@ -103,8 +109,20 @@ func (r *httpStreamReader) Next() (Chunk, error) {
 		if chunk.Usage.TotalTokens != 0 || chunk.Usage.PromptTokens != 0 || chunk.Usage.CompletionTokens != 0 {
 			r.usage = chunk.Usage
 		}
-		if len(chunk.ToolCalls) > 0 {
-			r.toolCalls = append(r.toolCalls, chunk.ToolCalls...)
+		// Streamed tool-call deltas are NOT merged into Final(). OpenAI-style
+		// providers fragment a single tool call across chunks (id/name once,
+		// then argument-string fragments keyed by index); naively appending
+		// the per-chunk deltas would yield corrupt, half-parsed arguments in
+		// Final().ToolCalls. The runtime does not stream tool calls today
+		// (no ConsultStream caller passes Tools), so rather than ship an
+		// un-exercisable merge path we guard loudly: the fragments are
+		// dropped from the accumulated Final() and the condition is logged.
+		// Whoever wires tool-call streaming will hit this log and must
+		// implement index-keyed merge against a real provider. The per-chunk
+		// Chunk.ToolCalls is still surfaced below (documented best-effort).
+		if len(chunk.ToolCalls) > 0 && !r.toolCallGuardLogged {
+			r.toolCallGuardLogged = true
+			log.Error("model: streamed tool-call deltas observed but not merged; Final().ToolCalls will be empty — use Consult for tool-calling")
 		}
 		return chunk, nil
 	}
@@ -113,10 +131,13 @@ func (r *httpStreamReader) Next() (Chunk, error) {
 // Final returns the accumulated Response after iteration. Safe to call
 // before EOF, though the resulting Content/Usage/FinishReason will only
 // reflect what has been observed so far.
+//
+// ToolCalls is always nil: streamed tool-call deltas are not merged (see
+// the guard in Next). Callers that need tool calls must use Consult.
 func (r *httpStreamReader) Final() Response {
 	return Response{
 		Content:      r.content.String(),
-		ToolCalls:    r.toolCalls,
+		ToolCalls:    nil,
 		FinishReason: r.finishReason,
 		Usage:        r.usage,
 	}

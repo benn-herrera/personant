@@ -22,7 +22,12 @@ const (
 	LevelInfo  Level = 1
 	LevelWarn  Level = 2
 	LevelError Level = 3
-	LevelNone  Level = math.MaxInt
+	// LevelNone suppresses all output. It must survive the uint32
+	// round-trip through the atomic level word (SetLevel stores uint32);
+	// math.MaxInt would truncate on store so GetLevel()==LevelNone would
+	// be false afterward. math.MaxUint32 both round-trips cleanly and sits
+	// above every real level, preserving suppression semantics.
+	LevelNone Level = math.MaxUint32
 )
 
 // ValidLevelNames lists the recognized --log-level values in display order.
@@ -57,6 +62,14 @@ func ParseLevel(s string) (Level, bool) {
 }
 
 // Logger is the interface all call sites depend on.
+//
+// Caller attribution constraint: when file/line prefixing is enabled the
+// implementation resolves the caller with runtime.Caller at a fixed stack
+// depth that assumes the emit is reached through the package-level
+// forwarders (log.Debug/Info/Warn/Error/Fatal). Calling the concrete
+// logger's methods directly (bypassing the forwarders) shifts the stack by
+// one frame and mis-attributes the file/line. Route emits through the
+// package-level functions.
 type Logger interface {
 	Debug(format string, args ...any)
 	Info(format string, args ...any)
@@ -74,12 +87,12 @@ type Logger interface {
 // stderrLevel is accessed via atomic ops so SetLevel/GetLevel are race-free
 // with concurrent emit calls. mu guards only the writer fields.
 type compactLogger struct {
-	stderrLevel   atomic.Uint32 // Level stored as uint32; use loadLevel/storeLevel
-	mu            sync.Mutex
-	stderrW       io.Writer
-	fileW         *os.File // nil if no log file
-	pathPrefixLen int
-	showFileLine  bool
+	stderrLevel  atomic.Uint32 // Level stored as uint32; use loadLevel/storeLevel
+	showFileLine atomic.Bool   // read on every emit; toggled by SetShowFileAndLine
+	mu           sync.Mutex
+	stderrW      io.Writer
+	fileW        *os.File // nil if no log file
+	pathPrefix   string   // repo-root prefix trimmed from caller file paths (with trailing separator)
 }
 
 func (c *compactLogger) emit(level Level, format string, args ...any) {
@@ -89,10 +102,18 @@ func (c *compactLogger) emit(level Level, format string, args ...any) {
 		return
 	}
 	fileLine := ""
-	if c.showFileLine {
+	if c.showFileLine.Load() {
+		// Depth 3 assumes emit was reached via a package-level forwarder
+		// (see the Logger interface caller-attribution note).
 		pc, fileName, lineNum, _ := runtime.Caller(3)
 		funcName := runtime.FuncForPC(pc).Name()
-		fileName = fileName[c.pathPrefixLen:]
+		// Trim the repo-root prefix, but only when the caller file
+		// actually lives under it. Dependency code and files built in a
+		// different directory won't share the prefix; slicing blindly
+		// could panic or mis-trim, so fall back to the full path.
+		if strings.HasPrefix(fileName, c.pathPrefix) {
+			fileName = fileName[len(c.pathPrefix):]
+		}
 		fileLine = fmt.Sprintf("%s(%d): %s() ", fileName, lineNum, funcName)
 	}
 	msg := fmt.Sprintf(format, args...)
@@ -108,9 +129,9 @@ func (c *compactLogger) emit(level Level, format string, args ...any) {
 }
 
 func (c *compactLogger) GetLevel() Level                  { return Level(c.stderrLevel.Load()) }
-func (c *compactLogger) GetShowFileAndLine() bool         { return c.showFileLine }
+func (c *compactLogger) GetShowFileAndLine() bool         { return c.showFileLine.Load() }
 func (c *compactLogger) SetLevel(level Level)             { c.stderrLevel.Store(uint32(level)) }
-func (c *compactLogger) SetShowFileAndLine(show bool)     { c.showFileLine = show }
+func (c *compactLogger) SetShowFileAndLine(show bool)     { c.showFileLine.Store(show) }
 func (c *compactLogger) Debug(format string, args ...any) { c.emit(LevelDebug, format, args...) }
 func (c *compactLogger) Info(format string, args ...any)  { c.emit(LevelInfo, format, args...) }
 func (c *compactLogger) Warn(format string, args ...any)  { c.emit(LevelWarn, format, args...) }
@@ -139,11 +160,11 @@ func InitLogger(logPath string, stderrLevel Level, logFileLine bool) error {
 		_, logGoPath, _, _ := runtime.Caller(0)
 		logGoPath = path.Dir(path.Dir(path.Dir(logGoPath)))
 		cl := &compactLogger{
-			stderrW:       os.Stderr,
-			pathPrefixLen: len(logGoPath) + 1,
-			showFileLine:  logFileLine,
+			stderrW:    os.Stderr,
+			pathPrefix: logGoPath + "/",
 		}
 		cl.stderrLevel.Store(uint32(stderrLevel))
+		cl.showFileLine.Store(logFileLine)
 		if logPath != "" {
 			f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 			if err != nil {

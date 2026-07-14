@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"personant/internal/memops"
 )
@@ -82,8 +83,22 @@ func surfaceArchivalCandidates(ctx context.Context, state *State) error {
 	}
 
 	// Coldest first: oldest StateChanged, falling back to LastEngaged.
+	// Order by PARSED time, not lexical string compare — RFC3339 stamps at
+	// different UTC offsets (e.g. "…T00:00:00-08:00" vs "…T07:00:00Z", the
+	// same instant) sort wrong lexically. An unparseable/empty stamp sorts
+	// LAST (treated as newest → never preferentially archived on a corrupt
+	// timestamp), the conservative direction decayEligible uses for
+	// unparseable LastEngaged.
 	sort.SliceStable(retired, func(i, j int) bool {
-		return coldnessKey(retired[i]) < coldnessKey(retired[j])
+		ti, oki := coldnessKey(retired[i])
+		tj, okj := coldnessKey(retired[j])
+		if oki != okj {
+			return oki // parseable stamp sorts before an unparseable one
+		}
+		if !oki {
+			return false // both unparseable: hold input order (stable sort)
+		}
+		return ti.Before(tj)
 	})
 
 	// Gather the coldest retired ids until we have enough to drain the
@@ -157,12 +172,21 @@ func isRetiredState(s memops.ThreadState) bool {
 	}
 }
 
-// coldnessKey returns the timestamp string used to order retired threads
-// coldest-first. StateChanged is the primary signal (when a thread was
-// retired); LastEngaged is the fallback when StateChanged is empty.
-func coldnessKey(rec memops.SpineRecord) string {
-	if rec.StateChanged != "" {
-		return rec.StateChanged
+// coldnessKey returns the parsed timestamp used to order retired threads
+// coldest-first, and whether it was parseable. StateChanged is the primary
+// signal (when a thread was retired); LastEngaged is the fallback when
+// StateChanged is empty. A missing or non-RFC3339 stamp returns ok=false so
+// the caller can sort it last (treated as newest — never preferentially
+// archived on a corrupt timestamp). Parsing (rather than lexical string
+// compare) makes the ordering correct across mixed UTC offsets.
+func coldnessKey(rec memops.SpineRecord) (time.Time, bool) {
+	stamp := rec.StateChanged
+	if stamp == "" {
+		stamp = rec.LastEngaged
 	}
-	return rec.LastEngaged
+	t, err := time.Parse(time.RFC3339, stamp)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
 }

@@ -299,13 +299,30 @@ type Service struct {
 	cache    vectorCache    // §5 persisted cache; nil → no cache (Inc 2 stub)
 
 	// cur is the live index snapshot, read lock-free by Recall (I1). It is
-	// always non-nil after construction. Only the indexer goroutine stores
-	// to it (CAS), so a single mutator never tears a swap.
+	// always non-nil after construction. There are TWO CAS publishers since
+	// Inc C/D: the indexer goroutine (processJob → swap, owning the
+	// coarse/fine/fineHash/watermark tiers) and the sleep-cycle RebuildTrees
+	// (owning the tree/treeHash tiers). Both publish only via CompareAndSwap,
+	// so a reader never observes a torn swap; the CAS-retry loop in each
+	// writer resolves a lost race by rebuilding against the fresh snapshot.
+	// The load-bearing contract that keeps this safe with no lock: neither
+	// writer mutates a snapshot in place, and RebuildTrees carries the
+	// indexer's tiers BY REFERENCE unchanged (it only replaces tree/treeHash).
+	// A future in-place mutation of any shared tier (e.g. appending to a
+	// fine[] slice instead of building a new one) would be a silent torn-index
+	// race across the two publishers — do not introduce one.
 	cur atomic.Pointer[indexSnapshot]
 
 	// jobs feeds the single indexer goroutine. nil when no embedder (the
-	// goroutine is never started). EnqueueFlush is a no-op while nil.
+	// goroutine is never started). EnqueueFlush is a no-op while nil. It is
+	// NEVER closed — shutdown is signalled via stop, so a send can never race
+	// a close-of-channel panic (the send-on-closed hazard the burn-down flagged).
 	jobs chan indexJob
+
+	// stop is closed by Close to signal the indexer to exit and to make
+	// EnqueueFlush refuse post-close enqueues (drop cleanly, no panic, no
+	// unbounded block). Created in Prepare beside jobs; nil before Prepare.
+	stop chan struct{}
 
 	// indexerDone is closed by the indexer goroutine when it exits, so
 	// Close can wait for a clean shutdown (no leaked goroutine).
@@ -475,6 +492,7 @@ func (s *Service) Prepare(ctx context.Context) error {
 	// AddThread driven by Inc 4's debt/dormancy hooks). Startup misses were
 	// already filled synchronously by the reconcile above.
 	s.jobs = make(chan indexJob, jobQueueDepth)
+	s.stop = make(chan struct{})
 	s.indexerDone = make(chan struct{})
 	go s.runIndexer()
 	return nil
@@ -553,13 +571,39 @@ func (s *Service) AddThread(ctx context.Context, threadID string) error {
 }
 
 // EnqueueFlush is the public entry the turn loop calls (Inc 4) at a debt-
-// cap or dormancy trigger to (re)index a thread. It is non-blocking up to
-// the queue depth; a no-op when no embedder is configured or before
-// Prepare started the indexer. dispatchTurncount is the thread's
-// turncount at dispatch — the monotonicity watermark (I2).
+// cap or dormancy trigger to (re)index a thread. A no-op when no embedder is
+// configured or before Prepare started the indexer. dispatchTurncount is the
+// thread's turncount at dispatch — the monotonicity watermark (I2).
+//
+// Blocking vs. drop (burn-down Wave 3, decided): while the indexer is running
+// the send BLOCKS when the jobQueueDepth (256) buffer is full — deliberate
+// backpressure, not a drop. A flush carries content the §3.4 completeness
+// invariant must keep findable; dropping one on a full queue would leave that
+// batch covered only by the lexical floor while the thread stays engaged, then
+// fall into a dead zone once it scrolls past the debt band. Latency (the turn
+// loop stalling on a saturated indexer) is recoverable and bounded — the
+// indexer drains — and the pendingFlushWarnThreshold backlog line fires long
+// before the buffer fills, so the blocking cost is observable. The buffer at
+// 256 makes blocking effectively unreachable in the steady state (well under
+// one flush per turn).
+//
+// After Close (stop closed) the enqueue is REFUSED and dropped cleanly: no
+// panic (jobs is never closed — the check-then-send would otherwise race a
+// close-of-channel), no unbounded block (the indexer has exited, so nothing
+// would ever receive), and no pendingFlush increment for the dropped job. A
+// post-close flush is safe to drop: the next session's Prepare reconcile
+// re-embeds the thread's changed excerpts from the content-hash comparison.
 func (s *Service) EnqueueFlush(threadID string, dispatchTurncount int) {
 	if s.jobs == nil {
 		return
+	}
+	// Refuse an enqueue after Close BEFORE touching pendingFlush, so a dropped
+	// job never widens the §3.4 lexical band (a decrement-free drop keeps the
+	// accounting exact).
+	select {
+	case <-s.stop:
+		return
+	default:
 	}
 	// Count the job as pending BEFORE it is visible to the indexer, so the
 	// §3.4 lexical floor is already widened by the time the job could race a
@@ -568,7 +612,15 @@ func (s *Service) EnqueueFlush(threadID string, dispatchTurncount int) {
 		_ = s.ops.Log(context.Background(), memops.LogCategoryRecall, "flush-backlog",
 			fmt.Sprintf("thread=%s pending=%d threshold=%d", threadID, n, pendingFlushWarnThreshold))
 	}
-	s.jobs <- indexJob{threadID: threadID, dispatchTurncount: dispatchTurncount}
+	// Block on a full queue (backpressure), but also watch stop so a Close
+	// that races us after the pending increment cannot wedge the caller on a
+	// send no exited indexer will ever receive. On that race, undo the pending
+	// increment so the accounting stays exact.
+	select {
+	case s.jobs <- indexJob{threadID: threadID, dispatchTurncount: dispatchTurncount}:
+	case <-s.stop:
+		s.addPendingFlush(threadID, -1)
+	}
 }
 
 // SweepCache drops persisted .vec files for threads no longer on the spine
@@ -613,20 +665,40 @@ func (s *Service) Close() error {
 		if s.jobs == nil {
 			return
 		}
-		close(s.jobs)
+		// Signal shutdown via stop, never by closing jobs: a concurrent
+		// EnqueueFlush send onto a closed jobs channel would panic. The indexer
+		// selects on stop, drains any already-buffered jobs, and exits.
+		close(s.stop)
 		<-s.indexerDone
 	})
 	return nil
 }
 
 // runIndexer is the single index-maintenance goroutine (I1/I2, design
-// §6.3). It owns every write to s.cur. It exits when s.jobs is closed,
-// signalling via s.indexerDone so Close can join it.
+// §6.3). It is the indexer half of the two CAS publishers of s.cur (see the
+// cur field doc; RebuildTrees is the other, tree-only, sleep-cycle half). It
+// exits when Close closes s.stop, signalling via s.indexerDone so Close can
+// join it. On stop it drains any already-buffered jobs first — EnqueueFlush
+// refuses new sends once stop is closed, so the buffer is bounded and no
+// longer growing — then exits, so a graceful close still persists the flushes
+// already enqueued.
 func (s *Service) runIndexer() {
 	defer close(s.indexerDone)
 	ctx := context.Background()
-	for job := range s.jobs {
-		s.processJob(ctx, job)
+	for {
+		select {
+		case job := <-s.jobs:
+			s.processJob(ctx, job)
+		case <-s.stop:
+			for {
+				select {
+				case job := <-s.jobs:
+					s.processJob(ctx, job)
+				default:
+					return
+				}
+			}
+		}
 	}
 }
 
@@ -660,10 +732,14 @@ func (s *Service) processJob(ctx context.Context, job indexJob) {
 	// The prior indexed state is the live snapshot's fine/fineHash for this
 	// thread: it is authoritative (those vectors were embedded by a past flush
 	// or loaded from the .vec cache, which the cache built from an embed) and
-	// lock-free to read (the single indexer goroutine is the only writer, so a
-	// load here cannot race a swap). Key reuse on (turnNumber, contentHash):
-	// only an unchanged chunk at an existing turn matches, so a changed-text
-	// chunk or a new turn falls through to EMBED.
+	// lock-free to read. The fine/fineHash tiers are written ONLY by this
+	// indexer goroutine (swap); the second CAS publisher, RebuildTrees, carries
+	// them by reference unchanged (it replaces only tree/treeHash), so a
+	// RebuildTrees swap between this load and the swap below cannot alter the
+	// fine tier this read observes — the two-writer invariant (see the cur
+	// field doc) is exactly what makes this load race-free. Key reuse on
+	// (turnNumber, contentHash): only an unchanged chunk at an existing turn
+	// matches, so a changed-text chunk or a new turn falls through to EMBED.
 	reuse := s.priorChunkVectors(job.threadID)
 
 	bodyText := truncateForEmbed(thr.Body)
@@ -735,10 +811,13 @@ type chunkKey struct {
 // (turn, content hash) → the vector the live snapshot already holds for that
 // chunk. The snapshot's fine[threadID] and fineHash[threadID] are parallel
 // (built together at every swap), so they zip into the keyed map. Reading the
-// live snapshot here is race-free: the single indexer goroutine is the sole
-// writer of s.cur, so this load (on that goroutine) cannot observe a torn or
-// concurrently-mutated snapshot. A missing/empty prior entry (first flush of a
-// thread) yields an empty map → every chunk embeds, the from-scratch path.
+// live snapshot here is race-free even with two CAS publishers (see the cur
+// field doc): the fine/fineHash tiers are written only by this indexer
+// goroutine, and RebuildTrees — the other publisher — carries them by
+// reference unchanged, so neither a concurrent RebuildTrees swap nor any
+// reader can tear or mutate the tiers this load reads. A missing/empty prior
+// entry (first flush of a thread) yields an empty map → every chunk embeds,
+// the from-scratch path.
 //
 // A length mismatch between fine and fineHash (which should never happen — the
 // swap always writes them together) degrades safely to no reuse: any chunk it
@@ -764,9 +843,14 @@ func (s *Service) priorChunkVectors(threadID string) map[chunkKey][]float64 {
 // thread's coarse/fine/watermark replaced and CAS-stores it, retrying on
 // a lost race (the build is cheap relative to the embed).
 //
-// This is the sole writer of s.cur; the CAS retry guards only against a
-// future second mutator — today the single indexer goroutine makes the
-// CAS always succeed first try, but the loop keeps the contract explicit.
+// This is ONE of two CAS publishers of s.cur (see the cur field doc): the
+// indexer's swap here owns the coarse/fine/fineHash/watermark tiers, and the
+// sleep-cycle RebuildTrees owns tree/treeHash. The CAS retry is LIVE, not
+// theoretical — RebuildTrees can swap concurrently with this one, and the
+// loser rebuilds against the fresh snapshot. Correctness rests on the by-value
+// build (with never mutating the receiver) plus RebuildTrees carrying this
+// writer's tiers by reference unchanged: the two publishers never touch each
+// other's tiers, so whichever wins the CAS, the merged snapshot is consistent.
 func (s *Service) swap(threadID string, dispatchTurncount int, coarse scoring.ThreadVector, chunks []scoring.ChunkVector, chunkHashes []string) {
 	for {
 		old := s.cur.Load()
@@ -1002,10 +1086,9 @@ func (s *Service) Recall(ctx context.Context, req Request) ([]Result, error) {
 		out = append(out, *r)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		ie := out[i].Embedding != nil || out[i].IntraThread != nil
-		je := out[j].Embedding != nil || out[j].IntraThread != nil
-		if ie != je {
-			return ie // embedding/intra-thread results first
+		ti, tj := rankTier(out[i]), rankTier(out[j])
+		if ti != tj {
+			return ti < tj // lower tier ranks first
 		}
 		if out[i].Score != out[j].Score {
 			return out[i].Score > out[j].Score
@@ -1013,6 +1096,38 @@ func (s *Service) Recall(ctx context.Context, req Request) ([]Result, error) {
 		return out[i].ThreadID < out[j].ThreadID
 	})
 	return out, nil
+}
+
+// rankTier assigns a result to one of three ranking tiers so the offer
+// top-recallOfferK cut (turn/recall.go, which takes the leading slice of this
+// ordering) can never let a completeness-only signal displace a genuinely
+// scored candidate:
+//
+//	0 — a scored embedding/intra RELEVANCE hit: an embedding thread hit, or an
+//	    intra-thread hit carrying a real (positive) cosine score;
+//	1 — a symbolic-only Jaccard hit (scored, but the weaker relevance signal);
+//	2 — a lexical-floor completeness hit ONLY: an intra-thread hit with Score 0
+//	    and no embedding or symbolic signal — the #123 debt-window guarantee
+//	    that durable-but-unembedded content stays FINDABLE, not a relevance
+//	    ranking. It sits below every scored candidate so a Score-0 lexical hit
+//	    cannot bump a high-cosine (or any scored) candidate out of the offered
+//	    top-recallOfferK — yet it stays IN the result set (completeness
+//	    preserved), surfacing only when there are fewer scored candidates than
+//	    the offer cut.
+//
+// The distinguishing key is IntraThread.Score: a real intra embedding hit
+// scores its best chunk's positive cosine, whereas a pure lexical debt-window
+// hit unions in at Score 0 (unionIntraTurns). An intra hit that ALSO matched
+// symbolically stays tier 1 (a scored candidate), carrying its completeness
+// turns along for free.
+func rankTier(r Result) int {
+	if r.Embedding != nil || (r.IntraThread != nil && r.IntraThread.Score > 0) {
+		return 0
+	}
+	if r.Symbolic != nil {
+		return 1
+	}
+	return 2
 }
 
 // embedQuery vectorizes the turn query for the embedding layer. Returns
@@ -1245,10 +1360,12 @@ func unionIntraTurns(prior *IntraThreadHit, lexicalTurns []int) *IntraThreadHit 
 // matches snap.fine[engaged] cannot be apples-to-apples with the flat scan,
 // so it falls back.
 //
-// Because NOTHING builds trees in this increment (Inc D's sleep cycle
-// does), snap.tree is always empty at runtime and this always takes the
-// flat-scan branch — byte-identical to the pre-#111 behaviour. The descent
-// branch is reached only by tests that install a tree.
+// Trees ARE populated at runtime since Inc C/D: Prepare's LoadTrees rehydrates
+// any usable persisted .tree at session start, and the sleep-cycle RebuildTrees
+// (re)builds them offline. So the descent branch is live whenever a usable tree
+// exists for the engaged thread; a thread with no tree, a short thread, or a
+// stale tree flat-falls-back (treeUsable / W8) — a still-correct path the tree
+// merely accelerates.
 func (s *Service) intraChunks(q []float64, snap *indexSnapshot, engaged string, counter *scoring.CosineCounter, netCapHits *int) []scoring.ChunkCandidate {
 	leaves := snap.fine[engaged]
 	if snap.treeUsable(engaged) {

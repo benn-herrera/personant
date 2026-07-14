@@ -137,6 +137,7 @@ func TestRecall_CompletenessContinuousAcrossInFlightFlush(t *testing.T) {
 			s := &Service{ops: fileadapter.NewFileAdapter(paths), embedder: ge}
 			s.cur.Store(emptySnapshot())
 			s.jobs = make(chan indexJob, jobQueueDepth)
+			s.stop = make(chan struct{})
 			s.indexerDone = make(chan struct{})
 			go s.runIndexer()
 			defer func() { _ = s.Close() }()

@@ -225,10 +225,21 @@ func surfaceClosureCandidates(ctx context.Context, state *State) error {
 		return eligible[i].rec.ID < eligible[j].rec.ID
 	})
 
+	// A retire.prompt log-write failure must not starve the remaining
+	// closure offers this turn. The former return-on-error aborted the whole
+	// scan on the FIRST transient write hiccup, so a single failure could
+	// deny closure to every later decayed thread. Degrade per candidate:
+	// skip this offer (its retire.prompt marker is the offer's forensic
+	// anchor, so proceeding without it would surface an unlogged offer) and
+	// surface the condition ONCE after the scan — not silently swallowed,
+	// not per-candidate spam. The other per-candidate substrate calls below
+	// already degrade-and-continue; this aligns the log with that contract.
+	var logFailures int
 	for _, c := range eligible {
 		if err := state.Ops.Log(ctx, memops.LogCategoryRetire, "prompt",
 			"thr="+c.rec.ID+" inactivity="+c.detail); err != nil {
-			return fmt.Errorf("closure: log retire.prompt: %w", err)
+			logFailures++
+			continue
 		}
 
 		thr, err := state.Ops.LoadThread(ctx, c.rec.ID)
@@ -265,6 +276,9 @@ func surfaceClosureCandidates(ctx context.Context, state *State) error {
 				"thr="+c.rec.ID+" err="+memops.SanitizeDetail(err.Error()))
 			continue
 		}
+	}
+	if logFailures > 0 {
+		return fmt.Errorf("closure: %d retire.prompt log write(s) failed; offers skipped", logFailures)
 	}
 	return nil
 }
@@ -362,8 +376,14 @@ func applyClosureResolution(ctx context.Context, state *State, threadID string, 
 	// thread's persisted state out of the active window) is a structural
 	// change. Count it; the turn-close cadence check (turn.go step 5e) commits
 	// once per turn regardless of how many threads a closure-storm (#82)
-	// resolved. Defer reaches no write and is correctly not counted.
-	state.structuralCloses++
+	// resolved. Defer reaches no write and is correctly not counted. Retire
+	// and WIP are counted separately so the commit reason reports each
+	// honestly — a WIP demotion is not a retirement (the thread stays open).
+	if res.Outcome == ClosureWIP {
+		state.structuralWIPs++
+	} else {
+		state.structuralRetires++
+	}
 
 	// The defer grace, if any, is now moot — the thread has been
 	// resolved or demoted out of the active set.

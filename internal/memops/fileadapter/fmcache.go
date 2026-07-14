@@ -143,15 +143,22 @@ func (c *frontmatterCache) Put(fm memops.ThreadMeta) {
 // and map fields so the result is fully cache-owned.
 //
 // ThreadMeta's reference-typed fields (per memops_model.go): Anchors
-// []string and HistorySymbols []HistorySymbol. HistorySymbol is itself
-// all value-typed, so a shallow slices.Clone of HistorySymbols is a true
-// deep copy. ThreadMeta has no map fields. If a new slice/map field is
-// added to ThreadMeta, clone it HERE — this helper is the single point
-// that must stay in sync with the type's reference-typed field set.
-// (nil slices clone to nil; slices.Clone already guarantees this.)
+// []string and HistorySymbols []HistorySymbol. HistorySymbol is NOT all
+// value-typed — it carries a DerivedFrom []string — so slices.Clone of
+// HistorySymbols is a shallow copy that still aliases each symbol's
+// DerivedFrom backing array. An in-place mutation of a cached symbol's
+// DerivedFrom would silently corrupt cached recall results; each symbol's
+// DerivedFrom is therefore cloned too. ThreadMeta has no map fields. If a
+// new slice/map field is added to ThreadMeta (or to HistorySymbol), clone
+// it HERE — this helper is the single point that must stay in sync with
+// the reference-typed field set. (nil slices clone to nil; slices.Clone
+// already guarantees this.)
 func cloneThreadMeta(fm memops.ThreadMeta) memops.ThreadMeta {
 	fm.Anchors = slices.Clone(fm.Anchors)
 	fm.HistorySymbols = slices.Clone(fm.HistorySymbols)
+	for i := range fm.HistorySymbols {
+		fm.HistorySymbols[i].DerivedFrom = slices.Clone(fm.HistorySymbols[i].DerivedFrom)
+	}
 	return fm
 }
 

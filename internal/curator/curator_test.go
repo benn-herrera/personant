@@ -2,12 +2,80 @@ package curator
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 
 	"personant/internal/memops"
 	"personant/internal/model"
 )
+
+// stubClient is a minimal model.Client for exercising the consult fallback
+// arms. consultErr, when non-nil, is returned by Consult; ConsultStream
+// records whether it was reached and, when streamCalled matters, hands back
+// a scripted stream.
+type stubClient struct {
+	consultErr   error
+	streamResp   model.Response
+	streamCalled bool
+}
+
+func (s *stubClient) Consult(ctx context.Context, req model.Request) (model.Response, error) {
+	if s.consultErr != nil {
+		return model.Response{}, s.consultErr
+	}
+	return model.Response{Content: "blocking"}, nil
+}
+
+func (s *stubClient) ConsultStream(ctx context.Context, req model.Request) (model.StreamReader, error) {
+	s.streamCalled = true
+	m := model.NewScriptedMock([]model.Response{s.streamResp}, nil)
+	return m.ConsultStream(ctx, req)
+}
+
+func (s *stubClient) ListModels(ctx context.Context) ([]model.ModelInfo, error) {
+	return nil, nil
+}
+
+// TestDraftClosure_FallsBackOnUnsupportedConsult: a client that signals
+// ErrConsultUnsupported for blocking Consult must be drained via
+// ConsultStream, and its streamed content becomes the summary.
+func TestDraftClosure_FallsBackOnUnsupportedConsult(t *testing.T) {
+	stub := &stubClient{
+		consultErr: model.ErrConsultUnsupported,
+		streamResp: model.Response{Content: "  streamed gist  ", FinishReason: "stop"},
+	}
+	c := NewHTTPCurator(stub, "test-model")
+	draft, err := c.DraftClosure(context.Background(), memops.Thread{Body: "b"})
+	if err != nil {
+		t.Fatalf("DraftClosure: %v", err)
+	}
+	if !stub.streamCalled {
+		t.Error("expected ConsultStream fallback to be reached on ErrConsultUnsupported")
+	}
+	if draft.Summary != "streamed gist" {
+		t.Errorf("Summary = %q, want %q", draft.Summary, "streamed gist")
+	}
+}
+
+// TestDraftClosure_PropagatesTransientConsultError: a non-unsupported
+// Consult error (e.g. a transient network failure) must propagate
+// unchanged and must NOT trigger a cost-doubling stream retry.
+func TestDraftClosure_PropagatesTransientConsultError(t *testing.T) {
+	transient := errors.New("http 503: service unavailable")
+	stub := &stubClient{consultErr: transient}
+	c := NewHTTPCurator(stub, "test-model")
+	_, err := c.DraftClosure(context.Background(), memops.Thread{Body: "b"})
+	if err == nil {
+		t.Fatal("expected the transient Consult error to propagate, got nil")
+	}
+	if !errors.Is(err, transient) {
+		t.Errorf("error should wrap the transient Consult error; got %v", err)
+	}
+	if stub.streamCalled {
+		t.Error("ConsultStream must NOT be called on a transient (non-unsupported) Consult error")
+	}
+}
 
 // hsym is a terse HistorySymbol constructor for the table tests.
 func hsym(norm string, count, firstSeen int) memops.HistorySymbol {

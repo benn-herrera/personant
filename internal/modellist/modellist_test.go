@@ -109,6 +109,67 @@ func TestRunProviderMissing(t *testing.T) {
 	}
 }
 
+// writeProvidersWithFault writes a providers.toml with a healthy provider
+// (good, pointing at baseURL) and a faulted one (bad, referencing an
+// apiKeyFile that does not exist so it drops from the pool). Returns the
+// paths.
+func writeProvidersWithFault(t *testing.T, baseURL string) store.PersonantPaths {
+	t.Helper()
+	home := t.TempDir()
+	body := fmt.Sprintf(`[good]
+baseUrl = %q
+apiKey = "dummy"
+defaultModel = "m"
+
+[bad]
+baseUrl = "http://unused.example"
+apiKeyFile = "does-not-exist.key"
+defaultModel = "m"
+`, baseURL)
+	if err := os.WriteFile(filepath.Join(home, "providers.toml"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write providers.toml: %v", err)
+	}
+	return store.PathsForHome(home)
+}
+
+// TestRunSurfacesLoadFaultsAsWarnings: a provider dropped for an unreadable
+// apiKeyFile must appear on stderr as a warning naming the provider — not
+// vanish silently while a healthy provider still resolves.
+func TestRunSurfacesLoadFaultsAsWarnings(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"m1","object":"model"}]}`))
+	}))
+	defer srv.Close()
+
+	paths := writeProvidersWithFault(t, srv.URL)
+	var stdout, stderr bytes.Buffer
+	if err := Run(fileadapter.NewFileAdapter(paths), Options{Provider: "good", Stdout: &stdout, Stderr: &stderr}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(stderr.String(), `provider "bad" unavailable`) {
+		t.Errorf("stderr should warn about the faulted provider; got %q", stderr.String())
+	}
+	// The healthy provider still resolved and listed.
+	if stdout.String() != "m1\n" {
+		t.Errorf("stdout: got %q, want %q", stdout.String(), "m1\n")
+	}
+}
+
+// TestRunFaultedProviderRequestedNamesFault: requesting the faulted
+// provider must return an error that says it failed to load — distinct from
+// the "not found" message a typo would produce.
+func TestRunFaultedProviderRequestedNamesFault(t *testing.T) {
+	paths := writeProvidersWithFault(t, "http://unused.example")
+	var stdout, stderr bytes.Buffer
+	err := Run(fileadapter.NewFileAdapter(paths), Options{Provider: "bad", Stdout: &stdout, Stderr: &stderr})
+	if err == nil {
+		t.Fatal("expected error for faulted provider, got nil")
+	}
+	if !strings.Contains(err.Error(), `provider "bad" failed to load`) {
+		t.Errorf("error should name the load fault; got %v", err)
+	}
+}
+
 func TestRunDefaultsToLocal(t *testing.T) {
 	// Provider name is "local" — Options.Provider left empty, defaults to "local".
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

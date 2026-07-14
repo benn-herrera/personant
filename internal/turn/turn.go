@@ -202,18 +202,23 @@ type State struct {
 	flushCalls  int
 	flushChunks int
 
-	// structuralCreates / structuralCloses count the §3.11 structural
-	// changes that occurred during the in-flight turn: thread creations
-	// (createNewThread) and §3.5 closure/retire writes (applyClosureResolution).
-	// They are the turn-close commit-cadence trigger — a turn with
-	// (creates+closes) > 0 yields EXACTLY ONE Checkpoint at Run close, never
-	// one per mutation, so a close+create switch or a vacation closure-storm
-	// (#82, many closes in one turn) coalesces to a single commit (§3.11).
-	// Both are reset to 0 at the top of every Run; the counts also build the
-	// commit reason string (e.g. "+1 thread, -2 retired"). Archival commits
-	// via its own §3.8 batch and is deliberately NOT counted here.
+	// structuralCreates / structuralRetires / structuralWIPs count the §3.11
+	// structural changes that occurred during the in-flight turn: thread
+	// creations (createNewThread), §3.5 retire writes, and §3.5 WIP
+	// demotions (both in applyClosureResolution). They are the turn-close
+	// commit-cadence trigger — a turn with (creates+retires+wips) > 0 yields
+	// EXACTLY ONE Checkpoint at Run close, never one per mutation, so a
+	// close+create switch or a vacation closure-storm (#82, many closes in
+	// one turn) coalesces to a single commit (§3.11). All three reset to 0
+	// at the top of every Run; the counts also build the commit reason
+	// string (e.g. "+1 thread, -2 retired, ~1 wip"). Retirements and WIP
+	// demotions are counted SEPARATELY: a WIP demotion keeps the thread open
+	// (state=wip), so folding it into a "retired" tally would misreport the
+	// commit's forensic reason. Archival commits via its own §3.8 batch and
+	// is deliberately NOT counted here.
 	structuralCreates int
-	structuralCloses  int
+	structuralRetires int
+	structuralWIPs    int
 }
 
 // sessionHistoryCapTurns bounds State.History to N user/assistant turn
@@ -423,9 +428,10 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	// owner cannot trip this turn's claim guard.
 	state.turnOwner = ""
 	// §3.11 structural-change counters are per-turn — clear them so the
-	// turn-close cadence check sees only this turn's creates/closes.
+	// turn-close cadence check sees only this turn's creates/retires/wips.
 	state.structuralCreates = 0
-	state.structuralCloses = 0
+	state.structuralRetires = 0
+	state.structuralWIPs = 0
 	// Bump the turn counter BEFORE any chain step fires so the user.prompt
 	// delta and the model.response delta both observe the same
 	// TurnNumber. The transient-data lifecycle B.4 window-close GC keys
@@ -659,9 +665,9 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	// non-fatal (log and continue), consistent with the other close-time
 	// substrate calls; the session-close commit is the backstop. Archival
 	// commits via its own §3.8 batch, so it is excluded from the trigger.
-	if commitOnStructuralChange && state.structuralCreates+state.structuralCloses > 0 {
-		reason := fmt.Sprintf("structural: +%d thread, -%d retired",
-			state.structuralCreates, state.structuralCloses)
+	if commitOnStructuralChange && state.structuralCreates+state.structuralRetires+state.structuralWIPs > 0 {
+		reason := fmt.Sprintf("structural: +%d thread, -%d retired, ~%d wip",
+			state.structuralCreates, state.structuralRetires, state.structuralWIPs)
 		if err := state.Ops.Checkpoint(ctx, reason); err != nil {
 			_ = state.Ops.Log(ctx, memops.LogCategorySession, "checkpoint-error", memops.SanitizeDetail(err.Error()))
 		}
@@ -685,10 +691,10 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		model.Message{Role: "user", Content: userInput},
 		model.Message{Role: "assistant", Content: full.Content},
 	)
-	if cap := 2 * sessionHistoryCapTurns; len(state.History) > cap {
-		drop := len(state.History) - cap
+	if histCap := 2 * sessionHistoryCapTurns; len(state.History) > histCap {
+		drop := len(state.History) - histCap
 		// Drop is always even because both the append above and any
-		// prior trim leave History even-length, and cap is even.
+		// prior trim leave History even-length, and histCap is even.
 		state.History = append(state.History[:0:0], state.History[drop:]...)
 	}
 

@@ -48,6 +48,31 @@ func seedThreadMeta(t *testing.T, paths store.PersonantPaths, id string, lifecyc
 	return fm
 }
 
+// TestFMCache_PutDeepClonesDerivedFrom is the aliasing regression guard for
+// HistorySymbol.DerivedFrom: Put must deep-copy each symbol's DerivedFrom
+// slice, so a caller mutating its own slice in place after the write cannot
+// corrupt cached recall state. Before the clone fix, cloneThreadMeta only
+// slices.Clone'd the HistorySymbols slice, leaving each element's
+// DerivedFrom backing array shared with the caller.
+func TestFMCache_PutDeepClonesDerivedFrom(t *testing.T) {
+	c := newFrontmatterCache()
+	orig := memops.ThreadMeta{
+		ID: "thr_1",
+		HistorySymbols: []memops.HistorySymbol{
+			{Raw: "alpha", Normalized: "alpha", DerivedFrom: []string{"thr_origin"}},
+		},
+	}
+	c.Put(orig)
+
+	// Mutate the caller-owned DerivedFrom slice in place after the write.
+	orig.HistorySymbols[0].DerivedFrom[0] = "CORRUPTED"
+
+	stored := c.entries["thr_1"]
+	if got := stored.HistorySymbols[0].DerivedFrom[0]; got != "thr_origin" {
+		t.Fatalf("cache DerivedFrom aliased caller slice: got %q, want %q", got, "thr_origin")
+	}
+}
+
 // TestFMCache_ObservationalEquivalence proves cache.LoadAll returns the
 // same set+field values as store.LoadAllThreadFrontmatter — on a cold
 // cache (all misses) and again on a warm cache (all hits).
