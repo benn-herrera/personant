@@ -186,46 +186,6 @@ func gitCommitFile(t *testing.T, repo, path, content, msg string) string {
 	return string(bytes.TrimSpace(out))
 }
 
-func TestCommitReachable_Reachable(t *testing.T) {
-	hasGit(t)
-	repo := t.TempDir()
-	gitInit(t, repo)
-	hash := gitCommitFile(t, repo, "f.txt", "hello\n", "add f")
-
-	ok, err := CommitReachable(repo, hash)
-	if err != nil {
-		t.Fatalf("CommitReachable: %v", err)
-	}
-	if !ok {
-		t.Errorf("CommitReachable(%s) = false, want true", hash)
-	}
-}
-
-func TestCommitReachable_Absent(t *testing.T) {
-	hasGit(t)
-	repo := t.TempDir()
-	gitInit(t, repo)
-	gitCommitFile(t, repo, "f.txt", "hello\n", "add f")
-
-	// A well-formed but never-committed hash is unreachable: false, no error.
-	ok, err := CommitReachable(repo, "0123456789012345678901234567890123456789")
-	if err != nil {
-		t.Fatalf("CommitReachable on absent hash: unexpected error: %v", err)
-	}
-	if ok {
-		t.Error("CommitReachable on absent hash = true, want false")
-	}
-}
-
-func TestCommitReachable_EmptyArgs(t *testing.T) {
-	if _, err := CommitReachable("", "abc"); err == nil {
-		t.Error("expected error for empty gitRoot")
-	}
-	if _, err := CommitReachable("/tmp", ""); err == nil {
-		t.Error("expected error for empty hash")
-	}
-}
-
 func TestBlobReachable_Present(t *testing.T) {
 	hasGit(t)
 	repo := t.TempDir()
@@ -242,19 +202,24 @@ func TestBlobReachable_Present(t *testing.T) {
 }
 
 // The load-bearing BD-11 case: the COMMIT is reachable but the queried PATH
-// is absent from its tree. CommitReachable answers true (too weak); the
-// blob-at-path predicate correctly answers false, so the aging gate refuses.
+// is absent from its tree. A whole-commit reachability check would answer
+// true (too weak — the gap the old gate had); the blob-at-path predicate
+// correctly answers false, so the aging gate refuses to drop the chain.
 func TestBlobReachable_CommitReachablePathAbsent(t *testing.T) {
 	hasGit(t)
 	repo := t.TempDir()
 	gitInit(t, repo)
 	hash := gitCommitFile(t, repo, "f.txt", "x\n", "add f")
 
-	// Sanity: the commit itself resolves — this is the gap the old gate had.
-	if ok, err := CommitReachable(repo, hash); err != nil || !ok {
-		t.Fatalf("CommitReachable = (%v,%v), want (true,nil)", ok, err)
+	// The commit demonstrably exists and resolves: its own committed path
+	// is blob-reachable (a hit here is only possible if `hash` names a real
+	// commit whose tree we can read). This is the contrast anchor — the
+	// same commit that a whole-commit check would pass.
+	if ok, err := BlobReachable(repo, hash, "f.txt"); err != nil || !ok {
+		t.Fatalf("BlobReachable(committed path) = (%v,%v), want (true,nil)", ok, err)
 	}
-	// But the recorded path is not in that commit → blob unreachable.
+	// But a DIFFERENT path is not in that commit's tree → blob unreachable,
+	// even though the commit itself is reachable.
 	ok, err := BlobReachable(repo, hash, "not-in-tree.txt")
 	if err != nil {
 		t.Fatalf("BlobReachable absent path: unexpected error: %v", err)

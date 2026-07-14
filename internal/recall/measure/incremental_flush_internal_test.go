@@ -193,7 +193,8 @@ func TestProcessJob_ReuseIsEquivalent(t *testing.T) {
 
 // TestProcessJob_ChangedChunkReEmbeds: a chunk whose text changed at an
 // existing turn (hash mismatch) is re-embedded, not reused — the reuse key is
-// (turn, content hash), so a content change forces a fresh vector.
+// the content hash, so a content change (new hash) forces a fresh vector while
+// the unchanged sibling is reused.
 func TestProcessJob_ChangedChunkReEmbeds(t *testing.T) {
 	emb := newCountingMock()
 	body := "## Turn 1\nquasar redshift\n\n## Turn 2\nglacier moraine\n"

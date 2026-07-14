@@ -173,35 +173,21 @@ func applyRecallResolution(ctx context.Context, state *State, offer RecallOffer,
 	for i, c := range offer.Candidates {
 		if accepted[i] {
 			// A recall-accept promotion is a working-window mutation, so it
-			// goes through the §3.0 hook chain like every other Layer-B fetch
-			// (G-F3 / §3.0.5 "no gaps"): load the thread and fire a
-			// thread.fetched delta through onContextDelta BEFORE promoting,
-			// parity with fetchThreadForReprompt (§5.5). On a load or delta
-			// failure, log fetch-miss and skip this candidate — no promotion,
-			// no accept log, no RecallFires bump — exactly as the reprompt
-			// path skips an unloadable thread.
-			thr, err := state.Ops.LoadThread(ctx, c.ThreadID)
-			if err != nil {
-				_ = state.Ops.Log(ctx, memops.LogCategoryThread, "fetch-miss",
-					"thr="+c.ThreadID+" err="+memops.SanitizeDetail(err.Error()))
+			// goes through the SAME §3.0.5 fetch chokepoint every other Layer-B
+			// fetch does (G-F3 / "no gaps"): fetchThroughChain loads the thread,
+			// declines a cross-project candidate (§3.2 — an embedding/intra hit
+			// can name a foreign thread the symbolic project filter never saw,
+			// so the accept path needs the same guard the §5.5 reprompt has),
+			// fires the thread.fetched delta through onContextDelta, and
+			// promotes into Layer B (recording the §2.7.3 recallSurfaced origin
+			// — an accept runs at turn-close, so its attribution lands one turn
+			// later). On any outcome that prevents promotion (fetch-miss or
+			// cross-project decline, both already logged) it returns false and
+			// we skip this candidate — no accept log, no RecallFires bump —
+			// exactly as the reprompt path skips an unpromotable thread.
+			if !fetchThroughChain(ctx, state, c.ThreadID) {
 				continue
 			}
-			if err := onContextDelta(ctx, state, Delta{
-				Source:  memops.SourceThreadFetched,
-				Content: thr.Body,
-				Meta:    map[string]string{"thr": c.ThreadID},
-			}); err != nil {
-				_ = state.Ops.Log(ctx, memops.LogCategoryThread, "fetch-miss",
-					"thr="+c.ThreadID+" err="+memops.SanitizeDetail(err.Error()))
-				continue
-			}
-			// promoteToLayerB pulls the thread into Layer B AND records the
-			// §2.7.3 recallSurfaced origin at the shared recall-promotion
-			// chokepoint. As an accept runs at turn-close (after the merge),
-			// the attribution lands one turn later — when the model, having
-			// seen this parent in the next turn's context, re-emits one of
-			// its symbols.
-			promoteToLayerB(state, c.ThreadID)
 			if err := state.Ops.Log(ctx, memops.LogCategoryRecall, "accept",
 				fmt.Sprintf("thr=%s layers=%s", c.ThreadID, strings.Join(c.Layers(), "+"))); err != nil {
 				return fmt.Errorf("log recall.accept: %w", err)

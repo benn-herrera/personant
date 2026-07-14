@@ -1,11 +1,11 @@
-// Package scenarios is the spec §11.4 scenario-test fabric: the
+// Package scenarios is the spec §9.4 scenario-test fabric: the
 // instrument by which the architectural thesis is empirically verified.
 //
 // Each Scenario is a named end-to-end story driven through the real
 // turn.Run path with a scripted mock LLM. After every step (and once
-// at the end) the harness runs invariant validators (§11.5) and
-// accumulates per-scenario metrics (§11.6) into a stable JSON blob the
-// six-month simulation harness will consume verbatim.
+// at the end) the harness runs invariant validators (§9.4) and
+// accumulates per-scenario metrics (§9.4) into a stable JSON blob the
+// acceptance simulation harness will consume verbatim.
 //
 // The shape — Step → Scenario, with default + custom invariants — is
 // designed to scale from the four Phase-2.f scenarios to the thousands
@@ -515,7 +515,7 @@ func (s *sliceSource) Next(_ StepFeedback) (Step, bool) {
 //
 // A scenario supplies its steps in exactly one of two ways: a fixed
 // Steps slice (the ~80 hand-written scenarios) or a StepSource that
-// yields them on demand (the six-month simulation, whose step count is
+// yields them on demand (the acceptance simulation, whose step count is
 // far too large to hold in memory). When StepSource is non-nil it
 // takes precedence and Steps is ignored.
 type Scenario struct {
@@ -531,7 +531,7 @@ type Scenario struct {
 
 	// StepSource, when non-nil, drives the scenario on demand instead of
 	// Steps: RunScenario pulls one Step per turn rather than iterating a
-	// pre-built slice. Used by the six-month simulation, whose ~59 000+
+	// pre-built slice. Used by the acceptance simulation, whose ~59 000+
 	// steps must not all live in memory at once. When set, Steps is
 	// ignored.
 	StepSource StepSource
@@ -558,7 +558,7 @@ type Scenario struct {
 	//
 	// Zero value = fire heavy invariants every step (the legacy behavior,
 	// what handwritten scenarios still get). Only opt-in scenarios — the
-	// six-month sim — set this.
+	// acceptance sim — set this.
 	//
 	// Per-step Step.Invariants overrides bypass this cadence: when a step
 	// supplies an explicit invariant list, that exact list runs.
@@ -628,7 +628,7 @@ type Scenario struct {
 	// infinitely more useful for diagnosing a leak than a macOS SIGKILL.
 	//
 	// Zero value (the default) disables the watchdog, preserving the
-	// behavior unit tests have always seen. The six-month sim sets it to a
+	// behavior unit tests have always seen. The acceptance sim sets it to a
 	// value comfortably under the macOS jetsam threshold (~30 GB
 	// compressed on a 38 GB machine) so a runaway leak trips the cap
 	// before the OS pager kills the process.

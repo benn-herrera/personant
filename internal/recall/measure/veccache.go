@@ -247,45 +247,32 @@ func (c *vecCache) reconcileThread(ctx context.Context, rec memops.SpineRecord, 
 		return cacheEntry{}, false, fmt.Errorf("load %s: %w", rec.ID, err)
 	}
 
-	// A full miss (nil vf) reuses nothing: an empty cached set forces every
-	// chunk and the coarse body through the embedder below.
-	var cachedChunks []vecFileChunk
+	// A full miss (nil vf) reuses nothing: an empty reuse lookup forces every
+	// chunk and the coarse body through the embedder below. The reuse lookup is
+	// content hash → cached vector, the same key policy the incremental flush
+	// uses (see chunkReusePartition).
+	reuse := map[string][]float64{}
 	cachedBodyHash := ""
 	var cachedCoarse []float64
 	cachedCount := -1 // sentinel: differs from any real count → full re-embed
 	if vf != nil {
-		cachedChunks = vf.Chunks
+		reuse = make(map[string][]float64, len(vf.Chunks))
+		for _, ch := range vf.Chunks {
+			reuse[ch.ChunkHash] = ch.Vector
+		}
 		cachedBodyHash = vf.BodyHash
 		cachedCoarse = vf.Coarse
 		cachedCount = len(vf.Chunks)
 	}
 
-	// Index cached chunk vectors by content hash for reuse lookup.
-	cachedByHash := make(map[string]vecFileChunk, len(cachedChunks))
-	for _, ch := range cachedChunks {
-		cachedByHash[ch.ChunkHash] = ch
-	}
-
-	refreshed := cachedCount != len(excerpts) // a removed/added excerpt (or full miss) moves the thread
-
 	// Chunk tier: reuse cached vectors for unchanged excerpts (hash match),
-	// re-embed only the changed/added ones — the AC4 "only that chunk" path.
-	chunks := make([]scoring.ChunkVector, len(excerpts))
-	chunkHashes := make([]string, len(excerpts))
-	var toEmbedTexts []string
-	var toEmbedSlot []int // index into chunks; -1 is the coarse slot
-	for i, ex := range excerpts {
-		h := contentHash(ex.Text)
-		chunkHashes[i] = h
-		chunks[i].TurnNumber = ex.TurnNumber
-		if ch, ok := cachedByHash[h]; ok {
-			chunks[i].Vector = ch.Vector
-			continue
-		}
-		refreshed = true
-		toEmbedTexts = append(toEmbedTexts, truncateForEmbed(ex.Text))
-		toEmbedSlot = append(toEmbedSlot, i)
-	}
+	// re-embed only the changed/added ones — the AC4 "only that chunk" path
+	// (chunkReusePartition, the shared shape with the incremental flush).
+	chunks, chunkHashes, toEmbedTexts, toEmbedSlot := chunkReusePartition(excerpts, reuse)
+
+	// A removed/added excerpt (or full miss) moves the thread, as does any
+	// re-embedded chunk (toEmbedTexts non-empty) — either forces a persist.
+	refreshed := cachedCount != len(excerpts) || len(toEmbedTexts) > 0
 
 	// Coarse tier: re-embed the body only if its hash moved. Prepend it so the
 	// coarse slot is index 0 of the embed batch when present.

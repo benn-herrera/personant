@@ -474,6 +474,99 @@ func TestComposeFullIntegration(t *testing.T) {
 	}
 }
 
+// TestComposeWarnsOnEmptyLayerDespiteInputs verifies the §3.1
+// render-stage workset.warning seam: when a layer is handed input ids but
+// the pre-fetched data for every one is missing, the layer renders empty
+// and ComposeOptions.Logger fires exactly one warning naming that layer.
+func TestComposeWarnsOnEmptyLayerDespiteInputs(t *testing.T) {
+	cases := []struct {
+		name      string
+		in        Inputs
+		wantLayer string // substring identifying which layer warned
+		wantEmpty func(prompt string) bool
+	}{
+		{
+			name: "layer B all threads missing data",
+			in: Inputs{
+				ActiveProject:    activeMeta,
+				Budget:           defaultBudget(),
+				ActiveThreads:    []string{"thr_1", "thr_2"},
+				ActiveThreadData: nil, // no data pre-fetched for either id
+			},
+			wantLayer: "layer B",
+		},
+		{
+			name: "layer C all dormant missing spine",
+			in: Inputs{
+				ActiveProject:  activeMeta,
+				Budget:         defaultBudget(),
+				DormantThreads: []string{"thr_9"},
+				DormantSpine:   nil,
+			},
+			wantLayer: "layer C",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var warnings []string
+			logger := func(format string, args ...any) {
+				warnings = append(warnings, fmt.Sprintf(format, args...))
+			}
+			if _, err := Compose(tc.in, ComposeOptions{Logger: logger}); err != nil {
+				t.Fatalf("Compose: %v", err)
+			}
+			if len(warnings) != 1 {
+				t.Fatalf("expected exactly 1 warning, got %d: %v", len(warnings), warnings)
+			}
+			if !strings.Contains(warnings[0], tc.wantLayer) {
+				t.Errorf("warning %q does not name %q", warnings[0], tc.wantLayer)
+			}
+		})
+	}
+}
+
+// TestComposeNoWarnWhenLayerRenders confirms the warning does NOT fire on
+// a healthy composition (data present) nor when a layer is legitimately
+// empty because no inputs were supplied — only genuine render-stage loss
+// warns.
+func TestComposeNoWarnWhenLayerRenders(t *testing.T) {
+	cases := []struct {
+		name string
+		in   Inputs
+	}{
+		{
+			name: "no inputs at all",
+			in:   Inputs{ActiveProject: activeMeta, Budget: defaultBudget()},
+		},
+		{
+			name: "layer B renders with data present",
+			in: Inputs{
+				ActiveProject: activeMeta,
+				Budget:        defaultBudget(),
+				ActiveThreads: []string{"thr_1"},
+				ActiveThreadData: map[string]ThreadData{"thr_1": {
+					Meta: memops.ThreadMeta{ID: "thr_1", Summary: "s", State: memops.ThreadActive},
+					Body: "body",
+				}},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var warnings []string
+			logger := func(format string, args ...any) {
+				warnings = append(warnings, fmt.Sprintf(format, args...))
+			}
+			if _, err := Compose(tc.in, ComposeOptions{Logger: logger}); err != nil {
+				t.Fatalf("Compose: %v", err)
+			}
+			if len(warnings) != 0 {
+				t.Errorf("expected no warnings, got %v", warnings)
+			}
+		})
+	}
+}
+
 // TestPerThreadBudgetFloor pins the substrate-fetch contract: the
 // adapter uses PerThreadBudget to bound store.ReadThreadBody reads to
 // the same share workset will render at, so the floor enforcement here

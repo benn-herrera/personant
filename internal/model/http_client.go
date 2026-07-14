@@ -65,13 +65,54 @@ func (c *HTTPClient) Consult(ctx context.Context, req Request) (Response, error)
 		return Response{}, fmt.Errorf("encode request: %w", err)
 	}
 
-	url := joinURL(c.provider.BaseURL, "chat/completions")
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	resp, err := c.doRequest(ctx, http.MethodPost, "chat/completions", "application/json", body)
 	if err != nil {
-		return Response{}, fmt.Errorf("build request: %w", err)
+		return Response{}, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/json")
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return Response{}, fmt.Errorf("read response: %w", err)
+	}
+
+	out, err := decodeResponse(respBody)
+	if err != nil {
+		return Response{}, fmt.Errorf("decode response: %w", err)
+	}
+	return out, nil
+}
+
+// doRequest builds a request to <BaseURL>/<path> with the given method,
+// Accept header, and optional JSON body (nil for a bodyless GET), sets
+// the standard headers — Content-Type when a body is present, plus
+// User-Agent and bearer Authorization when an API key is configured —
+// and performs it against the shared http.Client.
+//
+// This is the collapsed shape shared by Consult, ConsultStream,
+// ListModels, and Embed. Per-call differences (decode targets, and the
+// streaming path's response ownership) stay at the call sites.
+//
+// On a non-2xx response the body is read, the connection closed, and a
+// wrapped error returned with the API key scrubbed — byte-identical to
+// the per-call error paths this replaced. On a 2xx response the live
+// *http.Response is returned with its Body unread; the caller owns
+// reading and closing it (the streaming caller hands the Body off to a
+// StreamReader instead of reading it here).
+func (c *HTTPClient) doRequest(ctx context.Context, method, path, accept string, body []byte) (*http.Response, error) {
+	url := joinURL(c.provider.BaseURL, path)
+	var rdr io.Reader
+	if body != nil {
+		rdr = bytes.NewReader(body)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, url, rdr)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	if body != nil {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
+	httpReq.Header.Set("Accept", accept)
 	httpReq.Header.Set("User-Agent", userAgent)
 	if c.provider.APIKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.provider.APIKey)
@@ -82,24 +123,16 @@ func (c *HTTPClient) Consult(ctx context.Context, req Request) (Response, error)
 		// http.Client.Do already wraps ctx errors usefully; make sure the
 		// caller can errors.Is(err, context.Canceled) without our wrapper
 		// hiding it.
-		return Response{}, fmt.Errorf("http: %w", err)
+		return nil, fmt.Errorf("http: %w", err)
 	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return Response{}, fmt.Errorf("read response: %w", err)
-	}
-
 	if resp.StatusCode/100 != 2 {
-		return Response{}, fmt.Errorf("http %d: %s", resp.StatusCode, scrubAuthorization(string(respBody), c.provider.APIKey))
+		// Read and discard so the connection can be reused; surface the
+		// body in the error after scrubbing.
+		respBody, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("http %d: %s", resp.StatusCode, scrubAuthorization(string(respBody), c.provider.APIKey))
 	}
-
-	out, err := decodeResponse(respBody)
-	if err != nil {
-		return Response{}, fmt.Errorf("decode response: %w", err)
-	}
-	return out, nil
+	return resp, nil
 }
 
 // ConsultStream performs one streaming chat-completions round-trip,
@@ -127,31 +160,12 @@ func (c *HTTPClient) ConsultStream(ctx context.Context, req Request) (StreamRead
 		return nil, fmt.Errorf("encode request: %w", err)
 	}
 
-	url := joinURL(c.provider.BaseURL, "chat/completions")
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	resp, err := c.doRequest(ctx, http.MethodPost, "chat/completions", "text/event-stream", body)
 	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
+		return nil, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "text/event-stream")
-	httpReq.Header.Set("User-Agent", userAgent)
-	if c.provider.APIKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+c.provider.APIKey)
-	}
-
-	resp, err := c.http.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("http: %w", err)
-	}
-
-	if resp.StatusCode/100 != 2 {
-		// Read and discard so the connection can be reused; surface the
-		// body in the error after scrubbing.
-		respBody, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		return nil, fmt.Errorf("http %d: %s", resp.StatusCode, scrubAuthorization(string(respBody), c.provider.APIKey))
-	}
-
+	// On 2xx the response body is owned by the StreamReader, which the
+	// caller must Close; doRequest leaves it unread for exactly this.
 	return newHTTPStreamReader(ctx, resp.Body), nil
 }
 
@@ -163,30 +177,15 @@ func (c *HTTPClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		return nil, fmt.Errorf("provider BaseURL is empty")
 	}
 
-	url := joinURL(c.provider.BaseURL, "models")
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	resp, err := c.doRequest(ctx, http.MethodGet, "models", "application/json", nil)
 	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
-	}
-	httpReq.Header.Set("Accept", "application/json")
-	httpReq.Header.Set("User-Agent", userAgent)
-	if c.provider.APIKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+c.provider.APIKey)
-	}
-
-	resp, err := c.http.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("http: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
-	}
-
-	if resp.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("http %d: %s", resp.StatusCode, scrubAuthorization(string(respBody), c.provider.APIKey))
 	}
 
 	var w wireModelList

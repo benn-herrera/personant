@@ -26,7 +26,6 @@
 package index
 
 import (
-	"fmt"
 	"sort"
 
 	"personant/internal/memops"
@@ -145,31 +144,4 @@ func sortedThreadIDs(set map[string]struct{}, recallFires map[string]int) []stri
 		return ids[i] < ids[j] // ties: lexical
 	})
 	return ids
-}
-
-// RebuildSymbols reads spine.jsonl and threads/*.md, builds the symbol
-// index, and writes it atomically to symbols.jsonl. Returns the records
-// that were written so callers (e.g. Check) can compare without
-// re-reading.
-//
-// Thread-frontmatter parse errors are tolerated: an unreadable thread
-// file is skipped and the build proceeds with the remaining inputs.
-// Hard validation is the job of `personant verify`. The logger is nil
-// here (RebuildSymbols is library-level and not always wired to
-// eventlog); cmd-level callers that want skip diagnostics should call
-// LoadAllThreadFrontmatter directly with their own logger.
-func RebuildSymbols(paths store.PersonantPaths) ([]store.SymbolRecord, error) {
-	spine, err := store.ReadSpine(paths.Spine)
-	if err != nil {
-		return nil, fmt.Errorf("rebuild symbols: read spine: %w", err)
-	}
-	threads, err := store.LoadAllThreadFrontmatter(paths, nil)
-	if err != nil {
-		return nil, fmt.Errorf("rebuild symbols: load threads: %w", err)
-	}
-	records := BuildSymbols(spine, threads)
-	if err := store.WriteSymbols(paths.Symbols, records); err != nil {
-		return nil, fmt.Errorf("rebuild symbols: write: %w", err)
-	}
-	return records, nil
 }

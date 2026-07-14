@@ -128,60 +128,15 @@ func firstNonEmptyLine(s string) string {
 	return ""
 }
 
-// CommitReachable reports whether commit hash is present and reachable in
-// the workspace repo at gitRoot. It is the read-only reachability predicate
-// the §3.9 git-minimization aging gate consults before dropping a chain: a
-// committed file's chain is dropped only when its hash is confirmed
-// reachable, so durable content is never aged away without an
-// application-reachable recovery path (SPEC §3.9.1, §6.1.3).
-//
-// Implemented as `git cat-file -e <hash>^{commit}`: exit 0 ⇒ reachable
-// (true). A non-zero git exit ⇒ not reachable (false, no error): git exits
-// 1 when the object is absent from the DB and 128 when the revision does not
-// resolve to a commit (orphaned, never committed, or syntactically rejected)
-// — both are the same "this hash is not an application-reachable recovery
-// point" answer, and the safe direction is "not reachable" so the caller
-// retains the chain. Only a failure to invoke git at all is an error.
-// Read-only; never mutates the workspace tree.
-func CommitReachable(gitRoot, hash string) (bool, error) {
-	if gitRoot == "" {
-		return false, errors.New("commit reachable: gitRoot is empty")
-	}
-	if hash == "" {
-		return false, errors.New("commit reachable: hash is empty")
-	}
-	if _, err := exec.LookPath("git"); err != nil {
-		return false, fmt.Errorf("commit reachable: %w", err)
-	}
-	cmd := exec.Command("git", "-C", gitRoot, "cat-file", "-e", hash+"^{commit}")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	if err == nil {
-		return true, nil
-	}
-	// Any clean git exit (1 absent / 128 unresolvable) is the negative
-	// answer, not a hard error — retain-the-chain is safe.
-	if _, ok := err.(*exec.ExitError); ok {
-		return false, nil
-	}
-	msg := bytes.TrimSpace(stderr.Bytes())
-	if len(msg) == 0 {
-		return false, fmt.Errorf("commit reachable %s: %w", hash, err)
-	}
-	return false, fmt.Errorf("commit reachable %s: %w: %s", hash, err, string(msg))
-}
-
 // BlobReachable reports whether the blob at `hash:path` is present and
 // reachable in the workspace repo at gitRoot — the §3.9.1 aging gate's
-// recovery precondition. It is strictly stronger than CommitReachable: it
-// confirms not just that the commit resolves but that the RECORDED PATH
-// exists in that commit's tree, which is exactly what the recovery read
-// (ShowFileAtCommit → `git show <hash>:<path>`) needs. A blob being
-// reachable implies its commit is reachable, so this is the single
-// predicate the gate consults before dropping a chain: durable content is
-// never aged away unless the same `hash:path` the recovery path reads is
-// confirmed present (SPEC §3.9.1, §6.1.3).
+// recovery precondition. It confirms not just that the commit resolves but
+// that the RECORDED PATH exists in that commit's tree, which is exactly
+// what the recovery read (ShowFileAtCommit → `git show <hash>:<path>`)
+// needs. A blob being reachable implies its commit is reachable, so this
+// is the single predicate the gate consults before dropping a chain:
+// durable content is never aged away unless the same `hash:path` the
+// recovery path reads is confirmed present (SPEC §3.9.1, §6.1.3).
 //
 // Implemented as `git cat-file -e <hash>:<path>`: exit 0 ⇒ reachable
 // (true). A non-zero git exit ⇒ not reachable (false, no error): git exits

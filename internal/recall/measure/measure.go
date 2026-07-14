@@ -47,8 +47,10 @@ const Kc = 10
 // Kf is the fine top-K: the number of chunks the fine pass keeps per
 // selected thread (design §4.2). Three surfaces the relevant passage
 // plus immediate neighbours without flooding the merge. A §9 calibration
-// window. (scoring.DefaultChunkLimit mirrors this for the pure layer.)
-const Kf = 3
+// window. It is the SAME constant as the pure scoring layer's default
+// chunk limit — scoring.DefaultChunkLimit is the single source, referenced
+// here rather than mirrored (one edit renames both).
+const Kf = scoring.DefaultChunkLimit
 
 // indexSnapshot is the immutable hierarchical embedding index. Once
 // published into Service.cur it is never mutated; the indexer builds a
@@ -737,32 +739,20 @@ func (s *Service) processJob(ctx context.Context, job indexJob) {
 	// them by reference unchanged (it replaces only tree/treeHash), so a
 	// RebuildTrees swap between this load and the swap below cannot alter the
 	// fine tier this read observes — the two-writer invariant (see the cur
-	// field doc) is exactly what makes this load race-free. Key reuse on
-	// (turnNumber, contentHash): only an unchanged chunk at an existing turn
-	// matches, so a changed-text chunk or a new turn falls through to EMBED.
+	// field doc) is exactly what makes this load race-free. Reuse is keyed by
+	// content hash alone (chunkReusePartition): an unchanged chunk hits and a
+	// changed-text chunk (a new hash) falls through to EMBED.
 	reuse := s.priorChunkVectors(job.threadID)
 
 	bodyText := truncateForEmbed(thr.Body)
+	// Chunk tier: partition into reuse-vs-embed against the prior snapshot's
+	// vectors (chunkReusePartition, the shared shape with the startup reconcile).
+	chunks, chunkHashes, embedTexts, embedSlot := chunkReusePartition(excerpts, reuse)
 	// The coarse body legitimately changes as the thread grows (it is the
-	// truncated whole-body), so it is always re-embedded — one call per flush,
-	// O(1). It rides slot -1 of the embed batch (index 0 below).
-	texts := []string{bodyText}
-	chunks := make([]scoring.ChunkVector, len(excerpts))
-	chunkHashes := make([]string, len(excerpts))
-	var embedSlot []int // index into chunks for each text beyond the coarse slot
-	for i, ex := range excerpts {
-		h := contentHash(ex.Text)
-		chunkHashes[i] = h
-		chunks[i].TurnNumber = ex.TurnNumber
-		if v, ok := reuse[chunkKey{turn: ex.TurnNumber, hash: h}]; ok {
-			chunks[i].Vector = v // REUSE: prior snapshot already embedded this exact chunk
-			continue
-		}
-		// EMBED: new turn, changed text, or a chunk the prior snapshot is
-		// missing (fall back to embedding — never serve a stale/missing vector).
-		texts = append(texts, truncateForEmbed(ex.Text))
-		embedSlot = append(embedSlot, i)
-	}
+	// truncated whole-body), so it is ALWAYS re-embedded — one call per flush,
+	// O(1) — riding index 0 of the embed batch ahead of the EMBED-partition
+	// chunks (embedSlot[j] → chunks index, placed from vecs[j+1] below).
+	texts := append([]string{bodyText}, embedTexts...)
 
 	// One batched embed call for the coarse body + the EMBED-partition chunks
 	// (design §6.1 batch efficiency, now over the delta only).
@@ -798,40 +788,73 @@ func (s *Service) processJob(ctx context.Context, job indexJob) {
 	}
 }
 
-// chunkKey identifies a fine-tier chunk for reuse lookup: a turn-excerpt is
-// immutable once written, so (turn number, content hash) uniquely pins one
-// embedded chunk. The hash guards against the rare case of a turn's text
-// changing — a hash mismatch at an existing turn falls through to re-embed.
-type chunkKey struct {
-	turn int
-	hash string
+// chunkReusePartition is the shared reuse/re-embed projection for a thread's
+// fine tier (#102), used by BOTH the incremental flush (processJob, reuse =
+// the live snapshot's vectors) and the startup reconcile (reconcileThread,
+// reuse = the cached .vec vectors). Given the current excerpts and a
+// content-hash → vector reuse lookup, it fills chunks[i] (turn number, plus
+// the reused vector when the excerpt's content hash hits) and chunkHashes[i],
+// and returns the texts + chunk slots that still need embedding.
+//
+// KEY POLICY: the reuse key is the content HASH ALONE, not (turn, hash). A
+// turn-excerpt is immutable once written and an embedding is a pure function
+// of its text, so identical text at ANY turn yields the identical vector —
+// hash-only reuse can never resurrect a wrong vector (a changed text has a
+// changed hash → falls through to EMBED) while reusing across a same-text
+// repeat that a (turn, hash) key would needlessly re-embed to the same result.
+// The turn number carried on each chunk comes from the CURRENT excerpt, so it
+// is always correct regardless of which prior chunk supplied the vector. (This
+// is the same key reconcileThread has always used; processJob was unified down
+// to it.)
+//
+// Pure: it performs no I/O and no embedding — the caller runs the one batched
+// embed over the returned texts and places the results by slot. Coarse-body
+// handling is deliberately left to the caller: the two sites differ there
+// (processJob always re-embeds the growing body; reconcile re-embeds it only on
+// a body-hash change), a load-bearing difference kept out of this shared shape.
+func chunkReusePartition(excerpts []memops.ThreadExcerpt, reuse map[string][]float64) (chunks []scoring.ChunkVector, chunkHashes []string, toEmbedTexts []string, toEmbedSlot []int) {
+	chunks = make([]scoring.ChunkVector, len(excerpts))
+	chunkHashes = make([]string, len(excerpts))
+	for i, ex := range excerpts {
+		h := contentHash(ex.Text)
+		chunkHashes[i] = h
+		chunks[i].TurnNumber = ex.TurnNumber
+		if v, ok := reuse[h]; ok {
+			chunks[i].Vector = v // REUSE: an embedded vector already exists for this exact text
+			continue
+		}
+		// EMBED: new text (or a chunk the prior state is missing) — never serve
+		// a stale/missing vector.
+		toEmbedTexts = append(toEmbedTexts, truncateForEmbed(ex.Text))
+		toEmbedSlot = append(toEmbedSlot, i)
+	}
+	return
 }
 
-// priorChunkVectors builds the reuse lookup for an incremental flush (#102):
-// (turn, content hash) → the vector the live snapshot already holds for that
-// chunk. The snapshot's fine[threadID] and fineHash[threadID] are parallel
-// (built together at every swap), so they zip into the keyed map. Reading the
-// live snapshot here is race-free even with two CAS publishers (see the cur
-// field doc): the fine/fineHash tiers are written only by this indexer
-// goroutine, and RebuildTrees — the other publisher — carries them by
-// reference unchanged, so neither a concurrent RebuildTrees swap nor any
-// reader can tear or mutate the tiers this load reads. A missing/empty prior
-// entry (first flush of a thread) yields an empty map → every chunk embeds,
-// the from-scratch path.
+// priorChunkVectors builds the incremental-flush reuse lookup (#102) from the
+// live snapshot: content hash → the vector the snapshot already holds for a
+// chunk with that text. The snapshot's fine[threadID] and fineHash[threadID]
+// are parallel (built together at every swap), so they zip into the keyed map.
+// Reading the live snapshot here is race-free even with two CAS publishers (see
+// the cur field doc): the fine/fineHash tiers are written only by this indexer
+// goroutine, and RebuildTrees — the other publisher — carries them by reference
+// unchanged, so neither a concurrent RebuildTrees swap nor any reader can tear
+// or mutate the tiers this load reads. A missing/empty prior entry (first flush
+// of a thread) yields an empty map → every chunk embeds, the from-scratch path.
 //
 // A length mismatch between fine and fineHash (which should never happen — the
 // swap always writes them together) degrades safely to no reuse: any chunk it
 // cannot confidently key is simply re-embedded.
-func (s *Service) priorChunkVectors(threadID string) map[chunkKey][]float64 {
+func (s *Service) priorChunkVectors(threadID string) map[string][]float64 {
 	snap := s.cur.Load()
 	priorChunks := snap.fine[threadID]
 	priorHashes := snap.fineHash[threadID]
 	if len(priorChunks) != len(priorHashes) {
 		return nil // defensive: cannot key reliably → re-embed everything
 	}
-	out := make(map[chunkKey][]float64, len(priorChunks))
+	out := make(map[string][]float64, len(priorChunks))
 	for i, cv := range priorChunks {
-		out[chunkKey{turn: cv.TurnNumber, hash: priorHashes[i]}] = cv.Vector
+		out[priorHashes[i]] = cv.Vector
 	}
 	return out
 }

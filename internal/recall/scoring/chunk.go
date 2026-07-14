@@ -141,7 +141,6 @@ func capNet(sorted []ChunkCandidate, limit int, netCapHits *int) []ChunkCandidat
 	if limit < 0 {
 		limit = len(sorted) // unbounded floor; NetCap still bounds it
 	}
-	keep := limit
 	clearlyRelated := 0
 	for _, c := range sorted {
 		if c.Score >= ClearlyRelated {
@@ -150,26 +149,42 @@ func capNet(sorted []ChunkCandidate, limit int, netCapHits *int) []ChunkCandidat
 			break // sorted desc — no clearly-related candidate past here
 		}
 	}
+	keep := netCapKeep(limit, clearlyRelated, len(sorted), netCapHits)
+	if keep >= len(sorted) {
+		return sorted
+	}
+	return sorted[:keep]
+}
+
+// netCapKeep is the shared relevance-sized-net cut count (#111 Finding A),
+// used by BOTH the terminal leaf rank (capNet) and the per-level beam step
+// (descend.go topKByCosine): the kept count is the larger of the floor
+// (min-k / Limit) and the clearlyRelated count (the cast net), clamped to the
+// candidate total and bounded by NetCap. Because the input is score-desc in
+// both callers, the kept set is always a prefix, so a single count governs the
+// cut. netCapHits (nil-safe) is bumped once iff NetCap actually dropped a
+// clearly-related candidate the net would otherwise have kept — the
+// pathological-density signal the caller logs (recall.net-cap-hit). A cut that
+// lands on already-below-ClearlyRelated leaves is the normal path, not a hit.
+func netCapKeep(floor, clearlyRelated, total int, netCapHits *int) int {
+	keep := floor
 	if clearlyRelated > keep {
 		keep = clearlyRelated // the cast net widens past the floor
 	}
-	if keep > len(sorted) {
-		keep = len(sorted)
+	if keep > total {
+		keep = total
 	}
 	if keep > NetCap {
 		// Backstop: a degenerate dense tail beyond NetCap. Only a cap hit if
-		// we are dropping candidates that cleared ClearlyRelated (genuine
-		// high density returning many is the feature working; the cap guards
-		// the pathological case). NOT the normal path — document + signal.
+		// we are dropping candidates that cleared ClearlyRelated (genuine high
+		// density returning many is the feature working; the cap guards the
+		// pathological case). NOT the normal path — document + signal.
 		if clearlyRelated > NetCap {
 			bumpNetCap(netCapHits)
 		}
 		keep = NetCap
 	}
-	if keep >= len(sorted) {
-		return sorted
-	}
-	return sorted[:keep]
+	return keep
 }
 
 // bumpNetCap increments a nil-safe net-cap-hit counter (mirrors

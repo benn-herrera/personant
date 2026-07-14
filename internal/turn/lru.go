@@ -154,20 +154,30 @@ func crossProjectDecline(ctx context.Context, state *State, threadID, project, a
 		"thr="+threadID+" project="+project+" active="+state.ActiveProject.ID)
 }
 
-// fetchThreadForReprompt loads thread thrID from disk, fires a
-// thread.fetched context delta, and promotes the thread into
-// state.ActiveThreads (de-duped, capped by Budget.BTopK; overflow
-// demotes the tail to the head of state.DormantThreads).
+// fetchThroughChain is the single §3.0.5 working-set fetch chokepoint: the one
+// path that pulls a stored thread into Layer B through the full §3.0 hook chain
+// (G-F3 / "no gaps"). It loads thrID, declines a cross-project thread (§3.2),
+// fires a thread.fetched context delta through onContextDelta, then promotes
+// the thread into Layer B (de-duped, capped by Budget.BTopK; overflow demotes
+// the tail to the head of state.DormantThreads).
 //
-// On a load error (missing file or otherwise unloadable), logs
-// thread.fetch-miss and returns false — the caller skips that thread
-// and proceeds with whichever others succeeded.
+// It returns true only when the thread reached Layer B. On any outcome that
+// prevents promotion — a load error (missing/unloadable file → thread.fetch-miss
+// logged) or a cross-project decline (logged fetch-cross-project) or a
+// thread.fetched delta failure (fetch-miss logged) — it returns false with the
+// forensic line already written, and the caller skips that thread. A log error
+// on the miss/decline paths is swallowed: the decision still holds.
 //
-// fetchThreadForReprompt deliberately does not add thrID to
-// coalesce.threads: engagement is owed by the second response's tag
-// (which the model emits against the augmented context), not by the
-// fetch action itself.
-func fetchThreadForReprompt(ctx context.Context, state *State, thrID string) bool {
+// Both callers route through here so the cross-project guard and the delta-
+// before-promote ordering can never diverge between them (a divergence would
+// reopen the §3.0.5 bypass class): the §5.5 mid-turn reprompt
+// (fetchThreadForReprompt) and the §3.4 recall-accept promotion
+// (applyRecallResolution). It deliberately does not add thrID to
+// coalesce.threads: engagement is owed by a later response's tag, not by the
+// fetch action itself. promoteToLayerB owns the §2.7.3 recallSurfaced marking,
+// so the attribution timing (same-turn for a pre-merge reprompt, next-turn for
+// a turn-close accept) falls out of residency for free.
+func fetchThroughChain(ctx context.Context, state *State, thrID string) bool {
 	thr, err := state.Ops.LoadThread(ctx, thrID)
 	if err != nil {
 		_ = state.Ops.Log(ctx, memops.LogCategoryThread, "fetch-miss",
@@ -175,7 +185,7 @@ func fetchThreadForReprompt(ctx context.Context, state *State, thrID string) boo
 		return false
 	}
 	// §3.2 cross-project decline (parity with the turn-close engagement
-	// resolver, resolveEngagedThread): a mid-turn fetch never promotes a
+	// resolver, resolveEngagedThread): a working-set fetch never promotes a
 	// thread that belongs to another project. Cross-project engagement is
 	// reserved for Phase 5; v0.1 declines. Checked BEFORE the thread.fetched
 	// delta so a foreign thread's body never enters the context/coalesce, and
@@ -196,6 +206,14 @@ func fetchThreadForReprompt(ctx context.Context, state *State, thrID string) boo
 
 	promoteToLayerB(state, thrID)
 	return true
+}
+
+// fetchThreadForReprompt is the §5.5 mid-turn fetch entry: it routes thrID
+// through the shared fetchThroughChain chokepoint. Kept as a named seam so the
+// reprompt call site (turn.go) reads at its own altitude; it adds nothing over
+// the chokepoint.
+func fetchThreadForReprompt(ctx context.Context, state *State, thrID string) bool {
+	return fetchThroughChain(ctx, state, thrID)
 }
 
 // promoteToLayerB promotes thrID into state.ActiveThreads at the front

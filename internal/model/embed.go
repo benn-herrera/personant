@@ -1,7 +1,6 @@
 package model
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -79,30 +78,14 @@ func (c *HTTPClient) embedOne(ctx context.Context, texts []string) ([][]float64,
 	if err != nil {
 		return nil, fmt.Errorf("encode embed request: %w", err)
 	}
-	url := joinURL(c.provider.BaseURL, "embeddings")
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	resp, err := c.doRequest(ctx, http.MethodPost, "embeddings", "application/json", body)
 	if err != nil {
-		return nil, fmt.Errorf("build embed request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/json")
-	httpReq.Header.Set("User-Agent", userAgent)
-	if c.provider.APIKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+c.provider.APIKey)
-	}
-
-	resp, err := c.http.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("http: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read embed response: %w", err)
-	}
-	if resp.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("http %d: %s", resp.StatusCode,
-			scrubAuthorization(string(respBody), c.provider.APIKey))
 	}
 
 	var wire wireEmbedResponse

@@ -7,8 +7,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-
-	"personant/internal/store"
 )
 
 // logTailer is the harness's stateful, incremental reader of the
@@ -121,20 +119,6 @@ func eventThreadID(line, marker, idPrefix string) (string, bool) {
 	return tok, true
 }
 
-// liveSpineThreadSet returns the set of thread IDs currently present on
-// the spine.
-func liveSpineThreadSet(paths store.PersonantPaths) (map[string]struct{}, error) {
-	recs, err := store.ReadSpine(paths.Spine)
-	if err != nil {
-		return nil, fmt.Errorf("liveSpineThreadSet: read spine: %w", err)
-	}
-	out := make(map[string]struct{}, len(recs))
-	for _, r := range recs {
-		out[r.ID] = struct{}{}
-	}
-	return out, nil
-}
-
 // The three `spine.*-match-fire ` log markers the harness scrapes to
 // reconstruct each recall layer's observed match set. These are the
 // contract with internal/turn's turn-close logging — a runtime edit to
@@ -239,14 +223,24 @@ func recordEmbedRecallFidelity(h *Harness, keptExpected, actual []string, measur
 //
 // Both inputs MUST be deduplicated. Order is irrelevant.
 func recallFidelity(expected, actual []string) (precision, recall, f1 float64) {
-	expSet := make(map[string]struct{}, len(expected))
-	for _, id := range expected {
-		expSet[id] = struct{}{}
+	return recallFidelityFromSets(toSet(expected), toSet(actual))
+}
+
+// toSet builds a membership set from a slice of thread IDs.
+func toSet(ids []string) map[string]struct{} {
+	s := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		s[id] = struct{}{}
 	}
-	actSet := make(map[string]struct{}, len(actual))
-	for _, id := range actual {
-		actSet[id] = struct{}{}
-	}
+	return s
+}
+
+// recallFidelityFromSets is the set-based core of recallFidelity: the caller
+// supplies the expected/actual membership sets so a site that also needs the
+// mismatch breakdown (recordRecallFidelity) builds each set exactly once and
+// passes it to both this and recallFidelityMismatchFromSets, rather than
+// rebuilding the same two sets twice (#2).
+func recallFidelityFromSets(expSet, actSet map[string]struct{}) (precision, recall, f1 float64) {
 	tp := 0
 	for id := range actSet {
 		if _, ok := expSet[id]; ok {
@@ -380,7 +374,11 @@ func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode 
 	// counter scores this step with the same forgiveness as the F1 path.
 	expectedForgiven := len(kept)
 
-	precision, recall, f1 := recallFidelity(expected, actual)
+	// Build the expected/actual membership sets ONCE and thread them through
+	// both the score and (strict path) the mismatch breakdown, rather than
+	// each helper rebuilding the same two sets (#2).
+	expSet, actSet := toSet(expected), toSet(actual)
+	precision, recall, f1 := recallFidelityFromSets(expSet, actSet)
 
 	if mode == RecallMeasureOnly {
 		h.Metrics.Counter(MetricRecallFidelityAdversarialSteps, 1)
@@ -394,7 +392,7 @@ func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode 
 	h.Metrics.Record("recall_fidelity_precision", precision)
 	h.Metrics.Record("recall_fidelity_recall", recall)
 	h.Metrics.Record("recall_fidelity_f1", f1)
-	unexpected, missing := recallFidelityMismatch(expected, actual)
+	unexpected, missing := recallFidelityMismatchFromSets(expSet, actSet)
 	if len(unexpected) == 0 && len(missing) == 0 {
 		return expected, expectedForgiven
 	}
@@ -407,14 +405,13 @@ func recordRecallFidelity(t *testing.T, h *Harness, idx int, label string, mode 
 // and missing (false-negative) thread ID sets for an assertion message.
 // Both slices are nil when the sets agree.
 func recallFidelityMismatch(expected, actual []string) (unexpected, missing []string) {
-	expSet := make(map[string]struct{}, len(expected))
-	for _, id := range expected {
-		expSet[id] = struct{}{}
-	}
-	actSet := make(map[string]struct{}, len(actual))
-	for _, id := range actual {
-		actSet[id] = struct{}{}
-	}
+	return recallFidelityMismatchFromSets(toSet(expected), toSet(actual))
+}
+
+// recallFidelityMismatchFromSets is the set-based core of
+// recallFidelityMismatch — see recallFidelityFromSets for why the sets are
+// passed in rather than rebuilt (#2).
+func recallFidelityMismatchFromSets(expSet, actSet map[string]struct{}) (unexpected, missing []string) {
 	for id := range actSet {
 		if _, ok := expSet[id]; !ok {
 			unexpected = append(unexpected, id)

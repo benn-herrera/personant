@@ -357,8 +357,10 @@ func topKByCosine(query []float64, nodes []*SummaryNode, k int, counter *CosineC
 	})
 
 	// The kept count is the larger of the floor k and the number of
-	// clearly-related branches (the cast net), bounded by NetCap. Sorted
-	// desc → the kept set is a prefix; count clearly-related from the front.
+	// clearly-related branches (the cast net), bounded by NetCap — the same
+	// relevance-net cut the terminal leaf rank uses (netCapKeep, shared with
+	// capNet). Sorted desc → the kept set is a prefix; count clearly-related
+	// from the front.
 	clearlyRelated := 0
 	for _, r := range ranked {
 		if r.score >= ClearlyRelated {
@@ -367,16 +369,7 @@ func topKByCosine(query []float64, nodes []*SummaryNode, k int, counter *CosineC
 			break
 		}
 	}
-	keep := k
-	if clearlyRelated > keep {
-		keep = clearlyRelated
-	}
-	if keep > NetCap {
-		if clearlyRelated > NetCap {
-			bumpNetCap(netCapHits) // dropping a clearly-related branch — pathological
-		}
-		keep = NetCap
-	}
+	keep := netCapKeep(k, clearlyRelated, len(ranked), netCapHits)
 	out := make([]*SummaryNode, keep)
 	for i := 0; i < keep; i++ {
 		out[i] = ranked[i].node

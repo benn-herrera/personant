@@ -1,8 +1,8 @@
-// Package metrics is the v0.1 scaffold for spec §11.6's metrics emission.
+// Package metrics is the v0.1 scaffold for spec §9.4's metrics emission.
 //
 // One Run holds the metrics collected during a single test or production
 // session. The schema written to disk is stable across versions so
-// cross-run comparison (§11.9) works without per-version migration.
+// cross-run comparison (§9.4) works without per-version migration.
 package metrics
 
 import (

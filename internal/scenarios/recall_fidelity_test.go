@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"personant/internal/metrics"
+	"personant/internal/store"
 )
 
 // readCounter writes the run's metrics blob to a temp file and returns the
@@ -107,10 +108,11 @@ func TestArchivedSet_IndexDerived_DroppedLogLine(t *testing.T) {
 	// A step that expected to recall thr_2 (now archived) must forgive it as
 	// archived-recoverable, NOT count it as an unexplained absence. liveSpine
 	// is the in-scope set runStep would have read (#11): thr_1 only.
-	live, err := liveSpineThreadSet(h.Paths)
+	recs, err := store.ReadSpine(h.Paths.Spine)
 	if err != nil {
 		t.Fatalf("live spine: %v", err)
 	}
+	live := spineIDSet(recs)
 	_, forgiven := recordRecallFidelity(t, h, 0, "f4", RecallStrict, []string{"thr_2"}, nil, live)
 	if forgiven != 0 {
 		t.Errorf("archived expected thread should be forgiven (0 kept); got %d", forgiven)

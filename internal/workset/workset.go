@@ -113,9 +113,18 @@ type TrackedFile struct {
 	Window     []dedup.WindowEntry
 }
 
-// ComposeOptions tweaks rendering behavior. Logger receives non-fatal
-// warnings (a layer that produces nothing despite inputs, a truncation
-// note). nil → silent.
+// ComposeOptions tweaks rendering behavior. Logger receives the §3.1
+// render-stage warning: a layer that was handed inputs (and a positive
+// budget) but produced nothing because the pre-fetched data for every
+// one of its entries was absent. nil → silent.
+//
+// This is deliberately the *aggregate* render-outcome signal, not a
+// per-entry one: substrate-fetch failures (a missing thread file, an
+// unreadable digest) are diagnosed and logged entry-by-entry by the
+// adapter as it fetches (memops/fileadapter, workset.warning event
+// lines). The pure renderer's exclusive, non-duplicative contribution
+// is "the whole layer collapsed to empty despite having something to
+// render" — which only it is positioned to observe.
 type ComposeOptions struct {
 	Logger func(format string, args ...any)
 }
@@ -133,19 +142,42 @@ func Compose(in Inputs, opts ComposeOptions) (prompt.SystemPromptElements, error
 	if in.ActiveProject.ID == "" {
 		return prompt.SystemPromptElements{}, fmt.Errorf("workset: ActiveProject.ID is empty")
 	}
-	_ = opts.Logger // currently unused; reserved for future render-time warnings
 	budget := in.Budget
 	if budget.Total == 0 {
 		budget = memops.DefaultBudget()
 	}
 
-	return prompt.SystemPromptElements{
+	el := prompt.SystemPromptElements{
 		LayerE:  renderLayerE(in, budget),
 		LayerA1: renderLayerA1(in, budget),
 		LayerA2: renderLayerA2(in, budget),
 		LayerB:  renderLayerB(in, budget),
 		LayerC:  renderLayerC(in, budget),
-	}, nil
+	}
+
+	// §3.1: "A failure to render one layer ... emits a workset.warning
+	// log line and that layer renders empty; neighbour layers proceed."
+	// Layers B and C are the only two the pure renderer can collapse to
+	// empty despite inputs: each looks its entries up in a pre-fetched
+	// map (ActiveThreadData / DormantSpine) and skips misses, so if every
+	// entry is absent the layer renders "" even though ids were supplied.
+	// A non-positive layer budget is an intentional allocation, not a
+	// render failure, so it is not warned.
+	warnEmptyLayer(opts.Logger, "B", el.LayerB, len(in.ActiveThreads), budget.LayerB)
+	warnEmptyLayer(opts.Logger, "C", el.LayerC, len(in.DormantThreads), budget.LayerC)
+
+	return el, nil
+}
+
+// warnEmptyLayer emits the §3.1 render-stage workset.warning when a layer
+// that had inputs (n > 0) and a positive byte budget rendered to an empty
+// string — i.e. the pre-fetched data for all of its entries was missing
+// and the layer's whole contribution was lost. nil logger → no-op.
+func warnEmptyLayer(logger func(string, ...any), layer, rendered string, n, layerBudget int) {
+	if logger == nil || n == 0 || layerBudget <= 0 || rendered != "" {
+		return
+	}
+	logger("workset: layer %s rendered empty despite %d input(s): pre-fetched data missing for all entries", layer, n)
 }
 
 // RenderSpineDisplay turns one SpineRecord into its spec §2.2.2

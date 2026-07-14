@@ -684,10 +684,6 @@ func (h *Harness) refreshArchivedSet() {
 // same code path for every entry, so a sample is sufficient to exercise it.
 const recoveryGaugeSample = 5
 
-// The harness↔sim metric KEY strings (sleep-cycle #108, W1/tree-rebuild #111)
-// are owned by the registry in metric_keys.go (Metric* consts) so the writer
-// here and the sim reader share one source of truth — see that file for why.
-
 // recordW1Class bumps the harness's run-total W1 classification tally for one
 // divergent probe (#111 §7.1). class is the per-probe verdict the recaller
 // returned; the empty string (a non-divergent probe) bumps nothing. The
