@@ -103,6 +103,51 @@ synced to the real validator set.
 
 ---
 
+## Live-run findings (2026-07-13/14, D4 runs — seed the next burn-down)
+
+- **HEADLINE — missing-topic-tag recovery policy.** 1d live-inference run
+  (gemma-4-main via reaper): the model ran ~90 coherent turns, then
+  omitted the topic tag on an `fs.write`-bearing turn; the runtime
+  treats this as a fatal §3.0/§3.3 protocol violation and aborts the
+  turn (`fs.write without topic tag … substrate state not advanced`).
+  Real models WILL intermittently omit tags — the runtime needs a
+  defined recovery (single re-prompt for the tag, or owner-thread
+  default + forensic log), not an abort. This is a realism-convergence
+  element in its own right; the §9.1 tag-fidelity backlog entry now has
+  its first empirical datum.
+- **Live per-turn cost ≈ 29 s** (gemma-4-main, whole-turn), ~3× the
+  single-digit-seconds planning estimate — sharpens the #98 sweet-spot
+  hunt's budget arithmetic.
+- **Shadow oracle is structurally blind under live inference** (expected;
+  why the 1d cap exists): forward Layer-B divergence WARNs continuously
+  because the scripted shadow cannot track a live model's thread
+  decisions. Any future live-inference rung needs either a
+  runtime-derived oracle or gates scoped to live-safe measurements.
+- **B1 completeness gate span-conditionality** (mechanism confirmed on
+  the 14d run): the gate arms package-wide whenever `-sim.live-embedding`
+  is set, so the two head-to-head *machinery* tests — which drive fixed
+  24h internal workloads regardless of DURATION — fail by construction
+  (24h structurally cannot scroll a probe into the dead zone). The gate
+  must distinguish "structurally-cannot-probe at this span" (skip with
+  note) from "should-have-probed and didn't" (fail), or arm only on the
+  rung whose span qualifies. Until fixed, `make sim LIVE_EMBEDDING=true`
+  reports package FAIL even when the actual rung passes.
+- **14d live-embedding rung (TestSim): PASS, strong.** 11,790 turns /
+  600 threads; W1 divergence **0 over 359 probes** (strict_miss=0 tie=0
+  tree_mismatch=0 — the exemplar-set keys + k=8 + watermark-tie fix hold
+  at 14d); **completeness floor 33/33 dead-zone probes surfaced** — the
+  (1+P)×cap floor proves §3.4 non-vacuously under live embedding;
+  embedding recall 0.940 vs symbolic 0.933 with the expected precision
+  gap (0.093 — the layer-3 judgment motivation); drift hop-curve
+  validates the layered design live (symbolic collapses to 0.028/0.000
+  at hops 2/3, embedding holds 0.556/0.409); intra-thread hop recall
+  1.000 across hops 2–11; latency P50 109ms / P95 564ms / P99 2.76s;
+  2 sleep cycles, git gc reclaimed ~383 MB. Watch item:
+  hop-0 embed wander_current_recall 0.882 vs the ~0.95 aspiration
+  (report-only; symbolic 0.345).
+- One non-monotonic generator step under live latency (warn-only
+  tripwire fired; step 51, Step.At < pinnedClock) — harness follow-up.
+
 ## Post-merge follow-ups (not in this burn-down)
 
 1. **1-week live-enabled sim** (D4) — observational; results may seed the
