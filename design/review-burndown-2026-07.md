@@ -122,3 +122,8 @@ synced to the real validator set.
    flush jobs if the session-bounded failed-embed gap ever shows up in
    live-run data. Wave 4 pickup: delete `store.CommitReachable` (zero
    production callers since BD-11 moved the gate to `BlobReachable`).
+   Wave-5 residue (comment-only, deferred): ~13 "six-month" phrasings in
+   Go comments across turn.go/archival.go/workload.go/clock.go/
+   thread_io.go/threadfiles.go/memops.go/autogit.go/sim_rung_test.go —
+   the gate is four-month/120-day; sweep opportunistically when those
+   files are next touched.

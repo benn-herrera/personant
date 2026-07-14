@@ -20,6 +20,30 @@ make test           # go vet + go test (compiles everything; skips live tests)
 
 On first run, `bin/personant` initializes `~/.personant/` as a git repository. Override the home directory with `$PERSONANT_HOME`.
 
+## Using the Chat REPL
+
+`bin/personant` (equivalently `personant chat`) opens an interactive REPL. Type a message and press Enter to take a turn; the assistant streams its reply. Lines beginning with `/` are commands:
+
+| Command | Effect |
+|---|---|
+| `/help` | list commands |
+| `/topic <name>` | start a new thread and engage it |
+| `/done [thr_id\|name]` | close the active (or named) thread |
+| `/pause [thr_id\|name]` | pause the active (or named) thread |
+| `/resume [thr_id\|name]` | resume a paused thread |
+| `/back-to <thr_id\|name>` | re-engage a thread into the working set |
+| `/project` | print active project info |
+| `/project rename <new-name>` | rename the active project |
+| `/project switch <name-or-id>` | switch to a known project |
+| `/stats` | session and spine statistics |
+| `/quit`, `/exit` | end the session |
+
+`/no-revisit`, `/cd-project`, and `/model` are recognized but stubbed for a later phase.
+
+Line editing and history come from `liner`: in-line editing plus Up/Down history recall. History persists across sessions in `~/.personant/history` (deduplicated, capped at 1000 entries). Ctrl-D — or a Ctrl-C at the prompt — ends the session cleanly (working set checkpointed, session-end logged). A Ctrl-C during a streaming turn cancels that turn and unwinds to the same clean shutdown; a second Ctrl-C during shutdown forces an immediate exit.
+
+> The front end is a **dogfood-minimum** REPL: the interactive surface is deliberately small and has not yet been hardened by direct human use.
+
 ## Build Targets
 
 ```sh
@@ -127,6 +151,7 @@ Personant stores all state under `~/.personant/` (override with `$PERSONANT_HOME
   projects/            per-project metadata + Layer A2 digests
   directives/          tunable behavior (defaults / user / per-project)
   logs/                YYYY-MM-DD.log, plain text, append-only; archive/ for old months
+  history              REPL line-edit history (deduplicated, capped)
   providers.toml       provider pool connectivity catalog
   config.toml          active chat + embedding provider choices
   api_keys/            secret-bearing key files — never read by agents
@@ -176,5 +201,6 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full architectural orientation.
 |---|---|---|---|
 | `github.com/BurntSushi/toml` | BurntSushi | MIT | `providers.toml` and `config.toml` parsing |
 | `github.com/go-git/go-git/v5` | go-git contributors | Apache 2.0 | `internal/autogit` — autonomic git operations on `~/.personant/` |
+| `github.com/peterh/liner` | Peter Harris | MIT | `internal/chat` — REPL line editing + persistent history |
 | `github.com/spf13/cobra` | Steve Francia | Apache 2.0 | CLI subcommand dispatch (`cmd/`) |
 | `gopkg.in/yaml.v3` | Canonical Ltd. | MIT / Apache 2.0 | Thread frontmatter read/write |

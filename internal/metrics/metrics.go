@@ -104,7 +104,7 @@ func (r *Run) GaugeValue(name string) float64 {
 	return r.gauges[name]
 }
 
-// runJSON is the on-disk schema. Field order follows §11.6 prose.
+// runJSON is the on-disk schema. Field order follows §9.4 prose.
 //
 // LabelsField is always emitted (possibly as {}). Counters/Histograms/
 // Gauges are emitted as {} when empty so consumers can rely on the

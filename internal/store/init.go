@@ -420,7 +420,7 @@ working-set.json
 # would couple a regenerable derivation to its source for no information gain.
 .recall-cache/
 # symbols.jsonl is a derived index — rebuildable from spine.jsonl plus
-# thread frontmatters via index.RebuildSymbols. Single-source-of-truth:
+# thread frontmatters via index.Rebuild. Single-source-of-truth:
 # tracking the derivation alongside its canonical source creates a
 # disagreement risk for no information gain. Fresh-clone substrates
 # rebuild it on open (queued: explicit rebuild-on-open hook for the

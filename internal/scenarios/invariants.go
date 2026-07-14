@@ -21,7 +21,7 @@ import (
 type InvariantCheck func(h *Harness) error
 
 // DefaultInvariants is the suite that runs after every step (and after
-// the last step, when FinalInvariants is empty). Covers the spec §11.5
+// the last step, when FinalInvariants is empty). Covers the spec §9.4
 // baseline.
 //
 // VerifyClosedThreadConsistency is deliberately excluded: it inspects
@@ -47,7 +47,7 @@ var DefaultInvariants = append(append([]InvariantCheck{}, cheapDefaultInvariants
 // cheapDefaultInvariants are the per-step-safe checks: strictly O(1) or
 // O(touched-this-step) cost. No full-spine reads, no project enumeration,
 // no folds over cumulative state that grows with the run. Safe to fire on
-// every step in any scenario, including the six-month sim, without
+// every step in any scenario, including the four-month sim, without
 // contributing to per-step wall-time growth.
 //
 // VerifyNoBudgetOverflow re-composes the working set (the same bounded work

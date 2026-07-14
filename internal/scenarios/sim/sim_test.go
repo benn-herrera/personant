@@ -1186,7 +1186,7 @@ func logEventCount(t *testing.T, h *scenarios.Harness, substr string) int {
 	return count
 }
 
-// metricsBlob mirrors the stable §11.6 metrics-blob schema for the
+// metricsBlob mirrors the stable §9.4 metrics-blob schema for the
 // fields the rung summary consumes.
 type metricsBlob struct {
 	Counters   map[string]int64     `json:"counters"`

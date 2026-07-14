@@ -480,9 +480,11 @@ Plain-text, append-only, one event per line. Free-form details after a fixed pre
 **Examples:**
 ```
 2026-05-08T02:55:44-07:00 system.bootstrap version=0.1.0 home=/home/user/.personant
-2026-05-08T02:55:50-07:00 thread.engaged thr_42 [trefoil, unknot] turn=1247
-2026-05-08T02:55:51-07:00 spine.match-fire thr_88 type=symbolic score=0.62
-2026-05-08T03:12:00-07:00 retire.prompt thr_42 inactivity=12 ack=yes resolution=resolved
+2026-05-08T02:55:50-07:00 thread.engaged thr_42 turn_count=1247
+2026-05-08T02:55:51-07:00 spine.match-fire thr_88 score=0.62 matched=trefoil,unknot query_size=5
+2026-05-08T02:55:51-07:00 spine.embed-match-fire thr_88 score=0.610 query_chars=140
+2026-05-08T03:12:00-07:00 retire.prompt thr=thr_42 inactivity=12
+2026-05-08T03:12:45-07:00 retire.ack thr=thr_42 resolution=resolved edited=no
 2026-05-08T03:14:30-07:00 dissect.fire reason=budget-pressure clusters=4
 2026-05-08T03:14:35-07:00 dissect.complete clusters=4 acks=4 spine_added=4
 ```
@@ -491,18 +493,30 @@ No JSON schema in v0.1. Promote individual event types to structured form when q
 
 **Initial event vocabulary** (will grow during implementation). The event vocabulary is the minimum required to satisfy §9 measurement contracts and the directive-accrual feedback loop. Events absent from this vocabulary cannot be measured; any new mechanism that emits a decision event must add a corresponding entry here before the mechanism is considered measurable.
 
+Actions ending in `-error` (and `warning`) are forensic diagnostics, not measured decision events; they are listed so the vocabulary is complete, but §9 measurement keys off the decision events. Rows marked *(vocabulary; not yet emitted)* are reserved for planned mechanisms.
+
 | Category | Events |
 |---|---|
-| `system` | `bootstrap`, `shutdown`, `error`, `config-reload` |
-| `thread` | `engaged`, `created`, `state-change`, `summary-generated` |
-| `spine` | `match-fire`, `match-miss`, `entry-updated` |
-| `recall` | `offer` (with `count=N`), `accept` (with `thr=`, `layers=`), `decline` (with `thr=`, `reason=not-relevant\|wrong-project\|already-known`), `embed-error`, `cross-project-fire` |
-| `retire` | `prompt`, `ack`, `defer`, `complete`, `curator-error`, `load-error` |
-| `dissect` | `fire`, `cluster-proposed`, `complete` |
-| `directive` | `accrual-update`, `parameter-read` (sampled) |
-| `index` | `rebuild-start`, `rebuild-complete`, `verify-fail` |
-| `user` | `shell` (with `$`/`#` discriminant), `slash` (see §4.2 / §4.4) |
-| `project` | `created`, `switched`, `renamed`, `cd-changed`, `remote-adopted`, `remote-updated`, `remote-collision-prompt`, `meta-updated` |
+| `system` | `bootstrap`, `context-ceiling-breach`; *(vocabulary; not yet emitted)* `shutdown`, `error`, `config-reload` |
+| `thread` | `engaged`, `engaged-non-owner`, `engaged-cross-project`, `engaged-miss`, `created`, `created-meta-only`, `state-change`, `fetch-miss`, `fetch-cross-project`, `anchor-projection-overflow`; *(vocabulary)* `summary-generated` |
+| `spine` | `match-fire`, `embed-match-fire`, `intra-match-fire`; *(vocabulary)* `match-miss`, `entry-updated` |
+| `recall` | `offer` (with `count=N`), `accept` (with `thr=`, `layers=`), `decline` (with `thr=`, `reason=not-relevant\|wrong-project\|already-known`), `net-cap-hit`, `flush-backlog`, `W1-diag`, `fire-error`, `error`, `index-error`, `embed-error`, `debt-window-error`, `tree-error`; *(vocabulary)* `cross-project-fire` |
+| `retire` | `prompt` (with `thr=` and `inactivity=`\|`trigger=manual`), `ack` (EVERY acked closure — retire or WIP — with `resolution=` and `edited=yes\|no`, §3.5), `defer`, `complete` (with `resolution=`), `curator-error`, `load-error`, `resolver-error`, `apply-error`, `error` |
+| `archive` | `archived`, `recovered`, `recovered-record`, `skip`, `under-drain`, `error` |
+| `consolidate` | `sleep-cycle` |
+| `dedup` | `chain-aged`, `chain-age-refused`, `error` |
+| `fs` | `edit-no-path`, `write-error`, `commit-untracked`, `unsynced-no-topic-tag` |
+| `staging` | `promoted`, `evicted` (window-close GC, §3.10) |
+| `topic` | `re-prompt`, `tag-missing`, `warning` |
+| `session` | `ended`, `working-set-save-error`, `checkpoint-error` |
+| `project` | `created`, `switched`, `renamed`; *(vocabulary)* `cd-changed`, `remote-adopted`, `remote-updated`, `remote-collision-prompt`, `meta-updated` |
+| `model` | `stream-close-warn` |
+| `workset` | `warning` (layer render failure, §3.1) |
+| `context` | `modified` (with `source=`, `bytes=`; the §3.0 chain step, §3.0.1) |
+| `dissect` | *(vocabulary; not yet emitted)* `fire`, `cluster-proposed`, `complete` |
+| `directive` | *(vocabulary; not yet emitted)* `accrual-update`, `parameter-read` (sampled) |
+| `index` | *(vocabulary; not yet emitted)* `rebuild-start`, `rebuild-complete`, `verify-fail` |
+| `user` | *(vocabulary; not yet emitted)* `shell` (with `$`/`#` discriminant), `slash` (see §4.2 / §4.4) |
 
 ---
 
@@ -1062,17 +1076,24 @@ To archive a batch of threads:
    entry per thread. Commit this **deletion commit** as a unit (gated by
    `CheckSpineIntegrity` on the pre-state and `CheckDerivedFresh` on the
    post-state); capture its hash `H`.
-4. The index entry references the deletion commit `H` and the parent's
-   tree hash; because `H` is only known after step 3, a small
-   **stamp commit** records the now-known `commit_hash` into the index
-   entries. The archive index entry:
+4. The index entry references the deletion commit `H`, its parent (the
+   capture commit) via `parent_commit_hash`, and the parent's tree hash;
+   because `H` is only known after step 3, a small **stamp commit** records
+   the now-known `commit_hash` into the index entries. The archive index
+   entry:
    ```jsonl
-   {"thr_id":"thr_42","commit_hash":"<H>","tree_hash":"<tree sha of threads/thr_42/ at H's parent>","archived_at":"<RFC3339>","original_path":"threads/thr_42/","spine_summary":"<summary at archival time>","anchors":["..."],"project":"prj_3","recovered_at":""}
+   {"thr_id":"thr_42","commit_hash":"<H>","parent_commit_hash":"<capture commit; H's parent>","tree_hash":"<tree sha of threads/thr_42/ at the capture commit>","archived_at":"<RFC3339>","original_path":"threads/thr_42/","spine_summary":"<summary at archival time>","anchors":["..."],"project":"prj_3","recovered_at":""}
    ```
    `spine_summary` and `anchors` are preserved verbatim from the spine
    record at archival time so a search over archive entries can match
-   without recovering the full thread. `recovered_at` is empty until the
-   thread is recovered (§3.8.3).
+   without recovering the full thread. `parent_commit_hash` is the capture
+   commit whose tree still holds the thread bytes; recovery restores the
+   subtree from it directly rather than walking `commit_hash`'s first
+   parent (an older entry written before this field existed omits it —
+   `omitempty` — and recovery falls back to the walk-parent path). It is
+   stored explicitly because a future merge commit (v2.0 submind-via-clone)
+   has multiple parents, where a first-parent walk would pick the wrong
+   lineage. `recovered_at` is empty until the thread is recovered (§3.8.3).
 
 The drain thus produces a **bounded** number of commits per batch (not
 one per thread), and the spine rewrite + derived regen happen **once**.
@@ -1127,8 +1148,9 @@ deep-cold history.
 which Personant owns and never rewrites — so it is a *strong, unconditional*
 guarantee. Aged-out *file versions* recover via `GetFileVersion` (§3.9.1)
 from the **workspace** git — which the **user** owns and may amend/rebase/gc
-— so it is a *conditional* guarantee, gated by the `CommitReachable` check
-that also refuses to age an unreachable hash. The asymmetry is intentional:
+— so it is a *conditional* guarantee, gated by the `BlobReachable` check
+(the blob at `hash:path`, BD-11) that also refuses to age an unreachable
+hash. The asymmetry is intentional:
 the strength of each recovery surface follows the ownership of the git repo
 it reads from.
 
@@ -1201,9 +1223,10 @@ history is then duplicative of what git holds, **for as long as the commit
 stays reachable in the workspace repo**. After a retention window
 (`FileChainRetentionTurns` turns OR `FileChainRetentionDays` days, whichever
 trips first), the chain is aged out — **but only after the runtime confirms
-the commit hash is reachable in the workspace repo** (a read-only
-reachability check, §6.1.3, via the `CommitReachable` predicate). If the
-hash is not reachable — the user amended, rebased, gc'd, or moved the
+the committed blob is reachable in the workspace repo** (a read-only
+reachability check, §6.1.3, via the `BlobReachable` predicate — the blob at
+`hash:path`, the same lookup `GetFileVersion` recovery uses, BD-11). If the
+blob is not reachable — the user amended, rebased, gc'd, or moved the
 workspace — **aging is refused and the chain is retained**, and the refusal
 is logged (`dedup/chain-age-refused`, carrying thread, path, hash, reason).
 Recovery of an aged-out committed state goes through the `GetFileVersion`
@@ -1907,8 +1930,10 @@ does not invalidate an otherwise well-formed tag.
 #### 5.1.3 Prompt template
 
 The system prompt instructs the model to emit a topic tag at response
-start. The template lives in `internal/prompt/template.go` and is
-hot-reloadable for empirical tuning.
+start. The template lives in `internal/prompt/template.go` as a compiled
+constant (`TopicTagDirective`, exposed with a stable identifier). Runtime
+hot-reload for empirical tuning is deferred (future work) — v0.1 requires
+a rebuild to change the template.
 
 ### 5.2 Curator prompt for retirement summary
 
@@ -2604,7 +2629,7 @@ The measurement regime drives four test layers — scenario, churn, calibration,
 - **Round-trip fidelity:** archive → recover → diff against original; information-preservation rate measured.
 - **Operation latency within bounds:** engagement update, spine match, thread fetch, retirement, archival, recovery, index rebuild, index check — all stable as accumulated state grows.
 
-**Invariant validators** (`internal/scenarios/invariants.go`) run after every operation in churn sequences and at key checkpoints in scenario tests: `VerifySpineIntegrity`, `VerifyIndexFresh`, `VerifyEngagementConsistency`, `VerifyArchiveResolvable`, `VerifyProjectReferences`, `VerifyLastActiveValid`, `VerifyNoBudgetOverflow`, `VerifyDedupConsistency`.
+**Invariant validators** (`internal/scenarios/invariants.go`) run after every operation in churn sequences and at key checkpoints in scenario tests. The full set is `VerifySpineIntegrity`, `VerifyIndexFresh`, `VerifyProjectReferences`, `VerifyLastActiveValid`, `VerifyThreadMetaMatchesSpine`, `VerifyEngagementConsistency`, `VerifyThreadAccounting`, `VerifyClosedThreadConsistency`, `VerifyArchiveResolvable`, `VerifyDedupConsistency`, and `VerifyNoBudgetOverflow`. `DefaultInvariants` is a cheap/heavy split: the cheap per-step tier (`VerifyLastActiveValid`, `VerifyNoBudgetOverflow`) fires every step; the heavy substrate-scale tier (`VerifySpineIntegrity`, `VerifyIndexFresh`, `VerifyProjectReferences`, `VerifyThreadMetaMatchesSpine`, `VerifyThreadAccounting`, `VerifyArchiveResolvable`, `VerifyDedupConsistency`) fires day-cadenced on the sim and always once at end-of-run. `VerifyEngagementConsistency` and `VerifyClosedThreadConsistency` are opt-in (closure scenarios) and not part of `DefaultInvariants`.
 
 **Named scenario set** (initial): single-thread lifecycle, multi-thread interleaving, project switching, heavy retirement (50 threads), same-anchor collision, transient shell-capture content, cross-boundary recovery. Churn sequences are randomized-but-seeded (80% engage / 10% create / 5% retire / 5% switch); failures dump operation log + seed for replay. Calibration sweeps a directive parameter across a range and emit a metrics matrix — this is how §2.6.1 bootstrap defaults earn their numbers.
 

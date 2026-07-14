@@ -105,8 +105,10 @@ accumulate a pip dependency surface.
 **Versioning & acceptance (read before judging "done").** Two
 independently-versioned tracks: the **substrate** (this runtime + the
 `MemoryOps` API; currently **v0.1.0**) and the **front end** (U/X +
-feature logic; currently **v0.0.1**, REPL-closed but untested by direct
-human means). The four-month (120-day) simulation gate converges the *substrate*
+feature logic; currently **v0.0.1**, REPL-closed with the dogfood-minimum
+interactive set now in place — slash commands, `liner` line editing +
+history, SIGINT handling — but not yet validated by direct human use;
+dogfooding is the next step). The four-month (120-day) simulation gate converges the *substrate*
 toward **v0.5.0** — and it is a *realism-convergence* gate, not a
 one-shot pass: "done" means the full top-rung span with **every identified realism
 element accounted for** (simulated, OR modeled-and-attempted with unit
@@ -254,6 +256,19 @@ In progress:
   state machine + idempotent-write guard → lifecycle-aware scorer →
   contract loosening + SPEC deltas → coupled sim workload + metrics) and
   validated across the acceptance ladder.
+- July 2026 review burn-down (`design/review-burndown-2026-07.md`,
+  Waves 1–5): instrument integrity (cross-seam metric-key registry,
+  non-vacuous thread accounting, live invariant validators), runtime
+  correctness (§3.4 (1+P)×cap completeness floor closing the flush-lag
+  dead zone, phantom-engaged-owner fallback, blob-at-`hash:path` aging
+  gate sharing one predicate with recovery), concurrency/robustness,
+  DRY/dead-code removal, and the docs accuracy sweep (Wave 5). Also
+  landed the **dogfood-minimum chat REPL**: the
+  `/topic /done /pause /resume /back-to /project rename|switch` slash
+  set, always-log `retire.ack` closure edit-ack with `edited=` logging,
+  `liner`-backed line editing + `~/.personant/history`, and SIGINT (first
+  interrupt cancels the in-flight turn to a clean shutdown, a second
+  forces immediate exit).
 
 Implemented and wired into the turn loop (pending full acceptance-validation):
 - Thread closure / retirement (§3.5): curator-drafted summary + ack flow;

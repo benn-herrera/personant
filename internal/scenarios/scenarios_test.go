@@ -138,7 +138,7 @@ func assertHistorySymbolsCap(threadID string, cap int) InvariantCheck {
 	}
 }
 
-// TestScenario_SingleThreadLifecycle_Engagement covers the §11.4
+// TestScenario_SingleThreadLifecycle_Engagement covers the §9.4
 // "single-thread lifecycle" scenario for the create + engagement
 // portion. The retirement / archive / recover cuts are deferred to
 // Phase 4 (see the t.Skip note at the bottom).
@@ -198,7 +198,7 @@ func TestScenario_SingleThreadLifecycle_Engagement(t *testing.T) {
 	}
 	RunScenario(t, sc)
 
-	// Retirement / closure portion of the §11.4 lifecycle scenario:
+	// Retirement / closure portion of the §9.4 lifecycle scenario:
 	// /retire and /closure are scheduled for Phase 4 (spec §3.5).
 	// Once the closure flow lands, the planned shape is:
 	//
@@ -211,7 +211,7 @@ func TestScenario_SingleThreadLifecycle_Engagement(t *testing.T) {
 	t.Logf("retirement / archive / recover portion deferred to Phase 4 (spec §3.5, §3.8)")
 }
 
-// TestScenario_MultiThreadInterleaving covers §11.4 multi-thread
+// TestScenario_MultiThreadInterleaving covers §9.4 multi-thread
 // interleaving: three threads alive simultaneously with alternating
 // engagement, verifying each thread's turn_count exactly matches the
 // operation log.
@@ -285,7 +285,7 @@ func TestScenario_MultiThreadInterleaving(t *testing.T) {
 	RunScenario(t, sc)
 }
 
-// TestScenario_ProjectSwitching covers §11.4 project switching:
+// TestScenario_ProjectSwitching covers §9.4 project switching:
 // engage thr in prj_1, switch active to prj_2, engage thr in prj_2,
 // switch back to prj_1, re-engage. Spine entries' project field must
 // be correct; per-project bookkeeping must stay isolated.
@@ -423,7 +423,7 @@ func runProjectSwitchScenario(t *testing.T, sc Scenario) {
 		assertThreadTurnCount("thr_2", 1),
 		assertThreadTurnCount("thr_3", 1),
 		// Project assignment correctness — explicit and load-bearing
-		// for §11.4 project-switching.
+		// for §9.4 project-switching.
 		func(h *Harness) error {
 			cases := map[string]string{"thr_1": "prj_1", "thr_2": "prj_1", "thr_3": "prj_2"}
 			for id, want := range cases {
@@ -524,8 +524,8 @@ func TestScenario_LongHaulHistorySymbolsEvict(t *testing.T) {
 }
 
 // TestScenarioMetricsBlobShapeIsStable spot-checks the metrics-blob
-// JSON shape against the §11.6-derived schema. Cross-version
-// comparison (§11.9) depends on this layout being stable, so the
+// JSON shape against the §9.4-derived schema. Cross-version
+// comparison (§9.4) depends on this layout being stable, so the
 // shape contract is exercised explicitly. A single short scenario
 // is sufficient — the schema is the same for every scenario.
 func TestScenarioMetricsBlobShapeIsStable(t *testing.T) {
@@ -836,7 +836,7 @@ func TestScenario_TransientDataPollutionPrevention(t *testing.T) {
 }
 
 // TestScenario_TransientShellCapture_Stub is a forward-marker test for
-// a scenario that v0.1 acceptance (§11.1 six-month simulation) requires
+// a scenario that v0.1 acceptance (§9.1 four-month simulation) requires
 // but which currently cannot run.
 //
 // The intended scenario:
@@ -875,7 +875,7 @@ func TestScenario_TransientDataPollutionPrevention(t *testing.T) {
 //   - Visibility. A scenario at this name in this file means a future
 //     agent (or future maintainer) inspecting the test surface knows
 //     this gap exists and is tracked. The v0.1 acceptance gate at
-//     §11.1 will not be honestly green without this scenario
+//     §9.1 will not be honestly green without this scenario
 //     activated.
 //   - Negative space. When the dependencies land, this test should be
 //     filled in (not just have its t.Skip removed) — the scenario
