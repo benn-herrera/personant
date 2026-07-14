@@ -1000,17 +1000,20 @@ Engagement decay fires when `last_engaged` exceeds `engagement.decay-turns` OR `
 The curator-drafted summary targets 100–150 chars. This balances two constraints: summary + anchors must fit within the Layer A1 budget at realistic spine cardinality (~400 threads × ~200 chars ≈ 80 KB, within the 8% A1 share at 64 KB context); the gist must also be sufficient for the model to recognize prior engagement without fetching the thread body.
 
 **Ack-quality instrumentation (front-end v0.1 requirement, spec'd
-2026-07-13 — not yet implemented).** The closure ack is a load-bearing
-integrity gate only while the human actually reads the draft; a
-rubber-stamped ack is worse than none, because it launders an unread
-summary as human-verified. The canary is **ack-edit-rate**: when the
-front-end ack UI lands, the `retire.ack` event detail (§2.8) must record
-`edited=yes|no` (whether the user modified the curator draft before
-acking), and the front-end U/X phase evaluates the rate — a user who
+2026-07-13; instrumentation landed 2026-07-13, rate-evaluation still
+front-end-phase).** The closure ack is a load-bearing integrity gate only
+while the human actually reads the draft; a rubber-stamped ack is worse
+than none, because it launders an unread summary as human-verified. The
+canary is **ack-edit-rate**: the REPL ack UI now offers an `[e]dit` choice
+(§4.2 `/done`, §3.5 decay flow), and the `retire.ack` event detail (§2.8)
+records `edited=yes|no` for EVERY acked outcome (retire and wip) —
+`yes` only when the user submits a summary that differs from the curator
+draft, so a rubber-stamp resubmission stays `edited=no`. What remains a
+front-end-phase deliverable is the *evaluation* of the rate — a user who
 edits 0% of drafts over months is either being served perfection or has
-stopped reading, and the distinction must be probed, not assumed. This
-is deliberately a front-end-phase deliverable: it needs a real human,
-so it is a §9.1 category-3 known-unknown until then.
+stopped reading, and the distinction must be probed, not assumed. That
+evaluation needs a real human, so it is a §9.1 category-3 known-unknown
+until then.
 
 ### 3.6 Fallback dissection
 

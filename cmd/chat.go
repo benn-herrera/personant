@@ -32,6 +32,7 @@ turn-handler chain.`,
 			ExplicitProject: chatFlagProject,
 			ProviderName:    chatFlagProvider,
 			Model:           chatFlagModel,
+			HistoryFile:     historyPath(paths),
 		})
 	},
 	SilenceUsage: true,

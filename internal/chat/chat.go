@@ -14,9 +14,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"personant/internal/clock"
@@ -53,6 +55,13 @@ type Options struct {
 
 	// Banner overrides the default startup banner. Empty → use Banner.
 	Banner string
+
+	// HistoryFile is the absolute path to the REPL line-edit history file
+	// (§2.1 <home>/history; §4.3.1). Empty → history is not persisted (the
+	// buffered/test path never persists regardless). cmd/chat.go sets this
+	// from the resolved PERSONANT_HOME; keeping path resolution in cmd
+	// preserves the rule that application packages never see PersonantPaths.
+	HistoryFile string
 }
 
 const (
@@ -176,7 +185,13 @@ func Run(opts Options) error {
 	// stage when stdin is a pipe.
 	in := bufio.NewReader(opts.Stdin)
 
-	project, err := bootstrapProject(opts, in, ops, cwd)
+	// The line reader is the input seam (§4.3.1): liner-backed editing +
+	// history on a real terminal, buffered reads for pipes/tests. Closed on
+	// every return path so terminal state is restored and history flushed.
+	lr := newLineReader(opts, in)
+	defer func() { _ = lr.close() }()
+
+	project, err := bootstrapProject(opts, lr, ops, cwd)
 	if err != nil {
 		return err
 	}
@@ -242,7 +257,7 @@ func Run(opts Options) error {
 
 	// §3.4 recall UI surface (Part B): install an interactive resolver
 	// so recalled threads can be pulled into Layer B at turn close.
-	state.RecallResolver = interactiveRecallResolver(in, opts.Stdout)
+	state.RecallResolver = interactiveRecallResolver(lr, opts.Stdout)
 
 	// §3.5 decay-triggered closure flow: a model-backed curator drafts
 	// the closure summary, and an interactive resolver lets the user
@@ -254,7 +269,7 @@ func Run(opts Options) error {
 		closureModel = provider.DefaultModel
 	}
 	state.Curator = curator.NewHTTPCurator(client, closureModel)
-	state.ClosureResolver = interactiveClosureResolver(in, opts.Stdout)
+	state.ClosureResolver = interactiveClosureResolver(lr, opts.Stdout)
 
 	banner := opts.Banner
 	if banner == "" {
@@ -263,7 +278,32 @@ func Run(opts Options) error {
 	fmt.Fprintln(opts.Stdout, banner)
 	fmt.Fprintf(opts.Stdout, "active: %s (%s)\n", project.Name, project.ID)
 
-	if err := loop(opts, in, ops, state); err != nil {
+	// SIGINT (§4 clean shutdown): the first interrupt cancels the session
+	// context so an in-flight turn unwinds and the loop exits through the
+	// clean-shutdown path below (recaller close → §3.11 session-close
+	// checkpoint → session-end log). A second interrupt during shutdown
+	// forces an immediate exit (onInterrupt). liner consumes Ctrl-C itself
+	// in raw mode (returns errInputAborted, handled in loop); this handler
+	// catches interrupts delivered while the terminal is in cooked mode
+	// (streaming a turn, shutting down, or the piped-stdin path).
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var interrupts atomic.Int32
+	sigCh := make(chan os.Signal, 2)
+	signal.Notify(sigCh, os.Interrupt)
+	// Stop delivery THEN close so the handler goroutine's range exits when
+	// Run returns (signal.Stop guarantees no send races the close).
+	defer func() {
+		signal.Stop(sigCh)
+		close(sigCh)
+	}()
+	go func() {
+		for range sigCh {
+			onInterrupt(&interrupts, cancel, lr, opts.Stderr)
+		}
+	}()
+
+	if err := loop(runCtx, opts, lr, ops, state, &interrupts, cancel); err != nil {
 		return err
 	}
 
@@ -370,33 +410,58 @@ func resolveChatModel(ctx context.Context, client model.Client, stderr io.Writer
 	return "", fmt.Errorf("chat: provider %q does not offer its own default model %q", providerName, providerDefault)
 }
 
+// onInterrupt handles one SIGINT (or an at-prompt Ctrl-C routed here). The
+// first interrupt cancels the session context so the REPL unwinds through
+// the clean-shutdown path; a second forces an immediate exit, restoring the
+// terminal first. count is shared between the signal handler and the loop's
+// at-prompt handling so a Ctrl-C during shutdown always forces regardless of
+// which path saw the first one.
+func onInterrupt(count *atomic.Int32, cancel context.CancelFunc, lr lineReader, stderr io.Writer) {
+	if count.Add(1) >= 2 {
+		_ = lr.close() // restore terminal before the forced exit
+		os.Exit(130)
+	}
+	cancel()
+	fmt.Fprintln(stderr, "\ninterrupt received — shutting down (Ctrl-C again to force quit)")
+}
+
 // loop is the core REPL. Returns nil on a clean exit; non-nil on an
 // unrecoverable I/O error (e.g. the input reader failing, not a
 // per-turn LLM error which is logged and tolerated).
-func loop(opts Options, in *bufio.Reader, ops memops.MemoryOps, state *turn.State) error {
+func loop(ctx context.Context, opts Options, lr lineReader, ops memops.MemoryOps, state *turn.State, interrupts *atomic.Int32, cancel context.CancelFunc) error {
 	for {
-		fmt.Fprint(opts.Stdout, "> ")
-		line, err := in.ReadString('\n')
-		if errors.Is(err, io.EOF) {
+		if ctx.Err() != nil {
+			// A SIGINT during a turn cancelled the session — unwind cleanly.
+			return nil
+		}
+		line, err := lr.prompt("> ")
+		switch {
+		case errors.Is(err, errInputAborted):
+			// Ctrl-C at the prompt (liner raw mode) — route through the same
+			// interrupt path as a delivered SIGINT, then unwind.
+			onInterrupt(interrupts, cancel, lr, opts.Stderr)
+			return nil
+		case errors.Is(err, io.EOF):
 			if line == "" {
 				fmt.Fprintln(opts.Stdout) // newline after the dangling prompt
 				return nil
 			}
 			// fall through: process the final line, then EOF on next read.
-		} else if err != nil {
+		case err != nil:
 			return fmt.Errorf("chat: read input: %w", err)
 		}
-		input := strings.TrimRight(line, "\r\n")
+		input := line
 		trimmed := strings.TrimSpace(input)
 		if trimmed == "" {
 			continue
 		}
+		lr.appendHistory(input)
 
 		switch {
 		case strings.HasPrefix(trimmed, "/"):
-			done, err := dispatchSlash(opts, ops, state, trimmed)
-			if err != nil {
-				fmt.Fprintf(opts.Stderr, "command error: %v\n", err)
+			done, derr := dispatchSlash(ctx, opts, ops, state, trimmed)
+			if derr != nil {
+				fmt.Fprintf(opts.Stderr, "command error: %v\n", derr)
 				continue
 			}
 			if done {
@@ -405,7 +470,7 @@ func loop(opts Options, in *bufio.Reader, ops memops.MemoryOps, state *turn.Stat
 		case strings.HasPrefix(trimmed, "$") || strings.HasPrefix(trimmed, "#"):
 			fmt.Fprintln(opts.Stderr, "shell escape ($/#) is not yet implemented (Phase 2.f)")
 		default:
-			if err := runOneTurn(opts, state, input); err != nil {
+			if err := runOneTurn(ctx, opts, state, input); err != nil {
 				// A bad turn does not kill the session — log the error and
 				// loop. The user can retry.
 				fmt.Fprintf(opts.Stderr, "turn error: %v\n", err)
@@ -415,10 +480,10 @@ func loop(opts Options, in *bufio.Reader, ops memops.MemoryOps, state *turn.Stat
 	}
 }
 
-func runOneTurn(opts Options, state *turn.State, input string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), turnTimeout)
+func runOneTurn(ctx context.Context, opts Options, state *turn.State, input string) error {
+	turnCtx, cancel := context.WithTimeout(ctx, turnTimeout)
 	defer cancel()
-	body, err := turn.Run(ctx, state, input, opts.Stdout)
+	body, err := turn.Run(turnCtx, state, input, opts.Stdout)
 	if err != nil {
 		return err
 	}
@@ -430,41 +495,182 @@ func runOneTurn(opts Options, state *turn.State, input string) error {
 	return nil
 }
 
-// dispatchSlash returns done=true to signal the loop should exit.
-// Errors are returned for the caller to print; non-fatal command-level
-// problems (unknown command, stub) are written to stderr inside this
-// function and do not return an error.
-func dispatchSlash(opts Options, ops memops.MemoryOps, state *turn.State, line string) (bool, error) {
+// dispatchSlash returns done=true to signal the loop should exit. A
+// returned error is per-command and non-fatal — the loop prints it and
+// continues. Stubs and unknown commands write to stderr and return nil.
+func dispatchSlash(ctx context.Context, opts Options, ops memops.MemoryOps, state *turn.State, line string) (bool, error) {
 	cmd, rest := splitCommand(line)
 	switch cmd {
 	case "/quit", "/exit":
 		return true, nil
-
 	case "/help":
 		fmt.Fprintln(opts.Stdout, helpText())
-		return false, nil
-
-	case "/project":
-		if rest != "" {
-			fmt.Fprintln(opts.Stderr, "project switch/rename are not yet implemented (Phase 2.c.3)")
-			return false, nil
-		}
-		printProjectInfo(opts.Stdout, state.ActiveProject)
-		return false, nil
-
 	case "/stats":
 		printStats(opts.Stdout, ops, state)
-		return false, nil
-
-	case "/topic", "/done", "/pause", "/resume", "/back-to", "/no-revisit",
-		"/cd-project", "/model":
+	case "/topic":
+		return false, cmdTopic(ctx, opts, state, rest)
+	case "/done":
+		return false, cmdDone(ctx, state, rest)
+	case "/pause":
+		return false, cmdPause(ctx, opts, state, rest)
+	case "/resume":
+		return false, cmdResume(ctx, opts, state, rest)
+	case "/back-to":
+		return false, cmdBackTo(ctx, opts, state, rest)
+	case "/project":
+		return false, cmdProject(ctx, opts, ops, state, rest)
+	case "/no-revisit":
+		fmt.Fprintln(opts.Stderr, "/no-revisit is not yet implemented (recall accrual loop, §3.4)")
+	case "/cd-project", "/model":
 		fmt.Fprintf(opts.Stderr, "%s is not yet implemented (later phase)\n", cmd)
-		return false, nil
-
 	default:
 		fmt.Fprintf(opts.Stderr, "unknown command: %s; type /help for available commands\n", cmd)
-		return false, nil
 	}
+	return false, nil
+}
+
+// cmdTopic implements /topic <name> — force a new thread engaged for the
+// next turn (§4.2).
+func cmdTopic(ctx context.Context, opts Options, state *turn.State, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("usage: /topic <name>")
+	}
+	id, err := turn.CreateTopic(ctx, state, name)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(opts.Stdout, "started topic %q (%s)\n", name, id)
+	return nil
+}
+
+// cmdDone implements /done [thr_id|name] — manual §3.5 closure on the
+// current owner thread (or the named one). SPEC §4.2 defines only the
+// no-arg form (close the active thread); the optional reference is a
+// dogfooding convenience for closing a specific thread.
+func cmdDone(ctx context.Context, state *turn.State, rest string) error {
+	return turn.ManualClosure(ctx, state, rest)
+}
+
+// cmdPause implements /pause [thr_id|name] (§2.2.1).
+func cmdPause(ctx context.Context, opts Options, state *turn.State, rest string) error {
+	id, err := turn.PauseThread(ctx, state, rest)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(opts.Stdout, "paused %s\n", id)
+	return nil
+}
+
+// cmdResume implements /resume [thr_id|name] (§2.2.1).
+func cmdResume(ctx context.Context, opts Options, state *turn.State, rest string) error {
+	id, err := turn.ResumeThread(ctx, state, rest)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(opts.Stdout, "resumed %s\n", id)
+	return nil
+}
+
+// cmdBackTo implements /back-to <thr_id|name> — explicit re-engagement
+// (§4.2), promoting the thread into Layer B.
+func cmdBackTo(ctx context.Context, opts Options, state *turn.State, rest string) error {
+	if strings.TrimSpace(rest) == "" {
+		return errors.New("usage: /back-to <thr_id|name>")
+	}
+	id, err := turn.BackToThread(ctx, state, rest)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(opts.Stdout, "re-engaged %s\n", id)
+	return nil
+}
+
+// cmdProject dispatches the /project family: bare (print info), rename, and
+// switch (§4.2 / §4.5.6).
+func cmdProject(ctx context.Context, opts Options, ops memops.MemoryOps, state *turn.State, rest string) error {
+	if rest == "" {
+		printProjectInfo(opts.Stdout, state.ActiveProject)
+		return nil
+	}
+	sub, arg := splitCommand(rest)
+	switch sub {
+	case "rename":
+		return cmdProjectRename(ctx, opts, ops, state, arg)
+	case "switch":
+		return cmdProjectSwitch(ctx, opts, ops, state, arg)
+	default:
+		return fmt.Errorf("unknown /project subcommand %q; use rename or switch", sub)
+	}
+}
+
+// cmdProjectRename implements /project rename <new-name> (§4.5.6): update
+// the display name only — id, path, and remote URL are unchanged, and no
+// spine entries are rewritten.
+func cmdProjectRename(ctx context.Context, opts Options, ops memops.MemoryOps, state *turn.State, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("usage: /project rename <new-name>")
+	}
+	meta, err := ops.LoadProject(ctx, state.ActiveProject.ID)
+	if err != nil {
+		return fmt.Errorf("load project: %w", err)
+	}
+	old := meta.Name
+	meta.Name = name
+	if err := ops.SaveProject(ctx, meta); err != nil {
+		return fmt.Errorf("save project: %w", err)
+	}
+	state.ActiveProject.Name = name
+	if err := ops.Log(ctx, memops.LogCategoryProject, "renamed",
+		"id="+meta.ID+" old="+old+" new="+name); err != nil {
+		return err
+	}
+	fmt.Fprintf(opts.Stdout, "renamed project %s: %q → %q\n", meta.ID, old, name)
+	return nil
+}
+
+// cmdProjectSwitch implements /project switch <name-or-id> (§4.2 / §4.5.6):
+// change the active project to a known one. The Layer B/C working set is
+// membership for the OUTGOING project (closure/recall are project-scoped),
+// so turn.SwitchProject resets it — v0.1 keeps no per-project working-set
+// snapshot, so the switched-to project cold-starts.
+func cmdProjectSwitch(ctx context.Context, opts Options, ops memops.MemoryOps, state *turn.State, ref string) error {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return errors.New("usage: /project switch <name-or-id>")
+	}
+	metas, err := ops.ListProjects(ctx)
+	if err != nil {
+		return fmt.Errorf("list projects: %w", err)
+	}
+	var target *memops.ProjectMeta
+	for i := range metas {
+		if metas[i].ID == ref || strings.EqualFold(metas[i].Name, ref) {
+			target = &metas[i]
+			break
+		}
+	}
+	if target == nil {
+		return fmt.Errorf("no known project matching %q", ref)
+	}
+	if target.ID == state.ActiveProject.ID {
+		fmt.Fprintf(opts.Stdout, "already on project %s (%s)\n", target.Name, target.ID)
+		return nil
+	}
+	from := state.ActiveProject.ID
+	if err := ops.SetLastActiveProject(ctx, target.ID); err != nil {
+		return fmt.Errorf("set last-active: %w", err)
+	}
+	if err := turn.SwitchProject(ctx, state, *target); err != nil {
+		return err
+	}
+	if err := ops.Log(ctx, memops.LogCategoryProject, "switched",
+		"from="+from+" to="+target.ID); err != nil {
+		return err
+	}
+	fmt.Fprintf(opts.Stdout, "switched to project %s (%s)\n", target.Name, target.ID)
+	return nil
 }
 
 func splitCommand(line string) (cmd, rest string) {
@@ -477,22 +683,26 @@ func splitCommand(line string) (cmd, rest string) {
 
 func helpText() string {
 	return `available commands:
-  /help                    show this help
-  /quit, /exit             exit the session
-  /project                 print active project info
-  /stats                   print session and spine statistics
+  /help                        show this help
+  /quit, /exit                 exit the session
+  /topic <name>                start a new thread and engage it
+  /done [thr_id|name]          close the active (or named) thread (§3.5)
+  /pause [thr_id|name]         pause the active (or named) thread
+  /resume [thr_id|name]        resume a paused thread
+  /back-to <thr_id|name>       re-engage a thread into the working set
+  /project                     print active project info
+  /project rename <new-name>   rename the active project
+  /project switch <name-or-id> switch to a known project
+  /stats                       print session and spine statistics
 
 stubbed (later phase):
-  /topic <name>            force a new thread (Phase 2.c.3+)
-  /done, /pause, /resume   thread state transitions (Phase 4)
-  /back-to <thr_id>        re-engage a retired thread (Phase 4)
-  /no-revisit              tighten recall threshold (Phase 4)
-  /cd-project <path>       set active project root (Phase 2.c.3)
-  /model <id>              switch active model (Phase 2.c.3)
+  /no-revisit                  tighten recall threshold (recall accrual)
+  /cd-project <path>           set active project root
+  /model <id>                  switch active model
 
 shell escape:
-  $<cmd>                   fire-and-forget shell (not yet implemented)
-  #<cmd>                   shell with capture (not yet implemented)`
+  $<cmd>                       fire-and-forget shell (not yet implemented)
+  #<cmd>                       shell with capture (not yet implemented)`
 }
 
 func printProjectInfo(w io.Writer, p memops.ProjectMeta) {
@@ -528,11 +738,11 @@ func printStats(w io.Writer, ops memops.MemoryOps, state *turn.State) {
 //
 // Returns a zero ProjectMeta only if the user cancels at every prompt.
 // The caller treats that as a clean exit.
-func bootstrapProject(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string) (memops.ProjectMeta, error) {
-	return bootstrapProjectWithExplicit(opts, in, ops, cwd, opts.ExplicitProject)
+func bootstrapProject(opts Options, lr lineReader, ops memops.MemoryOps, cwd string) (memops.ProjectMeta, error) {
+	return bootstrapProjectWithExplicit(opts, lr, ops, cwd, opts.ExplicitProject)
 }
 
-func bootstrapProjectWithExplicit(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string, explicit string) (memops.ProjectMeta, error) {
+func bootstrapProjectWithExplicit(opts Options, lr lineReader, ops memops.MemoryOps, cwd string, explicit string) (memops.ProjectMeta, error) {
 	ctx := context.Background()
 	result, err := ops.ResolveActiveProject(ctx, memops.BootstrapHints{
 		ExplicitProject: explicit,
@@ -550,10 +760,10 @@ func bootstrapProjectWithExplicit(opts Options, in *bufio.Reader, ops memops.Mem
 		return *result.Resolved, nil
 
 	case memops.StepNeedsConfirmation:
-		return promptConfirmation(opts, in, ops, cwd, result.Candidate)
+		return promptConfirmation(opts, lr, ops, cwd, result.Candidate)
 
 	case memops.StepNeedsFallback:
-		return promptFallback(opts, in, ops, cwd)
+		return promptFallback(opts, lr, ops, cwd)
 
 	default:
 		return memops.ProjectMeta{}, fmt.Errorf("chat: bootstrap: unrecognized step %v", result.Step)
@@ -561,9 +771,9 @@ func bootstrapProjectWithExplicit(opts Options, in *bufio.Reader, ops memops.Mem
 }
 
 // promptConfirmation surfaces the §4.5.7 last-active resume prompt.
-func promptConfirmation(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string, candidate *memops.ProjectMeta) (memops.ProjectMeta, error) {
+func promptConfirmation(opts Options, lr lineReader, ops memops.MemoryOps, cwd string, candidate *memops.ProjectMeta) (memops.ProjectMeta, error) {
 	if candidate == nil {
-		return promptFallback(opts, in, ops, cwd)
+		return promptFallback(opts, lr, ops, cwd)
 	}
 	ctx := context.Background()
 	if candidate.LastActive == "" {
@@ -573,7 +783,7 @@ func promptConfirmation(opts Options, in *bufio.Reader, ops memops.MemoryOps, cw
 		fmt.Fprintf(opts.Stdout, "Resume work on '%s' (last active %s)? [y]es / [n]o / <other-name-or-id>: ",
 			candidate.Name, candidate.LastActive)
 	}
-	ans, err := readLine(in)
+	ans, err := lr.prompt("")
 	if err != nil {
 		return memops.ProjectMeta{}, err
 	}
@@ -585,15 +795,15 @@ func promptConfirmation(opts Options, in *bufio.Reader, ops memops.MemoryOps, cw
 		}
 		return *candidate, nil
 	case "n", "N", "no":
-		return promptFallback(opts, in, ops, cwd)
+		return promptFallback(opts, lr, ops, cwd)
 	default:
 		// Treat as <other-name-or-id> — re-resolve with explicit override.
-		return bootstrapProjectWithExplicit(opts, in, ops, cwd, ans)
+		return bootstrapProjectWithExplicit(opts, lr, ops, cwd, ans)
 	}
 }
 
 // promptFallback surfaces the §4.5.7 final fallback prompt.
-func promptFallback(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string) (memops.ProjectMeta, error) {
+func promptFallback(opts Options, lr lineReader, ops memops.MemoryOps, cwd string) (memops.ProjectMeta, error) {
 	ctx := context.Background()
 	for {
 		fmt.Fprintln(opts.Stdout, "No active project resolved.")
@@ -601,20 +811,20 @@ func promptFallback(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd st
 		fmt.Fprint(opts.Stdout, "  [s] switch to a known project\n")
 		fmt.Fprint(opts.Stdout, "  [n] no project (use prj_default)\n")
 		fmt.Fprint(opts.Stdout, "choice: ")
-		ans, err := readLine(in)
+		ans, err := lr.prompt("")
 		if err != nil {
 			return memops.ProjectMeta{}, err
 		}
 		switch strings.TrimSpace(strings.ToLower(ans)) {
 		case "c":
-			meta, err := createNewProject(opts, in, ops, cwd)
+			meta, err := createNewProject(opts, lr, ops, cwd)
 			if err != nil {
 				fmt.Fprintf(opts.Stderr, "create failed: %v\n", err)
 				continue
 			}
 			return meta, nil
 		case "s":
-			meta, ok, err := pickExistingProject(opts, in, ops)
+			meta, ok, err := pickExistingProject(opts, lr, ops)
 			if err != nil {
 				return memops.ProjectMeta{}, err
 			}
@@ -640,10 +850,10 @@ func promptFallback(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd st
 	}
 }
 
-func createNewProject(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd string) (memops.ProjectMeta, error) {
+func createNewProject(opts Options, lr lineReader, ops memops.MemoryOps, cwd string) (memops.ProjectMeta, error) {
 	ctx := context.Background()
 	fmt.Fprint(opts.Stdout, "display name: ")
-	name, err := readLine(in)
+	name, err := lr.prompt("")
 	if err != nil {
 		return memops.ProjectMeta{}, err
 	}
@@ -685,7 +895,7 @@ func createNewProject(opts Options, in *bufio.Reader, ops memops.MemoryOps, cwd 
 	return meta, nil
 }
 
-func pickExistingProject(opts Options, in *bufio.Reader, ops memops.MemoryOps) (memops.ProjectMeta, bool, error) {
+func pickExistingProject(opts Options, lr lineReader, ops memops.MemoryOps) (memops.ProjectMeta, bool, error) {
 	metas, err := ops.ListProjects(context.Background())
 	if err != nil {
 		return memops.ProjectMeta{}, false, err
@@ -699,7 +909,7 @@ func pickExistingProject(opts Options, in *bufio.Reader, ops memops.MemoryOps) (
 		fmt.Fprintf(opts.Stdout, "  %s  %s\n", m.ID, m.Name)
 	}
 	fmt.Fprint(opts.Stdout, "id or name: ")
-	ans, err := readLine(in)
+	ans, err := lr.prompt("")
 	if err != nil {
 		return memops.ProjectMeta{}, false, err
 	}
@@ -713,27 +923,10 @@ func pickExistingProject(opts Options, in *bufio.Reader, ops memops.MemoryOps) (
 	return memops.ProjectMeta{}, false, nil
 }
 
-// readLine reads a single line from r, stripping the trailing newline.
-// io.EOF before any data is returned as ("", io.EOF); io.EOF after a
-// non-empty partial line is returned as (line, nil).
-func readLine(r *bufio.Reader) (string, error) {
-	s, err := r.ReadString('\n')
-	if err != nil {
-		if errors.Is(err, io.EOF) {
-			if s == "" {
-				return "", io.EOF
-			}
-			return strings.TrimRight(s, "\r\n"), nil
-		}
-		return "", err
-	}
-	return strings.TrimRight(s, "\r\n"), nil
-}
-
 // interactiveRecallResolver returns a turn.RecallResolver that surfaces
 // the §3.4 recall offer at the prompt and reads the user's accept /
 // decline decision. Kept deliberately small — U/X polish is deferred.
-func interactiveRecallResolver(in *bufio.Reader, out io.Writer) turn.RecallResolver {
+func interactiveRecallResolver(lr lineReader, out io.Writer) turn.RecallResolver {
 	return func(_ context.Context, offer turn.RecallOffer) (turn.RecallResolution, error) {
 		fmt.Fprintln(out, "recalled threads related to this turn:")
 		for i, c := range offer.Candidates {
@@ -741,9 +934,9 @@ func interactiveRecallResolver(in *bufio.Reader, out io.Writer) turn.RecallResol
 				i+1, c.ThreadID, c.Score, strings.Join(c.Layers(), "+"))
 		}
 		fmt.Fprint(out, "accept which? [numbers / a=all / n=none]: ")
-		ans, err := readLine(in)
-		if errors.Is(err, io.EOF) {
-			// Session is ending — decline all, no error.
+		ans, err := lr.prompt("")
+		if isEndOrAbort(err) {
+			// Session is ending / interrupted — decline all, no error.
 			return turn.RecallResolution{}, nil
 		}
 		if err != nil {
@@ -772,7 +965,7 @@ func interactiveRecallResolver(in *bufio.Reader, out io.Writer) turn.RecallResol
 		reason := turn.DeclineNotRelevant
 		if len(accept) < len(offer.Candidates) {
 			fmt.Fprint(out, "decline reason [not-relevant / wrong-project / already-known] (default not-relevant): ")
-			rans, rerr := readLine(in)
+			rans, rerr := lr.prompt("")
 			if rerr == nil {
 				if r, ok := matchDeclineReason(rans); ok {
 					reason = r
@@ -783,37 +976,79 @@ func interactiveRecallResolver(in *bufio.Reader, out io.Writer) turn.RecallResol
 	}
 }
 
-// interactiveClosureResolver returns a turn.ClosureResolver that
-// surfaces the §3.5 closure offer at the prompt and reads the user's
-// retire / wip / defer decision. Kept deliberately small — U/X polish
-// is deferred. On EOF (the session is ending) it returns ClosureDefer
-// so the thread is left untouched.
-func interactiveClosureResolver(in *bufio.Reader, out io.Writer) turn.ClosureResolver {
+// interactiveClosureResolver returns a turn.ClosureResolver that surfaces
+// the §3.5 closure offer at the prompt and reads the user's retire / wip /
+// edit / defer decision. The [e]dit choice lets the user revise the
+// curator's draft summary before acking (§3.5 ack-quality); a revised,
+// non-identical summary flows back as ClosureResolution.EditedSummary so
+// applyClosureResolution stores it and logs retire.ack edited=yes. On EOF
+// or Ctrl-C it returns ClosureDefer so the thread is left untouched.
+func interactiveClosureResolver(lr lineReader, out io.Writer) turn.ClosureResolver {
+	askOutcome := func() (string, error) {
+		fmt.Fprint(out, "close as? [r]esolved / [d]ecided / [a]bandoned / [w]ip / [e]dit summary / [s]kip: ")
+		ans, err := lr.prompt("")
+		return strings.ToLower(strings.TrimSpace(ans)), err
+	}
 	return func(_ context.Context, offer turn.ClosureOffer) (turn.ClosureResolution, error) {
 		fmt.Fprintf(out, "thread %s has gone idle — closure suggested.\n", offer.ThreadID)
 		fmt.Fprintf(out, "  summary: %s\n", offer.Summary)
-		fmt.Fprint(out, "close as? [r]esolved / [d]ecided / [a]bandoned / [w]ip / [s]kip: ")
-		ans, err := readLine(in)
-		if errors.Is(err, io.EOF) {
-			// Session ending — defer, leave the thread untouched.
+
+		choice, err := askOutcome()
+		if isEndOrAbort(err) {
 			return turn.ClosureResolution{Outcome: turn.ClosureDefer}, nil
 		}
 		if err != nil {
 			return turn.ClosureResolution{}, err
 		}
-		switch strings.ToLower(strings.TrimSpace(ans)) {
-		case "r":
-			return turn.ClosureResolution{Outcome: turn.ClosureResolved}, nil
-		case "d":
-			return turn.ClosureResolution{Outcome: turn.ClosureDecided}, nil
-		case "a":
-			return turn.ClosureResolution{Outcome: turn.ClosureAbandoned}, nil
-		case "w":
-			return turn.ClosureResolution{Outcome: turn.ClosureWIP}, nil
-		default:
+
+		edited := ""
+		if choice == "e" {
+			revised, perr := lr.promptWithDefault("edit summary: ", offer.Summary)
+			if isEndOrAbort(perr) {
+				return turn.ClosureResolution{Outcome: turn.ClosureDefer}, nil
+			}
+			if perr != nil {
+				return turn.ClosureResolution{}, perr
+			}
+			revised = strings.TrimSpace(revised)
+			// Only a genuinely changed summary counts as an edit; resubmitting
+			// the draft unchanged keeps edited=no (the ack-edit-rate canary
+			// must not read a rubber-stamp as an edit).
+			if revised != "" && revised != offer.Summary {
+				edited = revised
+			}
+			// Re-ask for the outcome now that the summary is settled.
+			choice, err = askOutcome()
+			if isEndOrAbort(err) {
+				return turn.ClosureResolution{Outcome: turn.ClosureDefer}, nil
+			}
+			if err != nil {
+				return turn.ClosureResolution{}, err
+			}
+		}
+
+		outcome, ok := closureOutcomeFor(choice)
+		if !ok {
 			// Empty / "s" / anything unrecognized → skip (defer).
 			return turn.ClosureResolution{Outcome: turn.ClosureDefer}, nil
 		}
+		return turn.ClosureResolution{Outcome: outcome, EditedSummary: edited}, nil
+	}
+}
+
+// closureOutcomeFor maps a single-letter closure choice to its outcome.
+func closureOutcomeFor(choice string) (turn.ClosureOutcome, bool) {
+	switch choice {
+	case "r":
+		return turn.ClosureResolved, true
+	case "d":
+		return turn.ClosureDecided, true
+	case "a":
+		return turn.ClosureAbandoned, true
+	case "w":
+		return turn.ClosureWIP, true
+	default:
+		return 0, false
 	}
 }
 

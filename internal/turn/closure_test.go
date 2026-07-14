@@ -544,3 +544,59 @@ func containsString(ss []string, v string) bool {
 	}
 	return false
 }
+
+// TestApplyClosureResolution_EditedSummaryPropagates: a non-empty
+// EditedSummary replaces the curator draft on the persisted record, and the
+// §3.5 ack-quality retire.ack event records edited=yes (§2.8).
+func TestApplyClosureResolution_EditedSummaryPropagates(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
+	state.TurnNumber = 1
+
+	draft := curator.ClosureDraft{Summary: "curator draft gist", Anchors: []string{"a"}}
+	res := ClosureResolution{Outcome: ClosureResolved, EditedSummary: "human edited gist"}
+	if err := applyClosureResolution(context.Background(), state, "thr_1", draft, res); err != nil {
+		t.Fatalf("applyClosureResolution: %v", err)
+	}
+
+	rec, found, err := state.Ops.FindThread(context.Background(), "thr_1")
+	if err != nil || !found {
+		t.Fatalf("FindThread: found=%v err=%v", found, err)
+	}
+	if rec.Summary != "human edited gist" {
+		t.Errorf("spine summary = %q, want the edited summary", rec.Summary)
+	}
+	log := readDayLog(t, paths)
+	if !strings.Contains(log, "retire.ack thr=thr_1 resolution=resolved edited=yes") {
+		t.Errorf("missing retire.ack edited=yes\n%s", log)
+	}
+	if !strings.Contains(log, "retire.complete thr=thr_1 resolution=resolved") {
+		t.Errorf("missing retire.complete\n%s", log)
+	}
+}
+
+// TestApplyClosureResolution_UneditedLogsAckNo: an accepted-as-drafted
+// closure keeps the curator summary and logs retire.ack edited=no.
+func TestApplyClosureResolution_UneditedLogsAckNo(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
+	state.TurnNumber = 1
+
+	draft := curator.ClosureDraft{Summary: "curator draft gist"}
+	res := ClosureResolution{Outcome: ClosureDecided}
+	if err := applyClosureResolution(context.Background(), state, "thr_1", draft, res); err != nil {
+		t.Fatalf("applyClosureResolution: %v", err)
+	}
+
+	rec, _, _ := state.Ops.FindThread(context.Background(), "thr_1")
+	if rec.Summary != "curator draft gist" {
+		t.Errorf("spine summary = %q, want the curator draft", rec.Summary)
+	}
+	if !strings.Contains(readDayLog(t, paths), "retire.ack thr=thr_1 resolution=decided edited=no") {
+		t.Errorf("missing retire.ack edited=no\n%s", readDayLog(t, paths))
+	}
+}

@@ -405,6 +405,10 @@ const seedReadmeMD = "# personant home\n" +
 const seedGitignore = `# personant home gitignore
 tmp/
 last-active
+# history is the REPL line-edit history (§4.3.1) — operational state, capped
+# and rewritten by the REPL. It is never canonical, so §3.11 checkpoints must
+# not commit it.
+history
 # working-set.json is volatile session state — Layer B/C membership
 # rewritten on every turn. Git-tracking it would dirty the home tree
 # with LRU churn every turn; it is operational state, not canonical.

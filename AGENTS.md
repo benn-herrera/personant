@@ -423,8 +423,11 @@ from the normal compile and bit-rot silently.
     loader); `gopkg.in/yaml.v3` (consumer: thread frontmatter writes);
     `github.com/go-git/go-git/v5` (consumer: `internal/autogit/` for
     autonomic git operations on `~/.personant/.git/`; landed during the
-    gitops/policy refactor). Do not pull these in speculatively; do
-    pull them in when the consumer arrives.
+    gitops/policy refactor);
+    `github.com/peterh/liner` (consumer: `internal/chat/` for the §4.3.1
+    REPL line editing + persistent history; lightest well-trodden
+    readline-class dep, one transitive dep `mattn/go-runewidth`). Do not
+    pull these in speculatively; do pull them in when the consumer arrives.
   - **`langchaingo/llms`** is *compatible* but excluded on dep-hygiene
     + scope grounds for v0.1 (30+ transitive deps; a thin OpenAI-compatible
     HTTP client at ~200–300 LoC covers the single-provider need). Revisit in

@@ -50,6 +50,15 @@ type ClosureOffer struct {
 // ClosureOffer.
 type ClosureResolution struct {
 	Outcome ClosureOutcome
+
+	// EditedSummary, when non-empty, replaces the curator's draft summary
+	// on the retired/WIP spine record (§3.5 ack-quality: the user edited
+	// the draft before acking). Empty means the draft was accepted as
+	// written. applyClosureResolution records the yes/no distinction in the
+	// retire.ack event's edited= field, the ack-edit-rate canary (§3.5 /
+	// §2.8). Additive field: scripted harness resolvers that build
+	// ClosureResolution with named fields are unaffected.
+	EditedSummary string
 }
 
 // ClosureResolver is the seam between the §3.5 closure flow and the
@@ -349,15 +358,25 @@ func applyClosureResolution(ctx context.Context, state *State, threadID string, 
 	if changed {
 		rec.AnchorsProjectedAtTurn = rec.TurnCount
 	}
+	// §3.5 ack-quality: the user may edit the curator's draft summary before
+	// acking. A non-empty EditedSummary replaces the draft on the persisted
+	// record; edited records the yes/no for the retire.ack canary below.
+	summary := draft.Summary
+	edited := "no"
+	if res.EditedSummary != "" {
+		summary = res.EditedSummary
+		edited = "yes"
+	}
+
 	rec.State = newState
-	rec.Summary = draft.Summary
+	rec.Summary = summary
 	rec.Anchors = anchors
 	rec.StateChanged = now
 
 	fm.ID = rec.ID
 	fm.Project = rec.Project
 	fm.State = newState
-	fm.Summary = draft.Summary
+	fm.Summary = summary
 	fm.Anchors = append([]string(nil), anchors...)
 	fm.StateChanged = now
 	fm.LastEngaged = rec.LastEngaged
@@ -397,9 +416,22 @@ func applyClosureResolution(ctx context.Context, state *State, threadID string, 
 		// dormant slice is bounded by Layer C's byte budget at render time
 		// (#127 dropped the v0.1 count cap), so no count truncation here.
 		state.DormantThreads = append([]string{threadID}, state.DormantThreads...)
-		return state.Ops.Log(ctx, memops.LogCategoryRetire, "ack", "thr="+threadID+" resolution=wip")
 	}
 
+	// §3.5 ack-quality instrumentation (§2.8 vocabulary): EVERY acked
+	// closure outcome — retire (resolved/decided/abandoned) or WIP — logs
+	// retire.ack with the resolution and the edited=yes|no ack-edit-rate
+	// canary. Retirements ALSO log the separate retire.complete event
+	// (kept from the §2.8 vocabulary); WIP's ack is its terminal event.
+	// The defer outcome returned early above (retire.defer) — a defer is
+	// not an ack, so it carries no edited= flag.
+	if err := state.Ops.Log(ctx, memops.LogCategoryRetire, "ack",
+		"thr="+threadID+" resolution="+string(newState)+" edited="+edited); err != nil {
+		return err
+	}
+	if res.Outcome == ClosureWIP {
+		return nil
+	}
 	return state.Ops.Log(ctx, memops.LogCategoryRetire, "complete",
 		"thr="+threadID+" resolution="+string(newState))
 }

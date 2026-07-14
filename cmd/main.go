@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -30,9 +31,18 @@ indexing, verification, and provider-connectivity smoke tests.`,
 		if err != nil {
 			return err
 		}
-		return chat.Run(chat.Options{Ops: fileadapter.NewFileAdapter(paths)})
+		return chat.Run(chat.Options{
+			Ops:         fileadapter.NewFileAdapter(paths),
+			HistoryFile: historyPath(paths),
+		})
 	},
 	SilenceUsage: true,
+}
+
+// historyPath is the REPL line-edit history file (§2.1 <home>/history,
+// §4.3.1). Operational state; the store gitignores it alongside last-active.
+func historyPath(paths store.PersonantPaths) string {
+	return filepath.Join(paths.Home, "history")
 }
 
 // resolvePaths honors --home for tests; otherwise uses the standard
