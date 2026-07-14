@@ -28,6 +28,7 @@ cover.out
 
 # makefile pulls shared agents from repo
 .claude/agents/
+.claude/agents
 .claude/commands/
 .claude/commands
 
