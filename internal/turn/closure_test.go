@@ -110,14 +110,14 @@ func TestDecayEligible(t *testing.T) {
 		engaged    string
 		want       bool
 	}{
-		{"turn-based fires at threshold", memops.ThreadActive, 2, 2 + decayTurns, recent, true},
-		{"turn-based one short does not fire", memops.ThreadActive, 2, 2 + decayTurns - 1, recent, false},
+		{"turn-based fires at threshold", memops.ThreadActive, 2, 2 + DecayTurns, recent, true},
+		{"turn-based one short does not fire", memops.ThreadActive, 2, 2 + DecayTurns - 1, recent, false},
 		{"wall-clock fires past threshold", memops.ThreadActive, 0, 1, old, true},
 		{"wall-clock recent does not fire", memops.ThreadActive, 0, 1, recent, false},
 		{"session-reset guard: stored turn larger, recent clock", memops.ThreadActive, 100, 1, recent, false},
 		{"session-reset guard: stored turn larger, old clock still fires via wall-clock", memops.ThreadActive, 100, 1, old, true},
-		{"empty last-engaged does not error, no wall-clock signal", memops.ThreadActive, 2, 2 + decayTurns - 1, "", false},
-		{"unparseable last-engaged does not error", memops.ThreadActive, 2, 2 + decayTurns - 1, "not-a-date", false},
+		{"empty last-engaged does not error, no wall-clock signal", memops.ThreadActive, 2, 2 + DecayTurns - 1, "", false},
+		{"unparseable last-engaged does not error", memops.ThreadActive, 2, 2 + DecayTurns - 1, "not-a-date", false},
 		{"wip thread never decay-prompts", memops.ThreadWIP, 0, 100, old, false},
 		{"paused thread never decay-prompts", memops.ThreadPaused, 0, 100, old, false},
 		{"resolved thread never decay-prompts", memops.ThreadResolved, 0, 100, old, false},
@@ -184,7 +184,7 @@ func TestSurfaceClosure_RetireWritesStateAndEvicts(t *testing.T) {
 
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
-	state.TurnNumber = 1 + decayTurns
+	state.TurnNumber = 1 + DecayTurns
 	state.ActiveThreads = []string{"thr_1"}
 	state.DormantThreads = []string{"thr_1"}
 	state.Curator = stubCurator{summary: "the thread's gist", anchors: []string{"x", "y", "z", "w"}}
@@ -235,7 +235,7 @@ func TestSurfaceClosure_WIPDemotes(t *testing.T) {
 
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
-	state.TurnNumber = 1 + decayTurns
+	state.TurnNumber = 1 + DecayTurns
 	state.ActiveThreads = []string{"thr_1"}
 	state.Curator = stubCurator{}
 	state.ClosureResolver = fixedOutcomeResolver(ClosureWIP)
@@ -260,7 +260,7 @@ func TestSurfaceClosure_WIPDemotes(t *testing.T) {
 }
 
 // TestSurfaceClosure_DeferReArms — ClosureDefer writes no state and
-// suppresses the re-prompt for decayTurns turns; once the grace
+// suppresses the re-prompt for DecayTurns turns; once the grace
 // expires the thread is offered again.
 func TestSurfaceClosure_DeferReArms(t *testing.T) {
 	paths, meta := newTestHome(t)
@@ -268,7 +268,7 @@ func TestSurfaceClosure_DeferReArms(t *testing.T) {
 
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
-	state.TurnNumber = 1 + decayTurns
+	state.TurnNumber = 1 + DecayTurns
 	state.Curator = stubCurator{}
 
 	prompts := 0
@@ -296,7 +296,7 @@ func TestSurfaceClosure_DeferReArms(t *testing.T) {
 	}
 
 	// Advance past the grace → the thread is offered again.
-	state.TurnNumber += decayTurns
+	state.TurnNumber += DecayTurns
 	if err := surfaceClosureCandidates(context.Background(), state); err != nil {
 		t.Fatalf("surfaceClosureCandidates (re-armed turn): %v", err)
 	}
@@ -335,7 +335,7 @@ func TestSurfaceClosure_CrossProjectScanLeavesSiblingUntouched(t *testing.T) {
 
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
-	state.TurnNumber = 1 + decayTurns
+	state.TurnNumber = 1 + DecayTurns
 	state.Curator = stubCurator{}
 	state.ClosureResolver = fixedOutcomeResolver(ClosureResolved)
 
@@ -397,7 +397,7 @@ func TestSurfaceClosure_CuratorErrorSwallowed(t *testing.T) {
 
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
-	state.TurnNumber = 1 + decayTurns
+	state.TurnNumber = 1 + DecayTurns
 	state.Curator = errCurator{}
 	state.ClosureResolver = fixedOutcomeResolver(ClosureResolved)
 
@@ -440,7 +440,7 @@ func TestDecayEligible_VacationSuppression(t *testing.T) {
 		for _, rec := range recs {
 			// turnNumber kept just under the turn threshold so only the
 			// wall-clock branch can fire — this isolates the fix.
-			if _, ok := decayEligible(rec, 1+decayTurns-1, sysRef); ok {
+			if _, ok := decayEligible(rec, 1+DecayTurns-1, sysRef); ok {
 				t.Errorf("%s became decay-eligible after a whole-system absence; want suppressed", rec.ID)
 			}
 		}
@@ -455,7 +455,7 @@ func TestDecayEligible_VacationSuppression(t *testing.T) {
 			{ID: "thr_active", State: memops.ThreadActive, LastEngaged: oneHourAgo, LastEngagedTurn: 50},
 		}
 		sysRef := systemReference(recs, now)
-		if _, ok := decayEligible(recs[0], 1+decayTurns-1, sysRef); !ok {
+		if _, ok := decayEligible(recs[0], 1+DecayTurns-1, sysRef); !ok {
 			t.Errorf("thr_old neglected during active use did not fire; want decay-eligible")
 		}
 		// The recently-engaged thread is not eligible on either signal.
@@ -472,7 +472,7 @@ func TestDecayEligible_VacationSuppression(t *testing.T) {
 			{ID: "thr_1", State: memops.ThreadActive, LastEngaged: eightDaysAgo, LastEngagedTurn: 1},
 		}
 		sysRef := systemReference(recs, now)
-		detail, ok := decayEligible(recs[0], 1+decayTurns, sysRef)
+		detail, ok := decayEligible(recs[0], 1+DecayTurns, sysRef)
 		if !ok {
 			t.Fatalf("turn-count decay did not fire; want eligible")
 		}
@@ -498,7 +498,7 @@ func TestSurfaceClosure_VacationSurfacesNoPrompt(t *testing.T) {
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
 	pinClock(t, now)
 	// TurnNumber 1 mimics a fresh post-resume session: turn-count decay
-	// cannot fire (1 < 1+decayTurns), so any prompt would be wall-clock.
+	// cannot fire (1 < 1+DecayTurns), so any prompt would be wall-clock.
 	state.TurnNumber = 1
 	state.Curator = stubCurator{}
 	prompts := 0

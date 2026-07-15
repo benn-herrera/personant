@@ -52,7 +52,7 @@ burn-down's execution scope):**
 |---|---|---|
 | B1 | Completeness-gate span-conditionality per D7 | `make sim LIVE_EMBEDDING=true` green end-to-end when the rung passes; skip-note visible for unscrollable spans |
 | B2 | **Sim slow-embedder mode** (carried): deterministic embed-latency injection so the (1+P)×cap transient band is observable; widen the dead-zone classifier alongside it (the intra.go comment's stated precondition) | a mock rung exercises P≥1 dead-zone probes; classifier band matches runtime bound |
-| B3 | **Shadow-LRU closure/displacement modeling** (carried, BD-4 residual): model closure/retirement and persistent carrier displacement in the generator shadow to recover a reverse ==0 Layer-B gate | reverse divergence gated ==0 on mock rungs (363 → 0 explained) |
+| B3 | **Shadow-LRU closure/displacement modeling** (carried, BD-4 residual): model closure/retirement and persistent carrier displacement in the generator shadow to recover a reverse ==0 Layer-B gate. **DONE 2026-07-14** — residual recovered via the execution-time runtime-mirror (`rtActive`): §3.5 turn-idle decay closure + persistent carrier displacement modeled, archival traced non-contributing to the reverse divergence. | reverse divergence gated ==0 on mock rungs (363 → 0; closure + carrier displacement modeled, archival non-contributing; hard ==0 gate on 1d and 14d mock rungs via `TestShadowLayerB_ReverseDivergence`, report-only under live inference) |
 
 ## Wave C — #94 startup recovery (the major build; D3 from July)
 
@@ -65,7 +65,31 @@ exists in the harness). Acceptance: crash-injection tests across the
 archival three-commit window; sim rung with mid-run restart passes all
 invariants; SPEC §4.5.8 updated from design output.
 
-## Watch / calibration (tracked, no wave)
+## Live rerun results (2026-07-14, 1d live-inference, post-Wave-A — A1/A2 acceptance)
+
+Full span PASS (~8.6 h, 1,015 turns): zero aborts. **A1 recovery live-proven** —
+32 missing-tag re-prompts on binding turns, all recovered (the class that
+killed the 2026-07-13 run at turn 91). First A2 series (gemma-4-main):
+
+- stream-level tag omissions: 349/1015 (~34% — 317 conversational
+  tag-missing + 32 binding re-prompts)
+- spurious `*new-topic*` rate: 0.194 (183)
+- re-engagement miss rate: 0.847 (797/941; borderline=0, unadjudicated=0)
+- anchor-emission overlap: 0.000 over 151 threads
+
+**Interpretation discipline (before drawing the big conclusion):** the
+top-line signal — gemma-4-main's tag discipline is far below mock
+assumptions — is almost certainly real (34% omission is model behavior,
+full stop). But two numbers need instrument-vs-subject decomposition
+before they drive design: (a) the exact-0.000 anchor overlap across 151
+observations smells like a source-attribution/join artifact (verify
+model-emitted anchors actually persist as `source=model` under live
+tags), and (b) the 0.847 miss rate is inflated to an unknown degree by
+spurious-new-topic duplicates splitting cosine mass across clones (the
+"right" thread's rank degrades as its near-duplicates accumulate).
+Verification of both is the first task of the next pass; the family-
+specific topic-tag prompt tuning (model-family layer-2 work) is the
+likely remedy either way, with recall layer-3 as backstop.
 
 - hop-0 embedding `wander_current_recall` 0.882 vs ~0.95 aspiration
   (14d rung; report-only — investigate threshold/query composition if

@@ -44,6 +44,15 @@ const LiveTestsEnv = "PERSONANT_LIVE_TESTS"
 // tests are gated on cost + derived-artifact presence, not a live endpoint.
 const CorpusTestsEnv = "PERSONANT_CORPUS_TESTS"
 
+// SlowSimTestsEnv is the opt-in environment variable for the slow, in-suite
+// sim mock rungs whose wall-clock would blow the `make test` per-package
+// timeout budget. Set it to any non-empty value (the Makefile's
+// sim-shadow-slow-test target sets it) to RUN them; leave it unset to SKIP
+// them. Distinct from the other two: these are gated purely on wall-clock
+// cost within the normal (non-live, non-corpus) mock suite — the fast arm of
+// the same test still runs in the default `make test`.
+const SlowSimTestsEnv = "PERSONANT_SLOW_SIM_TESTS"
+
 // ReaperEmbeddingModel is the embedding model id served by the local,
 // non-metered `reaper` provider.
 const ReaperEmbeddingModel = "nomicai-embed"
@@ -88,6 +97,17 @@ func RequireCorpus(t *testing.T) {
 	t.Helper()
 	if os.Getenv(CorpusTestsEnv) == "" {
 		t.Skipf("corpus measurement skipped — run `make recall-corpus-test` (sets %s) to exercise it", CorpusTestsEnv)
+	}
+}
+
+// RequireSlowSim skips the calling test (or subtest) unless the slow-sim
+// opt-in is set. Call it first in the slow arm of an in-suite sim rung: with
+// the opt-in unset, the arm compiles (caught by `make test`) and skips, so the
+// default suite stays within its per-package timeout budget; opted in, it runs.
+func RequireSlowSim(t *testing.T) {
+	t.Helper()
+	if os.Getenv(SlowSimTestsEnv) == "" {
+		t.Skipf("slow sim rung skipped — run `make sim-shadow-slow-test` (sets %s) to exercise it", SlowSimTestsEnv)
 	}
 }
 

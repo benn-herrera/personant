@@ -711,6 +711,7 @@ func GenerateWorkload(cfg WorkloadConfig) scenarios.Scenario {
 		intraDepthTotal:       map[int]int{},
 		intraDepthPredictHit:  map[int]int{},
 		intraDepthObservedHit: map[int]int{},
+		rtLastEngaged:         map[string]int{},
 	}
 	return scenarios.Scenario{
 		Name:       fmt.Sprintf("sim-workload-seed%d-dur%s", cfg.Seed, cfg.Duration),
@@ -1026,6 +1027,13 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 			g.recallAttempts++
 			g.lastLayerBSnapshot = nil
 			ref := g.buildRefinementStep()
+			// The runtime executes the refinement as a real turn (TurnNumber++)
+			// that re-engages the frontier head (buildRefinementStep tags
+			// g.layerB[0]). Advance the runtime mirror the same way so decay
+			// timing stays aligned with the runtime; the reverse cross-check for
+			// this step is skipped anyway (lastLayerBSnapshot nil above), but the
+			// advance must happen so the NEXT step's mirror is turn-accurate.
+			g.lastRtSnapshot = g.advanceRuntimeMirror(g.threads[g.layerB[0]].threadID(), false)
 			g.reconcileAt(&ref)
 			return ref, true
 		default:
@@ -1057,6 +1065,18 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 	g.lastProbe = bs.probe
 	g.lastIntraProbe = bs.intraProbe
 	g.lastLayerBSnapshot = bs.layerBSnapshot
+	// Arm the runtime-mirror snapshot for the BD-4 reverse cross-check. A sleep-
+	// cycle step is not a turn (the runtime routes it off the turn path, no
+	// TurnNumber++ and RuntimeLayerB nil), so the mirror must not advance for it;
+	// every other step engages g.threads[bs.engagedIdx] (the id the runtime's
+	// MockResponse tags — the single thread it moves to the front of
+	// ActiveThreads), with the mirror turn counter resetting on a RestartSession.
+	if bs.step.SleepCycle {
+		g.lastRtSnapshot = nil
+	} else {
+		g.lastRtSnapshot = g.advanceRuntimeMirror(
+			g.threads[bs.engagedIdx].threadID(), bs.step.RestartSession)
+	}
 
 	// If this buffered step opens a new recall opportunity, start an
 	// episode — UNLESS it is a campaign step (suppressEpisode), whose
@@ -1578,13 +1598,15 @@ const (
 	metricLayerBShadowDivergence = "layerb_shadow_divergence"
 
 	// metricLayerBShadowReverseDivergence is the OPPOSITE-direction cross-check
-	// (BD-4): the run-total count of threads the shadow still holds that the
-	// runtime EVICTED (shadow-retained / runtime-evicted) — the class the forward
-	// subset metric structurally cannot see. It is REPORT-ONLY, not a == 0 gate:
-	// the shadow legitimately over-retains via persistent carrier displacement
-	// and closure/retirement, neither of which its LRU model replicates (see
-	// crossCheckLayerB). The counter quantifies that over-retention as a monitored
-	// quality signal. Same package-local rationale as the forward key.
+	// (BD-4 / B3): the run-total count of threads the RUNTIME-MIRROR (rtActive)
+	// holds that the runtime EVICTED (mirror-retained / runtime-evicted) — the
+	// class the forward subset metric structurally cannot see. The mirror
+	// replicates the two documented legitimate eviction sources — measurement-
+	// carrier displacement and §3.5 turn-idle decay closure (see the rtActive
+	// field doc / crossCheckLayerB) — so a residual is a REAL runtime/mirror LRU
+	// disagreement rather than modeled over-retention. Still folded in as
+	// report-only; the coordinator flips it to a == 0 gate once it demonstrably
+	// sits at 0. Same package-local rationale as the forward key.
 	metricLayerBShadowReverseDivergence = "layerb_shadow_reverse_divergence"
 )
 
@@ -1854,14 +1876,50 @@ type generator struct {
 	layerBShadowDivergence int
 
 	// layerBShadowReverseDivergence is the OPPOSITE-direction tally (BD-4): the
-	// run-total count of threads the shadow retains that the runtime EVICTED
-	// (shadow-retained / runtime-evicted). The forward `layerBShadowDivergence`
-	// only catches a runtime thread the shadow lacks; this catches a shadow
-	// thread the runtime lacks. REPORT-ONLY, not gated == 0: the shadow
-	// legitimately over-retains via persistent carrier displacement and
-	// closure/retirement, which its engage()-only LRU model does not replicate
-	// (see crossCheckLayerB). A monitored quality signal, not a defect gate.
+	// run-total count of threads the runtime-mirror Layer-B (rtActive) holds
+	// that the runtime EVICTED (mirror-retained / runtime-evicted). The forward
+	// `layerBShadowDivergence` only catches a runtime thread the engage()-only
+	// shadow lacks; this catches a mirror thread the runtime lacks. Since the
+	// mirror (unlike the plain shadow) replicates the two documented legitimate
+	// eviction sources — measurement-carrier displacement and §3.5 decay closure
+	// — a nonzero here is a REAL runtime/mirror LRU disagreement, not modeled
+	// over-retention (B3). Report-only until the coordinator flips the gate.
 	layerBShadowReverseDivergence int
+
+	// Runtime-mirror Layer-B (BD-4 / B3 reverse cross-check). An INDEPENDENT,
+	// execution-order model of the runtime's ActiveThreads that — unlike the
+	// engage()-only `layerB` shadow — replicates the two documented eviction
+	// sources the reverse check otherwise reports as legitimate over-retention:
+	//   1. Measurement-carrier displacement: a carrier-hosted probe/campaign-recall
+	//      step engages the carrier into ActiveThreads (evicting the real tail),
+	//      which `layerB` never models (the carrier is deliberately kept out of the
+	//      candidate-selection shadow). The mirror engages it, so the displacement
+	//      — and its persistence after the carrier itself ages out — is reproduced.
+	//   2. Decay closure (§3.5): the turn-idle retire (turn/closure.go, DecayTurns)
+	//      removes a STILL-RESIDENT thread from ActiveThreads. Wall-clock decay is
+	//      not modeled: a thread idle past decayTime is long since turn-decayed OR
+	//      already dormant (never in the top-BTopK ActiveThreads it would need to be
+	//      in to affect this cross-check), so only turn-idle decay can evict a
+	//      resident thread.
+	//
+	// It is maintained at EXECUTION time in Next() (not generation time) so it
+	// observes the true turn sequence — including execution-injected refinement
+	// turns (which advance the runtime's TurnNumber and so shift decay timing) and
+	// session restarts (which reset TurnNumber). It draws no rng and emits no
+	// step: pure observability, so the canonical stream stays byte-identical.
+	//
+	// rtActive is the ActiveThreads mirror (thread ids, most-recent-first, capped
+	// at layerBCap == memops.DefaultBTopK — the same cap the forward shadow uses).
+	// rtLastEngaged[id] is the mirror turn at which id was last engaged (== the
+	// runtime's stored LastEngagedTurn). rtTurn is the mirror turn counter: it
+	// ++ once per executed turn and resets to 0 on a RestartSession step, exactly
+	// mirroring state.TurnNumber. lastRtSnapshot is the just-returned step's
+	// rtActive, compared against that step's runtime ActiveThreads on the next
+	// Next()'s feedback.
+	rtActive       []string
+	rtLastEngaged  map[string]int
+	rtTurn         int
+	lastRtSnapshot []string
 
 	// files[idx] is the §3.9 tracked-file state for thread idx: the
 	// deterministic file path and the file's current content, which grows
@@ -2276,6 +2334,78 @@ func (g *generator) inLayerB(idx int) bool {
 	return slices.Contains(g.layerB, idx)
 }
 
+// advanceRuntimeMirror models one EXECUTED turn engaging engagedID in the
+// runtime-mirror Layer-B (rtActive) and returns the post-turn snapshot for the
+// BD-4 reverse cross-check. It is called once per returned step from Next() (a
+// buffered step, or an execution-injected refinement), so it sees the true turn
+// sequence. Draws no rng; pure observability.
+//
+// restart mirrors the runtime's session relaunch: LoadSession resets TurnNumber
+// to 0 (so turn-idle decay is suppressed for pre-restart threads until rtTurn
+// climbs past their stored LastEngagedTurn) but RESTORES ActiveThreads from the
+// substrate — which equals the mirror's current rtActive — so membership is
+// unchanged. It then applies the two runtime paths that move a thread out of
+// ActiveThreads: updateLayerLRU (move-to-front + BTopK cap, rtEngage) and the
+// §3.5 turn-idle decay sweep (rtDecaySweep).
+func (g *generator) advanceRuntimeMirror(engagedID string, restart bool) []string {
+	if restart {
+		g.rtTurn = 0
+	}
+	g.rtTurn++
+	g.rtEngage(engagedID)
+	g.rtDecaySweep()
+	return append([]string(nil), g.rtActive...)
+}
+
+// rtEngage replicates touchActiveLRU/updateLayerLRU for the runtime mirror:
+// lift id to the front of rtActive (de-duped), demote any BTopK overflow off
+// the tail (the demoted thread goes to Layer C, which this cross-check does not
+// track — only ActiveThreads membership matters here), and stamp its last-
+// engaged turn. Engaging a thread that had decayed out resurrects it (the
+// runtime's §2.2.1 re-engagement resurrection) simply by re-adding it here.
+func (g *generator) rtEngage(id string) {
+	g.rtActive = withoutString(g.rtActive, id)
+	g.rtActive = append([]string{id}, g.rtActive...)
+	if len(g.rtActive) > layerBCap {
+		g.rtActive = g.rtActive[:layerBCap]
+	}
+	g.rtLastEngaged[id] = g.rtTurn
+}
+
+// rtDecaySweep removes from rtActive every still-resident thread whose turn-idle
+// count has reached turn.DecayTurns — the §3.5 closure eviction (turn/closure.go
+// decayEligible turn-based branch). The `rtTurn >= last` guard mirrors
+// decayEligible's prior-session skip: after a restart, a pre-restart thread's
+// stored last-engaged turn exceeds the reset counter, so its turn signal does
+// not fire (the runtime then relies on wall-clock decay, which cannot evict a
+// resident thread — see the rtActive field doc). The just-engaged thread has
+// idle 0, so it is never swept.
+func (g *generator) rtDecaySweep() {
+	kept := make([]string, 0, len(g.rtActive))
+	for _, id := range g.rtActive {
+		last, ok := g.rtLastEngaged[id]
+		if ok && g.rtTurn >= last && g.rtTurn-last >= turn.DecayTurns {
+			continue
+		}
+		kept = append(kept, id)
+	}
+	g.rtActive = kept
+}
+
+// withoutString returns ss with the first occurrence of v removed,
+// order-preserving. It allocates a fresh slice so the caller never aliases
+// rtActive's backing array across an engage.
+func withoutString(ss []string, v string) []string {
+	for i, s := range ss {
+		if s == v {
+			out := make([]string, 0, len(ss)-1)
+			out = append(out, ss[:i]...)
+			return append(out, ss[i+1:]...)
+		}
+	}
+	return ss
+}
+
 // crossCheckLayerB compares the just-run step's shadow Layer-B (the snapshot
 // armed from its bufStep) against the runtime's authoritative set
 // (StepFeedback.RuntimeLayerB, a snapshot of turn.State.ActiveThreads taken
@@ -2342,35 +2472,34 @@ func (g *generator) crossCheckLayerB(feedback scenarios.StepFeedback) {
 			feedback.Index, divergent, g.lastLayerBSnapshot, carrierID)
 	}
 
-	// Reverse direction (BD-4): threads the shadow still holds that the runtime
-	// EVICTED (shadow-retained / runtime-evicted) — the divergence class the
-	// forward subset check structurally cannot see.
+	// Reverse direction (BD-4 / B3): threads the RUNTIME-MIRROR (rtActive) holds
+	// that the runtime EVICTED (mirror-retained / runtime-evicted) — the class
+	// the forward subset check structurally cannot see.
 	//
-	// This is a REPORT-ONLY over-retention measure, NOT a == 0 gate. BD-4's
-	// premise was that the carrier is the only legitimate reason the shadow is a
-	// superset of the runtime, so the reverse could be gated == 0 after excluding
-	// it. Empirically that premise does not hold: the shadow legitimately
-	// over-retains for TWO reasons its simple LRU model does not replicate —
-	//   1. Persistent carrier displacement: a carrier probe evicts a real tail
-	//      thread from the RUNTIME's Layer-B; that thread stays evicted even
-	//      after the carrier itself ages out, but the carrier-free shadow never
-	//      dropped it (so divergence persists with the carrier NOT resident).
-	//   2. Closure / retirement: the runtime removes a retired thread from
-	//      ActiveThreads (§3.5); the shadow's engage()-only model never does.
-	// Both are legitimate, not LRU bugs, and neither is bounded by carrier
-	// residency — so a reverse == 0 gate would false-fail constantly. Modeling
-	// them in the shadow (to recover a == 0 gate) is a deliberate expansion of
-	// the generator oracle, deferred. Until then the counter quantifies the
-	// shadow's over-retention as a monitored quality signal; the forward
-	// direction remains the hard == 0 LRU-agreement gate.
+	// Unlike the engage()-only `layerB` shadow, the mirror replicates the two
+	// documented legitimate eviction sources — measurement-carrier displacement
+	// and §3.5 turn-idle decay closure (see the rtActive field doc) — so a
+	// residual here is now a REAL runtime/mirror LRU disagreement, not modeled
+	// over-retention. The carrier is excluded from both the mirror snapshot and
+	// the runtime set (runtimeSet already dropped it above), keeping the compare
+	// carrier-symmetric. Still report-only (the counter is folded into the
+	// metrics blob); the coordinator flips it to a == 0 gate once it demonstrably
+	// sits at 0. lastRtSnapshot is nil for the execution-injected refinement (no
+	// mirror snapshot armed there); the guard above skips it via lastLayerBSnapshot.
 	var reverseDivergent []string
-	for _, idx := range g.lastLayerBSnapshot {
-		id := g.threads[idx].threadID()
+	for _, id := range g.lastRtSnapshot {
+		if id == carrierID {
+			continue
+		}
 		if _, ok := runtimeSet[id]; !ok {
 			reverseDivergent = append(reverseDivergent, id)
 		}
 	}
-	g.layerBShadowReverseDivergence += len(reverseDivergent)
+	if len(reverseDivergent) > 0 {
+		g.layerBShadowReverseDivergence += len(reverseDivergent)
+		pnlog.Warn("sim step %d: Layer-B reverse divergence: mirror-held %v absent from runtime %v (carrier=%q) — BD-4 runtime-mirror LRU drift",
+			feedback.Index, reverseDivergent, g.lastRtSnapshot, carrierID)
+	}
 }
 
 // runSession emits turns covering `active` worth of turn-active simulated

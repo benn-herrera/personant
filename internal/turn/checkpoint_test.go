@@ -83,7 +83,7 @@ func TestCheckpoint_CloseCommitsOnce(t *testing.T) {
 	// Arm decay: TurnNumber jumps past the idle threshold so the seeded
 	// thread is closure-eligible on this turn. Run increments TurnNumber, so
 	// seed one below the firing value.
-	state.TurnNumber = decayTurns
+	state.TurnNumber = DecayTurns
 	state.ActiveThreads = []string{"thr_1"}
 	state.Curator = stubCurator{summary: "gist", anchors: []string{"x", "y", "z", "w"}}
 	state.ClosureResolver = fixedOutcomeResolver(ClosureResolved)
@@ -117,7 +117,7 @@ func TestCheckpoint_CloseAndCreateCoalesceToOneCommit(t *testing.T) {
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
 
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
-	state.TurnNumber = decayTurns
+	state.TurnNumber = DecayTurns
 	state.ActiveThreads = []string{"thr_1"}
 	state.Curator = stubCurator{summary: "gist", anchors: []string{"x", "y", "z", "w"}}
 	state.ClosureResolver = fixedOutcomeResolver(ClosureResolved)

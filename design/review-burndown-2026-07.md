@@ -49,7 +49,7 @@ that changes behavior.
 | BD-1 | Move every cross-seam metric key into `metric_keys.go`: `recall_unexplained_absence`, `turns`, `threads_created`, `turn_duration_ms`, `recall_fidelity_*`, `embed_recall_fidelity_*`; sweep for any remaining raw literals crossing the harness↔sim seam | no raw key literal crosses the seam; rename ⇒ compile error |
 | BD-2 | Runtime-driven contract test pinning the `thread.created` log marker (pattern: `TestRuntimeEmitsMatchFireMarker`); `VerifyThreadAccounting` two-directional and non-vacuous (fails when created-set is empty while spine grew) | marker rename breaks a test, not a measurement |
 | BD-3 | Export W1 classification labels from `recall/measure` (single source); harness references the exported symbols; delete the comment-only mirror in `harness_run.go` | same pattern as `turn.EmbeddingDebtCap` (324dc94) |
-| BD-4 | Two-sided Layer-B shadow cross-check: detect shadow-retains/runtime-evicted divergence, not only the subset direction | forward gated ==0; reverse REPORT-ONLY (amended in-wave: closure/retirement and persistent carrier displacement legitimately evict runtime threads the `engage()`-only shadow never models — a reverse ==0 gate would false-fail continuously; recovering it requires modeling both in the shadow LRU, deferred as its own item) |
+| BD-4 | Two-sided Layer-B shadow cross-check: detect shadow-retains/runtime-evicted divergence, not only the subset direction | forward gated ==0; reverse RESIDUAL RECOVERED (2026-07-14, B3): the reverse direction is now checked against a runtime-mirror (`rtActive`) that models the two legitimate eviction sources the original amendment deferred — closure/retirement (§3.5 turn-idle decay) and persistent carrier displacement — plus archival traced non-contributing. Reverse divergence collapsed 363 → 0 and is now a hard ==0 gate on mock rungs (report-only under live inference, shadow id-blind). |
 | BD-5 | Implement `VerifyArchiveResolvable` and `VerifyDedupConsistency` (features shipped; stubs still say v0.2) | stubs replaced; invariants run in `DefaultInvariants` |
 | BD-6 | Execute D1: SPEC §9.1/§9.4 + ARCHITECTURE updated (X4 = normative overflow gate; T3-3 deferral noted); add mock-rung per-layer byte `VerifyNoBudgetOverflow` | doc + invariant land together |
 
@@ -163,7 +163,8 @@ synced to the real validator set.
    dead-zone classifier can widen meaningfully (until then the 1×cap band
    is the deterministic lexical-only band, documented in `intra.go`);
    shadow-LRU closure/carrier-displacement modeling to recover a reverse
-   ==0 Layer-B gate (BD-4 amendment); single re-enqueue-on-failure for
+   ==0 Layer-B gate (BD-4 amendment — DONE 2026-07-14 as B3: runtime-mirror
+   `rtActive`, reverse divergence 363 → 0, now gated); single re-enqueue-on-failure for
    flush jobs if the session-bounded failed-embed gap ever shows up in
    live-run data. Wave 4 pickup: delete `store.CommitReachable` (zero
    production callers since BD-11 moved the gate to `BlobReachable`).

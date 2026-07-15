@@ -1,6 +1,6 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build test test-run cover sim sim-completeness-rung sim-tokenceiling-rung integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
+.PHONY: all build test test-run cover sim sim-completeness-rung sim-tokenceiling-rung sim-shadow-slow-test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
 
 all: build
 
@@ -107,6 +107,15 @@ recall-corpus-test: build recall-madlibs recall-corpus-sweep-data
 # refresh or extend the recall-fidelity corpus, then commit the result.
 recall-corpus-fetch:
 	python3 test/tools/wikipedia_corpus.py
+
+# sim-shadow-slow-test runs the SLOW (14d) arm of TestShadowLayerB_ReverseDivergence.
+# That arm ALWAYS COMPILES (part of the normal `make test` compile) but its ~20 min
+# wall-clock would blow `make test`'s 30m sim-package timeout budget, so EXECUTION is
+# opted in here by setting PERSONANT_SLOW_SIM_TESTS — without it the arm skips and only
+# the fast 1d arm runs in the default suite. -timeout 0 disables go test's default
+# ceiling for this deliberate, watched long rung (a runaway is the user's to Ctrl-C).
+sim-shadow-slow-test: build recall-madlibs
+	PERSONANT_SLOW_SIM_TESTS=1 go test ./internal/scenarios/sim/ -run 'TestShadowLayerB_ReverseDivergence' -count=1 -timeout 0 -v
 
 test: build recall-madlibs
 	go vet $(GOPKGS)

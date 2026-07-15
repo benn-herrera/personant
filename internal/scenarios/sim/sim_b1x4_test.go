@@ -2,6 +2,7 @@ package sim
 
 import (
 	"testing"
+	"time"
 
 	"personant/internal/memops"
 	"personant/internal/store"
@@ -117,29 +118,94 @@ func TestGatePolicyPredicates(t *testing.T) {
 
 // TestInDebtWindowDepth pins the flush-lag dead-zone boundary: a turn-depth is in
 // the dead zone iff it has scrolled out of the assembly window
-// (depth >= ThreadTurnWindow) AND is within the most-recent turn.EmbeddingDebtCap
-// below the window floor (depth < ThreadTurnWindow + turn.EmbeddingDebtCap). This
-// is the band where ONLY the lexical floor can hit (the embedding fine tier has
-// no vector yet) — the exact subset the B1 completeness gate targets. The band
-// bound reads the runtime's exported turn.EmbeddingDebtCap directly, so there is
-// a single source of truth and no mirror to drift (#126).
+// (depth >= ThreadTurnWindow) AND is within the most-recent (1+pending)×
+// turn.EmbeddingDebtCap below the window floor. With pending=0 (the acceptance-rung
+// case) the band is the plain 1×cap; with pending=P>0 (the slow-embedder BD-8 case)
+// it widens to (1+P)×cap — the band the runtime's in-flight-widened lexical floor
+// covers. This is the band where ONLY the lexical floor can hit (the embedding fine
+// tier has no vector yet) — the exact subset the B1 completeness gate targets. Both
+// bounds read the runtime's exported constants directly, so there is a single
+// source of truth and no mirror to drift (#126).
 func TestInDebtWindowDepth(t *testing.T) {
 	w := store.ThreadTurnWindow
+	dcap := turn.EmbeddingDebtCap
 	cases := []struct {
-		depth int
-		want  bool
+		depth, pending int
+		want           bool
 	}{
-		{0, false},                               // never scrolled out
-		{w - 1, false},                           // still in the assembly window
-		{w, true},                                // first scrolled-out excerpt — dead zone floor
-		{w + turn.EmbeddingDebtCap - 1, true},    // last dead-zone excerpt
-		{w + turn.EmbeddingDebtCap, false},       // just past the debt window — flushed, fine tier covers
-		{w + turn.EmbeddingDebtCap + 100, false}, // deep history — flushed long ago
+		// pending=0: the plain 1×cap band (byte-identical to the pre-B2 classifier).
+		{0, 0, false},              // never scrolled out
+		{w - 1, 0, false},          // still in the assembly window
+		{w, 0, true},               // first scrolled-out excerpt — dead-zone floor
+		{w + dcap - 1, 0, true},    // last 1×cap dead-zone excerpt
+		{w + dcap, 0, false},       // just past 1×cap — flushed, fine tier covers
+		{w + dcap + 100, 0, false}, // deep history — flushed long ago
+		// pending=1: the (1+1)×cap = 2×cap widened band (BD-8, one flush in flight).
+		{w + dcap, 1, true},       // now inside the widened band — the whole point of B2
+		{w + 2*dcap - 1, 1, true}, // last 2×cap dead-zone excerpt
+		{w + 2*dcap, 1, false},    // past 2×cap even with one pending — flushed
+		// pending=2: (1+2)×cap = 3×cap — matches the measure BD-8 queued-batch case.
+		{w + 2*dcap, 2, true},
+		{w + 3*dcap - 1, 2, true},
+		{w + 3*dcap, 2, false},
+		// negative pending is clamped to 0 (defensive).
+		{w + dcap, -1, false},
 	}
 	for _, c := range cases {
-		if got := inDebtWindowDepth(c.depth); got != c.want {
-			t.Errorf("inDebtWindowDepth(%d) = %v, want %v (window=%d cap=%d)",
-				c.depth, got, c.want, w, turn.EmbeddingDebtCap)
+		if got := inDebtWindowDepth(c.depth, c.pending); got != c.want {
+			t.Errorf("inDebtWindowDepth(%d, pending=%d) = %v, want %v (window=%d cap=%d)",
+				c.depth, c.pending, got, c.want, w, dcap)
 		}
+	}
+}
+
+// TestCompletenessFloor_SpanConditionality is the B1 / D7 span-conditionality
+// proof: the completeness gate SKIPs (logs, does not fail) when the workload's
+// realized main-thread turn count cannot reach the dead zone, and stays live
+// (anti-vacuity FAIL on zero) once the span qualifies. The qualifying threshold
+// is derived from the public runtime constants, never a hardcoded rung list.
+func TestCompletenessFloor_SpanConditionality(t *testing.T) {
+	threshold := completenessQualifyThreshold()
+	if want := store.ThreadTurnWindow + turn.EmbeddingDebtCap; threshold != want {
+		t.Fatalf("qualify threshold = %d, want ThreadTurnWindow+EmbeddingDebtCap = %d", threshold, want)
+	}
+
+	// Below threshold: structurally cannot probe → span does NOT qualify → the
+	// gate skips (the machinery-test / short-rung case). At and above: it qualifies.
+	spanCases := []struct {
+		mainTurns int
+		qualifies bool
+	}{
+		{0, false},               // main thread never created
+		{threshold - 1, false},   // one short of qualifying — SKIP
+		{threshold, true},        // exactly qualifying
+		{threshold + 5000, true}, // a long rung — well past
+	}
+	for _, c := range spanCases {
+		if got := completenessSpanQualifies(c.mainTurns); got != c.qualifies {
+			t.Errorf("completenessSpanQualifies(%d) = %v, want %v (threshold=%d)",
+				c.mainTurns, got, c.qualifies, threshold)
+		}
+	}
+
+	// Once the span qualifies, the anti-vacuity arm is live: a 0-probe tally FAILS
+	// (checkCompletenessFloor(0,0) — the "could-have-probed-and-didn't" defect).
+	// This is the second half of the acceptance criterion: a qualifying span with
+	// zero probes still fails.
+	if fail := checkCompletenessFloor(0, 0); fail == "" {
+		t.Error("a qualifying span with 0/0 dead-zone probes must FAIL the anti-vacuity gate, got no failure")
+	}
+
+	// The qualifying-span estimate scales linearly and rounds to the hour: a 24h
+	// span whose main thread reached exactly threshold turns already qualifies (1:1);
+	// a 24h span at half the threshold needs ~2× the span.
+	if got := qualifyingCompletenessSpan(24*time.Hour, threshold, threshold); got != 24*time.Hour {
+		t.Errorf("qualifyingCompletenessSpan(24h, threshold, threshold) = %s, want 24h", got)
+	}
+	if got := qualifyingCompletenessSpan(24*time.Hour, threshold/2, threshold); got != 48*time.Hour {
+		t.Errorf("qualifyingCompletenessSpan(24h, threshold/2, threshold) = %s, want 48h", got)
+	}
+	if got := qualifyingCompletenessSpan(24*time.Hour, 0, threshold); got != 0 {
+		t.Errorf("qualifyingCompletenessSpan with 0 main turns = %s, want 0 (nothing to scale)", got)
 	}
 }

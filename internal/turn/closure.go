@@ -11,15 +11,21 @@ import (
 	"personant/internal/memops"
 )
 
-// decayTurns / decayTime are the spec §2.6.1 default thresholds for
+// DecayTurns / decayTime are the spec §2.6.1 default thresholds for
 // engagement decay. A thread idle past EITHER threshold (OR semantics)
 // is decay-eligible. Directive-file plumbing (§2.6.1) arrives later;
 // until then they are plain constants.
+//
+// DecayTurns is EXPORTED as a public contract value (like EmbeddingDebtCap):
+// the acceptance sim's BD-4 runtime-mirror Layer-B references it to replicate
+// the §3.5 turn-idle closure eviction in its cross-check (ARCHITECTURE.md's
+// harness↔system coupling rule — a contract value the harness depends on is
+// referenced, never hand-mirrored into a second const that can silently drift).
 const (
-	// decayTurns is the count of non-engagement turns before a thread
+	// DecayTurns is the count of non-engagement turns before a thread
 	// is offered for closure.
-	decayTurns = 8
-	// decayTime is the wall-clock equivalent of decayTurns.
+	DecayTurns = 8
+	// decayTime is the wall-clock equivalent of DecayTurns.
 	decayTime = 7 * 24 * time.Hour
 )
 
@@ -91,7 +97,7 @@ func closeStateForOutcome(o ClosureOutcome) (memops.ThreadState, bool) {
 // paused / blocked / retired states do not decay-prompt) AND it is idle
 // past either threshold:
 //
-//   - Turn-based: TurnNumber - rec.LastEngagedTurn >= decayTurns, applied
+//   - Turn-based: TurnNumber - rec.LastEngagedTurn >= DecayTurns, applied
 //     only when TurnNumber >= rec.LastEngagedTurn. A new session resets
 //     TurnNumber, so a stored value larger than the current turn means
 //     the record is from a prior session — skip the turn signal and rely
@@ -128,7 +134,7 @@ func decayEligible(rec memops.SpineRecord, turnNumber int, sysRef time.Time) (st
 	// engagement fires, so no genuine engagement ever records turn 0 —
 	// a real value and the sentinel can never collide.
 	if turnNumber >= rec.LastEngagedTurn {
-		if idle := turnNumber - rec.LastEngagedTurn; idle >= decayTurns {
+		if idle := turnNumber - rec.LastEngagedTurn; idle >= DecayTurns {
 			return fmt.Sprintf("turns=%d", idle), true
 		}
 	}
@@ -304,7 +310,7 @@ func surfaceClosureCandidates(ctx context.Context, state *State) error {
 //     thread does not re-prompt every turn.
 func applyClosureResolution(ctx context.Context, state *State, threadID string, draft curator.ClosureDraft, res ClosureResolution) error {
 	if res.Outcome == ClosureDefer {
-		state.closureDeferUntil[threadID] = state.TurnNumber + decayTurns
+		state.closureDeferUntil[threadID] = state.TurnNumber + DecayTurns
 		return state.Ops.Log(ctx, memops.LogCategoryRetire, "defer", "thr="+threadID)
 	}
 

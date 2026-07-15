@@ -141,27 +141,42 @@ func depthOrZero(cur, target int) int {
 
 // inDebtWindowDepth reports whether a turn-depth (cur − target) lands strictly
 // in the FLUSH-LAG DEAD ZONE: scrolled out of the assembly window
-// (depth >= ThreadTurnWindow) AND within the most-recent turn.EmbeddingDebtCap
-// below the window floor (depth < ThreadTurnWindow + turn.EmbeddingDebtCap). The
-// band bound references the runtime's exported constant directly (no mirror):
-// turn.EmbeddingDebtCap is public contract for exactly this consumer (#126).
-// In that band the §3.4 embedding fine tier has no vector yet, so a runtime
-// intra hit can come ONLY from the #123 bounded lexical completeness floor — the
-// B1 assertion target. depth must be the predicted-target depth (>=1); 0 (no
+// (depth >= ThreadTurnWindow) AND within the most-recent (1+pending)×
+// turn.EmbeddingDebtCap below the window floor
+// (depth < ThreadTurnWindow + (1+pending)*turn.EmbeddingDebtCap). Both bounds
+// reference the runtime's exported constants directly (no mirror): ThreadTurnWindow
+// and turn.EmbeddingDebtCap are public contract for exactly this consumer (#126).
+// In that band the §3.4 embedding fine tier has no vector yet, so a runtime intra
+// hit can come ONLY from the #123 bounded lexical completeness floor — the B1
+// assertion target. depth must be the predicted-target depth (>=1); 0 (no
 // predicted target) is never in the dead zone.
 //
-// DELIBERATELY the 1×cap band (BD-8). The runtime's lexical floor transiently
-// widens to (1+P)×cap while P flush jobs are enqueued-but-unpublished
-// (measure.Request.EngagedDebtWindow), but that transient band exists only
-// under an in-flight flush — a condition this sim cannot sustain: the mock
-// embedder returns immediately, so the indexer drains each flush before the
-// next probe fires and P is 0 at every measurement point. Widening this
-// classifier to (1+P)×cap without a sim slow-embedder mode would therefore
-// mark probes whose targets the ordinary embedding tier covers anyway —
-// asserting nothing about the widened floor. If a slow-embedder sim mode
-// lands, widen this band together with it; do not widen the band alone.
-func inDebtWindowDepth(depth int) bool {
-	return depth >= store.ThreadTurnWindow && depth < store.ThreadTurnWindow+turn.EmbeddingDebtCap
+// THE (1+P)×cap WIDENING (B2 / BD-8). pending is the runtime's per-thread
+// pending-flush depth P at the measurement instant: the runtime's lexical floor
+// widens its scan to (1+P)×cap while P flush jobs are enqueued-but-unpublished
+// (Recall multiplies EngagedDebtWindow by 1+pendingFlushDepth — see
+// measure.debtWindowTurns). The classifier must track that same band so the
+// oracle requires a floor hit for exactly the targets the runtime's widened
+// floor covers, and no more.
+//
+// pending SOURCE (the OBSERVABILITY gap, reported for B2). There is NO public
+// runtime observable for the instantaneous per-thread P at the sim/generator
+// level: measure.Service.pendingFlush is unexported (guarded by pendingMu), and
+// the only sim-observable flush signal is the CUMULATIVE flushCalls/flushChunks
+// counters folded from turn.State — call totals, not instantaneous depth. So the
+// generator oracle passes pending=0 (see buildIntraProbeStep): on every mock and
+// live-embedding acceptance rung the embedder drains each flush before the next
+// probe fires (P is genuinely 0 at every measurement point), so the 1×cap band
+// is exact and unchanged. The widened band is exercised only where P is KNOWN by
+// construction — the slow-embedder test, whose gated wrapper holds (and OBSERVES,
+// via slowEmbedder.InFlight) exactly the batches it blocks, so the pending it
+// passes here is ground truth, not a model of runtime internals.
+func inDebtWindowDepth(depth, pending int) bool {
+	if pending < 0 {
+		pending = 0
+	}
+	upper := store.ThreadTurnWindow + (1+pending)*turn.EmbeddingDebtCap
+	return depth >= store.ThreadTurnWindow && depth < upper
 }
 
 // intraDepthBucket maps a turn-depth (>=1) to a LOG-SCALE bucket index, using
@@ -209,6 +224,26 @@ func (g *generator) mainThreadChunkCount() int {
 		return 0
 	}
 	return durableChunkCount(g.shadowChunks[g.mainThreadIdx])
+}
+
+// mainThreadTurns returns the Candidate-A main thread's RAW turn-excerpt count
+// (its current turn number = len of the shadow chunk list, transient chunks
+// INCLUDED — production over-retains, so the runtime's turn numbering counts
+// them). This is the span's realized arithmetic the B1 completeness-floor gate
+// uses to decide whether the workload could STRUCTURALLY scroll a probe target
+// into the flush-lag dead zone: a dead-zone probe needs a scrolled-out target at
+// turn-depth in [ThreadTurnWindow, ThreadTurnWindow+EmbeddingDebtCap), and the
+// deepest depth a probe can reach is (mainThreadTurns − 1), so a span whose main
+// thread never accrues that many turns cannot probe the band at all. Unlike
+// mainThreadChunkCount (durable/kept, the perf-decay length axis) this is the RAW
+// count, because the dead-zone depth is measured in the runtime's turn numbering,
+// which the keep/toss trim does not renumber. 0 when the main thread was never
+// created.
+func (g *generator) mainThreadTurns() int {
+	if g.mainThreadIdx < 0 {
+		return 0
+	}
+	return len(g.shadowChunks[g.mainThreadIdx])
 }
 
 // totalFineChunks returns the total DURABLE (kept) shadow chunk count across
@@ -460,9 +495,14 @@ func (g *generator) buildIntraProbeStep() (bufStep, bool) {
 			// B1 dead-zone classification: the predicted target chunk is in the
 			// flush-lag band (scrolled out, not yet flushed → only the #123 lexical
 			// floor can surface it). Only meaningful when the oracle predicted a
-			// target (predictHit); inDebtWindowDepth(0) is false for an unpredicted
+			// target (predictHit); inDebtWindowDepth(0, _) is false for an unpredicted
 			// probe, so the && predictHit guard is belt-and-suspenders.
-			inDebtWindow: predictHit && inDebtWindowDepth(depthOrZero(cur, targetTurn)),
+			// pending=0: the generator has no runtime-observable per-thread P at
+			// classification time, and on every mock/live-embedding rung the
+			// embedder drains each flush before the next probe fires (P is genuinely
+			// 0), so the 1×cap band is exact here — see inDebtWindowDepth's
+			// pending-source note.
+			inDebtWindow: predictHit && inDebtWindowDepth(depthOrZero(cur, targetTurn), 0),
 		},
 	}, true
 }

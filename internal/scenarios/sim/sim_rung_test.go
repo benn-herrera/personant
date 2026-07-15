@@ -10,6 +10,7 @@ import (
 	"personant/internal/model"
 	"personant/internal/recall/measure"
 	"personant/internal/scenarios"
+	"personant/internal/store"
 	"personant/internal/turn"
 	"testing"
 )
@@ -503,8 +504,10 @@ func logRungSummary(t *testing.T, label string, rep rungReport, gen *generator) 
 		divergence)
 	t.Logf("layerb shadow divergence:   %d (burndown #8 PASS = 0 when runtime follows the plan; shadow LRU vs runtime ActiveThreads)",
 		int(m.Gauges[metricLayerBShadowDivergence]))
-	// Report-only: legitimately nonzero (closure/retirement + persistent carrier displacement are not modeled by the shadow — see crossCheckLayerB doc). No ==0 gate.
-	t.Logf("layerb shadow reverse div:  %d (BD-4 report-only over-retention: shadow-held / runtime-evicted; no gate)",
+	// BD-4 / B3: the runtime-mirror (rtActive) now models §3.5 closure/decay AND
+	// measurement-carrier displacement, so the reverse direction is a hard ==0
+	// gate on mock rungs (evalRungGates), no longer report-only over-retention.
+	t.Logf("layerb shadow reverse div:  %d (BD-4 PASS = 0 when runtime follows the plan; runtime-mirror rtActive vs runtime ActiveThreads)",
 		int(m.Gauges[metricLayerBShadowReverseDivergence]))
 
 	// Intra-thread recall (#109, §9.2). The §4.3 perf-decay series (the I3/I4
@@ -728,9 +731,16 @@ func evalRungGates(t *testing.T, label string, rep rungReport, gen *generator, p
 	// Under live INFERENCE the real model engages a different thread set than
 	// the plan, so the shadow legitimately diverges → report only.
 	layerBDivergence := int(m.Gauges[metricLayerBShadowDivergence])
-	// Report-only: legitimately nonzero (closure/retirement + persistent carrier displacement are not modeled by the shadow — see crossCheckLayerB doc). No ==0 gate.
-	t.Logf("Layer-B shadow reverse divergence %d (BD-4 report-only over-retention: shadow-held / runtime-evicted; no gate)",
-		int(m.Gauges[metricLayerBShadowReverseDivergence]))
+	// Reverse direction (BD-4 / B3): threads the runtime-mirror (rtActive) holds
+	// that the runtime EVICTED. The mirror now models the two documented
+	// legitimate eviction sources (measurement-carrier displacement and §3.5
+	// turn-idle decay closure — see crossCheckLayerB / the rtActive field doc), so
+	// a residual is a REAL mirror/runtime LRU disagreement, not modeled
+	// over-retention. Same structural, embedder-independent cross-check as the
+	// forward direction, so it fires as a hard ==0 gate on the mock and live-
+	// EMBEDDING runs (oracleGatesAssert) and is report-only under live INFERENCE
+	// (the real model engages off-plan, so the mirror legitimately diverges).
+	layerBReverseDivergence := int(m.Gauges[metricLayerBShadowReverseDivergence])
 	if policy.oracleGatesAssert() {
 		if layerBDivergence != 0 {
 			t.Errorf("burndown #8 FAILURE: Layer-B shadow divergence %d != 0 — the generator's shadow LRU and the "+
@@ -739,9 +749,17 @@ func evalRungGates(t *testing.T, label string, rep rungReport, gen *generator, p
 				"the shadow engage()/eviction model against the runtime LRU (see the forensic log for the offending ids).",
 				layerBDivergence)
 		}
+		if layerBReverseDivergence != 0 {
+			t.Errorf("BD-4 FAILURE: Layer-B shadow reverse divergence %d != 0 — the runtime-mirror (rtActive) holds a "+
+				"thread the runtime EVICTED (mirror-retained / runtime-evicted). The mirror now models §3.5 decay "+
+				"closure and measurement-carrier displacement, so a residual is a REAL mirror/runtime LRU disagreement, "+
+				"not modeled over-retention. Root-cause the mirror engage/decay model against the runtime LRU (see the "+
+				"forensic log for the offending ids).",
+				layerBReverseDivergence)
+		}
 	} else {
-		t.Logf("Layer-B shadow divergence %d (live-inference: real model engages off-plan — shadow legitimately diverges, not asserted)",
-			layerBDivergence)
+		t.Logf("Layer-B shadow divergence %d / reverse %d (live-inference: real model engages off-plan — shadow legitimately diverges, not asserted)",
+			layerBDivergence, layerBReverseDivergence)
 	}
 
 	// Intra-thread coherence divergence — the #109 tripwire. SCOPED MOCK-ONLY
@@ -829,7 +847,7 @@ func evalRungGates(t *testing.T, label string, rep rungReport, gen *generator, p
 	}
 
 	assertTokenCeiling(t, label, m, policy)
-	assertCompletenessFloor(t, label, m, policy)
+	assertCompletenessFloor(t, label, m, policy, gen)
 }
 
 // assertTokenCeiling is the B1+X4 whole-request token-ceiling gate (X4 /
@@ -902,6 +920,15 @@ func checkTokenCeiling(samples []float64) string {
 // dead-zone probe was observed (else the rung cannot prove §3.4, design
 // invariant 3), and (b) the floor FIRED — every dead-zone probe was surfaced.
 //
+// D7 SPAN-CONDITIONALITY (B1). (a)'s non-vacuity FAIL is armed only when the span
+// COULD structurally scroll a probe into the dead zone — completenessSpanQualifies
+// on the workload's realized main-thread turn count. A fixed short profile (e.g.
+// the 24h head-to-head machinery rungs) whose main thread cannot reach
+// ThreadTurnWindow+EmbeddingDebtCap is SKIPPED with a logged note (not t.Skip —
+// the enclosing test keeps its other assertions), naming the qualifying span. This
+// is what keeps `make sim LIVE_EMBEDDING=true` green when the actual completeness
+// rung passes but a co-resident fixed-span machinery test cannot probe.
+//
 // This is the anti-vacuity proof's target: with the debtWindowTurns floor
 // disabled (or debtWindowBound forced to 0) the runtime cannot surface a
 // dead-zone target (no vector, no lexical pass), so _hit < _total and this gate
@@ -909,7 +936,7 @@ func checkTokenCeiling(samples []float64) string {
 // mock run (no embedder → no intra layer → 0/0) and report-only nowhere: under
 // live embedding it is the HARD B1 assertion (the report-only #96 coherence
 // tripwire is a different, whole-range measure — see completenessFloorAsserts).
-func assertCompletenessFloor(t *testing.T, label string, m metricsBlob, policy gatePolicy) {
+func assertCompletenessFloor(t *testing.T, label string, m metricsBlob, policy gatePolicy, gen *generator) {
 	t.Helper()
 	if !policy.completenessFloorAsserts() {
 		// Mock / live-inference-only run: the §3.4 fine tier and its lexical floor
@@ -918,12 +945,75 @@ func assertCompletenessFloor(t *testing.T, label string, m metricsBlob, policy g
 	}
 	total := int(m.Gauges[metricRecallCompletenessDeadZoneTotal])
 	hit := int(m.Gauges[metricRecallCompletenessDeadZoneHit])
+
+	// D7 span-conditionality (B1). Distinguish "STRUCTURALLY CANNOT PROBE at this
+	// span" from "COULD have probed and observed zero". A dead-zone probe needs a
+	// scrolled-out main-thread target at turn-depth in
+	// [ThreadTurnWindow, ThreadTurnWindow+EmbeddingDebtCap), and the deepest depth a
+	// probe can reach is (mainThreadTurns − 1). If the workload's OWN realized
+	// main-thread turn count never reached the qualifying threshold, a 0/0 tally is
+	// EXPECTED — SKIP the gate with a logged note (NOT t.Skip: the enclosing test
+	// carries other assertions), naming the reason and the span that would qualify.
+	// Only when the span DID qualify does total==0 mean the machinery broke → FAIL
+	// (checkCompletenessFloor's anti-vacuity arm). Derived from the workload's own
+	// arithmetic (both bounds are public runtime constants), not a hardcoded rung list.
+	mainTurns := gen.mainThreadTurns()
+	if !completenessSpanQualifies(mainTurns) {
+		qualify := completenessQualifyThreshold()
+		qualSpan := qualifyingCompletenessSpan(gen.cfg.Duration, mainTurns, qualify)
+		spanNote := "unknown (main thread never created at this span)"
+		if qualSpan > 0 {
+			spanNote = fmt.Sprintf("~%s", qualSpan)
+		}
+		t.Logf("%s recall-completeness floor (§3.4/#123): SKIPPED (span structurally cannot probe) — the main "+
+			"thread accrued %d turn-excerpts, below the %d (ThreadTurnWindow %d + EmbeddingDebtCap %d) needed to scroll "+
+			"a probe target into the flush-lag dead zone; no dead-zone probe is structurally possible at this span. A "+
+			"span of %s would qualify. (dead-zone tally %d/%d — expected 0/0)",
+			label, mainTurns, qualify, store.ThreadTurnWindow, turn.EmbeddingDebtCap, spanNote, hit, total)
+		return
+	}
+
 	t.Logf("%s recall-completeness floor (§3.4/#123): %d/%d flush-lag dead-zone probes surfaced "+
-		"(only the bounded lexical floor can hit this band — the embedding fine tier has no vector yet)",
-		label, hit, total)
+		"(only the bounded lexical floor can hit this band — the embedding fine tier has no vector yet; "+
+		"main thread accrued %d turn-excerpts, span qualifies)",
+		label, hit, total, mainTurns)
 	if fail := checkCompletenessFloor(hit, total); fail != "" {
 		t.Errorf("%s %s", label, fail)
 	}
+}
+
+// completenessQualifyThreshold is the main-thread turn count a span must reach
+// for a probe target to land in the flush-lag dead zone: ThreadTurnWindow +
+// EmbeddingDebtCap. Both are public runtime constants (no mirror). It is the
+// conservative bound — a probe becomes possible once the deepest reachable depth
+// crosses ThreadTurnWindow, but requiring the full window+cap ensures a real
+// dead-zone band exists before the anti-vacuity gate is willing to FAIL on zero.
+func completenessQualifyThreshold() int {
+	return store.ThreadTurnWindow + turn.EmbeddingDebtCap
+}
+
+// completenessSpanQualifies is the PURE B1 span-conditionality predicate
+// (testable in isolation): the span could STRUCTURALLY scroll a probe target
+// into the flush-lag dead zone iff its main thread accrued at least
+// completenessQualifyThreshold() turn-excerpts. Below that, a 0/0 dead-zone
+// tally is expected and the completeness gate is skipped (logged, not failed);
+// at/above it the anti-vacuity gate (checkCompletenessFloor) stays live.
+func completenessSpanQualifies(mainThreadTurns int) bool {
+	return mainThreadTurns >= completenessQualifyThreshold()
+}
+
+// qualifyingCompletenessSpan estimates the sim span whose main thread would
+// accrue enough turn-excerpts (>= threshold) to scroll a probe into the
+// flush-lag dead zone. Main-thread growth is ~linear in the span (a fixed
+// engage cadence per emitted step), so it scales the current span by
+// threshold/mainThreadTurns. Reported in the skip note so a future rung can pick
+// a qualifying span without a hardcoded table. Returns 0 when mainThreadTurns is
+// 0 (no main thread was created — nothing to scale).
+func qualifyingCompletenessSpan(span time.Duration, mainThreadTurns, threshold int) time.Duration {
+	if mainThreadTurns <= 0 {
+		return 0
+	}
+	return (time.Duration(float64(span) * float64(threshold) / float64(mainThreadTurns))).Round(time.Hour)
 }
 
 // checkCompletenessFloor is the PURE B1 §3.4 completeness-floor predicate
