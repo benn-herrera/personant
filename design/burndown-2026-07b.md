@@ -77,6 +77,30 @@ killed the 2026-07-13 run at turn 91). First A2 series (gemma-4-main):
 - re-engagement miss rate: 0.847 (797/941; borderline=0, unadjudicated=0)
 - anchor-emission overlap: 0.000 over 151 threads
 
+**RESOLVED (2026-07-15, three-round live elicitation probe — 600 calls,
+`internal/prompt/*_probe_test.go`, artifacts in
+`test/rundata/elicitation_probe/`):** the omission driver is the
+**work-switch genre**, not model capability and not prompt
+placement/format. Round 1: 100% single-turn compliance across
+placement/format variants at production pins (static prompt exonerated;
+prefill unsupported on reaper). Round 2: history-precedent mimicry real
+but minor (4% at saturated k=12 tag-less history; production History
+replays tag-INTACT — only excerpts strip). Round 3: work-switch turns
+drop to 88% (Fisher p≈0.013 vs V0's 100%); excerpt-format Layer B adds
+NOTHING (E: 0 real omissions; EG ≈ G). Miss signatures: (a)
+clarify-question-without-tag on ambiguous routing; (b) bare
+`*new-topic* [anchors]` — the model unwraps the confusable nested-
+asterisk syntax; (c) full-budget hidden-reasoning burns returning empty
+content (switch-genre exclusive). 12%/switch-turn × sim switch density
+× own-omission feedback ≈ composes toward the observed 34%.
+**Fixes indicated:** (1) directive clause — the tag is required even on
+clarifying/ambiguous responses (best-guess or new-topic); (2) parser
+alias accepting bare `*new-topic* [anchors]` (absorb the confusable
+syntax at the deterministic tier, per minimize-infrastructural-prompts);
+(3) extend the D6 re-prompt to cover empty responses; track
+reasoning-burn empties as a serving-level hazard. Layer-B excerpt tag
+retention: exonerated, do not build.
+
 **Interpretation discipline (before drawing the big conclusion):** the
 top-line signal — gemma-4-main's tag discipline is far below mock
 assumptions — is almost certainly real (34% omission is model behavior,
