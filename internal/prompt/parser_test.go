@@ -339,6 +339,118 @@ func TestPreambleScanLineCapExhausted(t *testing.T) {
 	}
 }
 
+// --- Bare new-topic alias (§5.1.2 deterministic-tier absorption of the
+// probe-observed unwrapped wire shape — 2026-07-15 elicitation probe
+// round 3, signature (b); design burndown-2026-07b "RESOLVED"). The alias
+// is strict: line-anchored, bracket pair required, same anchor-list
+// grammar. ---
+
+func TestParseBareNewTopicAlias(t *testing.T) {
+	in := "*new-topic* [Trefoil, body-topology]\nbody"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if want := []string{NewTopicLiteral}; !reflect.DeepEqual(got.Tag.Threads, want) {
+		t.Errorf("Threads: got %v, want %v", got.Tag.Threads, want)
+	}
+	// The alias shares the canonical anchor-list grammar, including §2.7.2
+	// normalization.
+	if want := []string{"trefoil", "body-topology"}; !reflect.DeepEqual(got.Tag.Anchors, want) {
+		t.Errorf("Anchors: got %v, want %v", got.Tag.Anchors, want)
+	}
+	if got.Body != "body" {
+		t.Errorf("Body: got %q, want %q (alias line must be stripped)", got.Body, "body")
+	}
+	if len(got.Warnings) != 0 {
+		t.Errorf("expected no warnings, got %v", got.Warnings)
+	}
+}
+
+func TestParseBareNewTopicAliasEmptyAnchorList(t *testing.T) {
+	// Grammar parity with the canonical form: an empty-in-brackets anchor
+	// list is a valid 0-anchor (vague-start) emission.
+	in := "*new-topic* []\nbody"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if want := []string{NewTopicLiteral}; !reflect.DeepEqual(got.Tag.Threads, want) {
+		t.Errorf("Threads: got %v, want %v", got.Tag.Threads, want)
+	}
+	if len(got.Tag.Anchors) != 0 {
+		t.Errorf("Anchors: got %v, want empty", got.Tag.Anchors)
+	}
+}
+
+func TestParseBareNewTopicWithoutAnchorListInvalid(t *testing.T) {
+	// The alias is NOT a general loosening: without the `[...]` bracket
+	// pair, a bare *new-topic* line stays invalid.
+	for _, in := range []string{
+		"*new-topic*\nbody",
+		"*new-topic* trefoil, unknot\nbody",
+		"*new-topic* [trefoil\nbody", // unclosed bracket
+	} {
+		if _, err := Parse(in); !errors.Is(err, ErrNoTopicTag) {
+			t.Errorf("Parse(%q): expected ErrNoTopicTag, got %v", in, err)
+		}
+	}
+}
+
+func TestParseBareNewTopicMidLineInvalid(t *testing.T) {
+	// Line-anchored: any non-whitespace before or after the alias on the
+	// same line invalidates it (same discipline as the canonical form).
+	for _, in := range []string{
+		"see *new-topic* [trefoil]\nbody",
+		"*new-topic* [trefoil] and more\nbody",
+	} {
+		if _, err := Parse(in); !errors.Is(err, ErrNoTopicTag) {
+			t.Errorf("Parse(%q): expected ErrNoTopicTag, got %v", in, err)
+		}
+	}
+}
+
+func TestParseAliasAndCanonicalShareFirstValidMatchRule(t *testing.T) {
+	// The alias participates in the same first-valid-match rule and the
+	// same extras count as the canonical form, in document order.
+	aliasFirst := "*new-topic* [a, b]\nbody\n*topic: thr_2 [c, d]*\nmore"
+	got, err := Parse(aliasFirst)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if want := []string{NewTopicLiteral}; !reflect.DeepEqual(got.Tag.Threads, want) {
+		t.Errorf("alias-first Threads: got %v, want %v", got.Tag.Threads, want)
+	}
+	if !hasWarningContaining(got.Warnings, "additional topic tag(s) ignored: 1") {
+		t.Errorf("alias-first: expected extras=1 warning, got %v", got.Warnings)
+	}
+
+	canonicalFirst := "*topic: thr_2 [c, d]*\nbody\n*new-topic* [a, b]\nmore"
+	got, err = Parse(canonicalFirst)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if want := []string{"thr_2"}; !reflect.DeepEqual(got.Tag.Threads, want) {
+		t.Errorf("canonical-first Threads: got %v, want %v", got.Tag.Threads, want)
+	}
+	if !hasWarningContaining(got.Warnings, "additional topic tag(s) ignored: 1") {
+		t.Errorf("canonical-first: expected extras=1 warning, got %v", got.Warnings)
+	}
+}
+
+func TestPreambleScanBareNewTopicAlias(t *testing.T) {
+	// The streaming-side authority (stream-filter suppression, §5.5 timing,
+	// D6 missing-tag trigger) must accept the alias exactly like Parse.
+	buf := []byte("*new-topic* [a, b]\nbody")
+	start, end, found, done := PreambleScan(buf)
+	if !found || !done {
+		t.Fatalf("found=%v done=%v, want both true", found, done)
+	}
+	if got := string(buf[start:end]); got != "*new-topic* [a, b]" {
+		t.Errorf("span: got %q", got)
+	}
+}
+
 // hasWarningContaining is a test helper that returns true if any of the
 // strings in ws contains the substring sub.
 func hasWarningContaining(ws []string, sub string) bool {

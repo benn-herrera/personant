@@ -120,16 +120,18 @@ func (f *StreamFilter) Close() error {
 	return err
 }
 
-// isTopicTagLine returns true when line matches the §5.1.2 topic-tag
-// regex. The regex is anchored multi-line in the parser; here we
-// pre-strip any trailing CR and apply the same pattern with explicit
-// line bounds.
+// isTopicTagLine returns true when line matches either tag shape — the
+// §5.1.2 topic-tag regex or the bare new-topic alias (newTopicAliasRE) —
+// so a newline-less trailing alias line is suppressed at Close exactly
+// like a canonical tag. The regexes are anchored multi-line in the parser;
+// here we pre-strip any trailing CR and apply the same patterns with
+// explicit line bounds.
 func isTopicTagLine(line []byte) bool {
-	// The shared parser regex is multi-line anchored — feed it a single
-	// line by stripping a trailing \r if present. The regex enforces
+	// The shared parser regexes are multi-line anchored — feed them a
+	// single line by stripping a trailing \r if present. Both enforce
 	// `^...$` so this is sufficient.
 	if n := len(line); n > 0 && line[n-1] == '\r' {
 		line = line[:n-1]
 	}
-	return topicTagRE.Match(line)
+	return topicTagRE.Match(line) || newTopicAliasRE.Match(line)
 }

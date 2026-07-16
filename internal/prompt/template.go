@@ -37,6 +37,13 @@ the current turn.`
 // Built at package init from [NewTopicLiteral] so the wire-protocol
 // sentinel has a single source of truth — a typo in the directive would
 // otherwise silently mis-teach the model.
+//
+// The ambiguity clause ("required even when ... clarifying question or the
+// thread routing is uncertain") is evidence-directed: the 2026-07-15 live
+// elicitation probe (round 3, design burndown-2026-07b "RESOLVED") showed
+// work-switch turns dropping the tag specifically on
+// clarify-question-without-tag responses (miss signature (a)). Kept to two
+// sentences deliberately — every directive token is paid on every turn.
 var TopicTagDirective = fmt.Sprintf(`TOPIC TAG REQUIREMENT
 
 Begin every response with a topic tag in this exact form, on its own line:
@@ -58,8 +65,13 @@ Examples:
     *topic: thr_42, thr_88 [trefoil, neutrino, helical-screw, oscillation]*
     *topic: %s [neutrino, oscillation, mass-hierarchy, beta-decay]*
 
+The tag is required even when your response is a clarifying question or the
+thread routing is uncertain: tag your best-guess thread, or %s if the work
+is genuinely new. The tag is a routing signal, not a commitment — later
+turns can re-route the topic.
+
 After the tag, write your response normally. The runtime parses the tag
-deterministically; getting the format exactly right matters.`, NewTopicLiteral, NewTopicLiteral)
+deterministically; getting the format exactly right matters.`, NewTopicLiteral, NewTopicLiteral, NewTopicLiteral)
 
 // TopicTagReminder is the terse system-side reminder appended to the
 // system prompt for the D6 missing-tag re-prompt (spec §3.3 recovery /
@@ -78,7 +90,23 @@ in this exact form:
     *topic: <thread-list> [<anchor-list>]*
 
 e.g. "*topic: thr_7 [alpha, beta]*", or "*topic: %s [alpha, beta]*" to
-start a new thread. The tag must be the first line of your response.`, NewTopicLiteral)
+start a new thread. The tag must be the first line of your response, even
+if you are only asking a clarifying question — tag your best-guess thread.`, NewTopicLiteral)
+
+// EmptyResponseReminder is the terse system-side reminder appended to the
+// system prompt for the D6 empty-response re-prompt (spec §3.3 recovery,
+// cause=empty-response): the model's previous response carried zero
+// visible content — the reasoning-burn signature observed live (2026-07-15
+// elicitation probe round 3, miss signature (c): the whole completion
+// budget spent on hidden reasoning, nothing emitted). Exposed like
+// TopicTagReminder so tests can assert verbatim presence in the re-issued
+// request.
+var EmptyResponseReminder = fmt.Sprintf(`PROTOCOL REMINDER — EMPTY RESPONSE
+
+Your previous response was discarded because it contained no visible text.
+Re-send your full response now: begin with the topic tag line
+(*topic: <thread-list> [<anchor-list>]*, or %s for a new line of work),
+keep any hidden reasoning brief, and write your answer.`, NewTopicLiteral)
 
 // layerSection holds one layer's header and rendered content. The order of
 // sections in the assembled prompt is fixed by the slice order in

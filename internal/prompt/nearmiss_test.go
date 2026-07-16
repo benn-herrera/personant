@@ -79,6 +79,26 @@ func TestClassifyNearMiss(t *testing.T) {
 			wantOK:     true,
 			wantReason: NearMissMarkdownMangled,
 		},
+		{
+			// The bare new-topic alias (§5.1.2) makes this shape a VALID
+			// tag — it must never be double-counted as an attempted-but-
+			// invalid near-miss.
+			name:   "valid bare new-topic alias is not a near-miss",
+			in:     "*new-topic* [trefoil, unknot]\nbody",
+			wantOK: false,
+		},
+		{
+			name:       "bare new-topic without anchor brackets",
+			in:         "*new-topic*\nbody",
+			wantOK:     true,
+			wantReason: NearMissBareNewTopic,
+		},
+		{
+			name:       "bare new-topic with unclosed anchor list",
+			in:         "*new-topic* [trefoil\nbody",
+			wantOK:     true,
+			wantReason: NearMissBareNewTopic,
+		},
 	}
 
 	for _, tc := range cases {

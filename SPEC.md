@@ -497,8 +497,8 @@ Actions ending in `-error` (and `warning`) are forensic diagnostics, not measure
 
 | Category | Events |
 |---|---|
-| `system` | `bootstrap`, `context-ceiling-breach`; *(vocabulary; not yet emitted)* `shutdown`, `error`, `config-reload` |
-| `thread` | `engaged`, `engaged-non-owner`, `engaged-cross-project`, `engaged-miss`, `created`, `created-meta-only`, `state-change`, `fetch-miss`, `fetch-cross-project`, `anchor-projection-overflow`, `tag-defaulted` (with `thr=` — the bound owner, `cause=missing-tag`, `reprompted=yes\|no`; §3.3 owner-default) |
+| `system` | `bootstrap`, `context-ceiling-breach`, `empty-response` (forensic; the final drained response carried zero visible content — with `reprompted=yes\|no`, `turn=`; §3.3 empty-response recovery); *(vocabulary; not yet emitted)* `shutdown`, `error`, `config-reload` |
+| `thread` | `engaged`, `engaged-non-owner`, `engaged-cross-project`, `engaged-miss`, `created`, `created-meta-only`, `state-change`, `fetch-miss`, `fetch-cross-project`, `anchor-projection-overflow`, `tag-defaulted` (with `thr=` — the bound owner, `cause=missing-tag\|empty-response`, `reprompted=yes\|no`; §3.3 owner-default) |
 | `spine` | `match-fire`, `embed-match-fire`, `intra-match-fire`; *(vocabulary)* `match-miss`, `entry-updated` |
 | `recall` | `offer` (with `count=N`), `accept` (with `thr=`, `layers=`), `decline` (with `thr=`, `reason=not-relevant\|wrong-project\|already-known`), `net-cap-hit`, `flush-backlog`, `W1-diag`, `fire-error`, `error`, `index-error`, `embed-error`, `debt-window-error`, `tree-error`; *(vocabulary)* `cross-project-fire` |
 | `retire` | `prompt` (with `thr=` and `inactivity=`\|`trigger=manual`), `ack` (EVERY acked closure — retire or WIP — with `resolution=` and `edited=yes\|no`, §3.5), `defer`, `complete` (with `resolution=`), `curator-error`, `load-error`, `resolver-error`, `apply-error`, `error` |
@@ -507,7 +507,7 @@ Actions ending in `-error` (and `warning`) are forensic diagnostics, not measure
 | `dedup` | `chain-aged`, `chain-age-refused`, `error` |
 | `fs` | `edit-no-path`, `write-error`, `commit-untracked` (`unsynced-no-topic-tag` is **retracted** with the missing-tag abort — §3.3 recovery means edits always bind) |
 | `staging` | `promoted`, `evicted` (window-close GC, §3.10) |
-| `topic` | `re-prompt` (with `cause=missing-thread` + `fetched=` for the §5.5 fetch, or `cause=missing-tag` for the §3.3 tag recovery), `tag-missing`, `tag-invalid` (forensic; a near-miss tag candidate that failed strict validation — `reason=markdown-mangled\|bad-delimiters\|bad-thread-list` + a short sanitized `snippet=`; ADDITIVE to `tag-missing`, not a measured decision event), `warning` |
+| `topic` | `re-prompt` (with `cause=missing-thread` + `fetched=` for the §5.5 fetch, `cause=missing-tag` for the §3.3 tag recovery, or `cause=empty-response` for the §3.3 empty-response recovery), `tag-missing`, `tag-invalid` (forensic; a near-miss tag candidate that failed strict validation — `reason=markdown-mangled\|bad-delimiters\|bad-thread-list\|bare-new-topic` + a short sanitized `snippet=`; ADDITIVE to `tag-missing`, not a measured decision event), `warning` |
 | `session` | `ended`, `working-set-save-error`, `checkpoint-error` |
 | `project` | `created`, `switched`, `renamed`; *(vocabulary)* `cd-changed`, `remote-adopted`, `remote-updated`, `remote-collision-prompt`, `meta-updated` |
 | `model` | `stream-close-warn` |
@@ -665,7 +665,16 @@ split between A1 fixed and A2 residue). The whole assembled request — system
 prompt + replayed history tail + current user input — is bounded against
 the token ceiling: bytes pre-flight (this composition + the live-turn
 sub-policy in `internal/turn`), `usage.prompt_tokens` post-flight as the
-real-model gate (see §6.5).
+real-model gate (see §6.5). *Known accounting gap (#127 follow-up):* the
+partition allocates 100% of the byte total to the layers + live-turn
+reserve; the **static prompt scaffolding** (orientation preamble, §5.1.3
+topic-tag directive, D6 reminders, section headers — ~1.7 KB) has no
+share and rides on top of the byte proxy. Harmless against the
+authoritative token gate (the 2.5 B/token ratio is deliberately
+conservative), and the A4 acceptance test bounds it explicitly
+(`Total + measured scaffolding`), but a partition that charges it a real
+share is deferred — a fixed deduction would zero out the tiny ceilings
+the acceptance tests exercise.
 
 **Layer order and contents** (§2.1 maps these to on-disk sources):
 
@@ -846,6 +855,41 @@ deltas require owner binding (buffered §3.9 file edits):
   instead be conversational-class for this predicate is flagged as a
   calibration/classification question awaiting live data; no behavior
   change is specified here.
+
+**Empty-response recovery (D6 extension — any turn).** A response with
+**zero visible content** is a protocol failure regardless of whether
+binding is required: there is no tag AND no body. Observed live (the
+2026-07-15 elicitation probe, round 3, signature (c)): on work-switch
+turns the model intermittently burns its whole completion budget on
+hidden reasoning and returns `finish=stop` with empty content. Recovery:
+
+1. *Single re-prompt* (`topic.re-prompt cause=empty-response`): the
+   ended stream is discarded and the request re-issued with the terse
+   `EmptyResponseReminder` (§5.1.3) appended — its own per-cause cap of
+   1 under the combined bound (§5.5). Fires on ANY turn, conversational
+   or binding.
+2. *Accept the empty*: if the re-prompted response is also empty, the
+   turn proceeds with it. On a **binding-required** turn it falls through
+   to the owner-default above (an empty response has no tag, vacuously);
+   the recorded excerpt's agent section is deliberately **empty** — the
+   user prompt and the §3.9 edits are real and need an owner, and an
+   empty agent section is the honest record of what the model produced
+   (synthesizing placeholder content would forge the thread history).
+   The `thread.tag-defaulted` line then carries `cause=empty-response`
+   (with `reprompted=` reading the empty cause's flag). On a
+   **conversational** turn the empty body surfaces to the caller
+   unchanged. Either way the runtime emits a `system.empty-response`
+   forensic line (`reprompted=`, `turn=`) — the REPL prints nothing for
+   an empty body, so without it a blank turn would be invisible in the
+   log.
+
+   The empty cause **subsumes** the missing-tag cause: a persistent-empty
+   response never additionally spends the missing-tag re-prompt — a tag
+   reminder to a model that twice produced no content re-runs the
+   intervention class that just failed, buying latency and nothing else.
+   Reasoning-burn empties are additionally tracked as a serving-level
+   hazard (max-token budget vs. hidden-reasoning interplay), not only a
+   prompt-protocol one.
 
 ### 3.4 Recall matching
 
@@ -1990,6 +2034,30 @@ delta. An **empty anchor list is valid** — a 0-anchor vague-start emission
 (§2.7.4); anchors are advisory, so an anchor list that normalizes to empty
 does not invalidate an otherwise well-formed tag.
 
+**Bare new-topic alias (deterministic-tier absorption).** The parser
+additionally accepts a line of the exact shape
+
+```
+*new-topic* [<anchor-list>]
+```
+
+as equivalent to `*topic: *new-topic* [<anchor-list>]*`. Evidence: the
+2026-07-15 live elicitation probe (round 3, 600 calls total across the
+probe series; miss signature (b)) caught the model intermittently
+"unwrapping" the nested-asterisk new-topic syntax into exactly this form
+on work-switch turns. Absorbing a demonstrably-confusable wire shape at
+the deterministic tier is cheaper than paying recurring prompt tokens to
+forbid it (minimize-infrastructural-prompts). The alias is **strict, not a
+general loosening**: line-anchored (regex
+`^\s*\*new-topic\*\s*\[([^\]]*)\]\s*$`), identical anchor-list grammar
+(empty-in-brackets valid), and a bare `*new-topic*` with **no** `[...]`
+bracket pair remains invalid (forensically classified `bare-new-topic` by
+the near-miss taxonomy). The alias participates in the same
+first-valid-match rule and extras count, in the bounded preamble scan
+(so the §5.5 fetch timing, the D6 missing-tag trigger, and the
+stream-filter suppression all accept it), and in the stream filter's
+Close-time trailing-line fallback.
+
 #### 5.1.3 Prompt template
 
 The system prompt instructs the model to emit a topic tag at response
@@ -1998,11 +2066,22 @@ constant (`TopicTagDirective`, exposed with a stable identifier). Runtime
 hot-reload for empirical tuning is deferred (future work) — v0.1 requires
 a rebuild to change the template.
 
+The directive carries an **ambiguity clause** (evidence-directed, probe
+round 3 signature (a): clarify-question-without-tag on uncertain routing):
+the tag is required even when the response is a clarifying question or the
+thread routing is uncertain — tag the best-guess thread, or `*new-topic*`
+if the work is genuinely new; the tag is a routing signal, not a
+commitment (the next turn can correct it). Kept to two sentences —
+directive tokens are paid on every turn.
+
 `TopicTagReminder` (same file) is the terse system-side reminder appended
 to the system prompt for the §3.3 missing-tag re-prompt: it names the
 discard reason, restates the tag form, and demands the tag as the first
-line. Once appended it survives any later same-turn recomposition (e.g. a
-subsequent §5.5 fetch re-prompt).
+line — even for a clarifying question. `EmptyResponseReminder` (same
+file) is the counterpart for the §3.3 empty-response re-prompt: it names
+the discard reason (no visible text), restates the tag form, and asks for
+brief hidden reasoning. Once appended, each reminder survives any later
+same-turn recomposition (e.g. a subsequent §5.5 fetch re-prompt).
 
 ### 5.2 Curator prompt for retirement summary
 
@@ -2049,19 +2128,25 @@ to *decide* (workspace reads, web fetch, model.consult) keeps the
 model's decision-making narrow. Topic tag is the request; system
 injection is the fulfillment.
 
-**Combined mid-turn re-prompt bound (with §3.3 missing-tag recovery).**
-Re-prompts are capped at **1 per cause**, and there are exactly two
-causes — missing-thread (this section) and missing-tag (§3.3) — so a
-turn issues at most 2 re-prompts (≤ 3 model streams). One per cause
-because the causes are independent failure modes with independent
-interventions (context augmentation vs. protocol reminder); both firing
-in one turn requires two distinct model failures, so the worst case is
-bounded and rare. Never two for the same cause: a repeat would re-run an
-intervention that just demonstrably failed, so the second miss falls
-through to the cause's deterministic close-time fallback (LRU pickup
-here; owner-default for §3.3). Latency cost on a turn that triggers a
-fetch is up to 2× the no-fetch case (one aborted stream + one full
-stream); turns that trigger neither cause pay nothing.
+**Combined mid-turn re-prompt bound (with §3.3 recovery).**
+Re-prompts are capped at **1 per cause**, and there are exactly three
+causes — missing-thread (this section), missing-tag (§3.3), and
+empty-response (§3.3) — so a turn issues at most 3 re-prompts (≤ 4 model
+streams). One per cause because the causes are independent failure modes
+with independent interventions (context augmentation vs. two distinct
+protocol reminders); several firing in one turn requires as many distinct
+model failures, so the worst case is bounded and rare. Never two for the
+same cause: a repeat would re-run an intervention that just demonstrably
+failed, so the second miss falls through to the cause's deterministic
+close-time fallback (LRU pickup here; owner-default for §3.3 missing-tag;
+accept-the-empty for §3.3 empty-response). The empty-response cause
+subsumes missing-tag for a persistent-empty response (§3.3): the two
+reminders never both fire against emptiness — with one pathological
+exception, an all-whitespace response longer than the bounded preamble
+scan resolves as tag-less rather than empty, so it fires the missing-tag
+reminder instead of the empty-response one. Latency cost on a turn that
+triggers a fetch is up to 2× the no-fetch case (one aborted stream + one
+full stream); turns that trigger no cause pay nothing.
 Speculative pre-fetch is rejected as an explicit non-goal (every
 loaded thread is loaded because the model said it was needed; see
 ARCHITECTURE.md "No speculative prefetch").

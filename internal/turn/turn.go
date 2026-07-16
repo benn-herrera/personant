@@ -122,6 +122,15 @@ type State struct {
 	// turnOwner.
 	tagReprompted bool
 
+	// emptyReprompted records that this turn's D6 empty-response re-prompt
+	// was spent: a stream ended with zero visible content (the
+	// reasoning-burn signature), so the request was re-issued with
+	// prompt.EmptyResponseReminder appended. Read by the close-time
+	// owner-default for the thread.tag-defaulted line's reprompted= field
+	// (cause=empty-response arm), and by the re-issue loop as the
+	// per-cause cap. Reset at the top of every Run alongside tagReprompted.
+	emptyReprompted bool
+
 	// fileEdits buffers §3.9 file-edit events (fs.read / fs.write /
 	// fs.commit) observed across the deltas of one turn. File-edit deltas
 	// arrive before the turn's engaged thread is known (engagement is
@@ -312,24 +321,34 @@ func LoadSession(ctx context.Context, ops memops.MemoryOps, project memops.Proje
 }
 
 // Mid-turn re-prompt bound (§5.5 + D6). A turn allows AT MOST ONE
-// system-injected re-prompt PER CAUSE, and there are exactly two causes:
+// system-injected re-prompt PER CAUSE, and there are exactly three causes:
 //
 //   - missing-thread (§5.5): the tag references a thr_<n> not in Layer B —
 //     the intervention is context augmentation (fetch + recompose).
 //   - missing-tag (D6): the response lacks a leading tag on a turn whose
 //     §3.9 buffered file edits require owner binding — the intervention is
 //     a protocol reminder (prompt.TopicTagReminder appended).
+//   - empty-response (D6 extension, probe 2026-07-15): the response ended
+//     with zero visible content, on ANY turn — the intervention is a
+//     protocol reminder (prompt.EmptyResponseReminder appended). A
+//     persistent-empty response SUBSUMES the missing-tag cause: it is
+//     tag-less only vacuously, and a tag reminder to a model that twice
+//     produced nothing is the same failed intervention class, so the
+//     missing-tag re-prompt is suppressed for it (see the loop).
 //
-// Combined bound: ≤ 2 re-prompts, ≤ 3 model streams per turn. One per
+// Combined bound: ≤ 3 re-prompts, ≤ 4 model streams per turn. One per
 // cause because the causes are independent failure modes with independent
-// interventions; both firing in one turn requires two distinct model
-// failures, so the worst case is bounded AND rare. Never two for the same
-// cause: a repeat would re-run an intervention that just demonstrably
+// interventions; several firing in one turn requires as many distinct
+// model failures, so the worst case is bounded AND rare. Never two for the
+// same cause: a repeat would re-run an intervention that just demonstrably
 // failed — no new information, only latency — so the second miss falls
 // through to the cause's deterministic close-time fallback (LRU pickup for
-// missing-thread, owner-default for missing-tag). The per-cause caps are
-// the fetchReprompted / state.tagReprompted flags in RunWithInfo; a bool
-// per cause IS the cap, so there is no tunable constant.
+// missing-thread; owner-default for missing-tag; accept-the-empty for
+// empty-response — owner-default with an empty excerpt on a binding turn,
+// empty body to the caller otherwise). The per-cause caps are the
+// fetchReprompted / state.tagReprompted / state.emptyReprompted flags in
+// RunWithInfo; a bool per cause IS the cap, so there is no tunable
+// constant.
 
 // commitOnStructuralChange gates the §3.11 turn-close commit cadence: when
 // true (the default), a turn that produced ≥1 structural change (thread
@@ -397,7 +416,9 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 //     §5.5), and the request is re-issued with augmented context. If the
 //     response lacks a tag while §3.9 file edits are buffered, the stream
 //     is aborted and re-issued with prompt.TopicTagReminder appended (D6).
-//     Re-prompts are capped at 1 per cause, ≤ 2 per turn (see the bound
+//     If the response has zero visible content — on any turn — it is
+//     re-issued with prompt.EmptyResponseReminder appended (D6 extension).
+//     Re-prompts are capped at 1 per cause, ≤ 3 per turn (see the bound
 //     comment above NewState).
 //  6. Fire model.response context-modify event (parses topic tag,
 //     accumulates symbols, defers engagement) after the stream completes.
@@ -452,10 +473,11 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	// The single-owner stamp is per-turn — clear it so the prior turn's
 	// owner cannot trip this turn's claim guard.
 	state.turnOwner = ""
-	// The D6 tag re-prompt flag is per-turn — clear it so a prior turn's
-	// re-prompt neither caps this turn's nor mislabels its
-	// thread.tag-defaulted line.
+	// The D6 tag / empty-response re-prompt flags are per-turn — clear them
+	// so a prior turn's re-prompt neither caps this turn's nor mislabels
+	// its thread.tag-defaulted line.
 	state.tagReprompted = false
+	state.emptyReprompted = false
 	// §3.11 structural-change counters are per-turn — clear them so the
 	// turn-close cadence check sees only this turn's creates/retires/wips.
 	state.structuralCreates = 0
@@ -500,10 +522,11 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 
 	// Step 2: compose working-set and assemble the system prompt.
 	// (Budget is materialized at the top of Run, before the reject check.)
-	// Once the D6 tag re-prompt has fired (state.tagReprompted), every
-	// recomposition — including a later §5.5 fetch recompose in the same
-	// turn — re-appends the reminder, so the fetch path cannot silently
-	// drop it.
+	// Once a D6 re-prompt has fired (state.tagReprompted /
+	// state.emptyReprompted), every recomposition — including a later §5.5
+	// fetch recompose in the same turn — re-appends that cause's reminder,
+	// so the fetch path cannot silently drop it. Append order is fixed
+	// (tag, then empty) for determinism when both causes fired.
 	buildSystemPrompt := func() (string, error) {
 		ws, err := state.Ops.ComposeWorkingSet(ctx, memops.WorksetInput{
 			ActiveProject:  state.ActiveProject,
@@ -523,6 +546,9 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		})
 		if state.tagReprompted {
 			sp += "\n\n" + prompt.TopicTagReminder
+		}
+		if state.emptyReprompted {
+			sp += "\n\n" + prompt.EmptyResponseReminder
 		}
 		return sp, nil
 	}
@@ -582,6 +608,29 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 			return "", TurnInfo{}, fmt.Errorf("turn: read preamble: %w", err)
 		}
 
+		// D6 empty-response re-prompt (cause: empty-response): the stream
+		// ended with ZERO visible content — nothing to tag, bind, or show.
+		// A protocol failure on ANY turn (binding or conversational), so
+		// this check precedes the tag-oriented branches below. Abort
+		// (already-ended) stream handling and re-issue with the reminder
+		// appended. Once per turn for this cause; a second empty response
+		// falls through — drained as-is, then at close: a binding turn hits
+		// the owner-default (empty excerpt), a conversational turn surfaces
+		// the empty body to the caller; either way the system.empty-response
+		// forensic line below records it.
+		emptyResponse := preambleIsEmpty(pre)
+		if emptyResponse && !state.emptyReprompted {
+			state.emptyReprompted = true
+			_ = sr.Close()
+			_ = state.Ops.Log(ctx, memops.LogCategoryTopic, "re-prompt",
+				"cause=empty-response attempt="+strconv.Itoa(attempt+1))
+			systemPrompt, err = buildSystemPrompt()
+			if err != nil {
+				return "", TurnInfo{}, fmt.Errorf("turn: recompose working set: %w", err)
+			}
+			continue
+		}
+
 		// §5.5 mid-turn fetch (cause: missing-thread): if the preamble is a
 		// topic tag referencing a thr_<n> not in Layer B, abort the stream,
 		// fetch the thread, and re-prompt. Once per turn for this cause.
@@ -617,8 +666,13 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		// buffered edits is deliberately not re-prompted — it proceeds
 		// tag-less (see closeTurnAndUpdateEngagement's conversational
 		// branch). Mutually exclusive with the fetch branch above within
-		// one attempt (that one requires pre.tag != nil).
-		if !state.tagReprompted && len(state.fileEdits) > 0 && preambleLacksTag(pre) {
+		// one attempt (that one requires pre.tag != nil). Gated on
+		// !emptyResponse: a persistent-empty response is tag-less only
+		// vacuously — the empty-response cause above owns it, and spending
+		// a tag reminder on a model that twice produced no content would
+		// re-run the just-failed intervention class (see the bound comment
+		// above NewState); it falls through to the owner-default directly.
+		if !emptyResponse && !state.tagReprompted && len(state.fileEdits) > 0 && preambleLacksTag(pre) {
 			state.tagReprompted = true
 			_ = sr.Close()
 			_ = state.Ops.Log(ctx, memops.LogCategoryTopic, "re-prompt",
@@ -676,6 +730,22 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		_ = state.Ops.Log(ctx, memops.LogCategorySystem, "context-ceiling-breach",
 			fmt.Sprintf("prompt_tokens=%d ceiling=%d turn=%d",
 				full.Usage.PromptTokens, state.Budget.TokenCeiling, state.TurnNumber))
+	}
+
+	// D6 persistent-empty forensic line: the FINAL drained response carries
+	// zero visible content — either the empty-response re-prompt also came
+	// back empty, or a pathological over-bound all-whitespace shape slipped
+	// the preamble trigger (see preambleIsEmpty's bound note). The REPL
+	// prints nothing for an empty body (chat.runOneTurn only re-aligns the
+	// prompt line), so without this line a blank turn would be forensically
+	// invisible.
+	if strings.TrimSpace(full.Content) == "" {
+		reprompted := "no"
+		if state.emptyReprompted {
+			reprompted = "yes"
+		}
+		_ = state.Ops.Log(ctx, memops.LogCategorySystem, "empty-response",
+			"reprompted="+reprompted+" turn="+strconv.Itoa(state.TurnNumber))
 	}
 
 	// Step 4: model.response delta with the full accumulated body —

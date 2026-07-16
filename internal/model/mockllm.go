@@ -115,6 +115,21 @@ type GeneratedMockOpts struct {
 	// path is byte-identical to the pre-knob mock, preserving the sim's
 	// determinism contract.
 	OmitTagEveryN int
+
+	// EmptyResponseEveryN — when > 0, every Nth synthesized response
+	// (response counter divisible by N) carries ZERO visible content
+	// (Content == ""), modeling the reasoning-burn empty responses a real
+	// model exhibits (D6 empty-response recovery; 2026-07-15 elicitation
+	// probe round 3, signature (c): finish=stop, whole completion budget
+	// spent on hidden reasoning). The tag and body are still drawn from
+	// the RNG before being dropped — same discipline as OmitTagEveryN —
+	// so every other response is byte-identical to the same seed/opts run
+	// with the knob off. FinishReason stays "stop" and Usage is left
+	// unchanged (tokens were spent; nothing visible was emitted — the
+	// live signature). When a response index triggers both this and
+	// OmitTagEveryN, empty wins (an empty response has no tag either).
+	// 0 (the default) disables: byte-identical off.
+	EmptyResponseEveryN int
 }
 
 const (
@@ -320,6 +335,12 @@ func (m *MockClient) synthesize() Response {
 	content := tag + "\n" + body
 	if n := m.genOpts.OmitTagEveryN; n > 0 && m.counter%n == 0 {
 		content = body
+	}
+	// Empty wins over tag omission when both trigger — see the
+	// EmptyResponseEveryN doc. The tag/body RNG draws above already
+	// happened, so the stream stays byte-identical either way.
+	if n := m.genOpts.EmptyResponseEveryN; n > 0 && m.counter%n == 0 {
+		content = ""
 	}
 	return Response{
 		Content:      content,

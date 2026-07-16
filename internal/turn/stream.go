@@ -1,6 +1,7 @@
 package turn
 
 import (
+	"bytes"
 	"errors"
 	"io"
 
@@ -147,6 +148,25 @@ func preambleLacksTag(pre preambleResult) bool {
 		return err != nil
 	}
 	return true
+}
+
+// preambleIsEmpty reports whether a streamed response conclusively carries
+// ZERO visible content — the D6 empty-response re-prompt trigger (spec
+// §3.3, cause=empty-response; the reasoning-burn signature from the
+// 2026-07-15 probe: finish=stop with the whole budget spent on hidden
+// reasoning). Conclusive means the stream already ended (pre.ended): an
+// empty or all-whitespace response never resolves the bounded preamble
+// scan, so it always reaches EOF with the entire response in pre.head —
+// the check is exact, not a truncated view. A response whose scan resolved
+// early (!pre.ended) necessarily carried content and is never empty here.
+//
+// Bound note: an all-whitespace response LONGER than the scan bound
+// (PreambleScanLineCap newlines / PreambleScanByteCap bytes of whitespace)
+// resolves the scan as tag-less and drains without triggering this — a
+// pathological shape no live run has produced; the close-time
+// system.empty-response forensic line (turn.go) still records it.
+func preambleIsEmpty(pre preambleResult) bool {
+	return pre.ended && len(bytes.TrimSpace(pre.head)) == 0
 }
 
 // missingFromActiveB returns thread ids from threads that are not

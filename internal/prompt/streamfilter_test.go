@@ -27,6 +27,40 @@ func TestStreamFilterStripsTopicTagFollowedByBody(t *testing.T) {
 	}
 }
 
+// TestStreamFilterStripsBareNewTopicAlias — the §5.1.2 bare new-topic
+// alias is a valid tag, so the filter must suppress it exactly like the
+// canonical form; a shape Parse accepts but the filter forwards would leak
+// wire syntax to the terminal. Covers both the terminated (mid-stream) and
+// newline-less trailing (Close-time fallback) positions.
+func TestStreamFilterStripsBareNewTopicAlias(t *testing.T) {
+	var buf bytes.Buffer
+	f := NewStreamFilter(&buf)
+	in := "*new-topic* [foo, bar]\nresponse body here"
+	if _, err := f.Write([]byte(in)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if got, want := buf.String(), "response body here"; got != want {
+		t.Errorf("output: got %q, want %q", got, want)
+	}
+
+	var buf2 bytes.Buffer
+	f2 := NewStreamFilter(&buf2)
+	// Newline-less single alias line: unresolved at Write, classified and
+	// suppressed by Close's isTopicTagLine fallback.
+	if _, err := f2.Write([]byte("*new-topic* [foo, bar]")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := f2.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if got := buf2.String(); got != "" {
+		t.Errorf("trailing alias line must be suppressed at Close, got %q", got)
+	}
+}
+
 func TestStreamFilterPassesThroughNonTagFirstLine(t *testing.T) {
 	var buf bytes.Buffer
 	f := NewStreamFilter(&buf)

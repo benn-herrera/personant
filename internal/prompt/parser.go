@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"personant/internal/memops"
@@ -26,6 +27,24 @@ var ErrNoTopicTag = errors.New("prompt: no valid topic tag found")
 // independently. Group 1 is the thread list (before `[`); group 2 is the
 // anchor list (between `[` and `]`).
 var topicTagRE = regexp.MustCompile(`(?m)^\s*\*topic:\s*([^\[]+?)\s*\[([^\]]*)\]\s*\*\s*$`)
+
+// newTopicAliasRE accepts a line of the exact shape
+//
+//	*new-topic* [<anchor-list>]
+//
+// as equivalent to `*topic: *new-topic* [<anchor-list>]*` (spec §5.1.2
+// alias). This is a DETERMINISTIC-TIER ABSORPTION of a demonstrably-
+// confusable wire syntax, not a general loosening: the 2026-07-15 live
+// elicitation probe (round 3, `excerptgenre_probe_test.go`; design
+// burndown-2026-07b "RESOLVED") caught the model intermittently
+// "unwrapping" the nested-asterisk new-topic form into exactly this shape
+// on work-switch turns. The alias is strict — line-anchored, identical
+// anchor-list grammar (empty-in-brackets valid, per the §5.1.2 contract) —
+// and a bare `*new-topic*` with NO `[...]` bracket pair stays invalid
+// (classified NearMissBareNewTopic for forensics). Built from
+// NewTopicLiteral so the sentinel stays single-sourced. Group 1 is the
+// anchor list.
+var newTopicAliasRE = regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(NewTopicLiteral) + `\s*\[([^\]]*)\]\s*$`)
 
 // PreambleScanLineCap bounds how many leading lines of a streaming model
 // response are scanned for a topic tag before giving up. Real models emit
@@ -68,7 +87,7 @@ const PreambleScanByteCap = 8 << 10
 // point the trailing partial line cannot be a within-bound tag anyway.
 func PreambleScan(buf []byte) (start, end int, found, done bool) {
 	limit := preambleScanLimit(buf)
-	if loc := topicTagRE.FindIndex(buf); loc != nil && loc[0] < limit {
+	if loc := firstTagMatch(buf); loc != nil && loc[0] < limit {
 		// FindIndex's match may swallow the trailing newline (the regex
 		// ends with `\s*$` in multi-line mode). Trim it back so the
 		// reported span is the tag text alone; the caller decides what to
@@ -91,6 +110,24 @@ func PreambleScan(buf []byte) (start, end int, found, done bool) {
 		return 0, 0, false, true
 	}
 	return 0, 0, false, false
+}
+
+// firstTagMatch returns the earliest full-match span of either tag shape —
+// the §5.1.2 canonical form or the bare new-topic alias — or nil when
+// neither matches. Shared by PreambleScan so the streaming-side tag
+// authority (the §5.5 fetch decision, the D6 missing-tag trigger, and the
+// stream-filter suppression all sit on PreambleScan) accepts exactly what
+// Parse accepts; a shape only one side recognized would either leak the
+// alias line to the terminal or fire a wasted missing-tag re-prompt on a
+// response the close-time parse would have bound. The two regexes cannot
+// match the same line (one demands a leading `*topic:`, the other a
+// leading `*new-topic*`), so "earliest start" is unambiguous.
+func firstTagMatch(buf []byte) []int {
+	loc := topicTagRE.FindIndex(buf)
+	if a := newTopicAliasRE.FindIndex(buf); a != nil && (loc == nil || a[0] < loc[0]) {
+		loc = a
+	}
+	return loc
 }
 
 // preambleScanLimit returns the exclusive byte offset past which a topic
@@ -147,11 +184,51 @@ type ParseResult struct {
 	Warnings []string
 }
 
+// tagCandidate is one tag-shaped regex hit awaiting validation: the
+// full-match span plus the raw thread/anchor groups. An alias hit (the
+// bare new-topic form) has no thread-list group — its thread list is the
+// fixed [NewTopicLiteral].
+type tagCandidate struct {
+	start, end int
+	threadsRaw string
+	anchorsRaw string
+	alias      bool
+}
+
+// tagCandidates collects every tag-shaped line — canonical §5.1.2 form and
+// the bare new-topic alias — in document order. The two regexes cannot
+// match the same line (disjoint required prefixes), so no dedup is needed.
+func tagCandidates(response string) []tagCandidate {
+	full := topicTagRE.FindAllStringSubmatchIndex(response, -1)
+	aliases := newTopicAliasRE.FindAllStringSubmatchIndex(response, -1)
+	out := make([]tagCandidate, 0, len(full)+len(aliases))
+	for _, m := range full {
+		// m is [matchStart, matchEnd, group1Start, group1End, group2Start, group2End].
+		out = append(out, tagCandidate{
+			start: m[0], end: m[1],
+			threadsRaw: response[m[2]:m[3]],
+			anchorsRaw: response[m[4]:m[5]],
+		})
+	}
+	for _, m := range aliases {
+		out = append(out, tagCandidate{
+			start: m[0], end: m[1],
+			anchorsRaw: response[m[2]:m[3]],
+			alias:      true,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].start < out[j].start })
+	return out
+}
+
 // Parse extracts the topic tag from a model response.
 //
 // Behavior (spec §5.1.2):
 //
-//   - The first fully valid tag in document order wins.
+//   - The first fully valid tag in document order wins. "Tag" covers both
+//     the canonical `*topic: ... [...]*` form and the bare new-topic alias
+//     (`*new-topic* [...]` — see newTopicAliasRE); the two shapes share
+//     one first-valid-match rule and one extras count.
 //   - A "valid" tag has a non-empty thread list (each entry either matching
 //     memops.ThreadIDPattern or equal to "*new-topic*"). The anchor list
 //     is advisory and MAY be empty: the tag's job is thread binding;
@@ -168,8 +245,8 @@ type ParseResult struct {
 //   - If no valid tag is found, returns ErrNoTopicTag with Body equal to
 //     the unmodified response.
 func Parse(response string) (ParseResult, error) {
-	matches := topicTagRE.FindAllStringSubmatchIndex(response, -1)
-	if len(matches) == 0 {
+	cands := tagCandidates(response)
+	if len(cands) == 0 {
 		return ParseResult{Body: response}, ErrNoTopicTag
 	}
 
@@ -180,14 +257,14 @@ func Parse(response string) (ParseResult, error) {
 		warnings   []string
 	)
 
-	for i, m := range matches {
-		// m is [matchStart, matchEnd, group1Start, group1End, group2Start, group2End].
-		threadsRaw := response[m[2]:m[3]]
-		anchorsRaw := response[m[4]:m[5]]
-
-		threads, ok := parseThreadList(threadsRaw)
-		if !ok {
-			continue
+	for i, c := range cands {
+		threads := []string{NewTopicLiteral}
+		if !c.alias {
+			var ok bool
+			threads, ok = parseThreadList(c.threadsRaw)
+			if !ok {
+				continue
+			}
 		}
 
 		// R1 reconciliation (anchor-lifecycle Inc 1): an anchor list that
@@ -196,7 +273,7 @@ func Parse(response string) (ParseResult, error) {
 		// job is thread binding, which the valid thread list above already
 		// satisfies. Anchors are advisory, so an empty list yields a valid
 		// tag rather than falling through to ErrNoTopicTag.
-		anchors := parseAnchorList(anchorsRaw)
+		anchors := parseAnchorList(c.anchorsRaw)
 
 		validCount++
 		if chosenIdx == -1 {
@@ -213,7 +290,7 @@ func Parse(response string) (ParseResult, error) {
 		warnings = append(warnings, fmt.Sprintf("additional topic tag(s) ignored: %d", extras))
 	}
 
-	body := stripTagLine(response, matches[chosenIdx][0], matches[chosenIdx][1])
+	body := stripTagLine(response, cands[chosenIdx].start, cands[chosenIdx].end)
 
 	return ParseResult{
 		Tag:      chosen,
@@ -240,6 +317,13 @@ const (
 	// thread-list group fails §5.1.2 (empty, trailing comma, or a token
 	// that is neither `thr_<n>` nor "*new-topic*").
 	NearMissBadThreadList = "bad-thread-list"
+	// NearMissBareNewTopic: a line-anchored bare `*new-topic*` token that
+	// fails strict validation — i.e. without the `[anchor-list]` bracket
+	// pair the §5.1.2 alias requires. The residual invalid variant of the
+	// probe-observed unwrapped shape (2026-07-15 round 3, signature (b));
+	// the WITH-anchors variant is now a valid tag via the alias and never
+	// reaches this classifier.
+	NearMissBareNewTopic = "bare-new-topic"
 )
 
 // NearMissSnippetLen bounds the sanitized snippet ClassifyNearMiss returns
@@ -266,32 +350,58 @@ type NearMiss struct {
 // stays on a single line.
 var nearMissTagRE = regexp.MustCompile("(?im)^[ \t>*`#_~-]*topic:")
 
+// nearMissNewTopicRE flags a line-anchored bare `*new-topic*` token — the
+// probe-observed unwrapped shape (see newTopicAliasRE). Like nearMissTagRE
+// it is a loose forensic heuristic, not a contract; the leading class is
+// `[ \t]` (never `\s`) so a match cannot swallow preceding newlines and
+// misattribute the candidate to an earlier blank line.
+var nearMissNewTopicRE = regexp.MustCompile(`(?im)^[ \t]*` + regexp.QuoteMeta(NewTopicLiteral))
+
 // ClassifyNearMiss reports whether response contains a near-miss topic-tag
-// candidate — a line that looks like an attempted §5.1.2 tag but fails
-// strict validation — and, if so, classifies the first such line.
+// candidate — a line that looks like an attempted §5.1.2 tag (either the
+// canonical form or the bare new-topic alias) but fails strict validation —
+// and, if so, classifies the first such line in document order.
 //
 // It is intended to run only after Parse has already returned
 // ErrNoTopicTag (there is no valid tag to bind), and is additive to the
 // tag-missing signal: the caller emits topic.tag-invalid alongside, never
 // instead of, topic.tag-missing. As a defensive measure it skips any
-// candidate line that in fact parses as a valid tag, so it is safe to call
-// on any response.
+// candidate line that in fact parses as a valid tag (which now includes
+// valid alias lines), so it is safe to call on any response.
 func ClassifyNearMiss(response string) (NearMiss, bool) {
+	type candidate struct {
+		start        int
+		bareNewTopic bool
+	}
+	var cands []candidate
 	for _, loc := range nearMissTagRE.FindAllStringIndex(response, -1) {
-		start := loc[0]
-		line := response[start:]
+		cands = append(cands, candidate{start: loc[0]})
+	}
+	for _, loc := range nearMissNewTopicRE.FindAllStringIndex(response, -1) {
+		cands = append(cands, candidate{start: loc[0], bareNewTopic: true})
+	}
+	sort.Slice(cands, func(i, j int) bool { return cands[i].start < cands[j].start })
+	for _, c := range cands {
+		line := response[c.start:]
 		if nl := strings.IndexByte(line, '\n'); nl >= 0 {
 			line = line[:nl]
 		}
 		line = strings.TrimRight(line, "\r")
-		// Defensive: a candidate that actually parses as a valid tag is not
-		// a near-miss. Callers only reach here after Parse failed, so in
-		// practice none does — but this keeps the function correct standalone.
+		// Defensive: a candidate that actually parses as a valid tag —
+		// including a valid alias line, whose shape also triggers
+		// nearMissNewTopicRE — is not a near-miss. Callers only reach here
+		// after a whole-response Parse failed (so no valid line exists),
+		// but the skip keeps the function correct standalone and guarantees
+		// a now-valid alias shape is never double-counted as invalid.
 		if _, err := Parse(line + "\n"); err == nil {
 			continue
 		}
+		reason := classifyNearMissLine(line)
+		if c.bareNewTopic {
+			reason = NearMissBareNewTopic
+		}
 		return NearMiss{
-			Reason:  classifyNearMissLine(line),
+			Reason:  reason,
 			Snippet: truncateRunes(line, NearMissSnippetLen),
 		}, true
 	}

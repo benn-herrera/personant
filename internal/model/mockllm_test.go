@@ -404,6 +404,67 @@ func splitTrim(s string) []string {
 	return out
 }
 
+// TestMockGeneratedEmptyResponse — the D6 empty-response knob. With
+// EmptyResponseEveryN=3, every third response carries zero visible
+// content; every other response is byte-identical to a same-seed run with
+// the knob off (the RNG draws still happen), so the knob perturbs nothing
+// when disabled. When both knobs trigger on the same response index,
+// empty wins.
+func TestMockGeneratedEmptyResponse(t *testing.T) {
+	const seed = 99
+	opts := GeneratedMockOpts{
+		ThreadPool: []string{"thr_1", "thr_2"},
+		AnchorPool: []string{"alpha", "beta", "gamma", "delta", "epsilon"},
+	}
+	off := NewGeneratedMock(seed, opts)
+
+	optsOn := opts
+	optsOn.EmptyResponseEveryN = 3
+	on := NewGeneratedMock(seed, optsOn)
+
+	ctx := context.Background()
+	for i := 1; i <= 9; i++ {
+		base, err := off.Consult(ctx, Request{})
+		if err != nil {
+			t.Fatalf("off consult %d: %v", i, err)
+		}
+		got, err := on.Consult(ctx, Request{})
+		if err != nil {
+			t.Fatalf("on consult %d: %v", i, err)
+		}
+		if i%3 == 0 {
+			if got.Content != "" {
+				t.Errorf("response %d: want empty content, got %q", i, got.Content)
+			}
+			// The live signature: finish=stop, tokens spent, nothing visible.
+			if got.FinishReason != "stop" {
+				t.Errorf("response %d: FinishReason %q, want %q", i, got.FinishReason, "stop")
+			}
+			if got.Usage != base.Usage {
+				t.Errorf("response %d: Usage must be unchanged on an empty response", i)
+			}
+		} else if got.Content != base.Content {
+			t.Errorf("response %d: non-empty content diverged\n got: %q\nwant: %q",
+				i, got.Content, base.Content)
+		}
+	}
+
+	// Both knobs on one index: empty wins.
+	optsBoth := opts
+	optsBoth.OmitTagEveryN = 2
+	optsBoth.EmptyResponseEveryN = 3
+	both := NewGeneratedMock(seed, optsBoth)
+	for i := 1; i <= 6; i++ {
+		resp, err := both.Consult(ctx, Request{})
+		if err != nil {
+			t.Fatalf("both consult %d: %v", i, err)
+		}
+		if i == 6 && resp.Content != "" {
+			t.Errorf("response 6 triggers both knobs; empty must win, got %q", resp.Content)
+		}
+	}
+}
+
 // TestMockGeneratedTagOmission — the D6 tag-omission knob. With
 // OmitTagEveryN=3, every third response omits the topic-tag line; every
 // other response — and the omitted responses' BODIES — are byte-identical

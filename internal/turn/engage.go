@@ -34,7 +34,9 @@ import (
 //
 // logActTagDefaulted is that forensic line's act. Emitted once per
 // defaulted turn, after the owner is known: thr=<bound owner>,
-// cause=missing-tag, reprompted=yes|no.
+// cause=missing-tag|empty-response (the latter when the final response
+// carried zero visible content — the D6 empty-response extension),
+// reprompted=yes|no.
 const logActTagDefaulted = "tag-defaulted"
 
 // ErrTurnAlreadyOwned is returned by claimTurnOwner when a second thread
@@ -120,6 +122,15 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 		// into the coalesce buffer so the normal resolution/ownership/
 		// binding machinery below runs unmodified — the default is an
 		// input to the standard path, not a parallel one.
+		//
+		// Persistent-EMPTY responses (D6 extension, cause=empty-response)
+		// reach this same branch: an empty response has no tag, so a
+		// binding turn whose empty re-prompt also came back empty defaults
+		// here. Its excerpt's agent section is then EMPTY — deliberately:
+		// the user prompt and the fs edits are real and need an owner, and
+		// an empty agent section is the honest record of what the model
+		// produced; synthesizing placeholder content would forge the
+		// thread history.
 		defaultID, err := defaultOwnerForTagless(ctx, state)
 		if err != nil {
 			return err
@@ -238,29 +249,48 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 	// D6 forensic line: the owner-default bound this turn. Emitted here —
 	// after the engagement blocks — so thr= names the ACTUAL bound owner
 	// (engaged[0]), including a freshly created thr_<n> from the
-	// no-candidate fallback. reprompted= records whether the mid-turn tag
-	// re-prompt fired first.
+	// no-candidate fallback. cause= names the failure that led here:
+	// empty-response when the final response had zero visible content
+	// (that cause subsumes the vacuous tag-lessness of an empty body),
+	// missing-tag otherwise. reprompted= records whether THAT cause's
+	// mid-turn re-prompt fired first.
 	//
-	// The reprompted=no arm is currently UNREACHABLE, kept as
-	// defense-in-depth. Reaching owner-default requires the FINAL response
-	// to lack a valid tag (a valid tag ⇒ non-empty coalesce ⇒ this branch
-	// never runs), on a turn with buffered §3.9 edits. All fs.* deltas
-	// arrive as pre-prompt events, so the edit buffer is complete before
-	// any stream; the per-cause flag is fresh each turn; and the close-time
-	// parser is strictly more permissive than the preamble scan (a tag the
-	// scan finds, Parse finds). So the drain attempt of a tag-less binding
-	// turn can only be reached with state.tagReprompted already true — the
-	// re-prompt always fired first. The arm would become live if a future
+	// The reprompted=no arm is UNREACHABLE for both causes EXCEPT one
+	// pathological shape (below); otherwise kept as defense-in-depth.
+	// Reaching owner-default requires the FINAL response to lack a valid tag
+	// (a valid tag ⇒ non-empty coalesce ⇒ this branch never runs), on a turn
+	// with buffered §3.9 edits. All fs.* deltas arrive as pre-prompt events,
+	// so the edit buffer is complete before any stream; the per-cause flags
+	// are fresh each turn; the close-time parser is strictly more permissive
+	// than the preamble scan (a tag the scan finds, Parse finds). So the
+	// drain attempt of a tag-less binding turn is normally reached only with
+	// the relevant flag already true — the cause's re-prompt fired first.
+	//
+	// The exception (cause=empty-response, reprompted=no): an all-whitespace
+	// response LONGER than the bounded preamble scan (PreambleScanLineCap /
+	// PreambleScanByteCap) resolves the scan as tag-less rather than empty,
+	// so preambleIsEmpty never fires (it requires pre.ended) and
+	// emptyReprompted stays false — the missing-tag re-prompt fires instead.
+	// If that re-prompt also returns over-bound whitespace, close-time
+	// strings.TrimSpace(responseBody)=="" relabels the cause empty-response,
+	// yielding reprompted=no. Forensic-only: the owner-default binding and
+	// the empty-agent-section record are identical either way; only the
+	// logged reprompted flag differs. The arm also becomes live if a future
 	// change lets the edit buffer grow after the drain decision (mid-stream
 	// fs deltas), or adds a policy that skips the re-prompt (cost cap,
-	// offline mode). Until then reprompted=no in a log is itself a finding.
+	// offline mode). Outside these, reprompted=no in a log is itself a
+	// finding.
 	if tagDefaulted {
+		cause, causeReprompted := "missing-tag", state.tagReprompted
+		if strings.TrimSpace(responseBody) == "" {
+			cause, causeReprompted = "empty-response", state.emptyReprompted
+		}
 		reprompted := "no"
-		if state.tagReprompted {
+		if causeReprompted {
 			reprompted = "yes"
 		}
 		_ = state.Ops.Log(ctx, memops.LogCategoryThread, logActTagDefaulted,
-			"thr="+engaged[0]+" cause=missing-tag reprompted="+reprompted)
+			"thr="+engaged[0]+" cause="+cause+" reprompted="+reprompted)
 	}
 
 	// §3.9 step-3 close: apply this turn's buffered file edits to the

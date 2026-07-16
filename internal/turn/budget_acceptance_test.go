@@ -11,6 +11,7 @@ import (
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
+	"personant/internal/prompt"
 	"personant/internal/store"
 )
 
@@ -114,8 +115,26 @@ func TestRejectOversizeUserInput(t *testing.T) {
 // pre-flight bounds the WHOLE request, mock-independently. Even with an
 // oversized memory state AND a large (but within-reserve) user input, the
 // assembled request bytes stay within the derived byte budget
-// (Budget.Total). This is the structural guarantee the mock sim relies on
-// (no token assertion against the mock's canned 8).
+// (Budget.Total) plus the STATIC prompt scaffolding. This is the
+// structural guarantee the mock sim relies on (no token assertion against
+// the mock's canned 8).
+//
+// Scaffolding term (2026-07-16): the #127 partition allocates 100% of
+// Budget.Total to the memory layers + the live-turn reserve — the static
+// prompt scaffolding (orientation preamble, TopicTagDirective, section
+// headers/joins; ~1.7 KB) was never given a share. The old bare
+// `≤ Budget.Total` assertion held only on integer-truncation and
+// layer-under-fill slack at this tiny 2000-token ceiling, and any
+// legitimate directive edit broke it (the evidence-directed D4 ambiguity
+// clause did). The bound below states the actual structural contract:
+// every budget-governed component is within its share; the constant
+// scaffolding rides on top, measured (not guessed) from the same builder
+// the runtime uses. The authoritative whole-request gate remains the
+// POST-flight `usage.prompt_tokens ≤ TokenCeiling` (I1) — bytes are the
+// conservative 2.5 B/token pre-flight proxy, so the scaffolding term does
+// not endanger the token ceiling. Charging the scaffolding a real share
+// inside BudgetForCeiling is a #127 partition-design follow-up (a fixed
+// deduction would zero the tiny ceilings tests use).
 func TestA4PreflightAssembledBytesWithinBudget(t *testing.T) {
 	paths, meta := newTestHome(t)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
@@ -131,6 +150,28 @@ func TestA4PreflightAssembledBytesWithinBudget(t *testing.T) {
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, cap,
 		WithTokenCeiling(2000))
 
+	// The static scaffolding, measured exactly: build the system prompt
+	// with 1-byte sentinel layers (all five headers + joins present — the
+	// worst case; empty layers omit their headers) and subtract the five
+	// sentinel bytes. No re-prompt fires in this test, so the D6 reminders
+	// (which append only on a re-prompted turn) are correctly absent.
+	sentinel := prompt.SystemPromptElements{
+		LayerE: "x", LayerA1: "x", LayerA2: "x", LayerB: "x", LayerC: "x",
+	}
+	scaffolding := len(prompt.BuildSystemPrompt(sentinel)) - 5
+
+	// Fixed sanity ceiling beside the structural bound: the structural
+	// `≤ Total + scaffolding` assertion below self-inflates — a 50KB directive
+	// regression widens the bound with it and would still pass. This absolute
+	// cap catches runaway directive growth (bump deliberately when the
+	// directive legitimately grows).
+	const maxScaffoldingBytes = 4096
+	if scaffolding > maxScaffoldingBytes {
+		t.Fatalf("static prompt scaffolding %d bytes exceeds sanity ceiling %d — "+
+			"directive/header growth regression (bump maxScaffoldingBytes if intended)",
+			scaffolding, maxScaffoldingBytes)
+	}
+
 	// Drive several turns engaging thr_1 so Layer B/C populate and History
 	// accumulates, then assert the assembled request stays within budget.
 	share, _, _ := liveTurnShares(state.Budget)
@@ -142,9 +183,9 @@ func TestA4PreflightAssembledBytesWithinBudget(t *testing.T) {
 		if _, _, err := RunWithInfo(context.Background(), state, nil, userInput, io.Discard); err != nil {
 			t.Fatalf("turn %d: %v", i, err)
 		}
-		if got := cap.assembledBytes(); got > state.Budget.Total {
-			t.Fatalf("turn %d assembled %d bytes exceeds derived byte budget %d",
-				i, got, state.Budget.Total)
+		if got, bound := cap.assembledBytes(), state.Budget.Total+scaffolding; got > bound {
+			t.Fatalf("turn %d assembled %d bytes exceeds derived byte budget %d (Total %d + static scaffolding %d)",
+				i, got, bound, state.Budget.Total, scaffolding)
 		}
 	}
 }
