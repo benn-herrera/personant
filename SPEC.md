@@ -507,7 +507,7 @@ Actions ending in `-error` (and `warning`) are forensic diagnostics, not measure
 | `dedup` | `chain-aged`, `chain-age-refused`, `error` |
 | `fs` | `edit-no-path`, `write-error`, `commit-untracked` (`unsynced-no-topic-tag` is **retracted** with the missing-tag abort — §3.3 recovery means edits always bind) |
 | `staging` | `promoted`, `evicted` (window-close GC, §3.10) |
-| `topic` | `re-prompt` (with `cause=missing-thread` + `fetched=` for the §5.5 fetch, or `cause=missing-tag` for the §3.3 tag recovery), `tag-missing`, `warning` |
+| `topic` | `re-prompt` (with `cause=missing-thread` + `fetched=` for the §5.5 fetch, or `cause=missing-tag` for the §3.3 tag recovery), `tag-missing`, `tag-invalid` (forensic; a near-miss tag candidate that failed strict validation — `reason=markdown-mangled\|bad-delimiters\|bad-thread-list` + a short sanitized `snippet=`; ADDITIVE to `tag-missing`, not a measured decision event), `warning` |
 | `session` | `ended`, `working-set-save-error`, `checkpoint-error` |
 | `project` | `created`, `switched`, `renamed`; *(vocabulary)* `cd-changed`, `remote-adopted`, `remote-updated`, `remote-collision-prompt`, `meta-updated` |
 | `model` | `stream-close-warn` |

@@ -223,6 +223,20 @@ func extractSymbols(ctx context.Context, state *State, delta Delta) error {
 				// §5.1.2: missing tag is a warning, not a fatal — log and continue.
 				_ = state.Ops.Log(ctx, memops.LogCategoryTopic, "tag-missing",
 					"source=model.response bytes="+strconv.Itoa(len(delta.Content)))
+				// Forensic decomposition of the tag-omission population (design
+				// burndown-2026-07b "Live rerun"): if this tag-less response still
+				// carries a NEAR-MISS candidate — a line that looks like an
+				// attempted §5.1.2 tag but failed strict validation — emit
+				// topic.tag-invalid with the failure reason and a short sanitized
+				// snippet. This is ADDITIVE to topic.tag-missing (which still fired
+				// above): it splits "never attempted" from "attempted but
+				// malformed/misplaced". The near-miss detector (prompt.ClassifyNearMiss)
+				// is a deliberately loose forensic heuristic, not a contract; the
+				// parser returns the classification and this call site owns the log.
+				if nm, ok := prompt.ClassifyNearMiss(delta.Content); ok {
+					_ = state.Ops.Log(ctx, memops.LogCategoryTopic, "tag-invalid",
+						"source=model.response reason="+nm.Reason+" snippet="+memops.SanitizeDetail(nm.Snippet))
+				}
 				return nil
 			}
 			return err

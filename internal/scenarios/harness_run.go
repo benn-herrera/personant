@@ -164,12 +164,17 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 	stepSetClock(h, idx, label, step)
 
 	body, elapsed := stepExecTurn(t, h, idx, label, step)
-	_ = body // body is the streamed text; harness keeps it in History via turn.Run.
 
 	postSpine, _ := store.ReadSpine(h.Paths.Spine)
 	stepUpdateEmbeddingIndex(t, h, idx, label, preSpine, postSpine)
 
 	stepLines := stepScrapeEventLog(t, h, idx, label, preSpine, postSpine)
+	// Forensic raw-response retention: on a live-inference rung a tag-miss
+	// turn (topic.tag-missing / topic.tag-invalid in stepLines) has body ==
+	// the raw model response — turn.Run strips the tag only when a valid one
+	// parses, so nothing was stripped here. Persist it for post-run
+	// decomposition of the tag-omission population. Live-only.
+	stepCaptureTagMiss(h, idx, body, stepLines)
 	livePost := spineIDSet(postSpine)
 	rec := stepMeasureRecall(t, h, idx, label, step, stepLines, livePost)
 	stepRecordMetrics(h, step, elapsed, preSpine, postSpine)
@@ -530,6 +535,57 @@ func stepRecoverable(h *Harness, livePost map[string]struct{}) func(string) bool
 			h.Metrics.Counter(MetricRecallUnexplainedAbsence, 1)
 			return true
 		}
+	}
+}
+
+// linesShowTagMiss reports whether this turn's freshly-tailed log lines
+// carry a topic.tag-missing or topic.tag-invalid event — the runtime's
+// authoritative signal that the turn's FINAL response bound no valid
+// §5.1.2 tag. tag-missing fires for every tag-less final response;
+// tag-invalid is the additive near-miss forensic (chain.go). Either means
+// turn.Run performed no tag-strip, so the returned body is the raw model
+// response worth retaining.
+func linesShowTagMiss(lines []string) bool {
+	for _, l := range lines {
+		if strings.Contains(l, "topic.tag-missing ") || strings.Contains(l, "topic.tag-invalid ") {
+			return true
+		}
+	}
+	return false
+}
+
+// stepCaptureTagMiss persists the raw model response body of a live-
+// inference tag-miss turn to test/rundata/<scenario>/tagmiss/<turn>.txt
+// (h.RunHome + tagmiss/, 1-based turn number), for post-run decomposition
+// of the ~34% live tag-omission figure (design burndown-2026-07b).
+//
+// Live-only, mirroring the liveClient gating precedent (#98): on the mock
+// path body is a canned plan response, not a real model emission, so
+// capturing it would retain noise — a mock/symbolic rung never captures.
+//
+// Observability note: this captures the FINAL stream's fully-accumulated
+// body (the value turn.Run returns). On a tag-miss turn that value is the
+// RAW pre-filter response — the stream filter only strips the tag from the
+// user-visible out, and turn.Run's own tag-strip is a no-op when Parse
+// fails — so no runtime hook is needed. The one thing NOT observable here
+// is a D6 re-prompt's aborted FIRST stream, which turn.Run closes and
+// discards internally; but the turn's tag outcome is set by its final
+// response, which is exactly what is retained.
+func stepCaptureTagMiss(h *Harness, idx int, body string, stepLines []string) {
+	if h.liveClient == nil {
+		return
+	}
+	if !linesShowTagMiss(stepLines) {
+		return
+	}
+	dir := filepath.Join(h.RunHome, "tagmiss")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		h.T.Errorf("stepCaptureTagMiss: mkdir %s: %v", dir, err)
+		return
+	}
+	path := filepath.Join(dir, fmt.Sprintf("%d.txt", idx+1))
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		h.T.Errorf("stepCaptureTagMiss: write %s: %v", path, err)
 	}
 }
 

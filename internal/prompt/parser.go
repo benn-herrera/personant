@@ -222,6 +222,116 @@ func Parse(response string) (ParseResult, error) {
 	}, nil
 }
 
+// Near-miss reasons — the forensic classification of a line that LOOKS
+// like an attempted §5.1.2 topic tag but fails strict validation. These
+// are terse, stable tokens for the topic.tag-invalid event detail; they
+// decompose the tag-omission population (design burndown-2026-07b "Live
+// rerun") into {never-attempted, malformed, misplaced}.
+const (
+	// NearMissMarkdownMangled: the candidate carries markdown decoration
+	// (bold `**`, or an inline code/backtick wrap) — the dominant real
+	// failure, where the model emits the right shape but styles it.
+	NearMissMarkdownMangled = "markdown-mangled"
+	// NearMissBadDelimiters: the `*…*` frame or the `[…]` anchor brackets
+	// are missing or misplaced (no leading/trailing asterisk, no bracket
+	// pair) — the tag's skeleton is wrong.
+	NearMissBadDelimiters = "bad-delimiters"
+	// NearMissBadThreadList: frame and brackets are present, but the
+	// thread-list group fails §5.1.2 (empty, trailing comma, or a token
+	// that is neither `thr_<n>` nor "*new-topic*").
+	NearMissBadThreadList = "bad-thread-list"
+)
+
+// NearMissSnippetLen bounds the sanitized snippet ClassifyNearMiss returns
+// so a forensic log line stays short and never carries full content.
+const NearMissSnippetLen = 80
+
+// NearMiss is a forensic classification of an attempted-but-invalid topic
+// tag. Reason is one of the NearMiss* tokens; Snippet is the first
+// NearMissSnippetLen characters of the offending line, raw — the caller
+// sanitizes it (memops.SanitizeDetail) at the logging site so parser.go
+// stays free of the logging concern.
+type NearMiss struct {
+	Reason  string
+	Snippet string
+}
+
+// nearMissTagRE is a DELIBERATELY LOOSE forensic heuristic — NOT the
+// §5.1.2 contract. It flags a line whose first non-decoration content is
+// `topic:` (case-insensitive), tolerating leading markdown emphasis
+// (`*`, backtick, `#`, `>`, `_`, `~`, `-`) and whitespace. It exists only
+// to distinguish "the model attempted a tag and mangled it" from "the
+// model never attempted one"; a false positive costs one forensic log
+// line, nothing more. The leading class excludes the newline so a match
+// stays on a single line.
+var nearMissTagRE = regexp.MustCompile("(?im)^[ \t>*`#_~-]*topic:")
+
+// ClassifyNearMiss reports whether response contains a near-miss topic-tag
+// candidate — a line that looks like an attempted §5.1.2 tag but fails
+// strict validation — and, if so, classifies the first such line.
+//
+// It is intended to run only after Parse has already returned
+// ErrNoTopicTag (there is no valid tag to bind), and is additive to the
+// tag-missing signal: the caller emits topic.tag-invalid alongside, never
+// instead of, topic.tag-missing. As a defensive measure it skips any
+// candidate line that in fact parses as a valid tag, so it is safe to call
+// on any response.
+func ClassifyNearMiss(response string) (NearMiss, bool) {
+	for _, loc := range nearMissTagRE.FindAllStringIndex(response, -1) {
+		start := loc[0]
+		line := response[start:]
+		if nl := strings.IndexByte(line, '\n'); nl >= 0 {
+			line = line[:nl]
+		}
+		line = strings.TrimRight(line, "\r")
+		// Defensive: a candidate that actually parses as a valid tag is not
+		// a near-miss. Callers only reach here after Parse failed, so in
+		// practice none does — but this keeps the function correct standalone.
+		if _, err := Parse(line + "\n"); err == nil {
+			continue
+		}
+		return NearMiss{
+			Reason:  classifyNearMissLine(line),
+			Snippet: truncateRunes(line, NearMissSnippetLen),
+		}, true
+	}
+	return NearMiss{}, false
+}
+
+// classifyNearMissLine assigns a near-miss reason to a single candidate
+// line, cascading from the most actionable root cause (markdown styling)
+// down to the frame and then the thread list. The order matters: markdown
+// decoration often co-occurs with other defects but is the fix the model
+// prompt should target, so it wins.
+func classifyNearMissLine(line string) string {
+	if strings.Contains(line, "**") || strings.Contains(line, "`") {
+		return NearMissMarkdownMangled
+	}
+	t := strings.TrimSpace(line)
+	if !strings.HasPrefix(t, "*topic:") || !strings.HasSuffix(t, "*") {
+		return NearMissBadDelimiters
+	}
+	if !strings.Contains(t, "[") || !strings.Contains(t, "]") {
+		return NearMissBadDelimiters
+	}
+	// Frame and brackets are present but strict validation still failed —
+	// the thread list is the remaining culprit (empty or an invalid token).
+	return NearMissBadThreadList
+}
+
+// truncateRunes returns s truncated to at most n runes, preserving valid
+// UTF-8 (a byte truncation could split a multi-byte rune).
+func truncateRunes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
+}
+
 // parseThreadList splits and validates the thread-list group. Returns the
 // validated entries and whether every entry passed validation; a single
 // failed entry rejects the whole tag (per spec §5.1.2 the thread list must
