@@ -512,7 +512,7 @@ Actions ending in `-error` (and `warning`) are forensic diagnostics, not measure
 | `project` | `created`, `switched`, `renamed`; *(vocabulary)* `cd-changed`, `remote-adopted`, `remote-updated`, `remote-collision-prompt`, `meta-updated` |
 | `model` | `stream-close-warn` |
 | `workset` | `warning` (layer render failure, §3.1) |
-| `context` | `modified` (with `source=`, `bytes=`; the §3.0 chain step, §3.0.1) |
+| `context` | `modified` (with `source=`, `bytes=`; the §3.0 chain step, §3.0.1). **Per-turn boundary contract:** exactly one `modified source=user.prompt` line is emitted per turn, and every other line a turn produces follows it before the next turn's boundary — the log is a concatenation of per-turn segments. This is load-bearing: the A2 tag-fidelity grader segments observed turns on it (same-second turns would otherwise smear into one group), so a change that suppresses, reorders, or duplicates the user.prompt delta line must revisit that grader. |
 | `dissect` | *(vocabulary; not yet emitted)* `fire`, `cluster-proposed`, `complete` |
 | `directive` | *(vocabulary; not yet emitted)* `accrual-update`, `parameter-read` (sampled) |
 | `index` | *(vocabulary; not yet emitted)* `rebuild-start`, `rebuild-complete`, `verify-fail` |
@@ -2057,6 +2057,22 @@ first-valid-match rule and extras count, in the bounded preamble scan
 (so the §5.5 fetch timing, the D6 missing-tag trigger, and the
 stream-filter suppression all accept it), and in the stream filter's
 Close-time trailing-line fallback.
+
+**Unclosed inner literal (deterministic-tier absorption, third
+nested-asterisk confusion variant).** Within an otherwise-valid
+`*topic: … [ … ]*` wrapper, the thread-list token `*new-topic` — leading
+asterisk present, closing asterisk dropped — is accepted as the new-topic
+sentinel and normalized to the canonical closed form. Evidence: the
+2026-07-16 1d live-inference run, where **364 of the 380 captured tag
+misses** were exactly `*topic: *new-topic [anchors]*` (classified
+`bad-thread-list`); replay of the capture directory recovers 363/380 with
+this tolerance, leaving ~16 true omissions. This is the third confusion
+variant of the nested-asterisk syntax (after the markdown mangle and the
+unwrapped bare alias above), absorbed at the deterministic tier per
+minimize-infrastructural-prompts. The tolerance is **strict**: thread-list
+position only, token-exact with a single leading asterisk (`new-topic`
+and `**new-topic` remain invalid), and a mixed thread list
+(`thr_3, *new-topic`) follows the same per-entry rule as the strict form.
 
 #### 5.1.3 Prompt template
 

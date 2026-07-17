@@ -167,6 +167,20 @@ func preambleScanLimit(buf []byte) int {
 // no compile-time signal.
 const NewTopicLiteral = "*new-topic*"
 
+// newTopicUnclosed is the probe- and live-run-observed degradation of
+// NewTopicLiteral inside the canonical `*topic: ... *` wrapper: the inner
+// literal's CLOSING asterisk dropped (`*topic: *new-topic [anchors]*`).
+// The 2026-07-16 1d live-inference run showed 364/380 captured tag misses
+// were exactly this shape (classified bad-thread-list) — the THIRD
+// nested-asterisk confusion variant, after the markdown mangle and the
+// unwrapped bare alias (d0e4a52). parseThreadList accepts it as the
+// new-topic sentinel — deterministic-tier absorption per SPEC §5.1.2 —
+// STRICTLY scoped: thread-list position only, leading asterisk required
+// (`new-topic` and `**new-topic` stay invalid), normalized to
+// NewTopicLiteral on output so downstream consumers see one sentinel.
+// Derived from NewTopicLiteral so the two cannot drift.
+var newTopicUnclosed = strings.TrimSuffix(NewTopicLiteral, "*")
+
 // TopicTag is the parsed form of a single topic-tag line. Threads contains
 // either canonical "thr_<n>" identifiers (matching memops.ThreadIDPattern)
 // or the literal "*new-topic*". Anchors are normalized via
@@ -315,7 +329,11 @@ const (
 	NearMissBadDelimiters = "bad-delimiters"
 	// NearMissBadThreadList: frame and brackets are present, but the
 	// thread-list group fails §5.1.2 (empty, trailing comma, or a token
-	// that is neither `thr_<n>` nor "*new-topic*").
+	// that is neither `thr_<n>` nor "*new-topic*"). NOTE: the unclosed
+	// inner literal `*topic: *new-topic [anchors]*` — 364/380 of the
+	// 2026-07-16 1d live run's misses, formerly the dominant occupant of
+	// this bin — is now a VALID tag (see newTopicUnclosed) and never
+	// reaches the classifier.
 	NearMissBadThreadList = "bad-thread-list"
 	// NearMissBareNewTopic: a line-anchored bare `*new-topic*` token that
 	// fails strict validation — i.e. without the `[anchor-list]` bracket
@@ -454,6 +472,13 @@ func parseThreadList(raw string) ([]string, bool) {
 		if t == "" {
 			// An empty entry (e.g. trailing comma) fails the §5.1.2 alternation.
 			return nil, false
+		}
+		if t == newTopicUnclosed {
+			// Unclosed inner literal (see newTopicUnclosed): accept as the
+			// sentinel, normalized to the canonical closed form. Applies
+			// per-entry, so a mixed list (`thr_3, *new-topic`) follows the
+			// same rule as the strict form's mixed list.
+			t = NewTopicLiteral
 		}
 		if t == NewTopicLiteral || memops.ThreadIDPattern.MatchString(t) {
 			out = append(out, t)

@@ -16,11 +16,20 @@ package sim
 // carries the plan's intended tag (its scripted MockResponse) plus the prompted
 // topic's symbol set and content. The model's ACTUAL per-turn tag outcome is
 // read from the event log (thread.engaged / thread.created / topic.tag-missing).
-// The two are joined by the turn's simulated instant (RFC3339 second): the
-// harness stamps every log line at pinnedClock == Step.At, and the regenerated
-// canonical Step.At is byte-identical, so the instant is a stable join key. An
-// execution-time-injected refinement turn has no canonical At and is skipped
-// (reported as an unmatched observed group, never silently forced).
+//
+// JOIN KEY (burndown 2026-07b item 4). Observed turns are segmented PER TURN
+// on the event log's per-turn boundary line — `context.modified
+// source=user.prompt`, emitted exactly once per turn (§2.8) — then joined to
+// plan turns by (instant, ordinal-within-instant): the harness stamps every
+// log line at pinnedClock == Step.At and executes steps in plan order, so the
+// k-th observed turn at an instant is the k-th plan turn at that instant.
+// (The previous instant-only grouping smeared same-second turns into one
+// merged outcome — 380 tag-missing lines collapsed into 256 instant groups on
+// the 2026-07-16 1d run.) An instant whose plan/observed turn counts disagree
+// (an execution-time-injected refinement turn has no canonical At and can
+// land in a plan second) is JOIN-AMBIGUOUS: its turns are counted and
+// reported, never force-joined. A log with no boundary lines (pre-boundary
+// format) degrades to the old instant-merged grouping, labeled DEGRADED.
 //
 // The re-engagement grader is HYBRID (ratified 2026-07-14):
 //  1. symbolic anchor-overlap FAST PATH — the tagged thread's anchors/history
@@ -77,10 +86,23 @@ const (
 	metricTagFidelityHits           = "tag_fidelity_hits"
 	metricTagFidelityMisses         = "tag_fidelity_misses"
 	metricTagFidelitySpuriousCount  = "tag_fidelity_spurious_new_topic_count"
-	metricTagFidelityTagMissing     = "tag_fidelity_tag_missing_count"
-	metricTagFidelityBorderline     = "tag_fidelity_borderline"
-	metricTagFidelityUnadjudicated  = "tag_fidelity_unadjudicated"
-	metricTagFidelityAnchorObs      = "tag_fidelity_anchor_overlap_obs"
+	// metricTagFidelityTagMissing is a PLAN-JOINED classification count — the
+	// re-engagement-intent plan turns whose joined observed turn carried a
+	// tag-omission marker — NOT the runtime's stream-level tag-missing count
+	// (reportInferenceBehavior owns that; the two denominators differ).
+	metricTagFidelityTagMissing    = "tag_fidelity_tag_missing_count"
+	metricTagFidelityBorderline    = "tag_fidelity_borderline"
+	metricTagFidelityUnadjudicated = "tag_fidelity_unadjudicated"
+	metricTagFidelityAnchorObs     = "tag_fidelity_anchor_overlap_obs"
+	// metricTagFidelityJoinAmbiguous counts re-engagement-intent plan turns at
+	// instants whose plan/observed turn counts disagreed (injected turn in the
+	// same second) — reported, never force-joined.
+	metricTagFidelityJoinAmbiguous = "tag_fidelity_join_ambiguous"
+	// metricTagFidelityJoinDegraded is 1 when the event log carried no
+	// per-turn boundary lines and the grader fell back to instant-merged
+	// grouping (old-log format) — the join is then smear-prone and the series
+	// should be read as degraded.
+	metricTagFidelityJoinDegraded = "tag_fidelity_join_degraded"
 )
 
 // graderEmbedder is the measurement-side embedding surface the residue rank
@@ -94,19 +116,26 @@ type graderEmbedder interface {
 // planTurn is one canonical (plan-intent) turn: its simulated-instant join key,
 // whether the plan intended re-engagement of a known topic (vs *new-topic*), the
 // prompted topic's symbol set (the scripted tag's anchors), and the prompted
-// content (for measurement-side embedding).
+// content (for measurement-side embedding). gradeable is false for a canonical
+// step whose scripted response carried no parseable plan tag — it still holds
+// its ordinal slot in the (instant, ordinal) join so later turns at the same
+// instant stay aligned, but nothing is graded for it.
 type planTurn struct {
-	instant  string
-	reengage bool
-	topicSym []string
-	content  string
+	instant   string
+	reengage  bool
+	gradeable bool
+	topicSym  []string
+	content   string
 }
 
-// observedTurn is the model's ACTUAL per-turn tag outcome scraped from the event
-// log for one simulated instant: the threads it engaged, whether it tagged
-// *new-topic* (created a thread), whether it emitted no parseable tag, and
-// whether the D6 owner-default bound the turn (thread.tag-defaulted).
+// observedTurn is the model's ACTUAL tag outcome for ONE executed turn — the
+// lines between two per-turn boundary markers (`context.modified
+// source=user.prompt`): the threads it engaged, whether it tagged *new-topic*
+// (created a thread), whether it emitted no parseable tag, and whether the D6
+// owner-default bound the turn (thread.tag-defaulted). instant is the turn's
+// Step.At second (the boundary line's timestamp).
 type observedTurn struct {
+	instant      string
 	engaged      []string
 	created      bool
 	tagMissing   bool
@@ -130,20 +159,26 @@ type tagFidelityResult struct {
 	hits             int
 	misses           int
 	spuriousNewTopic int
-	tagMissing       int
+	tagMissing       int // plan-joined omission classification (see metricTagFidelityTagMissing)
 	borderline       int
 	unadjudicated    int
-	unmatchedGroups  int // observed groups with no plan instant (refinement/injected turns)
+	joinAmbiguous    int // reengage plan turns at instants whose plan/observed counts disagree
+	unmatchedGroups  int // observed turns that joined no plan turn (refinement/injected)
 }
 
 // gradeTagFidelity is the PURE grader core: given the plan (ground-truth
-// intent), the observed per-instant tag outcomes, the live threads, and an
-// (optional) embedder, it grades the re-engagement series. It is embedder- and
-// I/O-injectable so the unit tests can drive every branch (fast-path hit,
+// intent), the observed PER-TURN tag outcomes grouped by instant (in executed
+// order), the live threads, and an (optional) embedder, it grades the
+// re-engagement series. The join is (instant, ordinal-within-instant): every
+// plan turn — gradeable or not — consumes one ordinal slot, so the k-th plan
+// turn at an instant meets the k-th executed turn at that instant. An instant
+// whose plan/observed counts disagree is join-ambiguous: nothing there is
+// graded (counted in joinAmbiguous for the reengage turns). It is embedder-
+// and I/O-injectable so the unit tests can drive every branch (fast-path hit,
 // residue rank-hit, residue rank-miss, borderline, unadjudicated) with canned
 // vectors. rankK/eps are passed in so a test can pin the boundary behavior.
 func gradeTagFidelity(ctx context.Context, emb graderEmbedder, plan []planTurn,
-	observed map[string]observedTurn, live []liveThread, rankK int, eps float64) tagFidelityResult {
+	observed map[string][]observedTurn, live []liveThread, rankK int, eps float64) tagFidelityResult {
 
 	var res tagFidelityResult
 	liveByID := make(map[string]liveThread, len(live))
@@ -152,14 +187,30 @@ func gradeTagFidelity(ctx context.Context, emb graderEmbedder, plan []planTurn,
 	}
 	var threadVecs map[string][]float64 // lazily embedded on first residue
 
+	// Plan-side per-instant turn counts, for the count-agreement check.
+	planCount := make(map[string]int, len(plan))
 	for _, p := range plan {
-		if !p.reengage {
-			continue
+		planCount[p.instant]++
+	}
+
+	ordinal := make(map[string]int, len(planCount)) // next plan ordinal per instant
+	for _, p := range plan {
+		k := ordinal[p.instant]
+		ordinal[p.instant]++
+		if !p.reengage || !p.gradeable {
+			continue // holds its ordinal slot; nothing to grade
 		}
-		o, ok := observed[p.instant]
+		obsAt, ok := observed[p.instant]
 		if !ok {
 			continue // no observed turn at this instant (skipped, counted below via caller diff)
 		}
+		if len(obsAt) != planCount[p.instant] {
+			// Injected/refinement turn landed in this second: the ordinal zip
+			// would mis-join. Report, never force.
+			res.joinAmbiguous++
+			continue
+		}
+		o := obsAt[k]
 		res.reengageIntent++
 
 		switch {
@@ -420,40 +471,59 @@ func buildPlanTurns(cfg WorkloadConfig) []planTurn {
 		if s.SleepCycle {
 			continue
 		}
-		pr, err := prompt.Parse(s.MockResponse.Content)
-		if err != nil {
-			continue // a scripted step with no parseable plan tag: nothing to grade
-		}
-		reengage := false
-		for _, th := range pr.Tag.Threads {
-			if th != prompt.NewTopicLiteral {
-				reengage = true
-				break
+		pt := planTurn{instant: s.At.Format(time.RFC3339)}
+		// A scripted step with no parseable plan tag still emits a turn (the
+		// runtime executes it), so it must HOLD its ordinal slot in the
+		// (instant, ordinal) join — gradeable=false, nothing graded for it.
+		if pr, err := prompt.Parse(s.MockResponse.Content); err == nil {
+			pt.gradeable = true
+			pt.topicSym = append([]string(nil), pr.Tag.Anchors...)
+			pt.content = s.UserInput
+			for _, th := range pr.Tag.Threads {
+				if th != prompt.NewTopicLiteral {
+					pt.reengage = true
+					break
+				}
 			}
 		}
-		out = append(out, planTurn{
-			instant:  s.At.Format(time.RFC3339),
-			reengage: reengage,
-			topicSym: append([]string(nil), pr.Tag.Anchors...),
-			content:  s.UserInput,
-		})
+		out = append(out, pt)
 	}
 	return out
 }
 
-// buildObservedTurns scrapes the event-log day files and groups the model's
-// per-turn tag markers by simulated instant (the leading RFC3339 field, equal to
-// the turn's Step.At). Recognized markers: thread.engaged / thread.engaged-non-owner
-// (→ engaged id), thread.created / thread.created-meta-only (→ *new-topic*),
+// turnBoundaryAction / turnBoundaryDetail identify the event log's per-turn
+// boundary line — `context.modified source=user.prompt`, emitted exactly once
+// per turn by the §3.0 chain (§2.8) — which buildObservedTurns segments on.
+const (
+	turnBoundaryAction = "context.modified"
+	turnBoundaryDetail = "source=user.prompt"
+)
+
+// buildObservedTurns scrapes the event-log day files (in filename order —
+// chronological, since the log is append-only and day-partitioned) and
+// segments the model's tag markers PER TURN on the per-turn boundary line:
+// each `context.modified source=user.prompt` opens a new observed turn, and
+// subsequent marker lines fold into it until the next boundary. Turns are
+// returned grouped by their simulated instant (the boundary line's leading
+// RFC3339 field, equal to the turn's Step.At), in executed order within each
+// instant — the (instant, ordinal) join key gradeTagFidelity consumes.
+//
+// Recognized markers: thread.engaged / thread.engaged-non-owner (→ engaged
+// id), thread.created / thread.created-meta-only (→ *new-topic*),
 // topic.tag-missing (→ no parseable tag), thread.tag-defaulted (→ the D6
-// owner-default bound the turn; the same instant's engaged id is the runtime's
-// recovery choice, not a model emission — the grader classifies these as
-// omissions before it ever looks at engaged).
-func buildObservedTurns(logsDir string) map[string]observedTurn {
-	out := map[string]observedTurn{}
+// owner-default bound the turn; the engaged id is the runtime's recovery
+// choice, not a model emission — the grader classifies these as omissions
+// before it ever looks at engaged).
+//
+// FALLBACK: a log with no boundary lines at all (pre-boundary format) falls
+// back to the old instant-MERGED grouping — one observedTurn per instant with
+// every marker folded in — and returns degraded=true so the caller labels the
+// series honestly (same-second turns smear in that mode).
+func buildObservedTurns(logsDir string) (out map[string][]observedTurn, degraded bool) {
+	out = map[string][]observedTurn{}
 	entries, err := os.ReadDir(logsDir)
 	if err != nil {
-		return out
+		return out, false
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -463,6 +533,18 @@ func buildObservedTurns(logsDir string) map[string]observedTurn {
 		names = append(names, e.Name())
 	}
 	sort.Strings(names)
+
+	var (
+		cur   *observedTurn
+		flush = func() {
+			if cur != nil {
+				out[cur.instant] = append(out[cur.instant], *cur)
+				cur = nil
+			}
+		}
+		sawBoundary bool
+		merged      = map[string]*observedTurn{} // degraded-fallback accumulator
+	)
 	for _, name := range names {
 		body, err := os.ReadFile(filepath.Join(logsDir, name))
 		if err != nil {
@@ -474,7 +556,28 @@ func buildObservedTurns(logsDir string) map[string]observedTurn {
 				continue
 			}
 			instant, catAction := fields[0], fields[1]
-			ot := out[instant]
+			if catAction == turnBoundaryAction {
+				if len(fields) >= 3 && fields[2] == turnBoundaryDetail {
+					sawBoundary = true
+					flush()
+					cur = &observedTurn{instant: instant}
+				}
+				continue
+			}
+
+			// Marker target: the in-progress per-turn segment, or (fallback)
+			// the instant-merged accumulator. Markers before the first
+			// boundary in a boundary-bearing log (bootstrap noise) fold into
+			// the merged map too, but a boundary-bearing log discards it below.
+			ot := cur
+			if ot == nil {
+				if m, ok := merged[instant]; ok {
+					ot = m
+				} else {
+					ot = &observedTurn{instant: instant}
+					merged[instant] = ot
+				}
+			}
 			switch catAction {
 			case "thread.engaged", "thread.engaged-non-owner":
 				if len(fields) >= 3 {
@@ -486,13 +589,20 @@ func buildObservedTurns(logsDir string) map[string]observedTurn {
 				ot.tagMissing = true
 			case "thread.tag-defaulted":
 				ot.tagDefaulted = true
-			default:
-				continue
 			}
-			out[instant] = ot
 		}
 	}
-	return out
+	flush()
+
+	if sawBoundary {
+		return out, false
+	}
+	// Degraded fallback: no boundary line anywhere — old-format log. Emit the
+	// instant-merged groups (one turn per instant), deterministically.
+	for instant, ot := range merged {
+		out[instant] = append(out[instant], *ot)
+	}
+	return out, true
 }
 
 // buildLiveThreads reads the post-run spine + frontmatter into the grader's
@@ -549,21 +659,37 @@ func buildLiveThreads(paths store.PersonantPaths) []liveThread {
 // source=model) and the deterministic extraction pass's symbols (source=
 // deterministic), over threads carrying ≥1 model anchor. It reads the
 // authoritative post-run frontmatter (each history symbol carries its Source), so
-// no runtime hook is needed. Returns (meanJaccard, observedThreadCount); (0, 0)
-// when no thread carries a model anchor (honest "nothing to measure").
+// no runtime hook is needed. Returns (meanJaccard, observedThreadCount,
+// detSymbolTotal); (0, 0, 0) on a load failure.
+//
+// VACUITY (burndown 2026-07b item 5): detSymbolTotal is the run-total count of
+// persisted source=deterministic history symbols across ALL threads. When it is
+// 0 the mean Jaccard is 0-against-empty-set BY CONSTRUCTION — the metric is
+// UNMEASURED, not 0.000, and the caller must report it so (the Jul-16 live run's
+// "0.000 over 151 threads" false alarm). The §3.3 deterministic pass extracts
+// only identifier-class symbols (URLs / file paths / hex IDs), so a workload
+// whose conversational content carries none yields detSymbolTotal == 0 honestly.
 //
 // NOTE: this is a RUN-LEVEL realization of the "per-turn" intent — the
 // authoritative per-turn source split (model anchors vs the §3.3 deterministic
 // pass, per turn) is not in the event log; the frontmatter carries the same two
 // sets accumulated per thread. A true per-turn series would need a one-line
 // runtime log hook (see the A2 report).
-func anchorEmissionOverlap(paths store.PersonantPaths) (float64, int) {
+func anchorEmissionOverlap(paths store.PersonantPaths) (float64, int, int) {
 	fms, err := store.LoadAllThreadFrontmatter(paths, nil)
 	if err != nil {
-		return 0, 0
+		return 0, 0, 0
 	}
+	return anchorOverlapFromMeta(fms)
+}
+
+// anchorOverlapFromMeta is the pure half of anchorEmissionOverlap (unit-testable
+// without a substrate): mean model-vs-deterministic Jaccard over threads with
+// ≥1 model anchor, plus the observation count and the run-total deterministic
+// symbol count (the measurability signal).
+func anchorOverlapFromMeta(fms []memops.ThreadMeta) (float64, int, int) {
 	var sum float64
-	obs := 0
+	obs, detTotal := 0, 0
 	for _, fm := range fms {
 		var modelSyms, detSyms []string
 		for _, hs := range fm.HistorySymbols {
@@ -574,6 +700,7 @@ func anchorEmissionOverlap(paths store.PersonantPaths) (float64, int) {
 				detSyms = append(detSyms, hs.Normalized)
 			}
 		}
+		detTotal += len(detSyms)
 		if len(modelSyms) == 0 {
 			continue
 		}
@@ -581,7 +708,7 @@ func anchorEmissionOverlap(paths store.PersonantPaths) (float64, int) {
 		sum += jaccard(modelSyms, detSyms)
 	}
 	if obs == 0 {
-		return 0, 0
+		return 0, 0, detTotal
 	}
-	return sum / float64(obs), obs
+	return sum / float64(obs), obs, detTotal
 }

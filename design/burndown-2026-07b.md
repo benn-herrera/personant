@@ -101,6 +101,28 @@ syntax at the deterministic tier, per minimize-infrastructural-prompts);
 reasoning-burn empties as a serving-level hazard. Layer-B excerpt tag
 retention: exonerated, do not build.
 
+**CLOSED (2026-07-16).** Post-fix 1d live acceptance run + forensic
+decomposition: of 380 apparent omissions, **364 (96%) were attempted
+tags** mangled by a third nested-asterisk variant (`*topic: *new-topic
+[...]​*` — inner literal unclosed); true never-attempted omissions ≈
+16/1038 (~1.5%). The d0e4a52 fixes worked (attempts way up, spurious
+0.194→0.173, miss 0.847→0.771); the final parser tolerance (accept the
+unclosed inner literal in a valid wrapper) recovers **363/380 on offline
+replay of the captured real bodies** — the replay harness
+(`PERSONANT_TAGMISS_REPLAY_DIR`) is the zero-cost acceptance instrument,
+per the testing-cost regime. Instrument fixes landed alongside: run
+manifest.json per rundata dir (mock/live confusion caused a false
+integrity alarm on 2026-07-16 — investigated, no actual integrity loss),
+per-turn grader join (instant-grouping smeared 380→256 groups),
+anchor-overlap honestly UNMEASURED on this workload (deterministic
+identifier vocabulary is disjoint from anchor vocabulary; staging GC
+drops uncited identifiers — structural, not a bug). Residuals for the
+watch list: 16 true omissions correlate with serving-side loop-detection
+artifacts ("CRITICAL LOOP DETECTED" bodies — serving-level hazard);
+one-off double-anchor-list shape not absorbed; ~15 pre-existing files
+with gofmt drift flagged for a separate sweep; grader join falls back
+degraded on pre-manifest logs.
+
 **Interpretation discipline (before drawing the big conclusion):** the
 top-line signal — gemma-4-main's tag discipline is far below mock
 assumptions — is almost certainly real (34% omission is model behavior,

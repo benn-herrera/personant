@@ -56,6 +56,57 @@ func TestParseNewTopicLiteral(t *testing.T) {
 	}
 }
 
+// TestParseUnclosedInnerNewTopic pins the §5.1.2 unclosed-inner-literal
+// tolerance (the 2026-07-16 1d live run's dominant miss shape, 364/380):
+// within an otherwise-valid `*topic: ... *` wrapper, the thread-list token
+// `*new-topic` (leading asterisk, closing asterisk dropped) is the
+// new-topic sentinel, normalized to the canonical closed form.
+func TestParseUnclosedInnerNewTopic(t *testing.T) {
+	in := "*topic: *new-topic [global-mean-temperature-increase, sea-level-rise]*\nbody"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if want := []string{NewTopicLiteral}; !reflect.DeepEqual(got.Tag.Threads, want) {
+		t.Errorf("Threads: got %v, want %v", got.Tag.Threads, want)
+	}
+	wantAnchors := []string{"global-mean-temperature-increase", "sea-level-rise"}
+	if !reflect.DeepEqual(got.Tag.Anchors, wantAnchors) {
+		t.Errorf("Anchors: got %v, want %v", got.Tag.Anchors, wantAnchors)
+	}
+	if got.Body != "body" {
+		t.Errorf("Body: got %q, want %q (tag line must strip)", got.Body, "body")
+	}
+}
+
+// TestParseUnclosedInnerNewTopicMixed: the tolerance is per-entry, so a
+// mixed thread list follows the same rule as the strict form's mixed list.
+func TestParseUnclosedInnerNewTopicMixed(t *testing.T) {
+	in := "*topic: thr_3, *new-topic [a, b]*\nbody"
+	got, err := Parse(in)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if want := []string{"thr_3", NewTopicLiteral}; !reflect.DeepEqual(got.Tag.Threads, want) {
+		t.Errorf("Threads: got %v, want %v", got.Tag.Threads, want)
+	}
+}
+
+// TestParseUnclosedNewTopicStaysStrict: the tolerance requires the leading
+// asterisk and exactly one — `new-topic` (no asterisk) and `**new-topic`
+// remain invalid thread-list tokens (ErrNoTopicTag when they are the only
+// candidate).
+func TestParseUnclosedNewTopicStaysStrict(t *testing.T) {
+	for _, in := range []string{
+		"*topic: new-topic [a, b]*\nbody",
+		"*topic: **new-topic [a, b]*\nbody",
+	} {
+		if _, err := Parse(in); !errors.Is(err, ErrNoTopicTag) {
+			t.Errorf("Parse(%q): err = %v, want ErrNoTopicTag", in, err)
+		}
+	}
+}
+
 func TestParseMixedExplicitAndNewTopic(t *testing.T) {
 	in := "*topic: thr_42, *new-topic* [a, b, c, d]*\nbody"
 	got, err := Parse(in)

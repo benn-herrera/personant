@@ -316,6 +316,12 @@ func TestSim(t *testing.T) {
 	corpus := loadCorpusSlots(t)
 	h := runSimRung(t, label, d, corpus, recaller, oracleBlind, liveClient, liveModel)
 
+	// Bind the summary numbers to their forensic directory: the rundata path
+	// (whose manifest.json carries mode/seed/duration/start/end/git-head) is
+	// what distinguishes a 74 s mock dir from a live run's — the
+	// burndown-2026-07b false-alarm root cause.
+	t.Logf("rundata: %s (manifest.json binds mode/seed/duration/git-head)", h.RunHome)
+
 	// Inference-in-loop behavior-validation summary (#98, Inc 3). These are the
 	// real-model behaviors the mock structurally cannot exercise, derived from
 	// the runtime's OWN event log (never the canned plan) — honest about the

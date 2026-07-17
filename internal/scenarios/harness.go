@@ -620,6 +620,19 @@ type Scenario struct {
 	// live request names the real chat model. Ignored when LiveClient is nil.
 	LiveModel string
 
+	// RungLabel / RungSeed / RungSpan are OPTIONAL run-provenance fields for
+	// the manifest.json every rundata scenario directory receives at run
+	// start (see writeRunManifest). The sim rung driver populates them from
+	// its WorkloadConfig so a rundata directory is self-describing — rung
+	// label, seed, and simulated span bound to the directory alongside the
+	// mode/start/end/git-head the harness derives itself. Zero values (every
+	// handwritten scenario) simply omit the fields from the manifest.
+	// Root cause served: a short mock rung's directory was indistinguishable
+	// from a live run's, mis-binding numbers to runs (burndown 2026-07b).
+	RungLabel string
+	RungSeed  int64
+	RungSpan  time.Duration
+
 	// MemoryCapBytes, when > 0, arms the harness's heap watchdog: a
 	// goroutine that polls runtime.MemStats.HeapInuse every
 	// memWatchdogCheckInterval and, on cap exceed, captures a heap profile

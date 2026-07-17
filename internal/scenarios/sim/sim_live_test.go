@@ -223,6 +223,7 @@ func reportInferenceBehavior(t *testing.T, h *scenarios.Harness, d time.Duration
 	omissionEvents := tagMissing + tagReprompts
 
 	t.Logf("=== inference-in-loop behavior validation (#98, oracle BLIND — no recall claim) ===")
+	t.Logf("rundata:                  %s (manifest.json binds mode/seed/duration/git-head)", h.RunHome)
 	t.Logf("turns:                    %d (live chat model, streaming via ConsultStream)", turns)
 	t.Logf("topic-tag discipline:     %d/%d parseable (%.3f); %d missing (runtime `topic.tag-missing`, FINAL responses only)",
 		tagParsed, int(turns), parsedRate, tagMissing)
@@ -269,20 +270,21 @@ func recordTagFidelityMetrics(t *testing.T, h *scenarios.Harness, cfg WorkloadCo
 	ctx := context.Background()
 
 	plan := buildPlanTurns(cfg)
-	observed := buildObservedTurns(h.Paths.LogsDir)
+	observed, joinDegraded := buildObservedTurns(h.Paths.LogsDir)
 	live := buildLiveThreads(h.Paths)
 
-	// Observed groups with no plan instant (execution-time refinement/injected
-	// turns carry no canonical Step.At, so they never join) — a forensic count;
-	// a large value means the plan↔observed join is degrading.
-	unmatched := 0
-	planInstants := make(map[string]struct{}, len(plan))
+	// Observed turns that join no plan turn (execution-time refinement/
+	// injected turns carry no canonical Step.At; count-mismatched instants
+	// contribute their surplus too) — a forensic count; a large value means
+	// the plan↔observed join is degrading.
+	planCount := make(map[string]int, len(plan))
 	for _, p := range plan {
-		planInstants[p.instant] = struct{}{}
+		planCount[p.instant]++
 	}
-	for inst := range observed {
-		if _, ok := planInstants[inst]; !ok {
-			unmatched++
+	unmatched := 0
+	for inst, turns := range observed {
+		if extra := len(turns) - planCount[inst]; extra > 0 {
+			unmatched += extra
 		}
 	}
 
@@ -290,7 +292,8 @@ func recordTagFidelityMetrics(t *testing.T, h *scenarios.Harness, cfg WorkloadCo
 	res := gradeTagFidelity(ctx, emb, plan, observed, live, tagFidelityRankK, tagFidelityBorderlineEps)
 	res.unmatchedGroups = unmatched
 
-	overlap, overlapObs := anchorEmissionOverlap(h.Paths)
+	overlap, overlapObs, detSymbols := anchorEmissionOverlap(h.Paths)
+	overlapMeasured := overlapObs > 0 && detSymbols > 0
 
 	// Miss rate over DECIDED turns (hits+misses); borderline/unadjudicated held
 	// out. 0 when nothing was decided (honest "unmeasured", not a false 0 rate).
@@ -306,7 +309,14 @@ func recordTagFidelityMetrics(t *testing.T, h *scenarios.Harness, cfg WorkloadCo
 
 	h.Metrics.Set(scenarios.MetricTagFidelityReengageMissRate, missRate)
 	h.Metrics.Set(scenarios.MetricTagFidelitySpuriousNewTopicRate, spuriousRate)
-	h.Metrics.Set(scenarios.MetricTagFidelityAnchorOverlap, overlap)
+	// The anchor-overlap gauge is set ONLY when measurable (≥1 model-anchor
+	// thread AND ≥1 persisted deterministic symbol anywhere in the run). With
+	// zero deterministic symbols the Jaccard is 0-against-empty-set by
+	// construction — an absent key is the honest "unmeasured", distinguishable
+	// from a measured 0.0 (the Jul-16 "0.000/151 threads" false alarm).
+	if overlapMeasured {
+		h.Metrics.Set(scenarios.MetricTagFidelityAnchorOverlap, overlap)
+	}
 
 	h.Metrics.Set(metricTagFidelityReengageIntent, float64(res.reengageIntent))
 	h.Metrics.Set(metricTagFidelityHits, float64(res.hits))
@@ -316,18 +326,36 @@ func recordTagFidelityMetrics(t *testing.T, h *scenarios.Harness, cfg WorkloadCo
 	h.Metrics.Set(metricTagFidelityBorderline, float64(res.borderline))
 	h.Metrics.Set(metricTagFidelityUnadjudicated, float64(res.unadjudicated))
 	h.Metrics.Set(metricTagFidelityAnchorObs, float64(overlapObs))
+	h.Metrics.Set(metricTagFidelityJoinAmbiguous, float64(res.joinAmbiguous))
+	joinDegradedVal := 0.0
+	if joinDegraded {
+		joinDegradedVal = 1.0
+	}
+	h.Metrics.Set(metricTagFidelityJoinDegraded, joinDegradedVal)
 
 	embState := "reachable"
 	if emb == nil {
 		embState = "none (residue unadjudicated)"
 	}
+	joinState := "per-turn (context.modified source=user.prompt boundary)"
+	if joinDegraded {
+		joinState = "DEGRADED instant-merged (no per-turn boundary lines — same-second turns smear)"
+	}
 	log.Info("=== tag-fidelity (A2, oracle=plan-intent, embedder=%s) ===", embState)
+	log.Info("rundata: %s", h.RunHome)
+	log.Info("join: %s; join-ambiguous reengage turns: %d", joinState, res.joinAmbiguous)
 	log.Info("re-engagement intent turns: %d (decided=%d)", res.reengageIntent, decided)
 	log.Info("  miss rate:        %.3f (misses=%d)", missRate, res.misses)
 	log.Info("  spurious *new-topic* rate: %.3f (count=%d)", spuriousRate, res.spuriousNewTopic)
-	log.Info("  tag-missing:      %d  borderline:%d  unadjudicated:%d", res.tagMissing, res.borderline, res.unadjudicated)
-	log.Info("  anchor overlap:   %.3f (obs=%d threads)", overlap, overlapObs)
-	log.Info("  unmatched observed groups (refinement/injected): %d", unmatched)
+	log.Info("  tag-missing (plan-joined classification, not the runtime stream count): %d  borderline:%d  unadjudicated:%d",
+		res.tagMissing, res.borderline, res.unadjudicated)
+	if overlapMeasured {
+		log.Info("  anchor overlap:   %.3f (obs=%d threads, deterministic symbols=%d)", overlap, overlapObs, detSymbols)
+	} else {
+		log.Info("  anchor overlap:   UNMEASURED (no deterministic symbols — %d model-anchor threads, %d persisted source=deterministic history symbols; 0-against-empty Jaccard would be vacuous)",
+			overlapObs, detSymbols)
+	}
+	log.Info("  unmatched observed turns (refinement/injected): %d", unmatched)
 
 	if err := h.Metrics.WriteJSON(h.MetricsPath); err != nil {
 		t.Fatalf("tag-fidelity: rewrite metrics blob: %v", err)

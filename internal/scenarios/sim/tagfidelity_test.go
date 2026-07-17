@@ -3,9 +3,13 @@ package sim
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"personant/internal/memops"
 	"personant/internal/scenarios"
 )
 
@@ -30,8 +34,8 @@ func (f fakeEmbedder) Embed(_ context.Context, texts []string) ([][]float64, err
 // engaged a thread whose symbols overlap the prompted topic set → symbolic
 // fast-path HIT, no embed call (a nil embedder must NOT change the outcome).
 func TestGradeTagFidelity_FastPathHit(t *testing.T) {
-	plan := []planTurn{{instant: "t1", reengage: true, topicSym: []string{"alpha", "beta"}, content: "Q"}}
-	observed := map[string]observedTurn{"t1": {engaged: []string{"thr_1"}}}
+	plan := []planTurn{{instant: "t1", reengage: true, gradeable: true, topicSym: []string{"alpha", "beta"}, content: "Q"}}
+	observed := map[string][]observedTurn{"t1": {{engaged: []string{"thr_1"}}}}
 	live := []liveThread{{id: "thr_1", sym: []string{"alpha", "gamma"}, text: "thr1"}}
 
 	res := gradeTagFidelity(context.Background(), nil, plan, observed, live, tagFidelityRankK, tagFidelityBorderlineEps)
@@ -46,8 +50,8 @@ func TestGradeTagFidelity_FastPathHit(t *testing.T) {
 // TestGradeTagFidelity_ResidueRankHit: no symbolic overlap → residue; the tagged
 // thread is the top cosine match for the prompted content → rank HIT.
 func TestGradeTagFidelity_ResidueRankHit(t *testing.T) {
-	plan := []planTurn{{instant: "t1", reengage: true, topicSym: []string{"zeta"}, content: "Q"}}
-	observed := map[string]observedTurn{"t1": {engaged: []string{"thr_1"}}}
+	plan := []planTurn{{instant: "t1", reengage: true, gradeable: true, topicSym: []string{"zeta"}, content: "Q"}}
+	observed := map[string][]observedTurn{"t1": {{engaged: []string{"thr_1"}}}}
 	live := []liveThread{
 		{id: "thr_1", sym: []string{"alpha"}, text: "d1"},
 		{id: "thr_2", sym: []string{"beta"}, text: "d2"},
@@ -67,8 +71,8 @@ func TestGradeTagFidelity_ResidueRankHit(t *testing.T) {
 // TestGradeTagFidelity_ResidueRankMiss: no symbolic overlap and the tagged
 // thread ranks below the near-top band (rank > K) → rank MISS.
 func TestGradeTagFidelity_ResidueRankMiss(t *testing.T) {
-	plan := []planTurn{{instant: "t1", reengage: true, topicSym: []string{"zeta"}, content: "Q"}}
-	observed := map[string]observedTurn{"t1": {engaged: []string{"thr_5"}}}
+	plan := []planTurn{{instant: "t1", reengage: true, gradeable: true, topicSym: []string{"zeta"}, content: "Q"}}
+	observed := map[string][]observedTurn{"t1": {{engaged: []string{"thr_5"}}}}
 	live := []liveThread{
 		{id: "thr_1", sym: []string{"a"}, text: "d1"},
 		{id: "thr_2", sym: []string{"b"}, text: "d2"},
@@ -94,8 +98,8 @@ func TestGradeTagFidelity_ResidueRankMiss(t *testing.T) {
 // boundary with a sub-epsilon cosine gap → BORDERLINE (not forced into hit/miss).
 // Uses rankK=1 so the boundary is between rank 1 and rank 2.
 func TestGradeTagFidelity_ResidueBorderline(t *testing.T) {
-	plan := []planTurn{{instant: "t1", reengage: true, topicSym: []string{"zeta"}, content: "Q"}}
-	observed := map[string]observedTurn{"t1": {engaged: []string{"thr_1"}}}
+	plan := []planTurn{{instant: "t1", reengage: true, gradeable: true, topicSym: []string{"zeta"}, content: "Q"}}
+	observed := map[string][]observedTurn{"t1": {{engaged: []string{"thr_1"}}}}
 	live := []liveThread{
 		{id: "thr_1", sym: []string{"a"}, text: "d1"},
 		{id: "thr_2", sym: []string{"b"}, text: "d2"},
@@ -116,8 +120,8 @@ func TestGradeTagFidelity_ResidueBorderline(t *testing.T) {
 // → the residue is UNADJUDICATED (counted, never guessed), and it is held out of
 // the hits/misses tally.
 func TestGradeTagFidelity_ResidueUnadjudicated(t *testing.T) {
-	plan := []planTurn{{instant: "t1", reengage: true, topicSym: []string{"zeta"}, content: "Q"}}
-	observed := map[string]observedTurn{"t1": {engaged: []string{"thr_1"}}}
+	plan := []planTurn{{instant: "t1", reengage: true, gradeable: true, topicSym: []string{"zeta"}, content: "Q"}}
+	observed := map[string][]observedTurn{"t1": {{engaged: []string{"thr_1"}}}}
 	live := []liveThread{{id: "thr_1", sym: []string{"alpha"}, text: "d1"}}
 
 	res := gradeTagFidelity(context.Background(), nil, plan, observed, live, tagFidelityRankK, tagFidelityBorderlineEps)
@@ -131,12 +135,12 @@ func TestGradeTagFidelity_ResidueUnadjudicated(t *testing.T) {
 // tag is a tag-missing MISS. Both feed the miss tally.
 func TestGradeTagFidelity_SpuriousAndMissing(t *testing.T) {
 	plan := []planTurn{
-		{instant: "t1", reengage: true, topicSym: []string{"a"}, content: "Q"},
-		{instant: "t2", reengage: true, topicSym: []string{"b"}, content: "Q"},
+		{instant: "t1", reengage: true, gradeable: true, topicSym: []string{"a"}, content: "Q"},
+		{instant: "t2", reengage: true, gradeable: true, topicSym: []string{"b"}, content: "Q"},
 	}
-	observed := map[string]observedTurn{
-		"t1": {created: true},
-		"t2": {tagMissing: true},
+	observed := map[string][]observedTurn{
+		"t1": {{created: true}},
+		"t2": {{tagMissing: true}},
 	}
 	res := gradeTagFidelity(context.Background(), nil, plan, observed, nil, tagFidelityRankK, tagFidelityBorderlineEps)
 	if res.spuriousNewTopic != 1 || res.tagMissing != 1 || res.misses != 2 {
@@ -158,14 +162,14 @@ func TestGradeTagFidelity_SpuriousAndMissing(t *testing.T) {
 func TestGradeTagFidelity_DefaultedTurnIsOmissionNeverHit(t *testing.T) {
 	plan := []planTurn{
 		// t1: full defaulted shape — tag-missing + tag-defaulted + engaged.
-		{instant: "t1", reengage: true, topicSym: []string{"alpha"}, content: "Q"},
+		{instant: "t1", reengage: true, gradeable: true, topicSym: []string{"alpha"}, content: "Q"},
 		// t2: defaulted marker alone alongside engaged (defensive: the grader
 		// must not depend on tag-missing accompanying it).
-		{instant: "t2", reengage: true, topicSym: []string{"alpha"}, content: "Q"},
+		{instant: "t2", reengage: true, gradeable: true, topicSym: []string{"alpha"}, content: "Q"},
 	}
-	observed := map[string]observedTurn{
-		"t1": {engaged: []string{"thr_1"}, tagMissing: true, tagDefaulted: true},
-		"t2": {engaged: []string{"thr_1"}, tagDefaulted: true},
+	observed := map[string][]observedTurn{
+		"t1": {{engaged: []string{"thr_1"}, tagMissing: true, tagDefaulted: true}},
+		"t2": {{engaged: []string{"thr_1"}, tagDefaulted: true}},
 	}
 	// thr_1 overlaps the prompted symbols — the bait the old case ordering
 	// took as a fast-path hit.
@@ -184,11 +188,188 @@ func TestGradeTagFidelity_DefaultedTurnIsOmissionNeverHit(t *testing.T) {
 // TestGradeTagFidelity_NewTopicIntentIgnored: a plan turn with new-topic intent
 // is NOT a re-engagement turn and must not enter any tally.
 func TestGradeTagFidelity_NewTopicIntentIgnored(t *testing.T) {
-	plan := []planTurn{{instant: "t1", reengage: false, topicSym: []string{"a"}, content: "Q"}}
-	observed := map[string]observedTurn{"t1": {created: true}}
+	plan := []planTurn{{instant: "t1", reengage: false, gradeable: true, topicSym: []string{"a"}, content: "Q"}}
+	observed := map[string][]observedTurn{"t1": {{created: true}}}
 	res := gradeTagFidelity(context.Background(), nil, plan, observed, nil, tagFidelityRankK, tagFidelityBorderlineEps)
 	if res.reengageIntent != 0 || res.hits != 0 || res.misses != 0 {
 		t.Fatalf("new-topic intent must be ignored: got intent=%d hits=%d misses=%d", res.reengageIntent, res.hits, res.misses)
+	}
+}
+
+// writeTagFidelityLog writes one event-log day file into a fresh logs dir and
+// returns the dir — the buildObservedTurns fixture helper.
+func writeTagFidelityLog(t *testing.T, lines []string) string {
+	t.Helper()
+	dir := t.TempDir()
+	body := strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "2026-05-04.log"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write log fixture: %v", err)
+	}
+	return dir
+}
+
+// TestBuildObservedTurns_PerTurnSegmentation: two turns in ONE RFC3339 second
+// — a clean engagement then a tag omission — must come back as TWO observed
+// turns in executed order, not one merged group (the burndown item-4 smear:
+// 380 tag-missing lines collapsed into 256 instant groups on the Jul-16 run).
+func TestBuildObservedTurns_PerTurnSegmentation(t *testing.T) {
+	const at = "2026-05-04T08:12:10Z"
+	dir := writeTagFidelityLog(t, []string{
+		at + " context.modified source=user.prompt bytes=47",
+		at + " context.modified source=model.response bytes=1421",
+		at + " thread.engaged thr_3 turn_count=3",
+		at + " context.modified source=user.prompt bytes=52",
+		at + " topic.tag-missing source=model.response bytes=900",
+		at + " thread.tag-defaulted thr=thr_3 cause=missing-tag reprompted=yes",
+		at + " thread.engaged thr_3 turn_count=4",
+	})
+	observed, degraded := buildObservedTurns(dir)
+	if degraded {
+		t.Fatalf("boundary-bearing log classified degraded")
+	}
+	turns := observed[at]
+	if len(turns) != 2 {
+		t.Fatalf("got %d observed turns at %s, want 2 (per-turn segmentation)", len(turns), at)
+	}
+	first, second := turns[0], turns[1]
+	if first.tagMissing || first.tagDefaulted || len(first.engaged) != 1 || first.engaged[0] != "thr_3" {
+		t.Errorf("first turn = %+v, want clean engaged thr_3", first)
+	}
+	if !second.tagMissing || !second.tagDefaulted {
+		t.Errorf("second turn = %+v, want the omission markers", second)
+	}
+}
+
+// TestBuildObservedTurns_DegradedFallback: a log with NO per-turn boundary
+// lines (old format) falls back to instant-merged grouping — one turn per
+// instant, every marker folded in — and is labeled degraded.
+func TestBuildObservedTurns_DegradedFallback(t *testing.T) {
+	const at = "2026-05-04T08:12:10Z"
+	dir := writeTagFidelityLog(t, []string{
+		at + " thread.engaged thr_3 turn_count=3",
+		at + " topic.tag-missing source=model.response bytes=900",
+		"2026-05-04T08:13:00Z thread.created thr_4 anchors=4 project=prj_1",
+	})
+	observed, degraded := buildObservedTurns(dir)
+	if !degraded {
+		t.Fatalf("boundary-free log must be classified degraded")
+	}
+	if turns := observed[at]; len(turns) != 1 || !turns[0].tagMissing || len(turns[0].engaged) != 1 {
+		t.Errorf("degraded group at %s = %+v, want one merged turn (engaged+tagMissing)", at, turns)
+	}
+	if turns := observed["2026-05-04T08:13:00Z"]; len(turns) != 1 || !turns[0].created {
+		t.Errorf("degraded group at 08:13:00 = %+v, want one created turn", turns)
+	}
+}
+
+// TestGradeTagFidelity_SameInstantSeparation is the item-4 smear fix proof:
+// two re-engagement plan turns in one second — the model tagged the first
+// cleanly and omitted on the second — must grade as ONE hit and ONE
+// plan-joined omission, not two omissions (the merged-group behavior).
+func TestGradeTagFidelity_SameInstantSeparation(t *testing.T) {
+	plan := []planTurn{
+		{instant: "t1", reengage: true, gradeable: true, topicSym: []string{"alpha"}, content: "Q1"},
+		{instant: "t1", reengage: true, gradeable: true, topicSym: []string{"alpha"}, content: "Q2"},
+	}
+	observed := map[string][]observedTurn{
+		"t1": {
+			{engaged: []string{"thr_1"}},
+			{engaged: []string{"thr_1"}, tagMissing: true, tagDefaulted: true},
+		},
+	}
+	live := []liveThread{{id: "thr_1", sym: []string{"alpha"}, text: "thr1"}}
+
+	res := gradeTagFidelity(context.Background(), nil, plan, observed, live, tagFidelityRankK, tagFidelityBorderlineEps)
+	if res.hits != 1 || res.tagMissing != 1 || res.misses != 1 {
+		t.Fatalf("same-instant separation: got hits=%d tagMissing=%d misses=%d, want 1/1/1", res.hits, res.tagMissing, res.misses)
+	}
+	if res.joinAmbiguous != 0 {
+		t.Errorf("joinAmbiguous = %d, want 0 (counts agree)", res.joinAmbiguous)
+	}
+}
+
+// TestGradeTagFidelity_JoinAmbiguousCountMismatch: an instant whose observed
+// turn count disagrees with the plan's (an injected refinement turn landed in
+// the same second) is never force-joined — its reengage plan turns land in the
+// joinAmbiguous bin and no grade is issued.
+func TestGradeTagFidelity_JoinAmbiguousCountMismatch(t *testing.T) {
+	plan := []planTurn{{instant: "t1", reengage: true, gradeable: true, topicSym: []string{"alpha"}, content: "Q"}}
+	observed := map[string][]observedTurn{
+		"t1": {
+			{engaged: []string{"thr_1"}},
+			{tagMissing: true},
+		},
+	}
+	live := []liveThread{{id: "thr_1", sym: []string{"alpha"}, text: "thr1"}}
+
+	res := gradeTagFidelity(context.Background(), nil, plan, observed, live, tagFidelityRankK, tagFidelityBorderlineEps)
+	if res.joinAmbiguous != 1 {
+		t.Fatalf("joinAmbiguous = %d, want 1", res.joinAmbiguous)
+	}
+	if res.reengageIntent != 0 || res.hits != 0 || res.misses != 0 || res.tagMissing != 0 {
+		t.Errorf("ambiguous instant must grade nothing: %+v", res)
+	}
+}
+
+// TestGradeTagFidelity_UngradeablePlanTurnHoldsOrdinal: a canonical step whose
+// scripted response carried no parseable plan tag still executes a turn, so it
+// must HOLD its ordinal slot — the gradeable turn behind it joins the correct
+// observed turn.
+func TestGradeTagFidelity_UngradeablePlanTurnHoldsOrdinal(t *testing.T) {
+	plan := []planTurn{
+		{instant: "t1"}, // ungradeable: holds ordinal 0
+		{instant: "t1", reengage: true, gradeable: true, topicSym: []string{"alpha"}, content: "Q"},
+	}
+	observed := map[string][]observedTurn{
+		"t1": {
+			{tagMissing: true},           // the ungradeable turn's outcome — must NOT be graded
+			{engaged: []string{"thr_1"}}, // the gradeable turn's outcome — a fast-path hit
+		},
+	}
+	live := []liveThread{{id: "thr_1", sym: []string{"alpha"}, text: "thr1"}}
+
+	res := gradeTagFidelity(context.Background(), nil, plan, observed, live, tagFidelityRankK, tagFidelityBorderlineEps)
+	if res.hits != 1 || res.tagMissing != 0 || res.misses != 0 {
+		t.Fatalf("ordinal hold: got hits=%d tagMissing=%d misses=%d, want 1/0/0", res.hits, res.tagMissing, res.misses)
+	}
+}
+
+// TestAnchorOverlapFromMeta pins the item-5 vacuity signal: with ZERO
+// persisted source=deterministic history symbols the mean Jaccard is
+// 0-against-empty-set by construction — detTotal==0 is the caller's
+// "unmeasured" gate — while a run with deterministic symbols measures
+// normally.
+func TestAnchorOverlapFromMeta(t *testing.T) {
+	sym := func(n string, src memops.SymbolSource) memops.HistorySymbol {
+		return memops.HistorySymbol{Raw: n, Normalized: n, Source: src, Count: 1}
+	}
+
+	// Vacuous: model anchors only (the Jul-16 live-run shape).
+	vacuous := []memops.ThreadMeta{
+		{ID: "thr_1", HistorySymbols: []memops.HistorySymbol{sym("a", memops.SourceModel)}},
+		{ID: "thr_2", HistorySymbols: []memops.HistorySymbol{sym("b", memops.SourceModel), sym("c", memops.SourceUser)}},
+	}
+	mean, obs, detTotal := anchorOverlapFromMeta(vacuous)
+	if detTotal != 0 {
+		t.Fatalf("vacuous detTotal = %d, want 0", detTotal)
+	}
+	if mean != 0 || obs != 2 {
+		t.Errorf("vacuous mean/obs = %.3f/%d, want 0.000/2 (obs counts model-anchor threads either way)", mean, obs)
+	}
+
+	// Measured: one thread with a shared model+deterministic symbol set.
+	measured := []memops.ThreadMeta{
+		{ID: "thr_1", HistorySymbols: []memops.HistorySymbol{
+			sym("a", memops.SourceModel), sym("b", memops.SourceModel),
+			sym("a", memops.SourceDeterministic), // NB distinct entries share a normalized form only in this fixture
+		}},
+	}
+	mean, obs, detTotal = anchorOverlapFromMeta(measured)
+	if detTotal != 1 || obs != 1 {
+		t.Fatalf("measured detTotal/obs = %d/%d, want 1/1", detTotal, obs)
+	}
+	if want := 1.0 / 2.0; absDiff(mean, want) > 1e-9 {
+		t.Errorf("measured mean = %.3f, want %.3f (|{a}| / |{a,b}|)", mean, want)
 	}
 }
 

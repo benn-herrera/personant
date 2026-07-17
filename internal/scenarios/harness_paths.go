@@ -68,7 +68,7 @@ func measurementBlobPath(t *testing.T, filename string) string {
 
 // repoRoot walks up from the test's working directory until it finds a
 // go.mod file, returning that directory.
-func repoRoot(t *testing.T) string {
+func repoRoot(t testing.TB) string {
 	t.Helper()
 	dir, err := os.Getwd()
 	if err != nil {

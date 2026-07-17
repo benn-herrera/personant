@@ -2,10 +2,12 @@ package scenarios
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -44,6 +46,15 @@ import (
 func RunScenario(t *testing.T, sc Scenario) *Harness {
 	t.Helper()
 	h := newHarness(t, sc)
+
+	// Run manifest: bind this rundata directory to the run that produces it
+	// — mode, provenance, wall-clock span, git HEAD — BEFORE the first step,
+	// so even a crashed/aborted run leaves a self-describing directory (End
+	// stays empty on a run that never completed). Root cause served: a 74 s
+	// mock rung's directory was indistinguishable from a live-inference
+	// run's, mis-binding numbers to runs (burndown 2026-07b).
+	manifestStart := clock.Profiling().UTC().Format(time.RFC3339)
+	writeRunManifest(h, sc, manifestStart, "")
 
 	// The mock holds a single current-response slot. runStep sets it from
 	// each step's MockResponse before driving the turn; every consult
@@ -126,6 +137,11 @@ func RunScenario(t *testing.T, sc Scenario) *Harness {
 	if err := h.Metrics.WriteJSON(h.MetricsPath); err != nil {
 		t.Errorf("scenario %s: metrics write: %v", sc.Name, err)
 	}
+
+	// Manifest completion stamp: rewrite with End filled. A manifest whose
+	// End is empty is the durable signature of a run that never completed.
+	writeRunManifest(h, sc, manifestStart, clock.Profiling().UTC().Format(time.RFC3339))
+
 	if t.Failed() {
 		// Re-emit the path on failure so it's adjacent to the verdict
 		// line in a long test log.
@@ -935,6 +951,93 @@ func runRecoveryGauge(t *testing.T, h *Harness) {
 		}
 		h.Metrics.Counter("archive_recovered_verified", 1)
 	}
+}
+
+// RunManifestFilename is the self-description file every rundata scenario
+// directory receives (writeRunManifest): the run's provenance, bound to the
+// directory so its numbers can never again be attributed to the wrong kind
+// of run (the burndown-2026-07b false-alarm root cause — a short mock dir
+// indistinguishable from a live one).
+const RunManifestFilename = "manifest.json"
+
+// RunManifest is the manifest.json schema. Mode is derived by the harness
+// from what is actually installed ("mock", "live-inference",
+// "live-embedding", or "live-inference+live-embedding"); Rung/Seed/Duration
+// come from the optional Scenario provenance fields (sim rungs populate
+// them; handwritten scenarios omit them). Start/End are real wall-clock
+// RFC3339 (clock.Profiling — the pinned sim Timeline never leaks in); an
+// empty End means the run did not complete. GitHead is the repo HEAD at run
+// time ("unknown" when git is unavailable).
+type RunManifest struct {
+	Scenario string `json:"scenario"`
+	Rung     string `json:"rung,omitempty"`
+	Mode     string `json:"mode"`
+	Seed     int64  `json:"seed,omitempty"`
+	Duration string `json:"duration,omitempty"`
+	Start    string `json:"start"`
+	End      string `json:"end,omitempty"`
+	GitHead  string `json:"git_head"`
+}
+
+// writeRunManifest writes/rewrites manifest.json in the scenario's rundata
+// directory. Called twice per run: at run start (end == "", so a crashed
+// run still leaves a manifest) and at completion (end filled). A write
+// failure is reported via t.Errorf — the manifest is forensic binding, not
+// a reason to halt a measured run.
+func writeRunManifest(h *Harness, sc Scenario, start, end string) {
+	man := RunManifest{
+		Scenario: sc.Name,
+		Rung:     sc.RungLabel,
+		Mode:     runMode(h),
+		Seed:     sc.RungSeed,
+		Start:    start,
+		End:      end,
+		// NB: resolve HEAD from the SOURCE repo root, never from h.RunHome —
+		// the run home contains the substrate's OWN autogit .git, whose HEAD
+		// is the memory tree's, not the code under test.
+		GitHead: gitHead(repoRoot(h.T)),
+	}
+	if sc.RungSpan > 0 {
+		man.Duration = sc.RungSpan.String()
+	}
+	body, err := json.MarshalIndent(man, "", "  ")
+	if err != nil {
+		h.T.Errorf("run manifest: marshal: %v", err)
+		return
+	}
+	path := filepath.Join(h.RunHome, RunManifestFilename)
+	if err := os.WriteFile(path, append(body, '\n'), 0o644); err != nil {
+		h.T.Errorf("run manifest: write %s: %v", path, err)
+	}
+}
+
+// runMode derives the manifest's mode string from what the harness actually
+// installed — never from a caller-supplied label, so it cannot lie:
+// a live chat client (Scenario.LiveClient) is inference-in-loop; a custom
+// recaller factory (Scenario.Recaller) is embedding-in-loop; neither is the
+// mock acceptance path.
+func runMode(h *Harness) string {
+	switch {
+	case h.liveClient != nil && h.recallerFactory != nil:
+		return "live-inference+live-embedding"
+	case h.liveClient != nil:
+		return "live-inference"
+	case h.recallerFactory != nil:
+		return "live-embedding"
+	default:
+		return "mock"
+	}
+}
+
+// gitHead returns the repository HEAD commit hash for the tree containing
+// dir, or "unknown" when git/the repo is unavailable. Forensic only — an
+// error is not worth failing a run over.
+func gitHead(dir string) string {
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return "unknown"
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // newSpineIDs returns the thread IDs present in post but not in pre — the

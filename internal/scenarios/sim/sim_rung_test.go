@@ -183,6 +183,13 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 		cfg.LargeInputBytes = largeInputRungBytes
 	}
 	sc := GenerateWorkload(cfg)
+	// Run-manifest provenance (burndown 2026-07b item 3): the rung label,
+	// seed, and simulated span ride into the harness so manifest.json binds
+	// the rundata directory to the run that produced it. Mode is derived
+	// harness-side from what is actually installed.
+	sc.RungLabel = label
+	sc.RungSeed = cfg.Seed
+	sc.RungSpan = d
 	sc.Recaller = recaller
 	// Inference-in-loop (#98, Inc 3): when a live chat client is supplied the
 	// harness drives turns against it instead of the scripted mock, and

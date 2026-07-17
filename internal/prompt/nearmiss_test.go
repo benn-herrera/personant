@@ -88,6 +88,14 @@ func TestClassifyNearMiss(t *testing.T) {
 			wantOK: false,
 		},
 		{
+			// The unclosed-inner-literal tolerance (§5.1.2; 2026-07-16 live
+			// evidence, 364/380 misses) makes this shape a VALID tag — it must
+			// stop counting as a bad-thread-list near-miss.
+			name:   "unclosed inner new-topic in canonical wrapper is not a near-miss",
+			in:     "*topic: *new-topic [trefoil, unknot]*\nbody",
+			wantOK: false,
+		},
+		{
 			name:       "bare new-topic without anchor brackets",
 			in:         "*new-topic*\nbody",
 			wantOK:     true,
