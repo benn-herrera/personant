@@ -146,7 +146,7 @@ func TestIsHighSpecificity(t *testing.T) {
 		{"plain word data", "data", false},
 		{"empty", "", false},
 		{"short hex below floor", "abc12", false},
-		{"hex with uppercase", "DEADBEEF1", false}, // pattern is lowercase-only
+		{"hex with uppercase", "DEADBEEF1", false},               // pattern is lowercase-only
 		{"word containing hex substring", "x deadbeef y", false}, // not whole-token
 		{"bare filename no slash", "history.go", false},          // needs a path separator
 		{"non-curated extension", "internal/x/foo.exe", false},

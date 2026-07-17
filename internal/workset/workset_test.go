@@ -235,7 +235,7 @@ func TestLayerBOversizedThreadTruncates(t *testing.T) {
 		ActiveThreadData: map[string]ThreadData{
 			id: {
 				Meta: memops.ThreadMeta{ID: id, Anchors: []string{"alpha"}, Summary: "huge", State: memops.ThreadActive},
-				Body:        huge,
+				Body: huge,
 			},
 		},
 	}
@@ -286,7 +286,7 @@ func TestLayerBTrackedFilesSection(t *testing.T) {
 		ActiveThreadData: map[string]ThreadData{
 			id: {
 				Meta: memops.ThreadMeta{ID: id, Anchors: []string{"alpha"}, Summary: "with files", State: memops.ThreadActive},
-				Body:        "thread body text",
+				Body: "thread body text",
 				TrackedFiles: []TrackedFile{{
 					Path:   "src/main.go",
 					Window: window,
@@ -320,7 +320,7 @@ func TestLayerBNoTrackedFilesSection(t *testing.T) {
 		ActiveThreadData: map[string]ThreadData{
 			id: {
 				Meta: memops.ThreadMeta{ID: id, Summary: "plain", State: memops.ThreadActive},
-				Body:        "plain thread body",
+				Body: "plain thread body",
 			},
 		},
 	}
@@ -407,7 +407,7 @@ func TestComposeFullIntegration(t *testing.T) {
 	for _, id := range activeIDs {
 		active[id] = ThreadData{
 			Meta: memops.ThreadMeta{ID: id, Summary: id, State: memops.ThreadActive},
-			Body:        "body of " + id,
+			Body: "body of " + id,
 		}
 	}
 	spineRecs := make([]memops.SpineRecord, 0, 5)

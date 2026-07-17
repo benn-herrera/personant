@@ -264,4 +264,3 @@ func extractSymbols(ctx context.Context, state *State, delta Delta) error {
 		return nil
 	}
 }
-

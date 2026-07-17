@@ -332,10 +332,10 @@ const (
 
 	// The memory partition percentages are taken over the MEMORY byte
 	// budget (Total − live-turn reserve), not over Total.
-	defaultPctLayerE  = 12
-	defaultPctHighA   = 18 // A1 + A2 combined high tier
-	defaultPctLayerC  = 15
-	defaultPctLayerB  = 55
+	defaultPctLayerE = 12
+	defaultPctHighA  = 18 // A1 + A2 combined high tier
+	defaultPctLayerC = 15
+	defaultPctLayerB = 55
 	// defaultPctLayerA1 is the fixed portion of the high tier; A2 is the
 	// residue (defaultPctHighA − defaultPctLayerA1). 10/8 is a
 	// calibration starting point (§9.4).

@@ -193,10 +193,13 @@ func TestA4PreflightAssembledBytesWithinBudget(t *testing.T) {
 // TestA3LiveTurnAndMemoryNeverSilentlyTraded — A3 / I2.
 //
 // (a) Large memory + a normal live turn: the live turn (user input) is
-//     fully present in the assembled request.
+//
+//	fully present in the assembled request.
+//
 // (b) Normal memory + an oversized (but in-reserve) live turn: the memory
-//     layers are still composed (system prompt non-empty), not zeroed to
-//     fit the live turn.
+//
+//	layers are still composed (system prompt non-empty), not zeroed to
+//	fit the live turn.
 func TestA3LiveTurnAndMemoryNeverSilentlyTraded(t *testing.T) {
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 

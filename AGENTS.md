@@ -368,7 +368,8 @@ Makefile                    build + agents-submodule pinning +
 
 ```sh
 make build            # bin/personant (compile only — the cheapest edit check)
-make test             # CHECKPOINT GATE: go vet + go test $(GOPKGS) --count=1 (full suite, incl. multi-day sim rungs)
+make fmt              # gofmt -w the Go source roots (cmd/, internal/) — fix formatting drift
+make test             # CHECKPOINT GATE: fmt-check (drift fails the gate) + go vet + go test $(GOPKGS) --count=1 (full suite, incl. multi-day sim rungs)
 make test-run PKG=<pkg> RUN=<regexp>  # EDIT GATE: run only the touched test(s) — seconds, not minutes
 make integration-test # live reaper embedder/recall tests (opt-in)
 make sim              # acceptance rung-walk (mock); LIVE_EMBEDDING=true / LIVE_INFERENCE=true for live-mode
@@ -394,6 +395,19 @@ reflex. **Commit at meaningful checkpoints** — a complete, self-consistent cha
 — not per-edit, and run the checkpoint gate once at that point. (`make test` is
 still NEVER substituted by a raw `go test`; the slow/live opt-in tests below stay
 gated either way.)
+
+**Mechanical-diff exception (user-ratified 2026-07-17).** A commit whose
+diff is semantics-preserving **by construction** — `gofmt`/`make fmt`
+output, comment-only, or docs-only changes — commits on the EDIT GATE
+(`make build` + `make fmt-check` + touched tests if any) without the
+full checkpoint suite: gofmt operates on the AST and cannot change
+logic, and burning suite-minutes on it is the attention tax formatting
+uniformity exists to eliminate. The next substantive commit's checkpoint
+gate still covers the whole tree, so any freak regression surfaces one
+commit later, attributably. The exception is construction-based, not
+size-based: a "small" logic change is NOT mechanical; anything touching
+executable code paths, go.mod dependency versions, or test assertions
+pays the full gate.
 
 Slow / live tests use a **runtime opt-in**, not build tags: they always
 compile (so a refactor that breaks them fails `make test`), and gate

@@ -151,8 +151,8 @@ func TestLCSSizeGuard(t *testing.T) {
 	// normal delta between them would be tiny — well under the 0.7
 	// threshold — so if idx 1 is stored as a literal it can only be the
 	// size guard, not the diff-literal threshold, that forced it.
-	bigA := makeBody(-1)          // no mutation
-	bigB := makeBody(nLines / 2)  // one line differs
+	bigA := makeBody(-1)         // no mutation
+	bigB := makeBody(nLines / 2) // one line differs
 	c.Append(small)
 	c.Append(bigA)
 	c.Append(bigB)

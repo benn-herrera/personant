@@ -715,4 +715,3 @@ func summarizeFindings(errs []memops.VerifyFinding, drift []string) string {
 	}
 	return strings.Join(parts, "; ")
 }
-

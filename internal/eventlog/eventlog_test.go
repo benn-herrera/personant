@@ -154,4 +154,3 @@ func TestLogRejectsBadInput(t *testing.T) {
 		})
 	}
 }
-

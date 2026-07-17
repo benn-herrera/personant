@@ -501,7 +501,7 @@ func TestSeedThreadSplitsBodyIntoTurns(t *testing.T) {
 	fm.ID = "thr_1"
 	thr := memops.Thread{
 		Meta: fm,
-		Body:        "# title\n\n" + turnExcerpt(7) + "\n" + turnExcerpt(8),
+		Body: "# title\n\n" + turnExcerpt(7) + "\n" + turnExcerpt(8),
 	}
 	if err := SeedThread(paths, thr); err != nil {
 		t.Fatalf("SeedThread: %v", err)

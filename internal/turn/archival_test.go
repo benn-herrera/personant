@@ -322,8 +322,8 @@ func TestSurfaceArchival_EvictsFromWorkingSet(t *testing.T) {
 	if total-1 < archivedBand {
 		t.Fatalf("test premise broken: survivor thr_%d falls inside archived band", total)
 	}
-	const archivedActiveID = "thr_1"  // archived; seeded into ActiveThreads
-	const archivedDormantID = "thr_2" // archived; seeded into DormantThreads
+	const archivedActiveID = "thr_1"           // archived; seeded into ActiveThreads
+	const archivedDormantID = "thr_2"          // archived; seeded into DormantThreads
 	survivorID := fmt.Sprintf("thr_%d", total) // warmest retired thread, survives
 
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))

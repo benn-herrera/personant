@@ -1,6 +1,6 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build test test-run cover sim sim-completeness-rung sim-tokenceiling-rung sim-shadow-slow-test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
+.PHONY: all build fmt fmt-check test test-run cover sim sim-completeness-rung sim-tokenceiling-rung sim-shadow-slow-test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
 
 all: build
 
@@ -42,6 +42,13 @@ BINDIR := bin
 # relaxation. Use $(GOPKGS), not ./..., in every vet/test/cover target.
 GOPKGS := ./cmd/... ./internal/...
 
+# GOFMTDIRS scopes gofmt to the Go source roots, mirroring the GOPKGS rationale:
+# gofmt walks directory trees, so pointing it at test/ would descend into
+# test/api_keys (mode 0700, benn-owned) and fail the walk for a non-owner. cmd/
+# and internal/ hold 100% of the Go code; test/ holds none. The pinned toolchain
+# in go.mod keeps gofmt output identical across machines/agents.
+GOFMTDIRS := cmd internal
+
 # build is the compile EDIT GATE — a .PHONY target (declared above) that ALWAYS
 # recompiles. It is deliberately NOT a $(BINDIR)/personant file target: a
 # file target with no prerequisites no-ops once bin/personant exists, so an
@@ -50,6 +57,23 @@ GOPKGS := ./cmd/... ./internal/...
 build:
 	@mkdir -p $(BINDIR)
 	go build -o $(BINDIR)/personant ./cmd
+
+# fmt canonically formats every Go source root in place. fmt-check is its
+# read-only gate counterpart: gofmt -l lists files that are NOT canonically
+# formatted, and a non-empty list fails. fmt-check is wired into `test` (the
+# checkpoint gate) below so formatting drift fails the gate — it runs in
+# milliseconds, so it fronts the slow go test run (fail fast).
+fmt:
+	gofmt -w $(GOFMTDIRS)
+
+fmt-check:
+	@drift="$$(gofmt -l $(GOFMTDIRS))"; \
+	if [ -n "$$drift" ]; then \
+	  echo "gofmt drift — these files are not canonically formatted:"; \
+	  echo "$$drift" | sed 's/^/  /'; \
+	  echo "run 'make fmt' to fix."; \
+	  exit 1; \
+	fi
 
 update-dependencies: update-agents-dependency
 	go mod tidy
@@ -117,7 +141,7 @@ recall-corpus-fetch:
 sim-shadow-slow-test: build recall-madlibs
 	PERSONANT_SLOW_SIM_TESTS=1 go test ./internal/scenarios/sim/ -run 'TestShadowLayerB_ReverseDivergence' -count=1 -timeout 0 -v
 
-test: build recall-madlibs
+test: build fmt-check recall-madlibs
 	go vet $(GOPKGS)
 	# -timeout 30m: the sim package's in-suite mock rungs (the 1d TestSim, the
 	# multi-day #120 daily-series + #121 day-off harness guards) push that one

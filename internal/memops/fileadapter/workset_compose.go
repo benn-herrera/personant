@@ -277,7 +277,7 @@ func (a *FileAdapter) loadOneThreadData(id string, perThread int, logf func(stri
 		return workset.ThreadData{}, false
 	}
 	return workset.ThreadData{
-		Meta:  fm,
+		Meta:         fm,
 		Body:         body,
 		TrackedFiles: a.loadTrackedFiles(id, logf),
 	}, true
@@ -343,4 +343,3 @@ func (a *FileAdapter) loadDormantSpine(ids []string, logf func(string, ...any)) 
 	}
 	return out
 }
-

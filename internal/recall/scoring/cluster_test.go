@@ -183,8 +183,8 @@ func TestExemplarSet_RecoversCentroidMiss(t *testing.T) {
 		var leaves []ChunkVector
 		for j := 0; j < 4; j++ {
 			v := make([]float64, dim)
-			v[0] = 0.6                          // shared axis-0 pull → strong centroid cosine
-			v[offAxis] = 1.0 + 0.05*float64(j)  // dominant off-axis direction, slight per-leaf spread
+			v[0] = 0.6                         // shared axis-0 pull → strong centroid cosine
+			v[offAxis] = 1.0 + 0.05*float64(j) // dominant off-axis direction, slight per-leaf spread
 			leaves = append(leaves, ChunkVector{TurnNumber: turn, Vector: v})
 			turn++
 		}

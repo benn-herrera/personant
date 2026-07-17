@@ -101,7 +101,7 @@ func TestCreateThread_WritesSpineAndFile(t *testing.T) {
 	rec := validSpine("thr_1", "prj_1")
 	w := memops.ThreadWrite{
 		Spine:       rec,
-		Meta: validFrontmatter(rec),
+		Meta:        validFrontmatter(rec),
 		TurnExcerpt: "## Turn 1\n\ninitial body\n",
 	}
 	if err := a.CreateThread(ctx, w); err != nil {

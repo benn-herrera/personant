@@ -178,8 +178,8 @@ func TestExhaustiveIntraScan_NoFineVectors(t *testing.T) {
 // fine pass uses).
 func TestExhaustiveIntraScan_DefaultThreshold(t *testing.T) {
 	fine := chunksFromVectors([][]float64{
-		{1, 0, 0, 0},       // cosine 1.0 with the query — clears the default
-		{0.05, 1, 0, 0},    // cosine ~0.05 — below DefaultCosineThreshold (0.55)
+		{1, 0, 0, 0},    // cosine 1.0 with the query — clears the default
+		{0.05, 1, 0, 0}, // cosine ~0.05 — below DefaultCosineThreshold (0.55)
 	})
 	snap := snapWithFine("thr_eng", fine, nil)
 	q := []float64{1, 0, 0, 0}
