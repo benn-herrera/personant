@@ -2878,9 +2878,9 @@ Model references are `"provider/model"`, split on the **first** `/` (the model p
 
 **Cross-file validation.** At bootstrap the runtime validates `config.toml` against the loaded pool:
 
-- Each non-empty `[chat]`/`[embedding]` reference must be a well-formed `provider/model` string, and the named provider must exist in `providers.toml`.
-- The `[embedding]` model id must equal that provider's `defaultModel` **verbatim**. The embedding model is a hard static pin — it defines the vector space — so it is effectively double-declared (the pool entry and the config reference) and cross-checked, catchable at bootstrap with no network call.
-- The `[chat]` model id is **not** statically checked. A chat model is resolved at use time against the provider's `/models` endpoint; a no-such-model condition (or an absent/invalid provider `defaultModel`) surfaces as a runtime error then, with the provider's `defaultModel` used as the fallback. This is checked only when the provider is actually used — the runtime does not probe every provider's `/models` at startup.
+- Each non-empty `[chat]`/`[embedding]` reference must be a well-formed `provider/model` string, and the named provider must exist in `providers.toml`. This is the full extent of the bootstrap cross-check: shape plus provider-existence.
+- Neither model id is statically checked against the provider's `defaultModel`. `defaultModel` is the **chat fallback**, not an embedding pin — a single provider legitimately serves both a chat model and a distinct embedding model, so gating the `[embedding]` reference on `defaultModel` equality would reject the common single-provider shape. The embedding model still matters (it defines the vector space, so changing it invalidates the persisted embedding cache), but that is a lifecycle concern, not a bootstrap cross-file equality check.
+- Neither model id is validated against the provider at use time by probing `/models` at startup. A chat or embedding model is resolved at use time against the provider's `/models` endpoint; a no-such-model condition (or an absent/invalid provider `defaultModel`) surfaces as a runtime error then, with the provider's `defaultModel` used as the chat fallback. This is checked only when the provider is actually used — the runtime does not probe every provider's `/models` at startup.
 
 Any cross-file validation failure is fatal at bootstrap. (A faulted provider per §8.2.1 is *not* itself fatal — but a `config.toml` reference to a provider that faulted out of the pool fails this check, since it is no longer in the pool.)
 

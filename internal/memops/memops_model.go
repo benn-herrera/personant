@@ -386,11 +386,13 @@ type ConfigIssue struct {
 // config is valid. An empty [chat] or [embedding] reference is NOT an
 // issue — it means "not configured, fall back to defaults".
 //
-// The chat model id is deliberately not validated here: chat model
-// correctness is resolved at runtime against the provider's /models
-// endpoint. The embedding model id, by contrast, is a hard static pin —
-// it defines the vector space — so it must match the provider's
-// defaultModel verbatim.
+// Both the chat and embedding references are validated for shape (a
+// well-formed "provider/model" string) and provider-existence (the named
+// provider is present in the pool) only. Neither model id is checked
+// against the provider's defaultModel: defaultModel is the chat fallback,
+// not an embedding pin, and a single provider legitimately serves both a
+// chat model and a distinct embedding model. The specific model id (chat
+// or embedding) is resolved at runtime against the provider.
 func ValidateConfig(cfg Config, providers Providers) []ConfigIssue {
 	var issues []ConfigIssue
 
@@ -413,7 +415,7 @@ func ValidateConfig(cfg Config, providers Providers) []ConfigIssue {
 	}
 
 	if cfg.Embedding.Model != "" {
-		provider, model, ok := ParseModelRef(cfg.Embedding.Model)
+		provider, _, ok := ParseModelRef(cfg.Embedding.Model)
 		switch {
 		case !ok:
 			issues = append(issues, ConfigIssue{
@@ -421,17 +423,10 @@ func ValidateConfig(cfg Config, providers Providers) []ConfigIssue {
 				Message: fmt.Sprintf("model %q is not a \"provider/model\" reference", cfg.Embedding.Model),
 			})
 		default:
-			p, known := providers[provider]
-			switch {
-			case !known:
+			if _, known := providers[provider]; !known {
 				issues = append(issues, ConfigIssue{
 					Section: "embedding",
 					Message: fmt.Sprintf("embedding references provider %q, which is not in the provider pool", provider),
-				})
-			case model != p.DefaultModel:
-				issues = append(issues, ConfigIssue{
-					Section: "embedding",
-					Message: fmt.Sprintf("embedding model %q does not match provider %q defaultModel %q", model, provider, p.DefaultModel),
 				})
 			}
 		}

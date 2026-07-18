@@ -107,8 +107,8 @@ func TestValidateConfig(t *testing.T) {
 		}
 		if emb == nil {
 			t.Errorf("missing embedding issue in %+v", issues)
-		} else if !strings.Contains(emb.Message, "does not match") {
-			t.Errorf("embedding issue message = %q, want a model-mismatch report", emb.Message)
+		} else if !strings.Contains(emb.Message, "not in the provider pool") {
+			t.Errorf("embedding issue message = %q, want an unknown-provider report", emb.Message)
 		}
 	})
 
@@ -128,4 +128,95 @@ func TestValidateConfig(t *testing.T) {
 			t.Errorf("issue message = %q, want a malformed-reference report", issues[0].Message)
 		}
 	})
+}
+
+// TestValidateConfig_ProviderModelSplit drives ValidateConfig directly
+// against inline provider pools (no fixture I/O), covering the
+// single-provider / dedicated-provider / unknown / malformed shapes.
+//
+// The key regression: an embedding model id that differs from the
+// provider's defaultModel is legitimate — defaultModel is the chat
+// fallback, not an embedding pin — so a single provider serving both a
+// chat model and a distinct embedding model must validate clean.
+func TestValidateConfig_ProviderModelSplit(t *testing.T) {
+	// singleProvider mirrors the real dogfood shape: one provider whose
+	// defaultModel is a chat model, referenced by both [chat] and
+	// [embedding] with distinct model ids.
+	singleProvider := memops.Providers{
+		"reaper": {Name: "reaper", DefaultModel: "gemma-4-main"},
+	}
+	// twoProviders adds a dedicated embedding provider.
+	twoProviders := memops.Providers{
+		"reaper": {Name: "reaper", DefaultModel: "gemma-4-main"},
+		"embco":  {Name: "embco", DefaultModel: "embco-default"},
+	}
+
+	cases := []struct {
+		name       string
+		cfg        memops.Config
+		providers  memops.Providers
+		wantIssues int
+		wantSect   string // section of the single expected issue (when wantIssues == 1)
+		wantMsg    string // substring the single expected issue must contain
+	}{
+		{
+			// (a) REGRESSION — the exact user shape that was failing.
+			name: "single provider, distinct chat and embedding models",
+			cfg: memops.Config{
+				Chat:      memops.ChatConfig{DefaultModel: "reaper/gemma-4-main"},
+				Embedding: memops.EmbeddingConfig{Model: "reaper/nomicai-embed"},
+			},
+			providers:  singleProvider,
+			wantIssues: 0,
+		},
+		{
+			// (b) dedicated embedding provider.
+			name: "dedicated embedding provider",
+			cfg: memops.Config{
+				Chat:      memops.ChatConfig{DefaultModel: "reaper/gemma-4-main"},
+				Embedding: memops.EmbeddingConfig{Model: "embco/some-embed-model"},
+			},
+			providers:  twoProviders,
+			wantIssues: 0,
+		},
+		{
+			// (c) unknown provider in the embedding reference.
+			name: "embedding references unknown provider",
+			cfg: memops.Config{
+				Embedding: memops.EmbeddingConfig{Model: "ghost/embed"},
+			},
+			providers:  singleProvider,
+			wantIssues: 1,
+			wantSect:   "embedding",
+			wantMsg:    "not in the provider pool",
+		},
+		{
+			// (c) malformed embedding reference (not "provider/model").
+			name: "embedding malformed ref",
+			cfg: memops.Config{
+				Embedding: memops.EmbeddingConfig{Model: "noslash"},
+			},
+			providers:  singleProvider,
+			wantIssues: 1,
+			wantSect:   "embedding",
+			wantMsg:    "is not a",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			issues := memops.ValidateConfig(c.cfg, c.providers)
+			if len(issues) != c.wantIssues {
+				t.Fatalf("got %d issues, want %d: %+v", len(issues), c.wantIssues, issues)
+			}
+			if c.wantIssues == 1 {
+				if issues[0].Section != c.wantSect {
+					t.Errorf("issue section = %q, want %q", issues[0].Section, c.wantSect)
+				}
+				if !strings.Contains(issues[0].Message, c.wantMsg) {
+					t.Errorf("issue message = %q, want it to contain %q", issues[0].Message, c.wantMsg)
+				}
+			}
+		})
+	}
 }
