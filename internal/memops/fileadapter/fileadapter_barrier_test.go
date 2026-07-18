@@ -15,6 +15,7 @@ import (
 	"personant/internal/autogit"
 	"personant/internal/clock"
 	"personant/internal/crashpoint"
+	"personant/internal/eventlog"
 	"personant/internal/index"
 	"personant/internal/memops"
 	"personant/internal/recovery"
@@ -232,6 +233,7 @@ func TestBarrier_CrashWalk(t *testing.T) {
 		"barrier.postNuke.preInit",
 		"barrier.postInit.preWatermark",
 		"barrier.postWatermark.preMarkerClear",
+		"barrier.postDayCommitPreTags",
 	}
 	for _, point := range points {
 		t.Run(point, func(t *testing.T) {
@@ -290,6 +292,122 @@ func TestBarrier_CrashWalk(t *testing.T) {
 			assertBarrierTerminal(t, b, day)
 		})
 	}
+}
+
+// primaryTags returns every tag on primary as name→target-commit-hash
+// (lightweight tags point directly at the commit).
+func primaryTags(t *testing.T, a *FileAdapter) map[string]string {
+	t.Helper()
+	repo, err := autogit.Open(a.paths, autogit.Primary)
+	if err != nil {
+		t.Fatalf("open primary: %v", err)
+	}
+	tags, err := repo.Tags()
+	if err != nil {
+		t.Fatalf("tags: %v", err)
+	}
+	out := map[string]string{}
+	_ = tags.ForEach(func(ref *plumbing.Reference) error {
+		out[ref.Name().Short()] = ref.Hash().String()
+		return nil
+	})
+	return out
+}
+
+// findTagByPrefix returns the single tag whose name starts with prefix,
+// asserting exactly one exists (idempotence: no duplicate life-event
+// tags).
+func findTagByPrefix(t *testing.T, tags map[string]string, prefix string) (name, target string) {
+	t.Helper()
+	var hits []string
+	for n := range tags {
+		if strings.HasPrefix(n, prefix) {
+			hits = append(hits, n)
+		}
+	}
+	if len(hits) != 1 {
+		t.Fatalf("tags matching %q = %v, want exactly 1", prefix, hits)
+	}
+	return hits[0], tags[hits[0]]
+}
+
+// TestBarrier_LifecycleTags is the focused derivation test: the barrier
+// mints one primary tag per mappable §2.8 life event, at the right
+// commit, with a round-trippable stamp — created/retired/project at the
+// day-commit, archived at the archival commit.
+func TestBarrier_LifecycleTags(t *testing.T) {
+	a := newBarrierHome(t, memops.ArchiveHighWater+10) // pressure so B1 archives
+	ctx := context.Background()
+
+	// Day-N life events (clock is still pinned at bDay0 by newBarrierHome).
+	if err := eventlog.Log(a.paths, "thread", "created", "thr_created1 via=slash-topic project=prj_1"); err != nil {
+		t.Fatalf("log created: %v", err)
+	}
+	if err := eventlog.Log(a.paths, "retire", "complete", "thr=thr_retired1 resolution=resolved"); err != nil {
+		t.Fatalf("log retire: %v", err)
+	}
+	if err := eventlog.Log(a.paths, "project", "created", "id=prj_created1 name=Fresh"); err != nil {
+		t.Fatalf("log project: %v", err)
+	}
+
+	pinBarrierClock(t, bDay1)
+	day := autogit.DayIndexOf(bDay1) - 1
+	if _, err := a.MaybeDayBarrier(ctx); err != nil {
+		t.Fatalf("barrier: %v", err)
+	}
+
+	dayCommit, err := autogit.HeadHash(ctx, a.paths, autogit.Primary)
+	if err != nil {
+		t.Fatalf("day-commit hash: %v", err)
+	}
+	tags := primaryTags(t, a)
+
+	// created / retired / project → the day-commit, stamp round-trips.
+	for _, tc := range []struct{ prefix, kind string }{
+		{"thread/thr_created1/created_", "created"},
+		{"thread/thr_retired1/retired_", "retired"},
+		{"project/prj_created1/created_", "project-created"},
+	} {
+		name, target := findTagByPrefix(t, tags, tc.prefix)
+		if target != dayCommit {
+			t.Errorf("%s tag %s → %s, want day-commit %s", tc.kind, name, target, dayCommit)
+		}
+		if _, perr := autogit.ParseTagStamp(strings.TrimPrefix(name, tc.prefix)); perr != nil {
+			t.Errorf("%s tag %s stamp does not round-trip: %v", tc.kind, name, perr)
+		}
+	}
+
+	// archived → the archival commit from the index (NOT the day-commit).
+	entries, err := store.LoadArchiveIndex(a.paths)
+	if err != nil {
+		t.Fatalf("LoadArchiveIndex: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("no archive entries — pressure did not archive")
+	}
+	archTargets := map[string]string{}
+	for _, e := range entries {
+		archTargets[e.ThrID] = e.CommitHash
+	}
+	archivedTags := 0
+	for name, target := range tags {
+		parts := strings.Split(name, "/")
+		if len(parts) != 3 || parts[0] != "thread" || !strings.HasPrefix(parts[2], "archived_") {
+			continue
+		}
+		archivedTags++
+		id := parts[1]
+		if want := archTargets[id]; target != want || want == dayCommit {
+			t.Errorf("archived tag %s → %s, want archival commit %s (!= day-commit)", name, target, want)
+		}
+		if _, perr := autogit.ParseTagStamp(strings.TrimPrefix(parts[2], "archived_")); perr != nil {
+			t.Errorf("archived tag %s stamp does not round-trip: %v", name, perr)
+		}
+	}
+	if archivedTags == 0 {
+		t.Error("no thread/*/archived_* tags minted despite archival pressure")
+	}
+	_ = day
 }
 
 // TestBarrier_MorningCompletionThenNextDay is kill-timing walk 1

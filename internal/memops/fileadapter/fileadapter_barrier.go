@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-git/go-git/v5"
 
@@ -61,6 +62,7 @@ var (
 	cpBarrierPostNuke      = crashpoint.Register("barrier.postNuke.preInit")
 	cpBarrierPostInit      = crashpoint.Register("barrier.postInit.preWatermark")
 	cpBarrierPostWatermark = crashpoint.Register("barrier.postWatermark.preMarkerClear")
+	cpBarrierPreTags       = crashpoint.Register("barrier.postDayCommitPreTags")
 )
 
 // MaybeDayBarrier is the new-day poll (§2.1). Detection: the barrier
@@ -297,6 +299,17 @@ func (a *FileAdapter) barrierTail(ctx context.Context, day int, res *memops.DayB
 			return fmt.Errorf("fileadapter: day barrier: re-mint day-commit: %w", err)
 		}
 	}
+
+	// Lifecycle tags: ONE derivation site (ARCHITECTURE.md "Git tags for
+	// project/thread lifecycle navigation"). Placed AFTER the F1 tail
+	// guard so primary HEAD is guaranteed the day-commit for `day` (the
+	// target of created/retired/project tags), and BEFORE ClearMarker so
+	// it lives inside the op=barrier scope: a crash here leaves the marker
+	// and completion re-derives idempotently (Tag skip-if-exists). Never
+	// fatal to the barrier — a tagging failure must not wedge the seal or
+	// leave a half-nuked daily, so it is logged, not returned.
+	crashpoint.At(cpBarrierPreTags)
+	a.deriveLifecycleTags(ctx, day)
 
 	// Marker clear is the LAST step — the §2.6 loop bound depends on it.
 	if err := store.ClearMarker(a.paths); err != nil {
@@ -553,6 +566,173 @@ func (a *FileAdapter) dailyLastDay() (int, bool) {
 		return 0, false
 	}
 	return autogit.DayIndexOf(c.Committer.When), true
+}
+
+// ---------- lifecycle tags (the single derivation site) ----------
+
+// deriveLifecycleTags is the barrier's ONE lifecycle-tag derivation site.
+// It parses `day`'s §2.8 event log for the mappable life events and
+// creates one primary tag per event at the commit that first captured it:
+//
+//	thread.created   → thread/<id>/created   @ the day-commit
+//	retire.complete  → thread/<id>/retired   @ the day-commit
+//	project.created  → project/<id>/created  @ the day-commit
+//	archive.archived → thread/<id>/archived  @ the archival commit
+//	                   (hash from the thread's archive-index entry)
+//
+// Ambiguous project open/close/switch semantics are deliberately NOT
+// mapped — they remain deferred (ARCHITECTURE.md). Idempotent by exact
+// name (ErrTagExists tolerated), so a completion re-drive re-derives
+// safely; names are timestamp-unique by construction.
+//
+// Day scoping is per event type, because the barrier for day N fires the
+// NEXT day (target = CurrentDay-1):
+//   - created / retired / project occurred DURING day N, so they are
+//     tagged only when their event timestamp's DayIndexOf == N (later
+//     lines belong to a future barrier), targeting day N's day-commit;
+//   - archived is emitted BY this barrier's B1 at barrier wall-clock
+//     (day N+1), so it carries no day filter and targets the archival
+//     commit recorded in the archive index.
+//
+// The log window [N .. CurrentDay()] covers both without over-reading.
+//
+// Best-effort throughout: lifecycle tags are a forensic navigation
+// convenience, so any read/parse/tag error is logged (barrier.tag-error)
+// and skipped rather than failing the seal — a tagging fault must never
+// wedge the barrier or leave a half-built daily.
+//
+// Multi-day-gap note: the window starts at N, so life events on earlier
+// idle gap-days (< N) go untagged — the documented "only the final day's
+// log is honestly derivable" gap.
+func (a *FileAdapter) deriveLifecycleTags(ctx context.Context, day int) {
+	target, err := autogit.HeadHash(ctx, a.paths, autogit.Primary)
+	if err != nil {
+		a.logBarrier("tag-error", fmt.Sprintf("day=%d head: %v", day, err))
+		return
+	}
+	cur := autogit.CurrentDay()
+	if cur < day {
+		cur = day
+	}
+	lines := a.readLogWindow(day, cur)
+	if len(lines) == 0 {
+		return
+	}
+	// Archived events target the archival commit (already stamped into the
+	// index by B1), not the day-commit — looked up by thread id.
+	archHash := map[string]string{}
+	if entries, ierr := store.LoadArchiveIndex(a.paths); ierr == nil {
+		for _, e := range entries {
+			if e.CommitHash != "" {
+				archHash[e.ThrID] = e.CommitHash
+			}
+		}
+	}
+
+	for _, ln := range lines {
+		ts, event, details, ok := parseLogLine(ln)
+		if !ok {
+			continue
+		}
+		var kind, id, ev, commit string
+		switch event {
+		case "thread.created":
+			if autogit.DayIndexOf(ts) != day {
+				continue
+			}
+			kind, ev, commit = autogit.TagKindThread, autogit.TagEventCreated, target
+			id = firstField(details)
+		case "retire.complete":
+			if autogit.DayIndexOf(ts) != day {
+				continue
+			}
+			kind, ev, commit = autogit.TagKindThread, autogit.TagEventRetired, target
+			id = fieldValue(details, "thr=")
+		case "project.created":
+			if autogit.DayIndexOf(ts) != day {
+				continue
+			}
+			kind, ev, commit = autogit.TagKindProject, autogit.TagEventCreated, target
+			id = fieldValue(details, "id=")
+		case "archive.archived":
+			kind, ev = autogit.TagKindThread, autogit.TagEventArchived
+			id = fieldValue(details, "thr=")
+			commit = archHash[id]
+		default:
+			continue
+		}
+		if id == "" || commit == "" {
+			continue // unmappable line — never guess a target
+		}
+		name := autogit.LifecycleTagName(kind, id, ev, ts)
+		if terr := autogit.Tag(ctx, a.paths, autogit.Primary, name, commit); terr != nil && !errors.Is(terr, git.ErrTagExists) {
+			a.logBarrier("tag-error", fmt.Sprintf("day=%d name=%s: %v", day, name, terr))
+		}
+	}
+}
+
+// readLogWindow returns the tolerant-read lines of every event-log file
+// covering day indices [fromDay, toDay]. A UTC day spans at most two
+// local calendar dates (logs are named by the wall clock), so both
+// candidates per day are read and de-duplicated; the caller scopes by
+// event type / DayIndexOf.
+func (a *FileAdapter) readLogWindow(fromDay, toDay int) []string {
+	loc := clock.Timeline().Location()
+	seen := map[string]struct{}{}
+	var out []string
+	for d := fromDay; d <= toDay; d++ {
+		start := time.Unix(int64(d)*86400, 0)
+		for _, inst := range []time.Time{start.In(loc), start.Add(24*time.Hour - time.Second).In(loc)} {
+			rel := eventlog.DayLogRel(inst)
+			if _, dup := seen[rel]; dup {
+				continue
+			}
+			seen[rel] = struct{}{}
+			lines, _, rerr := eventlog.ReadLinesTolerant(filepath.Join(a.paths.Home, filepath.FromSlash(rel)))
+			if rerr != nil {
+				a.logBarrier("tag-error", fmt.Sprintf("read %s: %v", rel, rerr))
+				continue
+			}
+			out = append(out, lines...)
+		}
+	}
+	return out
+}
+
+// parseLogLine splits a §2.8 event line "<rfc3339> <cat>.<action> [details]".
+func parseLogLine(line string) (ts time.Time, event, details string, ok bool) {
+	parts := strings.SplitN(line, " ", 3)
+	if len(parts) < 2 {
+		return time.Time{}, "", "", false
+	}
+	t, err := time.Parse(time.RFC3339, parts[0])
+	if err != nil {
+		return time.Time{}, "", "", false
+	}
+	if len(parts) == 3 {
+		details = parts[2]
+	}
+	return t, parts[1], details, true
+}
+
+// firstField returns the first whitespace-delimited token of details (the
+// thread id leading a thread.created line).
+func firstField(details string) string {
+	if f := strings.Fields(details); len(f) > 0 {
+		return f[0]
+	}
+	return ""
+}
+
+// fieldValue returns the value of the "prefix<value>" token in details
+// (e.g. fieldValue("thr=thr_9 project=prj_1", "thr=") == "thr_9").
+func fieldValue(details, prefix string) string {
+	for _, f := range strings.Fields(details) {
+		if v, ok := strings.CutPrefix(f, prefix); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 // ---------- completion (the recovery/adapter seam, F4) ----------

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 
 	"personant/internal/autogit"
 	"personant/internal/memops/fileadapter"
@@ -93,6 +94,51 @@ func TestSimBarrier2Day(t *testing.T) {
 	if dayCommits != int(barriers) {
 		t.Errorf("primary day-commit count = %d, want %d (one per sealed day)", dayCommits, barriers)
 	}
+
+	// Lifecycle tags: the sim creates threads on day 0, so the barrier
+	// mints thread/*/created_* tags at the sealed day-0 day-commit, with
+	// round-trippable stamps. A thread archived that day (if pressure
+	// fired) carries the archival-commit target, never the day-commit.
+	dayCommitHash := priHead.Hash().String()
+	archTargets := map[string]string{}
+	if entries, aerr := store.LoadArchiveIndex(h.Paths); aerr == nil {
+		for _, e := range entries {
+			archTargets[e.ThrID] = e.CommitHash
+		}
+	}
+	tagIter, err := pri.Tags()
+	if err != nil {
+		t.Fatalf("primary tags: %v", err)
+	}
+	createdTags, archivedTags := 0, 0
+	_ = tagIter.ForEach(func(ref *plumbing.Reference) error {
+		name := ref.Name().Short()
+		target := ref.Hash().String()
+		parts := strings.SplitN(name, "/", 3)
+		if len(parts) != 3 {
+			return nil
+		}
+		switch {
+		case parts[0] == "thread" && strings.HasPrefix(parts[2], "created_"):
+			createdTags++
+			if target != dayCommitHash {
+				t.Errorf("created tag %s → %s, want day-commit %s", name, target, dayCommitHash)
+			}
+			if _, perr := autogit.ParseTagStamp(strings.TrimPrefix(parts[2], "created_")); perr != nil {
+				t.Errorf("created tag %s stamp does not round-trip: %v", name, perr)
+			}
+		case parts[0] == "thread" && strings.HasPrefix(parts[2], "archived_"):
+			archivedTags++
+			if want := archTargets[parts[1]]; target != want || want == dayCommitHash {
+				t.Errorf("archived tag %s → %s, want archival commit %s (!= day-commit)", name, target, want)
+			}
+		}
+		return nil
+	})
+	if createdTags == 0 {
+		t.Error("no thread/*/created_* lifecycle tags after barrier — the day's created events went untagged")
+	}
+	t.Logf("lifecycle tags: created=%d archived=%d", createdTags, archivedTags)
 
 	// Daily evidence: present, reborn (shallow — only day-1 turns + the
 	// baseline, NOT the whole run), watermark anchored to its HEAD.

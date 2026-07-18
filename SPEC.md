@@ -510,7 +510,7 @@ Actions ending in `-error` (and `warning`) are forensic diagnostics, not measure
 | `retire` | `prompt` (with `thr=` and `inactivity=`\|`trigger=manual`), `ack` (EVERY acked closure — retire or WIP — with `resolution=` and `edited=yes\|no`, §3.5), `defer`, `complete` (with `resolution=`), `curator-error`, `load-error`, `resolver-error`, `apply-error`, `error` |
 | `archive` | `archived`, `recovered`, `recovered-record`, `skip`, `under-drain`, `error` |
 | `recovery` | (§4.5.8 startup reconciliation; forensic) `begin`, `complete` (with `cells=`, `reset=`, `stamped=`, `unrepairable=`), `pending` (with `op=`, `day=` — a barrier/archival completion was typed to the adapter), `rollback` (torn-turn reset — `turn=`, `reverted=`, `debris=`), `journal-recovered` (preserved in-flight bytes — `turn=`, `records=`), `morning-init` (`baseline=`, `rebuilt=`), `adopt` (cell-12 greenfield/legacy), `stamp-repaired` (cell-9), `unrepairable` (archive entry stays refused — `thr=`, `reason=`), `quarantined` (byte-exact preserved path), `log-tail-repaired` |
-| `barrier` | (§4.5.8 day barrier B0–B6; forensic) `begin` (`day=`), `archived` (B1 — `day=`, `count=`), `day-committed` (B2 — `day=`, optional `repaired=true`), `reborn` (B5 daily re-init — `day=`, `baseline=`), `complete` (`day=`), `re-mint` (defensive B2 re-mint on a non-day-shape HEAD — currently unreachable), `quarantined` (§4.5.8 quarantine-and-proceed — `paths=`, `dir=`, `restored=`) |
+| `barrier` | (§4.5.8 day barrier B0–B6; forensic) `begin` (`day=`), `archived` (B1 — `day=`, `count=`), `day-committed` (B2 — `day=`, optional `repaired=true`), `reborn` (B5 daily re-init — `day=`, `baseline=`), `complete` (`day=`), `re-mint` (defensive B2 re-mint on a non-day-shape HEAD — currently unreachable), `quarantined` (§4.5.8 quarantine-and-proceed — `paths=`, `dir=`, `restored=`), `tag-error` (forensic; a lifecycle-tag derivation read/parse/tag fault — never fatal to the seal) |
 | `consolidate` | `sleep-cycle` |
 | `dedup` | `chain-aged`, `chain-age-refused`, `error` |
 | `fs` | `edit-no-path`, `write-error`, `commit-untracked` (`unsynced-no-topic-tag` is **retracted** with the missing-tag abort — §3.3 recovery means edits always bind) |
@@ -2162,6 +2162,36 @@ Only B1/B2 mutate primary; B4/B5 are pure daily lifecycle; B3/B6 touch
 derived + watermark. The canonical worktree is untouched by B2–B6 (only
 *reduced*, never lost, by B1's archival removals — bytes preserved in
 primary).
+
+**Lifecycle tags (one derivation site).** After the B2 day-commit lands
+(inside the `op=barrier` scope, immediately before `ClearMarker`), the
+barrier derives autonomic **git tags on primary** marking thread/project
+life events. It parses the sealed day's §2.8 event log (the reuse of the
+tolerant `eventlog` reader) and maps: `thread.created` →
+`thread/<id>/created`, `retire.complete` → `thread/<id>/retired`,
+`project.created` → `project/<id>/created` — all targeting **that day's
+day-commit** — and `archive.archived` → `thread/<id>/archived`, targeting
+the **archival commit** recorded in the thread's archive-index entry.
+Ambiguous project *open/close/switch* semantics are deliberately NOT
+mapped (still deferred, ARCHITECTURE.md). The ref namespace is
+`<kind>/<id>/<event>_<stamp>`, e.g.
+`thread/thr_42/created_2026-05-08T03-12-00Z`; the stamp is the event's own
+UTC-normalized instant in RFC3339 with time colons rewritten to hyphens
+(git refs forbid `:`), so names are timestamp-unique by construction and
+sort **lexically = chronologically** across DST boundaries and mixed
+original offsets (`autogit.TagStamp` / `ParseTagStamp` are the single
+source; nothing else hand-formats). Derivation is **idempotent** —
+skip-if-exists by exact name (`ErrTagExists` tolerated) — so a barrier
+completion re-drive re-derives safely, and **best-effort**: a
+read/parse/tag fault logs `barrier.tag-error` and is skipped, never
+failing the seal. The tag→log→pathspec workflow it enables: locate a life
+event's tag, then `git show <tag>:spine.jsonl` (or any path) reads the
+substrate exactly as it stood at that commit — the tag narrows the
+pathspec lookup to O(1) without a bespoke temporal index. *Day-scoping
+note:* the barrier for day N fires the next day, so created/retired/project
+lines are scoped to `DayIndexOf(ts) == N` while `archived` (emitted by the
+barrier itself) is not; life events on earlier **idle gap-days** (< N) go
+untagged — the barrier honestly derives only from the sealed day's log.
 
 **Roll-forward completion (crash inside the barrier).** Every barrier
 crash window recovers by **roll-forward, never a reset** (INV-1). The

@@ -71,6 +71,7 @@ var crashScenarioCoverage = map[string]string{
 	"barrier.postNuke.preInit":                 "fileadapter.TestBarrier_CrashWalk",
 	"barrier.postInit.preWatermark":            "fileadapter.TestBarrier_CrashWalk",
 	"barrier.postWatermark.preMarkerClear":     "fileadapter.TestBarrier_CrashWalk",
+	"barrier.postDayCommitPreTags":             "fileadapter.TestBarrier_CrashWalk (also TestBarrier_LifecycleTags)",
 	"archiveBatch.postCapture.preMembership":   "fileadapter.TestBarrier_CrashWalk",
 	"archiveBatch.postMembership.preRemove":    "fileadapter.TestBarrier_CrashWalk",
 	"archiveBatch.midRemove":                   "fileadapter.TestBarrier_CrashWalk",

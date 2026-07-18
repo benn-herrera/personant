@@ -195,12 +195,34 @@ loose-object accrual vs sleep-gc cadence, clean-open O(1) verification.
 
 ## Carry-forward (post-#94, honestly open)
 
-- **Intra-day derived-watermark question (R4-flagged).** The turn path
-  never stamps the watermark; the barrier owns freshness (§4.5.8 (7)).
-  This is STATED design behavior, not a gap — but if a future need
-  wants clean-open O(1) *within* a day after a markerless hand-edit
-  (rather than deferring to the next full sweep), revisit whether an
-  intra-day watermark stamp is worth its cost. Parked deliberately.
+- **Intra-day derived-watermark question (R4-flagged) — RESOLVED
+  (parked by design).** The turn path never stamps the watermark; the
+  barrier owns freshness (§4.5.8 (7)). This is STATED design behavior,
+  not a gap. Evidence it is safe to leave parked: there is **no
+  behavior-bearing intra-day reader of the derived symbol index** —
+  recall sources thread lifecycle from **frontmatter** (`scoring.go`),
+  and the `symbols.jsonl` candidate filter was **deliberately reverted**
+  (fmcache.go Inc-6 note); the only intra-day readers of the derived
+  index are the freshness gate + `index.Check`, neither of which is a
+  behavior surface. An intra-day watermark stamp would buy clean-open
+  O(1) *within* a day after a markerless hand-edit, at per-turn cost, for
+  no behavioral benefit. Left parked; revisit only if a future
+  behavior-bearing intra-day derived reader appears.
+
+- **Lifecycle tags — SHIPPED (this wave).** Autonomic git tags on
+  **primary** mark thread create/retire/archive and project *created*
+  life events (project open/close still deferred — ambiguous vocabulary,
+  ARCHITECTURE.md). One derivation site at the barrier, after B2 lands and
+  before `ClearMarker`: parse the sealed day's §2.8 event log and mint
+  `<kind>/<id>/<event>_<stamp>` tags (created/retired/project → the
+  day-commit; archived → the archive-index commit). Idempotent
+  (skip-if-exists), best-effort (`barrier.tag-error`, never fatal).
+  `autogit.TagStamp`/`ParseTagStamp` are the single stamp source
+  (UTC-normalized, lexically = chronologically sortable). Crashpoint
+  `barrier.postDayCommitPreTags` + coverage-gate scenario; sim
+  `TestSimBarrier2Day` asserts the tags. See SPEC §4.5.8. *Known gap:*
+  life events on idle gap-days (< sealed day N) go untagged — the barrier
+  derives only from the sealed day's log.
 - **§6.2 mid-day re-baseline arming.** The recovery side is wired
   (`op=rebaseline` marker in the known-op set + `decodeOrig`; a crash
   routes to `rm -rf .git-daily` + morning-init, `CellRebaseline`). The
