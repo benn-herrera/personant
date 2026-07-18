@@ -12,10 +12,47 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 
 	"personant/internal/memops"
 	"personant/internal/store"
 )
+
+// rebuildFaultInjector, when installed, is applied to the symbol set every
+// Rebuild is about to write. It exists solely for the #94 crash-injection
+// matrix's fixture (j): forcing a PERSISTENT derived drift — a Rebuild whose
+// output never matches what Check recomputes from the (unchanged) spine —
+// drives the day barrier's B6 quarantine-and-proceed posture (§2.7), which
+// no natural corruption can exercise because a plain rebuild always
+// re-derives Check-clean output. Production never installs it; the nil check
+// is one branch on the cold rebuild path. Kept in the always-compiled path
+// (not build-tagged) for the crashpoint seam's bit-rot reason.
+var (
+	faultMu              sync.Mutex
+	rebuildFaultInjector func([]store.SymbolRecord) []store.SymbolRecord
+)
+
+// SetRebuildFaultInjector installs fn as the test-only rebuild fault
+// injector and returns a restore closure a test should defer. Passing nil
+// clears it. Guarded so it is race-clean under -race even when other
+// packages' tests drive Rebuild concurrently.
+func SetRebuildFaultInjector(fn func([]store.SymbolRecord) []store.SymbolRecord) (restore func()) {
+	faultMu.Lock()
+	prev := rebuildFaultInjector
+	rebuildFaultInjector = fn
+	faultMu.Unlock()
+	return func() {
+		faultMu.Lock()
+		rebuildFaultInjector = prev
+		faultMu.Unlock()
+	}
+}
+
+func currentFaultInjector() func([]store.SymbolRecord) []store.SymbolRecord {
+	faultMu.Lock()
+	defer faultMu.Unlock()
+	return rebuildFaultInjector
+}
 
 // Options controls Rebuild and Check behavior.
 //
@@ -43,10 +80,14 @@ func Rebuild(paths store.PersonantPaths, opts Options) error {
 		return err
 	}
 
-	if err := store.WriteSymbols(paths.Symbols, plan.symbols); err != nil {
+	syms := plan.symbols
+	if inject := currentFaultInjector(); inject != nil {
+		syms = inject(syms)
+	}
+	if err := store.WriteSymbols(paths.Symbols, syms); err != nil {
 		return fmt.Errorf("rebuild: write symbols: %w", err)
 	}
-	logf("index: wrote %s (%d symbols)", paths.Symbols, len(plan.symbols))
+	logf("index: wrote %s (%d symbols)", paths.Symbols, len(syms))
 
 	// Write digests in a deterministic order (lexical project id) for
 	// readable progress output.

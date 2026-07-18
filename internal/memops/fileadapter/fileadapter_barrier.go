@@ -421,7 +421,7 @@ func (a *FileAdapter) spineQuarantineRepair(ctx context.Context, findings []memo
 	q := newBarrierQuarantine(a.paths)
 	seen := map[string]struct{}{}
 	for _, f := range findings {
-		rel := findingRel(f.Path)
+		rel := a.findingRel(f.Path)
 		if rel == "" {
 			continue
 		}
@@ -480,7 +480,7 @@ func (a *FileAdapter) assertDerivedFresh(ctx context.Context, recovering bool) e
 	}
 	q := newBarrierQuarantine(a.paths)
 	for _, d := range check.Drifts {
-		if rel := findingRel(d.Path); rel != "" {
+		if rel := a.findingRel(d.Path); rel != "" {
 			if _, qerr := q.quarantineAndRemove(rel); qerr != nil {
 				return fmt.Errorf("fileadapter: day barrier: quarantine derived %s: %w", rel, qerr)
 			}
@@ -511,14 +511,29 @@ func (a *FileAdapter) assertDerivedFresh(ctx context.Context, recovering bool) e
 	return nil
 }
 
-// findingRel maps a verify/check finding path onto a home-relative file
-// path: a "file[line]" location loses its bracket suffix; a path that
-// names no real file maps to "" (unquarantinable — the caller skips it).
-func findingRel(p string) string {
+// findingRel maps a verify/check finding path onto a home-relative,
+// slash-separated file path suitable for quarantineAndRemove / Checkout: a
+// "file[line]" location loses its bracket suffix, and an ABSOLUTE path (as
+// index.Check emits for symbols.jsonl — paths.Symbols is absolute, unlike
+// verify.Verify's already-relative findings) is made relative to the home.
+// A path that names no real file maps to "" (unquarantinable — the caller
+// skips it).
+func (a *FileAdapter) findingRel(p string) string {
 	if i := strings.IndexByte(p, '['); i >= 0 {
 		p = p[:i]
 	}
-	return filepath.ToSlash(strings.TrimSpace(p))
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	if filepath.IsAbs(p) {
+		rel, err := filepath.Rel(a.paths.Home, p)
+		if err != nil {
+			return ""
+		}
+		p = rel
+	}
+	return filepath.ToSlash(p)
 }
 
 // dailyLastDay returns the day index of the daily DB's HEAD commit —

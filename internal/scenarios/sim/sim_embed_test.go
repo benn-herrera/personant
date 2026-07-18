@@ -32,6 +32,7 @@ import (
 	"personant/internal/model"
 	"personant/internal/recall/measure"
 	"personant/internal/scenarios"
+	"personant/internal/testsupport"
 )
 
 // mockEmbedderRecaller is the Scenario.Recaller factory for the head-to-head
@@ -48,6 +49,12 @@ func mockEmbedderRecaller(ops memops.MemoryOps) measure.Recaller {
 // assert recall quality (MockEmbedder is not semantic) — only that the
 // machinery runs end-to-end and stays network-free.
 func TestSimEmbeddingHeadToHead_Machinery(t *testing.T) {
+	// SUITE BUDGET (#94 R4): this rung drives a fixed 24h sim profile whose
+	// hard gates arm only under live flags; under the mock default it just
+	// re-proves plumbing TestSim already covers. Opt it out of the default
+	// suite so `make test` stays inside the sim-package timeout budget; run
+	// it via `make sim-shadow-slow-test`.
+	testsupport.RequireSlowSim(t)
 	corpus := loadCorpusSlots(t)
 	h := runSimRung(t, "sim-embed-machinery", simDayDuration, corpus, mockEmbedderRecaller, false, nil, "")
 
@@ -196,6 +203,11 @@ func TestSimEmbeddingHeadToHead_Machinery(t *testing.T) {
 // the embedding head-to-head series, so the symbolic-only summary and the
 // acceptance gates are provably unaffected by the #98 wiring.
 func TestSimNoEmbedder_HeadToHeadAbsent(t *testing.T) {
+	// SUITE BUDGET (#94 R4): the negative-control companion to
+	// TestSimEmbeddingHeadToHead_Machinery — same fixed 24h profile, moved
+	// out of the default suite for the same reason. Run via
+	// `make sim-shadow-slow-test`.
+	testsupport.RequireSlowSim(t)
 	corpus := loadCorpusSlots(t)
 	h := runSimRung(t, "sim-embed-absent", simDayDuration, corpus, nil, false, nil, "")
 

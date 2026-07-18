@@ -708,6 +708,105 @@ func TestBarrier_PersistentSpineBreak(t *testing.T) {
 	}
 }
 
+// TestBarrier_PersistentDerivedBreak is fixture (j) — the §2.7
+// quarantine-and-proceed posture for a PERSISTENT B6 CheckDerivedFresh
+// failure. A rebuild fault (index.SetRebuildFaultInjector) makes every
+// derived rebuild emit a bogus symbol Check never recomputes, so the drift
+// survives both B3's rebuild AND B6's post-quarantine rebuild — the only way
+// to reach the derived quarantine path, since ordinary derived corruption is
+// silently fixed by the rebuild before B6 ever checks. Asserts: while the
+// fault persists the barrier refuses-to-open with the op=barrier marker
+// intact and the offending derived bytes quarantined byte-exact (no corrupt
+// day-commit, no accretion); once the fault clears to a single residual
+// rebuild, the completion converges to exactly one day-commit with
+// ScopedRestored naming the quarantined+regenerated derived path.
+func TestBarrier_PersistentDerivedBreak(t *testing.T) {
+	a := newBarrierHome(t, 2)
+	ctx := context.Background()
+
+	bogus := store.SymbolRecord{Symbol: "__crash_matrix_bogus__", Threads: []string{"thr_1"}}
+	corrupt := index.SetRebuildFaultInjector(func(s []store.SymbolRecord) []store.SymbolRecord {
+		return append(append([]store.SymbolRecord{}, s...), bogus)
+	})
+
+	pinBarrierClock(t, bDay1)
+	day := autogit.DayIndexOf(bDay1) - 1
+
+	// Fresh run: B3 rebuilds corrupt derived; B6's assert (recovering=false)
+	// fails plainly, marker left in place.
+	if _, err := a.MaybeDayBarrier(ctx); err == nil {
+		t.Fatal("barrier over persistent derived corruption succeeded; want B6 failure")
+	}
+	if m, present, _ := store.ReadMarker(a.paths); !present || m.Op != store.OpBarrier {
+		t.Fatalf("marker after failed barrier: %+v present=%v, want op=barrier intact", m, present)
+	}
+
+	// Completion re-drive while the fault persists: §2.7 quarantines the
+	// offending derived, rebuild still corrupts, re-check still drifts →
+	// refuse, marker intact.
+	if _, err := NewFileAdapter(a.paths).Reconcile(ctx); err == nil {
+		t.Fatal("completion Reconcile succeeded while derived fault persists; want §2.7 refuse")
+	}
+	if m, present, _ := store.ReadMarker(a.paths); !present || m.Op != store.OpBarrier || m.Day != day {
+		t.Fatalf("marker after refused derived open: %+v present=%v, want op=barrier day=%d intact", m, present, day)
+	}
+	// Unlike a spine break (fixture i, where B2's gate fails and NO day-commit
+	// lands), a derived break lets B2's spine-good day-commit land — derived
+	// is not checked until B6 — so exactly one day-commit exists, and the
+	// INV-2 guard must not duplicate it across the refused re-drives.
+	if n := dayCommitCount(t, a, day); n != 1 {
+		t.Errorf("day-commit count while derived-broken = %d, want exactly 1 (spine-good day-commit lands once; no INV-2 duplicate)", n)
+	}
+	// The offending derived bytes are preserved byte-exact in quarantine
+	// (this is exactly the derived-quarantine path the findingRel abs-path
+	// fix makes reachable).
+	matches, err := filepath.Glob(filepath.Join(a.paths.RecoveryDir, "quarantine", "*", "symbols.jsonl"))
+	if err != nil || len(matches) == 0 {
+		t.Fatalf("no quarantined symbols copy: %v err=%v", matches, err)
+	}
+	qbytes, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read quarantined symbols: %v", err)
+	}
+	if !strings.Contains(string(qbytes), "__crash_matrix_bogus__") {
+		t.Error("quarantined symbols not byte-exact (missing the injected bogus record)")
+	}
+
+	// Reduce the fault to a single residual rebuild: the next completion's
+	// B3 corrupts (so B6 quarantines), but B6's post-quarantine rebuild is
+	// Check-clean → ScopedRestored records the regenerated derived path and
+	// the barrier converges.
+	corrupt()
+	remaining := 1
+	oneShot := index.SetRebuildFaultInjector(func(s []store.SymbolRecord) []store.SymbolRecord {
+		if remaining > 0 {
+			remaining--
+			return append(append([]store.SymbolRecord{}, s...), bogus)
+		}
+		return s
+	})
+	defer oneShot()
+
+	b := NewFileAdapter(a.paths)
+	rep, err := b.Reconcile(ctx)
+	if err != nil {
+		t.Fatalf("converging Reconcile: %v (want quarantine-and-proceed success)", err)
+	}
+	foundSymbols := false
+	for _, p := range rep.ScopedRestored {
+		if p == "symbols.jsonl" {
+			foundSymbols = true
+		}
+	}
+	if !foundSymbols {
+		t.Errorf("ScopedRestored = %v, want symbols.jsonl (derived scoped-restore via regenerate)", rep.ScopedRestored)
+	}
+	if rep.ResetPerformed {
+		t.Error("derived quarantine-and-proceed performed a reset (must be path-scoped)")
+	}
+	assertBarrierTerminal(t, b, day)
+}
+
 // TestBarrier_RefusedOpensDoNotAccrete is F1's accretion arm: while the
 // §2.7 posture keeps refusing (the quarantine destination is wedged
 // shut here), every refused open must leave primary EXACTLY as it found

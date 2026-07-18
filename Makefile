@@ -132,14 +132,17 @@ recall-corpus-test: build recall-madlibs recall-corpus-sweep-data
 recall-corpus-fetch:
 	python3 test/tools/wikipedia_corpus.py
 
-# sim-shadow-slow-test runs the SLOW (14d) arm of TestShadowLayerB_ReverseDivergence.
-# That arm ALWAYS COMPILES (part of the normal `make test` compile) but its ~20 min
-# wall-clock would blow `make test`'s 30m sim-package timeout budget, so EXECUTION is
-# opted in here by setting PERSONANT_SLOW_SIM_TESTS — without it the arm skips and only
-# the fast 1d arm runs in the default suite. -timeout 0 disables go test's default
-# ceiling for this deliberate, watched long rung (a runaway is the user's to Ctrl-C).
+# sim-shadow-slow-test runs the opt-in SLOW sim rungs gated by
+# testsupport.RequireSlowSim (PERSONANT_SLOW_SIM_TESTS): the 14d arm of
+# TestShadowLayerB_ReverseDivergence, plus the fixed-24h #98 embedding
+# head-to-head machinery rungs (#94 R4 suite-budget move). All ALWAYS COMPILE
+# (part of the normal `make test` compile) but their wall-clock would blow
+# `make test`'s 30m sim-package timeout budget, so EXECUTION is opted in here.
+# Without the env var they skip and only the fast default-suite rungs run.
+# -timeout 0 disables go test's default ceiling for these deliberate, watched
+# long rungs (a runaway is the user's to Ctrl-C).
 sim-shadow-slow-test: build recall-madlibs
-	PERSONANT_SLOW_SIM_TESTS=1 go test ./internal/scenarios/sim/ -run 'TestShadowLayerB_ReverseDivergence' -count=1 -timeout 0 -v
+	PERSONANT_SLOW_SIM_TESTS=1 go test ./internal/scenarios/sim/ -run 'TestShadowLayerB_ReverseDivergence|TestSimEmbeddingHeadToHead_Machinery|TestSimNoEmbedder_HeadToHeadAbsent' -count=1 -timeout 0 -v
 
 test: build fmt-check recall-madlibs
 	go vet $(GOPKGS)
