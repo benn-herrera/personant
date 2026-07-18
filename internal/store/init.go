@@ -1,10 +1,12 @@
 package store
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -30,9 +32,11 @@ type InitOptions struct {
 // commit is made only if the repo has no commits yet.
 //
 // Per-file install policy on re-init:
-//   - Install-shipped templates (directives/defaults.md, README.md,
-//     .gitignore) are *always rewritten* to match the binary. They are
-//     bootstrap snapshots, not user content.
+//   - Install-shipped templates (directives/defaults.md, README.md) are
+//     *always rewritten* to match the binary. They are bootstrap
+//     snapshots, not user content. .gitignore is the hybrid: its seeded
+//     block is rewritten to match the binary, user lines outside the
+//     block are preserved (see writeGitignoreMerged).
 //   - Files that accrue canonical state (directives/user.md,
 //     providers.toml) are *preserved* if present; re-init cannot
 //     reconstruct them.
@@ -99,13 +103,26 @@ func Init(paths PersonantPaths, opts InitOptions) error {
 	}{
 		{filepath.Join(paths.DirectivesDir, "defaults.md"), seedDefaultsMD},
 		{paths.Readme, seedReadmeMD},
-		{paths.Gitignore, seedGitignore},
 	}
 	for _, s := range rewriteFiles {
 		if err := writeAlways(s.path, []byte(s.content)); err != nil {
 			return fmt.Errorf("init: write %s: %w", filepath.Base(s.path), err)
 		}
 		logf("init: wrote %s", s.path)
+	}
+
+	// .gitignore is rewrite-with-preservation: the seeded block is
+	// authoritative (refreshed to match the binary, like the templates
+	// above), but user-added ignore lines outside it survive. A wholesale
+	// rewrite would clobber user entries, converting their deliberately-
+	// ignored scratch into untracked files that recovery's debris sweep
+	// then quarantines out of the tree.
+	changed, err := writeGitignoreMerged(paths.Gitignore)
+	if err != nil {
+		return fmt.Errorf("init: write .gitignore: %w", err)
+	}
+	if changed {
+		logf("init: wrote %s", paths.Gitignore)
 	}
 
 	// Accrual / hand-edited files: preserve if present. user.md
@@ -199,6 +216,77 @@ func writeAlways(path string, content []byte) error {
 	return os.WriteFile(path, content, 0o644)
 }
 
+// The managed-block markers for .gitignore. Init keeps the block between
+// them authoritative while preserving everything outside it.
+const (
+	gitignoreBeginMarker = "# >>> personant managed (rewritten by init; add your entries outside this block) >>>"
+	gitignoreEndMarker   = "# <<< personant managed <<<"
+)
+
+// writeGitignoreMerged installs the seeded gitignore block, preserving
+// user-added lines, and reports whether the file changed. Idempotent:
+// a re-run against its own output writes nothing.
+func writeGitignoreMerged(path string) (bool, error) {
+	existing, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	merged := mergeGitignore(existing)
+	if bytes.Equal(existing, merged) {
+		return false, nil
+	}
+	return true, os.WriteFile(path, merged, 0o644)
+}
+
+// mergeGitignore computes the .gitignore content for this install: the
+// seeded block (authoritative) plus every user line outside it. Three
+// shapes of existing content:
+//   - none → just the marked block;
+//   - markers present → the block's content is replaced with the seed,
+//     lines before/after the markers are kept in place;
+//   - no markers (pre-marker install, or a hand-created file) → lines
+//     that exactly match a seeded line are treated as stale seed and
+//     dropped (they now live in the block); everything else is user
+//     content and is preserved below the block.
+func mergeGitignore(existing []byte) []byte {
+	block := gitignoreBeginMarker + "\n" + seedGitignoreBody + gitignoreEndMarker
+	if len(existing) == 0 {
+		return []byte(block + "\n")
+	}
+	lines := strings.Split(strings.TrimSuffix(string(existing), "\n"), "\n")
+
+	begin, end := -1, -1
+	for i, l := range lines {
+		switch l {
+		case gitignoreBeginMarker:
+			if begin == -1 {
+				begin = i
+			}
+		case gitignoreEndMarker:
+			end = i
+		}
+	}
+
+	var out []string
+	if begin != -1 && end > begin {
+		out = append(out, lines[:begin]...)
+		out = append(out, block)
+		out = append(out, lines[end+1:]...)
+	} else {
+		seeded := make(map[string]struct{})
+		for _, l := range strings.Split(strings.TrimSuffix(seedGitignoreBody, "\n"), "\n") {
+			seeded[l] = struct{}{}
+		}
+		out = append(out, block)
+		for _, l := range lines {
+			if _, isSeed := seeded[l]; !isSeed {
+				out = append(out, l)
+			}
+		}
+	}
+	return []byte(strings.Join(out, "\n") + "\n")
+}
+
 // initGit ensures Home is a git repository with at least one commit.
 //   - If .git/ already exists, it is opened with go-git.PlainOpen and
 //     left otherwise untouched.
@@ -289,8 +377,9 @@ func CommitSignature(repo *git.Repository) *object.Signature {
 
 // Seed content. Verbatim from the implementation spec for the init step.
 // See Init for the per-file rewrite-vs-preserve policy: install-shipped
-// templates (defaults.md, README.md, .gitignore) are rewritten on every
-// init; accrual files (user.md, providers.toml) are preserved if present.
+// templates (defaults.md, README.md) are rewritten on every init; the
+// .gitignore seeded block is rewritten with user lines preserved; accrual
+// files (user.md, providers.toml) are preserved if present.
 
 const seedDefaultsMD = `---
 scope: defaults
@@ -402,7 +491,7 @@ const seedReadmeMD = "# personant home\n" +
 	"This directory is git-managed by the runtime; you do not need to run git\n" +
 	"commands here yourself.\n"
 
-const seedGitignore = `# personant home gitignore
+const seedGitignoreBody = `# personant home gitignore
 tmp/
 last-active
 # history is the REPL line-edit history (§4.3.1) — operational state, capped
@@ -413,6 +502,25 @@ history
 # rewritten on every turn. Git-tracking it would dirty the home tree
 # with LRU churn every turn; it is operational state, not canonical.
 working-set.json
+# Crash-stability substrate (#94, SPEC §4.5.8) — all operational, never
+# canonical. They must survive a recovery reset --hard (git-ignored files
+# are untouched by reset), which is precisely why they are not tracked:
+#   - op-in-progress.json: the op-typed in-flight marker. Its survival
+#     across reset is what lets recovery read "an op was running" after
+#     reverting the worktree.
+#   - turn-journal.jsonl: prompt/response content journal, truncated on
+#     CommitTurn. Tracking it would commit transient in-flight bytes.
+#   - derived-watermark: built-from-commit hash for the regeneration path;
+#     a derived pointer, rebuildable, never canonical.
+op-in-progress.json
+turn-journal.jsonl
+derived-watermark
+# recovery/ holds preserved crash artifacts: journaled turn content
+# surfaced after a rollback (recovered-turn-*.md, never auto-replayed
+# into canonical) and the transient log-preservation staging a recovery
+# reset uses. Operational forensics — must survive the reset and must
+# never be committed.
+recovery/
 # .recall-cache/ is the derived embedding-vector cache (§3.4 / intra-thread
 # recall). It is operational state — rebuildable from canonical (spine.jsonl
 # + threads/*/turns/*.md) on any miss or staleness — and is NEVER canonical

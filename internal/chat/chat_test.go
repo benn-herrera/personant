@@ -2,11 +2,16 @@ package chat
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/go-git/go-git/v5"
+
+	"personant/internal/autogit"
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
@@ -335,5 +340,123 @@ func TestRunNoProvidersIsFatal(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no providers configured") {
 		t.Errorf("error message: %q", err.Error())
+	}
+}
+
+// ---------- crash-stability wiring (#94): Init → Reconcile → LoadSession ----------
+
+// gitBaseline promotes a scaffolded home to a git-backed substrate with
+// everything committed — the state a real home is in between sessions.
+func gitBaseline(t *testing.T, paths store.PersonantPaths) {
+	t.Helper()
+	if err := store.Init(paths, store.InitOptions{Quiet: true}); err != nil {
+		t.Fatalf("store.Init: %v", err)
+	}
+	ctx := context.Background()
+	if err := autogit.Add(ctx, paths, "."); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := autogit.Commit(ctx, paths, "test baseline", 0, 0); err != nil && !errors.Is(err, git.ErrEmptyCommit) {
+		t.Fatalf("Commit: %v", err)
+	}
+}
+
+// TestRunRecoveryBannerAfterTornTurn: a home crashed mid-turn opens
+// with the recovery banner — the unclean-shutdown line and the
+// preserved-content announcement — and the session proceeds normally.
+func TestRunRecoveryBannerAfterTornTurn(t *testing.T) {
+	paths := scaffoldHome(t)
+	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
+	gitBaseline(t, paths)
+
+	// Torn turn t2: marker set, prompt journaled, a tracked canonical
+	// file dirtied, killed before the per-turn commit.
+	if err := store.WriteMarker(paths, store.Marker{Op: store.OpTurn, Turn: "t2"}); err != nil {
+		t.Fatalf("WriteMarker: %v", err)
+	}
+	if err := store.AppendJournal(paths, "t2", store.JournalPrompt, []byte("lost prompt")); err != nil {
+		t.Fatalf("AppendJournal: %v", err)
+	}
+	userMD := filepath.Join(paths.DirectivesDir, "user.md")
+	if err := os.WriteFile(userMD, []byte("TORN MID-TURN\n"), 0o644); err != nil {
+		t.Fatalf("dirty user.md: %v", err)
+	}
+
+	mock := model.NewScriptedMock(nil, nil)
+	var stdout, stderr bytes.Buffer
+	if err := Run(Options{
+		Ops:             newOps(paths),
+		ExplicitProject: "prj_1",
+		Stdin:           strings.NewReader("/quit\n"),
+		Stdout:          &stdout,
+		Stderr:          &stderr,
+		Client:          mock,
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "recovery: unclean shutdown detected (in-flight turn t2)") {
+		t.Errorf("missing unclean-shutdown banner line:\n%s", out)
+	}
+	if !strings.Contains(out, "recovery: in-flight content for turn t2 preserved at ") ||
+		!strings.Contains(out, "not replayed") {
+		t.Errorf("missing preserved-content banner line:\n%s", out)
+	}
+	if !strings.Contains(out, "active: alpha (prj_1)") {
+		t.Errorf("session did not proceed after recovery:\n%s", out)
+	}
+}
+
+// TestRunQuietRecoveryPrintsNoBanner: a routine open (fresh home,
+// derived refresh only) must not nag.
+func TestRunQuietRecoveryPrintsNoBanner(t *testing.T) {
+	paths := scaffoldHome(t)
+	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
+
+	mock := model.NewScriptedMock(nil, nil)
+	var stdout, stderr bytes.Buffer
+	if err := Run(Options{
+		Ops:             newOps(paths),
+		ExplicitProject: "prj_1",
+		Stdin:           strings.NewReader("/quit\n"),
+		Stdout:          &stdout,
+		Stderr:          &stderr,
+		Client:          mock,
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Contains(stdout.String(), "recovery:") {
+		t.Errorf("quiet open printed a recovery banner:\n%s", stdout.String())
+	}
+}
+
+// TestRunReconcileFailureRefusesToOpen: an unreconcilable substrate
+// (here: a corrupt op marker) must refuse the session outright — no
+// prompt, no LoadSession, error surfaced.
+func TestRunReconcileFailureRefusesToOpen(t *testing.T) {
+	paths := scaffoldHome(t)
+	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
+	if err := os.WriteFile(paths.OpMarker, []byte("{corrupt"), 0o600); err != nil {
+		t.Fatalf("write corrupt marker: %v", err)
+	}
+
+	mock := model.NewScriptedMock(nil, nil)
+	var stdout, stderr bytes.Buffer
+	err := Run(Options{
+		Ops:             newOps(paths),
+		ExplicitProject: "prj_1",
+		Stdin:           strings.NewReader("/quit\n"),
+		Stdout:          &stdout,
+		Stderr:          &stderr,
+		Client:          mock,
+	})
+	if err == nil {
+		t.Fatal("Run opened a session on an unreconcilable substrate")
+	}
+	if !strings.Contains(err.Error(), "refusing to open") {
+		t.Errorf("error = %v, want refuse-to-open wording", err)
+	}
+	if strings.Contains(stdout.String(), "active:") {
+		t.Errorf("session banner printed despite refusal:\n%s", stdout.String())
 	}
 }

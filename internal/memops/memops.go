@@ -520,6 +520,44 @@ type MemoryOps interface {
 	// it, on its day-off idle window.
 	Consolidate(ctx context.Context, reason string) error
 
+	// ---------- Crash-stability (#94, SPEC §4.5.8) ----------
+
+	// Reconcile repairs the substrate after any unclean shutdown and is
+	// called on EVERY open, between Init and the first session read
+	// (Init → Reconcile → LoadSession). The clean path is a cheap no-op;
+	// a crash-open rolls torn state back to the last per-turn recovery
+	// point (≤1 turn structural loss), preserves the rolled-back turn's
+	// journaled content as a surfaced artifact (never auto-replayed into
+	// canonical), repairs archival residue, and reconciles derived
+	// state. The returned RecoveryReport says what happened; a non-nil
+	// error means the substrate is NOT safe to open — the caller must
+	// refuse the session, and a retry is idempotent (the adapter leaves
+	// its own in-progress recovery marker behind).
+	Reconcile(ctx context.Context) (RecoveryReport, error)
+
+	// JournalTurn appends one durable record of in-flight turn content —
+	// the prompt before the model call, the response before canonical
+	// writes — so a crash at any later instant can recover the bytes.
+	// The FIRST call of a turn marks the turn in-flight on the substrate
+	// as a side effect (there is no Begin/End bracket on the port; the
+	// in-flight marker's lifecycle is entirely substrate-internal). The
+	// append is durable (fsync) before return. A failure here aborts the
+	// turn before any canonical write — cheap, nothing to undo.
+	JournalTurn(ctx context.Context, turnID string, kind TurnContentKind, content []byte) error
+
+	// CommitTurn creates the per-turn durability recovery point: it
+	// commits the turn's canonical writes (tagged with turnID so
+	// Reconcile can tell a committed turn from a torn one), clears the
+	// in-flight marker, and truncates the content journal, in that
+	// order. A turn that changed nothing canonical still completes (the
+	// empty recovery point is skipped; marker and journal are still
+	// released). On failure the in-flight marker is left set, so the
+	// turn fails loudly into the ≤1-loss recovery path at next open
+	// rather than half-landing. `reason` is folded into the recovery
+	// point's forensic message (built from event counts, never user
+	// content).
+	CommitTurn(ctx context.Context, turnID, reason string) error
+
 	// ---------- Bootstrap and verification ----------
 
 	// Init scaffolds the substrate for first-run use. Idempotent: a

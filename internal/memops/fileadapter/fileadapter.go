@@ -30,6 +30,7 @@ import (
 	"personant/internal/index"
 	"personant/internal/memops"
 	"personant/internal/recall/scoring"
+	"personant/internal/recovery"
 	"personant/internal/store"
 	"personant/internal/verify"
 )
@@ -530,12 +531,16 @@ func (a *FileAdapter) InvalidateAll() {
 
 // RegenerateDerivedState rebuilds every derived artifact from canonical
 // sources. For the file adapter this is symbols.jsonl + per-project
-// digest.json.
+// digest.json, plus the derived-watermark stamp — regeneration is THE
+// watermark write site (recovery.RebuildDerived), so the two can never
+// drift apart. See RebuildDerived for why a mid-transaction (dirty-
+// tree) stamp is safe: the watermark is only ever trusted against a
+// clean worktree.
 func (a *FileAdapter) RegenerateDerivedState(ctx context.Context, opts memops.IndexBuildOptions) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := index.Rebuild(a.paths, indexOptionsFromMemops(opts)); err != nil {
+	if err := recovery.RebuildDerived(ctx, a.paths, indexOptionsFromMemops(opts)); err != nil {
 		return fmt.Errorf("fileadapter: regenerate derived state: %w", err)
 	}
 	return nil

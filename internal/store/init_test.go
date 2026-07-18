@@ -96,7 +96,10 @@ func TestInitFreshHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read gitignore: %v", err)
 	}
-	for _, want := range []string{"tmp/", "history", "providers.toml", ".recall-cache/"} {
+	for _, want := range []string{
+		"tmp/", "history", "providers.toml", ".recall-cache/",
+		"op-in-progress.json", "turn-journal.jsonl", "derived-watermark",
+	} {
 		if !strings.Contains(string(gi), want) {
 			t.Errorf("gitignore missing %q; content:\n%s", want, string(gi))
 		}
@@ -228,7 +231,6 @@ func TestInitRefreshesShippedTemplates(t *testing.T) {
 	}{
 		{defaultsPath, seedDefaultsMD},
 		{paths.Readme, seedReadmeMD},
-		{paths.Gitignore, seedGitignore},
 	}
 	for _, c := range cases {
 		got, err := os.ReadFile(c.path)
@@ -238,6 +240,96 @@ func TestInitRefreshesShippedTemplates(t *testing.T) {
 		if string(got) != c.want {
 			t.Errorf("%s was not refreshed to canonical content\ngot: %q\nwant: %q", c.path, got, c.want)
 		}
+	}
+
+	// .gitignore is refresh-with-preservation: the seeded block is
+	// installed authoritatively, and the pre-existing (user) line is
+	// preserved outside it rather than clobbered.
+	gi, err := os.ReadFile(paths.Gitignore)
+	if err != nil {
+		t.Fatalf("read gitignore: %v", err)
+	}
+	if !strings.Contains(string(gi), seedGitignoreBody) {
+		t.Errorf("gitignore missing the seeded block:\n%s", gi)
+	}
+	if !strings.Contains(string(gi), strings.TrimSuffix(string(tampered), "\n")) {
+		t.Errorf("pre-existing gitignore line was clobbered:\n%s", gi)
+	}
+}
+
+// TestInitGitignorePreservesUserLines: a user-added ignore entry outside
+// the managed block survives re-Init byte-identically, and re-Init on the
+// merged result is idempotent. Clobbering user entries would convert
+// their deliberately-ignored scratch into recovery-sweep fodder.
+func TestInitGitignorePreservesUserLines(t *testing.T) {
+	hasGit(t)
+	paths := initIntoTempDir(t)
+
+	const userLine = "my-scratch/\n"
+	f, err := os.OpenFile(paths.Gitignore, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("open gitignore: %v", err)
+	}
+	if _, err := f.WriteString(userLine); err != nil {
+		t.Fatalf("append user line: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close gitignore: %v", err)
+	}
+	before, err := os.ReadFile(paths.Gitignore)
+	if err != nil {
+		t.Fatalf("read gitignore: %v", err)
+	}
+
+	if err := Init(paths, InitOptions{Quiet: true}); err != nil {
+		t.Fatalf("re-Init: %v", err)
+	}
+	after, err := os.ReadFile(paths.Gitignore)
+	if err != nil {
+		t.Fatalf("read gitignore: %v", err)
+	}
+	// The block was already canonical and the user line sits outside it,
+	// so re-Init must be a byte-identical no-op.
+	if string(after) != string(before) {
+		t.Errorf("re-Init modified a gitignore whose managed block was already canonical\nbefore: %q\n after: %q", before, after)
+	}
+	if !strings.Contains(string(after), userLine) {
+		t.Errorf("user gitignore line clobbered by re-Init:\n%s", after)
+	}
+}
+
+// TestInitGitignoreLegacyUpgrade: a pre-marker gitignore (old seed
+// content plus a user line) upgrades to the marked layout — seed lines
+// fold into the managed block without duplication, the user line is
+// preserved.
+func TestInitGitignoreLegacyUpgrade(t *testing.T) {
+	hasGit(t)
+	home := t.TempDir()
+	paths := PathsForHome(home)
+
+	const userLine = "my-legacy-scratch/"
+	legacy := seedGitignoreBody + userLine + "\n"
+	if err := os.WriteFile(paths.Gitignore, []byte(legacy), 0o644); err != nil {
+		t.Fatalf("write legacy gitignore: %v", err)
+	}
+
+	if err := Init(paths, InitOptions{Quiet: true}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	got, err := os.ReadFile(paths.Gitignore)
+	if err != nil {
+		t.Fatalf("read gitignore: %v", err)
+	}
+	s := string(got)
+	if strings.Count(s, gitignoreBeginMarker) != 1 {
+		t.Errorf("managed block installed %d times, want 1:\n%s", strings.Count(s, gitignoreBeginMarker), s)
+	}
+	if strings.Count(s, "\n"+userLine+"\n") != 1 {
+		t.Errorf("user line not preserved exactly once:\n%s", s)
+	}
+	// Old seed entries fold into the block — no duplicate entry lines.
+	if strings.Count(s, "\nworking-set.json\n") != 1 {
+		t.Errorf("seed entry duplicated by legacy upgrade:\n%s", s)
 	}
 }
 

@@ -30,6 +30,12 @@ type PersonantPaths struct {
 	LastActive    string // Home/last-active                  (operational; one line: prj_<n>; gitignored)
 	WorkingSet    string // Home/working-set.json             (operational; Layer B/C membership; rewritten per turn; gitignored)
 	RecallCache   string // Home/.recall-cache/               (operational; derived embedding-vector cache; gitignored; never canonical, §5/I5)
+	// Crash-stability substrate (#94, SPEC §4.5.8). All operational,
+	// gitignored, and survive a recovery reset --hard.
+	OpMarker         string // Home/op-in-progress.json          (operational; op-typed in-flight marker; presence authorizes recovery reset)
+	TurnJournal      string // Home/turn-journal.jsonl           (operational; per-append-fsync content journal; truncated on CommitTurn)
+	DerivedWatermark string // Home/derived-watermark            (operational; built-from-commit hash; written only by the regeneration path)
+	RecoveryDir      string // Home/recovery/                    (operational; preserved crash artifacts: recovered-turn content + reset log staging; gitignored)
 }
 
 // EnvHome is the environment variable that overrides the default home.
@@ -65,6 +71,11 @@ func makePaths(home string) PersonantPaths {
 		LastActive:    filepath.Join(home, "last-active"),
 		WorkingSet:    filepath.Join(home, "working-set.json"),
 		RecallCache:   filepath.Join(home, ".recall-cache"),
+
+		OpMarker:         filepath.Join(home, "op-in-progress.json"),
+		TurnJournal:      filepath.Join(home, "turn-journal.jsonl"),
+		DerivedWatermark: filepath.Join(home, "derived-watermark"),
+		RecoveryDir:      filepath.Join(home, "recovery"),
 	}
 }
 

@@ -1,0 +1,108 @@
+package memops
+
+// Crash-stability port types (#94, SPEC §4.5.8): the turn-content
+// journal kinds and the RecoveryReport that Reconcile returns. Kept in
+// their own file as a self-contained concern, like the archival types.
+//
+// Substrate-agnostic naming policy: the report speaks in abstract
+// recovery outcomes (cells hit, reverted paths, preserved content). The
+// one substrate concession is AdoptCommit — an opaque recovery-point
+// token, the same concession ArchiveEntry.CommitHash already makes.
+
+// TurnContentKind distinguishes the two per-turn journal appends: the
+// user prompt (journaled before the model call) and the model response
+// (journaled before canonical writes).
+type TurnContentKind string
+
+const (
+	TurnContentPrompt   TurnContentKind = "prompt"
+	TurnContentResponse TurnContentKind = "response"
+)
+
+// RecoveryReport describes what Reconcile did, phase by phase. It is
+// informational: a non-nil Reconcile error is the only refuse-to-open
+// signal; the report on a nil error is always a substrate that is safe
+// to open. The chat layer renders it as a terse banner.
+type RecoveryReport struct {
+	// CellsHit names the recovery state-machine cells that fired, in
+	// order (e.g. "cell-4-torn-turn"). A clean open is exactly
+	// ["cell-1-clean"].
+	CellsHit []string
+
+	// ClearedOp is the op kind of the in-flight marker recovery cleared
+	// ("turn", "archival", "sleep"), or "" when no operation marker was
+	// present at open. Non-empty means the previous session shut down
+	// uncleanly inside that operation's scope.
+	ClearedOp string
+	// ClearedTurn is the turn id from a cleared op=turn marker, or "".
+	ClearedTurn string
+
+	// ResetPerformed reports whether the marker-gated reset ran.
+	ResetPerformed bool
+	// RevertedPaths are the tracked paths the reset restored to their
+	// last recovery point (sorted; drives O(changed) derived work).
+	RevertedPaths []string
+	// DebrisSwept are the untracked in-flight debris files removed after
+	// a reset (sorted). Empty unless ResetPerformed.
+	DebrisSwept []string
+
+	// TmpSwept are the atomic-write temp residues (tmp-*) removed by the
+	// unconditional sweep that runs on every reconcile.
+	TmpSwept []string
+	// QuarantineDir is the home-relative directory holding every file
+	// this reconcile pass quarantined (swept files are moved, dirty
+	// tracked paths are byte-snapshotted before a reset — nothing is
+	// deleted), or "" when nothing was quarantined.
+	QuarantineDir string
+	// Quarantined are the home-relative paths preserved under
+	// QuarantineDir, in the order they were quarantined.
+	Quarantined []string
+	// LogTailsHealed are the event-log files whose torn final line was
+	// capped with a newline (additive heal, never truncation).
+	LogTailsHealed []string
+
+	// StampRepaired are archived-thread ids whose missing archival
+	// recovery-point token was located and re-stamped.
+	StampRepaired []string
+	// Unrepairable are archived-thread ids whose token could not be
+	// located; their entries stay refused (never guessed) and each is
+	// logged as a recovery.unrepairable event.
+	Unrepairable []string
+
+	// PreservedContentPath is the artifact file holding the rolled-back
+	// turn's journaled content, or "" when nothing needed preserving.
+	// The content is surfaced, never replayed into canonical.
+	PreservedContentPath string
+	// PreservedTurn is the turn id the preserved content belongs to.
+	PreservedTurn string
+	// TornJournalRecords counts malformed/torn journal lines skipped
+	// while scanning (forensic; the well-formed records are preserved).
+	TornJournalRecords int
+
+	// AdoptCommit is the recovery point created by the legacy/greenfield
+	// adopt-forward pass (cell 12), or "".
+	AdoptCommit string
+
+	// DerivedRebuilt reports whether derived state was regenerated (and
+	// the watermark advanced) during this reconcile.
+	DerivedRebuilt bool
+}
+
+// Quiet reports whether the reconcile was routine — nothing a user needs
+// to see. Cell 1 no-ops and cell 2 derived refreshes are quiet; anything
+// that cleared an in-flight marker, reverted or removed files, repaired
+// or refused archive entries, preserved content, or adopted legacy state
+// is banner-worthy.
+func (r RecoveryReport) Quiet() bool {
+	return r.ClearedOp == "" &&
+		!r.ResetPerformed &&
+		len(r.DebrisSwept) == 0 &&
+		len(r.TmpSwept) == 0 &&
+		len(r.Quarantined) == 0 &&
+		len(r.LogTailsHealed) == 0 &&
+		len(r.StampRepaired) == 0 &&
+		len(r.Unrepairable) == 0 &&
+		r.PreservedContentPath == "" &&
+		r.TornJournalRecords == 0 &&
+		r.AdoptCommit == ""
+}

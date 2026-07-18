@@ -14,6 +14,7 @@ const (
 	LogCategoryModel       = "model"
 	LogCategoryProject     = "project"
 	LogCategoryRecall      = "recall"
+	LogCategoryRecovery    = "recovery"
 	LogCategoryRetire      = "retire"
 	LogCategorySession     = "session"
 	LogCategorySpine       = "spine"

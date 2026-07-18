@@ -104,6 +104,19 @@ func Run(opts Options) error {
 		return fmt.Errorf("chat: scaffold home: %w", err)
 	}
 
+	// Startup reconcile (#94, SPEC §4.5.8): Init → Reconcile →
+	// LoadSession, in that order. Reconcile repairs any unclean-shutdown
+	// state before a single session read happens; a failure REFUSES the
+	// session — opening an unreconciled substrate is how torn state gets
+	// read back as truth. The retry is idempotent (the adapter leaves an
+	// in-progress recovery marker behind), so the user just relaunches
+	// once the underlying condition is fixed.
+	recoveryReport, err := ops.Reconcile(ctx)
+	if err != nil {
+		return fmt.Errorf("chat: substrate reconcile failed — refusing to open (relaunch retries recovery): %w", err)
+	}
+	printRecoveryBanner(opts.Stdout, recoveryReport)
+
 	providers, faults, err := ops.LoadProviders(ctx)
 	if err != nil {
 		return fmt.Errorf("chat: load providers: %w", err)
@@ -327,6 +340,58 @@ func Run(opts Options) error {
 		fmt.Fprintf(opts.Stderr, "warn: log session.end: %v\n", err)
 	}
 	return nil
+}
+
+// printRecoveryBanner renders the startup RecoveryReport as a terse
+// informational banner. Routine opens (clean, or a plain derived
+// refresh) print nothing; anything that repaired state gets one line
+// per fact. The preserved-content line is the load-bearing one: the
+// rolled-back turn's bytes are surfaced here and never auto-replayed.
+func printRecoveryBanner(w io.Writer, rep memops.RecoveryReport) {
+	if rep.Quiet() {
+		return
+	}
+	if rep.ClearedOp != "" {
+		detail := rep.ClearedOp
+		if rep.ClearedTurn != "" {
+			detail += " " + rep.ClearedTurn
+		}
+		fmt.Fprintf(w, "recovery: unclean shutdown detected (in-flight %s); substrate reconciled\n", detail)
+	}
+	if rep.ResetPerformed {
+		fmt.Fprintf(w, "recovery: rolled back to last recovery point (%d path(s) reverted, %d debris file(s) quarantined)\n",
+			len(rep.RevertedPaths), len(rep.DebrisSwept))
+	}
+	if rep.PreservedContentPath != "" {
+		fmt.Fprintf(w, "recovery: in-flight content for turn %s preserved at %s — not replayed; re-supply it if still wanted\n",
+			rep.PreservedTurn, rep.PreservedContentPath)
+	}
+	if rep.AdoptCommit != "" {
+		fmt.Fprintln(w, "recovery: pre-existing uncommitted content adopted forward (verified)")
+	}
+	if n := len(rep.StampRepaired); n > 0 {
+		fmt.Fprintf(w, "recovery: repaired %d archive entr%s\n", n, pluralY(n))
+	}
+	if n := len(rep.Unrepairable); n > 0 {
+		fmt.Fprintf(w, "recovery: %d archive entr%s unrepairable — recovery for them stays refused (see event log)\n", n, pluralY(n))
+	}
+	if n := len(rep.TmpSwept); n > 0 {
+		fmt.Fprintf(w, "recovery: swept %d interrupted-write temp file(s)\n", n)
+	}
+	if n := len(rep.LogTailsHealed); n > 0 {
+		fmt.Fprintf(w, "recovery: healed %d torn event-log tail(s)\n", n)
+	}
+	if rep.QuarantineDir != "" {
+		fmt.Fprintf(w, "recovery: nothing was deleted — %d file(s) preserved byte-exact under %s\n",
+			len(rep.Quarantined), rep.QuarantineDir)
+	}
+}
+
+func pluralY(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
 }
 
 // sortedProviderNames returns the pool's provider names in deterministic

@@ -4,6 +4,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"personant/internal/crashpoint"
+)
+
+// Crashpoints armed by the R4 recovery matrix. Registered at package-init
+// time so crashpoint.RegisteredNames() (the mechanical coverage gate)
+// enumerates them without the write ever running.
+//
+//   - cpAtomicPreRename fires after the temp is fully written+fsynced but
+//     before the rename: the atomic commit has NOT happened, so the target
+//     still holds its prior contents.
+//   - cpAtomicTornWrite models a kill mid-write: only a prefix of data
+//     reaches the temp, which is deliberately left on disk (not cleaned
+//     up) so recovery must sweep the tmp- residue. The residue is staged
+//     BEFORE the panic because in-process defers still run on unwind (see
+//     the crashpoint package doc).
+var (
+	cpAtomicPreRename = crashpoint.Register("store.WriteFileAtomic.preRename")
+	cpAtomicTornWrite = crashpoint.Register("store.WriteFileAtomic.tornWrite")
 )
 
 // atomicWriteTempPrefix is the prefix for the temp file every
@@ -48,6 +67,20 @@ func WriteFileAtomic(path string, data []byte) error {
 		}
 	}()
 
+	// Torn-write crashpoint (unarmed in production: one atomic load). When
+	// armed, write only a prefix, leave the partial temp on disk, and crash
+	// — modeling a kill part-way through the temp write. The rename never
+	// runs, so the target is untouched; the tmp- residue is what recovery
+	// must sweep.
+	if crashpoint.Armed(cpAtomicTornWrite) {
+		half := len(data) / 2
+		_, _ = tmp.Write(data[:half])
+		_ = tmp.Sync()
+		_ = tmp.Close()
+		cleanup = false // preserve the partial temp across the panic unwind
+		crashpoint.At(cpAtomicTornWrite)
+	}
+
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		return fmt.Errorf("atomic write %s: write: %w", path, err)
@@ -59,6 +92,10 @@ func WriteFileAtomic(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("atomic write %s: close temp: %w", path, err)
 	}
+	// Pre-rename crashpoint: temp is durable, target is not yet replaced.
+	// A crash here leaves the target at its prior contents (the atomic
+	// commit point has not been reached).
+	crashpoint.At(cpAtomicPreRename)
 	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("atomic write %s: rename: %w", path, err)
 	}
