@@ -1,6 +1,7 @@
 package sim
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"time"
@@ -242,7 +243,33 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// shadow-derived stats come from the SAME computeIntraThreadGauges the
 	// end-of-run summary uses, and counters/percentiles are read run-to-date.
 	daily := newDailySnapshotWriter(gen)
-	sc.OnSimDayClose = daily.onDayClose
+	// Day barrier (#94 R3b §2.1): in the sim, OnSimDayClose is the
+	// trigger — the poll runs at the deterministic day boundary (the
+	// pre-turn poll in turn.Run would otherwise fire it at the first turn
+	// of the new day; both are guarded, so double-arming is idempotent).
+	// The wrapper also records the §6.3 gauges from the result.
+	sc.OnSimDayClose = func(h *scenarios.Harness, day int, simDate time.Time) {
+		// Usually a no-op: the crossing step's PRE-TURN poll (inside
+		// turn.RunWithInfo) has already sealed, and the harness recorded
+		// the gauges from TurnInfo.Barrier. This call is the deterministic
+		// backstop (a day-off with zero post-midnight turns) — when IT
+		// seals, record the same gauges here.
+		res, berr := h.Ops.MaybeDayBarrier(context.Background())
+		if berr != nil {
+			t.Errorf("day %d barrier: %v", day, berr)
+		}
+		if len(res.DaysSealed) > 0 {
+			for range res.DaysSealed {
+				h.Metrics.Counter(scenarios.MetricBarrierCount, 1)
+			}
+			h.Metrics.Record(scenarios.MetricBarrierDurationMs, float64(res.BarrierDuration.Microseconds())/1000.0)
+			h.Metrics.Record(scenarios.MetricDayCommitDurationMs, float64(res.DayCommitDuration.Microseconds())/1000.0)
+			h.Metrics.Record(scenarios.MetricMorningInitDurationMs, float64(res.MorningInitDuration.Microseconds())/1000.0)
+			h.Metrics.Record(scenarios.MetricDayCommitBytes, float64(res.DayCommitBytes))
+			h.Metrics.Record(scenarios.MetricDailyLooseObjects, float64(res.DailyLooseObjects))
+		}
+		daily.onDayClose(h, day, simDate)
+	}
 
 	start := clock.Profiling()
 	h := scenarios.RunScenario(t, sc)

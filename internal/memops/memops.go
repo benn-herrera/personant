@@ -534,6 +534,24 @@ type MemoryOps interface {
 	// swallowed, so there is nothing to return and it can never fail a turn.
 	MaybeGC(ctx context.Context)
 
+	// MaybeDayBarrier is the new-day poll (#94 R3b §2.1): it seals every
+	// COMPLETED day — strictly before the current clock day — that the
+	// substrate's permanent history has not yet sealed, running one day
+	// barrier per completed day (archival-if-pressure, day-grain
+	// permanent recovery point, per-turn-history rebirth). The poll is
+	// guarded and idempotent: once a day is sealed it can never re-fire
+	// (targets advance strictly forward), so calling it at session open
+	// AND before every turn is cheap — the common call is a no-op.
+	//
+	// The returned result names any threads the barrier's archival drain
+	// removed (the caller evicts them from its in-memory working set)
+	// plus duration gauges. A barrier error leaves the substrate's own
+	// re-entry token behind: the next Reconcile detects and completes
+	// the interrupted barrier, so the caller's only obligation is to
+	// surface the error (refuse-to-open at session open; fail the turn
+	// pre-journal on the per-turn check).
+	MaybeDayBarrier(ctx context.Context) (DayBarrierResult, error)
+
 	// ---------- Crash-stability (#94, SPEC §4.5.8) ----------
 
 	// Reconcile repairs the substrate after any unclean shutdown and is

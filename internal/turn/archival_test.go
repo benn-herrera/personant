@@ -16,6 +16,15 @@ import (
 	"personant/internal/store"
 )
 
+// #94 R3b: the §3.8 archival drain is BARRIER-ONLY — it fires inside the
+// day barrier's B1, which the turn pipeline triggers via the pre-turn
+// MaybeDayBarrier poll (top of RunWithInfo). These tests drive that path
+// end-to-end: seed pressure, advance the pinned clock past a day
+// boundary, run ONE turn, and assert the drain + working-set eviction.
+// The selection policy itself (coldest-retired, watermarks) is unit-
+// tested in internal/memops (SelectArchivalCandidates); the barrier's
+// crash windows are fixture-tested in internal/memops/fileadapter.
+
 // readArchivalEventLog returns the concatenated contents of every *.log
 // file under the home's LogsDir.
 func readArchivalEventLog(t *testing.T, paths store.PersonantPaths) string {
@@ -85,28 +94,36 @@ func monotonicTS(rank int) string {
 	return fmt.Sprintf("2026-03-%02dT%02d:%02d:00Z", (rank/1440)+1, (rank/60)%24, rank%60)
 }
 
-// TestSurfaceArchival_WatermarkDrainsColdestRetired seeds a spine over
-// the high-water mark and asserts the cardinality trigger archives the
-// coldest retired threads down to the low-water mark, leaves live
-// threads untouched, and produces a derived index with no drift.
-func TestSurfaceArchival_WatermarkDrainsColdestRetired(t *testing.T) {
+// barrierDay0 / barrierDay1 pin the two sides of a day boundary for the
+// pre-turn poll: the home is Init'd (daily born) under day0, and the
+// turn runs under day1 — one completed day, one barrier.
+var (
+	barrierDay0 = time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+	barrierDay1 = time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC)
+)
+
+// TestDayBarrier_PreTurnDrainsColdestRetired seeds a spine over the
+// high-water mark, crosses a day boundary, and drives ONE tag-less turn.
+// The pre-turn MaybeDayBarrier must fire the barrier, whose B1 drains
+// the coldest retired threads to the low-water mark — proving the
+// trigger placement (before the turn's recovery scope opens) and the
+// barrier-homed drain end-to-end. Also asserts the day-commit evidence:
+// exactly one day-commit on primary and a reborn daily.
+func TestDayBarrier_PreTurnDrainsColdestRetired(t *testing.T) {
+	pinClock(t, barrierDay0)
 	paths, meta := newTestHome(t)
 
 	const liveCount = 40
 	const retiredCount = 180
 	const total = liveCount + retiredCount
 
-	// Live threads thr_1..thr_40 (active/wip) — never archival-eligible.
-	// Their state_changed timestamps are deliberately OLDER than every
-	// retired thread, so a state-blind coldest policy would wrongly pick
-	// them; the retired-only filter must exclude them.
+	// Live threads thr_1..thr_40 (active/wip) — never archival-eligible,
+	// despite deliberately OLDER timestamps than every retired thread.
 	liveStates := []memops.ThreadState{memops.ThreadActive, memops.ThreadWIP}
 	for i := 0; i < liveCount; i++ {
 		id := fmt.Sprintf("thr_%d", i+1)
 		seedArchivalThread(t, paths, meta.ID, id, liveStates[i%2], "2026-01-15T00:00:00Z")
 	}
-	// Retired threads thr_41..thr_220. retiredRank(j) gives thr_(41+j) a
-	// coldness rank of j, so thr_41 is coldest and thr_220 warmest.
 	retiredStates := []memops.ThreadState{
 		memops.ThreadResolved, memops.ThreadDecided, memops.ThreadAbandoned,
 	}
@@ -116,48 +133,38 @@ func TestSurfaceArchival_WatermarkDrainsColdestRetired(t *testing.T) {
 			retiredStates[rank%3], monotonicTS(rank))
 	}
 
-	if recs, err := store.ReadSpine(paths.Spine); err != nil {
-		t.Fatalf("read spine: %v", err)
-	} else if len(recs) != total {
-		t.Fatalf("seeded spine count = %d, want %d", len(recs), total)
-	}
-
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
-
-	// Materialize the derived index so the post-archival drift check is
-	// meaningful (a regenerate-then-check on a never-built index would
-	// trivially agree).
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock([]model.Response{
+		{Content: "A plain reply with no topic tag."},
+	}, nil))
 	if err := state.Ops.RegenerateDerivedState(context.Background(), memops.IndexBuildOptions{Quiet: true}); err != nil {
 		t.Fatalf("seed RegenerateDerivedState: %v", err)
 	}
 
-	if err := surfaceArchivalCandidates(context.Background(), state); err != nil {
-		t.Fatalf("surfaceArchivalCandidates: %v", err)
+	// Cross the day boundary; the next turn's pre-turn poll fires the
+	// barrier for the completed day.
+	pinClock(t, barrierDay1)
+	if _, err := RunWithDeltas(context.Background(), state, nil, "hello", io.Discard); err != nil {
+		t.Fatalf("RunWithDeltas: %v", err)
 	}
 
 	recs, err := store.ReadSpine(paths.Spine)
 	if err != nil {
-		t.Fatalf("read spine after archival: %v", err)
+		t.Fatalf("read spine after barrier: %v", err)
 	}
-	if len(recs) != archiveLowWater {
-		t.Errorf("spine count after archival = %d, want %d (low-water)", len(recs), archiveLowWater)
+	if len(recs) != memops.ArchiveLowWater {
+		t.Errorf("spine count after barrier = %d, want %d (low-water)", len(recs), memops.ArchiveLowWater)
 	}
-
 	survivors := make(map[string]bool, len(recs))
 	for _, rec := range recs {
 		survivors[rec.ID] = true
 	}
-
-	// No live thread may be archived, despite their old timestamps.
 	for i := 0; i < liveCount; i++ {
 		id := fmt.Sprintf("thr_%d", i+1)
 		if !survivors[id] {
 			t.Errorf("live thread %s was archived — only retired threads are eligible", id)
 		}
 	}
-
-	// archivedCount coldest retired threads gone; the rest survive.
-	archivedCount := total - archiveLowWater
+	archivedCount := total - memops.ArchiveLowWater
 	for rank := 0; rank < archivedCount; rank++ {
 		if survivors[retiredID(rank)] {
 			t.Errorf("coldest retired thread %s (rank %d) should have been archived", retiredID(rank), rank)
@@ -169,169 +176,55 @@ func TestSurfaceArchival_WatermarkDrainsColdestRetired(t *testing.T) {
 		}
 	}
 
-	// The batch regenerates the derived index once; it must show no drift.
+	// Derived index regenerated inside the batch + barrier: no drift.
 	check, err := state.Ops.CheckDerivedState(context.Background(), memops.IndexBuildOptions{Quiet: true})
 	if err != nil {
 		t.Fatalf("CheckDerivedState: %v", err)
 	}
 	if !check.OK() {
-		t.Errorf("derived index has drift after archival: %+v", check.Drifts)
+		t.Errorf("derived index has drift after barrier: %+v", check.Drifts)
+	}
+
+	// Barrier evidence in the forensic log.
+	log := readArchivalEventLog(t, paths)
+	for _, want := range []string{"barrier.begin", "barrier.day-committed", "barrier.reborn", "barrier.complete"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("event log missing %s line", want)
+		}
 	}
 }
 
-// failArchiveBatchOps wraps a real MemoryOps but forces ArchiveThreads to
-// fail WITHOUT mutating the spine — modelling the adapter's atomic-per-call
-// contract (the capture-commit pre-flag fails before any spine/disk
-// mutation, so a failed batch leaves the spine intact). It lets the drain
-// test assert that the drain swallows the error and never silently loses
-// threads off the spine.
-type failArchiveBatchOps struct {
-	memops.MemoryOps
-	err error
-}
-
-func (f failArchiveBatchOps) ArchiveThreads(context.Context, []string) (memops.ArchiveResult, error) {
-	return memops.ArchiveResult{}, f.err
-}
-
-// TestSurfaceArchival_FailedBatchLeavesSpineIntact is the I2-regression
-// guard: when ArchiveThreads fails, the drain must swallow the error
-// (non-fatal) AND the spine must be UNCHANGED — never drained, never
-// partially lost. The adapter's atomic-per-call contract guarantees a
-// failed batch leaves the spine intact (pre-flag before mutation); this
-// asserts the drain honors that by not treating a failure as progress.
-func TestSurfaceArchival_FailedBatchLeavesSpineIntact(t *testing.T) {
+// TestDayBarrier_EvictsFromWorkingSet is the P2-1 dead-zone guard under
+// the barrier-homed drain: an archived thread must be removed from the
+// working-set LRU (ActiveThreads / DormantThreads) by the pre-turn
+// poll's eviction, not just from spine+disk, and the eviction must
+// survive a SaveWorkingSet → LoadSession round-trip.
+func TestDayBarrier_EvictsFromWorkingSet(t *testing.T) {
+	pinClock(t, barrierDay0)
 	paths, meta := newTestHome(t)
 
-	const total = archiveHighWater + 30
+	const total = memops.ArchiveHighWater + 30
 	for rank := 0; rank < total; rank++ {
 		seedArchivalThread(t, paths, meta.ID, fmt.Sprintf("thr_%d", rank+1),
 			memops.ThreadResolved, monotonicTS(rank))
 	}
-
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
-	state.Ops = failArchiveBatchOps{
-		MemoryOps: state.Ops,
-		err:       fmt.Errorf("injected batch failure"),
-	}
-
-	// The drain must NOT propagate the error (opportunistic + non-fatal).
-	if err := surfaceArchivalCandidates(context.Background(), state); err != nil {
-		t.Fatalf("surfaceArchivalCandidates returned the swallowed error: %v", err)
-	}
-
-	// The spine is unchanged — a failed batch never drains it (and never to 0,
-	// the I2 bug class).
-	recs, err := store.ReadSpine(paths.Spine)
-	if err != nil {
-		t.Fatalf("read spine after failed archival: %v", err)
-	}
-	if len(recs) != total {
-		t.Errorf("spine count after failed archival = %d, want %d (failed batch must leave spine intact)",
-			len(recs), total)
-	}
-}
-
-// TestSurfaceArchival_NoOpBelowHighWater — a spine below the high-water
-// mark triggers no archival.
-func TestSurfaceArchival_NoOpBelowHighWater(t *testing.T) {
-	paths, meta := newTestHome(t)
-	for i := 0; i < 50; i++ {
-		seedArchivalThread(t, paths, meta.ID, fmt.Sprintf("thr_%d", i+1),
-			memops.ThreadResolved, monotonicTS(i))
-	}
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
-
-	if err := surfaceArchivalCandidates(context.Background(), state); err != nil {
-		t.Fatalf("surfaceArchivalCandidates: %v", err)
-	}
-	recs, err := store.ReadSpine(paths.Spine)
-	if err != nil {
-		t.Fatalf("read spine: %v", err)
-	}
-	if len(recs) != 50 {
-		t.Errorf("spine count = %d, want 50 (no archival below high-water)", len(recs))
-	}
-}
-
-// TestSurfaceArchival_FiresAtTurnClose drives the trigger through a real
-// turn via RunWithDeltas — not by calling surfaceArchivalCandidates
-// directly — proving the §3.8 archival scan genuinely fires at turn close
-// (step 5c) even on a no-engagement turn (no topic tag → closeTurn early
-// returns), so the trigger placement outside that early return is locked
-// against regression.
-func TestSurfaceArchival_FiresAtTurnClose(t *testing.T) {
-	paths, meta := newTestHome(t)
-
-	// Seed a spine over the high-water mark, all retired so the whole
-	// over-budget surplus is archival-eligible.
-	const total = archiveHighWater + 30
-	for rank := 0; rank < total; rank++ {
-		seedArchivalThread(t, paths, meta.ID, fmt.Sprintf("thr_%d", rank+1),
-			memops.ThreadResolved, monotonicTS(rank))
-	}
-
-	// A response with NO topic tag: closeTurnAndUpdateEngagement sees an
-	// empty coalesce buffer and early-returns. Archival (step 5c) must
-	// still fire because it sits outside that early return.
-	mock := model.NewScriptedMock([]model.Response{
-		{Content: "A plain reply with no topic tag."},
-	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
-	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
-
-	if _, err := RunWithDeltas(context.Background(), state, nil, "hello", io.Discard); err != nil {
-		t.Fatalf("RunWithDeltas: %v", err)
-	}
-
-	recs, err := store.ReadSpine(paths.Spine)
-	if err != nil {
-		t.Fatalf("read spine after turn: %v", err)
-	}
-	if len(recs) != archiveLowWater {
-		t.Errorf("spine count after turn = %d, want %d (archival fired at turn close)",
-			len(recs), archiveLowWater)
-	}
-}
-
-// TestSurfaceArchival_EvictsFromWorkingSet is the P2-1 dead-zone guard
-// (finding M2): an archived thread must be removed from the working-set
-// LRU (ActiveThreads / DormantThreads), not just from the spine+disk. A
-// phantom entry left in those lists would otherwise be persisted by
-// SaveWorkingSet (turn.go step 5d) and resurface across sessions pointing
-// at a thread that no longer exists. This asserts eviction happens AND
-// survives a SaveWorkingSet → LoadSession reload round-trip.
-func TestSurfaceArchival_EvictsFromWorkingSet(t *testing.T) {
-	paths, meta := newTestHome(t)
-
-	// Seed a spine over the high-water mark, all retired so the whole
-	// over-budget surplus is archival-eligible. The coldest (total -
-	// archiveLowWater) threads are archived; thr_1 is coldest (rank 0).
-	const total = archiveHighWater + 30
-	for rank := 0; rank < total; rank++ {
-		seedArchivalThread(t, paths, meta.ID, fmt.Sprintf("thr_%d", rank+1),
-			memops.ThreadResolved, monotonicTS(rank))
-	}
-
-	// thr_1 / thr_2 are the coldest → archived; thr_230 is warmest →
-	// survives. Confirm that band split holds for the seeded watermarks.
-	archivedBand := total - archiveLowWater // coldest ranks [0, archivedBand) archived
+	archivedBand := total - memops.ArchiveLowWater
 	if archivedBand < 2 {
 		t.Fatalf("test premise broken: archived band %d < 2 needed seed ids", archivedBand)
 	}
-	if total-1 < archivedBand {
-		t.Fatalf("test premise broken: survivor thr_%d falls inside archived band", total)
-	}
-	const archivedActiveID = "thr_1"           // archived; seeded into ActiveThreads
+	const archivedActiveID = "thr_1"           // coldest — archived; seeded into ActiveThreads
 	const archivedDormantID = "thr_2"          // archived; seeded into DormantThreads
 	survivorID := fmt.Sprintf("thr_%d", total) // warmest retired thread, survives
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock([]model.Response{
+		{Content: "A plain reply with no topic tag."},
+	}, nil))
 	state.ActiveThreads = []string{archivedActiveID, survivorID}
 	state.DormantThreads = []string{archivedDormantID}
 
-	if err := surfaceArchivalCandidates(context.Background(), state); err != nil {
-		t.Fatalf("surfaceArchivalCandidates: %v", err)
+	pinClock(t, barrierDay1)
+	if _, err := RunWithDeltas(context.Background(), state, nil, "hello", io.Discard); err != nil {
+		t.Fatalf("RunWithDeltas: %v", err)
 	}
 
 	assertAbsent := func(label string, list []string, id string) {
@@ -351,17 +244,12 @@ func TestSurfaceArchival_EvictsFromWorkingSet(t *testing.T) {
 		}
 		t.Errorf("%s no longer contains live thread %s — survivor was wrongly evicted", label, id)
 	}
-
-	// In-memory: archived IDs gone from both lists; the survivor stays.
 	assertAbsent("ActiveThreads", state.ActiveThreads, archivedActiveID)
 	assertAbsent("DormantThreads", state.DormantThreads, archivedDormantID)
 	assertPresent("ActiveThreads", state.ActiveThreads, survivorID)
 
-	// Persist the evicted membership and reload it from disk — the phantom
-	// must not resurface across the session boundary.
-	if err := state.Ops.SaveWorkingSet(context.Background(), state.ActiveThreads, state.DormantThreads); err != nil {
-		t.Fatalf("SaveWorkingSet: %v", err)
-	}
+	// The turn's own SaveWorkingSet already persisted the evicted lists;
+	// reload and assert the phantom does not resurface.
 	reloaded, err := LoadSession(context.Background(), fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
 	if err != nil {
 		t.Fatalf("LoadSession: %v", err)
@@ -371,54 +259,33 @@ func TestSurfaceArchival_EvictsFromWorkingSet(t *testing.T) {
 	assertPresent("reloaded ActiveThreads", reloaded.ActiveThreads, survivorID)
 }
 
-// TestSurfaceArchival_UnderDrain seeds a spine over the high-water mark
-// whose retired threads are fewer than the drain target. Archival cannot
-// reach low-water — it settles ABOVE archiveLowWater — and emits an
-// archive.under-drain log line carrying the standing-pressure detail.
-func TestSurfaceArchival_UnderDrain(t *testing.T) {
+// TestDayBarrier_NoOpSameDay: with no completed day pending, the
+// pre-turn poll is a no-op — over-pressure spine or not, no drain and
+// no primary commit happen mid-day (archival is barrier-only).
+func TestDayBarrier_NoOpSameDay(t *testing.T) {
+	pinClock(t, barrierDay0)
 	paths, meta := newTestHome(t)
-
-	// Over high-water, but mostly live threads. target = total -
-	// archiveLowWater; retiredCount is deliberately smaller than target.
-	const total = archiveHighWater + 40    // target = 90
-	const retiredCount = 20                // < target
-	const liveCount = total - retiredCount // 220
-
-	liveStates := []memops.ThreadState{memops.ThreadActive, memops.ThreadWIP}
-	for i := 0; i < liveCount; i++ {
-		seedArchivalThread(t, paths, meta.ID, fmt.Sprintf("thr_%d", i+1),
-			liveStates[i%2], "2026-01-15T00:00:00Z")
+	const total = memops.ArchiveHighWater + 30
+	for rank := 0; rank < total; rank++ {
+		seedArchivalThread(t, paths, meta.ID, fmt.Sprintf("thr_%d", rank+1),
+			memops.ThreadResolved, monotonicTS(rank))
 	}
-	for j := 0; j < retiredCount; j++ {
-		seedArchivalThread(t, paths, meta.ID, fmt.Sprintf("thr_%d", liveCount+1+j),
-			memops.ThreadResolved, monotonicTS(j))
-	}
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock([]model.Response{
+		{Content: "A plain reply with no topic tag."},
+	}, nil))
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
-	if err := state.Ops.RegenerateDerivedState(context.Background(), memops.IndexBuildOptions{Quiet: true}); err != nil {
-		t.Fatalf("seed RegenerateDerivedState: %v", err)
+	// SAME day as the daily's birth: nothing completed, no barrier.
+	if _, err := RunWithDeltas(context.Background(), state, nil, "hello", io.Discard); err != nil {
+		t.Fatalf("RunWithDeltas: %v", err)
 	}
-
-	if err := surfaceArchivalCandidates(context.Background(), state); err != nil {
-		t.Fatalf("surfaceArchivalCandidates: %v", err)
-	}
-
 	recs, err := store.ReadSpine(paths.Spine)
 	if err != nil {
-		t.Fatalf("read spine after archival: %v", err)
+		t.Fatalf("read spine: %v", err)
 	}
-	// All retired threads archived; the spine settles above low-water.
-	wantSpine := total - retiredCount
-	if len(recs) != wantSpine {
-		t.Errorf("spine count after under-drain = %d, want %d", len(recs), wantSpine)
+	if len(recs) != total {
+		t.Errorf("spine count = %d, want %d (no drain without a day barrier)", len(recs), total)
 	}
-	if len(recs) <= archiveLowWater {
-		t.Errorf("spine drained to %d <= low-water %d; under-drain expected to settle ABOVE low-water",
-			len(recs), archiveLowWater)
-	}
-
-	log := readArchivalEventLog(t, paths)
-	if !strings.Contains(log, "archive.under-drain") {
-		t.Errorf("event log missing archive.under-drain line\n%s", log)
+	if strings.Contains(readArchivalEventLog(t, paths), "barrier.begin") {
+		t.Error("barrier fired on a same-day poll")
 	}
 }

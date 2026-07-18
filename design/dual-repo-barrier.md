@@ -961,6 +961,52 @@ Changes vs the SOLUTION outline (which was single-repo):
     cell 8 — F1 supersedes "worktree-preserving but leave-it" with
     "worktree-preserving AND complete-it".)
 
+## Post-review amendments (2026-07 R3b fixup pass)
+
+Implementation deltas vs the text above, adopted at the review burn-down;
+invariants unchanged (INV-2 is strengthened):
+
+1. **B2's spine gate runs on the STAGED tree BEFORE the mint** (the text
+   above says "post-flag"). The staged tree is byte-for-byte what the
+   commit would capture, so the gate checks the same state — but a
+   spine-broken day-commit can now never land, making §2.7's "primary
+   HEAD is always spine-good" universal. Consequences: the §2.7
+   scoped-restore source is plain primary HEAD, no parent special-case
+   (step 3 above already said HEAD); the §2.7 repair is a pure worktree
+   action with NO repair commit, so a **completed barrier always ends
+   with primary HEAD = the day-commit for N** (no same-day re-fire off a
+   trailered-but-non-day-shape HEAD), a **refused open leaves primary
+   untouched** (no day-commit/repair accretion while wedged), and
+   exactly-one-day-commit (INV-2) holds even across a repair.
+   `barrierTail` keeps a cheap tail expectation check — re-mint iff HEAD
+   is non-day-shape at marker-clear time (currently unreachable; guards
+   any future B3–B6 primary writer).
+2. **The §2.3 completion routine re-runs the B1 pressure drain** after
+   completing any in-flight batch — the "before B1 → re-run barrier from
+   B1" row, folded into the numbered routine: a barrier killed at
+   `barrier.preArchival` must not silently defer the day's archival
+   pressure to the next barrier. Gated on the day-commit for N not
+   having landed (post-B2 windows can never have candidates, and
+   archival commits atop a landed day-commit would recreate the
+   non-day-shape wedge).
+3. **`store.Init` births `.git-daily` ONLY alongside a fresh primary**
+   (true greenfield). On an existing home a missing daily is the
+   legacy-upgrade shape and stays absent through Init, so the §2.5 rows
+   and cell-12's verify-gated adopt discriminate as designed — an
+   Init-minted baseline committed un-adopted legacy content into a
+   clean-looking daily, skipping the adopt gate and downgrading the
+   benign-morning stamp-only path to a spurious full rebuild.
+4. **cell-9 stamp-repair re-entry re-runs the scoped daily absorb**
+   (zero-unstamped path): a crash between the index write and the
+   absorb otherwise leaves the stamped index as standing cell-3 dirt.
+   Idempotent — an index already at daily HEAD is a swallowed empty
+   commit.
+5. **`ScopedRestored` covers regeneration for derived paths**: under the
+   §2.7 B6 posture the quarantined derived artifacts (gitignored, never
+   in primary HEAD) are made whole by the post-quarantine rebuild and
+   recorded only after the re-check passes — restore-from-HEAD for
+   canonical paths, regenerate-and-verify for derived ones.
+
 ## Retractions (from the R2 dispatched design)
 
 - **Cell 8 "`reset --hard HEAD` → sweep debris".** WITHDRAWN. Reason:

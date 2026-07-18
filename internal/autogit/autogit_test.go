@@ -50,10 +50,10 @@ func TestCommit_NoFlags(t *testing.T) {
 	if err := os.WriteFile(stray, []byte("hello\n"), 0o644); err != nil {
 		t.Fatalf("write stray: %v", err)
 	}
-	if err := Add(context.Background(), paths, "."); err != nil {
+	if err := Add(context.Background(), paths, Primary, "."); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	if err := Commit(context.Background(), paths, "no-flags", 0, 0); err != nil {
+	if err := Commit(context.Background(), paths, Primary, "no-flags", 0, 0); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 	after := repoHead(t, paths)
@@ -74,11 +74,11 @@ func TestCommit_PreFlagFailureAbortsBeforeCommit(t *testing.T) {
 	if err := os.WriteFile(paths.Spine, []byte(badRecord), 0o644); err != nil {
 		t.Fatalf("write bad spine: %v", err)
 	}
-	if err := Add(context.Background(), paths, "."); err != nil {
+	if err := Add(context.Background(), paths, Primary, "."); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
-	err := Commit(context.Background(), paths, "should-not-land", CheckSpineIntegrity, 0)
+	err := Commit(context.Background(), paths, Primary, "should-not-land", CheckSpineIntegrity, 0)
 	if err == nil {
 		t.Fatal("expected pre-flag failure, got nil")
 	}
@@ -106,11 +106,11 @@ func TestCommit_PostFlagFailureWraps(t *testing.T) {
 	if err := os.WriteFile(paths.Spine, []byte(rec), 0o644); err != nil {
 		t.Fatalf("write spine: %v", err)
 	}
-	if err := Add(context.Background(), paths, "."); err != nil {
+	if err := Add(context.Background(), paths, Primary, "."); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
-	err := Commit(context.Background(), paths, "drift", 0, CheckDerivedFresh)
+	err := Commit(context.Background(), paths, Primary, "drift", 0, CheckDerivedFresh)
 	if err == nil {
 		t.Fatal("expected post-flag failure, got nil")
 	}
@@ -133,7 +133,7 @@ func TestCommit_GitFailureNotWrappedAsPostOp(t *testing.T) {
 	// No staged changes. CheckDerivedFresh as the post-flag would also
 	// pass on this clean state, so a wrapped error would indicate a real
 	// misclassification.
-	err := Commit(context.Background(), paths, "empty", 0, CheckDerivedFresh)
+	err := Commit(context.Background(), paths, Primary, "empty", 0, CheckDerivedFresh)
 	if err == nil {
 		t.Fatal("expected ErrEmptyCommit, got nil")
 	}
@@ -150,12 +150,12 @@ func TestCommit_MultipleFlags(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(paths.Home, "stray.md"), []byte("ok\n"), 0o644); err != nil {
 		t.Fatalf("write stray: %v", err)
 	}
-	if err := Add(context.Background(), paths, "."); err != nil {
+	if err := Add(context.Background(), paths, Primary, "."); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
 	flags := CheckDerivedFresh | CheckSpineIntegrity
-	if err := Commit(context.Background(), paths, "multi-flag", flags, flags); err != nil {
+	if err := Commit(context.Background(), paths, Primary, "multi-flag", flags, flags); err != nil {
 		t.Fatalf("Commit with both flags: %v", err)
 	}
 }
@@ -169,10 +169,10 @@ func TestCheckout_RestoresFile(t *testing.T) {
 	if err := os.WriteFile(target, []byte("version A\n"), 0o644); err != nil {
 		t.Fatalf("write A: %v", err)
 	}
-	if err := Add(context.Background(), paths, "."); err != nil {
+	if err := Add(context.Background(), paths, Primary, "."); err != nil {
 		t.Fatalf("Add A: %v", err)
 	}
-	if err := Commit(context.Background(), paths, "commit A", 0, 0); err != nil {
+	if err := Commit(context.Background(), paths, Primary, "commit A", 0, 0); err != nil {
 		t.Fatalf("Commit A: %v", err)
 	}
 	commitA := repoHead(t, paths)
@@ -180,14 +180,14 @@ func TestCheckout_RestoresFile(t *testing.T) {
 	if err := os.WriteFile(target, []byte("version B\n"), 0o644); err != nil {
 		t.Fatalf("write B: %v", err)
 	}
-	if err := Add(context.Background(), paths, "."); err != nil {
+	if err := Add(context.Background(), paths, Primary, "."); err != nil {
 		t.Fatalf("Add B: %v", err)
 	}
-	if err := Commit(context.Background(), paths, "commit B", 0, 0); err != nil {
+	if err := Commit(context.Background(), paths, Primary, "commit B", 0, 0); err != nil {
 		t.Fatalf("Commit B: %v", err)
 	}
 
-	if err := Checkout(context.Background(), paths, commitA.String(), "target.md", 0, 0); err != nil {
+	if err := Checkout(context.Background(), paths, Primary, commitA.String(), "target.md", 0, 0); err != nil {
 		t.Fatalf("Checkout: %v", err)
 	}
 	got, err := os.ReadFile(target)
@@ -202,7 +202,7 @@ func TestCheckout_RestoresFile(t *testing.T) {
 // TestTag_CreatesTag: tag at HEAD resolves through go-git's Tag().
 func TestTag_CreatesTag(t *testing.T) {
 	paths := scaffoldHome(t)
-	if err := Tag(context.Background(), paths, "test-tag", ""); err != nil {
+	if err := Tag(context.Background(), paths, Primary, "test-tag", ""); err != nil {
 		t.Fatalf("Tag: %v", err)
 	}
 	repo, err := git.PlainOpen(paths.Home)

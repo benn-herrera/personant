@@ -8,6 +8,7 @@ package memops
 // documents.
 const (
 	LogCategoryArchive     = "archive"
+	LogCategoryBarrier     = "barrier"
 	LogCategoryConsolidate = "consolidate"
 	LogCategoryDedup       = "dedup"
 	LogCategoryFS          = "fs"

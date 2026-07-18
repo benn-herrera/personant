@@ -457,6 +457,12 @@ type TurnInfo struct {
 	CommitDuration  time.Duration
 	JournalDuration time.Duration
 	GCDuration      time.Duration
+	// Barrier is the pre-turn day-barrier poll's result (#94 R3b §6.3).
+	// Zero on the common same-day turn; when the poll sealed a day the
+	// caller (the sim harness) records the duration gauges from it —
+	// the seal happens INSIDE the turn call, so this is the only place
+	// the measurements surface.
+	Barrier memops.DayBarrierResult
 }
 
 // Run drives one complete user turn end-to-end (spec §3.0). It is a thin
@@ -548,6 +554,24 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	// history tail) are bounded by truncation/recency below, not rejected.
 	if err := checkUserInput(userInput, state.Budget); err != nil {
 		return "", TurnInfo{}, err
+	}
+	// #94 R3b §2.1: the pre-turn new-day check. The day barrier is a
+	// between-turns batch op, so it must fire BEFORE this turn's recovery
+	// scope opens (the JournalTurn below). The common same-day poll is a
+	// cached in-memory compare; when a barrier DID run, any threads its
+	// archival drain removed are evicted from the working-set LRU here
+	// (the P2-1 phantom guard — an archived id lingering in
+	// ActiveThreads/DormantThreads would be persisted by SaveWorkingSet
+	// pointing at a thread that no longer exists). A barrier error fails
+	// the turn: the substrate's own marker makes the next open detect and
+	// complete the interrupted barrier.
+	bres, berr := state.Ops.MaybeDayBarrier(ctx)
+	if berr != nil {
+		return "", TurnInfo{}, fmt.Errorf("turn: day barrier: %w", berr)
+	}
+	for _, id := range bres.ArchivedThreads {
+		state.ActiveThreads = removeString(state.ActiveThreads, id)
+		state.DormantThreads = removeString(state.DormantThreads, id)
 	}
 	if state.coalesce == nil {
 		state.coalesce = newCoalesceBuffer()
@@ -945,29 +969,26 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	state.Ops.MaybeGC(ctx)
 	gcDur := clock.Since(gcStart)
 
-	// Step 5d: §3.8 cardinality-pressure archival scan. Re-sequenced (#94,
-	// SOLUTION principle 6) to run strictly AFTER CommitTurn — archival
-	// runs BETWEEN turns, never inside a turn's marker window, in its own
-	// op=archival marker scope (owned by the adapter's ArchiveThreads).
-	// Like closure, it runs on every turn (a spine grows past the
-	// watermark regardless of this turn's activity) and is opportunistic —
-	// a failure is logged and swallowed, never aborting the turn.
-	if err := surfaceArchivalCandidates(ctx, state); err != nil {
-		_ = state.Ops.Log(ctx, memops.LogCategoryArchive, "error", memops.SanitizeDetail(err.Error()))
-	}
+	// Step 5d (RETIRED under #94 R3b): the §3.8 cardinality-pressure
+	// archival drain no longer fires at turn close — archival is
+	// BARRIER-ONLY (the day barrier's B1, INV-5: primary is
+	// barrier-exclusive). The pressure policy itself survives as
+	// memops.SelectArchivalCandidates, applied by the adapter at B1; the
+	// pre-turn MaybeDayBarrier call at the top of this function is where
+	// a drain's working-set evictions reach this State.
 
 	// Step 5e: persist the updated Layer B/C working-set membership so a
 	// clean shutdown→relaunch resumes the working set instead of
-	// cold-starting it empty. This MUST run after steps 5b/5d: closure
-	// retirement and archival both evict threads from ActiveThreads /
-	// DormantThreads, so saving any earlier would persist a stale set
-	// (a thread the same turn went on to evict). It also runs on
-	// no-engagement turns — closeTurnAndUpdateEngagement returns early
-	// then, but closure/archival can still have evicted something. The
-	// artifact is operational (gitignored), so writing it after CommitTurn
-	// is outside no marker scope's concern. A save failure is non-fatal:
-	// log and continue, consistent with the other close-time substrate
-	// calls (AgeFileChains, recall).
+	// cold-starting it empty. This MUST run after step 5b: closure
+	// retirement evicts threads from ActiveThreads / DormantThreads, so
+	// saving any earlier would persist a stale set (a thread the same
+	// turn went on to evict). It also runs on no-engagement turns —
+	// closeTurnAndUpdateEngagement returns early then, but closure can
+	// still have evicted something. The artifact is operational
+	// (gitignored), so writing it after CommitTurn is outside any marker
+	// scope's concern. A save failure is non-fatal: log and continue,
+	// consistent with the other close-time substrate calls
+	// (AgeFileChains, recall).
 	if err := state.Ops.SaveWorkingSet(ctx, state.ActiveThreads, state.DormantThreads); err != nil {
 		_ = state.Ops.Log(ctx, memops.LogCategorySession, "working-set-save-error", memops.SanitizeDetail(err.Error()))
 	}
@@ -1003,5 +1024,6 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		CommitDuration:  commitDur,
 		JournalDuration: journalDur,
 		GCDuration:      gcDur,
+		Barrier:         bres,
 	}, nil
 }

@@ -8,9 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/cache"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/storage/filesystem"
 
 	"personant/internal/clock"
 )
@@ -147,8 +150,26 @@ func Init(paths PersonantPaths, opts InitOptions) error {
 		}
 	}
 
-	if err := initGit(paths.Home, logf); err != nil {
+	createdPrimary, err := initGit(paths.Home, logf)
+	if err != nil {
 		return err
+	}
+	// The daily DB is born by Init ONLY alongside a fresh primary (true
+	// greenfield). An existing home lacking a daily is the LEGACY-UPGRADE
+	// shape and must stay daily-less through Init: Reconcile's §2.5 rows
+	// (greenfield vs benign-morning, discriminated by the watermark) and
+	// cell-12's verify-gated adopt are the discriminators, and an
+	// Init-minted daily baseline would blind them — it commits un-adopted
+	// legacy content into a clean-looking daily, skipping the cell-12
+	// structural gate, and turns the benign-morning index.Check
+	// stamp-only path into a spurious full rebuild. No code path observes
+	// a daily-less substrate either way: the open sequence is Init →
+	// Reconcile, and Reconcile's morning-init/adopt rows mint the daily
+	// before anything reads it.
+	if createdPrimary {
+		if err := initGitDaily(paths, logf); err != nil {
+			return err
+		}
 	}
 
 	logf("init: ok")
@@ -287,7 +308,9 @@ func mergeGitignore(existing []byte) []byte {
 	return []byte(strings.Join(out, "\n") + "\n")
 }
 
-// initGit ensures Home is a git repository with at least one commit.
+// initGit ensures Home is a git repository with at least one commit and
+// reports whether it CREATED the repo (false when .git/ pre-existed —
+// the greenfield-vs-legacy signal Init's daily-birth decision keys on).
 //   - If .git/ already exists, it is opened with go-git.PlainOpen and
 //     left otherwise untouched.
 //   - Otherwise go-git.PlainInit creates the repo.
@@ -296,29 +319,71 @@ func mergeGitignore(existing []byte) []byte {
 //     fallback when the repo's git config has no user.name/user.email.
 //
 // No git binary is required on $PATH; the work is done in-process.
-func initGit(home string, logf func(format string, args ...any)) error {
+func initGit(home string, logf func(format string, args ...any)) (created bool, err error) {
 	gitDir := filepath.Join(home, ".git")
 
 	var repo *git.Repository
 	if _, err := os.Stat(gitDir); err == nil {
 		opened, oerr := git.PlainOpen(home)
 		if oerr != nil {
-			return fmt.Errorf("init: open existing repo: %w", oerr)
+			return false, fmt.Errorf("init: open existing repo: %w", oerr)
 		}
 		repo = opened
 	} else if errors.Is(err, os.ErrNotExist) {
-		created, cerr := git.PlainInit(home, false)
+		madeRepo, cerr := git.PlainInit(home, false)
 		if cerr != nil {
-			return fmt.Errorf("init: git init: %w", cerr)
+			return false, fmt.Errorf("init: git init: %w", cerr)
 		}
-		repo = created
+		repo = madeRepo
+		created = true
 		logf("init: git init %s", home)
 	} else {
-		return fmt.Errorf("init: stat .git: %w", err)
+		return false, fmt.Errorf("init: stat .git: %w", err)
 	}
 
 	if err := initialCommitIfEmpty(repo, logf); err != nil {
-		return err
+		return created, err
+	}
+	return created, nil
+}
+
+// initGitDaily ensures the DAILY recovery DB (#94 R3b: <home>/.git-daily,
+// a git-dir divorced from the shared worktree) exists with a baseline
+// commit. Called ONLY on the greenfield path (Init created the primary
+// this run — see the caller): on an existing home a missing daily is
+// the legacy-upgrade shape that Reconcile's §2.5/cell-12 rows must
+// discriminate, and birthing it here would blind them. Idempotent: an
+// existing .git-daily is left entirely alone (a half-created or corrupt
+// one is recovery's recreate-from-worktree case, not init's).
+//
+// The daily DB is DISPOSABLE scaffolding: nuked and reborn at each day
+// barrier; the worktree is the truth and primary (.git) is the career
+// history. Both git-dirs are covered by the seeded .gitignore block
+// (written above, before the baseline Add honors it — INV-6).
+func initGitDaily(paths PersonantPaths, logf func(format string, args ...any)) error {
+	if _, err := os.Stat(paths.GitDaily); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("init: stat .git-daily: %w", err)
+	}
+	// NOT git.Init: with a divorced git-dir it writes a `.git` gitdir-link
+	// FILE into the worktree, colliding with primary's real `.git` dir.
+	// Storage init + HEAD ref is git.Init minus that link (autogit's
+	// InitDaily does the same at runtime).
+	storer := filesystem.NewStorage(osfs.New(paths.GitDaily), cache.NewObjectLRUDefault())
+	if err := storer.Init(); err != nil {
+		return fmt.Errorf("init: git init daily: %w", err)
+	}
+	if err := storer.SetReference(plumbing.NewSymbolicReference(plumbing.HEAD, plumbing.Master)); err != nil {
+		return fmt.Errorf("init: daily HEAD: %w", err)
+	}
+	repo, err := git.Open(storer, osfs.New(paths.Home))
+	if err != nil {
+		return fmt.Errorf("init: open daily: %w", err)
+	}
+	logf("init: git init %s", paths.GitDaily)
+	if err := initialCommitIfEmpty(repo, logf); err != nil {
+		return fmt.Errorf("init: daily baseline: %w", err)
 	}
 	return nil
 }
@@ -494,6 +559,14 @@ const seedReadmeMD = "# personant home\n" +
 const seedGitignoreBody = `# personant home gitignore
 tmp/
 last-active
+# Both git-dirs are ignored EXPLICITLY (#94 R3b, INV-6). git auto-ignores
+# only a repo's OWN git-dir: the daily handle (.git-daily as git-dir over
+# this worktree) would otherwise see .git/ as untracked, and primary would
+# see .git-daily/ as untracked — either could commit a sibling git DB or
+# have the recovery debris-sweep quarantine a LIVE one. The .git/ line is
+# redundant-harmless for primary, load-bearing for daily.
+.git/
+.git-daily/
 # history is the REPL line-edit history (§4.3.1) — operational state, capped
 # and rewritten by the REPL. It is never canonical, so §3.11 checkpoints must
 # not commit it.

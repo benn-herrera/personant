@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 
 	"github.com/go-git/go-git/v5"
@@ -51,13 +52,24 @@ func unstampedEntries(paths store.PersonantPaths) ([]memops.ArchiveEntry, error)
 // hand-edit); a whole-tree stage here would adopt that dirt as a side
 // effect of an unrelated repair. It also carries no verification flags:
 // recovery precedes validity (see autogit.ResetHard's flag rationale).
+//
+// R3b: the stamp commit targets PRIMARY (archival lives there) under
+// the recovery-repair exemption of INV-5, and carries the Personant-Day
+// trailer = HEADDAY-at-repair-time (F3) — a standalone stamp-repair
+// never advances the day; on a trailerless (pre-R3b) primary it falls
+// back to the current day, the bootstrap carve-out.
 func stampRepair(ctx context.Context, paths store.PersonantPaths, rep *memops.RecoveryReport) error {
 	unstamped, err := unstampedEntries(paths)
 	if err != nil {
 		return fmt.Errorf("recovery: stamp repair: read index: %w", err)
 	}
 	if len(unstamped) == 0 {
-		return nil
+		// Re-entry convergence: a prior pass may have crashed after its
+		// index write (every entry now stamped) but before the daily
+		// absorb below, leaving the index as transient cell-3 dirt vs
+		// daily on every subsequent open. Re-run the scoped absorb — an
+		// index already at daily HEAD is an empty commit, swallowed.
+		return absorbStampIntoDaily(ctx, paths)
 	}
 	rep.CellsHit = append(rep.CellsHit, Cell9StampRepair)
 
@@ -68,7 +80,7 @@ func stampRepair(ctx context.Context, paths store.PersonantPaths, rep *memops.Re
 			logEvent(paths, "unrepairable", "thr="+e.ThrID+" reason=no-parent-commit-recorded")
 			continue
 		}
-		delHash, found, lerr := locateDeletionCommit(ctx, paths, e.ParentCommitHash, e.OriginalPath)
+		delHash, found, lerr := LocateDeletionCommit(ctx, paths, e.ParentCommitHash, e.OriginalPath)
 		if lerr != nil {
 			return fmt.Errorf("recovery: stamp repair %s: %w", e.ThrID, lerr)
 		}
@@ -87,21 +99,33 @@ func stampRepair(ctx context.Context, paths store.PersonantPaths, rep *memops.Re
 	if err := store.AppendArchiveEntries(paths, repaired); err != nil {
 		return fmt.Errorf("recovery: stamp repair: write index: %w", err)
 	}
-	indexRel, err := filepath.Rel(paths.Home, paths.ArchiveIndex)
+	indexRel, err := archiveIndexRel(paths)
 	if err != nil {
-		return fmt.Errorf("recovery: stamp repair: index path: %w", err)
+		return fmt.Errorf("recovery: stamp repair: %w", err)
 	}
-	if err := autogit.Add(ctx, paths, filepath.ToSlash(indexRel)); err != nil {
+	if err := autogit.Add(ctx, paths, autogit.Primary, indexRel); err != nil {
 		return fmt.Errorf("recovery: stamp repair: stage index: %w", err)
 	}
 	crashpoint.At(cpStampPreCommit)
-	if err := autogit.Commit(ctx, paths,
-		fmt.Sprintf("recovery: stamp %d archive entr%s", len(repaired), plural(len(repaired))), 0, 0); err != nil {
+	// Personant-Day = HEADDAY at repair time (never advances the day).
+	repairDay, ok, derr := autogit.HeadDay(ctx, paths, autogit.Primary)
+	if derr != nil {
+		return fmt.Errorf("recovery: stamp repair: read HEADDAY: %w", derr)
+	}
+	if !ok {
+		repairDay = autogit.CurrentDay() // trailerless pre-R3b primary — bootstrap
+	}
+	msg := autogit.WithDayTrailer(
+		fmt.Sprintf("recovery: stamp %d archive entr%s", len(repaired), plural(len(repaired))), repairDay)
+	if err := autogit.Commit(ctx, paths, autogit.Primary, msg, 0, 0); err != nil {
 		// The index write already landed; an empty commit here means a
 		// re-entered pass committed it before crashing. Converged — accept.
 		if !errors.Is(err, git.ErrEmptyCommit) {
 			return fmt.Errorf("recovery: stamp repair: commit: %w", err)
 		}
+	}
+	if err := absorbStampIntoDaily(ctx, paths); err != nil {
+		return err
 	}
 	for _, e := range repaired {
 		rep.StampRepaired = append(rep.StampRepaired, e.ThrID)
@@ -110,23 +134,68 @@ func stampRepair(ctx context.Context, paths store.PersonantPaths, rep *memops.Re
 	return nil
 }
 
-// locateDeletionCommit walks HEAD's ancestry for the child of
+// absorbStampIntoDaily stages the archive index (scoped — never a full
+// sweep, which would adopt unrelated cell-3 dirt) into DAILY and
+// commits it flag-free, swallowing the empty commit. The index rewrite
+// changes the worktree after daily's last commit while the stamp commit
+// lands only in primary; without this absorb the repaired home reads
+// markerless-dirty (cell 3) on every open, and a later torn-turn reset
+// to daily HEAD could revert the repair. Runs on the main stampRepair
+// path AND on its re-entry (zero unstamped entries — a prior pass may
+// have crashed between index write and absorb), so both converge to a
+// clean tree. A home with no archive index yet is a no-op.
+func absorbStampIntoDaily(ctx context.Context, paths store.PersonantPaths) error {
+	if _, err := os.Stat(paths.ArchiveIndex); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("recovery: stamp absorb: stat index: %w", err)
+	}
+	indexRel, err := archiveIndexRel(paths)
+	if err != nil {
+		return fmt.Errorf("recovery: stamp absorb: %w", err)
+	}
+	if err := autogit.AddPaths(ctx, paths, autogit.Daily, []string{indexRel}); err != nil {
+		return fmt.Errorf("recovery: stamp absorb: stage index (daily): %w", err)
+	}
+	if err := autogit.Commit(ctx, paths, autogit.Daily,
+		"recovery: stamp absorb", 0, 0); err != nil && !errors.Is(err, git.ErrEmptyCommit) {
+		return fmt.Errorf("recovery: stamp absorb: commit: %w", err)
+	}
+	return nil
+}
+
+// archiveIndexRel returns the archive index's home-relative,
+// slash-separated path — the form autogit's scoped staging speaks.
+func archiveIndexRel(paths store.PersonantPaths) (string, error) {
+	rel, err := filepath.Rel(paths.Home, paths.ArchiveIndex)
+	if err != nil {
+		return "", fmt.Errorf("index path: %w", err)
+	}
+	return filepath.ToSlash(rel), nil
+}
+
+// LocateDeletionCommit walks primary HEAD's ancestry for the child of
 // parentHash whose tree no longer contains originalPath while the
 // parent's tree does — the deletion commit. History is linear
 // (single-parent) in this substrate; children appear before their
 // parent in the walk, so the search stops once parentHash itself is
 // reached. A deletion commit orphaned by a reset is unreachable from
 // HEAD and correctly reports not-found (its entry stays refused).
-func locateDeletionCommit(ctx context.Context, paths store.PersonantPaths, parentHash, originalPath string) (string, bool, error) {
+//
+// Exported (#94 R3b): the adapter's F1 roll-forward completion uses it
+// as the deletion-commit discriminator — NEVER worktree-clean-vs-HEAD,
+// which an overnight hand-edit would fool into minting a duplicate.
+func LocateDeletionCommit(ctx context.Context, paths store.PersonantPaths, parentHash, originalPath string) (string, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return "", false, err
 	}
 	if originalPath == "" {
 		return "", false, nil
 	}
-	repo, err := git.PlainOpen(paths.Home)
+	repo, err := autogit.Open(paths, autogit.Primary)
 	if err != nil {
-		return "", false, fmt.Errorf("open repo: %w", err)
+		return "", false, fmt.Errorf("open primary repo: %w", err)
 	}
 	head, err := repo.Head()
 	if err != nil {

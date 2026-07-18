@@ -53,21 +53,21 @@ func reconcile(t *testing.T, paths store.PersonantPaths) memops.RecoveryReport {
 	return rep
 }
 
-func commitAll(t *testing.T, paths store.PersonantPaths, msg string) string {
+func commitAll(t *testing.T, paths store.PersonantPaths, which autogit.Repo, msg string) string {
 	t.Helper()
 	ctx := context.Background()
-	if err := autogit.Add(ctx, paths, "."); err != nil {
+	if err := autogit.Add(ctx, paths, which, "."); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	if err := autogit.Commit(ctx, paths, msg, 0, 0); err != nil {
+	if err := autogit.Commit(ctx, paths, which, msg, 0, 0); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
-	return headHash(t, paths)
+	return headHash(t, paths, which)
 }
 
-func headHash(t *testing.T, paths store.PersonantPaths) string {
+func headHash(t *testing.T, paths store.PersonantPaths, which autogit.Repo) string {
 	t.Helper()
-	h, err := autogit.HeadHash(context.Background(), paths)
+	h, err := autogit.HeadHash(context.Background(), paths, which)
 	if err != nil {
 		t.Fatalf("HeadHash: %v", err)
 	}
@@ -120,8 +120,8 @@ func wantWatermarkAtHead(t *testing.T, paths store.PersonantPaths) {
 	if err != nil || !present {
 		t.Fatalf("watermark: present=%v err=%v", present, err)
 	}
-	if head := headHash(t, paths); wm != head {
-		t.Errorf("watermark %s != HEAD %s", wm, head)
+	if head := headHash(t, paths, autogit.Daily); wm != head {
+		t.Errorf("watermark %s != daily HEAD %s", wm, head)
 	}
 }
 
@@ -227,7 +227,7 @@ func TestCell2ThenCell1_FreshHome(t *testing.T) {
 func TestCell2_StaleAfterCommit(t *testing.T) {
 	paths := baselineHome(t)
 	writeHome(t, paths, userMDRel, "new directive content\n")
-	commitAll(t, paths, "content update")
+	commitAll(t, paths, autogit.Daily, "content update")
 
 	rep := reconcile(t, paths)
 	wantCells(t, rep, Cell2DerivedStale)
@@ -246,7 +246,7 @@ func TestCell3_HandEditNeverReset(t *testing.T) {
 	paths := baselineHome(t)
 	const sentinel = "HAND EDIT SENTINEL — these exact bytes must survive recovery\n"
 	writeHome(t, paths, userMDRel, sentinel)
-	headBefore := headHash(t, paths)
+	headBefore := headHash(t, paths, autogit.Daily)
 
 	rep := reconcile(t, paths)
 	wantCells(t, rep, Cell3HandEdit)
@@ -256,7 +256,7 @@ func TestCell3_HandEditNeverReset(t *testing.T) {
 	if got := readHome(t, paths, userMDRel); got != sentinel {
 		t.Fatalf("hand-edit bytes did not survive: %q", got)
 	}
-	if headHash(t, paths) != headBefore {
+	if headHash(t, paths, autogit.Daily) != headBefore {
 		t.Error("cell 3 created a commit; the edit must be absorbed by the NEXT turn's commit, not recovery")
 	}
 	wantMarkerAbsent(t, paths)
@@ -288,10 +288,10 @@ func tornTurnHome(t *testing.T) (store.PersonantPaths, string) {
 		t.Fatalf("eventlog: %v", err)
 	}
 	ctx := context.Background()
-	if err := autogit.Add(ctx, paths, "."); err != nil {
+	if err := autogit.Add(ctx, paths, autogit.Daily, "."); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	if err := autogit.Commit(ctx, paths, autogit.TurnCommitMessage("t1", "baseline"), 0, 0); err != nil {
+	if err := autogit.Commit(ctx, paths, autogit.Daily, autogit.TurnCommitMessage("t1", "baseline"), 0, 0); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 	reconcile(t, paths) // watermark at t1's commit
@@ -337,7 +337,7 @@ func assertTornTurnRecovered(t *testing.T, paths store.PersonantPaths, committed
 	wantJournalEmpty(t, paths)
 	wantMarkerAbsent(t, paths)
 	wantWatermarkAtHead(t, paths)
-	if turn, _ := autogit.HeadTurn(context.Background(), paths); turn != "t1" {
+	if turn, _ := autogit.HeadTurn(context.Background(), paths, autogit.Daily); turn != "t1" {
 		t.Errorf("HEADTURN = %q, want t1 (t2 must be rolled back, ≤1-turn loss)", turn)
 	}
 	// Non-lossy destructive path: the swept debris file and the pre-reset
@@ -406,10 +406,10 @@ func TestCell5_TurnCommittedPreClear(t *testing.T) {
 	paths := baselineHome(t)
 	writeHome(t, paths, userMDRel, "turn t2 content\n")
 	ctx := context.Background()
-	if err := autogit.Add(ctx, paths, "."); err != nil {
+	if err := autogit.Add(ctx, paths, autogit.Daily, "."); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	if err := autogit.Commit(ctx, paths, autogit.TurnCommitMessage("t2", "1 event"), 0, 0); err != nil {
+	if err := autogit.Commit(ctx, paths, autogit.Daily, autogit.TurnCommitMessage("t2", "1 event"), 0, 0); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 	// Crash window: commit landed, journal never truncated — the
@@ -417,7 +417,7 @@ func TestCell5_TurnCommittedPreClear(t *testing.T) {
 	if err := store.AppendJournal(paths, "t2", store.JournalResponse, []byte("already committed")); err != nil {
 		t.Fatalf("AppendJournal: %v", err)
 	}
-	headBefore := headHash(t, paths)
+	headBefore := headHash(t, paths, autogit.Daily)
 
 	rep := reconcile(t, paths)
 	wantCells(t, rep, Cell5TurnCommitted)
@@ -430,7 +430,7 @@ func TestCell5_TurnCommittedPreClear(t *testing.T) {
 	if got := readHome(t, paths, userMDRel); got != "turn t2 content\n" {
 		t.Errorf("committed turn content damaged: %q — cell 5 must be ZERO loss", got)
 	}
-	if headHash(t, paths) != headBefore {
+	if headHash(t, paths, autogit.Daily) != headBefore {
 		t.Error("cell 5 moved HEAD")
 	}
 	wantJournalEmpty(t, paths)
@@ -448,14 +448,14 @@ func TestCell6_CrashDuringModelCall_TrailerAbsent(t *testing.T) {
 	if err := store.AppendJournal(paths, "t1", store.JournalPrompt, []byte("PROMPT-ONLY: model call never returned")); err != nil {
 		t.Fatalf("AppendJournal: %v", err)
 	}
-	headBefore := headHash(t, paths)
+	headBefore := headHash(t, paths, autogit.Daily)
 
 	rep := reconcile(t, paths)
 	wantCells(t, rep, Cell6TurnNoWrites)
 	if rep.ResetPerformed {
 		t.Error("cell 6 reset a clean tree")
 	}
-	if headHash(t, paths) != headBefore {
+	if headHash(t, paths, autogit.Daily) != headBefore {
 		t.Error("cell 6 moved HEAD")
 	}
 	arts := recoveryArtifacts(t, paths)
@@ -508,17 +508,19 @@ func TestCell6_TornOnlyJournalQuarantined(t *testing.T) {
 
 // ---------- cells 7/8/9: archival family ----------
 
-// archivedUnstampedHome builds the exact archival crash-window history:
-// a capture commit holding the thread's bytes, then ONE deletion commit
-// containing both the directory removal and the index entry with an
-// empty stamp (in real archival the unstamped entries are committed
-// inside the deletion commit; the crash hits before the stamp commit).
-// deletionMsg lets a caller give the deletion commit a turn trailer.
+// archivedUnstampedHome builds the exact archival crash-window history
+// on PRIMARY (where archival lives under R3b): a capture commit holding
+// the thread's bytes, then ONE deletion commit containing both the
+// directory removal and the index entry with an empty stamp (in real
+// archival the unstamped entries are committed inside the deletion
+// commit; the crash hits before the stamp commit). A final DAILY sync
+// commit (dailyMsg — lets a caller give it a turn trailer) keeps the
+// worktree clean vs daily, mirroring the real batch's daily absorb.
 // Returns the deletion commit hash the repair must locate.
-func archivedUnstampedHome(t *testing.T, paths store.PersonantPaths, deletionMsg string) string {
+func archivedUnstampedHome(t *testing.T, paths store.PersonantPaths, dailyMsg string) string {
 	t.Helper()
 	writeHome(t, paths, "threads/thr_5/thread.md", "archived thread body\n")
-	capture := commitAll(t, paths, "archive: capture 1 thread(s)")
+	capture := commitAll(t, paths, autogit.Primary, "archive: capture 1 thread(s)")
 	if err := os.RemoveAll(filepath.Join(paths.Home, "threads", "thr_5")); err != nil {
 		t.Fatalf("remove thread dir: %v", err)
 	}
@@ -532,12 +534,14 @@ func archivedUnstampedHome(t *testing.T, paths store.PersonantPaths, deletionMsg
 	}}); err != nil {
 		t.Fatalf("AppendArchiveEntries: %v", err)
 	}
-	return commitAll(t, paths, deletionMsg)
+	deletion := commitAll(t, paths, autogit.Primary, "archive: 1 thread(s)")
+	commitAll(t, paths, autogit.Daily, dailyMsg)
+	return deletion
 }
 
 func TestCell9_StampRepair(t *testing.T) {
 	paths := baselineHome(t)
-	deletion := archivedUnstampedHome(t, paths, "archive: 1 thread(s)")
+	deletion := archivedUnstampedHome(t, paths, "daily sync")
 
 	rep := reconcile(t, paths)
 	wantCells(t, rep, Cell2DerivedStale, Cell9StampRepair)
@@ -554,8 +558,9 @@ func TestCell9_StampRepair(t *testing.T) {
 	if !eventLogged(t, paths, "recovery.stamp-repaired") {
 		t.Error("missing recovery.stamp-repaired event")
 	}
-	// The stamp commit is surgical: index file only, committed.
-	wt, err := autogit.Worktree(context.Background(), paths)
+	// The stamp commit is surgical: index file only, committed (and
+	// absorbed into daily so the tree stays clean vs daily HEAD).
+	wt, err := autogit.Worktree(context.Background(), paths, autogit.Daily)
 	if err != nil {
 		t.Fatalf("Worktree: %v", err)
 	}
@@ -584,7 +589,7 @@ func TestCell9_UnrepairableRefusedNeverGuessed(t *testing.T) {
 		},
 		{
 			ThrID:            "thr_8",
-			ParentCommitHash: headHash(t, paths), // real commit, but it never held the path
+			ParentCommitHash: headHash(t, paths, autogit.Primary), // real commit, but it never held the path
 			CommitHash:       "",
 			TreeHash:         "x",
 			ArchivedAt:       "2026-07-17T00:00:00Z",
@@ -626,7 +631,8 @@ func TestCell9_UnrepairableRefusedNeverGuessed(t *testing.T) {
 // committed at HEAD).
 func TestCell7_TornTurnCoincidingWithUnstamped(t *testing.T) {
 	paths := newHome(t)
-	// Deletion commit carries turn trailer t1 so HEADTURN is well-defined.
+	// The daily sync commit carries turn trailer t1 so HEADTURN (a DAILY
+	// observable) is well-defined.
 	deletion := archivedUnstampedHome(t, paths, autogit.TurnCommitMessage("t1", "archive: 1 thread(s)"))
 	committed := readHome(t, paths, userMDRel)
 
@@ -660,47 +666,70 @@ func TestCell7_TornTurnCoincidingWithUnstamped(t *testing.T) {
 	wantCells(t, rep2, Cell1Clean)
 }
 
-func TestCell8_ArchivalDirty(t *testing.T) {
+// TestCell8_ArchivalDetectionOnly — R3b/F1 supersedes the R2 reset: an
+// op=archival marker makes core recovery DETECT (typed Pending, marker
+// LEFT IN PLACE, nil error) and never reset or complete — the adapter
+// owns the roll-forward completion (fileadapter tests exercise it).
+// Detection keys on marker presence ALONE: no unstamped entries exist
+// in this fixture, and Pending must still be returned.
+func TestCell8_ArchivalDetectionOnly(t *testing.T) {
 	paths := baselineHome(t)
 	committed := readHome(t, paths, userMDRel)
-	if err := store.WriteMarker(paths, store.Marker{Op: store.OpArchival}); err != nil {
+	if err := store.WriteMarker(paths, store.Marker{Op: store.OpArchival, Day: 42}); err != nil {
 		t.Fatalf("WriteMarker: %v", err)
 	}
 	writeHome(t, paths, userMDRel, committed+"MID-ARCHIVAL TORN WRITE\n")
-	writeHome(t, paths, "archive/debris.tmpfile", "uncommitted archival residue\n")
-	// Hand-created during the stale marker window — swept, but recoverable.
-	const handNote = "idle-window hand file\n"
-	writeHome(t, paths, "hand-note.md", handNote)
 
 	rep := reconcile(t, paths)
-	wantCells(t, rep, Cell8Archival)
-	if !rep.ResetPerformed {
-		t.Fatal("cell 8 did not reset")
+	if rep.Pending == nil || rep.Pending.Kind != memops.PendingArchival {
+		t.Fatalf("Pending = %+v, want PendingArchival", rep.Pending)
 	}
-	if got := readHome(t, paths, userMDRel); got != committed {
-		t.Errorf("tracked file not reverted: %q", got)
+	if rep.Pending.Day != 42 {
+		t.Errorf("Pending.Day = %d, want 42 (marker-day)", rep.Pending.Day)
 	}
-	if homeFileExists(paths, "archive/debris.tmpfile") || homeFileExists(paths, "hand-note.md") {
-		t.Error("archival debris survived")
+	if rep.ResetPerformed {
+		t.Fatal("detection performed a reset — F1 forbids it (roll-forward only)")
 	}
-	if rep.ClearedOp != "archival" {
-		t.Errorf("ClearedOp = %q", rep.ClearedOp)
+	if len(rep.RevertedPaths) != 0 {
+		t.Fatalf("RevertedPaths = %v, want empty on the archival detection path", rep.RevertedPaths)
 	}
-	// Everything the destructive pass touched is recoverable byte-exact:
-	// the dirty tracked file's pre-reset bytes and both untracked files.
-	wantQuarantined(t, paths, userMDRel, committed+"MID-ARCHIVAL TORN WRITE\n")
-	wantQuarantined(t, paths, "archive/debris.tmpfile", "uncommitted archival residue\n")
-	wantQuarantined(t, paths, "hand-note.md", handNote)
-	for _, rel := range []string{userMDRel, "archive/debris.tmpfile", "hand-note.md"} {
-		if !slices.Contains(rep.Quarantined, rel) {
-			t.Errorf("Quarantined = %v, missing %s", rep.Quarantined, rel)
-		}
+	// The worktree is untouched and the marker survives as the
+	// completion's re-entry token.
+	if got := readHome(t, paths, userMDRel); got != committed+"MID-ARCHIVAL TORN WRITE\n" {
+		t.Errorf("detection mutated the worktree: %q", got)
 	}
-	wantMarkerAbsent(t, paths)
-	wantWatermarkAtHead(t, paths)
+	m, present, err := store.ReadMarker(paths)
+	if err != nil || !present || m.Op != store.OpArchival || m.Day != 42 {
+		t.Fatalf("marker after detection: %+v present=%v err=%v, want intact op=archival day=42", m, present, err)
+	}
 
+	// Idempotent: detection again, same answer.
 	rep2 := reconcile(t, paths)
-	wantCells(t, rep2, Cell1Clean)
+	if rep2.Pending == nil || rep2.Pending.Kind != memops.PendingArchival {
+		t.Fatalf("second detection Pending = %+v", rep2.Pending)
+	}
+}
+
+// TestBarrierMarkerDetectionOnly mirrors cell 8 for op=barrier: typed
+// Pending carrying the marker-day, marker intact, nothing mutated.
+func TestBarrierMarkerDetectionOnly(t *testing.T) {
+	paths := baselineHome(t)
+	if err := store.WriteMarker(paths, store.Marker{Op: store.OpBarrier, Day: 7}); err != nil {
+		t.Fatalf("WriteMarker: %v", err)
+	}
+	headBefore := headHash(t, paths, autogit.Daily)
+
+	rep := reconcile(t, paths)
+	if rep.Pending == nil || rep.Pending.Kind != memops.PendingBarrier || rep.Pending.Day != 7 {
+		t.Fatalf("Pending = %+v, want PendingBarrier day=7", rep.Pending)
+	}
+	if rep.ResetPerformed || headHash(t, paths, autogit.Daily) != headBefore {
+		t.Error("barrier detection mutated the substrate")
+	}
+	m, present, err := store.ReadMarker(paths)
+	if err != nil || !present || m.Op != store.OpBarrier || m.Day != 7 {
+		t.Fatalf("marker after detection: %+v present=%v err=%v", m, present, err)
+	}
 }
 
 // ---------- cell 10: sleep ----------
@@ -710,11 +739,11 @@ func TestCell10_SleepMarker(t *testing.T) {
 	if err := store.WriteMarker(paths, store.Marker{Op: store.OpSleep}); err != nil {
 		t.Fatalf("WriteMarker: %v", err)
 	}
-	headBefore := headHash(t, paths)
+	headBefore := headHash(t, paths, autogit.Daily)
 
 	rep := reconcile(t, paths)
 	wantCells(t, rep, Cell10Sleep)
-	if rep.ResetPerformed || headHash(t, paths) != headBefore {
+	if rep.ResetPerformed || headHash(t, paths, autogit.Daily) != headBefore {
 		t.Error("cell 10 must be a pure marker-clear")
 	}
 	if rep.ClearedOp != "sleep" {
@@ -842,14 +871,14 @@ func TestCell12_LegacyAdoptForward(t *testing.T) {
 	paths := newHome(t) // NO baseline reconcile: watermark has never existed
 	const legacy = "legacy uncommitted content turn\n"
 	writeHome(t, paths, userMDRel, legacy)
-	headBefore := headHash(t, paths)
+	headBefore := headHash(t, paths, autogit.Primary)
 
 	rep := reconcile(t, paths)
-	wantCells(t, rep, Cell12LegacyAdopt)
+	wantCells(t, rep, Cell12LegacyAdopt, CellMorningInit)
 	if rep.AdoptCommit == "" {
 		t.Fatal("no adopt commit recorded")
 	}
-	if headHash(t, paths) == headBefore {
+	if headHash(t, paths, autogit.Primary) == headBefore {
 		t.Error("adopt did not commit")
 	}
 	if got := readHome(t, paths, userMDRel); got != legacy {
@@ -893,6 +922,142 @@ func TestCell12_VerifyGateRefusesThenRetryConverges(t *testing.T) {
 	}
 	wantMarkerAbsent(t, paths)
 	wantWatermarkAtHead(t, paths)
+}
+
+// ---------- F2: Init leaves legacy homes daily-less (#94 R3b) ----------
+//
+// The real open sequence is Init → Reconcile. Init births the daily ONLY
+// on true greenfield (fresh primary); on an existing home lacking a
+// daily it must leave it ABSENT, so Reconcile's §2.5 rows and cell-12's
+// verify-gated adopt discriminate as designed. An Init-minted baseline
+// would commit un-adopted legacy content into a clean-looking daily —
+// skipping the cell-12 structural gate entirely (the review's gap) and
+// turning the benign-morning stamp-only path into a spurious rebuild.
+
+const brokenSpineLine = `{"id":"thr_bogus","project":"prj_default","anchors":["a"],"summary":"bad","state":"wip","created":"2026-07-17T00:00:00Z","last_engaged":"2026-07-17T00:00:00Z","state_changed":"2026-07-17T00:00:00Z","turn_count":1,"recall_fires":0}` + "\n"
+
+func TestCell12_UpgradedLegacyBrokenSpineRefusedThroughInit(t *testing.T) {
+	paths := newHome(t)
+	// Regress to the legacy-upgrade shape: primary present, daily gone,
+	// watermark never written, structurally broken spine dirty vs primary.
+	if err := autogit.NukeDaily(paths); err != nil {
+		t.Fatalf("nuke daily: %v", err)
+	}
+	writeHome(t, paths, "spine.jsonl", brokenSpineLine)
+	headBefore := headHash(t, paths, autogit.Primary)
+
+	if err := store.Init(paths, store.InitOptions{Quiet: true}); err != nil {
+		t.Fatalf("re-Init: %v", err)
+	}
+	if st := autogit.ProbeDaily(paths); st == autogit.DailyPresent {
+		t.Fatal("Init rebirthed the daily on a legacy home (F2) — the cell-12 gate would never see the dirt")
+	}
+
+	if _, err := Reconcile(context.Background(), paths); err == nil {
+		t.Fatal("broken upgraded-legacy home opened; want cell-12 pre-adopt refusal")
+	}
+	if headHash(t, paths, autogit.Primary) != headBefore {
+		t.Error("refused adopt committed to primary")
+	}
+}
+
+func TestCell12_CleanLegacyAdoptsThroughInit(t *testing.T) {
+	paths := newHome(t)
+	if err := autogit.NukeDaily(paths); err != nil {
+		t.Fatalf("nuke daily: %v", err)
+	}
+	const legacy = "legacy uncommitted content\n"
+	writeHome(t, paths, userMDRel, legacy)
+
+	if err := store.Init(paths, store.InitOptions{Quiet: true}); err != nil {
+		t.Fatalf("re-Init: %v", err)
+	}
+	if st := autogit.ProbeDaily(paths); st == autogit.DailyPresent {
+		t.Fatal("Init rebirthed the daily on a legacy home (F2)")
+	}
+
+	rep := reconcile(t, paths)
+	wantCells(t, rep, Cell12LegacyAdopt, CellMorningInit)
+	if rep.AdoptCommit == "" {
+		t.Fatal("no adopt commit recorded")
+	}
+	if got := readHome(t, paths, userMDRel); got != legacy {
+		t.Errorf("legacy content damaged by adopt: %q", got)
+	}
+	wantWatermarkAtHead(t, paths)
+	rep2 := reconcile(t, paths)
+	wantCells(t, rep2, Cell1Clean)
+}
+
+func TestBenignMorning_StampOnlyThroughInit(t *testing.T) {
+	paths := baselineHome(t) // watermark present; derived genuinely fresh
+	if err := autogit.NukeDaily(paths); err != nil {
+		t.Fatalf("nuke daily: %v", err)
+	}
+	if err := store.Init(paths, store.InitOptions{Quiet: true}); err != nil {
+		t.Fatalf("re-Init: %v", err)
+	}
+	if st := autogit.ProbeDaily(paths); st == autogit.DailyPresent {
+		t.Fatal("Init rebirthed the daily — benign morning belongs to Reconcile (F2)")
+	}
+
+	rep := reconcile(t, paths)
+	wantCells(t, rep, CellMorningInit)
+	if rep.DerivedRebuilt {
+		t.Error("benign morning ran a full rebuild on genuinely fresh derived — want the index.Check stamp-only path")
+	}
+	wantWatermarkAtHead(t, paths)
+	rep2 := reconcile(t, paths)
+	wantCells(t, rep2, Cell1Clean)
+}
+
+// TestCell9_ReentryAbsorbsStampIntoDaily — the stampRepair re-entry
+// window: a prior pass crashed after its index write (every entry
+// stamped, primary stamp commit landed) but before the daily absorb.
+// The re-entered pass sees zero unstamped entries and must still re-run
+// the scoped absorb — otherwise the index reads as transient cell-3
+// dirt on every subsequent open.
+func TestCell9_ReentryAbsorbsStampIntoDaily(t *testing.T) {
+	paths := baselineHome(t)
+	entry := memops.ArchiveEntry{
+		ThrID:            "thr_5",
+		ParentCommitHash: headHash(t, paths, autogit.Primary),
+		CommitHash:       "", // pre-repair: unstamped
+		TreeHash:         "x",
+		ArchivedAt:       "2026-07-17T00:00:00Z",
+		OriginalPath:     "threads/thr_5",
+	}
+	// The index is TRACKED in daily at its pre-repair (unstamped) state —
+	// the real window's shape (the batch's daily absorb carried it there).
+	if err := store.AppendArchiveEntries(paths, []memops.ArchiveEntry{entry}); err != nil {
+		t.Fatalf("AppendArchiveEntries: %v", err)
+	}
+	commitAll(t, paths, autogit.Daily, "seed index into daily")
+	// The crashed repair pass: index rewritten stamped + primary stamp
+	// commit landed; the daily absorb never ran.
+	entry.CommitHash = "deadbeef"
+	if err := store.AppendArchiveEntries(paths, []memops.ArchiveEntry{entry}); err != nil {
+		t.Fatalf("AppendArchiveEntries (stamp): %v", err)
+	}
+	commitAll(t, paths, autogit.Primary, "recovery: stamp 1 archive entry")
+
+	// Pass 1 classifies the index dirt (cell 3) and the re-entered stamp
+	// phase absorbs it into daily — scoped, never a full sweep.
+	rep := reconcile(t, paths)
+	wantCells(t, rep, Cell3HandEdit)
+	wt, err := autogit.Worktree(context.Background(), paths, autogit.Daily)
+	if err != nil {
+		t.Fatalf("Worktree: %v", err)
+	}
+	if CanonicalDirty(wt.DirtyPaths) {
+		t.Errorf("index still dirty vs daily after re-entered absorb: %v", wt.DirtyPaths)
+	}
+	// The absorb moved daily HEAD; pass 2 re-stamps derived and pass 3 is
+	// the clean terminal.
+	rep2 := reconcile(t, paths)
+	wantCells(t, rep2, Cell2DerivedStale)
+	rep3 := reconcile(t, paths)
+	wantCells(t, rep3, Cell1Clean)
 }
 
 // ---------- orthogonal phases ----------
@@ -993,10 +1158,10 @@ func TestCell5_ResurrectedTruncatedJournal(t *testing.T) {
 	paths := baselineHome(t)
 	writeHome(t, paths, userMDRel, "turn t3 content\n")
 	ctx := context.Background()
-	if err := autogit.Add(ctx, paths, "."); err != nil {
+	if err := autogit.Add(ctx, paths, autogit.Daily, "."); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	if err := autogit.Commit(ctx, paths, autogit.TurnCommitMessage("t3", ""), 0, 0); err != nil {
+	if err := autogit.Commit(ctx, paths, autogit.Daily, autogit.TurnCommitMessage("t3", ""), 0, 0); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 	// The resurrected journal: CommitTurn's truncate happened in the page
@@ -1030,10 +1195,10 @@ func TestCell6_StaleJournalFromOlderTurnPreservedNotLost(t *testing.T) {
 	paths := baselineHome(t)
 	writeHome(t, paths, userMDRel, "turn t9 content\n")
 	ctx := context.Background()
-	if err := autogit.Add(ctx, paths, "."); err != nil {
+	if err := autogit.Add(ctx, paths, autogit.Daily, "."); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	if err := autogit.Commit(ctx, paths, autogit.TurnCommitMessage("t9", ""), 0, 0); err != nil {
+	if err := autogit.Commit(ctx, paths, autogit.Daily, autogit.TurnCommitMessage("t9", ""), 0, 0); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 	if err := store.AppendJournal(paths, "t2", store.JournalResponse, []byte("stale older-turn bytes")); err != nil {

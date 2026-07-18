@@ -16,7 +16,7 @@ import (
 // headHash returns the substrate HEAD commit hash for the test home.
 func headHash(t *testing.T, paths store.PersonantPaths) string {
 	t.Helper()
-	h, err := autogit.HeadHash(context.Background(), paths)
+	h, err := autogit.HeadHash(context.Background(), paths, autogit.Daily)
 	if err != nil {
 		t.Fatalf("HeadHash: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestCheckpoint_ContentOnlyTurnCommitsOnce(t *testing.T) {
 	if n := commitCountBetween(t, paths, before, after); n != 1 {
 		t.Fatalf("content-only turn produced %d commits, want exactly 1", n)
 	}
-	headTurn, err := autogit.HeadTurn(context.Background(), paths)
+	headTurn, err := autogit.HeadTurn(context.Background(), paths, autogit.Daily)
 	if err != nil {
 		t.Fatalf("HeadTurn: %v", err)
 	}
@@ -198,7 +198,7 @@ func commitCountBetween(t *testing.T, paths store.PersonantPaths, before, after 
 	cur := after
 	for cur != before && cur != "" {
 		count++
-		parent, err := autogit.ParentCommitHash(ctx, paths, cur)
+		parent, err := autogit.ParentCommitHash(ctx, paths, autogit.Daily, cur)
 		if err != nil {
 			t.Fatalf("walk parents from %s: %v", after, err)
 		}

@@ -59,10 +59,10 @@ func makeCommits(t *testing.T, paths store.PersonantPaths, prefix string, n int)
 		if err := os.WriteFile(f, []byte(fmt.Sprintf("commit body %s %d\n", prefix, i)), 0o644); err != nil {
 			t.Fatalf("write commit file %d: %v", i, err)
 		}
-		if err := Add(context.Background(), paths, "."); err != nil {
+		if err := Add(context.Background(), paths, Primary, "."); err != nil {
 			t.Fatalf("Add %d: %v", i, err)
 		}
-		if err := Commit(context.Background(), paths, "gc test commit", 0, 0); err != nil {
+		if err := Commit(context.Background(), paths, Primary, "gc test commit", 0, 0); err != nil {
 			t.Fatalf("Commit %d: %v", i, err)
 		}
 	}
@@ -81,7 +81,7 @@ func TestGC_PacksLooseObjects(t *testing.T) {
 		t.Fatalf("precondition: expected loose objects before GC, got 0")
 	}
 
-	if err := GC(context.Background(), paths); err != nil {
+	if err := GC(context.Background(), paths, Primary); err != nil {
 		t.Fatalf("GC: %v", err)
 	}
 
@@ -107,7 +107,7 @@ func TestGC_RepeatedGCNoStalePackError(t *testing.T) {
 	paths := scaffoldHome(t)
 	makeCommits(t, paths, "first", 6)
 
-	if err := GC(context.Background(), paths); err != nil {
+	if err := GC(context.Background(), paths, Primary); err != nil {
 		t.Fatalf("first GC: %v", err)
 	}
 	if got := packFileCount(t, paths); got < 1 {
@@ -118,7 +118,7 @@ func TestGC_RepeatedGCNoStalePackError(t *testing.T) {
 	// against the existing pack — the condition that triggered the stale
 	// in-memory pack-layout error before the prune re-open fix.
 	makeCommits(t, paths, "second", 4)
-	if err := GC(context.Background(), paths); err != nil {
+	if err := GC(context.Background(), paths, Primary); err != nil {
 		t.Fatalf("second GC (repack against existing pack) errored — stale-pack regression: %v", err)
 	}
 }
@@ -128,7 +128,7 @@ func TestGC_RepeatedGCNoStalePackError(t *testing.T) {
 // GC never fails the caller on a small/empty pile.
 func TestGC_FreshRepoIsCleanNoOp(t *testing.T) {
 	paths := scaffoldHome(t)
-	if err := GC(context.Background(), paths); err != nil {
+	if err := GC(context.Background(), paths, Primary); err != nil {
 		t.Fatalf("GC on fresh repo: %v", err)
 	}
 	// HEAD must still resolve — GC must not corrupt the repo.
@@ -140,7 +140,7 @@ func TestGC_CanceledContext(t *testing.T) {
 	paths := scaffoldHome(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := GC(ctx, paths); err == nil {
+	if err := GC(ctx, paths, Primary); err == nil {
 		t.Fatalf("GC with canceled context: want error, got nil")
 	}
 }

@@ -74,41 +74,26 @@ const (
 // sentinel; a post-op flag failure wraps it.
 var ErrPostOpVerification = errors.New("autogit: post-op verification failed")
 
-// Commit creates a commit in paths.Home with the given message.
+// Commit creates a commit of paths.Home's worktree in the selected repo.
 // preFlags run before the commit; postFlags run after a successful
 // commit. A pre-flag failure aborts before any git mutation; a
 // post-flag failure is wrapped with ErrPostOpVerification (the commit
 // has already been written and HEAD has moved).
 //
+// Policy-flag semantics per repo (#94 R3b §1.2): GitCheckFlags are
+// meaningful only for Primary ops (day-commit, archival, adopt) — the
+// permanent history must never immortalize a broken spine or stale
+// derived state. Daily commits always pass 0,0: a daily commit is a
+// disposable per-turn snapshot whose consistency is (re)checked at the
+// day barrier.
+//
 // The caller is responsible for staging changes via Add before calling
 // Commit. Empty commits are rejected by go-git with ErrEmptyCommit;
-// callers that want bookkeeping commits must stage something first.
-func Commit(ctx context.Context, paths store.PersonantPaths, msg string, preFlags, postFlags GitCheckFlags) error {
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("autogit.Commit: %w", err)
-	}
-	if err := applyFlags(ctx, paths, preFlags); err != nil {
-		return fmt.Errorf("autogit.Commit: pre-flag: %w", err)
-	}
-
-	repo, err := git.PlainOpen(paths.Home)
-	if err != nil {
-		return fmt.Errorf("autogit.Commit: open repo: %w", err)
-	}
-	wt, err := repo.Worktree()
-	if err != nil {
-		return fmt.Errorf("autogit.Commit: worktree: %w", err)
-	}
-
-	opts := &git.CommitOptions{Author: store.CommitSignature(repo)}
-	if _, err := wt.Commit(msg, opts); err != nil {
-		return fmt.Errorf("autogit.Commit: commit: %w", err)
-	}
-
-	if err := applyFlags(ctx, paths, postFlags); err != nil {
-		return fmt.Errorf("%w: %w", ErrPostOpVerification, err)
-	}
-	return nil
+// callers that want bookkeeping commits must stage something first (the
+// barrier's day-commit uses CommitAllowEmpty instead — F3).
+func Commit(ctx context.Context, paths store.PersonantPaths, which Repo, msg string, preFlags, postFlags GitCheckFlags) error {
+	_, err := commitInternal(ctx, paths, which, msg, preFlags, postFlags, false)
+	return err
 }
 
 // CommitWithHash is Commit but returns the hash of the commit it creates.
@@ -118,24 +103,38 @@ func Commit(ctx context.Context, paths store.PersonantPaths, msg string, preFlag
 // semantics as Commit. On a post-flag failure the commit has already been
 // written, so the hash is returned alongside the wrapped error so the
 // caller can still reference it.
-func CommitWithHash(ctx context.Context, paths store.PersonantPaths, msg string, preFlags, postFlags GitCheckFlags) (string, error) {
+func CommitWithHash(ctx context.Context, paths store.PersonantPaths, which Repo, msg string, preFlags, postFlags GitCheckFlags) (string, error) {
+	return commitInternal(ctx, paths, which, msg, preFlags, postFlags, false)
+}
+
+// CommitAllowEmpty is CommitWithHash with go-git's AllowEmptyCommits set
+// (#94 R3b, F3): the barrier's B2 day-commit and the morning-init
+// baseline must mint a commit even when the tree is unchanged, so
+// HEADDAY is always defined and an empty day still seals. Every other
+// caller keeps the reject-empty default.
+func CommitAllowEmpty(ctx context.Context, paths store.PersonantPaths, which Repo, msg string, preFlags, postFlags GitCheckFlags) (string, error) {
+	return commitInternal(ctx, paths, which, msg, preFlags, postFlags, true)
+}
+
+func commitInternal(ctx context.Context, paths store.PersonantPaths, which Repo, msg string, preFlags, postFlags GitCheckFlags, allowEmpty bool) (string, error) {
 	if err := ctx.Err(); err != nil {
-		return "", fmt.Errorf("autogit.CommitWithHash: %w", err)
+		return "", fmt.Errorf("autogit.Commit: %w", err)
 	}
 	if err := applyFlags(ctx, paths, preFlags); err != nil {
-		return "", fmt.Errorf("autogit.CommitWithHash: pre-flag: %w", err)
+		return "", fmt.Errorf("autogit.Commit: pre-flag: %w", err)
 	}
-	repo, err := git.PlainOpen(paths.Home)
+	repo, err := openRepo(paths, which)
 	if err != nil {
-		return "", fmt.Errorf("autogit.CommitWithHash: open repo: %w", err)
+		return "", fmt.Errorf("autogit.Commit: open %s repo: %w", which, err)
 	}
 	wt, err := repo.Worktree()
 	if err != nil {
-		return "", fmt.Errorf("autogit.CommitWithHash: worktree: %w", err)
+		return "", fmt.Errorf("autogit.Commit: worktree: %w", err)
 	}
-	hash, err := wt.Commit(msg, &git.CommitOptions{Author: store.CommitSignature(repo)})
+	opts := &git.CommitOptions{Author: store.CommitSignature(repo), AllowEmptyCommits: allowEmpty}
+	hash, err := wt.Commit(msg, opts)
 	if err != nil {
-		return "", fmt.Errorf("autogit.CommitWithHash: commit: %w", err)
+		return "", fmt.Errorf("autogit.Commit: commit: %w", err)
 	}
 	if err := applyFlags(ctx, paths, postFlags); err != nil {
 		return hash.String(), fmt.Errorf("%w: %w", ErrPostOpVerification, err)
@@ -149,16 +148,16 @@ func CommitWithHash(ctx context.Context, paths store.PersonantPaths, msg string,
 // deletion commit's parent, and recovery restores the subtree from there.
 // Returns an error if the commit has no parent (a root commit cannot have
 // archived a thread).
-func ParentCommitHash(ctx context.Context, paths store.PersonantPaths, commitHash string) (string, error) {
+func ParentCommitHash(ctx context.Context, paths store.PersonantPaths, which Repo, commitHash string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("autogit.ParentCommitHash: %w", err)
 	}
 	if commitHash == "" {
 		return "", errors.New("autogit.ParentCommitHash: commitHash is empty")
 	}
-	repo, err := git.PlainOpen(paths.Home)
+	repo, err := openRepo(paths, which)
 	if err != nil {
-		return "", fmt.Errorf("autogit.ParentCommitHash: open repo: %w", err)
+		return "", fmt.Errorf("autogit.ParentCommitHash: open %s repo: %w", which, err)
 	}
 	commit, err := repo.CommitObject(plumbing.NewHash(commitHash))
 	if err != nil {
@@ -175,13 +174,13 @@ func ParentCommitHash(ctx context.Context, paths store.PersonantPaths, commitHas
 // committed tree (TreeHashAt) at the point where HEAD IS the capture
 // commit (the deletion commit's parent-to-be) — gitignore-safe and
 // mode-faithful, unlike hashing the worktree.
-func HeadHash(ctx context.Context, paths store.PersonantPaths) (string, error) {
+func HeadHash(ctx context.Context, paths store.PersonantPaths, which Repo) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("autogit.HeadHash: %w", err)
 	}
-	repo, err := git.PlainOpen(paths.Home)
+	repo, err := openRepo(paths, which)
 	if err != nil {
-		return "", fmt.Errorf("autogit.HeadHash: open repo: %w", err)
+		return "", fmt.Errorf("autogit.HeadHash: open %s repo: %w", which, err)
 	}
 	head, err := repo.Head()
 	if err != nil {
@@ -197,13 +196,13 @@ func HeadHash(ctx context.Context, paths store.PersonantPaths) (string, error) {
 // patterns, which is treated as "."). Each named path is staged
 // individually so a typo in one pattern surfaces as an error rather
 // than silently dropping that file.
-func Add(ctx context.Context, paths store.PersonantPaths, patterns ...string) error {
+func Add(ctx context.Context, paths store.PersonantPaths, which Repo, patterns ...string) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("autogit.Add: %w", err)
 	}
-	repo, err := git.PlainOpen(paths.Home)
+	repo, err := openRepo(paths, which)
 	if err != nil {
-		return fmt.Errorf("autogit.Add: open repo: %w", err)
+		return fmt.Errorf("autogit.Add: open %s repo: %w", which, err)
 	}
 	wt, err := repo.Worktree()
 	if err != nil {
@@ -237,16 +236,16 @@ func Add(ctx context.Context, paths store.PersonantPaths, patterns ...string) er
 // the adapter records only after successful writes). Directories are
 // NOT accepted: a directory add re-triggers the full status walk this
 // function exists to avoid; callers record file-level paths.
-func AddPaths(ctx context.Context, paths store.PersonantPaths, rels []string) error {
+func AddPaths(ctx context.Context, paths store.PersonantPaths, which Repo, rels []string) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("autogit.AddPaths: %w", err)
 	}
 	if len(rels) == 0 {
 		return nil
 	}
-	repo, err := git.PlainOpen(paths.Home)
+	repo, err := openRepo(paths, which)
 	if err != nil {
-		return fmt.Errorf("autogit.AddPaths: open repo: %w", err)
+		return fmt.Errorf("autogit.AddPaths: open %s repo: %w", which, err)
 	}
 	wt, err := repo.Worktree()
 	if err != nil {
@@ -260,14 +259,23 @@ func AddPaths(ctx context.Context, paths store.PersonantPaths, rels []string) er
 	return nil
 }
 
-// LooseObjectCount counts the loose objects under .git/objects — files
-// in the two-hex-digit fan-out directories. Every un-packed commit
-// contributes a few (commit + tree(s) + blob(s)); the count is the
-// gc-pressure observable behind the count-triggered sleep gc
-// (#94 R3-addendum item 4). Pack files and other .git bookkeeping are
+// LooseObjectCount counts the loose objects under the selected repo's
+// objects dir — files in the two-hex-digit fan-out directories. Every
+// un-packed commit contributes a few (commit + tree(s) + blob(s)); the
+// count is the gc-pressure observable behind the count-triggered sleep
+// gc (#94 R3-addendum item 4) and the daily_loose_object_count gauge /
+// re-baseline knob (R3b §6.2-6.3). Pack files and other bookkeeping are
 // not counted. A missing objects dir counts as zero.
-func LooseObjectCount(paths store.PersonantPaths) (int, error) {
-	objectsDir := filepath.Join(paths.Home, ".git", "objects")
+func LooseObjectCount(paths store.PersonantPaths, which Repo) (int, error) {
+	var objectsDir string
+	switch which {
+	case Primary:
+		objectsDir = filepath.Join(paths.Home, ".git", "objects")
+	case Daily:
+		objectsDir = filepath.Join(paths.GitDaily, "objects")
+	default:
+		return 0, fmt.Errorf("autogit.LooseObjectCount: unknown repo selector %d", int(which))
+	}
 	entries, err := os.ReadDir(objectsDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -300,7 +308,7 @@ func LooseObjectCount(paths store.PersonantPaths) (int, error) {
 // of the restored blob hash — build a purpose-specific wrapper that
 // composes Checkout with its own post-checkout verification. Do not
 // extend GitCheckFlags for that.
-func Checkout(ctx context.Context, paths store.PersonantPaths, commitHash, filePath string, preFlags, postFlags GitCheckFlags) error {
+func Checkout(ctx context.Context, paths store.PersonantPaths, which Repo, commitHash, filePath string, preFlags, postFlags GitCheckFlags) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("autogit.Checkout: %w", err)
 	}
@@ -314,9 +322,9 @@ func Checkout(ctx context.Context, paths store.PersonantPaths, commitHash, fileP
 		return fmt.Errorf("autogit.Checkout: pre-flag: %w", err)
 	}
 
-	repo, err := git.PlainOpen(paths.Home)
+	repo, err := openRepo(paths, which)
 	if err != nil {
-		return fmt.Errorf("autogit.Checkout: open repo: %w", err)
+		return fmt.Errorf("autogit.Checkout: open %s repo: %w", which, err)
 	}
 	hash := plumbing.NewHash(commitHash)
 	commit, err := repo.CommitObject(hash)
@@ -374,7 +382,7 @@ func Checkout(ctx context.Context, paths store.PersonantPaths, commitHash, fileP
 // doc and the Checkout doc above, integrity verification of the restored
 // subtree (tree-hash compare) is the caller's purpose-specific wrapper
 // composing CheckoutTree + VerifyTreeHash — NOT a new GitCheckFlag.
-func CheckoutTree(ctx context.Context, paths store.PersonantPaths, commitHash, dirPath string, preFlags, postFlags GitCheckFlags) error {
+func CheckoutTree(ctx context.Context, paths store.PersonantPaths, which Repo, commitHash, dirPath string, preFlags, postFlags GitCheckFlags) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("autogit.CheckoutTree: %w", err)
 	}
@@ -388,9 +396,9 @@ func CheckoutTree(ctx context.Context, paths store.PersonantPaths, commitHash, d
 		return fmt.Errorf("autogit.CheckoutTree: pre-flag: %w", err)
 	}
 
-	repo, err := git.PlainOpen(paths.Home)
+	repo, err := openRepo(paths, which)
 	if err != nil {
-		return fmt.Errorf("autogit.CheckoutTree: open repo: %w", err)
+		return fmt.Errorf("autogit.CheckoutTree: open %s repo: %w", which, err)
 	}
 	commit, err := repo.CommitObject(plumbing.NewHash(commitHash))
 	if err != nil {
@@ -461,7 +469,7 @@ func CheckoutTree(ctx context.Context, paths store.PersonantPaths, commitHash, d
 // byte-diff fallback needed for capture. (WorktreeTreeHash below handles
 // the verify side, where the restored directory is on disk, not yet in a
 // commit.)
-func TreeHashAt(ctx context.Context, paths store.PersonantPaths, commitHash, dirPath string) (string, error) {
+func TreeHashAt(ctx context.Context, paths store.PersonantPaths, which Repo, commitHash, dirPath string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("autogit.TreeHashAt: %w", err)
 	}
@@ -471,9 +479,9 @@ func TreeHashAt(ctx context.Context, paths store.PersonantPaths, commitHash, dir
 	if dirPath == "" {
 		return "", errors.New("autogit.TreeHashAt: dirPath is empty")
 	}
-	repo, err := git.PlainOpen(paths.Home)
+	repo, err := openRepo(paths, which)
 	if err != nil {
-		return "", fmt.Errorf("autogit.TreeHashAt: open repo: %w", err)
+		return "", fmt.Errorf("autogit.TreeHashAt: open %s repo: %w", which, err)
 	}
 	commit, err := repo.CommitObject(plumbing.NewHash(commitHash))
 	if err != nil {
@@ -582,16 +590,16 @@ func VerifyTreeHash(paths store.PersonantPaths, dirPath, want string) error {
 // git-tags-lifecycle convention. No validation policy: tagging is
 // metadata-only and cannot leave the substrate in an inconsistent
 // state.
-func Tag(ctx context.Context, paths store.PersonantPaths, name, commitHash string) error {
+func Tag(ctx context.Context, paths store.PersonantPaths, which Repo, name, commitHash string) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("autogit.Tag: %w", err)
 	}
 	if name == "" {
 		return errors.New("autogit.Tag: name is empty")
 	}
-	repo, err := git.PlainOpen(paths.Home)
+	repo, err := openRepo(paths, which)
 	if err != nil {
-		return fmt.Errorf("autogit.Tag: open repo: %w", err)
+		return fmt.Errorf("autogit.Tag: open %s repo: %w", which, err)
 	}
 	var hash plumbing.Hash
 	if commitHash == "" {
@@ -633,13 +641,13 @@ func Tag(ctx context.Context, paths store.PersonantPaths, name, commitHash strin
 // unexpected repack/prune error propagates; the caller (Consolidate) must
 // also treat any returned error as non-fatal — a sleep cycle that cannot
 // gc must not abort the run.
-func GC(ctx context.Context, paths store.PersonantPaths) error {
+func GC(ctx context.Context, paths store.PersonantPaths, which Repo) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("autogit.GC: %w", err)
 	}
-	repo, err := git.PlainOpen(paths.Home)
+	repo, err := openRepo(paths, which)
 	if err != nil {
-		return fmt.Errorf("autogit.GC: open repo: %w", err)
+		return fmt.Errorf("autogit.GC: open %s repo: %w", which, err)
 	}
 
 	// (1) Repack: pack reachable loose objects, delete their loose copies
@@ -659,11 +667,11 @@ func GC(ctx context.Context, paths store.PersonantPaths) error {
 	// the old packs, but the in-memory storer that did the repack still
 	// caches the OLD pack layout. Prune's reachability walk resolves objects
 	// through that stale cache and fails with "packfile not found" for any
-	// object that moved into the fresh pack. A fresh PlainOpen re-reads the
+	// object that moved into the fresh pack. A fresh open re-reads the
 	// post-repack pack layout, so the walk resolves cleanly.
-	pruneRepo, err := git.PlainOpen(paths.Home)
+	pruneRepo, err := openRepo(paths, which)
 	if err != nil {
-		return fmt.Errorf("autogit.GC: re-open repo for prune: %w", err)
+		return fmt.Errorf("autogit.GC: re-open %s repo for prune: %w", which, err)
 	}
 	if err := pruneRepo.Prune(git.PruneOptions{Handler: pruneRepo.DeleteObject}); err != nil {
 		if errors.Is(err, git.ErrLooseObjectsNotSupported) {

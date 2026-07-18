@@ -353,10 +353,10 @@ func gitBaseline(t *testing.T, paths store.PersonantPaths) {
 		t.Fatalf("store.Init: %v", err)
 	}
 	ctx := context.Background()
-	if err := autogit.Add(ctx, paths, "."); err != nil {
+	if err := autogit.Add(ctx, paths, autogit.Daily, "."); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	if err := autogit.Commit(ctx, paths, "test baseline", 0, 0); err != nil && !errors.Is(err, git.ErrEmptyCommit) {
+	if err := autogit.Commit(ctx, paths, autogit.Daily, "test baseline", 0, 0); err != nil && !errors.Is(err, git.ErrEmptyCommit) {
 		t.Fatalf("Commit: %v", err)
 	}
 }
@@ -485,7 +485,7 @@ func TestRunMarkerRetainedWedgeThenQuitRecovers(t *testing.T) {
 	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
 	gitBaseline(t, paths)
 
-	headBefore, err := autogit.HeadHash(context.Background(), paths)
+	headBefore, err := autogit.HeadHash(context.Background(), paths, autogit.Daily)
 	if err != nil {
 		t.Fatalf("HeadHash: %v", err)
 	}
@@ -523,7 +523,7 @@ func TestRunMarkerRetainedWedgeThenQuitRecovers(t *testing.T) {
 	if strings.Contains(stderr.String(), "warn: session-close checkpoint") {
 		t.Errorf("marker refusal surfaced as a checkpoint fault; stderr:\n%s", stderr.String())
 	}
-	headAfter, err := autogit.HeadHash(context.Background(), paths)
+	headAfter, err := autogit.HeadHash(context.Background(), paths, autogit.Daily)
 	if err != nil {
 		t.Fatalf("HeadHash: %v", err)
 	}

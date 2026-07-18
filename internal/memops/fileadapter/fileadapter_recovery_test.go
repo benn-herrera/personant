@@ -105,7 +105,7 @@ func TestCommitTurn_TrailerClearTruncate(t *testing.T) {
 		t.Fatalf("CommitTurn: %v", err)
 	}
 
-	turn, err := autogit.HeadTurn(ctx, a.paths)
+	turn, err := autogit.HeadTurn(ctx, a.paths, autogit.Daily)
 	if err != nil {
 		t.Fatalf("HeadTurn: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestCommitTurn_NoCanonicalChangeStillReleases(t *testing.T) {
 	if err := a.JournalTurn(ctx, "t9", memops.TurnContentPrompt, []byte("chit-chat")); err != nil {
 		t.Fatalf("JournalTurn: %v", err)
 	}
-	headBefore, err := autogit.HeadHash(ctx, a.paths)
+	headBefore, err := autogit.HeadHash(ctx, a.paths, autogit.Daily)
 	if err != nil {
 		t.Fatalf("HeadHash: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestCommitTurn_NoCanonicalChangeStillReleases(t *testing.T) {
 	if err := a.CommitTurn(ctx, "t9", "no structural change"); err != nil {
 		t.Fatalf("CommitTurn on clean tree: %v", err)
 	}
-	headAfter, err := autogit.HeadHash(ctx, a.paths)
+	headAfter, err := autogit.HeadHash(ctx, a.paths, autogit.Daily)
 	if err != nil {
 		t.Fatalf("HeadHash: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestReleaseTurn_LogsOnlyDirtyReleasesWithoutCommit(t *testing.T) {
 	if err := a.Log(ctx, memops.LogCategorySystem, "test-noise", "x"); err != nil {
 		t.Fatalf("Log: %v", err)
 	}
-	headBefore, err := autogit.HeadHash(ctx, a.paths)
+	headBefore, err := autogit.HeadHash(ctx, a.paths, autogit.Daily)
 	if err != nil {
 		t.Fatalf("HeadHash: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestReleaseTurn_LogsOnlyDirtyReleasesWithoutCommit(t *testing.T) {
 		t.Fatalf("ReleaseTurn: %v", err)
 	}
 
-	headAfter, err := autogit.HeadHash(ctx, a.paths)
+	headAfter, err := autogit.HeadHash(ctx, a.paths, autogit.Daily)
 	if err != nil {
 		t.Fatalf("HeadHash: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestReleaseTurn_CanonicalDirtFallsBackToCommit(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
-	headBefore, err := autogit.HeadHash(ctx, a.paths)
+	headBefore, err := autogit.HeadHash(ctx, a.paths, autogit.Daily)
 	if err != nil {
 		t.Fatalf("HeadHash: %v", err)
 	}
@@ -269,14 +269,14 @@ func TestReleaseTurn_CanonicalDirtFallsBackToCommit(t *testing.T) {
 		t.Fatalf("ReleaseTurn: %v", err)
 	}
 
-	headAfter, err := autogit.HeadHash(ctx, a.paths)
+	headAfter, err := autogit.HeadHash(ctx, a.paths, autogit.Daily)
 	if err != nil {
 		t.Fatalf("HeadHash: %v", err)
 	}
 	if headAfter == headBefore {
 		t.Error("canonical-dirty release did not commit")
 	}
-	turn, err := autogit.HeadTurn(ctx, a.paths)
+	turn, err := autogit.HeadTurn(ctx, a.paths, autogit.Daily)
 	if err != nil {
 		t.Fatalf("HeadTurn: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestCommitTurn_ScopedStagingLeavesHandEditsDirty(t *testing.T) {
 			t.Fatalf("CommitTurn %s: %v", turnID, err)
 		}
 		// The turn's own writes landed (trailer moved)...
-		headTurn, err := autogit.HeadTurn(ctx, a.paths)
+		headTurn, err := autogit.HeadTurn(ctx, a.paths, autogit.Daily)
 		if err != nil || headTurn != turnID {
 			t.Fatalf("HEAD trailer after turn %d = %q err=%v", i, headTurn, err)
 		}
@@ -350,7 +350,7 @@ func TestCommitTurn_ScopedStagingLeavesHandEditsDirty(t *testing.T) {
 		if err != nil || string(got) != sentinel {
 			t.Fatalf("hand-edit bytes after turn %d: %q err=%v", i, got, err)
 		}
-		wt, err := autogit.Worktree(ctx, a.paths)
+		wt, err := autogit.Worktree(ctx, a.paths, autogit.Daily)
 		if err != nil {
 			t.Fatalf("Worktree: %v", err)
 		}
@@ -363,7 +363,7 @@ func TestCommitTurn_ScopedStagingLeavesHandEditsDirty(t *testing.T) {
 	if err := a.Checkpoint(ctx, "session-close"); err != nil {
 		t.Fatalf("Checkpoint: %v", err)
 	}
-	wt, err := autogit.Worktree(ctx, a.paths)
+	wt, err := autogit.Worktree(ctx, a.paths, autogit.Daily)
 	if err != nil {
 		t.Fatalf("Worktree: %v", err)
 	}

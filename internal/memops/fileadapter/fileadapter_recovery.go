@@ -101,6 +101,17 @@ func (a *FileAdapter) checkNoInFlightScope() error {
 // thread.md files out from under any entries populated before this
 // call, and a stale parse surviving into ProposeRecall would violate
 // the cache-coherence invariant (fmcache.go).
+//
+// F4 completion loop (#94 R3b §2.6): core recovery DETECTS an in-flight
+// op=barrier / op=archival scope and returns it typed
+// (RecoveryReport.Pending, marker left in place); THIS adapter — which
+// owns the archival batch, both repo handles and the day-commit —
+// COMPLETES it, then re-invokes recovery.Reconcile exactly once for the
+// terminal clean classification, merging the two reports. The loop is
+// bounded: completion clears the marker LAST, so on success the second
+// pass sees no marker; on a completion error (including the §2.7
+// persistent-failure refuse) the marker STAYS, the error propagates as
+// refuse-to-open, and the NEXT process re-enters detection.
 func (a *FileAdapter) Reconcile(ctx context.Context) (memops.RecoveryReport, error) {
 	if err := ctx.Err(); err != nil {
 		return memops.RecoveryReport{}, err
@@ -110,7 +121,38 @@ func (a *FileAdapter) Reconcile(ctx context.Context) (memops.RecoveryReport, err
 	if err != nil {
 		return rep, fmt.Errorf("fileadapter: reconcile: %w", err)
 	}
-	return rep, nil
+	if rep.Pending == nil {
+		return rep, nil
+	}
+	comp, err := a.completePending(ctx, rep.Pending)
+	if err != nil {
+		// Marker intact (completion clears it last) — refuse-to-open; the
+		// next open re-enters detection via the surviving marker.
+		return rep, fmt.Errorf("fileadapter: reconcile: complete %s: %w", rep.Pending.Kind, err)
+	}
+	rep2, err := recovery.Reconcile(ctx, a.paths)
+	a.fmCache.Reset()
+	// Merge: completion context first (what the crash was), then the
+	// terminal pass's classification and repairs.
+	rep2.CellsHit = append(append(append([]string{}, rep.CellsHit...), comp.cells...), rep2.CellsHit...)
+	rep2.TmpSwept = append(rep.TmpSwept, rep2.TmpSwept...)
+	rep2.LogTailsHealed = append(rep.LogTailsHealed, rep2.LogTailsHealed...)
+	rep2.Quarantined = append(append(rep.Quarantined, comp.quarantined...), rep2.Quarantined...)
+	if rep2.QuarantineDir == "" {
+		rep2.QuarantineDir = rep.QuarantineDir
+	}
+	if rep2.QuarantineDir == "" {
+		rep2.QuarantineDir = comp.quarantineDir
+	}
+	rep2.ScopedRestored = comp.scopedRestored
+	rep2.TornJournalRecords += rep.TornJournalRecords
+	if rep2.ClearedOp == "" {
+		rep2.ClearedOp = string(rep.Pending.Kind)
+	}
+	if err != nil {
+		return rep2, fmt.Errorf("fileadapter: reconcile: %w", err)
+	}
+	return rep2, nil
 }
 
 // JournalTurn durably appends one record of in-flight turn content
@@ -174,16 +216,18 @@ func (a *FileAdapter) CommitTurn(ctx context.Context, turnID, reason string) err
 		return fmt.Errorf("fileadapter: CommitTurn %s: %w", turnID, err)
 	}
 	staged := a.snapshotTurnScope()
-	if err := autogit.AddPaths(ctx, a.paths, staged); err != nil {
+	if err := autogit.AddPaths(ctx, a.paths, autogit.Daily, staged); err != nil {
 		return fmt.Errorf("fileadapter: CommitTurn %s: stage: %w", turnID, err)
 	}
 	// The Add/Commit gap: staged-but-uncommitted is a distinct on-disk
 	// state (the index moved, HEAD did not) the R4 matrix must kill in.
 	crashpoint.At(cpCommitPostAdd)
-	// No verification flags: this is the per-turn durability snapshot,
-	// same cost rationale as Checkpoint — integrity gating stays with
-	// archival's commits and standalone verify.
-	if err := autogit.Commit(ctx, a.paths, autogit.TurnCommitMessage(turnID, reason), 0, 0); err != nil {
+	// Target: DAILY (#94 R3b, INV-5) — the per-turn recovery point lives
+	// in the disposable daily DB; primary is barrier-exclusive. No
+	// verification flags: daily commits always pass 0,0 (a disposable
+	// per-turn snapshot; integrity gating moved to the once-a-day
+	// barrier — spine on B2, derived on B6).
+	if err := autogit.Commit(ctx, a.paths, autogit.Daily, autogit.TurnCommitMessage(turnID, reason), 0, 0); err != nil {
 		if !errors.Is(err, git.ErrEmptyCommit) {
 			return fmt.Errorf("fileadapter: CommitTurn %s: commit: %w", turnID, err)
 		}
@@ -230,7 +274,9 @@ func (a *FileAdapter) MaybeGC(ctx context.Context) {
 		return
 	}
 	a.commitsSinceGCCheck = 0
-	n, err := autogit.LooseObjectCount(a.paths)
+	// Per-turn commits land in DAILY (R3b), so daily is where the
+	// pressure lives — primary accrues ~a handful of objects per day.
+	n, err := autogit.LooseObjectCount(a.paths, autogit.Daily)
 	if err != nil || n < gcLooseObjectThreshold {
 		return
 	}
@@ -263,7 +309,7 @@ func (a *FileAdapter) ReleaseTurn(ctx context.Context, turnID string) error {
 	if err := a.checkTurnScope(turnID); err != nil {
 		return fmt.Errorf("fileadapter: ReleaseTurn %s: %w", turnID, err)
 	}
-	wt, err := autogit.Worktree(ctx, a.paths)
+	wt, err := autogit.Worktree(ctx, a.paths, autogit.Daily)
 	if err != nil {
 		return fmt.Errorf("fileadapter: ReleaseTurn %s: worktree state: %w", turnID, err)
 	}

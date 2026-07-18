@@ -13,7 +13,7 @@ import (
 // headHash is a test helper returning the current HEAD commit hash.
 func headHash(t *testing.T, a *FileAdapter) string {
 	t.Helper()
-	h, err := autogit.HeadHash(context.Background(), a.paths)
+	h, err := autogit.HeadHash(context.Background(), a.paths, autogit.Daily)
 	if err != nil {
 		t.Fatalf("HeadHash: %v", err)
 	}

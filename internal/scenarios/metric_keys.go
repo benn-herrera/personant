@@ -26,6 +26,22 @@ package scenarios
 // pinned to its registry const by TestMetricKeyTagsMatchRegistry (sim package),
 // so a registry rename that forgets a tag fails loudly.
 const (
+	// Day-barrier gauges (#94 R3b §6.3). Written by the sim's OnSimDayClose
+	// barrier wrapper (sim_rung_test.go) from the MaybeDayBarrier result;
+	// read by the rung summary. MetricBarrierCount counts sealed days;
+	// the *_ms histograms carry per-barrier durations (whole B0→B6,
+	// the B2 day-commit portion, the B5+B6 daily-rebirth portion);
+	// MetricDayCommitBytes is the primary object-store growth per day;
+	// MetricDailyLooseObjects samples the daily DB's loose-object count
+	// at each day close (the §6.2 re-baseline-knob observable), taken
+	// BEFORE the barrier nukes the day's accrual.
+	MetricBarrierCount          = "barrier_count"
+	MetricBarrierDurationMs     = "barrier_duration_ms"
+	MetricDayCommitDurationMs   = "day_commit_duration_ms"
+	MetricMorningInitDurationMs = "morning_init_duration_ms"
+	MetricDayCommitBytes        = "day_commit_bytes"
+	MetricDailyLooseObjects     = "daily_loose_object_count"
+
 	// Sleep-cycle keys (#108). MetricSleepCycles counts sleep/consolidation
 	// passes (one per day-off); the GitDirBytes trio are the substrate .git
 	// footprint before/after the gc plus the total reclaimed across cycles —

@@ -54,14 +54,16 @@ func ParseTurnTrailer(message string) string {
 // HeadTurn returns the turn id recorded in HEAD's commit-message trailer,
 // or "" (⊥) when HEAD carries none — which covers every commit made
 // outside the per-turn CommitTurn path (init, checkpoints, archival,
-// pre-upgrade histories).
-func HeadTurn(ctx context.Context, paths store.PersonantPaths) (string, error) {
+// pre-upgrade histories). Under the dual-repo scheme turns commit to
+// Daily, so recovery reads HEADTURN there; Primary commits never carry
+// the turn trailer (§4).
+func HeadTurn(ctx context.Context, paths store.PersonantPaths, which Repo) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("autogit.HeadTurn: %w", err)
 	}
-	repo, err := git.PlainOpen(paths.Home)
+	repo, err := openRepo(paths, which)
 	if err != nil {
-		return "", fmt.Errorf("autogit.HeadTurn: open repo: %w", err)
+		return "", fmt.Errorf("autogit.HeadTurn: open %s repo: %w", which, err)
 	}
 	head, err := repo.Head()
 	if err != nil {
@@ -91,14 +93,16 @@ type WorktreeState struct {
 	Untracked []string
 }
 
-// Worktree computes the WorktreeState of paths.Home against HEAD.
-func Worktree(ctx context.Context, paths store.PersonantPaths) (WorktreeState, error) {
+// Worktree computes the WorktreeState of paths.Home against the selected
+// repo's HEAD. Turn-scope dirtiness is a DAILY observable (turns commit
+// to daily); archival/barrier code asks Primary.
+func Worktree(ctx context.Context, paths store.PersonantPaths, which Repo) (WorktreeState, error) {
 	if err := ctx.Err(); err != nil {
 		return WorktreeState{}, fmt.Errorf("autogit.Worktree: %w", err)
 	}
-	repo, err := git.PlainOpen(paths.Home)
+	repo, err := openRepo(paths, which)
 	if err != nil {
-		return WorktreeState{}, fmt.Errorf("autogit.Worktree: open repo: %w", err)
+		return WorktreeState{}, fmt.Errorf("autogit.Worktree: open %s repo: %w", which, err)
 	}
 	wt, err := repo.Worktree()
 	if err != nil {
@@ -151,13 +155,18 @@ func Worktree(ctx context.Context, paths store.PersonantPaths) (WorktreeState, e
 // state is stale by construction until recovery's own rebuild step runs.
 // Reset PRECEDES validity; validation is the recovery orchestrator's
 // job, after normalization.
-func ResetHard(ctx context.Context, paths store.PersonantPaths) (revertedPaths []string, err error) {
+//
+// Dual-repo note (INV-1): ResetHard is only ever CALLED against Daily —
+// resetting the worktree to primary HEAD (which lags by up to a day)
+// would silently destroy the day. The selector exists for uniformity
+// and greppability, not because a Primary reset is ever legitimate.
+func ResetHard(ctx context.Context, paths store.PersonantPaths, which Repo) (revertedPaths []string, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("autogit.ResetHard: %w", err)
 	}
-	repo, err := git.PlainOpen(paths.Home)
+	repo, err := openRepo(paths, which)
 	if err != nil {
-		return nil, fmt.Errorf("autogit.ResetHard: open repo: %w", err)
+		return nil, fmt.Errorf("autogit.ResetHard: open %s repo: %w", which, err)
 	}
 	wt, err := repo.Worktree()
 	if err != nil {

@@ -109,7 +109,7 @@ func TestArchiveRecoveryRoundTrip(t *testing.T) {
 	addCommit := commitAll(t, paths, repo, "add thr_1")
 
 	// E3 capture: tree hash of the dir as committed.
-	captured, err := TreeHashAt(ctx, paths, addCommit.String(), dirPath)
+	captured, err := TreeHashAt(ctx, paths, Primary, addCommit.String(), dirPath)
 	if err != nil {
 		t.Fatalf("TreeHashAt: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestArchiveRecoveryRoundTrip(t *testing.T) {
 	}
 
 	// E2: restore the whole subtree from the parent commit.
-	if err := CheckoutTree(ctx, paths, parent, dirPath, 0, 0); err != nil {
+	if err := CheckoutTree(ctx, paths, Primary, parent, dirPath, 0, 0); err != nil {
 		t.Fatalf("CheckoutTree: %v", err)
 	}
 
@@ -206,7 +206,7 @@ func TestCheckoutTreeMissingDirErrors(t *testing.T) {
 	writeThreadDir(t, paths, "thr_1")
 	c := commitAll(t, paths, repo, "add thr_1")
 
-	if err := CheckoutTree(ctx, paths, c.String(), "threads/thr_404", 0, 0); err == nil {
+	if err := CheckoutTree(ctx, paths, Primary, c.String(), "threads/thr_404", 0, 0); err == nil {
 		t.Fatal("expected error restoring a nonexistent subtree")
 	}
 }

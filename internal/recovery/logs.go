@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/go-git/go-git/v5"
-
 	"personant/internal/autogit"
 	"personant/internal/clock"
 	"personant/internal/crashpoint"
@@ -211,7 +209,8 @@ func sweepTmpResidue(paths store.PersonantPaths, q *quarantine) ([]string, error
 			return walkErr
 		}
 		if d.IsDir() {
-			if p == filepath.Join(paths.Home, ".git") || p == paths.TmpDir || p == paths.RecoveryDir {
+			if p == filepath.Join(paths.Home, ".git") || p == paths.GitDaily ||
+				p == paths.TmpDir || p == paths.RecoveryDir {
 				return filepath.SkipDir
 			}
 			return nil
@@ -283,7 +282,10 @@ func underDir(p, root string) bool {
 // gitignored, listed here as belt-and-braces for homes whose .gitignore
 // predates the entry). Empty parent directories left behind are pruned.
 func sweepUntrackedDebris(ctx context.Context, paths store.PersonantPaths, q *quarantine) ([]string, error) {
-	wt, err := autogit.Worktree(ctx, paths)
+	// Untracked-ness is a DAILY observable: turns commit to daily, so
+	// in-flight turn debris is whatever daily HEAD does not know. Both
+	// git-dirs are gitignored (INV-6), so neither can appear here.
+	wt, err := autogit.Worktree(ctx, paths, autogit.Daily)
 	if err != nil {
 		return nil, err
 	}
@@ -362,17 +364,18 @@ func preserveLogs(ctx context.Context, paths store.PersonantPaths) error {
 	return nil
 }
 
-// trackedLogFiles enumerates the HEAD tree's files under logs/, as
+// trackedLogFiles enumerates the DAILY HEAD tree's files under logs/, as
 // home-relative slash paths. These are exactly the files a reset will
-// revert (untracked log files are untouched by reset and exempt from
+// revert — resets target daily (INV-1) — so daily HEAD is the right
+// tree (untracked log files are untouched by reset and exempt from
 // the debris sweep, so they need no preservation).
 func trackedLogFiles(ctx context.Context, paths store.PersonantPaths) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	repo, err := git.PlainOpen(paths.Home)
+	repo, err := autogit.Open(paths, autogit.Daily)
 	if err != nil {
-		return nil, fmt.Errorf("open repo: %w", err)
+		return nil, fmt.Errorf("open daily repo: %w", err)
 	}
 	head, err := repo.Head()
 	if err != nil {

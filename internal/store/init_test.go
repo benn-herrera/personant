@@ -354,6 +354,41 @@ func TestInitGitRepoExists(t *testing.T) {
 	if out, err := headCmd.CombinedOutput(); err != nil {
 		t.Fatalf("git rev-parse HEAD: %v: %s", err, out)
 	}
+
+	// A pre-existing primary is the legacy-upgrade shape: Init must NOT
+	// birth the daily DB (#94 R3b F2) — Reconcile's §2.5/cell-12 rows own
+	// that discrimination.
+	if _, err := os.Stat(paths.GitDaily); !os.IsNotExist(err) {
+		t.Errorf(".git-daily after Init over existing .git: err=%v, want absent (legacy upgrade is Reconcile's call)", err)
+	}
+}
+
+// TestInitDailyBirthGreenfieldOnly — #94 R3b F2: Init births .git-daily
+// only when it also scaffolds a fresh primary (true greenfield). An
+// existing home whose daily is missing must stay daily-less through
+// Init, so Reconcile can discriminate greenfield vs benign-morning vs
+// legacy-adopt (an Init-minted baseline would commit un-adopted legacy
+// content into a clean-looking daily and blind cell-12's verify gate).
+func TestInitDailyBirthGreenfieldOnly(t *testing.T) {
+	hasGit(t)
+	paths := initIntoTempDir(t)
+
+	// Greenfield: daily born alongside the fresh primary.
+	if _, err := os.Stat(paths.GitDaily); err != nil {
+		t.Fatalf(".git-daily after greenfield Init: %v, want present", err)
+	}
+
+	// Regress to the legacy-upgrade shape (primary present, daily gone);
+	// a re-run Init must leave the daily ABSENT.
+	if err := os.RemoveAll(paths.GitDaily); err != nil {
+		t.Fatalf("remove .git-daily: %v", err)
+	}
+	if err := Init(paths, InitOptions{Quiet: true}); err != nil {
+		t.Fatalf("re-Init: %v", err)
+	}
+	if _, err := os.Stat(paths.GitDaily); !os.IsNotExist(err) {
+		t.Errorf(".git-daily after re-Init on daily-less home: err=%v, want still absent (F2)", err)
+	}
 }
 
 func TestInitDefaultsParameters(t *testing.T) {

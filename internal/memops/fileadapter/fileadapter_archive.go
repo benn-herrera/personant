@@ -21,10 +21,22 @@ import (
 )
 
 // Crashpoints for the R4 W-ARCH matrix: the op=archival marker scope
-// boundaries (#94 R3). Registered at import time for the coverage gate.
+// boundaries (#94 R3) plus the F1 batch sub-window boundaries (#94 R3b
+// §7 — the load-bearing new ones: each must have a scenario that kills
+// there, drives the adapter's completion, and asserts a fully-archived,
+// stamped, single-deletion-commit terminal with no reset and no
+// re-archive-as-drift). Registered at import time for the coverage gate.
 var (
 	cpArchivalPreMarker  = crashpoint.Register("archival.preMarker")
 	cpArchivalPostMarker = crashpoint.Register("archival.postMarker")
+
+	cpBatchPostCapture        = crashpoint.Register("archiveBatch.postCapture.preMembership")
+	cpBatchPostMembership     = crashpoint.Register("archiveBatch.postMembership.preRemove")
+	cpBatchMidRemove          = crashpoint.Register("archiveBatch.midRemove")
+	cpBatchPostRemove         = crashpoint.Register("archiveBatch.postRemove.preSpine")
+	cpBatchPostSpine          = crashpoint.Register("archiveBatch.postSpine.preDeletionCommit")
+	cpBatchPostDeletionCommit = crashpoint.Register("archiveBatch.postDeletionCommit.preStamp")
+	cpBatchPostStamp          = crashpoint.Register("archiveBatch.postStamp")
 )
 
 // §3.8 recoverable git-based archival (task #99, design §3.2 / §7.2). This
@@ -64,22 +76,23 @@ func threadRelDir(threadID string) string {
 
 // Checkpoint creates a §3.11 substrate recovery point: it stages the whole
 // worktree (Add(".")) and commits it with a message folding in `reason`. The
-// caller drives the cadence (turn close on structural change, session close);
+// caller drives the cadence (mid-session structural change, session close);
 // this method is the mechanism, not the policy.
+//
+// Target: DAILY, for EVERY Checkpoint — mid-session structural AND the
+// session-close backstop (#94 R3b, F2). Primary is barrier-exclusive
+// (INV-5): the day barrier's B2 is the only worktree→primary capture, so
+// this method needs no Repo argument and no caller split. The full
+// Add(".") sweep is also what absorbs hand-edits (recovery cell 3) into
+// the daily record; the barrier's own B1/B2 sweep folds them into the
+// day.
 //
 // A clean tree is a benign no-op. go-git rejects an empty commit with
 // git.ErrEmptyCommit; we swallow it and return nil — there is no recovery
-// point to make when nothing changed (archival already committed this turn's
-// structural bytes, or session close after the last structural commit flushed
-// everything). Any other failure propagates.
+// point to make when nothing changed. Any other failure propagates.
 //
-// Verification flags are conservative: none on pre, none on post. The cadence
-// fires on every material turn, so a post-flag CheckSpineIntegrity (a full
-// verify.Verify pass) would add that cost to every commit — and integrity
-// gating is already owned by archival (CheckDerivedFresh|CheckSpineIntegrity
-// on its deletion/recovery commits) and the standalone `personant verify`. A
-// cadence commit is a durability snapshot, not an integrity gate; keeping it
-// flag-free keeps per-commit cost flat.
+// Verification flags: none — daily commits always pass 0,0 (disposable
+// snapshots; integrity gating lives at the once-a-day barrier).
 //
 // Scope guard (same family as ArchiveThreads/Consolidate): a checkpoint
 // under ANY in-flight scope — batch marker file or non-empty turn
@@ -96,10 +109,10 @@ func (a *FileAdapter) Checkpoint(ctx context.Context, reason string) error {
 	if err := a.checkNoInFlightScope(); err != nil {
 		return fmt.Errorf("fileadapter: checkpoint: %w", err)
 	}
-	if err := autogit.Add(ctx, a.paths, "."); err != nil {
+	if err := autogit.Add(ctx, a.paths, autogit.Daily, "."); err != nil {
 		return fmt.Errorf("fileadapter: checkpoint: stage: %w", err)
 	}
-	if err := autogit.Commit(ctx, a.paths, fmt.Sprintf("checkpoint: %s", reason), 0, 0); err != nil {
+	if err := autogit.Commit(ctx, a.paths, autogit.Daily, fmt.Sprintf("checkpoint: %s", reason), 0, 0); err != nil {
 		if errors.Is(err, git.ErrEmptyCommit) {
 			a.resetTurnScope() // the full Add(".") staged everything anyway
 			return nil         // clean tree — nothing to checkpoint
@@ -148,11 +161,20 @@ func (a *FileAdapter) Consolidate(ctx context.Context, reason string) error {
 	if err := store.WriteMarker(a.paths, store.Marker{Op: store.OpSleep}); err != nil {
 		return fmt.Errorf("fileadapter: consolidate: marker: %w", err)
 	}
+	// gc runs PER-REPO under R3b (recovery cell 10): DAILY is the common
+	// case — per-turn commits accrue loose objects there — and primary
+	// gets a cheap best-effort pass too (it takes only a handful of
+	// commits per day, so this is near-free and keeps the career pack
+	// tidy between barriers).
 	gcStatus := "ok"
-	if err := autogit.GC(ctx, a.paths); err != nil {
+	if err := autogit.GC(ctx, a.paths, autogit.Daily); err != nil {
 		// Non-fatal: log and record, but do not abort the caller. The %s
 		// arg keeps any error text out of format-string position.
-		pnlog.Warn("fileadapter: consolidate: gc failed (non-fatal): %v", err)
+		pnlog.Warn("fileadapter: consolidate: daily gc failed (non-fatal): %v", err)
+		gcStatus = "err"
+	}
+	if err := autogit.GC(ctx, a.paths, autogit.Primary); err != nil {
+		pnlog.Warn("fileadapter: consolidate: primary gc failed (non-fatal): %v", err)
 		gcStatus = "err"
 	}
 	if err := store.ClearMarker(a.paths); err != nil {
@@ -165,53 +187,20 @@ func (a *FileAdapter) Consolidate(ctx context.Context, reason string) error {
 	return nil
 }
 
-// ArchiveThreads archives a batch of retired threads (design §3.2).
+// ArchiveThreads archives a batch of retired threads (design §3.2) —
+// the PUBLIC standalone contract: no-in-flight-scope check, op=archival
+// marker, the batch body, marker clear. Under R3b the routine drain is
+// barrier-homed (B1 calls archiveBatch directly inside the op=barrier
+// scope — F4), but this public entry point remains for explicit callers
+// and keeps the standalone crash path specified (recovery detects the
+// op=archival marker and the adapter roll-forward completes, §2.4
+// cell 8).
 //
-// # Index-needs-commit-hash ordering (the crux) and its crash-safety
-//
-// An archive index entry's CommitHash names the DELETION commit, and
-// recovery resolves the thread's bytes from that commit's PARENT (Q3). But
-// a commit's hash is only known AFTER it is written — circular with putting
-// it in a file that the same commit contains. We resolve this with a
-// bounded, per-drain commit shape (the design blesses two; this uses three,
-// still O(1) per drain, never O(K)):
-//
-//  1. CAPTURE commit — stage the whole worktree (Add(".")) and commit. In a
-//     running session thread directories are written to the worktree but
-//     never committed per-turn (only `personant init` commits), so this
-//     pins every to-be-archived directory into a committed tree. This
-//     commit becomes the PARENT of the deletion commit and is where the
-//     archived bytes live. Tree hashes are captured here (worktree == this
-//     commit's state). If the worktree is already clean, go-git rejects the
-//     empty commit; we tolerate that (the dirs are already at HEAD).
-//
-//  2. DELETION commit — os.RemoveAll each dir, one RemoveSpineRecords, regen
-//     derived, append index entries (CommitHash still empty), then
-//     Add(".") + CommitWithHash, capturing the deletion commit hash H. Its
-//     parent is the capture commit, which holds the bytes.
-//
-//  3. STAMP commit — rewrite the index entries with CommitHash = H and
-//     commit that single-file change.
-//
-// Crash-safety (invariant 1: losing the index must not lose data):
-//   - Crash after (1): worktree unchanged except a no-op capture; nothing
-//     archived; fully consistent.
-//   - Crash between (1) and (2)'s commit: worktree ahead of HEAD (dirs
-//     removed, spine/derived/index written but uncommitted). Recoverable —
-//     the capture commit still holds every thread's bytes, and startup
-//     reconcile (#94) realigns. No bytes are lost.
-//   - Crash after (2) but before (3): the deletion commit holds the bytes in
-//     its parent; the index entries exist but with empty CommitHash. This is
-//     the one window where an index entry cannot self-recover by lookup, but
-//     the data is NOT lost (reachable by git log), and reconcile can re-stamp
-//     by matching OriginalPath against the deletion commit. RecoverThread
-//     guards against an empty CommitHash explicitly.
-//   - Crash after (3): fully committed, fully recoverable.
-//
-// The batch is atomic-per-drain in the sense invariant 3 requires: a thread
-// is either fully archived (off worktree + spine, in index + reachable
-// commit) or untouched; no thread ends off-spine yet absent from both the
-// index and a reachable commit.
+// The marker is written BEFORE the batch body (F4) and carries the
+// current day (its commits' Personant-Day, F3); it is cleared only after
+// the batch fully lands. An error anywhere leaves the marker set — the
+// batch fails loudly into the recovery path (detection → completion)
+// rather than half-releasing.
 func (a *FileAdapter) ArchiveThreads(ctx context.Context, threadIDs []string) (memops.ArchiveResult, error) {
 	if err := ctx.Err(); err != nil {
 		return memops.ArchiveResult{}, err
@@ -225,6 +214,99 @@ func (a *FileAdapter) ArchiveThreads(ctx context.Context, threadIDs []string) (m
 	// adopting it would let two operations share one crash-recovery scope.
 	if err := a.checkNoInFlightScope(); err != nil {
 		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: %w", err)
+	}
+
+	day := autogit.CurrentDay()
+	crashpoint.At(cpArchivalPreMarker)
+	if err := store.WriteMarker(a.paths, store.Marker{Op: store.OpArchival, Day: day}); err != nil {
+		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: marker: %w", err)
+	}
+	crashpoint.At(cpArchivalPostMarker)
+
+	result, err := a.archiveBatch(ctx, threadIDs, day)
+	if err != nil {
+		// Marker deliberately left set: the worktree may be torn, and
+		// failing loudly into the recovery path (Pending → roll-forward
+		// completion) beats continuing the session on it.
+		return result, err
+	}
+	if err := a.absorbIntoDaily(ctx, "archive absorb"); err != nil {
+		return result, err
+	}
+	if err := store.ClearMarker(a.paths); err != nil {
+		return result, fmt.Errorf("fileadapter: archive batch: clear marker: %w", err)
+	}
+	return result, nil
+}
+
+// absorbIntoDaily commits the current worktree into DAILY (flag-free,
+// empty-swallowed). Standalone archival and its roll-forward completion
+// mutate the worktree while committing only to PRIMARY; without this
+// absorb the home would read markerless-dirty vs daily (cell 3) until
+// the next full sweep, and — worse — a later torn-turn reset to daily
+// HEAD would revert the batch's removals. The barrier path never needs
+// it: B4/B5 rebirth daily off the post-batch worktree.
+func (a *FileAdapter) absorbIntoDaily(ctx context.Context, reason string) error {
+	if err := autogit.Add(ctx, a.paths, autogit.Daily, "."); err != nil {
+		return fmt.Errorf("fileadapter: daily absorb: stage: %w", err)
+	}
+	if err := autogit.Commit(ctx, a.paths, autogit.Daily, reason, 0, 0); err != nil &&
+		!errors.Is(err, git.ErrEmptyCommit) {
+		return fmt.Errorf("fileadapter: daily absorb: commit: %w", err)
+	}
+	return nil
+}
+
+// archiveBatch is the archival mutation body (#94 R3b, F4): NO marker
+// I/O and NO scope refusal — it always runs inside an already-open
+// scope (the public ArchiveThreads wrapper's op=archival marker, or the
+// barrier's op=barrier marker for B1 and both roll-forward completion
+// paths). This is an explicit internal variant, not a global bypass:
+// the scope guard still fires at every public entry point.
+//
+// # Index-needs-commit-hash ordering (the crux) and its crash-safety
+//
+// An archive index entry's CommitHash names the DELETION commit, and
+// recovery resolves the thread's bytes from that commit's PARENT (Q3). But
+// a commit's hash is only known AFTER it is written — circular with putting
+// it in a file that the same commit contains. We resolve this with a
+// bounded, per-drain commit shape (three commits, O(1) per drain, never
+// O(K)), all against PRIMARY, all carrying `Personant-Day: <day>` (F3):
+//
+//  1. CAPTURE commit — stage the whole worktree (Add(".")) and commit.
+//     This pins every to-be-archived directory into a committed tree —
+//     and, at the barrier, it is what makes B4's daily nuke safe
+//     (INV-3): after it lands, primary already holds the day's
+//     cumulative content. This commit becomes the PARENT of the deletion
+//     commit and is where the archived bytes live. If the worktree is
+//     already clean, go-git rejects the empty commit; we tolerate that
+//     (the dirs are already at HEAD).
+//
+//  2. MEMBERSHIP record — append the index entries (empty CommitHash,
+//     full ParentCommitHash/TreeHash/OriginalPath/spine snapshot)
+//     STRICTLY BEFORE the first RemoveAll (F1). The unstamped entries
+//     are the deterministic roll-forward worklist: because membership
+//     is durable before any deletion begins, no half-applied deletion
+//     is ever ambiguous — completion just finishes the recorded batch.
+//
+//  3. DELETION commit — os.RemoveAll each dir, one RemoveSpineRecords,
+//     regen derived, then Add(".") + CommitWithHash, capturing the
+//     deletion commit hash H. Its parent is the capture commit, which
+//     holds the bytes.
+//
+//  4. STAMP commit — rewrite the index entries with CommitHash = H and
+//     commit that single-file change.
+//
+// Crash-safety per sub-window (design §2.3 F1 — each boundary carries a
+// registered crashpoint): every window either has no deletion begun
+// (membership may simply re-form) or has the unstamped worklist +
+// capture commit, from which the adapter's completion routine
+// (completeArchivalBatch) rolls FORWARD — ensure-removed →
+// ensure-spine-removed → regen → deletion-commit-iff-unlocatable →
+// stamp. No window loses a byte and none is ever resolved by a reset.
+func (a *FileAdapter) archiveBatch(ctx context.Context, threadIDs []string, day int) (memops.ArchiveResult, error) {
+	if err := ctx.Err(); err != nil {
+		return memops.ArchiveResult{}, err
 	}
 
 	// Sort + dedup the requested ids so the batch is order-independent and
@@ -293,9 +375,11 @@ func (a *FileAdapter) ArchiveThreads(ctx context.Context, threadIDs []string) (m
 		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: pre-regenerate derived: %w", err)
 	}
 
-	// CAPTURE commit: pin the to-be-archived directories into a committed
-	// tree so the deletion commit's parent holds their bytes.
-	if err := autogit.Add(ctx, a.paths, "."); err != nil {
+	// CAPTURE commit → PRIMARY: pin the to-be-archived directories into a
+	// committed tree so the deletion commit's parent holds their bytes.
+	// At the barrier this is also the worktree-capture that makes the
+	// daily nuke safe (INV-3).
+	if err := autogit.Add(ctx, a.paths, autogit.Primary, "."); err != nil {
 		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: stage capture: %w", err)
 	}
 	// The capture commit's pre-flag CheckSpineIntegrity validates the OLD
@@ -304,7 +388,8 @@ func (a *FileAdapter) ArchiveThreads(ctx context.Context, threadIDs []string) (m
 	// RemoveSpineRecords below), so a broken spine aborts cleanly with
 	// nothing removed. The deletion commit then carries no pre-flag (we are
 	// mid-transaction) and validates the END state in its post-flag.
-	if err := autogit.Commit(ctx, a.paths, fmt.Sprintf("archive: capture %d thread(s)", len(archivable)),
+	if err := autogit.Commit(ctx, a.paths, autogit.Primary,
+		autogit.WithDayTrailer(fmt.Sprintf("archive: capture %d thread(s)", len(archivable)), day),
 		autogit.CheckSpineIntegrity, 0); err != nil {
 		// An empty capture commit means the worktree was already clean and
 		// the directories are already committed at HEAD — fine, proceed. (A
@@ -327,7 +412,7 @@ func (a *FileAdapter) ArchiveThreads(ctx context.Context, threadIDs []string) (m
 	// A drift thread with no directory has no bytes — empty TreeHash (its dir
 	// is absent from the committed tree too, so TreeHashAt would error; we
 	// skip it, preserving the existing empty-TreeHash breadcrumb semantics).
-	captureHash, err := autogit.HeadHash(ctx, a.paths)
+	captureHash, err := autogit.HeadHash(ctx, a.paths, autogit.Primary)
 	if err != nil {
 		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: resolve capture commit: %w", err)
 	}
@@ -336,46 +421,20 @@ func (a *FileAdapter) ArchiveThreads(ctx context.Context, threadIDs []string) (m
 		if !caps[id].hasDir {
 			continue
 		}
-		th, err := autogit.TreeHashAt(ctx, a.paths, captureHash, threadRelDir(id))
+		th, err := autogit.TreeHashAt(ctx, a.paths, autogit.Primary, captureHash, threadRelDir(id))
 		if err != nil {
 			return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: tree hash %s: %w", id, err)
 		}
 		treeHashes[id] = th
 	}
+	crashpoint.At(cpBatchPostCapture)
 
-	// Open the op=archival marker scope (#94, SOLUTION principle 6) —
-	// written before the first destructive mutation (the RemoveAll loop
-	// below) and cleared only after the stamp commit lands. A crash inside
-	// the scope reconciles as cell 8 (reset to the last stable
-	// archival-sequence point; redrain re-triggers on the next pressure
-	// check). Everything above this line is non-destructive: validation,
-	// derived regen (idempotent), and the capture commit — a markerless
-	// crash there leaves a self-consistent home. An in-process error AFTER
-	// this point deliberately leaves the marker set: the worktree may be
-	// torn, and failing loudly into the recovery path beats continuing the
-	// session on it.
-	crashpoint.At(cpArchivalPreMarker)
-	if err := store.WriteMarker(a.paths, store.Marker{Op: store.OpArchival}); err != nil {
-		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: marker: %w", err)
-	}
-	crashpoint.At(cpArchivalPostMarker)
-
-	// (2) Stage removals: remove each thread directory + invalidate its
-	// frontmatter cache entry. os.RemoveAll on a missing dir is a no-op.
-	for _, id := range archivable {
-		if err := os.RemoveAll(store.ThreadDir(a.paths, id)); err != nil {
-			return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: remove dir %s: %w", id, err)
-		}
-		a.fmCache.Invalidate(id)
-	}
-
-	// (3) One spine rewrite for the whole batch.
-	if err := store.RemoveSpineRecords(a.paths, archivable); err != nil {
-		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: remove spine records: %w", err)
-	}
-
-	// (4) Append sorted index entries (CommitHash filled in after the
-	// deletion commit, step 6). ArchivedAt is clock.Timeline() (AC6).
+	// (2) MEMBERSHIP record (F1): append the index entries — CommitHash
+	// empty, everything else filled — STRICTLY BEFORE the first RemoveAll.
+	// The unstamped entries are the durable batch-membership record that
+	// makes crash completion deterministic: a crash from here on leaves a
+	// worklist recovery's roll-forward can always finish, and no deletion
+	// can ever have begun without it. ArchivedAt is clock.Timeline() (AC6).
 	archivedAt := clock.Timeline().Format(time.RFC3339)
 	entries := make([]memops.ArchiveEntry, 0, len(archivable))
 	for _, id := range archivable {
@@ -394,32 +453,52 @@ func (a *FileAdapter) ArchiveThreads(ctx context.Context, threadIDs []string) (m
 	if err := store.AppendArchiveEntries(a.paths, entries); err != nil {
 		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: append index: %w", err)
 	}
+	crashpoint.At(cpBatchPostMembership)
+
+	// (3) Stage removals: remove each thread directory + invalidate its
+	// frontmatter cache entry. os.RemoveAll on a missing dir is a no-op.
+	for _, id := range archivable {
+		if err := os.RemoveAll(store.ThreadDir(a.paths, id)); err != nil {
+			return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: remove dir %s: %w", id, err)
+		}
+		a.fmCache.Invalidate(id)
+		// Multi-hit point: R4 kills at the kth removal via ArmOnHit.
+		crashpoint.At(cpBatchMidRemove)
+	}
+	crashpoint.At(cpBatchPostRemove)
+
+	// (4) One spine rewrite for the whole batch.
+	if err := store.RemoveSpineRecords(a.paths, archivable); err != nil {
+		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: remove spine records: %w", err)
+	}
 
 	// (5) Regenerate derived state ONCE so the deletion commit passes
 	// CheckDerivedFresh — each removed thread dangles symbols.jsonl refs.
 	if err := a.RegenerateDerivedState(ctx, memops.IndexBuildOptions{Quiet: true}); err != nil {
 		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: regenerate derived: %w", err)
 	}
+	crashpoint.At(cpBatchPostSpine)
 
-	// (6) DELETION commit: stage everything (removals + spine + index +
-	// derived) and commit once. No pre-flag — the OLD-state spine integrity
-	// was validated by the capture commit's pre-flag before any mutation;
-	// here we are mid-transaction. The post-flag CheckDerivedFresh |
-	// CheckSpineIntegrity validates the END state (regen fresh, spine still
-	// consistent after the batch removal).
-	if err := autogit.Add(ctx, a.paths, "."); err != nil {
+	// (6) DELETION commit → PRIMARY: stage everything (removals + spine +
+	// index + derived) and commit once. No pre-flag — the OLD-state spine
+	// integrity was validated by the capture commit's pre-flag before any
+	// mutation; here we are mid-transaction. The post-flag
+	// CheckDerivedFresh | CheckSpineIntegrity validates the END state
+	// (regen fresh, spine still consistent after the batch removal).
+	if err := autogit.Add(ctx, a.paths, autogit.Primary, "."); err != nil {
 		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: stage deletion: %w", err)
 	}
-	delHash, err := autogit.CommitWithHash(ctx, a.paths,
-		fmt.Sprintf("archive: %d thread(s)", len(archivable)),
+	delHash, err := autogit.CommitWithHash(ctx, a.paths, autogit.Primary,
+		autogit.WithDayTrailer(fmt.Sprintf("archive: %d thread(s)", len(archivable)), day),
 		0, autogit.CheckDerivedFresh|autogit.CheckSpineIntegrity)
 	if err != nil {
 		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: deletion commit: %w", err)
 	}
 	result.CommitHash = delHash
+	crashpoint.At(cpBatchPostDeletionCommit)
 
-	// (6, cont.) STAMP the deletion commit hash into each index entry, then
-	// commit the index-only change. The entries already exist (step 4); we
+	// (7) STAMP the deletion commit hash into each index entry, then
+	// commit the index-only change. The entries already exist (step 2); we
 	// re-append them with CommitHash set — AppendArchiveEntries replaces by
 	// thr_id and keeps the file sorted.
 	for i := range entries {
@@ -428,26 +507,24 @@ func (a *FileAdapter) ArchiveThreads(ctx context.Context, threadIDs []string) (m
 	if err := store.AppendArchiveEntries(a.paths, entries); err != nil {
 		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: stamp index: %w", err)
 	}
-	if err := autogit.Add(ctx, a.paths, "."); err != nil {
+	if err := autogit.Add(ctx, a.paths, autogit.Primary, "."); err != nil {
 		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: stage stamp: %w", err)
 	}
-	if err := autogit.Commit(ctx, a.paths,
-		fmt.Sprintf("archive: stamp %d index entr%s", len(archivable), plural(len(archivable))),
+	if err := autogit.Commit(ctx, a.paths, autogit.Primary,
+		autogit.WithDayTrailer(fmt.Sprintf("archive: stamp %d index entr%s", len(archivable), plural(len(archivable))), day),
 		0, autogit.CheckSpineIntegrity); err != nil {
 		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: stamp commit: %w", err)
 	}
+	crashpoint.At(cpBatchPostStamp)
 
-	// Close the op=archival marker scope: the batch's final commit landed,
-	// so the mutation is fully covered by recovery points. The event-log
-	// emission below is logs/-only (never canonical) and stays outside the
-	// scope by design. The batch's Add(".") sweeps also absorbed any
-	// pending scoped-write entries.
+	// The batch's final commit landed, so the mutation is fully covered by
+	// recovery points; the caller (wrapper or barrier) owns clearing its
+	// scope marker. The batch's Add(".") sweeps absorbed any pending
+	// scoped-write entries. The event-log emission below is logs/-only
+	// (never canonical).
 	a.resetTurnScope()
-	if err := store.ClearMarker(a.paths); err != nil {
-		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: clear marker: %w", err)
-	}
 
-	// (7) Emit one archive.archived line per id (forensic + harness fold
+	// (8) Emit one archive.archived line per id (forensic + harness fold
 	// key). bytes= kept for demand-sizing continuity. project= attributes
 	// pressure per project even though the drain is substrate-global.
 	for _, id := range archivable {
@@ -507,12 +584,12 @@ func (a *FileAdapter) RecoverThread(ctx context.Context, thrID string) (memops.S
 	// existed (greenfield — no migration, but don't crash on empty).
 	parent := entry.ParentCommitHash
 	if parent == "" {
-		parent, err = autogit.ParentCommitHash(ctx, a.paths, entry.CommitHash)
+		parent, err = autogit.ParentCommitHash(ctx, a.paths, autogit.Primary, entry.CommitHash)
 		if err != nil {
 			return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: resolve parent: %w", thrID, err)
 		}
 	}
-	if err := autogit.CheckoutTree(ctx, a.paths, parent, entry.OriginalPath, 0, 0); err != nil {
+	if err := autogit.CheckoutTree(ctx, a.paths, autogit.Primary, parent, entry.OriginalPath, 0, 0); err != nil {
 		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: restore subtree: %w", thrID, err)
 	}
 
@@ -594,11 +671,13 @@ func (a *FileAdapter) RecoverThread(ctx context.Context, thrID string) (memops.S
 	if err := a.RegenerateDerivedState(ctx, memops.IndexBuildOptions{Quiet: true}); err != nil {
 		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: regenerate derived: %w", thrID, err)
 	}
-	if err := autogit.Add(ctx, a.paths, "."); err != nil {
+	// Mid-session structural op → DAILY, flag-free (R3b op→DB table): the
+	// restore is folded into the day at the next barrier; the specific
+	// VerifyTreeHash integrity check above already gated the content.
+	if err := autogit.Add(ctx, a.paths, autogit.Daily, "."); err != nil {
 		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: stage: %w", thrID, err)
 	}
-	if err := autogit.Commit(ctx, a.paths, "archive: recover "+thrID,
-		0, autogit.CheckDerivedFresh|autogit.CheckSpineIntegrity); err != nil {
+	if err := autogit.Commit(ctx, a.paths, autogit.Daily, "archive: recover "+thrID, 0, 0); err != nil {
 		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: commit: %w", thrID, err)
 	}
 	a.resetTurnScope() // the recovery commit's Add(".") absorbed pending entries
@@ -643,11 +722,11 @@ func (a *FileAdapter) recoverDriftRecord(ctx context.Context, thrID string, entr
 	if err := a.RegenerateDerivedState(ctx, memops.IndexBuildOptions{Quiet: true}); err != nil {
 		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover drift record %s: regenerate derived: %w", thrID, err)
 	}
-	if err := autogit.Add(ctx, a.paths, "."); err != nil {
+	// Mid-session structural op → DAILY, flag-free (R3b op→DB table).
+	if err := autogit.Add(ctx, a.paths, autogit.Daily, "."); err != nil {
 		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover drift record %s: stage: %w", thrID, err)
 	}
-	if err := autogit.Commit(ctx, a.paths, "archive: recover record "+thrID,
-		0, autogit.CheckDerivedFresh|autogit.CheckSpineIntegrity); err != nil {
+	if err := autogit.Commit(ctx, a.paths, autogit.Daily, "archive: recover record "+thrID, 0, 0); err != nil {
 		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover drift record %s: commit: %w", thrID, err)
 	}
 	a.resetTurnScope() // the recovery commit's Add(".") absorbed pending entries

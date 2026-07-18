@@ -23,19 +23,23 @@ import (
 type OpKind string
 
 const (
-	OpTurn     OpKind = "turn"     // a turn is mid-flight (journal→commit window)
-	OpArchival OpKind = "archival" // deep-cold archival between turns (§3.8)
-	OpSleep    OpKind = "sleep"    // sleep-cycle consolidation (RebuildTrees, gc)
-	OpRecovery OpKind = "recovery" // recovery itself is running (re-entrancy guard)
+	OpTurn       OpKind = "turn"       // a turn is mid-flight (journal→commit window)
+	OpArchival   OpKind = "archival"   // deep-cold archival between turns (§3.8)
+	OpSleep      OpKind = "sleep"      // sleep-cycle consolidation (RebuildTrees, gc)
+	OpRecovery   OpKind = "recovery"   // recovery itself is running (re-entrancy guard)
+	OpBarrier    OpKind = "barrier"    // the day barrier B0-B6 (#94 R3b); Day carries the target day
+	OpRebaseline OpKind = "rebaseline" // mid-day daily nuke+recreate (§6.2 knob); never touches primary
 )
 
 // validOpKinds is the closed set of marker op values. A marker with any
 // other op is a contract violation at the marker boundary.
 var validOpKinds = map[OpKind]struct{}{
-	OpTurn:     {},
-	OpArchival: {},
-	OpSleep:    {},
-	OpRecovery: {},
+	OpTurn:       {},
+	OpArchival:   {},
+	OpSleep:      {},
+	OpRecovery:   {},
+	OpBarrier:    {},
+	OpRebaseline: {},
 }
 
 // Marker is the on-disk op-in-progress record (op-in-progress.json) for
@@ -48,11 +52,15 @@ var validOpKinds = map[OpKind]struct{}{
 // Contract: Op is one of the batch OpKind constants (WriteMarker refuses
 // op=turn). Turn carries a turn id only on the op=recovery re-entry
 // marker whose orig is a turn; Orig carries the original op for
-// op=recovery. Both are omitted when empty.
+// op=recovery. Day is the target day index of an op=barrier scope (and
+// the day stamped on an op=archival scope's primary commits, F3/F6) —
+// load-bearing: recovery reads it to complete an interrupted barrier for
+// the RIGHT day. All are omitted when empty/zero.
 type Marker struct {
 	Op   OpKind `json:"op"`
 	Turn string `json:"turn,omitempty"`
 	Orig string `json:"orig,omitempty"`
+	Day  int    `json:"day,omitempty"`
 }
 
 // WriteMarker atomically writes m to op-in-progress.json. It is a marker

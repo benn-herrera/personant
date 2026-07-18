@@ -80,6 +80,23 @@ type FileAdapter struct {
 	// in fileadapter_recovery.go). Single-writer like the turn path; no
 	// lock needed.
 	commitsSinceGCCheck int
+
+	// sealedDay caches the most recent day known to be SEALED (a
+	// day-commit-shape primary HEAD was observed or minted for it), so
+	// the per-turn new-day poll (MaybeDayBarrier) costs zero git reads on
+	// the common same-day path. Valid only after the first observation;
+	// advanced by the barrier itself (the only in-process primary
+	// day-commit writer — recovery repairs run before the adapter is
+	// polled). Single-writer like the turn path.
+	sealedDay      int
+	sealedDayValid bool
+
+	// §2.7 quarantine-and-proceed forensics from the LAST completion run
+	// (completePending), merged into the final RecoveryReport by
+	// Reconcile's completion loop. Reset at the top of completePending.
+	scopedRestored       []string
+	barrierQuarantined   []string
+	barrierQuarantineDir string
 }
 
 // touchTurnScope records repo-relative tracked paths written by the

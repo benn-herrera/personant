@@ -67,6 +67,11 @@ func (r *opsRecorder) ArchiveThreads(ctx context.Context, ids []string) (memops.
 	return r.MemoryOps.ArchiveThreads(ctx, ids)
 }
 
+func (r *opsRecorder) MaybeDayBarrier(ctx context.Context) (memops.DayBarrierResult, error) {
+	*r.calls = append(*r.calls, "day-barrier")
+	return r.MemoryOps.MaybeDayBarrier(ctx)
+}
+
 // consultRecorder wraps a model client, logging each ConsultStream into
 // the same shared sequence log the opsRecorder writes.
 type consultRecorder struct {
@@ -165,7 +170,7 @@ func TestPipeline_JournalFailureAbortsPreCanonical(t *testing.T) {
 			}, nil)
 			state := NewState(rec, meta, memops.Provider{}, mock)
 
-			headBefore, herr := autogit.HeadHash(context.Background(), paths)
+			headBefore, herr := autogit.HeadHash(context.Background(), paths, autogit.Daily)
 			if herr != nil {
 				t.Fatalf("HeadHash: %v", herr)
 			}
@@ -193,7 +198,7 @@ func TestPipeline_JournalFailureAbortsPreCanonical(t *testing.T) {
 			// And released WITHOUT a commit (R3 review F3): the tree is at
 			// most logs-dirty, so a commit-per-abort would be pure churn
 			// under a provider-outage retry loop.
-			headAfter, herr := autogit.HeadHash(context.Background(), paths)
+			headAfter, herr := autogit.HeadHash(context.Background(), paths, autogit.Daily)
 			if herr != nil {
 				t.Fatalf("HeadHash: %v", herr)
 			}
@@ -276,7 +281,7 @@ func TestPipeline_CommitFailureLeavesMarkerThenRecovers(t *testing.T) {
 	if rerr2 != nil {
 		t.Fatalf("post-recovery Run: %v", rerr2)
 	}
-	headTurn, herr := autogit.HeadTurn(context.Background(), paths)
+	headTurn, herr := autogit.HeadTurn(context.Background(), paths, autogit.Daily)
 	if herr != nil {
 		t.Fatalf("HeadTurn: %v", herr)
 	}
@@ -303,7 +308,7 @@ func TestPipeline_TrailerAndInfo(t *testing.T) {
 	if info.TurnID == "" {
 		t.Fatalf("TurnInfo.TurnID empty")
 	}
-	headTurn, herr := autogit.HeadTurn(context.Background(), paths)
+	headTurn, herr := autogit.HeadTurn(context.Background(), paths, autogit.Daily)
 	if herr != nil {
 		t.Fatalf("HeadTurn: %v", herr)
 	}
@@ -315,17 +320,18 @@ func TestPipeline_TrailerAndInfo(t *testing.T) {
 	}
 }
 
-// TestPipeline_ArchivalRunsAfterCommitTurn asserts the R3 re-sequencing
-// (SOLUTION principle 6): the §3.8 archival drain fires strictly AFTER
-// CommitTurn returns — between turns, never inside the turn's marker
-// window — and releases its own marker scope by the time Run returns.
-func TestPipeline_ArchivalRunsAfterCommitTurn(t *testing.T) {
-	paths, meta := newTestHome(t)
+// TestPipeline_BarrierRunsBeforeTurnScope asserts the R3b re-sequencing
+// (barrier-only archival, INV-5): the day barrier — and the §3.8 drain
+// it homes — fires strictly BEFORE the turn's recovery scope opens (the
+// prompt journal append), and releases its op=barrier scope by the time
+// Run returns.
+func TestPipeline_BarrierRunsBeforeTurnScope(t *testing.T) {
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
+	paths, meta := newTestHome(t)
 
 	// Push the spine over the archival high-water mark with retired
-	// threads so the turn-close drain fires this turn.
-	for i := 0; i < archiveHighWater+5; i++ {
+	// threads so the barrier's B1 drain fires.
+	for i := 0; i < memops.ArchiveHighWater+5; i++ {
 		seedArchivalThread(t, paths, meta.ID, fmt.Sprintf("thr_%d", i+1),
 			memops.ThreadResolved, monotonicTS(i))
 	}
@@ -337,23 +343,25 @@ func TestPipeline_ArchivalRunsAfterCommitTurn(t *testing.T) {
 	}, nil)
 	state := NewState(rec, meta, memops.Provider{}, mock)
 
+	// Cross the day boundary so the pre-turn poll fires the barrier.
+	pinClock(t, time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC))
 	if _, err := Run(context.Background(), state, "hello", io.Discard); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	assertOrdered(t, calls, "commit-turn", "archive-threads")
+	assertOrdered(t, calls, "day-barrier", "journal:prompt", "commit-turn")
 
-	// The archival batch ran and released its op=archival scope; no marker
-	// of any kind survives the turn.
+	// The barrier ran, drained, and released its op=barrier scope; no
+	// marker of any kind survives the turn.
 	if _, present, err := store.ReadMarker(paths); err != nil || present {
-		t.Fatalf("marker after archival turn: present=%v err=%v", present, err)
+		t.Fatalf("marker after barrier turn: present=%v err=%v", present, err)
 	}
 	recs, err := store.ReadSpine(paths.Spine)
 	if err != nil {
 		t.Fatalf("ReadSpine: %v", err)
 	}
-	if len(recs) > archiveHighWater {
-		t.Fatalf("spine not drained: %d records (high water %d)", len(recs), archiveHighWater)
+	if len(recs) > memops.ArchiveHighWater {
+		t.Fatalf("spine not drained: %d records (high water %d)", len(recs), memops.ArchiveHighWater)
 	}
 }
 

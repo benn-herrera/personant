@@ -472,13 +472,13 @@ func VerifyArchiveResolvable(h *Harness) error {
 		}
 		parent := e.ParentCommitHash
 		if parent == "" {
-			parent, err = autogit.ParentCommitHash(ctx, h.Paths, e.CommitHash)
+			parent, err = autogit.ParentCommitHash(ctx, h.Paths, autogit.Primary, e.CommitHash)
 			if err != nil {
 				problems = append(problems, fmt.Sprintf("%s: resolve parent of %s: %v", e.ThrID, e.CommitHash, err))
 				continue
 			}
 		}
-		got, err := autogit.TreeHashAt(ctx, h.Paths, parent, e.OriginalPath)
+		got, err := autogit.TreeHashAt(ctx, h.Paths, autogit.Primary, parent, e.OriginalPath)
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("%s: subtree %q at %s unresolvable: %v", e.ThrID, e.OriginalPath, parent, err))
 			continue

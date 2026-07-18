@@ -339,6 +339,21 @@ func stepExecTurn(t *testing.T, h *Harness, idx int, label string, step Step) (s
 	// no longer inflates turn_commit_ms. Zero on turns where the throttled
 	// check does not fire; a spike marks a turn that carried a repack.
 	h.Metrics.Record(metricTurnGCMs, float64(info.GCDuration.Microseconds())/1000.0)
+	// Day-barrier gauges (#94 R3b §6.3): the PRE-TURN poll inside
+	// turn.RunWithInfo is where a sim's day boundary usually seals (the
+	// first step past midnight runs before the harness's day-close
+	// catch-up), so the measurements surface via TurnInfo. Cross-seam
+	// keys: the sim's rung summary and the 2d barrier rung read them.
+	if b := info.Barrier; len(b.DaysSealed) > 0 {
+		for range b.DaysSealed {
+			h.Metrics.Counter(MetricBarrierCount, 1)
+		}
+		h.Metrics.Record(MetricBarrierDurationMs, float64(b.BarrierDuration.Microseconds())/1000.0)
+		h.Metrics.Record(MetricDayCommitDurationMs, float64(b.DayCommitDuration.Microseconds())/1000.0)
+		h.Metrics.Record(MetricMorningInitDurationMs, float64(b.MorningInitDuration.Microseconds())/1000.0)
+		h.Metrics.Record(MetricDayCommitBytes, float64(b.DayCommitBytes))
+		h.Metrics.Record(MetricDailyLooseObjects, float64(b.DailyLooseObjects))
+	}
 	return body, elapsed
 }
 

@@ -117,6 +117,19 @@ func Run(opts Options) error {
 	}
 	printRecoveryBanner(opts.Stdout, recoveryReport)
 
+	// Day barrier (#94 R3b): the session-open half of the new-day check —
+	// Init → Reconcile → (barrier if new-day) → LoadSession. Ordering is
+	// load-bearing: Reconcile has already repaired any torn last turn, so
+	// the barrier day-commits a reconciled, consistent worktree into
+	// permanent history. The pre-turn half lives in turn.RunWithInfo. A
+	// barrier failure refuses the session; the op=barrier marker it
+	// leaves behind makes the next open detect and complete it.
+	if res, err := ops.MaybeDayBarrier(ctx); err != nil {
+		return fmt.Errorf("chat: day barrier failed — refusing to open (relaunch completes it): %w", err)
+	} else if len(res.DaysSealed) > 0 {
+		fmt.Fprintf(opts.Stdout, "day barrier: sealed day(s) %v into permanent history\n", res.DaysSealed)
+	}
+
 	providers, faults, err := ops.LoadProviders(ctx)
 	if err != nil {
 		return fmt.Errorf("chat: load providers: %w", err)
@@ -375,6 +388,10 @@ func printRecoveryBanner(w io.Writer, rep memops.RecoveryReport) {
 	if rep.PreservedContentPath != "" {
 		fmt.Fprintf(w, "recovery: in-flight content for turn %s preserved at %s — not replayed; re-supply it if still wanted\n",
 			rep.PreservedTurn, rep.PreservedContentPath)
+	}
+	if n := len(rep.ScopedRestored); n > 0 {
+		fmt.Fprintf(w, "recovery: %d broken path(s) quarantined and restored from permanent history: %s\n",
+			n, strings.Join(rep.ScopedRestored, ", "))
 	}
 	if rep.AdoptCommit != "" {
 		fmt.Fprintln(w, "recovery: pre-existing uncommitted content adopted forward (verified)")

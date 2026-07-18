@@ -38,10 +38,10 @@ func TestResetHard_RevertsTrackedOnly(t *testing.T) {
 	// Baseline: two tracked files committed.
 	writeHomeFile(t, paths.Home, "threads/a.md", "committed-a\n")
 	writeHomeFile(t, paths.Home, "threads/b.md", "committed-b\n")
-	if err := Add(ctx, paths, "."); err != nil {
+	if err := Add(ctx, paths, Primary, "."); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	if err := Commit(ctx, paths, "baseline", 0, 0); err != nil {
+	if err := Commit(ctx, paths, Primary, "baseline", 0, 0); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 	head := repoHead(t, paths)
@@ -54,13 +54,13 @@ func TestResetHard_RevertsTrackedOnly(t *testing.T) {
 		t.Fatalf("remove b.md: %v", err)
 	}
 	writeHomeFile(t, paths.Home, "threads/staged-new.md", "staged\n")
-	if err := Add(ctx, paths, "threads/staged-new.md"); err != nil {
+	if err := Add(ctx, paths, Primary, "threads/staged-new.md"); err != nil {
 		t.Fatalf("Add staged-new: %v", err)
 	}
 	writeHomeFile(t, paths.Home, "threads/untracked.md", "untracked\n")
 	writeHomeFile(t, paths.Home, "op-in-progress.json", `{"op":"turn","turn":"t9"}`)
 
-	reverted, err := ResetHard(ctx, paths)
+	reverted, err := ResetHard(ctx, paths, Primary)
 	if err != nil {
 		t.Fatalf("ResetHard: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestResetHard_RevertsTrackedOnly(t *testing.T) {
 	// Post-reset worktree state: no tracked dirt; exactly the two
 	// non-ignored leftovers are untracked (the marker is gitignored and
 	// must appear in neither list).
-	wt, err := Worktree(ctx, paths)
+	wt, err := Worktree(ctx, paths, Primary)
 	if err != nil {
 		t.Fatalf("Worktree: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestWorktree_IgnoredFilesInvisible(t *testing.T) {
 	writeHomeFile(t, paths.Home, "derived-watermark", "abc\n")
 	writeHomeFile(t, paths.Home, "recovery/recovered-turn-t1-abcd.md", "preserved\n")
 
-	wt, err := Worktree(ctx, paths)
+	wt, err := Worktree(ctx, paths, Primary)
 	if err != nil {
 		t.Fatalf("Worktree: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestTurnTrailerRoundTrip(t *testing.T) {
 	paths := scaffoldHome(t)
 
 	// Fresh home: HEAD is the init commit — no trailer, HeadTurn is ⊥.
-	turn, err := HeadTurn(ctx, paths)
+	turn, err := HeadTurn(ctx, paths, Primary)
 	if err != nil {
 		t.Fatalf("HeadTurn: %v", err)
 	}
@@ -136,13 +136,13 @@ func TestTurnTrailerRoundTrip(t *testing.T) {
 	}
 
 	writeHomeFile(t, paths.Home, "threads/x.md", "x\n")
-	if err := Add(ctx, paths, "."); err != nil {
+	if err := Add(ctx, paths, Primary, "."); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	if err := Commit(ctx, paths, TurnCommitMessage("t42", "2 events"), 0, 0); err != nil {
+	if err := Commit(ctx, paths, Primary, TurnCommitMessage("t42", "2 events"), 0, 0); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
-	turn, err = HeadTurn(ctx, paths)
+	turn, err = HeadTurn(ctx, paths, Primary)
 	if err != nil {
 		t.Fatalf("HeadTurn: %v", err)
 	}

@@ -3,15 +3,29 @@
 // between Init and the first session read; the clean path is a cheap
 // no-op, and every unclean-shutdown shape maps to exactly one cell of
 // the recovery state machine below (the MAD-converged design in
-// mad-design/crash-stability/SOLUTION.md; the SPEC rewrite lands in R5).
+// mad-design/crash-stability/SOLUTION.md as amended by
+// design/dual-repo-barrier.md; the SPEC rewrite lands in R5).
+//
+// # Dual-repo model (#94 R3b)
+//
+// Two git DBs track the one shared worktree: DAILY (.git-daily,
+// per-turn, disposable — nuked and reborn at each day barrier) and
+// PRIMARY (.git, day-grain career history — barrier-exclusive with the
+// recovery-repair exemption). THE WORKTREE IS THE TRUTH: no canonical
+// byte lives only in git, so losing the daily DB is never losing
+// content. Losing PRIMARY, by contrast, is unrecoverable career history
+// — refuse to open, never auto-recreate.
 //
 // # The state machine (observables → cell)
 //
-// Observables at open: MARKER (the in-flight-op signal, op-typed), WT
-// (canonical worktree dirtiness vs HEAD — see the logs/ carve-out
-// below), HEADTURN (the turn id in HEAD's commit trailer, ⊥ when
-// absent), ARCH (unstamped archive-index entries, evaluated AFTER
-// worktree normalization), DERIVED (watermark vs HEAD).
+// Observables at open: MARKER (the in-flight-op signal, op-typed),
+// DAILY (present / missing / half-created — probed defensively FIRST,
+// before any daily-repo read; an open failure on a corrupt .git-daily
+// is the half-created signal, never an error, F7), WT (canonical
+// worktree dirtiness vs DAILY HEAD — see the logs/ carve-out below),
+// HEADTURN (the turn id in daily HEAD's commit trailer, ⊥ when absent),
+// ARCH (unstamped archive-index entries on primary, evaluated AFTER
+// worktree normalization), DERIVED (watermark vs daily HEAD).
 //
 // MARKER has two carriers (the R3-addendum marker-into-journal fold):
 //
@@ -19,30 +33,39 @@
 //     record carries turn id T (T=⊥ for a torn/corrupt first record —
 //     still an in-flight turn, id unknown, which HEADTURN≠⊥ can never
 //     equal, so it classifies as "not committed": cell 4/6, never a
-//     false cell 5). The journal append's fsync makes the signal
-//     durable; there is no per-turn marker file. (A legacy op=turn
-//     marker FILE from pre-addendum code is still honored and cleared.)
-//   - MARKER(archival|sleep|recovery) := the op-in-progress.json marker
-//     file — batch ops only.
+//     false cell 5). (A legacy op=turn marker FILE from pre-addendum
+//     code is still honored and cleared.)
 //
-// The cells below are UNCHANGED in meaning; only the op=turn carrier
-// moved from the marker file into the journal.
+//   - MARKER(archival|sleep|recovery|barrier|rebaseline) := the
+//     op-in-progress.json marker file — batch ops only.
 //
-//	cell 1  marker absent, clean, derived fresh      → no-op
-//	cell 2  marker absent, clean, derived stale      → rebuild derived, write watermark
-//	cell 3  marker absent, DIRTY, watermark present  → hand-edit: NEVER reset (see below)
-//	cell 4  op=turn, dirty, HEADTURN≠T               → torn turn: preserve+reset+sweep
-//	cell 5  op=turn, clean, HEADTURN==T              → committed; clear marker, zero loss
-//	cell 6  op=turn, clean, HEADTURN≠T               → nothing landed; preserve journal, clear
-//	cell 7  cell 4 coinciding with unstamped ARCH    → cell 4 then the stamp pass
-//	cell 8  op=archival, dirty                       → reset+sweep; redrain re-triggers later
-//	cell 9  unstamped ARCH (any cell, post-normalization) → locate deletion commit, stamp;
-//	        unlocatable ⇒ recovery.unrepairable, entry stays refused — never guessed
-//	cell 10 op=sleep                                 → clear marker; substrate self-heals
-//	cell 11 op=recovery (crash during recovery)      → re-run with the original marker; every
-//	        phase is idempotent, so re-entry converges to the same terminal state
-//	cell 12 marker absent, dirty, NO watermark ever  → greenfield/legacy: verify-gated
-//	        adopt-commit, stamp repair, full rebuild, watermark
+//     cell 1  marker absent, daily present+clean, derived fresh → no-op
+//     cell 2  marker absent, clean, derived stale      → rebuild derived, stamp daily HEAD
+//     cell 3  marker absent, DIRTY vs daily, watermark present → hand-edit: NEVER reset
+//     cell 4  op=turn, dirty, HEADTURN≠T               → torn turn: preserve+reset(daily)+sweep
+//     cell 5  op=turn, clean, HEADTURN==T              → committed; clear marker, zero loss
+//     cell 6  op=turn, clean, HEADTURN≠T               → nothing landed; preserve journal, clear
+//     cell 7  cell 4 coinciding with unstamped ARCH    → cell 4 then the stamp pass
+//     cell 8  op=archival                              → DETECT ONLY (F1/F4): typed Pending
+//     returned to the adapter, which roll-forward COMPLETES the batch — no reset,
+//     no re-archive-as-drift, marker left in place for the completion
+//     cell 9  unstamped ARCH (any cell, post-normalization) → locate deletion commit, stamp;
+//     unlocatable ⇒ recovery.unrepairable, entry stays refused — never guessed
+//     cell 10 op=sleep                                 → clear marker; substrate self-heals
+//     cell 11 op=recovery (crash during recovery)      → re-run with the original marker; every
+//     phase is idempotent, so re-entry converges to the same terminal state
+//     cell 12 dirty, NO watermark ever                 → greenfield/legacy: verify-gated
+//     adopt-commit to PRIMARY (Personant-Day trailer), stamp repair, full rebuild
+//     op=barrier                                       → DETECT ONLY (F4): typed Pending to the
+//     adapter, which runs the idempotent §2.3 barrier-recovery routine; the DAILY
+//     observable is irrelevant to classification (the barrier owns daily's lifecycle)
+//     op=rebaseline                                    → rm -rf .git-daily + morning-init
+//     unconditionally; no primary touch (§6.2 knob, F7)
+//     morning-init rows (marker absent, daily missing/half-created):
+//     greenfield (no watermark)      → [adopt if primary-dirty] + morning-init + rebuild
+//     benign morning (watermark)     → morning-init; rebuild iff derived stale
+//     interrupted init / corrupt dir → rm -rf; morning-init
+//     Daily-missing is NORMAL, never a data-loss signature.
 //
 // # Cell 3 — why a markerless-dirty tree is NEVER reset
 //
@@ -51,30 +74,22 @@
 // marker must be treated as a legitimate user edit and absorbed
 // forward, never destroyed. That is safe because markerless dirt is
 // provably not crash debris: the only writers of multi-file canonical
-// state (turn close, archival, any future canonical-touching sleep op)
-// are REQUIRED to open their scope before their first canonical write —
+// state (turn close → daily; archival/barrier/adopt → primary) are
+// REQUIRED to open their scope before their first canonical write —
 // the turn path by its fsynced first journal append, the batch ops by
 // the marker file — and release it only after their commit lands, so
 // any crash that could leave torn canonical writes necessarily leaves
-// the in-flight signal too, and a dirty-and-markerless worktree cannot
-// have been produced by a crash.
-// Gating the reset on git-dirtiness instead of marker presence would
-// silently destroy user edits; gating on the marker alone is what makes
-// reset --hard a ≤1-turn-loss operation instead of a data-loss defect.
-// (The one deliberate discriminator: markerless-dirty with NO watermark
-// is cell 12 — a pre-upgrade home that has never been reconciled, whose
-// uncommitted content turns are adopted forward, verify-gated. Once a
-// home has been reconciled once, the watermark exists and markerless-
-// dirty is always cell 3.)
+// the in-flight signal too. The unreachability proof holds PER-REPO.
+// Hand-edits are absorbed at the next FULL sweep (session-close
+// backstop Checkpoint or the barrier's B1/B2 full Add(".")), not the
+// next scoped turn commit.
 //
 // # The logs/ carve-out on the WT observable
 //
 // "Dirty" means tracked changes OUTSIDE logs/. The event log is tracked
 // but append-only and is written continuously between recovery points,
 // so logs-tail dirt is the steady operating state, not a crash
-// signature — including it would make every open read as dirty and
-// would misclassify a mid-model-call crash (cell 6, structurally clean)
-// as a torn turn (cell 4). Resets still revert logs (they are tracked),
+// signature. Resets still revert logs (they are tracked in daily),
 // which is why every reset is bracketed by the preserve/restore pass in
 // logs.go: forensic log bytes beyond HEAD survive the rollback.
 //
@@ -82,12 +97,10 @@
 //
 // Before its first mutating action Reconcile replaces the observed
 // marker with {op: recovery, orig: <observed op>} and clears it only
-// after the terminal state is reached. A crash anywhere inside recovery
-// therefore re-enters here, re-derives the effective original marker
-// from orig, and re-runs; every phase (preserve-once, reset, sweep,
-// merge-restore, stamp, rebuild, truncate) is individually idempotent.
-// A Reconcile error leaves the recovery marker in place so the caller
-// refuses to open and the retry converges.
+// after the terminal state is reached. The op=barrier / op=archival
+// markers are the EXCEPTION (F4): they are returned typed and left in
+// place — the marker itself is the completion's idempotent re-entry
+// token, and the ADAPTER clears it as its completion's final step.
 //
 // # Journal discipline
 //
@@ -104,16 +117,6 @@
 // <reconcile-timestamp>/<original-relative-path>, and each dirty
 // tracked path's bytes are snapshotted there before a reset reverts
 // it. See the quarantine type in logs.go for the full rationale.
-//
-// # Deferred carries (adjudicated in the R2 review)
-//
-// Status after R3: the verbs-bypass-Reconcile gap is CLOSED (cmd's
-// substrate-reading verbs open through reconciledOps — same refuse-on-
-// error semantics as chat); arm-on-Nth-hit (crashpoint.ArmOnHit) and the
-// Add/Commit-gap kill point (fileadapter.CommitTurn.postAddPreCommit)
-// are landed.
-// Still open for R4: a kill point inside the ResetHard loop, and the
-// exhaustive kill-point matrix itself.
 package recovery
 
 import (
@@ -138,11 +141,25 @@ const (
 	Cell4TornTurn      = "cell-4-torn-turn"
 	Cell5TurnCommitted = "cell-5-turn-committed"
 	Cell6TurnNoWrites  = "cell-6-turn-uncommitted"
-	Cell8Archival      = "cell-8-archival"
-	Cell9StampRepair   = "cell-9-stamp-repair"
-	Cell10Sleep        = "cell-10-sleep"
-	Cell11Reentry      = "cell-11-recovery-reentry"
-	Cell12LegacyAdopt  = "cell-12-legacy-adopt"
+	// Cell8Archival is appended by the ADAPTER's completion (F1/F4) when
+	// it roll-forward-finishes a detected in-flight op=archival batch —
+	// core recovery only detects (RecoveryReport.Pending) and never adds
+	// this cell itself.
+	Cell8Archival     = "cell-8-archival"
+	Cell9StampRepair  = "cell-9-stamp-repair"
+	Cell10Sleep       = "cell-10-sleep"
+	Cell11Reentry     = "cell-11-recovery-reentry"
+	Cell12LegacyAdopt = "cell-12-legacy-adopt"
+	// CellMorningInit fires whenever the daily DB is (re)born from the
+	// worktree: benign morning, interrupted init, greenfield first-open,
+	// the op=rebaseline row, and the op=turn-with-daily-missing corner.
+	CellMorningInit = "cell-morning-init"
+	// CellRebaseline is the op=rebaseline crash row (§6.2 knob, F7).
+	CellRebaseline = "cell-rebaseline"
+	// CellBarrier is appended by the ADAPTER's completion when it runs
+	// the §2.3 idempotent barrier-recovery routine for a detected
+	// op=barrier marker (same detect-vs-complete split as Cell8Archival).
+	CellBarrier = "cell-barrier"
 )
 
 // origNone encodes "no operation marker was present" in the recovery
@@ -164,9 +181,16 @@ var (
 // shutdown damage per the state machine above, and reports what it did.
 // It assumes Init has already run (idempotent scaffold: git repo,
 // directories, gitignore) — the chat/cmd wiring is Init → Reconcile →
-// LoadSession. A non-nil error means the substrate must not be opened;
-// the in-progress recovery marker is left behind so the next call
-// re-enters and converges.
+// (barrier if new-day) → LoadSession. A non-nil error means the
+// substrate must not be opened; the in-progress recovery marker is left
+// behind so the next call re-enters and converges.
+//
+// F4 seam: an op=barrier or op=archival marker is NOT completed here —
+// core recovery DETECTS it (on marker presence alone) and returns a
+// typed RecoveryReport.Pending with a nil error and the marker left in
+// place; the ADAPTER (which owns ArchiveThreads, both repo handles and
+// the day-commit) completes it and re-invokes Reconcile once for the
+// terminal classification.
 func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.RecoveryReport, error) {
 	var rep memops.RecoveryReport
 	// One quarantine destination per pass; the directory is created only
@@ -231,18 +255,53 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 	// (A legacy op=turn marker FILE — markerPresent with m.Op==OpTurn —
 	// falls through as eff=m unchanged: pre-addendum homes still honor it.)
 
-	head, err := autogit.HeadHash(ctx, paths)
-	if err != nil {
-		return rep, fmt.Errorf("recovery: resolve HEAD (did Init run?): %w", err)
+	// F4 detection seam: op=barrier / op=archival are ADAPTER-completed.
+	// Detection keys on marker presence ALONE (never on the unstamped-
+	// entry count); the marker — carrying `day` — is left in place as the
+	// completion's idempotent re-entry token, and the return is (rep, nil)
+	// because the substrate WILL be made safe by the adapter that called
+	// us. The DAILY observable is irrelevant here: the barrier owns
+	// daily's lifecycle regardless of its current state.
+	if effPresent && (eff.Op == store.OpBarrier || eff.Op == store.OpArchival) {
+		kind := memops.PendingArchival
+		if eff.Op == store.OpBarrier {
+			kind = memops.PendingBarrier
+		}
+		rep.Pending = &memops.PendingCompletion{Kind: kind, Day: eff.Day}
+		if reentry {
+			rep.CellsHit = append(rep.CellsHit, Cell11Reentry)
+		}
+		logEvent(paths, "pending", fmt.Sprintf("op=%s day=%d", eff.Op, eff.Day))
+		return rep, nil
 	}
-	wt, err := autogit.Worktree(ctx, paths)
-	if err != nil {
-		return rep, fmt.Errorf("recovery: worktree state: %w", err)
+
+	// PRIMARY must exist and resolve — a missing/corrupt primary is
+	// irreplaceable career history: refuse to open, never auto-recreate.
+	if _, err := autogit.HeadHash(ctx, paths, autogit.Primary); err != nil {
+		return rep, fmt.Errorf("recovery: resolve primary HEAD (did Init run?): %w", err)
 	}
-	dirty := CanonicalDirty(wt.DirtyPaths)
-	headTurn, err := autogit.HeadTurn(ctx, paths)
-	if err != nil {
-		return rep, fmt.Errorf("recovery: read HEAD turn trailer: %w", err)
+
+	// DAILY observable — probed defensively BEFORE any daily-repo read
+	// (F7): an open failure on a corrupt .git-daily is the half-created
+	// signal, not an error.
+	daily := autogit.ProbeDaily(paths)
+
+	var dailyHead, headTurn string
+	dirty := false
+	if daily == autogit.DailyPresent {
+		dailyHead, err = autogit.HeadHash(ctx, paths, autogit.Daily)
+		if err != nil {
+			return rep, fmt.Errorf("recovery: resolve daily HEAD: %w", err)
+		}
+		wt, err := autogit.Worktree(ctx, paths, autogit.Daily)
+		if err != nil {
+			return rep, fmt.Errorf("recovery: worktree state: %w", err)
+		}
+		dirty = CanonicalDirty(wt.DirtyPaths)
+		headTurn, err = autogit.HeadTurn(ctx, paths, autogit.Daily)
+		if err != nil {
+			return rep, fmt.Errorf("recovery: read daily HEAD turn trailer: %w", err)
+		}
 	}
 	wm, wmPresent, err := store.ReadDerivedWatermark(paths)
 	if err != nil {
@@ -253,12 +312,11 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 		return rep, fmt.Errorf("recovery: read archive index: %w", err)
 	}
 
-	// Cell 1 — the clean path. No marker (and no re-entry), canonically
-	// clean, derived fresh, nothing unstamped, journal empty. The heal
-	// and tmp-sweep above are idempotent and already done, so no
-	// engagement is needed even when they acted.
-	if !effPresent && !reentry && !dirty &&
-		wmPresent && wm == head &&
+	// Cell 1 — the clean path. No marker (and no re-entry), daily present
+	// and canonically clean, derived fresh vs DAILY HEAD, nothing
+	// unstamped, journal empty. O(1).
+	if !effPresent && !reentry && daily == autogit.DailyPresent && !dirty &&
+		wmPresent && wm == dailyHead &&
 		len(unstamped) == 0 && len(records) == 0 && torn == 0 {
 		rep.CellsHit = append(rep.CellsHit, Cell1Clean)
 		return rep, nil
@@ -272,7 +330,8 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 			return rep, fmt.Errorf("recovery: engage: %w", err)
 		}
 	}
-	logEvent(paths, "begin", fmt.Sprintf("orig=%s turn=%s reentry=%t", origLabel(eff, effPresent), eff.Turn, reentry))
+	logEvent(paths, "begin", fmt.Sprintf("orig=%s turn=%s daily=%s reentry=%t",
+		origLabel(eff, effPresent), eff.Turn, daily, reentry))
 	if reentry {
 		rep.CellsHit = append(rep.CellsHit, Cell11Reentry)
 	}
@@ -292,22 +351,39 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 
 	// Phase 4 — cell dispatch.
 	canonicalClean := !dirty
+	needMorningInit := daily != autogit.DailyPresent
 	switch {
+	case effPresent && eff.Op == store.OpRebaseline:
+		// §6.2 knob crash (F7): recreate daily from the worktree
+		// UNCONDITIONALLY — no primary touch. Recreating an already-fresh
+		// daily is intentionally accepted (cheap, disposable-daily-
+		// consistent).
+		rep.CellsHit = append(rep.CellsHit, CellRebaseline)
+		needMorningInit = true
+		canonicalClean = true
+
+	case effPresent && eff.Op == store.OpTurn && daily != autogit.DailyPresent:
+		// op=turn signal with the daily DB missing/half-created: the
+		// turn's per-turn record is gone, but its content is in the
+		// journal (preserved below) and the pre-turn worktree is in
+		// primary's last day-commit + subsequent daily baseline — treat
+		// as cell 6 (nothing landed structurally), preserve journal, then
+		// fall into morning-init to rebuild daily.
+		rep.CellsHit = append(rep.CellsHit, Cell6TurnNoWrites)
+		if err := preserveJournalContent(paths, &rep, eff.Turn, records, q); err != nil {
+			return rep, err
+		}
+		canonicalClean = true
+
 	case effPresent && eff.Op == store.OpTurn:
 		committed := headTurn != "" && headTurn == eff.Turn
 		switch {
 		case committed:
-			// Cell 5: the turn's commit landed; the crash hit between
-			// commit and journal-truncate (or an unsynced truncate
+			// Cell 5: the turn's commit landed on daily; the crash hit
+			// between commit and journal-truncate (or an unsynced truncate
 			// resurrected the just-committed turn's journal after power
 			// loss — same observable, same handling). Zero loss; journal
 			// is redundant with the commit and is truncated at phase 7.
-			// (Divergence corner: a LEGACY op=turn marker FILE whose id
-			// equals HEADTURN but whose non-empty journal carries a
-			// DIFFERENT turn Tj would truncate Tj here unpreserved — but that
-			// state is unreachable without external tampering, since
-			// pre-addendum code wrote the marker file and journaled content
-			// for one and the same turn.)
 			rep.CellsHit = append(rep.CellsHit, Cell5TurnCommitted)
 			if dirty {
 				// Anomalous under the protocol (nothing canonical is written
@@ -317,7 +393,7 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 				rep.CellsHit = append(rep.CellsHit, Cell3HandEdit)
 			}
 		case dirty:
-			// Cell 4 — the core torn turn.
+			// Cell 4 — the core torn turn. Reset targets DAILY (≤1 turn).
 			rep.CellsHit = append(rep.CellsHit, Cell4TornTurn)
 			if err := preserveJournalContent(paths, &rep, eff.Turn, records, q); err != nil {
 				return rep, err
@@ -335,13 +411,9 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 			// untracked-debris sweep still runs — twice licensed: (a) the
 			// in-flight-turn signal is present, so untracked non-ignored
 			// files are candidate in-flight debris (quarantined, never
-			// deleted — see sweepUntrackedDebris for why this is heuristic,
-			// not proof, under scoped per-turn commits; a torn turn whose
-			// only canonical writes were NEW files presents exactly this
-			// clean-tracked shape); (b) cell-11
-			// convergence — a cell-4 pass killed after its reset re-enters
-			// HERE (tree now clean), and skipping the sweep would leave the
-			// first pass's debris behind forever.
+			// deleted); (b) cell-11 convergence — a cell-4 pass killed
+			// after its reset re-enters HERE (tree now clean), and skipping
+			// the sweep would leave the first pass's debris behind forever.
 			rep.CellsHit = append(rep.CellsHit, Cell6TurnNoWrites)
 			if err := preserveJournalContent(paths, &rep, eff.Turn, records, q); err != nil {
 				return rep, err
@@ -353,85 +425,106 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 			rep.DebrisSwept = swept
 		}
 
-	case effPresent && eff.Op == store.OpArchival:
-		rep.CellsHit = append(rep.CellsHit, Cell8Archival)
-		// Turn content is never at risk here (archival runs strictly
-		// between turns), so a non-empty journal is a contract anomaly —
-		// preserve it rather than destroy it, then proceed.
-		if len(records) > 0 || torn > 0 {
-			if err := preserveJournalContent(paths, &rep, "", records, q); err != nil {
-				return rep, err
-			}
-		}
-		if dirty {
-			if err := resetSequence(ctx, paths, &rep, q); err != nil {
-				return rep, err
-			}
-			canonicalClean = true
-			logEvent(paths, "rollback", fmt.Sprintf("op=archival reverted=%d debris=%d",
-				len(rep.RevertedPaths), len(rep.DebrisSwept)))
-		} else {
-			// Clean variant (crash between archival's commits): nothing to
-			// reset, but the debris sweep still runs under the marker's
-			// license — same cell-11 convergence rationale as cell 6.
-			swept, serr := sweepUntrackedDebris(ctx, paths, q)
-			if serr != nil {
-				return rep, fmt.Errorf("recovery: sweep debris: %w", serr)
-			}
-			rep.DebrisSwept = swept
-		}
-		// The interrupted drain re-triggers on the next spine-pressure
-		// check; nothing to re-drive here.
-
 	case effPresent && eff.Op == store.OpSleep:
 		// Cell 10: sleep touches only git internals and gitignored
-		// caches; git's own gc is self-healing and the recall cache
-		// self-heals on staleness. Any dirt is hand-edit territory —
-		// absorbed, never reset.
+		// caches; git's own gc is self-healing (per-repo — the daily gc is
+		// the common case) and the recall cache self-heals on staleness.
+		// Any dirt is hand-edit territory — absorbed, never reset.
 		rep.CellsHit = append(rep.CellsHit, Cell10Sleep)
 		// Sleep runs strictly between turns (like archival), so a non-empty
 		// journal is a contract anomaly — preserve it rather than let phase 7
-		// truncate it away. This closes the post-CommitTurn pressure-gc
-		// window: power loss during MaybeGC's op=sleep scope can resurrect
-		// turn T's not-yet-durably-truncated journal, and if T's own commit
-		// is likewise not durable those journaled bytes are the only surviving
-		// copy. Mirror cell 8's preserve-if-nonempty handling; the artifact
-		// (or torn-journal quarantine) and its event log are the anomaly note.
+		// truncate it away.
 		if len(records) > 0 || torn > 0 {
 			if err := preserveJournalContent(paths, &rep, "", records, q); err != nil {
 				return rep, err
 			}
 		}
 
+	case daily != autogit.DailyPresent:
+		// Markerless daily-missing/half-created rows (§2.5). Daily-missing
+		// is NORMAL — never a data-loss signature; the worktree is truth
+		// and primary holds career history. A non-empty journal here would
+		// have been caught by the op=turn branch above, so the journal is
+		// empty. Three sub-rows, all converging on morning-init below:
+		//   - greenfield (no watermark): if the tree carries uncommitted
+		//     content vs PRIMARY, adopt it forward first (cell 12);
+		//   - benign morning (watermark present): just morning-init;
+		//   - interrupted init / corrupt dir: rm -rf + morning-init
+		//     (MorningInit nukes first, so no special case).
+		if !wmPresent {
+			priWT, werr := autogit.Worktree(ctx, paths, autogit.Primary)
+			if werr != nil {
+				return rep, fmt.Errorf("recovery: primary worktree state: %w", werr)
+			}
+			if CanonicalDirty(priWT.DirtyPaths) {
+				rep.CellsHit = append(rep.CellsHit, Cell12LegacyAdopt)
+				if err := adoptLegacy(ctx, paths, &rep); err != nil {
+					return rep, err
+				}
+				// Cell 12 always runs the one-time FULL rebuild: a legacy
+				// home's derived state is untrusted by definition. (The
+				// watermark stamp happens inside morning-init below; the
+				// rebuild here cannot stamp a daily that does not exist yet.)
+				if err := RebuildDerived(ctx, paths, index.Options{Quiet: true}); err != nil {
+					return rep, fmt.Errorf("recovery: legacy rebuild: %w", err)
+				}
+				rep.DerivedRebuilt = true
+			}
+		}
+		canonicalClean = true
+
 	case dirty && !wmPresent:
-		// Cell 12: greenfield/legacy first-open — no watermark has ever
-		// been written, and the tree carries uncommitted content (an
-		// old-cadence home's legitimate content turns). Adopt forward,
-		// verify-gated; stamp repair and full rebuild follow below.
+		// Cell 12 with a live daily (an Init-scaffolded but never-
+		// reconciled home carrying uncommitted content): adopt forward
+		// into PRIMARY, verify-gated, then re-baseline daily off the
+		// adopted state (morning-init below) so daily HEAD == current
+		// canonical and the watermark is stamped honestly.
 		rep.CellsHit = append(rep.CellsHit, Cell12LegacyAdopt)
 		if err := adoptLegacy(ctx, paths, &rep); err != nil {
 			return rep, err
 		}
+		// The one-time full rebuild — a never-reconciled home's derived
+		// state is untrusted by definition (see the daily-missing arm).
+		if err := RebuildDerived(ctx, paths, index.Options{Quiet: true}); err != nil {
+			return rep, fmt.Errorf("recovery: legacy rebuild: %w", err)
+		}
+		rep.DerivedRebuilt = true
+		needMorningInit = true
 		canonicalClean = true
 
 	case dirty:
 		// Cell 3 — the hand-edit. Absorbed forward at the next FULL
-		// sweep — the session-close/backstop Checkpoint or the day-
-		// barrier sweep (TODO(R3b)) — NOT the next turn: per-turn
-		// commits stage only the turn's own recorded write set
-		// (R3-addendum item 3), so hand-edits stay dirty, untouched and
-		// unreset, until a full Add(".") pass. Derived state reconciles
-		// on the next trigger. See the package doc for why this must
-		// never reset.
+		// sweep — the session-close backstop Checkpoint or the barrier's
+		// B1/B2 full Add(".") — NOT the next turn: per-turn commits stage
+		// only the turn's own recorded write set (R3-addendum item 3), so
+		// hand-edits stay dirty, untouched and unreset, until a full sweep.
+		// Derived state reconciles on the next trigger. See the package
+		// doc for why this must never reset.
 		rep.CellsHit = append(rep.CellsHit, Cell3HandEdit)
 
-	case !wmPresent || wm != head:
+	case !wmPresent || wm != dailyHead:
 		rep.CellsHit = append(rep.CellsHit, Cell2DerivedStale)
 
 	default:
 		// Only reachable via re-entry after a prior pass already
 		// converged everything; record the clean terminal.
 		rep.CellsHit = append(rep.CellsHit, Cell1Clean)
+	}
+
+	// Phase 4b — morning-init: (re)birth the daily DB from the current
+	// worktree wherever the dispatch above requires it. MorningInit nukes
+	// any half-created remnant first, baseline-commits the worktree, and
+	// stamps the watermark honestly (rebuilding derived first iff stale
+	// vs the reborn baseline — the R2→R3b migration path fires exactly
+	// once here).
+	if needMorningInit {
+		rep.CellsHit = append(rep.CellsHit, CellMorningInit)
+		baseline, rebuilt, merr := MorningInit(ctx, paths)
+		if merr != nil {
+			return rep, fmt.Errorf("recovery: morning-init: %w", merr)
+		}
+		rep.DerivedRebuilt = rep.DerivedRebuilt || rebuilt
+		logEvent(paths, "morning-init", fmt.Sprintf("baseline=%s rebuilt=%t", baseline, rebuilt))
 	}
 
 	// Phase 5 — archival stamp repair, evaluated AFTER worktree
@@ -443,13 +536,13 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 
 	// Phase 6 — derived state. Rebuild (and advance the watermark) only
 	// from a canonically-clean tree: the watermark is a claim that
-	// derived matches a specific commit, which a dirty tree can never
-	// certify. Cell 3 therefore defers derived reconcile to the next
-	// trigger, exactly as the state machine specifies.
+	// derived matches a specific DAILY commit, which a dirty tree can
+	// never certify. Cell 3 therefore defers derived reconcile to the
+	// next trigger, exactly as the state machine specifies.
 	if canonicalClean {
-		headNow, err := autogit.HeadHash(ctx, paths)
+		headNow, err := autogit.HeadHash(ctx, paths, autogit.Daily)
 		if err != nil {
-			return rep, fmt.Errorf("recovery: resolve HEAD post-normalization: %w", err)
+			return rep, fmt.Errorf("recovery: resolve daily HEAD post-normalization: %w", err)
 		}
 		wmNow, wmNowPresent, err := store.ReadDerivedWatermark(paths)
 		if err != nil {
@@ -482,10 +575,11 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 }
 
 // resetSequence is the marker-gated destructive repair: snapshot dirty
-// tracked bytes into quarantine, preserve log bytes beyond HEAD, reset
-// tracked state to HEAD, sweep untracked in-flight debris (into the
-// same quarantine), restore the log bytes. Every step is idempotent so
-// a crash at any point re-converges through cell 11.
+// tracked bytes into quarantine, preserve log bytes beyond daily HEAD,
+// reset tracked state to DAILY HEAD (≤1 turn — never primary, INV-1),
+// sweep untracked in-flight debris (into the same quarantine), restore
+// the log bytes. Every step is idempotent so a crash at any point
+// re-converges through cell 11.
 func resetSequence(ctx context.Context, paths store.PersonantPaths, rep *memops.RecoveryReport, q *quarantine) error {
 	// Quarantine snapshot before the rollback — the logs-preserve pattern
 	// applied to canonical files. The marker proves an op was in flight
@@ -495,7 +589,7 @@ func resetSequence(ctx context.Context, paths store.PersonantPaths, rep *memops.
 	// a byte-exact copy of every dirty tracked path. logs/ is excluded —
 	// the preserve/restore bracket below already carries log bytes across
 	// the reset losslessly.
-	wt, err := autogit.Worktree(ctx, paths)
+	wt, err := autogit.Worktree(ctx, paths, autogit.Daily)
 	if err != nil {
 		return fmt.Errorf("recovery: worktree pre-reset: %w", err)
 	}
@@ -510,7 +604,7 @@ func resetSequence(ctx context.Context, paths store.PersonantPaths, rep *memops.
 	if err := preserveLogs(ctx, paths); err != nil {
 		return fmt.Errorf("recovery: preserve logs: %w", err)
 	}
-	reverted, err := autogit.ResetHard(ctx, paths)
+	reverted, err := autogit.ResetHard(ctx, paths, autogit.Daily)
 	if err != nil {
 		return fmt.Errorf("recovery: reset: %w", err)
 	}
@@ -529,7 +623,10 @@ func resetSequence(ctx context.Context, paths store.PersonantPaths, rep *memops.
 }
 
 // adoptLegacy is cell 12's verify-gated adopt-commit: the dirty
-// worktree's content is structurally validated and committed as-is.
+// worktree's content is structurally validated and committed as-is to
+// PRIMARY, carrying the Personant-Day trailer for the CURRENT day — the
+// sole bootstrap carve-out of the uniform-trailer rule (F3: no
+// marker-day and no prior HEADDAY exists on a greenfield/legacy home).
 // Derived drift is NOT part of the gate — a legacy home's derived state
 // is stale by definition and is rebuilt immediately after; only
 // structural (schema/constraint) errors refuse the adopt.
@@ -542,11 +639,12 @@ func adoptLegacy(ctx context.Context, paths store.PersonantPaths, rep *memops.Re
 		return fmt.Errorf("recovery: legacy adopt refused: %d structural error(s), first: %s: %s",
 			len(report.Errors), report.Errors[0].Path, report.Errors[0].Message)
 	}
-	if err := autogit.Add(ctx, paths, "."); err != nil {
+	if err := autogit.Add(ctx, paths, autogit.Primary, "."); err != nil {
 		return fmt.Errorf("recovery: stage adopt: %w", err)
 	}
 	crashpoint.At(cpAdoptPreCommit)
-	hash, err := autogit.CommitWithHash(ctx, paths, "recovery: adopt pre-existing content", 0, 0)
+	msg := autogit.WithDayTrailer("recovery: adopt pre-existing content", autogit.CurrentDay())
+	hash, err := autogit.CommitWithHash(ctx, paths, autogit.Primary, msg, 0, 0)
 	if err != nil {
 		return fmt.Errorf("recovery: adopt commit: %w", err)
 	}
@@ -571,7 +669,9 @@ func CanonicalDirty(dirtyPaths []string) bool {
 }
 
 // decodeOrig recovers the effective original marker from a re-entered
-// recovery marker.
+// recovery marker. OpBarrier/OpRebaseline are in the known set (F6) so a
+// double-crash-during-recovery converges instead of hard-failing; a
+// genuinely unknown orig still hard-fails.
 func decodeOrig(m store.Marker) (store.Marker, bool, error) {
 	switch m.Orig {
 	case "", origNone:
@@ -579,9 +679,13 @@ func decodeOrig(m store.Marker) (store.Marker, bool, error) {
 	case string(store.OpTurn):
 		return store.Marker{Op: store.OpTurn, Turn: m.Turn}, true, nil
 	case string(store.OpArchival):
-		return store.Marker{Op: store.OpArchival}, true, nil
+		return store.Marker{Op: store.OpArchival, Day: m.Day}, true, nil
 	case string(store.OpSleep):
 		return store.Marker{Op: store.OpSleep}, true, nil
+	case string(store.OpBarrier):
+		return store.Marker{Op: store.OpBarrier, Day: m.Day}, true, nil
+	case string(store.OpRebaseline):
+		return store.Marker{Op: store.OpRebaseline}, true, nil
 	default:
 		return store.Marker{}, false, fmt.Errorf("recovery marker carries unknown orig %q", m.Orig)
 	}
@@ -593,7 +697,7 @@ func encodeRecoveryMarker(eff store.Marker, present bool) store.Marker {
 	if !present {
 		return store.Marker{Op: store.OpRecovery, Orig: origNone}
 	}
-	return store.Marker{Op: store.OpRecovery, Orig: string(eff.Op), Turn: eff.Turn}
+	return store.Marker{Op: store.OpRecovery, Orig: string(eff.Op), Turn: eff.Turn, Day: eff.Day}
 }
 
 func origLabel(eff store.Marker, present bool) string {

@@ -772,7 +772,7 @@ func TestArchive_StoresParentCommitHash_RecoveryUsesIt(t *testing.T) {
 	}
 	// The stored parent must equal the deletion commit's actual first parent —
 	// proving it pins the real capture commit, not some unrelated hash.
-	walked, err := autogit.ParentCommitHash(ctx, a.paths, entry.CommitHash)
+	walked, err := autogit.ParentCommitHash(ctx, a.paths, autogit.Primary, entry.CommitHash)
 	if err != nil {
 		t.Fatalf("walk parent of deletion commit: %v", err)
 	}

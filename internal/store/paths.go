@@ -34,8 +34,9 @@ type PersonantPaths struct {
 	// gitignored, and survive a recovery reset --hard.
 	OpMarker         string // Home/op-in-progress.json          (operational; op-typed in-flight marker; presence authorizes recovery reset)
 	TurnJournal      string // Home/turn-journal.jsonl           (operational; per-append-fsync content journal; truncated on CommitTurn)
-	DerivedWatermark string // Home/derived-watermark            (operational; built-from-commit hash; written only by the regeneration path)
+	DerivedWatermark string // Home/derived-watermark            (operational; built-from-DAILY-commit hash; written only by the regeneration path)
 	RecoveryDir      string // Home/recovery/                    (operational; preserved crash artifacts: recovered-turn content + reset log staging; gitignored)
+	GitDaily         string // Home/.git-daily                   (operational, gitignored: the disposable per-turn recovery DB; nuked + reborn each day barrier; never career history)
 }
 
 // EnvHome is the environment variable that overrides the default home.
@@ -76,6 +77,7 @@ func makePaths(home string) PersonantPaths {
 		TurnJournal:      filepath.Join(home, "turn-journal.jsonl"),
 		DerivedWatermark: filepath.Join(home, "derived-watermark"),
 		RecoveryDir:      filepath.Join(home, "recovery"),
+		GitDaily:         filepath.Join(home, ".git-daily"),
 	}
 }
 
