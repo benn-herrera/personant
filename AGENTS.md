@@ -169,6 +169,32 @@ Complete:
   Still open: cost-minimization (re-verify W1==0 at narrower beam after
   exemplar fix confirms the keys carry recall); brute-force O(n) backstop
   for user-asserted-confidence fallback.
+- Crash stability / startup recovery (#94, SPEC §4.5.8). Waves **R1–R4
+  landed**, **R5 docs** (this pass). The substrate is now a **dual-repo**
+  git scheme: a disposable **daily** DB (`.git-daily/`, scoped per-turn
+  commits, nuked + reborn each day) and a permanent **primary** DB
+  (`.git/`, one day-grain commit/day + archival anchors, ~365
+  commits/year). The worktree is the truth; git is a recovery-point
+  index over it, so any DB is recreatable from the worktree and losing
+  one is never losing content. Recovery is a deterministic cold-start
+  state machine (no signal handlers, no LLM, no ack) bounding loss to
+  **≤1 turn**: a turn's raw bytes are journaled before any canonical
+  write (`turn-journal.jsonl` = the in-flight signal, no separate turn
+  marker), torn turns reset **only daily**, barrier/archival crashes
+  **roll forward** (never reset the worktree), broken hand-edits are
+  **quarantined byte-exact, never deleted**. Batch ops use the
+  `op-in-progress.json` marker (`archival|sleep|recovery|barrier|
+  rebaseline`); the day barrier (B0–B6) moves integrity gating off the
+  per-turn path to once-a-day (spine on B2, derived on B6). Key packages:
+  `internal/recovery`, `internal/crashpoint`, `internal/autogit`
+  (dual-handle `Primary`/`Daily`), `internal/store` (marker/journal/
+  watermark), and the barrier home in `internal/memops/fileadapter`.
+  No new `make` target — the crash-injection matrix is unit-grade in
+  `internal/scenarios` (runs under `make test`, gated by
+  `TestCrashPointCoverageGate`); a 2-day barrier-crossing rung
+  (`TestSimBarrier2Day`) runs in the default sim suite. Carry-forward:
+  §6.2 mid-day re-baseline **arming** trigger not yet wired (recovery
+  side is); intra-day derived-watermark revisit is parked by design.
 
 In progress:
 - Phase C: recall-fidelity test infrastructure. Six-step plan in the
@@ -415,11 +441,23 @@ EXECUTION at runtime — they `t.Skip` unless their opt-in is present, so
 bare `make test` compiles and skips them. The opt-ins live in
 `internal/testsupport`: `PERSONANT_LIVE_TESTS` (live reaper endpoint;
 under it an unreachable endpoint is a FAILURE, not a skip),
-`PERSONANT_CORPUS_TESTS` (slow corpus measurement), and the
+`PERSONANT_CORPUS_TESTS` (slow corpus measurement),
+`PERSONANT_SLOW_SIM_TESTS` (`make sim-shadow-slow-test`), and the
 `-sim.live-embedding` / `-sim.live-inference` flags (live sim). The
 `make` targets above set the right opt-in. Do not reintroduce
 `//go:build` tags for conditional execution — tagged tests are excluded
 from the normal compile and bit-rot silently.
+
+**`sim-shadow-slow-test` broadened (#94 R4 suite-budget move).**
+`PERSONANT_SLOW_SIM_TESTS` now gates not just the 14d
+`TestShadowLayerB_ReverseDivergence` arm but also the fixed-24h #98
+embedding head-to-head machinery rungs
+(`TestSimEmbeddingHeadToHead_Machinery`,
+`TestSimNoEmbedder_HeadToHeadAbsent`) — moved out of the default
+`make test` run so the R4 crash-injection matrix fits the 30-min
+checkpoint budget. All still ALWAYS COMPILE under `make test`; only
+their EXECUTION is opted in. The crash matrix itself is *not* gated
+here — it is fast unit-grade and runs in the default suite.
 
 **Intra-thread recall metrics (#109/#111).** The sim emits the following at every rung; the W1 divergence is a reported quality measure (not build-blocking, #119):
 

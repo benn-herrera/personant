@@ -156,8 +156,23 @@ Personant stores all state under `~/.personant/` (override with `$PERSONANT_HOME
   config.toml          active chat + embedding provider choices
   api_keys/            secret-bearing key files — never read by agents
   archive/             deep cold archive index (recoverable git-based archival)
-  .git/                git tree; autonomically managed by the runtime
+  recovery/            quarantine/ — byte-exact bytes preserved by crash recovery
+  turn-journal.jsonl   in-flight-turn content journal (crash durability)
+  .git/                primary git tree — permanent day-grain career history
+  .git-daily/          disposable per-turn recovery DB; reborn each day
 ```
+
+**Crash recovery.** Your data survives a hard kill — SIGKILL, a power
+loss, a mid-turn crash. Personant journals each turn's raw prompt and
+response to disk *before* touching canonical state, and commits work to
+a git substrate that treats the on-disk files as the source of truth, so
+on the next launch it reconciles automatically and loses at most the one
+turn that was in flight. Recovered content from an interrupted turn is
+**surfaced to you** in the startup banner (never silently replayed, so
+nothing acts on your behalf without you seeing it). Anything a recovery
+step could not safely restore is **quarantined byte-exact** under
+`recovery/quarantine/` rather than deleted — your bytes are never thrown
+away.
 
 ## Status
 
@@ -181,11 +196,11 @@ Two independently-versioned tracks:
 - Thread closure / retirement (§3.5): curator-drafted summary + human-ack flow; the decay-triggered closure scan fires at turn close.
 - Recoverable deep-cold archival (§3.8): `internal/turn/archival.go` + `internal/memops/fileadapter/fileadapter_archive.go`; the cardinality-pressure archival scan fires at turn close.
 - Working-set content dedup / git minimization (§3.9): `internal/dedup` + `AgeFileChains`, applied per engaged thread.
+- Startup crash recovery (§4.5.8, #94): dual-repo git substrate (disposable per-turn `.git-daily/` + permanent day-grain `.git/`), ≤1-turn durability journal, deterministic cold-start reconciliation, and a crash-injection matrix with a mechanical coverage gate.
 
 **Queued:**
 
 - Phase 5: cross-project digest, fallback dissection, directive accrual.
-- Startup recovery after unclean shutdown.
 - Inference-/embedding-in-loop coverage (LIVE_INFERENCE / LIVE_EMBEDDING sim paths).
 - v0.2: transient-data event-log compaction.
 

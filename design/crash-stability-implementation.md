@@ -96,7 +96,7 @@ reduction):**
   kills; a mechanical coverage gate fails the suite if a registered
   point lacks a scenario.
 
-## Wave R1 — substrate primitives (no policy)
+## Wave R1 — substrate primitives (no policy) — DONE (55f767c, with R2)
 
 `internal/store`: `marker.go` (op-typed read/write/clear, atomic-write
 convention), `journal.go` (append/scan/truncate per contract above);
@@ -106,7 +106,7 @@ entries (journal, marker, watermark); the crashpoint seam package
 (test-armed hooks, no-op in production). Unit tests incl. torn-tail
 fixtures. *Opus coder; edit gate; wave checkpoint.*
 
-## Wave R2 — recovery orchestrator + port surface
+## Wave R2 — recovery orchestrator + port surface — DONE (55f767c)
 
 `internal/autogit`: `ResetHard(ctx) (revertedPaths, err)` — the single
 new git verb; reverted paths keep derived rebuild O(changed).
@@ -134,7 +134,7 @@ reconcile idempotence). *Fable coder; ADVERSARIAL REVIEW (the
 marker-gated reset is the single most correctness-critical rule);
 wave checkpoint.*
 
-## Wave R3 — turn pipeline + operation re-sequencing
+## Wave R3 — turn pipeline + operation re-sequencing — DONE (1d76780 R3+addendum; 7ce5aef R3b dual-repo day barrier)
 
 `internal/turn`: journal prompt (fsync) before the model call; journal
 response before canonical writes; `CommitTurn` at close with the turn
@@ -151,7 +151,7 @@ loose-object growth gauges (the cost-accounting measurement plan; sim
 reads them; gc interplay is a watch metric). *Fable coder; adversarial
 review; wave checkpoint.*
 
-## Wave R4 — crash-injection architecture
+## Wave R4 — crash-injection architecture — DONE (36db9e2)
 
 Arm the R1 seam: kill points through `WriteFileAtomic` (torn-write
 variant), `JournalTurn`, per-turn commit, each archival commit
@@ -173,7 +173,7 @@ mid-run-crash SIM rung joins as opt-in (`PERSONANT_SLOW_SIM_TESTS`)
 with a 1d default-suite variant only if it fits the budget. *Opus
 coder; wave checkpoint.*
 
-## Wave R5 — SPEC §4.5.8 rewrite + doc sync
+## Wave R5 — SPEC §4.5.8 rewrite + doc sync — DONE (docs-only, this pass)
 
 Rewrite §4.5.8 from the converged design (state machine table, journal
 carve-out — operational class yet durability-load-bearing in the
@@ -192,3 +192,29 @@ the code is written; R4 arms and exhausts them). Edit gates per item;
 checkpoint gate per wave commit (R5 exempt, docs-only). Reviews on R2
 and R3. Cost data to watch across R3/R4: per-turn commit latency,
 loose-object accrual vs sleep-gc cadence, clean-open O(1) verification.
+
+## Carry-forward (post-#94, honestly open)
+
+- **Intra-day derived-watermark question (R4-flagged).** The turn path
+  never stamps the watermark; the barrier owns freshness (§4.5.8 (7)).
+  This is STATED design behavior, not a gap — but if a future need
+  wants clean-open O(1) *within* a day after a markerless hand-edit
+  (rather than deferring to the next full sweep), revisit whether an
+  intra-day watermark stamp is worth its cost. Parked deliberately.
+- **§6.2 mid-day re-baseline arming.** The recovery side is wired
+  (`op=rebaseline` marker in the known-op set + `decodeOrig`; a crash
+  routes to `rm -rf .git-daily` + morning-init, `CellRebaseline`). The
+  *producer* — the mid-day trigger that arms the knob when daily
+  loose-objects cross a threshold and no barrier is imminent — is NOT
+  yet wired. Default-off by design; wire only if the pathological
+  long-single-session case shows up in practice.
+- **Crash-injection fixtures (i)/(j) refinements** (dual-repo-barrier.md
+  §7): the persistent-verify-failure fixtures (spine-breaking overnight
+  hand-edit; derived corruption forcing a B6 assert failure) exercise
+  the quarantine-and-proceed / refuse-to-open path. If real-use surfaces
+  additional persistent-failure shapes, extend these fixtures rather
+  than widening measurement-side forgiveness.
+- **Multi-day mid-barrier-crash SIM rung.** R4 shipped the unit-grade
+  matrix + a 2-day barrier-crossing rung (`TestSimBarrier2Day`, default
+  suite). A deeper multi-day mid-barrier-crash sim rung remains opt-in
+  only if it fits the budget (dual-repo-barrier.md §7 suite-budget).

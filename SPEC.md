@@ -54,9 +54,15 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
   README.md                         # layout documentation for human inspection
   last-active                       # operational; one line: prj_<n> of most-recently-active project (§4.5.7)
   history                           # operational; REPL line-edit history (§4.3.1); newest last; capped
+  turn-journal.jsonl                # operational, gitignored; in-flight-turn content journal + turn signal (§4.5.8)
+  op-in-progress.json               # operational, gitignored; batch-op marker (archival|sleep|recovery|barrier|rebaseline), survives reset (§4.5.8)
+  derived-watermark                 # operational, gitignored; daily HEAD hash the derived artifacts were built from (§4.5.8)
   archive/
     index.jsonl                     # canonical; deep cold archive index (§3.8); recoverable git-based archival (active)
-  .git/                             # git-init'd at first run
+  recovery/
+    quarantine/<stamp>/             # operational; byte-exact preserved bytes from torn-turn / verify-failure recovery (§4.5.8)
+  .git/                             # primary git DB: permanent career history — one day-grain commit/day + archival anchors (§4.5.8)
+  .git-daily/                       # operational, gitignored: DISPOSABLE per-turn recovery DB; nuked + reborn each day barrier; never career history (§4.5.8)
   tmp/                              # agent's drafting scratch (see §6.3); never git-committed
 ```
 
@@ -64,9 +70,9 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
 
 | Type | Examples | Drift policy |
 |---|---|---|
-| Canonical | `spine.jsonl` rows, `threads/*.md`, `directives/*.md`, `projects/prj_<n>/meta.json`, `logs/*.log`, `providers.toml`, `config.toml`, `archive/index.jsonl` | Source of truth. Hand-editable. Other files derive from these. |
+| Canonical | `spine.jsonl` rows, `threads/*.md`, `directives/*.md`, `projects/prj_<n>/meta.json`, `logs/*.log`, `providers.toml`, `config.toml`, `archive/index.jsonl` | Source of truth. Hand-editable. Other files derive from these. (`logs/*.log` is canonical, not operational: it is the append-only turn-grain forensic record that crash recovery preserves and re-appends — §4.5.8, §9 non-goals.) |
 | Derived | `symbols.jsonl`, `projects/prj_<n>/digest.json` | Regenerable from canonical. `autogit.CheckDerivedFresh` fails any state-changing git op on stale. Never hand-edited. |
-| Operational | `logs/*.log`, `.git/`, `tmp/`, `last-active`, `history` | System-managed; not subject to drift checking. `tmp/`, `last-active`, and `history` are gitignored. |
+| Operational | `.git/`, `.git-daily/`, `tmp/`, `last-active`, `history`, `turn-journal.jsonl`, `op-in-progress.json`, `derived-watermark`, `recovery/` | System-managed; not subject to drift checking. `tmp/`, `last-active`, `history`, `.git-daily/`, `turn-journal.jsonl`, `op-in-progress.json`, and `derived-watermark` are gitignored; `.git/` and `.git-daily/` are both in the managed gitignore block so neither repo sees the other as untracked (§4.5.8 INV-6). |
 | Secret-bearing | `api_keys/*` (apiKeyFile targets); `providers.toml` only if it uses `apiKeyUnsafe` | Contains API keys. Treated specially by the runtime: never included in any LLM-context artifact, log line, ack prompt, or captured output. See §8.2.1. |
 
 **Storage commands** (Go binary subcommands; see §4.1):
@@ -503,6 +509,8 @@ Actions ending in `-error` (and `warning`) are forensic diagnostics, not measure
 | `recall` | `offer` (with `count=N`), `accept` (with `thr=`, `layers=`), `decline` (with `thr=`, `reason=not-relevant\|wrong-project\|already-known`), `net-cap-hit`, `flush-backlog`, `W1-diag`, `fire-error`, `error`, `index-error`, `embed-error`, `debt-window-error`, `tree-error`; *(vocabulary)* `cross-project-fire` |
 | `retire` | `prompt` (with `thr=` and `inactivity=`\|`trigger=manual`), `ack` (EVERY acked closure — retire or WIP — with `resolution=` and `edited=yes\|no`, §3.5), `defer`, `complete` (with `resolution=`), `curator-error`, `load-error`, `resolver-error`, `apply-error`, `error` |
 | `archive` | `archived`, `recovered`, `recovered-record`, `skip`, `under-drain`, `error` |
+| `recovery` | (§4.5.8 startup reconciliation; forensic) `begin`, `complete` (with `cells=`, `reset=`, `stamped=`, `unrepairable=`), `pending` (with `op=`, `day=` — a barrier/archival completion was typed to the adapter), `rollback` (torn-turn reset — `turn=`, `reverted=`, `debris=`), `journal-recovered` (preserved in-flight bytes — `turn=`, `records=`), `morning-init` (`baseline=`, `rebuilt=`), `adopt` (cell-12 greenfield/legacy), `stamp-repaired` (cell-9), `unrepairable` (archive entry stays refused — `thr=`, `reason=`), `quarantined` (byte-exact preserved path), `log-tail-repaired` |
+| `barrier` | (§4.5.8 day barrier B0–B6; forensic) `begin` (`day=`), `archived` (B1 — `day=`, `count=`), `day-committed` (B2 — `day=`, optional `repaired=true`), `reborn` (B5 daily re-init — `day=`, `baseline=`), `complete` (`day=`), `re-mint` (defensive B2 re-mint on a non-day-shape HEAD — currently unreachable), `quarantined` (§4.5.8 quarantine-and-proceed — `paths=`, `dir=`, `restored=`) |
 | `consolidate` | `sleep-cycle` |
 | `dedup` | `chain-aged`, `chain-age-refused`, `error` |
 | `fs` | `edit-no-path`, `write-error`, `commit-untracked` (`unsynced-no-topic-tag` is **retracted** with the missing-tag abort — §3.3 recovery means edits always bind) |
@@ -1152,6 +1160,16 @@ Per §3.5, threads can be archived "off-spine" when spine cardinality
 pressure builds, with recovery via explicit fetch. The mechanism leverages
 the autonomic git layer (§8.3) rather than a bespoke archive format.
 
+**Barrier-homed (behavioral change, #94 R3b).** The archival *drain*
+fires **only at the day barrier** (§4.5.8 B1), against the **primary**
+git DB, so primary stays barrier-exclusive (§4.5.8 INV-5). This
+supersedes the R3-shipped mid-turn/between-turns firing. The pressure
+computation is unchanged; only the drain's timing and target repo move.
+The public `RecoverThread`/`ArchiveThreads` port ops still exist (and
+standalone `ArchiveThreads` stays crash-recoverable via the same
+roll-forward completion, §4.5.8 §6), but under normal operation the
+barrier owns the drain.
+
 #### 3.8.1 Mechanism
 
 A thread is a **directory** (`threads/thr_<n>/` = `thread.md` + `turns/` +
@@ -1166,26 +1184,31 @@ To archive a batch of threads:
 1. The runtime confirms each `threads/thr_<n>/` is tracked at HEAD and
    captures the directory's git **tree hash** (the value recovery will
    verify against).
-2. A **capture commit** pins the to-be-archived directories into a
-   committed tree — this commit becomes the *parent* where the thread
-   bytes remain reachable after removal. (Per-turn *content* writes do
-   not commit; the substrate commits at `init`, on structural change,
-   at archival, and at session close — §3.11 — so a capture commit here
-   guarantees the bytes are in a committed tree before deletion
-   regardless of what the cadence committed earlier.)
-3. Stage the recursive removal of each `threads/thr_<n>/` directory
+2. A **capture commit** `Add(".")`s the full current worktree into
+   **primary**, pinning the to-be-archived directories into a committed
+   tree — this commit becomes the *parent* where the thread bytes remain
+   reachable after removal, and it also lands the day's cumulative
+   content in primary (what makes the barrier's daily-DB nuke safe,
+   §4.5.8 INV-3). A capture commit here guarantees the bytes are in a
+   committed tree before deletion regardless of the per-turn daily
+   cadence (§3.11).
+3. **Record batch membership durably BEFORE any deletion** (F1,
+   membership-before-deletion): append one `archive/index.jsonl` entry
+   per thread with **empty `commit_hash`** but full
+   `parent_commit_hash`/`tree_hash`/`original_path`/spine snapshot — all
+   available immediately after the capture commit. This entry set is the
+   deterministic worklist a crash-completion consumes (§4.5.8 §6), so no
+   half-applied deletion is ever ambiguous.
+4. Stage the recursive removal of each `threads/thr_<n>/` directory
    (`os.RemoveAll` + `autogit.Add(".")`, which stages tracked-file
    deletions), remove all spine records in **one** filtered rewrite
    (`RemoveSpineRecords`), regenerate derived state (`symbols.jsonl`,
-   digests) **once** for the batch, and append one `archive/index.jsonl`
-   entry per thread. Commit this **deletion commit** as a unit (gated by
-   `CheckSpineIntegrity` on the pre-state and `CheckDerivedFresh` on the
-   post-state); capture its hash `H`.
-4. The index entry references the deletion commit `H`, its parent (the
-   capture commit) via `parent_commit_hash`, and the parent's tree hash;
-   because `H` is only known after step 3, a small **stamp commit** records
-   the now-known `commit_hash` into the index entries. The archive index
-   entry:
+   digests) **once** for the batch, and commit this **deletion commit**
+   as a unit (gated by `CheckSpineIntegrity` on the pre-state and
+   `CheckDerivedFresh` on the post-state); capture its hash `H`.
+5. Because `H` is only known after step 4, a small **stamp commit**
+   records the now-known `commit_hash` into the membership entries from
+   step 3. The completed archive index entry:
    ```jsonl
    {"thr_id":"thr_42","commit_hash":"<H>","parent_commit_hash":"<capture commit; H's parent>","tree_hash":"<tree sha of threads/thr_42/ at the capture commit>","archived_at":"<RFC3339>","original_path":"threads/thr_42/","spine_summary":"<summary at archival time>","anchors":["..."],"project":"prj_3","recovered_at":""}
    ```
@@ -1589,56 +1612,52 @@ correctness floor it later trims.
 
 ### 3.11 Substrate commit cadence
 
-The substrate is a git repo; every commit buys a recovery point at the
-cost of `.git` growth and commit overhead. The cadence policy is
-**commit-on-structural-change**: the substrate commits at `init`, on
-each **structural change**, at **archival** (§3.8, its own
-capture/deletion/stamp batch), and at **session close**. Per-turn
-*content* writes (turn excerpts, `history_symbols` accretion, anchor
-re-projection, file edits) do **not** themselves commit.
+The substrate is backed by **two** git DBs (§4.5.8): a **daily** DB
+(`.git-daily/`, disposable per-turn microscope) and a **primary** DB
+(`.git/`, permanent day-grain career history). The cadence policy is
+**per-turn commit to daily, day-grain commit to primary**, superseding
+the earlier commit-on-structural-change scheme (#94, waves R1–R5).
 
-**Structural change** = a turn that **creates** a thread (incl. a
-synthesis thread, §2.7.3) or **closes/retires** one (§3.5 closure), or
-the creation of a project. Archival is structural but commits via its
-own §3.8 batch.
+**Per-turn (daily).** Every turn commits its **scoped** write set to
+**daily** at turn close (`CommitTurn`, `Personant-Turn: <id>` trailer)
+— the ≤1-turn durability boundary of §4.5.8. Staging is scoped to the
+turn's recorded write set (`autogit.AddPaths`), O(write-set) with no
+tree walk; daily commits carry **no integrity flags** (`0,0`) so
+per-turn cost stays flat. Structural changes (create/close a thread,
+create a project) no longer drive a *separate* commit — they ride the
+per-turn daily commit and are folded into the day at the barrier.
 
-**The check is performed once at turn close**, not at each mutation
-site: a turn that produced ≥1 structural change yields **exactly one**
-commit. A close+create switch, or a vacation closure-storm (§9 T1-4)
-that retires many threads in one turn, is therefore a single commit, not
-one per event — fewer commits than a per-mutation rule, and the turn's
-accumulated content rides along in the same commit.
+**Per-day (primary).** The **day barrier** (§4.5.8 B0–B6, fired on
+new-day detection) writes exactly **one** day-grain commit to primary
+(`Personant-Day: <N>`, `AllowEmptyCommits`) plus the day's archival
+anchors (§3.8, barrier-homed at B1). This bounds primary to ~365
+commits/year forever — a single small pack — and moves integrity gating
+off the per-turn path to **once a day**: `CheckSpineIntegrity` on the
+staged day-commit (B2) and `CheckDerivedFresh` on the post-rebuild
+assert (B6). The daily DB is nuked and reborn at each barrier (B4/B5),
+so its loose objects do not accrue across days.
 
-**Session-close commit.** At session end the runtime commits any pending
-working-tree changes — the safety net that flushes content-only turns
-accumulated since the last structural commit.
+**Checkpoint (session-close + mid-session structural) → daily.** All
+`Checkpoint` calls target **daily** with a full `Add(".")` sweep — the
+belt-and-braces backstop that absorbs hand-edits and any content not yet
+scoped-committed. It is normally a no-op (daily is already current at
+close). Primary is **barrier-exclusive** (§4.5.8 INV-5).
 
-**Why this cadence.** Per-turn commits at multi-month scale produce tens
-of thousands of commits and corresponding `.git` growth; per-session
-commits lose up to a session's work on a crash. Commit-on-structural-
-change is the empirically-chosen middle. The §9 sim (15 sim-days) measures
-**≈130 commits/sim-day, ≈1 commit per 2.8 turns** — closures dominate
-(≈1648 vs ≈399 creates), so the rate is set mostly by thread retirement,
-not creation. Per-commit cost is **linear** (P50 ≈38 ms; no `Add(".")`
-rescan blowup, since thread bodies are FIFO-windowed), so the cadence does
-not bog down even at this rate — it stays well below per-turn. The cost it
-*does* carry is loose-object accumulation in `.git` (the sim never packs:
-≈159 MB unpacked over 15 sim-days); packing is delegated to the offline
-**sleep/consolidation cycle** (`git gc`/repack — ARCHITECTURE.md), not a
-working-hours operation. `MemoryOps.Consolidate` is the sleep-cycle entry
-point — today it runs go-git gc (`RepackObjects` + `Prune`); the §9 sim
-fires it on the day-off idle window. It is a §9 calibration choice, not a frozen
-constant — adjustable (e.g. commit only on terminal retirement, not
-wip-pause) if `.git` growth or overhead ever warrant, but the measured
-linear cost did not.
+**gc cadence.** Packing is **count-triggered** plus the offline
+sleep-cycle. Count-triggered: after every `gcCheckEveryCommits` (64)
+per-turn daily commits the adapter reads daily's loose-object count and
+runs gc when it crosses `gcLooseObjectThreshold` (5000). The offline
+sleep/consolidation cycle (`MemoryOps.Consolidate` → go-git
+`RepackObjects` + `Prune`, fired on the §9 day-off idle window) packs
+both repos. A default-off mid-day re-baseline knob (§4.5.8, §6.2)
+handles the pathological long-single-session case where no barrier fires
+to bound daily loose objects.
 
-**Durability gap (by design).** Content-only turns between structural
-commits are uncommitted; a hard crash loses at most that window, bounded
-by the session-close commit. Finer-grain per-turn recovery is the
-separate concern of the forced-shutdown/crash-resilience work (a per-turn
-transaction boundary + reconstruct-on-open), which layers *beneath* this
-cadence rather than replacing it — the cadence governs git recovery
-points; the journal governs mid-session crash replay.
+**Durability.** Content is durable to ≤1 turn at all times: the journal
+(§4.5.8) protects the in-flight turn's raw bytes before any canonical
+write, and the scoped daily commit lands the turn structurally at close.
+This section governs git recovery points; §4.5.8 governs the crash
+protocol and mid-session recovery.
 
 ---
 
@@ -1916,28 +1935,382 @@ recovery of §3.8 (which recovers retired threads via `git show`): the
 runtime may be hard-terminated (crash, SIGKILL, power loss) mid-turn,
 leaving derived state (the symbol index, working-set membership, the
 `last-active` file) inconsistent with canonical (`spine.jsonl`, thread
-files, logs). On startup the runtime must **reconcile derived state
-against canonical** — detect that a prior session did not shut down
-cleanly, and rebuild/repair the stale derived artifacts (cf. `personant
-index rebuild`, §2.1) rather than trusting them. The normal
-shutdown→resume cycle must also be exercised, not only the crash path.
-Status: queued for v0.1; not yet implemented. (The honest-coverage rule
-of §9.1 applies — this is a known substrate obligation, tracked, not
-forgotten.)
+files, logs). On startup the runtime **reconciles derived state against
+canonical** and **repairs a torn in-flight turn** before opening the
+session. Implemented (#94, waves R1–R5). Startup ordering is
+load-bearing: **Init → Reconcile → (day barrier if new-day) →
+LoadSession**; the runtime **refuses to open** on an unreconciled or
+unrepairable substrate rather than trusting stale state.
 
-**Design direction (decided 2026-05-22; not yet coded):**
+**Durability bar: at most one turn may ever be lost**, no matter how
+pathologically timed the termination; journaled content bytes are
+recovered from prompt-time onward. The in-flight turn carries user
+prompt + model response — real, expensive-to-recreate in-task-flow
+state — so the raw `(prompt, response)` bytes are protected by a
+durable append journal written *before* any canonical write.
 
-**No signal/interrupt handlers as a flush mechanism.** A handler doing real work during teardown is a footgun (partial flush, re-entrancy, races, can itself be SIGKILL'd) and may produce a *more* confused post-termination state. No signal handlers for canonical writes.
+**No signal/interrupt handlers as a flush mechanism.** A teardown
+handler doing real work is a footgun (partial flush, re-entrancy,
+races, can itself be SIGKILL'd) and may produce a *more* confused
+post-termination state. Recovery is entirely a **cold-start
+reconciliation** — no shutdown event to catch, no LLM in the loop, no
+user acknowledgement; the on-disk state alone determines the outcome
+deterministically. The worktree is the source of truth; git is a
+recovery-point index over it (see the dual-repo model below).
 
-**Per-turn transaction marker.** A file marker (`turn-in-progress` with the current turn id) is written before any canonical writes for a turn and cleared after they all complete. On open: marker absent → clean shutdown (rebuild derived); marker present → the prior turn was interrupted mid-write → reconcile/roll-back the partial turn, then rebuild derived. This handles clean shutdown and SIGKILL uniformly with no shutdown event to catch, and bounds possible inconsistency to exactly one in-flight turn.
+##### (1) Detection observables
 
-**Turn-level (cross-file) atomicity is the real gap.** Current writes use `store.WriteFileAtomic` (deterministic sibling temp file `tmp-<target>` + `os.Rename`) — atomic per file, but a turn rewrites two canonical files that must stay mutually consistent: `spine.jsonl` and the owner thread's `.md`. An interrupt *between* those two renames leaves canonical internally inconsistent (spine `turn_count` ahead of the `.md`); rebuilding derived state does not fix this. The chosen solution: **git commit per turn as the atomic boundary** — the substrate is already a git repo, each commit preserves the prior state, and crash recovery can `reset --hard HEAD` to discard a partial in-flight turn. (Note: the §3.11 commit-on-structural-change cadence commits only on structural changes; the per-turn transaction boundary is a finer-grain commit that fires on *every* turn for durability. Both coexist: the §3.11 commit may absorb the per-turn commit on structural turns.)
+Recovery reads the following on-disk signals and classifies into exactly
+one cell (§4). No signal is trusted transitively; each is read against
+the correct repo (daily vs primary — see §5).
 
-**Durability bar: at most one turn may ever be lost**, no matter how pathologically timed the termination. Even that one turn must be made as rare as practical — the in-flight turn carries user prompt + model response: real, expensive-to-recreate in-task-flow state. Protect the raw `(user-prompt, model-response)` bytes by writing them to a **durable append log as the first action of the turn** — before any multi-file canonical writes — so a kill during the canonical commit can recover turn content on restart even when spine/.md writes were partially applied. Structural/derived state is always reconstructable; the content bytes are the genuinely irreplaceable part.
+- **Journal-as-turn-signal.** A **non-empty** `turn-journal.jsonl`
+  (§2.1) *is* the in-flight-turn signal — there is no separate
+  `op=turn` marker file. The journal's first record carries the turn id
+  (`store.JournalOwner`); the first append's existing fsync makes the
+  signal durable for free. (`store.WriteMarker` refuses `op=turn`; a
+  legacy `op=turn` marker file from pre-#94 code is still read and
+  reconciled.)
+- **Batch marker file** `op-in-progress.json` (`$PERSONANT_HOME`,
+  gitignored, survives `reset --hard`): batch ops **only** —
+  `{op: archival|sleep|recovery|barrier|rebaseline, day?, orig?}`.
+  Written before a batch operation's canonical mutations, cleared as
+  its last step. Its presence is the batch-in-flight signal;
+  `op=barrier` carries the target `day`.
+- **Watermark = daily HEAD.** `derived-watermark` (gitignored) holds
+  the **daily** git HEAD hash the derived artifacts were last built
+  from. `daily HEAD == watermark ∧ daily WT clean ⇒ derived fresh` —
+  the O(1) clean-open certificate.
+- **HEADTURN / HEADDAY trailers.** Every daily commit carries
+  `Personant-Turn: <id>` (read as HEADTURN); every primary commit
+  carries `Personant-Day: <N>` (read as HEADDAY). HEADTURN discriminates
+  the torn-turn cells (4/5/6); HEADDAY drives new-day detection and the
+  barrier idempotence guard. HEADDAY is ⊥ only for a bare (never-
+  committed) primary.
+- **DAILY ∈ {present, missing, half-created}**, evaluated **defensively
+  and FIRST**, before any daily-repo read: a go-git open failure on a
+  corrupt/partial `.git-daily` classifies as `half-created`, **never a
+  propagated error** — a corrupt or half-nuked daily is always a
+  recreate-from-worktree candidate (the daily is disposable by
+  construction), so it can never wedge an open.
 
-**Temp file naming.** Use deterministic sibling names (`tmp-spine.jsonl`, `tmp-thr_42.md`) rather than random-suffix temps. Rationale: (a) a leftover temp after a crash maps clearly to its target and is visible as untracked; (b) `O_TRUNC` handles a stale leftover from a prior crashed write; (c) deterministic temp→target mapping is what a roll-forward redo-log recovery needs.
+##### (2) Turn transaction protocol
 
-**Testing methodology (must be built):** deliberate fault injection — partial file-set writes (apply only some of a turn's renames, in every ordering), torn/truncated writes — followed by recovery and verification that the substrate ends in a runnable state that lost ≤1 turn. Fold these as sim/recovery scenarios, not one-off manual checks.
+A turn is written to the **daily** repo through a three-step port
+protocol (`internal/turn`, `memops` port ops):
+
+1. **`JournalTurn(ctx, turnID, "prompt", bytes)`** — append the prompt
+   record (fsync) **before the model call**. The first append is what
+   arms the in-flight signal.
+2. **`JournalTurn(ctx, turnID, "response", bytes)`** — append the
+   response record (fsync) **before any canonical write**. A journal-
+   append failure aborts the turn *pre-canonical* (no torn state
+   possible).
+3. **`CommitTurn(ctx, turnID, reason)`** at turn close — commit the
+   turn's **scoped** write set to daily with the `Personant-Turn`
+   trailer, then **truncate the journal** (the truncate *is* the scope
+   release — no separate marker clear). A `CommitTurn` failure leaves
+   the journal non-empty and fails loudly into recovery.
+
+Per-turn staging is **scoped**: `CommitTurn` stages only the turn's
+recorded write set (`spine.jsonl`, touched thread dirs, the day's event
+log — recorded at each adapter write site, never guessed) via
+`autogit.AddPaths`, O(write-set) with no tree walk. The full `Add(".")`
+sweep is the session-close/backstop `Checkpoint`'s job and a day-barrier
+responsibility (§5 B1/B2), so a hand-edit is absorbed at the next FULL
+sweep, not the next turn.
+
+The per-cause re-prompt caps of §5.5 (missing-tag / empty-response
+recovery) live entirely *inside* a turn, ahead of step 3; recovery
+operates only on the committed/journaled result and never re-drives the
+model.
+
+##### (3) The journal
+
+`turn-journal.jsonl` (`$PERSONANT_HOME`, flat, operational/gitignored):
+
+- **JSONL contract:** one record per line,
+  `{turn, kind: prompt|response, at, bytes}`; **fsync per append**.
+- **Truncate-no-fsync on `CommitTurn`.** The truncate-to-empty carries
+  **no fsync**. Proof it is safe (`store.TruncateJournal` comment +
+  `TestCell5_ResurrectedTruncatedJournal`): a power-loss resurrection
+  of a stale-but-truncated journal is the cell-5 redundant-journal case
+  (`turn == HEADTURN`, already committed), and the next turn's first
+  append fsync makes the truncate durable before any new canonical dirt
+  can exist. **Converse residual:** a torn *append* (fsync not yet
+  flushed on the failing turn) is bounded to that one turn's content —
+  the ≤1-turn bar (§7).
+- **Torn tail.** A torn final line (a partial record from a kill
+  mid-append) is **skipped** by the scan, never parsed.
+- **Preserve + surface, never replay.** On a torn turn the journal
+  bytes are written to a recovery artifact and **surfaced** in the REPL
+  banner. They are **never auto-replayed** into canonical: a turn is
+  bytes *plus* non-replayable derivation (tag parse, symbol extraction,
+  engagement). The user re-issues if they choose.
+
+##### (4) The recovery state machine
+
+Core recovery (`internal/recovery`) reads the observables and classifies
+into one cell. Turn cells (4/5/6) evaluate against **daily**; cell 12
+against **primary**. Barrier/archival cells **DETECT ONLY** — core
+recovery returns a typed `RecoveryReport.Pending` with a nil error and
+the marker left in place, and the **adapter** (`fileadapter.Reconcile`,
+which owns `ArchiveThreads` + both repo handles) completes them (§6, the
+F4 seam). This avoids the `recovery → adapter` import cycle.
+
+| Cell | Trigger | Action |
+|---|---|---|
+| 1 clean | no marker, DAILY present + WT clean vs daily HEAD, daily HEAD == watermark, journal empty | no-op — **O(1)** open |
+| 2 derived-stale | no marker, clean, derived stale | rebuild derived; stamp watermark = daily HEAD |
+| 3 hand-edit | markerless-**dirty** vs daily HEAD, watermark present | **NEVER reset** — a legitimate hand-edit; absorbed at the next FULL sweep (§2) |
+| 4 torn turn | journal non-empty, dirty, `HEADTURN ≠ turn` | preserve+surface journal → `ResetHard` **daily** (≤1 turn) → sweep untracked canonical-namespace debris (excluding `logs/`) → re-append log bytes → truncate journal |
+| 5 turn committed | journal non-empty, clean, `HEADTURN == turn` | redundant journal (turn already committed) — truncate, zero loss |
+| 6 turn no-writes | journal non-empty, clean, `HEADTURN ≠ turn` | nothing landed structurally — preserve+surface journal, truncate |
+| 7 (composite) | cell 4 coinciding with an unstamped ARCH entry | cell 4, then the cell-9 stamp pass — no distinct constant |
+| 8 archival | `op=archival` marker | **DETECT ONLY** → typed `Pending`; adapter roll-forward **completes** the batch (no reset, no re-archive-as-drift); marker left in place until completion (supersedes the R2 reset — see §7) |
+| 9 stamp-repair | unstamped ARCH entry (any cell, post-normalization) | `locateDeletionCommit` (child-of-`ParentCommitHash` tree test), stamp; unlocatable ⇒ `recovery.unrepairable`, entry stays **refused, never guessed** |
+| 10 sleep | `op=sleep` marker | clear marker; substrate self-heals (gc/rebuild idempotent) |
+| 11 recovery-reentry | `op=recovery` (crash during recovery) | re-run under the original marker; every phase idempotent → converges |
+| 12 legacy-adopt | dirty, **no watermark ever** | greenfield/legacy: verify-gated adopt-commit to **primary** (`Personant-Day` trailer), stamp-repair, full rebuild, then morning-init |
+
+Dual-repo op rows (§5):
+
+| Op | Action |
+|---|---|
+| `op=barrier` | **DETECT ONLY** → typed `Pending`; adapter runs the idempotent §5 B-recovery routine. The DAILY observable is **irrelevant** to classification — the barrier owns daily's lifecycle regardless of its state. |
+| `op=rebaseline` | `rm -rf .git-daily` + morning-init **unconditionally**; no primary touch (§6.2 knob). |
+| morning-init rows (no marker, daily missing/half-created) | greenfield (no watermark) → [adopt if primary-dirty] + morning-init + rebuild; benign morning (watermark) → morning-init, rebuild iff derived stale; interrupted-init/corrupt-dir → `rm -rf`; morning-init. **Daily-missing is NORMAL, never a data-loss signature.** |
+
+Orthogonal heals run on **every** path, before classification: additive
+event-log tail-heal (last byte ≠ `\n` ⇒ append one `\n`, never truncate)
+and `tmp/` sweep.
+
+The **Pending seam** is a typed opaque "finish this" request
+(`PendingCompletion{Kind: PendingBarrier|PendingArchival, Day}`) plus
+`ScopedRestored []string` (the §5 quarantine-and-proceed paths; empty on
+the normal path). The chat/cmd caller is unchanged — it calls the port's
+`Reconcile` and reads one report.
+
+**Quarantine-never-delete.** Recovery never deletes canonical bytes it
+cannot re-derive. The torn-turn debris sweep and the §5 persistent-
+verify-failure posture both **quarantine byte-exact under
+`recovery/quarantine/<stamp>/`** before any removal or scoped restore
+(the **quarantine-and-proceed** posture, §5), and record the moved paths
+in `ScopedRestored`. An offending path absent from the restore source is
+quarantined and removed (nothing valid to restore to).
+
+##### (5) The dual-repo architecture and the day barrier
+
+**THE WORKTREE IS THE TRUTH; the daily DB is disposable scaffolding.**
+No canonical byte lives *only* in git — every canonical byte is a file
+under `$PERSONANT_HOME`, and git is a recovery-point index over those
+files. Two git DBs track the one worktree at two cadences:
+
+| DB | git-dir | cadence | role |
+|---|---|---|---|
+| **daily** | `.git-daily/` | per-turn | today's microscope — fine-grained recovery points; **nuked + reborn each day barrier**; never career history |
+| **primary** | `.git/` | per-day | career history — one day-grain commit per day + permanent archival anchors (~365 commits/year); irreplaceable |
+
+Invariants (the design is correct iff these hold): **INV-1** archival
+and the barrier NEVER reset the worktree (their recovery is *re-drive /
+repair*); only op=turn recovery resets, and only ever to **daily** HEAD
+(≤1 turn). **INV-2** the day-commit is guarded by *primary HEAD is a
+day-commit-shape commit AND its `Personant-Day == N`* (not merely
+"trailered") — a re-drive after a crash never mints a second day-commit.
+**INV-3** `.git-daily` is nuked only after the worktree is captured to
+primary. **INV-4** the watermark tracks **daily** HEAD, re-stamped by
+derived rebuild and by barrier/morning-init re-init. **INV-5** primary
+is **barrier-exclusive** with one recovery-repair exemption; the
+exhaustive primary-writer set is: barrier B1 archival, barrier B2
+day-commit, cell-9 stamp-repair, cell-12 adopt, F1 roll-forward
+completion — **nothing else** (Checkpoint now targets daily). **INV-6**
+both `.git/` and `.git-daily/` are in the managed `.gitignore` block, so
+neither repo sees the other's git-dir as untracked debris.
+
+**Day barrier B0–B6** (a normal operation fired on new-day detection —
+single-clock day index exceeds HEADDAY — checked at session open after
+Reconcile and before each turn; homed in the adapter under an
+`op=barrier {day: N}` marker):
+
+- **B0** write the `op=barrier` marker (owns the whole sequence,
+  including B1 — B1 opens no nested `op=archival` scope).
+- **B1** *archival-if-pressure* against **primary** via internal
+  `archiveBatch` (no nested marker). It **records batch membership
+  durably before any deletion** (archive-index entries with empty
+  `CommitHash` appended *before* the first `RemoveAll` — the F1
+  membership-before-deletion record), and its capture commit `Add(".")`s
+  the full worktree into primary (making B4's nuke safe, INV-3). Skipped
+  under the low-water mark; then B2 is the sole worktree-capture.
+- **B2** *day-commit* worktree → **primary**, `Personant-Day: N`, staging
+  **everything including overnight hand-edits**. The `CheckSpineIntegrity`
+  gate runs on the **STAGED tree BEFORE the mint** (post-review
+  amendment 1), so a spine-broken day-commit can never land — making
+  "primary HEAD is always spine-good" universal. Guarded by INV-2
+  (idempotent re-drive); minted with `AllowEmptyCommits` so an empty day
+  still produces exactly one trailered day-commit (HEADDAY always
+  defined; no tag path anywhere).
+- **B3** *rebuild derived* from the now-committed worktree (absorbs
+  overnight hand-edits and B1 removals), re-stamping the watermark
+  against the pre-nuke daily HEAD.
+- **B4** `rm -rf .git-daily` (idempotent).
+- **B5** *re-init daily* + baseline commit of the current worktree →
+  baseline hash H_d.
+- **B6** stamp watermark = H_d (INV-4); **assert `CheckDerivedFresh`**;
+  clear marker.
+
+Only B1/B2 mutate primary; B4/B5 are pure daily lifecycle; B3/B6 touch
+derived + watermark. The canonical worktree is untouched by B2–B6 (only
+*reduced*, never lost, by B1's archival removals — bytes preserved in
+primary).
+
+**Roll-forward completion (crash inside the barrier).** Every barrier
+crash window recovers by **roll-forward, never a reset** (INV-1). The
+`op=barrier` marker (with its `day: N`) is the idempotent re-entry
+token; every sub-action is guarded/idempotent, so re-entry converges.
+The B1 sub-window completion consumes the durable batch-membership
+worklist: ensure-removed → ensure-spine-removed → regen → (deletion
+commit iff `locateDeletionCommit` returns not-found, else stamp the
+located one) → stamp. The `postDeletionCommit.preStamp` window is the
+exact join where roll-forward degenerates into cell-9 stamp-repair —
+and it must **not** discriminate on worktree-clean-vs-HEAD (an overnight
+hand-edit would be misread as uncommitted removals and mint a duplicate
+deletion commit). The completion routine also **re-runs the B1 pressure
+drain** (post-review amendment 2) so a barrier killed at
+`barrier.preArchival` does not silently defer the day's archival.
+
+**Day-commit-shape guard, at-most-once per day.** New-day *detection*
+reads HEADDAY off any trailered primary commit; the INV-2 *idempotence
+guard* fires only on a `DayCommitMessage`-shape HEAD for the target day.
+A trailered-but-non-day-shape HEAD (a roll-forward stamp, an adopt)
+advances detection but does NOT satisfy the guard, so the real
+day-commit is still minted — proven fork-free across the morning-N+1
+completion and adopt-then-barrier kill timings. The poll seals only
+**completed** days (strictly before the current clock day), so each day
+is sealed exactly once (gap-day at-most-once).
+
+**Quarantine-and-proceed (persistent verify failure).** If B2's spine
+gate or B6's derived assert fails and still fails across one idempotent
+re-drive: (1) identify the offending paths; (2) quarantine their bytes
+byte-exact under `recovery/quarantine/<stamp>/`; (3) scoped-restore
+exactly those paths from primary HEAD (a path-scoped checkout — **never**
+`reset --hard`, never a whole-worktree restore; derived paths, absent
+from primary, are regenerated-and-verified instead — amendment 5); an
+offending path absent from HEAD is quarantined and **removed**; (4)
+re-run the failing step once; (5) still failing ⇒ **refuse-to-open**,
+marker LEFT IN PLACE (the retry token), report names the quarantine dir.
+Safe by INV-1 (scoped, quarantined-first) and by "primary HEAD is always
+spine-good" (every primary writer carries the pre-mint gate).
+
+**Morning-init** (`git init .git-daily` + baseline-commit the worktree +
+stamp watermark = baseline hash) is exactly B5+B6 in isolation, reused
+as the recovery/first-open primitive so no code path ever observes a
+daily-less substrate. It is **O(active working-set bytes)**, independent
+of career-history length (archival caps the working set) — a 5-year-old
+home morning-inits in the same time as a 5-day-old one.
+
+**Mid-day re-baseline knob** (§6.2), **default-off**: nuke + recreate
+daily at a commit boundary when daily loose objects cross a threshold,
+under `op=rebaseline` (never touches primary, never advances the day).
+Recovery routes an `op=rebaseline` crash straight to morning-init. In
+v0.1 the recovery-side handling and marker plumbing are present; the
+mid-day *arming* trigger is not yet wired (see §6.2 carry-forward).
+
+##### (6) Archival: barrier-only + roll-forward completion
+
+Deep-cold archival (§3.8) is re-sequenced to fire **only at the barrier
+(B1)** so primary stays barrier-exclusive (INV-5) — a **behavioral
+change** from the R3-shipped mid-turn/between-turn firing (public
+`ArchiveThreads` still exists and stays specified for standalone use,
+but the drain is barrier-homed). Two properties make crash-completion
+deterministic:
+
+- **Membership-before-deletion.** Archive-index entries are appended
+  (with `ParentCommitHash`/`TreeHash`/`OriginalPath`/spine snapshot,
+  empty `CommitHash`) *before* the first `os.RemoveAll`, so a crash
+  mid-batch leaves a durable worklist and no half-applied deletion is
+  ever ambiguous.
+- **`locateDeletionCommit`** resolves an already-landed deletion commit
+  by a child-of-`ParentCommitHash` **tree test** (robust to overnight
+  hand-edit dirt), so roll-forward stamps the existing commit rather
+  than minting a duplicate.
+
+Standalone archival (cell 8) is likewise **detect-then-complete**:
+recovery types `Pending` on marker presence alone and the adapter runs
+the same roll-forward tail. The daily-absorb rationale: turn/structural
+commits land in daily and are folded into the day at the barrier, so
+archival (primary) never races a turn.
+
+##### (7) Honest-coverage tiers
+
+- **SIGKILL — full guarantee.** ≤1 turn structural loss under any kill
+  timing; journaled content bytes recovered from prompt-time onward.
+  Every registered crashpoint (§9) has an asserting scenario.
+- **Daily-DB loss — never content loss.** The daily DB is disposable by
+  construction: nuked, lost, corrupted, or absent, recovery recreates
+  it from the worktree. Daily-missing is never a data-loss signature.
+- **Primary-DB loss — unrecoverable.** A missing/corrupt **primary** is
+  **refuse-to-open + surface**, never auto-recreated (career history is
+  irreplaceable).
+- **Power-loss — qualified.** The ≤1-turn bar holds under fsync
+  semantics, with two named residuals: (a) the **truncate-converse** —
+  a truncate-no-fsync journal resurrection is the benign cell-5
+  redundant case (§3); (b) a **journal-write-failure** aborts the turn
+  pre-canonical, losing that one in-flight turn's content (still ≤1).
+- **Intra-day derived staleness — STATED design behavior.** The turn
+  path **never stamps the watermark**; the **barrier owns freshness**
+  (B3 rebuild + B6 assert). Between barriers, derived tracks daily
+  per-turn state via the watermark; a markerless hand-edit stays
+  deferred (cell 3) until the next full sweep. This is intentional, not
+  a gap (see §6.2 carry-forward for the revisit question).
+
+##### (8) Greenfield / legacy compatibility
+
+- **Greenfield** (no watermark, no daily): cell-12 verify-gated
+  adopt-commit to primary (`Personant-Day: <current day>` — the sole
+  bootstrap carve-out), stamp-repair, full rebuild, morning-init. A
+  legacy `op=turn` marker file is honored and cleared.
+- **`store.Init` births `.git-daily` only alongside a fresh primary**
+  (true greenfield); on an existing home a missing daily is the
+  legacy-upgrade shape and stays absent through Init, so cell-12's
+  adopt gate and the benign-morning stamp-only path discriminate
+  correctly (amendment 3).
+- **Arbitration rulings (both closed):** legacy unstamped archive cells
+  take the **general adopt-forward repair path** (no special case) —
+  population **expected-empty** under release sequencing; the journal is
+  **JSONL**, flat top-level, operational/gitignored.
+- **R2→R3b watermark migration** is codeless: the stale R2 primary-hash
+  watermark never equals a daily HEAD, so the first R3b open reads it as
+  stale via the benign-morning path and rebuilds once.
+
+##### (9) Crash-injection methodology (R4)
+
+- **Crashpoint seam** (`internal/crashpoint`): named deterministic
+  hooks (`crashpoint.At(name)`), test-armed, **production no-op**,
+  registered at every point the matrix kills.
+- **Mechanical coverage gate** (`TestCrashPointCoverageGate`): the suite
+  **fails** if any registered crashpoint lacks a scenario in the
+  greppable `crashScenarioCoverage` registry.
+- **`RestartWithCrash`** (`internal/scenarios/restart.go`): sibling of
+  `RestartSession` — arms a crashpoint, drives the turn/op, discards
+  in-memory state, and drives `Reconcile` against the on-disk result.
+- **The matrix** kills at: every W-TURN ordering
+  (`turn.postJournalPreCanonical`, `turn.betweenCanonicalRenames`,
+  `fileadapter.CommitTurn.*`, `store.WriteFileAtomic.{preRename,tornWrite}`,
+  `fileadapter.JournalTurn.preAppend`); every barrier step
+  (`barrier.preArchival` … `barrier.postWatermark.preMarkerClear`);
+  every B1 archival sub-window (`archiveBatch.postCapture.preMembership`
+  … `archiveBatch.postStamp`); standalone archival
+  (`archival.{preMarker,postMarker}`); recovery internals
+  (`recovery.{adopt.preCommit,stampRepair.preCommit,resetDone.preSweep,
+  logsRestored.preCleanup,done.preMarkerClear}`); and morning-init
+  (`morninginit.{preBaseline,postBaseline.preWatermark}`). Every
+  fixture asserts the full invariant suite plus the strengthened
+  `VerifyThreadMetaMatchesSpine`, ≤1-turn-loss vs a pre-crash oracle,
+  exact journal-byte recovery, no-reset on barrier/archival paths
+  (`RevertedPaths` empty), exactly-one day-commit, and idempotent second
+  `Reconcile`. The matrix is **unit-grade** (synthetic homes, inside the
+  30-min checkpoint budget); a 2-day barrier-crossing sim rung
+  (`TestSimBarrier2Day`) runs in the default suite.
 
 ---
 

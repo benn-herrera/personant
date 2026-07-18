@@ -66,7 +66,7 @@ The ack is the **integrity gate** at the moment its accuracy matters most.
 
 The runtime performs many operations the LLM cannot. Most notably **git**:
 
-- The runtime owns `~/.personant/`'s git tree autonomically (init, then **commit-on-structural-change** per SPEC §3.11 — a commit fires at turn close when the turn created or retired a thread, plus at archival and session close, *not* on every canonical write) via the `internal/autogit` wrapper, which composes in-process go-git operations with policy-driven systemic-validation checks (`CheckDerivedFresh`, `CheckSpineIntegrity`) declared as bitflags on each call. No git pre-commit hook is installed: validation runs as part of personant's own logic at the event points where it's required. Same lifecycle status as writing to `spine.jsonl`.
+- The runtime owns `~/.personant/`'s git tree autonomically (init, then the **dual-repo cadence** of SPEC §3.11/§4.5.8 — a scoped per-turn commit to the disposable **daily** DB, one day-grain commit per day to the permanent **primary** DB, *not* on every canonical write) via the `internal/autogit` wrapper, which composes in-process go-git operations with policy-driven systemic-validation checks (`CheckDerivedFresh`, `CheckSpineIntegrity`) declared as bitflags on each call (gating the once-a-day primary writes; daily commits are ungated). No git pre-commit hook is installed: validation runs as part of personant's own logic at the event points where it's required. Same lifecycle status as writing to `spine.jsonl`.
 - The runtime issues read-only git queries against the user's *workspace* (`git ls-files`, `git status`, `git diff`) for permission-tier classification and ack-prompt diff rendering.
 - The LLM has **no git tool**.
 
@@ -351,13 +351,55 @@ Behavior tuning lives in inspectable directive files that accrue from feedback s
 
 The directives are *text files*. Inspectable, editable by hand, portable, version-controlled. **This is the property that elevates the system from "smart assistant" to "real research partner": the agent learns how the user works, *and the user can read what it learned and correct it*.** (Spec §2.6.)
 
+### Crash stability and the dual-repo substrate
+
+The runtime can be hard-killed (SIGKILL, power loss) at any instant, so
+recovery is designed as a **deterministic cold-start reconciliation** —
+no signal handler doing teardown work (a footgun that can itself be
+killed), no LLM in the loop, no user acknowledgement. On-disk state
+alone determines the outcome. The load-bearing property: **the worktree
+is the truth; git is a recovery-point index over it.** No canonical byte
+ever lives *only* in git, so any git DB can be recreated from the
+worktree and losing a DB is never losing content. (Spec §4.5.8, #94.)
+
+Two git DBs track the one worktree at two cadences: a **daily** DB
+(`.git-daily/`, per-turn, disposable — nuked and reborn each day) and a
+**primary** DB (`.git/`, one day-grain commit per day + permanent
+archival anchors). This split is what keeps the durability bar and the
+cost bar simultaneously satisfiable: per-turn commits are cheap
+(disposable daily, no integrity gating) yet still bound loss to **≤1
+turn**, while primary stays a single small pack forever (~365
+commits/year). The in-flight turn's raw `(prompt, response)` bytes are
+protected by a durable append journal written *before* any canonical
+write, so even the one at-risk turn's content survives.
+
+Framed against the thesis: **day-grain career history in primary is
+*better* inspectability**, not a compromise — `git -C ~/.personant log`
+reads as a clean résumé (a day per commit, permanent archival anchors),
+while today's turn-grain forensics live in the disposable daily DB and,
+across days, in the append-only event log. Turn-grain git archaeology
+across days is deliberately *not* primary's job.
+
+Recovery reduces to a small state machine over on-disk observables
+(marker file, in-flight journal, daily/primary HEAD trailers, watermark,
+daily-DB presence) that classifies into one cell and repairs
+idempotently — a torn turn resets **only daily** to ≤1-turn-ago; a
+barrier or archival crash **rolls forward** (never resets the worktree,
+which would destroy up to a day); a broken hand-edit is **quarantined
+byte-exact, never deleted**. Ruled out permanently: async/deferred
+per-turn commit (reintroduces the torn window), loss-bar extension
+(commit batching / ≤N-turn windows — ≤1 turn is the bar), daily-DB
+durability guarantees (disposable by construction), and primary
+auto-recreation (a missing primary is refuse-to-open, not a benign
+recreate).
+
 ### Memory consolidation — the "sleep" cycle (future consideration)
 
 Personant's memory layering is deliberately analogous to organic memory: **working short-term** (the live working set), **consolidated long-term** (the spine + thread bodies, mostly read), **archival deep memory** (off-spine, rarely touched), and a **metadata layer** for operating on active context fast — tapping long-term memory read-only, *activating* it read/write, or unpacking archival entries.
 
 Under sustained working use this organization fragments unavoidably: threads close out of order, the spine accretes, derived structures and archival boundaries drift from their ideal packing. In-turn maintenance keeps the substrate *correct* but not *orderly*.
 
-The intended remedy is an offline **consolidation cycle** — the system's equivalent of organic sleep. During idle time (the day off, or any unused window) the runtime would run larger-scale reorganization it cannot afford mid-turn: re-packing fragmented structures into orderly arrangements, compacting the spine, advancing archival, **running `git gc`/repack on the substrate** (the commit-on-structural-change cadence of SPEC §3.11 accumulates loose objects between sessions — the sim measured ~130 commits/sim-day; packing them is a sleep-cycle job, not a working-hours one), making the final keep/toss calls on data the faster in-turn transient-data lifecycle (§3.0) left questionable, and **building/reconciling the within-thread summary trees** (`measure.RebuildTrees`, #111 — the sleep pass summarizes dirtied subtrees of the per-thread chunk hierarchy so the next session's intra-thread recall can descend in O(log n) instead of scanning all of a multi-year thread's chunks). Working hours stay responsive; the heavy reorganization happens when nothing is waiting on it.
+The intended remedy is an offline **consolidation cycle** — the system's equivalent of organic sleep. During idle time (the day off, or any unused window) the runtime would run larger-scale reorganization it cannot afford mid-turn: re-packing fragmented structures into orderly arrangements, compacting the spine, advancing archival, **running `git gc`/repack on the substrate** (the per-turn daily cadence of SPEC §3.11 accumulates loose objects; packing is a sleep-cycle job, not a working-hours one — complementing the in-flight **count-triggered** gc that fires when daily loose objects cross a threshold, and the day barrier that nukes/reborns the daily DB), making the final keep/toss calls on data the faster in-turn transient-data lifecycle (§3.0) left questionable, and **building/reconciling the within-thread summary trees** (`measure.RebuildTrees`, #111 — the sleep pass summarizes dirtied subtrees of the per-thread chunk hierarchy so the next session's intra-thread recall can descend in O(log n) instead of scanning all of a multi-year thread's chunks). Working hours stay responsive; the heavy reorganization happens when nothing is waiting on it.
 
 This is a future consideration, not v0.1 — but the v0.1 acceptance simulation already supplies the hook: the day-off is a real idle window in the workload model, and closure (§3.5) / archival (§3.8) are exactly the mechanisms a consolidation pass would tidy.
 
@@ -598,6 +640,7 @@ The "silent lie" failure mode (above) comes from two independent sources claimin
 | Day index | Derived: `SimDayIndex(pinnedClock)`. Never a parallel counter. | Any code that needs "which sim-day is this?" calls `SimDayIndex(h.pinnedClock)`. |
 | Generator exec clock | `generator.execClock` — an exact generator-side **mirror** of `pinnedClock`, maintained by `reconcileAt` (burndown A3): every emitted step's `At` is re-anchored forward to it when execution-time refinement turns advanced the clock past the step's planned instant; an `At`-less refinement advances it by `TimeDelta`, mirroring the harness normalize. | The harness never reads it; it exists so the fix lives at the source (the generator) and `stepSetClock`'s non-monotonic warn tripwire stays a pure canary — mirror-drift is exactly what trips it, so the canary stays armed. |
 | Cross-seam metric keys | `metric_keys.go` — the single const block. Harness writes them; sim reads them. | A key rename is one edit; a compile error if a reference is missed. Keys owned entirely inside `sim/` are NOT mirrored here. |
+| Crash-scenario coverage | `crashScenarioCoverage` (`crash_matrix_test.go`) — the single greppable registry mapping each registered `crashpoint` name to its scenario. `TestCrashPointCoverageGate` enumerates `crashpoint.RegisteredNames()` against it. | A registered crashpoint with no scenario **fails the suite** — the mechanical gate that stops silent kill-point rot. The pre-crash `TurnOracle` is a local immutable snapshot, not shared mutable state, so it is deliberately not mapped here. |
 | Archived thread set | `Harness.archivedThreadIDs` — **index-derived** via `refreshArchivedSet` from the canonical archive index (`store.LoadArchiveIndex`, entries with `RecoveredAt == ""`), reassigned wholesale; refreshed when a tailed batch carries an archive/recovery line (the change trigger, not the source of truth) (F4/F8). | The archival-forgiveness filter in recall fidelity and `VerifyThreadAccounting` both read this set; a recovered thread drops out the instant its index entry is stamped, and a log-emission gap can no longer under-count it. |
 | Created thread set | `Harness.createdThreadIDs` — folded incrementally from tailed `thread.created` log lines. | Same pattern as above. |
 | W1 divergence tally | Accumulated directly in `runStep` (not read from `measure.Service` atomics post-run), so the tally survives `RestartSession`-driven Service churn. | A restart installs a fresh Service whose atomics start at zero; reading post-run would lose probes from prior sessions. |
@@ -670,6 +713,8 @@ If you see one of these proposed (or are about to write it), stop and surface th
 | "Just add `vim` shell-escape support" | Pulls in PTY mode-handoff complexity | Held until empirical pressure; user can suspend personant |
 | "Speculatively prefetch threads we *might* need" | Violates "every loaded thread is needed" | Model emits topic tag; runtime fetches what was named |
 | "Shorten the topic-tag instruction to save tokens" | Topic-tag emission is the load-bearing recognition signal | The system prompt's topic-tag directive is non-optional |
+| "Reset the worktree when it's dirty on startup" | A markerless-dirty tree is a legitimate hand-edit; resetting on dirtiness destroys user work (and, off primary, a whole day) | Gate `reset --hard` on the turn marker/journal signal, never on dirtiness; absorb hand-edits forward (Spec §4.5.8 cell 3) |
+| "Commit durability writes async / deferred (flush later)" | A commit lagging its canonical writes reintroduces the torn-window ambiguity the marker/commit protocol exists to eliminate | Commit ordering is synchronous, always; cost comes from cheaper steps (scoped add, disposable daily), never from widening the loss window |
 
 ---
 
