@@ -48,13 +48,13 @@ func ThreadDir(paths PersonantPaths, threadID string) string {
 // ThreadMetaPath returns the path to a thread's metadata file:
 // <Home>/threads/thr_<n>/thread.md (frontmatter + title, no body).
 func ThreadMetaPath(paths PersonantPaths, threadID string) string {
-	return filepath.Join(ThreadDir(paths, threadID), "thread.md")
+	return filepath.Join(ThreadDir(paths, threadID), threadMetaFileName)
 }
 
 // ThreadTurnsDir returns the path to a thread's turn-excerpt directory:
 // <Home>/threads/thr_<n>/turns/.
 func ThreadTurnsDir(paths PersonantPaths, threadID string) string {
-	return filepath.Join(ThreadDir(paths, threadID), "turns")
+	return filepath.Join(ThreadDir(paths, threadID), threadTurnsDirName)
 }
 
 // turnFileName returns the zero-padded excerpt filename for a turn

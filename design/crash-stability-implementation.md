@@ -14,14 +14,81 @@ journaled content bytes recovered from prompt-time onward;
 `reset --hard` fires iff the marker is present (never on dirtiness —
 markerless-dirty is a legitimate hand-edit, absorbed forward).
 
-**Shared contracts fixed here (R2/R3 both consume; single source):**
+**Ruled out permanently (user, 2026-07-17) — excluded, not deferred:**
+- **Async/deferred per-turn commit.** A commit lagging its canonical
+  writes reintroduces the torn-window ambiguity the marker/commit
+  protocol exists to eliminate. Commit ordering is synchronous, always.
+- **Loss-bar extension (commit batching / ≤N-turn windows).** The MAD
+  SOLUTION named per-N batching as a calibration fallback; closed by
+  the user: ≤1 turn is the bar, full stop. Cost reduction comes from
+  cheaper synchronous protocol steps (fsync-count reduction, scoped
+  staging, day-barrier pruning), never from widening the loss window.
+
+**Amendments (2026-07-17, user-directed):** (a) R3-addendum —
+marker-into-journal fold for op=turn, truncate-fsync drop, scoped
+per-turn add with full sweep at backstop/barrier, count-triggered gc;
+(b) R3b — DUAL-REPO scheme (supersedes the briefly-considered
+day-branch squash-merge; ratified 2026-07-17): two git DBs track the
+same worktree at different cadences. `.git-daily/` (custom git-dir via
+go-git) receives the per-turn commits and is NUKED AND RE-CREATED from
+current file state at each day barrier; `.git/` (primary) receives one
+day-grain commit at the barrier plus archival commits — so archival
+anchors are permanent by construction (no squash pruning, no
+keep-commits) and primary stays a single small pack forever
+(~365 commits/year). Load-bearing property: THE WORKTREE IS THE TRUTH
+and the daily DB is disposable scaffolding — every barrier crash window
+recovers by "commit worktree to primary if not yet committed; recreate
+daily"; no ordering can lose bytes. Barrier sequence: (1) archival
+batch against primary (if pressure), (2) day commit worktree → primary
+(`Personant-Day` trailer), (3) rm -rf .git-daily, (4) re-init daily +
+initial commit of current state. R3b design pass covers: autogit
+dual-handle op-scoping (turn ops → daily; barrier/archival → primary);
+recovery-observable mapping across two repos (daily-missing = normal
+morning, NOT a crash signature; op=barrier marker cells); derived-
+watermark re-anchoring (primary day-commit + intraday delta or content
+hash — daily hashes evaporate); morning-init cost measured; optional
+mid-day re-baseline knob (recovery needs only HEAD; nuke+recreate at
+any commit boundary caps loose-object drift, trading intraday git
+archaeology the event log already covers).
+
+**Shared contracts fixed here (R2/R3 both consume; single source;
+amended by the R3-addendum — per-turn durability-protocol cost
+reduction):**
 - Commit trailer `Personant-Turn: <turn-id>` on per-turn commits —
   recovery reads HEADTURN from it.
 - Marker file `$PERSONANT_HOME/op-in-progress.json` (gitignored;
-  survives reset): `{op: turn|archival|sleep|recovery, turn?, orig?}`.
+  survives reset): **batch ops only** —
+  `{op: archival|sleep|recovery, turn?, orig?}`. The per-turn marker is
+  FOLDED INTO THE JOURNAL: a NON-EMPTY `turn-journal.jsonl` IS the
+  in-flight-turn signal, its first record carrying the turn id
+  (`store.JournalOwner`); the first append's existing fsync makes the
+  signal durable for free. `store.WriteMarker` refuses `op=turn`; a
+  legacy `op=turn` marker file still reads and reconciles.
 - Journal records: JSONL, `{turn, kind: prompt|response, at, bytes}` —
-  fsync per append; truncate-to-empty on CommitTurn; torn final line
-  skipped by scan.
+  fsync per append; truncate-to-empty on CommitTurn (the truncate IS
+  the scope release — no separate marker clear); torn final line
+  skipped by scan. The truncate carries NO fsync: a power-loss
+  resurrection of a stale-but-truncated journal is cell 5's
+  redundant-journal case (turn == HEADTURN), and the next turn's first
+  append fsync makes the truncate durable before any new canonical
+  dirt can exist (see store.TruncateJournal's proof comment +
+  TestCell5_ResurrectedTruncatedJournal).
+- Per-turn staging is SCOPED (R3-addendum item 3): CommitTurn stages
+  only the turn's recorded write set (spine.jsonl, touched thread
+  files, the day's event log — recorded at each adapter write site,
+  never guessed) via `autogit.AddPaths`, O(write-set) with no tree
+  walk. The DAY-grain full `Add(".")` sweep is the session-close/
+  backstop Checkpoint's job AND a day-barrier responsibility —
+  TODO(R3b): give the day barrier an explicit full-sweep Checkpoint so
+  multi-day sessions absorb hand-edits at day close, not only at
+  session close. Consequences: hand-edits are absorbed at the next
+  FULL sweep, not the next turn; markerless-dirty stays never-reset;
+  recovery's untracked-debris identification is heuristic bounded by
+  quarantine, no longer proof-clean (sweepUntrackedDebris honesty
+  note).
+- Sleep-cycle gc fires on the day-off cadence AND on a loose-object
+  count threshold (`gcLooseObjectThreshold`, checked every
+  `gcCheckEveryCommits` per-turn commits — R3-addendum item 4).
 - Derived watermark `$PERSONANT_HOME/derived-watermark` (gitignored):
   built-from-commit hash; written only by the regeneration path.
 - Kill-point seam: named deterministic hooks (`crashpoint.At(name)`,

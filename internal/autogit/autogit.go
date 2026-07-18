@@ -227,6 +227,69 @@ func Add(ctx context.Context, paths store.PersonantPaths, patterns ...string) er
 	return nil
 }
 
+// AddPaths stages exactly the named repo-relative FILE paths, skipping
+// go-git's whole-tree status walk (#94 R3-addendum item 3: the scoped
+// per-turn staging). Each path is staged with SkipStatus, which hashes
+// and indexes just that file — O(write-set), not O(repo). An unchanged
+// recorded file is re-hashed and re-indexed to the same blob (wasted
+// but harmless); a recorded path that no longer exists on disk falls
+// back through go-git's status-assisted delete-from-index path (rare —
+// the adapter records only after successful writes). Directories are
+// NOT accepted: a directory add re-triggers the full status walk this
+// function exists to avoid; callers record file-level paths.
+func AddPaths(ctx context.Context, paths store.PersonantPaths, rels []string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("autogit.AddPaths: %w", err)
+	}
+	if len(rels) == 0 {
+		return nil
+	}
+	repo, err := git.PlainOpen(paths.Home)
+	if err != nil {
+		return fmt.Errorf("autogit.AddPaths: open repo: %w", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("autogit.AddPaths: worktree: %w", err)
+	}
+	for _, rel := range rels {
+		if err := wt.AddWithOptions(&git.AddOptions{Path: rel, SkipStatus: true}); err != nil {
+			return fmt.Errorf("autogit.AddPaths: add %q: %w", rel, err)
+		}
+	}
+	return nil
+}
+
+// LooseObjectCount counts the loose objects under .git/objects — files
+// in the two-hex-digit fan-out directories. Every un-packed commit
+// contributes a few (commit + tree(s) + blob(s)); the count is the
+// gc-pressure observable behind the count-triggered sleep gc
+// (#94 R3-addendum item 4). Pack files and other .git bookkeeping are
+// not counted. A missing objects dir counts as zero.
+func LooseObjectCount(paths store.PersonantPaths) (int, error) {
+	objectsDir := filepath.Join(paths.Home, ".git", "objects")
+	entries, err := os.ReadDir(objectsDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("autogit.LooseObjectCount: %w", err)
+	}
+	count := 0
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() || len(name) != 2 {
+			continue // pack/, info/, and friends
+		}
+		objs, err := os.ReadDir(filepath.Join(objectsDir, name))
+		if err != nil {
+			return 0, fmt.Errorf("autogit.LooseObjectCount: %w", err)
+		}
+		count += len(objs)
+	}
+	return count, nil
+}
+
 // Checkout restores a specific file from a specific commit to the
 // working tree. Implemented via tree-walk + raw write of the blob,
 // not via worktree.Checkout (which is whole-tree-only) and not via

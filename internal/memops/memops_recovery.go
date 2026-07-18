@@ -1,5 +1,7 @@
 package memops
 
+import "errors"
+
 // Crash-stability port types (#94, SPEC §4.5.8): the turn-content
 // journal kinds and the RecoveryReport that Reconcile returns. Kept in
 // their own file as a self-contained concern, like the archival types.
@@ -8,6 +10,17 @@ package memops
 // recovery outcomes (cells hit, reverted paths, preserved content). The
 // one substrate concession is AdoptCommit — an opaque recovery-point
 // token, the same concession ArchiveEntry.CommitHash already makes.
+
+// ErrConflictingMarker is wrapped by every adapter refusal caused by an
+// in-flight op marker that belongs to another operation's crash-recovery
+// scope (JournalTurn/CommitTurn/ReleaseTurn for a different turn,
+// Checkpoint/ArchiveThreads/Consolidate under ANY marker). The text is
+// the exact phrase the refusal messages already carried, so wrapping it
+// changes no message — it only makes the class errors.Is-detectable:
+// the chat layer keys on it to say "restart to recover" instead of
+// implying a retry will work, and to skip the session-close checkpoint
+// without treating the refusal as a fault.
+var ErrConflictingMarker = errors.New("conflicting in-flight marker")
 
 // TurnContentKind distinguishes the two per-turn journal appends: the
 // user prompt (journaled before the model call) and the model response

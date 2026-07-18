@@ -520,6 +520,20 @@ type MemoryOps interface {
 	// it, on its day-off idle window.
 	Consolidate(ctx context.Context, reason string) error
 
+	// MaybeGC runs the loose-object PRESSURE gc trigger (#94 R3-addendum
+	// item 4) — the per-turn counterpart to Consolidate's CADENCE trigger.
+	// The turn pipeline calls it once after each CommitTurn (outside the
+	// turn's recovery scope, which CommitTurn already released), so a long
+	// session that never crosses a day-off sleep cycle cannot grow .git
+	// unboundedly. Counting loose objects is a readdir sweep, so the check
+	// is throttled internally and the gc (a Consolidate pass, op=sleep)
+	// fires only past a threshold. Deliberately called from the pipeline
+	// rather than folded into CommitTurn so its repack cost never
+	// contaminates the CommitTurn latency measurement (turn_commit_ms). It
+	// runs synchronously and is strictly best-effort — every failure is
+	// swallowed, so there is nothing to return and it can never fail a turn.
+	MaybeGC(ctx context.Context)
+
 	// ---------- Crash-stability (#94, SPEC §4.5.8) ----------
 
 	// Reconcile repairs the substrate after any unclean shutdown and is
@@ -539,24 +553,41 @@ type MemoryOps interface {
 	// the prompt before the model call, the response before canonical
 	// writes — so a crash at any later instant can recover the bytes.
 	// The FIRST call of a turn marks the turn in-flight on the substrate
-	// as a side effect (there is no Begin/End bracket on the port; the
-	// in-flight marker's lifecycle is entirely substrate-internal). The
+	// as a side effect of the same durable append (there is no Begin/End
+	// bracket on the port, and no separate in-flight artifact to sync:
+	// in the file adapter the non-empty journal IS the signal). The
 	// append is durable (fsync) before return. A failure here aborts the
 	// turn before any canonical write — cheap, nothing to undo.
 	JournalTurn(ctx context.Context, turnID string, kind TurnContentKind, content []byte) error
 
 	// CommitTurn creates the per-turn durability recovery point: it
 	// commits the turn's canonical writes (tagged with turnID so
-	// Reconcile can tell a committed turn from a torn one), clears the
-	// in-flight marker, and truncates the content journal, in that
-	// order. A turn that changed nothing canonical still completes (the
-	// empty recovery point is skipped; marker and journal are still
-	// released). On failure the in-flight marker is left set, so the
-	// turn fails loudly into the ≤1-loss recovery path at next open
-	// rather than half-landing. `reason` is folded into the recovery
-	// point's forensic message (built from event counts, never user
-	// content).
+	// Reconcile can tell a committed turn from a torn one) and then
+	// truncates the content journal — the truncate IS the in-flight
+	// scope's release. A turn that changed nothing canonical still
+	// completes (the empty recovery point is skipped; the journal is
+	// still released). On failure the scope is left open, so the turn
+	// fails loudly into the ≤1-loss recovery path at next open rather
+	// than half-landing. `reason` is folded into the recovery point's
+	// forensic message (built from event counts, never user content).
 	CommitTurn(ctx context.Context, turnID, reason string) error
+
+	// ReleaseTurn releases an ABORTED turn's crash-recovery scope: the
+	// turn wrote nothing canonical (journal failure, model-consult
+	// failure, stream failure), so there is nothing to make durable —
+	// the content journal is truncated (the scope release)
+	// WITHOUT creating a recovery point. The event log is written
+	// continuously between recovery points, so a logs-only-dirty tree is
+	// the steady operating state, not in-flight debris: releasing
+	// markerless leaves it to be absorbed into the next successful
+	// turn's commit, exactly as recovery's cell-3/logs carve-out already
+	// treats it — and a provider-outage retry loop stops minting one
+	// commit per error. If the tree unexpectedly carries canonical dirt
+	// (a caller bug, or a hand-edit made mid-turn), the adapter falls
+	// back to the full CommitTurn path so torn-looking state is never
+	// left with its scope released. A scope belonging to a different
+	// turn is refused (ErrConflictingMarker), never released.
+	ReleaseTurn(ctx context.Context, turnID string) error
 
 	// ---------- Bootstrap and verification ----------
 

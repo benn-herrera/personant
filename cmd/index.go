@@ -9,7 +9,6 @@ import (
 
 	"personant/internal/log"
 	"personant/internal/memops"
-	"personant/internal/memops/fileadapter"
 )
 
 var (
@@ -32,11 +31,12 @@ var indexRebuildCmd = &cobra.Command{
 digest.json files atomically. Idempotent: a rebuild after a clean
 rebuild produces no changes.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		paths, err := resolvePaths()
+		// Reconcile-first (#94): rebuilding derived files from a torn
+		// canonical tree would bake crash debris into symbols.jsonl.
+		ops, err := reconciledOps()
 		if err != nil {
 			return err
 		}
-		ops := fileadapter.NewFileAdapter(paths)
 		opts := memops.IndexBuildOptions{
 			Quiet:  indexFlagQuiet,
 			Logger: stderrLogger(),
@@ -53,11 +53,12 @@ disk. Prints any drift to stdout. Exits 0 when all derived files match
 the rebuild output; exits 1 when drift is detected. Never writes
 anything.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		paths, err := resolvePaths()
+		// Reconcile-first (#94): drift measured against torn canonical
+		// state is noise, not signal.
+		ops, err := reconciledOps()
 		if err != nil {
 			return err
 		}
-		ops := fileadapter.NewFileAdapter(paths)
 		opts := memops.IndexBuildOptions{
 			Quiet:  indexFlagQuiet,
 			Logger: stderrLogger(),

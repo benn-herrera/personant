@@ -125,6 +125,9 @@ func RunScenario(t *testing.T, sc Scenario) *Harness {
 		h.Metrics.Set("final_thread_count", float64(len(recs)))
 	}
 	h.Metrics.Set("final_peak_history_symbols", float64(peakHistorySymbols(h.Paths)))
+	// #94 R3: end-of-run loose-object level — with per-turn commits this is
+	// the accrual since the last sleep-cycle gc, the gc-cadence watch metric.
+	h.Metrics.Set(metricGitLooseObjectsFinal, float64(looseObjectCount(h.Paths.Home)))
 
 	// Recovery-fetch gauge (design §6.3, AC1): the honest "recoverable,
 	// measured" signal. Runs ONCE here — AFTER the measured run and AFTER the
@@ -319,8 +322,48 @@ func stepExecTurn(t *testing.T, h *Harness, idx int, label string, step Step) (s
 	if h.liveClient != nil {
 		h.Metrics.Record(MetricRequestPromptTokens, float64(info.PromptTokens))
 	}
+	// Per-turn commit latency (#94 R3, the design's open cost question).
+	// The runtime measures its own CommitTurn wall-clock (TurnInfo); one
+	// sample per turn, mock and live alike — the commit is equally real on
+	// both paths. Harness-local key: written here, read from the metrics
+	// blob (no sim-side consumer yet), so per the registry discipline it
+	// stays out of metric_keys.go until a cross-seam reader exists.
+	h.Metrics.Record(metricTurnCommitMs, float64(info.CommitDuration.Microseconds())/1000.0)
+	// The other half of the measured per-turn crash-stability overhead:
+	// the two fsynced journal appends (prompt + response), summed by the
+	// runtime into TurnInfo.JournalDuration. Same one-sample-per-turn
+	// discipline as turn_commit_ms.
+	h.Metrics.Record(metricTurnJournalMs, float64(info.JournalDuration.Microseconds())/1000.0)
+	// The post-commit loose-object pressure gc (MaybeGC), measured by the
+	// runtime OUTSIDE the CommitDuration window (TurnInfo.GCDuration) so it
+	// no longer inflates turn_commit_ms. Zero on turns where the throttled
+	// check does not fire; a spike marks a turn that carried a repack.
+	h.Metrics.Record(metricTurnGCMs, float64(info.GCDuration.Microseconds())/1000.0)
 	return body, elapsed
 }
+
+// Harness-local crash-stability cost keys (#94 R3). turn_commit_ms is the
+// per-turn CommitTurn latency histogram and turn_journal_ms its journal
+// counterpart (the turn's two fsynced appends); turn_gc_ms is the
+// post-commit pressure-gc cost (MaybeGC), split out of turn_commit_ms so a
+// repack no longer contaminates the commit gauge; git_loose_objects_{pre,post}_gc
+// gauge loose-object accrual at each sleep cycle — the gc-interplay watch
+// metric (per-turn commits make loose-object growth ~turns/day, and the
+// sleep gc is the stated hard dependency that bounds it).
+const (
+	metricTurnCommitMs         = "turn_commit_ms"
+	metricTurnJournalMs        = "turn_journal_ms"
+	metricTurnGCMs             = "turn_gc_ms"
+	metricGitLooseObjectsPre   = "git_loose_objects_pre_gc"
+	metricGitLooseObjectsPost  = "git_loose_objects_post_gc"
+	metricGitLooseObjectsFinal = "final_git_loose_objects"
+	// R3-addendum item 4: packed-size + repack-duration growth gauges
+	// beside the loose-object ones. Harness-local per the registry
+	// discipline (written here, read from the metrics blob).
+	metricGitPackedBytesPre  = "git_packed_bytes_pre_gc"
+	metricGitPackedBytesPost = "git_packed_bytes_post_gc"
+	metricGitGCRepackMs      = "gc_repack_ms"
+)
 
 // stepUpdateEmbeddingIndex keeps the embedding index current (#98): a thread
 // created this turn must be embedded and added to the layer-2 index, or it is
@@ -798,9 +841,17 @@ func recordW1Class(h *Harness, class string) {
 func runSleepCycle(t *testing.T, h *Harness, idx int, label string) {
 	t.Helper()
 	pre := gitDirBytes(h.Paths.Home)
+	h.Metrics.Record(metricGitLooseObjectsPre, float64(looseObjectCount(h.Paths.Home)))
+	h.Metrics.Record(metricGitPackedBytesPre, float64(packedBytes(h.Paths.Home)))
+	gcStart := clock.Profiling()
 	if err := h.Ops.Consolidate(context.Background(), "sleep-cycle: day-off"); err != nil {
 		t.Fatalf("scenario step %d (%s): Consolidate: %v", idx+1, label, err)
 	}
+	// Repack duration (R3-addendum item 4): the wall-clock cost of the
+	// Consolidate pass (repack + prune + pack-refs) — the growth gauge's
+	// companion, so a rung shows what the reclaim COSTS as loose-object
+	// accrual scales with per-turn commits.
+	h.Metrics.Record(metricGitGCRepackMs, float64(clock.Since(gcStart).Microseconds())/1000.0)
 	// §6.4 recall-cache sweep: drop persisted .vec files for archived/absent
 	// threads, alongside the substrate gc. The cache is operational state the
 	// adapter's Consolidate cannot reach, so the seam is on the Service the
@@ -831,6 +882,8 @@ func runSleepCycle(t *testing.T, h *Harness, idx int, label string) {
 	}
 
 	post := gitDirBytes(h.Paths.Home)
+	h.Metrics.Record(metricGitLooseObjectsPost, float64(looseObjectCount(h.Paths.Home)))
+	h.Metrics.Record(metricGitPackedBytesPost, float64(packedBytes(h.Paths.Home)))
 
 	h.Metrics.Counter(MetricSleepCycles, 1)
 	h.Metrics.Record(MetricGitDirBytesPreGC, float64(pre))
@@ -838,6 +891,51 @@ func runSleepCycle(t *testing.T, h *Harness, idx int, label string) {
 	if pre > post {
 		h.Metrics.Counter(MetricGitDirBytesReclaimed, pre-post)
 	}
+}
+
+// looseObjectCount counts loose objects in home's .git/objects — files
+// under the two-hex-digit fan-out directories (pack/ and info/ excluded).
+// Per-turn commits (#94 R3) accrue ~2-4 loose objects per turn between
+// sleep-cycle gcs; this gauge is the growth-vs-reclaim forensic. Walk
+// errors degrade to the count so far (forensic, not load-bearing).
+func looseObjectCount(home string) int64 {
+	var n int64
+	objects := filepath.Join(home, ".git", "objects")
+	entries, err := os.ReadDir(objects)
+	if err != nil {
+		return 0
+	}
+	for _, e := range entries {
+		if !e.IsDir() || len(e.Name()) != 2 {
+			continue
+		}
+		files, err := os.ReadDir(filepath.Join(objects, e.Name()))
+		if err != nil {
+			continue
+		}
+		n += int64(len(files))
+	}
+	return n
+}
+
+// packedBytes sums the sizes of .git/objects/pack/* — the packed-store
+// footprint the sleep gc folds loose objects into. Grows step-wise at
+// each repack; paired with the loose-object gauges it separates "space
+// moved into packs" from "space reclaimed". Errors degrade to 0
+// (forensic, not load-bearing).
+func packedBytes(home string) int64 {
+	var n int64
+	packDir := filepath.Join(home, ".git", "objects", "pack")
+	entries, err := os.ReadDir(packDir)
+	if err != nil {
+		return 0
+	}
+	for _, e := range entries {
+		if info, err := e.Info(); err == nil && !e.IsDir() {
+			n += info.Size()
+		}
+	}
+	return n
 }
 
 // foldEndedSessionFlushCost drains a NOW-ENDING session's OBSERVED §6.5 flush

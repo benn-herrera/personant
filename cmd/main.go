@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -52,6 +55,37 @@ func resolvePaths() (store.PersonantPaths, error) {
 		return store.PathsForHome(flagHome), nil
 	}
 	return store.ResolvePaths()
+}
+
+// reconciledOps builds the substrate adapter and runs the startup
+// Reconcile before handing it to a CLI verb (#94, SPEC §4.5.8 — the R2
+// verbs-bypass-Reconcile carry). Every verb that READS or REBUILDS
+// substrate state must open through here: operating on an unreconciled
+// home would read torn canonical state back as truth (verify reporting
+// phantom errors, index rebuild baking crash debris into derived files).
+// Same refuse-on-error semantics as chat: a Reconcile failure refuses the
+// verb; the recovery marker is left behind so a retry converges. On a
+// home that was never initialized Reconcile fails to resolve HEAD — that
+// refusal is honest too (nothing to operate on); verbs do NOT scaffold
+// (`personant init` owns that).
+//
+// A non-routine reconcile prints one terse stderr note; the full detail
+// is in the event log and, interactively, the chat banner.
+func reconciledOps() (*fileadapter.FileAdapter, error) {
+	paths, err := resolvePaths()
+	if err != nil {
+		return nil, err
+	}
+	ops := fileadapter.NewFileAdapter(paths)
+	rep, err := ops.Reconcile(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("substrate reconcile failed — refusing to operate on an unreconciled home (rerun retries recovery): %w", err)
+	}
+	if !rep.Quiet() {
+		fmt.Fprintf(os.Stderr, "recovery: unclean shutdown repaired before opening (cells: %s); see event log\n",
+			strings.Join(rep.CellsHit, ", "))
+	}
+	return ops, nil
 }
 
 func init() {

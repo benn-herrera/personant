@@ -276,6 +276,11 @@ func TestCell3_HandEditNeverReset(t *testing.T) {
 // with turn trailer t1, then an in-flight turn t2 that journaled
 // prompt+response, dirtied a tracked file, dropped untracked debris,
 // and appended an event-log line beyond HEAD — killed before commit.
+//
+// R3-addendum: the journal appends themselves ARE the in-flight-turn
+// signal (MARKER(turn,t2) := non-empty journal, first record t2); no
+// marker file is written. The cell MEANINGS are unchanged — every
+// assertion below is identical to the marker-file era.
 func tornTurnHome(t *testing.T) (store.PersonantPaths, string) {
 	t.Helper()
 	paths := newHome(t)
@@ -293,10 +298,8 @@ func tornTurnHome(t *testing.T) (store.PersonantPaths, string) {
 
 	committed := readHome(t, paths, userMDRel)
 
-	// In-flight turn t2, torn mid-canonical-write:
-	if err := store.WriteMarker(paths, store.Marker{Op: store.OpTurn, Turn: "t2"}); err != nil {
-		t.Fatalf("WriteMarker: %v", err)
-	}
+	// In-flight turn t2, torn mid-canonical-write. The first journal
+	// append opens the scope — no marker file exists for op=turn.
 	if err := store.AppendJournal(paths, "t2", store.JournalPrompt, []byte("PROMPT-BYTES: what is the plan?")); err != nil {
 		t.Fatalf("AppendJournal: %v", err)
 	}
@@ -409,10 +412,8 @@ func TestCell5_TurnCommittedPreClear(t *testing.T) {
 	if err := autogit.Commit(ctx, paths, autogit.TurnCommitMessage("t2", "1 event"), 0, 0); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
-	// Crash window: commit landed, marker + journal never released.
-	if err := store.WriteMarker(paths, store.Marker{Op: store.OpTurn, Turn: "t2"}); err != nil {
-		t.Fatalf("WriteMarker: %v", err)
-	}
+	// Crash window: commit landed, journal never truncated — the
+	// non-empty journal is still signalling turn t2 in flight.
 	if err := store.AppendJournal(paths, "t2", store.JournalResponse, []byte("already committed")); err != nil {
 		t.Fatalf("AppendJournal: %v", err)
 	}
@@ -444,9 +445,6 @@ func TestCell6_CrashDuringModelCall_TrailerAbsent(t *testing.T) {
 	// is ⊥, which must read as "turn t1 not committed" — cell 6, never a
 	// false cell 5.
 	paths := baselineHome(t)
-	if err := store.WriteMarker(paths, store.Marker{Op: store.OpTurn, Turn: "t1"}); err != nil {
-		t.Fatalf("WriteMarker: %v", err)
-	}
 	if err := store.AppendJournal(paths, "t1", store.JournalPrompt, []byte("PROMPT-ONLY: model call never returned")); err != nil {
 		t.Fatalf("AppendJournal: %v", err)
 	}
@@ -478,6 +476,34 @@ func TestCell6_CrashDuringModelCall_TrailerAbsent(t *testing.T) {
 	if got := recoveryArtifacts(t, paths); len(got) != 1 {
 		t.Errorf("second reconcile changed artifacts: %v", got)
 	}
+}
+
+// TestCell6_TornOnlyJournalQuarantined asserts the F2 fix: a journal whose
+// only content is torn/corrupt (no well-formed records but bytes present)
+// has its RAW bytes quarantined before phase 7 truncates the live file,
+// per "recovery never deletes" — not silently discarded. A non-empty
+// journal is the op=turn signal; with an unrecoverable turn id and a clean
+// tree it classifies as cell 6.
+func TestCell6_TornOnlyJournalQuarantined(t *testing.T) {
+	paths := baselineHome(t)
+	// One corrupt line WITH a trailing newline: ScanJournal parses it to
+	// zero records and counts it torn (records==0, torn==1, bytes present).
+	const raw = "{not valid json at all}\n"
+	writeHome(t, paths, "turn-journal.jsonl", raw)
+
+	rep := reconcile(t, paths)
+	wantCells(t, rep, Cell6TurnNoWrites)
+	if rep.TornJournalRecords == 0 {
+		t.Error("torn journal records not counted")
+	}
+	// The raw bytes are recoverable byte-exact from quarantine, and the live
+	// journal is released — no artifact (there were no parseable records).
+	wantQuarantined(t, paths, "turn-journal.jsonl", raw)
+	if !eventLogged(t, paths, "recovery.quarantined") {
+		t.Error("missing recovery.quarantined event")
+	}
+	wantJournalEmpty(t, paths)
+	wantMarkerAbsent(t, paths)
 }
 
 // ---------- cells 7/8/9: archival family ----------
@@ -604,10 +630,8 @@ func TestCell7_TornTurnCoincidingWithUnstamped(t *testing.T) {
 	deletion := archivedUnstampedHome(t, paths, autogit.TurnCommitMessage("t1", "archive: 1 thread(s)"))
 	committed := readHome(t, paths, userMDRel)
 
-	// Torn turn t2 on top, no reconcile between the two damages.
-	if err := store.WriteMarker(paths, store.Marker{Op: store.OpTurn, Turn: "t2"}); err != nil {
-		t.Fatalf("WriteMarker: %v", err)
-	}
+	// Torn turn t2 on top, no reconcile between the two damages. The
+	// journal append is the turn signal.
 	if err := store.AppendJournal(paths, "t2", store.JournalPrompt, []byte("cell-7 prompt")); err != nil {
 		t.Fatalf("AppendJournal: %v", err)
 	}
@@ -696,6 +720,46 @@ func TestCell10_SleepMarker(t *testing.T) {
 	if rep.ClearedOp != "sleep" {
 		t.Errorf("ClearedOp = %q", rep.ClearedOp)
 	}
+	wantMarkerAbsent(t, paths)
+}
+
+// TestCell10_SleepPreservesJournal asserts the F1 fix: a non-empty turn
+// journal present under an op=sleep marker (the post-CommitTurn pressure-gc
+// window — power loss there can resurrect a not-yet-durably-truncated
+// journal while turn T's own commit is likewise not durable) is PRESERVED
+// before phase 7 truncates it, mirroring cell 8's contract-anomaly
+// handling, rather than silently discarded.
+func TestCell10_SleepPreservesJournal(t *testing.T) {
+	paths := baselineHome(t)
+	if err := store.WriteMarker(paths, store.Marker{Op: store.OpSleep}); err != nil {
+		t.Fatalf("WriteMarker: %v", err)
+	}
+	if err := store.AppendJournal(paths, "t7", store.JournalPrompt, []byte("SLEEP-WINDOW PROMPT")); err != nil {
+		t.Fatalf("AppendJournal: %v", err)
+	}
+	if err := store.AppendJournal(paths, "t7", store.JournalResponse, []byte("SLEEP-WINDOW RESPONSE")); err != nil {
+		t.Fatalf("AppendJournal: %v", err)
+	}
+
+	rep := reconcile(t, paths)
+	wantCells(t, rep, Cell10Sleep)
+	// The journaled content survives as a surfaced artifact (the anomaly
+	// note), keyed to the journal's own turn id...
+	if rep.PreservedTurn != "t7" || rep.PreservedContentPath == "" {
+		t.Errorf("preserved turn/path = %q/%q, want t7 + a path", rep.PreservedTurn, rep.PreservedContentPath)
+	}
+	arts := recoveryArtifacts(t, paths)
+	if len(arts) != 1 {
+		t.Fatalf("artifacts = %v, want one (the preserved sleep-window journal)", arts)
+	}
+	if content := readHome(t, paths, "recovery/"+filepath.Base(arts[0])); !strings.Contains(content, "SLEEP-WINDOW RESPONSE") {
+		t.Errorf("journal bytes missing from artifact:\n%s", content)
+	}
+	if !eventLogged(t, paths, "recovery.journal-recovered") {
+		t.Error("missing recovery.journal-recovered event")
+	}
+	// ...and the live journal is released.
+	wantJournalEmpty(t, paths)
 	wantMarkerAbsent(t, paths)
 }
 
@@ -916,16 +980,35 @@ func TestLogTailHealedAdditively(t *testing.T) {
 	}
 }
 
-func TestMarkerlessJournalResidueTruncated(t *testing.T) {
-	// The CommitTurn crash window between marker-clear and journal-
-	// truncate: markerless, clean, journal non-empty. The content is
-	// redundant with the committed turn — truncate, no artifact.
+// TestCell5_ResurrectedTruncatedJournal is the truncate-fsync-drop proof
+// (R3-addendum item 2): TruncateJournal carries no fsync, so a power
+// loss after CommitTurn returns can resurrect the just-committed turn's
+// stale-but-truncated journal. That resurrection state is EXACTLY the
+// commit-landed-truncate-lost crash window — journal non-empty with
+// turn T, HEADTURN==T, clean tree — which is cell 5's already-handled
+// redundant-journal case: truncate again, no artifact, zero loss. This
+// test constructs the resurrection state directly and asserts cell-5
+// handling, which is what licenses dropping the fsync.
+func TestCell5_ResurrectedTruncatedJournal(t *testing.T) {
 	paths := baselineHome(t)
+	writeHome(t, paths, userMDRel, "turn t3 content\n")
+	ctx := context.Background()
+	if err := autogit.Add(ctx, paths, "."); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := autogit.Commit(ctx, paths, autogit.TurnCommitMessage("t3", ""), 0, 0); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	// The resurrected journal: CommitTurn's truncate happened in the page
+	// cache but never reached disk; the pre-truncate bytes are back.
 	if err := store.AppendJournal(paths, "t3", store.JournalResponse, []byte("redundant")); err != nil {
 		t.Fatalf("AppendJournal: %v", err)
 	}
 
 	rep := reconcile(t, paths)
+	if !slices.Contains(rep.CellsHit, Cell5TurnCommitted) {
+		t.Errorf("CellsHit = %v, want cell-5 (resurrected journal is the redundant-journal case)", rep.CellsHit)
+	}
 	wantJournalEmpty(t, paths)
 	if len(recoveryArtifacts(t, paths)) != 0 {
 		t.Error("redundant journal content was preserved as an artifact")
@@ -933,6 +1016,59 @@ func TestMarkerlessJournalResidueTruncated(t *testing.T) {
 	if rep.ResetPerformed {
 		t.Error("journal residue triggered a reset")
 	}
+}
+
+// TestCell6_StaleJournalFromOlderTurnPreservedNotLost covers the other
+// resurrection corner: a stale journal whose turn is an OLDER committed
+// turn (HEAD has advanced past it — possible only if the resurrected
+// truncate predates the last commit's own journal appends, i.e. a
+// hand-restored or doubly-stale journal). HEADTURN≠T with a clean tree
+// classifies as cell 6: the content is preserved to an artifact
+// (redundant with a commit, but preserve-not-guess is the journal
+// discipline) and the journal truncated. No reset, no loss.
+func TestCell6_StaleJournalFromOlderTurnPreservedNotLost(t *testing.T) {
+	paths := baselineHome(t)
+	writeHome(t, paths, userMDRel, "turn t9 content\n")
+	ctx := context.Background()
+	if err := autogit.Add(ctx, paths, "."); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := autogit.Commit(ctx, paths, autogit.TurnCommitMessage("t9", ""), 0, 0); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if err := store.AppendJournal(paths, "t2", store.JournalResponse, []byte("stale older-turn bytes")); err != nil {
+		t.Fatalf("AppendJournal: %v", err)
+	}
+
+	rep := reconcile(t, paths)
+	if !slices.Contains(rep.CellsHit, Cell6TurnNoWrites) {
+		t.Errorf("CellsHit = %v, want cell-6", rep.CellsHit)
+	}
+	if rep.ResetPerformed {
+		t.Error("stale journal triggered a reset on a clean tree")
+	}
+	if len(recoveryArtifacts(t, paths)) != 1 {
+		t.Error("stale journal content was not preserved")
+	}
+	wantJournalEmpty(t, paths)
+}
+
+// TestLegacyTurnMarkerFileStillHonored: a pre-addendum home can carry an
+// op=turn marker FILE (WriteMarker refuses to create one now, so the
+// test writes the bytes directly). Recovery still honors it as the turn
+// signal and clears it — the read-tolerance contract in store.ReadMarker.
+func TestLegacyTurnMarkerFileStillHonored(t *testing.T) {
+	paths := baselineHome(t)
+	writeHome(t, paths, "op-in-progress.json", `{"op":"turn","turn":"t1"}`)
+
+	rep := reconcile(t, paths)
+	if !slices.Contains(rep.CellsHit, Cell6TurnNoWrites) {
+		t.Errorf("CellsHit = %v, want cell-6 (legacy marker, clean tree, nothing landed)", rep.CellsHit)
+	}
+	if rep.ClearedOp != "turn" || rep.ClearedTurn != "t1" {
+		t.Errorf("cleared op/turn = %q/%q, want turn/t1", rep.ClearedOp, rep.ClearedTurn)
+	}
+	wantMarkerAbsent(t, paths)
 }
 
 func TestCorruptMarkerRefusesOpen(t *testing.T) {

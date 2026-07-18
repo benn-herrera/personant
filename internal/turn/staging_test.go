@@ -661,7 +661,7 @@ func TestPruneStaging_EvictsMultiple(t *testing.T) {
 // model mock returns a benign topic-tag response so the rest of Run
 // completes without error.
 func TestRun_EvictsStaledStagingAtTopOfRun(t *testing.T) {
-	paths, meta := newChainHome(t)
+	paths, meta := newTestHome(t)
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello."},
 	}, nil)
@@ -700,7 +700,7 @@ func TestRun_EvictsStaledStagingAtTopOfRun(t *testing.T) {
 // TurnNumber=2 going in; Run bumps to 3; cutoff = 3-3+1 = 1; nothing
 // has StagedAt < 1, so no eviction and no log line.
 func TestRun_DoesNotEvictBeforeWindowClose(t *testing.T) {
-	paths, meta := newChainHome(t)
+	paths, meta := newTestHome(t)
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello."},
 	}, nil)

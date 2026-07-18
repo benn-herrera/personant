@@ -2,10 +2,12 @@ package fileadapter
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"personant/internal/autogit"
 	"personant/internal/memops"
+	"personant/internal/store"
 )
 
 // headHash is a test helper returning the current HEAD commit hash.
@@ -82,5 +84,63 @@ func TestCheckpoint_CleanTreeIsBenignNoOp(t *testing.T) {
 	}
 	if got := headHash(t, a); got != committed {
 		t.Fatalf("redundant Checkpoint advanced HEAD: %s -> %s", committed, got)
+	}
+}
+
+// TestCheckpoint_RefusedUnderInFlightScope (R3 review F1, R3-addendum
+// fold): a checkpoint under ANY in-flight scope — a non-empty turn
+// journal or a batch-op marker — is refused. A trailer-less commit of a
+// scope-retained turn's torn prefix would reconcile as cell 6 ("nothing
+// landed") and make the torn state permanent. The refusal wraps
+// memops.ErrConflictingMarker so the chat session-close can recognize it
+// and report "preserved for recovery" instead of a fault.
+func TestCheckpoint_RefusedUnderInFlightScope(t *testing.T) {
+	pinClock(t)
+	a := newAdapter(t)
+	ctx := context.Background()
+
+	// The torn-prefix shape: canonical dirt from an uncommitted turn,
+	// with the turn's scope still open — a non-empty journal (CommitTurn
+	// failed before its truncate).
+	rec := validSpine("thr_1", "prj_1")
+	if err := a.CreateThread(ctx, memops.ThreadWrite{
+		Spine: rec, Meta: validFrontmatter(rec), TurnExcerpt: "torn turn",
+	}); err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+	if err := store.AppendJournal(a.paths, "t9", store.JournalPrompt, []byte("torn turn prompt")); err != nil {
+		t.Fatalf("AppendJournal: %v", err)
+	}
+
+	before := headHash(t, a)
+	err := a.Checkpoint(ctx, "session-close")
+	if err == nil || !errors.Is(err, memops.ErrConflictingMarker) {
+		t.Fatalf("Checkpoint under in-flight turn scope: err=%v, want ErrConflictingMarker", err)
+	}
+	if got := headHash(t, a); got != before {
+		t.Fatalf("refused Checkpoint still advanced HEAD: %s -> %s", before, got)
+	}
+
+	// A batch-op marker refuses identically.
+	if err := store.WriteMarker(a.paths, store.Marker{Op: store.OpSleep}); err != nil {
+		t.Fatalf("WriteMarker: %v", err)
+	}
+	if err := a.Checkpoint(ctx, "session-close"); err == nil || !errors.Is(err, memops.ErrConflictingMarker) {
+		t.Fatalf("Checkpoint under op=sleep marker: err=%v, want ErrConflictingMarker", err)
+	}
+	if err := store.ClearMarker(a.paths); err != nil {
+		t.Fatalf("ClearMarker: %v", err)
+	}
+
+	// With the scope released the same tree checkpoints normally — the
+	// guard, not the dirt, was the blocker.
+	if err := store.TruncateJournal(a.paths); err != nil {
+		t.Fatalf("TruncateJournal: %v", err)
+	}
+	if err := a.Checkpoint(ctx, "session-close"); err != nil {
+		t.Fatalf("Checkpoint after scope release: %v", err)
+	}
+	if got := headHash(t, a); got == before {
+		t.Fatal("post-release Checkpoint did not commit the dirty tree")
 	}
 }

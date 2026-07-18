@@ -54,10 +54,10 @@ func PathsForHome(home string) PersonantPaths {
 func makePaths(home string) PersonantPaths {
 	return PersonantPaths{
 		Home:          home,
-		Spine:         filepath.Join(home, "spine.jsonl"),
+		Spine:         filepath.Join(home, spineFileName),
 		Symbols:       filepath.Join(home, "symbols.jsonl"),
-		ThreadsDir:    filepath.Join(home, "threads"),
-		ProjectsDir:   filepath.Join(home, "projects"),
+		ThreadsDir:    filepath.Join(home, threadsDirName),
+		ProjectsDir:   filepath.Join(home, projectsDirName),
 		DirectivesDir: filepath.Join(home, "directives"),
 		LogsDir:       filepath.Join(home, "logs"),
 		LogsArchive:   filepath.Join(home, "logs", "archive"),

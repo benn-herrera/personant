@@ -104,3 +104,51 @@ func TestRegisterEnumeratesSortedAndDeduped(t *testing.T) {
 		}
 	}
 }
+
+// mustCrash runs fn and asserts it panics with a *Crash at point.
+func mustCrash(t *testing.T, point string, fn func()) {
+	t.Helper()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatalf("expected crash at %s, got none", point)
+		}
+		c, ok := r.(*Crash)
+		if !ok || c.Point != point {
+			t.Fatalf("panic value %v (%T), want *Crash at %s", r, r, point)
+		}
+	}()
+	fn()
+}
+
+func TestArmOnHitFiresOnNthHit(t *testing.T) {
+	const name = "test.armOnHit"
+	disarm := Arm(name, ArmOnHit(3))
+	defer disarm()
+
+	// Hits 1 and 2 pass through; while pending, Armed reports false (the
+	// NEXT At will not fire) until the countdown reaches 1.
+	if Armed(name) {
+		t.Fatal("Armed true with 3 hits remaining")
+	}
+	At(name)
+	At(name)
+	if !Armed(name) {
+		t.Fatal("Armed false with the next hit due to fire")
+	}
+	mustCrash(t, name, func() { At(name) })
+
+	// The point stays armed at the fire threshold: a re-execution after
+	// the simulated crash still crashes (tests defer disarm to end it).
+	mustCrash(t, name, func() { At(name) })
+}
+
+func TestArmOnHitClampsToOne(t *testing.T) {
+	const name = "test.armOnHitClamp"
+	disarm := Arm(name, ArmOnHit(0))
+	defer disarm()
+	if !Armed(name) {
+		t.Fatal("ArmOnHit(0) did not clamp to fire-next")
+	}
+	mustCrash(t, name, func() { At(name) })
+}

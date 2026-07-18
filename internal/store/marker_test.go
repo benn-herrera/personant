@@ -13,10 +13,10 @@ func TestMarkerRoundTrip(t *testing.T) {
 		name string
 		m    Marker
 	}{
-		{"turn", Marker{Op: OpTurn, Turn: "t_42"}},
 		{"archival", Marker{Op: OpArchival, Orig: "threads/thr_9"}},
 		{"sleep", Marker{Op: OpSleep}},
 		{"recovery", Marker{Op: OpRecovery}},
+		{"recovery-of-turn", Marker{Op: OpRecovery, Orig: "turn", Turn: "t_42"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -50,7 +50,7 @@ func TestMarkerAbsentIsNotError(t *testing.T) {
 
 func TestMarkerClear(t *testing.T) {
 	paths := PathsForHome(t.TempDir())
-	if err := WriteMarker(paths, Marker{Op: OpTurn, Turn: "t_1"}); err != nil {
+	if err := WriteMarker(paths, Marker{Op: OpSleep}); err != nil {
 		t.Fatalf("WriteMarker: %v", err)
 	}
 	if err := ClearMarker(paths); err != nil {
@@ -69,7 +69,7 @@ func TestMarkerWriteIsAtomic(t *testing.T) {
 	// WriteMarker must route through WriteFileAtomic — leave no tmp- residue
 	// and produce a target the reader parses cleanly.
 	paths := PathsForHome(t.TempDir())
-	if err := WriteMarker(paths, Marker{Op: OpTurn, Turn: "t_7"}); err != nil {
+	if err := WriteMarker(paths, Marker{Op: OpArchival}); err != nil {
 		t.Fatalf("WriteMarker: %v", err)
 	}
 	tmpPath := tmpSiblingOf(paths.OpMarker)
@@ -86,6 +86,27 @@ func TestMarkerRejectsUnknownOp(t *testing.T) {
 	// And it wrote nothing.
 	if _, present, _ := ReadMarker(paths); present {
 		t.Fatal("a rejected marker was nonetheless persisted")
+	}
+}
+
+// TestMarkerRefusesTurnOpButReadsLegacy: the marker file is batch ops
+// only (R3-addendum fold) — WriteMarker refuses op=turn — but a legacy
+// op=turn file written by pre-addendum code still READS cleanly so
+// recovery can honor and clear it.
+func TestMarkerRefusesTurnOpButReadsLegacy(t *testing.T) {
+	paths := PathsForHome(t.TempDir())
+	if err := WriteMarker(paths, Marker{Op: OpTurn, Turn: "t_1"}); err == nil {
+		t.Fatal("WriteMarker accepted op=turn; the turn signal is the journal, not the marker file")
+	}
+	if _, present, _ := ReadMarker(paths); present {
+		t.Fatal("a refused op=turn marker was nonetheless persisted")
+	}
+	if err := os.WriteFile(paths.OpMarker, []byte(`{"op":"turn","turn":"t_9"}`), 0o644); err != nil {
+		t.Fatalf("seed legacy marker: %v", err)
+	}
+	m, present, err := ReadMarker(paths)
+	if err != nil || !present || m.Op != OpTurn || m.Turn != "t_9" {
+		t.Fatalf("legacy op=turn marker read = (%+v,%v,%v), want tolerated", m, present, err)
 	}
 }
 

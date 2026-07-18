@@ -10,12 +10,27 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
+	"personant/internal/clock"
+	"personant/internal/crashpoint"
 	"personant/internal/curator"
 	"personant/internal/memops"
 	"personant/internal/model"
 	"personant/internal/prompt"
 	"personant/internal/recall/measure"
+)
+
+// Crashpoints for the R4 W-TURN matrix (#94 R3): the turn pipeline's own
+// kill points. postJournalPreCanonical is the window between the fsynced
+// response journal append and the first canonical write of turn close;
+// betweenCanonicalRenames fires between successive canonical thread
+// writes inside closeTurnAndUpdateEngagement (a multi-hit point — R4
+// targets the kth crossing via crashpoint.ArmOnHit). Registered at
+// import time for the coverage gate.
+var (
+	cpPostJournalPreCanonical = crashpoint.Register("turn.postJournalPreCanonical")
+	cpBetweenCanonicalRenames = crashpoint.Register("turn.betweenCanonicalRenames")
 )
 
 // State is the per-session mutable runtime state passed to Run. Most
@@ -350,14 +365,63 @@ func LoadSession(ctx context.Context, ops memops.MemoryOps, project memops.Proje
 // RunWithInfo; a bool per cause IS the cap, so there is no tunable
 // constant.
 
-// commitOnStructuralChange gates the §3.11 turn-close commit cadence: when
-// true (the default), a turn that produced ≥1 structural change (thread
-// create / §3.5 close-retire) takes exactly one substrate Checkpoint at turn
-// close. Per-turn content writes never commit on their own — the
-// session-close commit (chat.go) is the safety net that flushes them.
-// Default-on; a §9-calibration toggle (not a config.toml setting — that file
-// is model choices only), flipped only to A/B the cadence in the sim.
-const commitOnStructuralChange = true
+// newTurnID mints the per-turn transaction id (#94, SPEC §4.5.8) carried
+// by the journal records (whose first record is the in-flight-turn
+// signal) and the commit trailer. Recovery
+// compares ids only for equality (journal turn vs HEADTURN), so the format
+// is free — but ids must not repeat across sessions: a fresh session's
+// turn colliding with a prior session's committed trailer would make a
+// cell-6 crash (nothing landed) read as cell 5 (committed), truncating a
+// journal that still held unrecovered content. The session-scoped turn
+// number alone repeats after every relaunch, so a real-clock instant is
+// folded in — clock.Profiling, NOT clock.Timeline. This is a legitimate
+// real-time read under the clock-discipline rule: the suffix is a
+// uniqueness token, not a simulated-world timestamp, and Timeline is
+// exactly the clock a sim pins — a pinned Timeline plus RestartSession's
+// TurnNumber reset minted IDENTICAL ids across sessions, defeating the
+// HEADTURN==T equality predicate (cell-5 misclassification truncating an
+// unpreserved journal). The t<N>- prefix stays for human readability.
+func newTurnID(turnNumber int) string {
+	return "t" + strconv.Itoa(turnNumber) + "-" + strconv.FormatInt(clock.Profiling().UnixNano(), 10)
+}
+
+// releaseAbortedTurn releases the turn's crash-recovery scope after a
+// PRE-CANONICAL abort (journal failure, model-consult failure, stream
+// failure): nothing canonical was written, so ReleaseTurn truncates the
+// journal (the scope release) WITHOUT a commit. The event log is
+// dirty on every turn, so a commit-shaped release was never empty — a
+// provider-outage retry loop emitted one real (logs-only) commit per
+// error; the markerless log dirt instead absorbs into the next
+// successful turn's commit, exactly as recovery's cell-3/logs carve-out
+// treats it. Without any release, the in-flight journal would survive
+// the abort and the NEXT turn's JournalTurn would refuse the
+// conflicting scope, wedging the session on a transient model error.
+//
+// Post-canonical failures never come here — they leave the scope open
+// (journal non-empty) so the turn fails loudly into the ≤1-loss
+// recovery path (Reconcile).
+//
+// context.WithoutCancel: the abort may itself be a context cancellation
+// (SIGINT mid-stream); the release — and the forensic log line on a
+// release failure — is cleanup that must still run. A release failure
+// is logged, never propagated — the abort's original error is the one
+// the caller needs, and an unreleased scope heals at the next Reconcile.
+func releaseAbortedTurn(ctx context.Context, state *State, turnID string) {
+	rctx := context.WithoutCancel(ctx)
+	if err := state.Ops.ReleaseTurn(rctx, turnID); err != nil {
+		_ = state.Ops.Log(rctx, memops.LogCategorySystem, "turn-abort-release-error",
+			"turn="+turnID+" err="+memops.SanitizeDetail(err.Error()))
+	}
+}
+
+// ErrMarkerRetained tags a turn failure that deliberately left the
+// turn's in-flight scope OPEN — the non-empty journal, the op=turn
+// signal (a CommitTurn failure: canonical writes
+// exist that no recovery point covers). Retrying in-session cannot
+// succeed — every subsequent JournalTurn refuses the conflicting scope
+// — so callers (the chat REPL) key on this to advise a restart, and to
+// warn that prompts typed in the wedged window are not captured.
+var ErrMarkerRetained = errors.New("turn recovery marker retained")
 
 // TurnInfo carries cheaply-available per-turn measurements a caller may
 // observe without re-deriving them from the substrate or the event log.
@@ -372,8 +436,27 @@ const commitOnStructuralChange = true
 // are true-by-construction and cannot stand in for it. On the mock path it
 // is whatever Usage the mock client reports (often a canned value or 0):
 // no special-casing — the number flows through honestly.
+//
+// TurnID is the per-turn transaction id (#94) stamped into the commit
+// trailer; CommitDuration is the measured wall-clock cost of the turn's
+// CommitTurn call — the per-turn-commit latency the crash-stability
+// design's measurement plan requires (the harness records it into the
+// turn_commit_ms histogram). JournalDuration is the summed wall-clock
+// cost of the turn's two fsynced JournalTurn appends (prompt +
+// response) — the other, previously un-instrumented half of the
+// measured ~160ms/turn crash-stability overhead (the harness records it
+// into the turn_journal_ms histogram beside turn_commit_ms).
+// GCDuration is the wall-clock cost of the post-commit loose-object
+// pressure gc (MemoryOps.MaybeGC, #94 R3-addendum item 4) — measured
+// OUTSIDE the CommitDuration window so a repack never contaminates
+// turn_commit_ms (the harness records it into turn_gc_ms). It is zero on
+// the common turn where the throttled check does not fire.
 type TurnInfo struct {
-	PromptTokens int
+	PromptTokens    int
+	TurnID          string
+	CommitDuration  time.Duration
+	JournalDuration time.Duration
+	GCDuration      time.Duration
 }
 
 // Run drives one complete user turn end-to-end (spec §3.0). It is a thin
@@ -400,7 +483,9 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 // usage.prompt_tokens for the fully-assembled request), and any error.
 // Step ordering:
 //
-//  1. Bump TurnNumber + window-close GC on staging (B.4 lifecycle).
+//  1. Bump TurnNumber, journal the prompt (fsync — opens the #94 turn
+//     recovery scope: the non-empty journal IS the in-flight-turn
+//     signal), then window-close GC on staging (B.4 lifecycle).
 //  2. Fire each preEvent through the §3.0 chain. preEvents are emitted
 //     AFTER staging GC but BEFORE the user.prompt delta, sharing the
 //     same TurnNumber. Use for tool.result, user.shell-capture,
@@ -424,8 +509,12 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 //     accumulates symbols, defers engagement) after the stream completes.
 //     Per §3.0.5 the model.response delta fires once with the full body,
 //     not per chunk.
-//  7. Close-out the turn: fire engagement updates with the coalesced
-//     symbol set (§3.0.4).
+//  7. Journal the response (fsync, before any canonical write), then
+//     close-out the turn: fire engagement updates with the coalesced
+//     symbol set (§3.0.4), run the §3.5 closure scan, and land the
+//     per-turn CommitTurn recovery point (#94). Archival (§3.8) and the
+//     working-set save run strictly AFTER CommitTurn, outside the turn's
+//     scope window.
 //  8. Return the response body with the topic tag stripped (matches what
 //     the user saw on out).
 //
@@ -435,7 +524,7 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 // out receives the streamed response body with the §5.1 topic tag
 // suppressed; pass io.Discard to keep the streaming behavior without
 // presenting tokens (e.g. tests that only assert on side-effects).
-func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput string, out io.Writer) (string, TurnInfo, error) {
+func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput string, out io.Writer) (_ string, _ TurnInfo, err error) {
 	if state == nil {
 		return "", TurnInfo{}, errors.New("turn: nil state")
 	}
@@ -489,6 +578,37 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	// off StagedAt-vs-TurnNumber, so the convention "TurnNumber reflects
 	// the in-flight turn" must hold for the whole of Run.
 	state.TurnNumber++
+
+	// Crash-stability (#94 R3): open the turn's recovery scope by
+	// journaling the prompt — durably (fsync) and BEFORE the model call,
+	// so a crash during the consult loses no typed content (SOLUTION
+	// principle 3). The first JournalTurn append IS the in-flight-turn
+	// signal (R3-addendum fold), and it runs before every canonical write
+	// below, which is what licenses recovery's marker-gated reset. A
+	// journal failure aborts the turn before anything canonical happens —
+	// clean error to the caller, scope released by the deferred handler.
+	turnID := newTurnID(state.TurnNumber)
+	journalStart := clock.Profiling()
+	jerr := state.Ops.JournalTurn(ctx, turnID, memops.TurnContentPrompt, []byte(userInput))
+	journalDur := clock.Since(journalStart)
+	if jerr != nil {
+		err = fmt.Errorf("turn: journal prompt: %w", jerr)
+		// The deferred release below is not yet armed — release directly.
+		releaseAbortedTurn(ctx, state, turnID)
+		return "", TurnInfo{}, err
+	}
+	// Pre-canonical abort handler: any error return between here and the
+	// first canonical write releases the turn scope (see
+	// releaseAbortedTurn). Once canonicalStarted flips, failures leave the
+	// scope open (journal non-empty) so the turn fails loudly into the
+	// ≤1-loss recovery path — including a CommitTurn failure (never
+	// half-release).
+	canonicalStarted := false
+	defer func() {
+		if err != nil && !canonicalStarted {
+			releaseAbortedTurn(ctx, state, turnID)
+		}
+	}()
 
 	// B.4 window-close GC: evict staging entries whose citation window
 	// closed at the start of this turn. Must run BEFORE the user.prompt
@@ -716,6 +836,19 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		break
 	}
 
+	// Crash-stability (#94 R3): journal the response — durably, BEFORE any
+	// canonical write — so the journal holds the full (prompt, response)
+	// byte pair for the in-flight turn. From here to CommitTurn a crash
+	// resolves to cell 4/6 with the content recoverable from the journal.
+	// A journal failure aborts pre-canonical (deferred release).
+	journalStart = clock.Profiling()
+	jerr = state.Ops.JournalTurn(ctx, turnID, memops.TurnContentResponse, []byte(full.Content))
+	journalDur += clock.Since(journalStart)
+	if jerr != nil {
+		return "", TurnInfo{}, fmt.Errorf("turn: journal response: %w", jerr)
+	}
+	crashpoint.At(cpPostJournalPreCanonical)
+
 	// #127 post-flight integrity gate (I1, design §3.3): the provider's
 	// usage.prompt_tokens is the only modality-agnostic authoritative
 	// count of the fully-assembled request. A count above Budget.TokenCeiling
@@ -755,7 +888,10 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	}
 
 	// Step 5: turn close — fire deferred engagement updates with the
-	// coalesced symbol set.
+	// coalesced symbol set. This is the first canonical write of the turn:
+	// from here on a failure leaves the scope open (fails into recovery)
+	// rather than releasing it.
+	canonicalStarted = true
 	if err := closeTurnAndUpdateEngagement(ctx, state, userInput, full.Content); err != nil {
 		return "", TurnInfo{}, fmt.Errorf("turn: close: %w", err)
 	}
@@ -769,45 +905,71 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "error", memops.SanitizeDetail(err.Error()))
 	}
 
-	// Step 5c: §3.8 cardinality-pressure archival scan. Like closure, it
-	// runs on EVERY turn (a spine grows past the watermark regardless of
-	// this turn's activity) and is opportunistic — a failure is logged and
-	// swallowed, never aborting the turn.
+	// Step 5c: CommitTurn — the per-turn durability recovery point (#94,
+	// SOLUTION principle 1). Every turn commits: the turn's canonical
+	// writes (content + any §3.5 structural changes from 5b) land in ONE
+	// commit carrying the Personant-Turn trailer, and the journal
+	// truncates (the scope release). This supersedes the former §3.11
+	// commit-on-structural-change Checkpoint (structural commits are
+	// absorbed — the reason string still reports the counts forensically);
+	// the session-close Checkpoint in chat.go survives only as a
+	// belt-and-braces backstop, normally a no-op. It MUST run after 5b:
+	// closure is a structural mutator and its writes must be on disk when
+	// CommitTurn stages Add(".").
+	//
+	// A CommitTurn failure is FATAL to the turn and leaves the scope open
+	// (never half-release): canonical writes exist that no recovery point
+	// covers, so the turn fails loudly into the ≤1-loss recovery path —
+	// the next Reconcile rolls back to the last committed turn and
+	// preserves this turn's journaled content.
+	reason := ""
+	if n := state.structuralCreates + state.structuralRetires + state.structuralWIPs; n > 0 {
+		reason = fmt.Sprintf("structural: +%d thread, -%d retired, ~%d wip",
+			state.structuralCreates, state.structuralRetires, state.structuralWIPs)
+	}
+	commitStart := clock.Profiling()
+	if cerr := state.Ops.CommitTurn(ctx, turnID, reason); cerr != nil {
+		// Both %w verbs wrap: callers match the cause with errors.Is/As as
+		// before, and additionally match ErrMarkerRetained to recognize the
+		// restart-to-recover wedge (see the sentinel's doc).
+		return "", TurnInfo{}, fmt.Errorf("turn %s: commit: %w [%w]", turnID, cerr, ErrMarkerRetained)
+	}
+	commitDur := clock.Since(commitStart)
+
+	// Loose-object pressure gc (#94 R3-addendum item 4) runs HERE, after the
+	// commit-timing capture, so its repack cost never contaminates
+	// turn_commit_ms. CommitTurn already released the turn's recovery scope
+	// (it truncated the journal), so this is a between-turns op in its own
+	// op=sleep scope; best-effort and synchronous, it never fails the turn.
+	gcStart := clock.Profiling()
+	state.Ops.MaybeGC(ctx)
+	gcDur := clock.Since(gcStart)
+
+	// Step 5d: §3.8 cardinality-pressure archival scan. Re-sequenced (#94,
+	// SOLUTION principle 6) to run strictly AFTER CommitTurn — archival
+	// runs BETWEEN turns, never inside a turn's marker window, in its own
+	// op=archival marker scope (owned by the adapter's ArchiveThreads).
+	// Like closure, it runs on every turn (a spine grows past the
+	// watermark regardless of this turn's activity) and is opportunistic —
+	// a failure is logged and swallowed, never aborting the turn.
 	if err := surfaceArchivalCandidates(ctx, state); err != nil {
 		_ = state.Ops.Log(ctx, memops.LogCategoryArchive, "error", memops.SanitizeDetail(err.Error()))
 	}
 
-	// Step 5d: persist the updated Layer B/C working-set membership so a
+	// Step 5e: persist the updated Layer B/C working-set membership so a
 	// clean shutdown→relaunch resumes the working set instead of
-	// cold-starting it empty. This MUST run after steps 5b/5c: closure
+	// cold-starting it empty. This MUST run after steps 5b/5d: closure
 	// retirement and archival both evict threads from ActiveThreads /
 	// DormantThreads, so saving any earlier would persist a stale set
 	// (a thread the same turn went on to evict). It also runs on
 	// no-engagement turns — closeTurnAndUpdateEngagement returns early
-	// then, but closure/archival can still have evicted something. A save
-	// failure is non-fatal: log and continue, consistent with the other
-	// close-time substrate calls (AgeFileChains, recall).
+	// then, but closure/archival can still have evicted something. The
+	// artifact is operational (gitignored), so writing it after CommitTurn
+	// is outside no marker scope's concern. A save failure is non-fatal:
+	// log and continue, consistent with the other close-time substrate
+	// calls (AgeFileChains, recall).
 	if err := state.Ops.SaveWorkingSet(ctx, state.ActiveThreads, state.DormantThreads); err != nil {
 		_ = state.Ops.Log(ctx, memops.LogCategorySession, "working-set-save-error", memops.SanitizeDetail(err.Error()))
-	}
-
-	// Step 5e: §3.11 commit-on-structural-change. The cadence check runs ONCE
-	// here at turn close, not at each mutation site, so a turn with ≥1
-	// structural change (thread create / §3.5 close-retire) yields EXACTLY one
-	// substrate Checkpoint — a close+create switch or a closure-storm (#82)
-	// coalesces to a single commit. The turn's accumulated content writes ride
-	// along in the same commit. This MUST run after 5b/5c/5d: closure and
-	// archival are the structural mutators, and the content they touched must
-	// be staged by the time Checkpoint calls Add("."). A Checkpoint failure is
-	// non-fatal (log and continue), consistent with the other close-time
-	// substrate calls; the session-close commit is the backstop. Archival
-	// commits via its own §3.8 batch, so it is excluded from the trigger.
-	if commitOnStructuralChange && state.structuralCreates+state.structuralRetires+state.structuralWIPs > 0 {
-		reason := fmt.Sprintf("structural: +%d thread, -%d retired, ~%d wip",
-			state.structuralCreates, state.structuralRetires, state.structuralWIPs)
-		if err := state.Ops.Checkpoint(ctx, reason); err != nil {
-			_ = state.Ops.Log(ctx, memops.LogCategorySession, "checkpoint-error", memops.SanitizeDetail(err.Error()))
-		}
 	}
 
 	// Step 6: derive the topic-tag-stripped body for the return value.
@@ -835,5 +997,11 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		state.History = append(state.History[:0:0], state.History[drop:]...)
 	}
 
-	return body, TurnInfo{PromptTokens: full.Usage.PromptTokens}, nil
+	return body, TurnInfo{
+		PromptTokens:    full.Usage.PromptTokens,
+		TurnID:          turnID,
+		CommitDuration:  commitDur,
+		JournalDuration: journalDur,
+		GCDuration:      gcDur,
+	}, nil
 }

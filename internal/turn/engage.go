@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"personant/internal/clock"
+	"personant/internal/crashpoint"
 	"personant/internal/memops"
 	"personant/internal/prompt"
 	"personant/internal/store"
@@ -203,12 +204,17 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 	// to it (applyFileEdits keys off engaged[0]).
 	engaged := make([]string, 0, len(ids))
 
-	// Owner first.
+	// Owner first. The W-TURN multi-write kill point fires after EACH
+	// canonical thread write in this function (owner, new-thread, each
+	// non-owner engagement) — R4 targets the kth boundary via
+	// crashpoint.ArmOnHit, exercising every torn prefix of the turn's
+	// canonical write set.
 	if ownerExisting != "" {
 		if err := updateExistingThread(ctx, state, resolved[ownerExisting], true, userInput, responseBody, now, turnSymbols, turnAnchors); err != nil {
 			return err
 		}
 		engaged = append(engaged, ownerExisting)
+		crashpoint.At(cpBetweenCanonicalRenames)
 	}
 
 	if hasNewTopic {
@@ -221,6 +227,7 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 			return err
 		}
 		engaged = append(engaged, newID)
+		crashpoint.At(cpBetweenCanonicalRenames)
 	}
 
 	for _, threadID := range validIDs {
@@ -231,6 +238,7 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 			return err
 		}
 		engaged = append(engaged, threadID)
+		crashpoint.At(cpBetweenCanonicalRenames)
 	}
 
 	// D2 fallback (ii): every referenced thread was a phantom and no

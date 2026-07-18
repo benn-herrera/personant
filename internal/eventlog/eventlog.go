@@ -51,7 +51,7 @@ func Log(paths store.PersonantPaths, category, action, details string) error {
 		details,
 	)
 
-	dayPath := filepath.Join(paths.LogsDir, now.Format("2006-01-02")+".log")
+	dayPath := filepath.Join(paths.LogsDir, dayFileName(now))
 
 	writeMu.Lock()
 	defer writeMu.Unlock()
@@ -68,6 +68,21 @@ func Log(paths store.PersonantPaths, category, action, details string) error {
 		return fmt.Errorf("eventlog: write %s: %w", dayPath, err)
 	}
 	return nil
+}
+
+// dayFileName is the daily-rotation file name for an instant — the one
+// place the YYYY-MM-DD.log convention lives.
+func dayFileName(at time.Time) string {
+	return at.Format("2006-01-02") + ".log"
+}
+
+// DayLogRel returns the repo-relative (slash) path of the event-log file
+// an append at instant `at` lands in — the seam the file adapter's
+// scoped per-turn staging (#94 R3-addendum) uses to record which log
+// file a turn's event lines touched. Same naming source as Log itself,
+// so the recorded path cannot drift from the written one.
+func DayLogRel(at time.Time) string {
+	return "logs/" + dayFileName(at)
 }
 
 // LogContextModified emits the per-§3.0 chain logging step. source is

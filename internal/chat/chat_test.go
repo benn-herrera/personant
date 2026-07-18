@@ -369,11 +369,9 @@ func TestRunRecoveryBannerAfterTornTurn(t *testing.T) {
 	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
 	gitBaseline(t, paths)
 
-	// Torn turn t2: marker set, prompt journaled, a tracked canonical
-	// file dirtied, killed before the per-turn commit.
-	if err := store.WriteMarker(paths, store.Marker{Op: store.OpTurn, Turn: "t2"}); err != nil {
-		t.Fatalf("WriteMarker: %v", err)
-	}
+	// Torn turn t2: prompt journaled (the non-empty journal is the
+	// in-flight-turn signal), a tracked canonical file dirtied, killed
+	// before the per-turn commit.
 	if err := store.AppendJournal(paths, "t2", store.JournalPrompt, []byte("lost prompt")); err != nil {
 		t.Fatalf("AppendJournal: %v", err)
 	}
@@ -458,5 +456,96 @@ func TestRunReconcileFailureRefusesToOpen(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "active:") {
 		t.Errorf("session banner printed despite refusal:\n%s", stdout.String())
+	}
+}
+
+// failCommitOps wraps the real adapter, failing every CommitTurn — the
+// post-canonical marker-retained failure shape (R3 review F1/F4).
+type failCommitOps struct {
+	memops.MemoryOps
+}
+
+func (f failCommitOps) CommitTurn(ctx context.Context, turnID, reason string) error {
+	return errors.New("injected commit failure")
+}
+
+// TestRunMarkerRetainedWedgeThenQuitRecovers is the end-to-end quit path
+// of a marker-retained turn failure (R3 review F1 + F4):
+//
+//   - the failed turn's error carries the restart-to-recover advisory
+//     (retry cannot work; the marker is retained);
+//   - a prompt typed in the wedged window is refused before it is
+//     journaled — the advisory says it is NOT captured;
+//   - /quit: the session-close Checkpoint is REFUSED by the marker guard
+//     (committing the torn prefix trailer-less would reconcile as cell 6
+//     and make it permanent) and chat reports the state as preserved;
+//   - reopen: Reconcile fires the cell-4 rollback on the preserved shape.
+func TestRunMarkerRetainedWedgeThenQuitRecovers(t *testing.T) {
+	paths := scaffoldHome(t)
+	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
+	gitBaseline(t, paths)
+
+	headBefore, err := autogit.HeadHash(context.Background(), paths)
+	if err != nil {
+		t.Fatalf("HeadHash: %v", err)
+	}
+
+	mock := model.NewScriptedMock([]model.Response{
+		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHi there."},
+	}, nil)
+	var stdout, stderr bytes.Buffer
+	in := strings.NewReader("hello\nwedged prompt\n/quit\n")
+	if err := Run(Options{
+		Ops:             failCommitOps{MemoryOps: newOps(paths)},
+		ExplicitProject: "prj_1",
+		Stdin:           in,
+		Stdout:          &stdout,
+		Stderr:          &stderr,
+		Client:          mock,
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// F4: both the commit failure and the wedged-window journal refusal
+	// carry the restart advisory.
+	if got := strings.Count(stderr.String(), "restart personant to recover"); got != 2 {
+		t.Errorf("restart advisory printed %d time(s), want 2; stderr:\n%s", got, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "conflicting in-flight marker") {
+		t.Errorf("wedged prompt was not refused on the retained scope; stderr:\n%s", stderr.String())
+	}
+
+	// F1: the session-close checkpoint was refused, reported as preserved,
+	// and nothing was committed — HEAD still at the pre-session baseline.
+	if !strings.Contains(stdout.String(), "unclean turn state preserved for recovery") {
+		t.Errorf("missing preserved-for-recovery close message; stdout:\n%s", stdout.String())
+	}
+	if strings.Contains(stderr.String(), "warn: session-close checkpoint") {
+		t.Errorf("marker refusal surfaced as a checkpoint fault; stderr:\n%s", stderr.String())
+	}
+	headAfter, err := autogit.HeadHash(context.Background(), paths)
+	if err != nil {
+		t.Fatalf("HeadHash: %v", err)
+	}
+	if headAfter != headBefore {
+		t.Fatalf("session-close committed a torn prefix: %s → %s", headBefore, headAfter)
+	}
+	if owner, inFlight, jerr := store.JournalOwner(paths); jerr != nil || !inFlight || owner == "" {
+		t.Fatalf("turn scope not preserved across quit: owner=%q inFlight=%v err=%v", owner, inFlight, jerr)
+	}
+
+	// Reopen: the cell-4 rollback fires on the preserved torn-turn shape.
+	rep, err := newOps(paths).Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if !rep.ResetPerformed {
+		t.Errorf("Reconcile did not roll the torn turn back; cells=%v", rep.CellsHit)
+	}
+	if !strings.Contains(strings.Join(rep.CellsHit, ","), "cell-4-torn-turn") {
+		t.Errorf("cells = %v, want cell-4-torn-turn", rep.CellsHit)
+	}
+	if _, inFlight, _ := store.JournalOwner(paths); inFlight {
+		t.Error("turn scope survived recovery")
 	}
 }

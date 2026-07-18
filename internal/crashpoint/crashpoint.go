@@ -51,8 +51,14 @@ type Crash struct {
 func (c *Crash) Error() string { return "crashpoint: simulated crash at " + c.Point }
 
 var (
-	mu       sync.Mutex
-	armed    = map[string]struct{}{} // currently-armed points (test-only)
+	mu sync.Mutex
+	// armed maps an armed point to its remaining hit countdown: N means
+	// "fire on the Nth At from now" (ArmOnHit); the default is 1 (fire on
+	// the next At, the original behavior). The countdown never drops below
+	// 1 — once it reaches 1 the point fires on that hit and every later
+	// one until Disarm'd, so the default single-hit semantics are the
+	// degenerate n=1 case, not a separate mode.
+	armed    = map[string]int{}
 	registry = map[string]struct{}{} // every Register'd point name
 	// anyArmed is the fast-path gate: false ⇒ no point is armed, so At and
 	// Armed return without taking mu. Written under mu, read locklessly.
@@ -87,42 +93,78 @@ func RegisteredNames() []string {
 	return names
 }
 
-// At is the kill-point hook. When name is armed it panics with a *Crash
-// sentinel; otherwise it is a no-op. Unarmed cost is one atomic load.
+// At is the kill-point hook. When name is armed and its hit countdown is
+// exhausted it panics with a *Crash sentinel; otherwise it is a no-op
+// (decrementing the countdown when armed for a later hit). Unarmed cost
+// is one atomic load.
 func At(name string) {
 	if !anyArmed.Load() {
 		return
 	}
-	if isArmed(name) {
+	if fire(name) {
 		panic(&Crash{Point: name})
 	}
 }
 
-// Armed reports whether name is currently armed, for call sites that must
-// branch into a crash-specific code path (e.g. a torn-write variant) so
-// they can stage on-disk residue before the At that panics. Unarmed cost
-// is one atomic load.
+// fire consumes one hit of name's countdown and reports whether this hit
+// is the one that crashes.
+func fire(name string) bool {
+	mu.Lock()
+	defer mu.Unlock()
+	n, ok := armed[name]
+	if !ok {
+		return false
+	}
+	if n > 1 {
+		armed[name] = n - 1
+		return false
+	}
+	return true
+}
+
+// Armed reports whether the NEXT At(name) will panic, for call sites that
+// must branch into a crash-specific code path (e.g. a torn-write variant)
+// so they can stage on-disk residue before the At that panics. A point
+// armed for a later hit (ArmOnHit(n>1) with hits remaining) reports
+// false — its next At is still a no-op. Unarmed cost is one atomic load.
 func Armed(name string) bool {
 	if !anyArmed.Load() {
 		return false
 	}
-	return isArmed(name)
-}
-
-func isArmed(name string) bool {
 	mu.Lock()
 	defer mu.Unlock()
-	_, ok := armed[name]
-	return ok
+	return armed[name] == 1
 }
 
-// Arm marks name so the next At(name) panics (and Armed(name) reports
-// true). It is test-only by convention — nothing in production arms a
-// point. It returns a disarm closure; a test should defer it so the arm
-// never leaks into a sibling test.
-func Arm(name string) (disarm func()) {
+// ArmOption customizes Arm. The zero configuration (no options) fires on
+// the next At — the original single-hit behavior.
+type ArmOption func(*armConfig)
+
+type armConfig struct{ hit int }
+
+// ArmOnHit arms the point to fire on the nth At(name) from now (1-based;
+// n=1 is the default next-hit behavior, n<1 is clamped to 1). This is the
+// multi-write-prefix knob: a call site that passes the same point several
+// times per operation (e.g. between successive canonical renames) can be
+// killed at exactly the kth crossing.
+func ArmOnHit(n int) ArmOption {
+	return func(c *armConfig) { c.hit = n }
+}
+
+// Arm marks name so a subsequent At(name) panics — the next one by
+// default, the nth with ArmOnHit(n). It is test-only by convention —
+// nothing in production arms a point. It returns a disarm closure; a
+// test should defer it so the arm never leaks into a sibling test.
+func Arm(name string, opts ...ArmOption) (disarm func()) {
+	cfg := armConfig{hit: 1}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if cfg.hit < 1 {
+		cfg.hit = 1
+	}
 	mu.Lock()
-	armed[name] = struct{}{}
+	armed[name] = cfg.hit
 	anyArmed.Store(true)
 	mu.Unlock()
 	return func() { Disarm(name) }

@@ -505,11 +505,13 @@ working-set.json
 # Crash-stability substrate (#94, SPEC §4.5.8) — all operational, never
 # canonical. They must survive a recovery reset --hard (git-ignored files
 # are untouched by reset), which is precisely why they are not tracked:
-#   - op-in-progress.json: the op-typed in-flight marker. Its survival
-#     across reset is what lets recovery read "an op was running" after
-#     reverting the worktree.
+#   - op-in-progress.json: the batch-op in-flight marker (archival/sleep/
+#     recovery). Its survival across reset is what lets recovery read
+#     "an op was running" after reverting the worktree.
 #   - turn-journal.jsonl: prompt/response content journal, truncated on
-#     CommitTurn. Tracking it would commit transient in-flight bytes.
+#     CommitTurn. A NON-EMPTY journal is also the in-flight-TURN signal
+#     (its first record carries the turn id; the append's fsync makes the
+#     signal durable). Tracking it would commit transient in-flight bytes.
 #   - derived-watermark: built-from-commit hash for the regeneration path;
 #     a derived pointer, rebuildable, never canonical.
 op-in-progress.json

@@ -7,10 +7,19 @@ import (
 	"os"
 )
 
-// OpKind is the operation class recorded in the op-in-progress marker.
-// Its presence at open time is exactly what authorizes recovery's
-// reset --hard (SPEC §4.5.8): a markerless-dirty tree is a legitimate
-// hand-edit and is never reset.
+// OpKind is the operation class of an in-flight crash-recovery scope.
+// The in-flight signal — whichever artifact carries it — is exactly what
+// authorizes recovery's reset --hard (SPEC §4.5.8): a signal-less-dirty
+// tree is a legitimate hand-edit and is never reset.
+//
+// Two carriers (#94 R3-addendum):
+//   - op=turn: a NON-EMPTY turn-journal.jsonl (first record carries the
+//     turn id — see JournalOwner). The journal append's existing fsync
+//     makes the signal durable for free; there is no per-turn marker
+//     file. OpTurn survives here as recovery's effective-op vocabulary
+//     (cell dispatch, the re-entry marker's orig field).
+//   - batch ops (archival/sleep/recovery): the marker FILE below —
+//     per-batch, not per-turn cost.
 type OpKind string
 
 const (
@@ -29,14 +38,17 @@ var validOpKinds = map[OpKind]struct{}{
 	OpRecovery: {},
 }
 
-// Marker is the on-disk op-in-progress record (op-in-progress.json). It
-// is present iff a mutating operation is mid-flight. The file is
-// gitignored and survives a reset --hard so recovery can read it after
-// reverting the worktree.
+// Marker is the on-disk op-in-progress record (op-in-progress.json) for
+// BATCH operations only (archival/sleep/recovery). It is present iff
+// such an operation is mid-flight; the per-turn scope never touches this
+// file (its signal is the journal — see OpKind). The file is gitignored
+// and survives a reset --hard so recovery can read it after reverting
+// the worktree.
 //
-// Contract: Op is one of the OpKind constants. Turn carries the turn-id
-// for op=turn; Orig carries the original path/id for op=archival (the
-// cell-9 unstamped-repair anchor). Both are omitted when empty.
+// Contract: Op is one of the batch OpKind constants (WriteMarker refuses
+// op=turn). Turn carries a turn id only on the op=recovery re-entry
+// marker whose orig is a turn; Orig carries the original op for
+// op=recovery. Both are omitted when empty.
 type Marker struct {
 	Op   OpKind `json:"op"`
 	Turn string `json:"turn,omitempty"`
@@ -44,14 +56,20 @@ type Marker struct {
 }
 
 // WriteMarker atomically writes m to op-in-progress.json. It is a marker
-// boundary: m.Op must be a known OpKind, else the write is refused (a
-// contract check — an unknown op is a caller bug, never persisted).
+// boundary: m.Op must be a known BATCH OpKind, else the write is refused
+// (a contract check — an unknown op is a caller bug, never persisted,
+// and op=turn never uses the marker file: the non-empty turn journal is
+// the in-flight-turn signal, so a per-turn marker write here would be a
+// regression to the folded-away protocol).
 func WriteMarker(paths PersonantPaths, m Marker) error {
 	if paths.OpMarker == "" {
 		return errors.New("store: WriteMarker: PersonantPaths.OpMarker is empty")
 	}
 	if _, ok := validOpKinds[m.Op]; !ok {
 		return fmt.Errorf("store: WriteMarker: unknown op %q", m.Op)
+	}
+	if m.Op == OpTurn {
+		return errors.New("store: WriteMarker: op=turn never uses the marker file (the turn journal is the in-flight-turn signal; the marker file is batch ops only)")
 	}
 	data, err := json.Marshal(m)
 	if err != nil {
@@ -68,6 +86,10 @@ func WriteMarker(paths PersonantPaths, m Marker) error {
 // nil error — not an error. A present-but-malformed marker IS an error:
 // it is a corrupt in-flight record, and recovery must not silently treat
 // corruption as "no op running".
+//
+// Read tolerance: an op=turn marker file (written by pre-addendum code,
+// never by WriteMarker now) still parses — recovery honors it as the
+// legacy turn signal and clears it, so an old home reconciles cleanly.
 func ReadMarker(paths PersonantPaths) (m Marker, present bool, err error) {
 	if paths.OpMarker == "" {
 		return Marker{}, false, errors.New("store: ReadMarker: PersonantPaths.OpMarker is empty")

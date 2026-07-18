@@ -7,11 +7,26 @@
 //
 // # The state machine (observables → cell)
 //
-// Observables at open: MARKER (the op-in-progress marker, op-typed),
-// WT (canonical worktree dirtiness vs HEAD — see the logs/ carve-out
+// Observables at open: MARKER (the in-flight-op signal, op-typed), WT
+// (canonical worktree dirtiness vs HEAD — see the logs/ carve-out
 // below), HEADTURN (the turn id in HEAD's commit trailer, ⊥ when
 // absent), ARCH (unstamped archive-index entries, evaluated AFTER
 // worktree normalization), DERIVED (watermark vs HEAD).
+//
+// MARKER has two carriers (the R3-addendum marker-into-journal fold):
+//
+//   - MARKER(turn,T) := the turn journal is NON-EMPTY and its first
+//     record carries turn id T (T=⊥ for a torn/corrupt first record —
+//     still an in-flight turn, id unknown, which HEADTURN≠⊥ can never
+//     equal, so it classifies as "not committed": cell 4/6, never a
+//     false cell 5). The journal append's fsync makes the signal
+//     durable; there is no per-turn marker file. (A legacy op=turn
+//     marker FILE from pre-addendum code is still honored and cleared.)
+//   - MARKER(archival|sleep|recovery) := the op-in-progress.json marker
+//     file — batch ops only.
+//
+// The cells below are UNCHANGED in meaning; only the op=turn carrier
+// moved from the marker file into the journal.
 //
 //	cell 1  marker absent, clean, derived fresh      → no-op
 //	cell 2  marker absent, clean, derived stale      → rebuild derived, write watermark
@@ -37,10 +52,12 @@
 // forward, never destroyed. That is safe because markerless dirt is
 // provably not crash debris: the only writers of multi-file canonical
 // state (turn close, archival, any future canonical-touching sleep op)
-// are REQUIRED to set the op marker before their first canonical write
-// and clear it only after their commit lands — so any crash that could
-// leave torn canonical writes necessarily leaves the marker too, and a
-// dirty-and-markerless worktree cannot have been produced by a crash.
+// are REQUIRED to open their scope before their first canonical write —
+// the turn path by its fsynced first journal append, the batch ops by
+// the marker file — and release it only after their commit lands, so
+// any crash that could leave torn canonical writes necessarily leaves
+// the in-flight signal too, and a dirty-and-markerless worktree cannot
+// have been produced by a crash.
 // Gating the reset on git-dirtiness instead of marker presence would
 // silently destroy user edits; gating on the marker alone is what makes
 // reset --hard a ≤1-turn-loss operation instead of a data-loss defect.
@@ -88,14 +105,15 @@
 // tracked path's bytes are snapshotted there before a reset reverts
 // it. See the quarantine type in logs.go for the full rationale.
 //
-// # Deferred carries (adjudicated in the R2 review, owned elsewhere)
+// # Deferred carries (adjudicated in the R2 review)
 //
-// Two review findings are deliberately NOT addressed in this package:
-//   - CLI verbs that touch the substrate without running Reconcile
-//     first (the verbs-bypass-Reconcile gap) — an R3/R5 sequencing
-//     decision; the chat path already wires Init → Reconcile → open.
-//   - Crash-injection seam gaps (arm-on-Nth-hit, a kill point inside
-//     the ResetHard loop, the Add/Commit gap) — R4 owns the seam spec.
+// Status after R3: the verbs-bypass-Reconcile gap is CLOSED (cmd's
+// substrate-reading verbs open through reconciledOps — same refuse-on-
+// error semantics as chat); arm-on-Nth-hit (crashpoint.ArmOnHit) and the
+// Add/Commit-gap kill point (fileadapter.CommitTurn.postAddPreCommit)
+// are landed.
+// Still open for R4: a kill point inside the ResetHard loop, and the
+// exhaustive kill-point matrix itself.
 package recovery
 
 import (
@@ -184,15 +202,34 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 		// open; the file is left untouched for forensics.
 		return rep, fmt.Errorf("recovery: %w", err)
 	}
+	records, torn, err := store.ScanJournal(paths)
+	if err != nil {
+		return rep, fmt.Errorf("recovery: scan journal: %w", err)
+	}
+	rep.TornJournalRecords = torn
+
 	eff, effPresent := m, markerPresent
 	reentry := false
-	if markerPresent && m.Op == store.OpRecovery {
+	switch {
+	case markerPresent && m.Op == store.OpRecovery:
 		reentry = true
 		eff, effPresent, err = decodeOrig(m)
 		if err != nil {
 			return rep, fmt.Errorf("recovery: %w", err)
 		}
+	case !markerPresent && (len(records) > 0 || torn > 0):
+		// MARKER(turn,T) — the journal carrier (see the package doc): a
+		// non-empty journal is the in-flight-turn signal, its first record
+		// the turn id. All-torn journal ⇒ T=⊥ ("" — which never equals a
+		// real HEADTURN, so the turn reads as uncommitted: cell 4/6).
+		turnID := ""
+		if len(records) > 0 {
+			turnID = records[0].Turn
+		}
+		eff, effPresent = store.Marker{Op: store.OpTurn, Turn: turnID}, true
 	}
+	// (A legacy op=turn marker FILE — markerPresent with m.Op==OpTurn —
+	// falls through as eff=m unchanged: pre-addendum homes still honor it.)
 
 	head, err := autogit.HeadHash(ctx, paths)
 	if err != nil {
@@ -202,7 +239,7 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 	if err != nil {
 		return rep, fmt.Errorf("recovery: worktree state: %w", err)
 	}
-	dirty := canonicalDirty(wt.DirtyPaths)
+	dirty := CanonicalDirty(wt.DirtyPaths)
 	headTurn, err := autogit.HeadTurn(ctx, paths)
 	if err != nil {
 		return rep, fmt.Errorf("recovery: read HEAD turn trailer: %w", err)
@@ -211,11 +248,6 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 	if err != nil {
 		return rep, fmt.Errorf("recovery: read derived watermark: %w", err)
 	}
-	records, torn, err := store.ScanJournal(paths)
-	if err != nil {
-		return rep, fmt.Errorf("recovery: scan journal: %w", err)
-	}
-	rep.TornJournalRecords = torn
 	unstamped, err := unstampedEntries(paths)
 	if err != nil {
 		return rep, fmt.Errorf("recovery: read archive index: %w", err)
@@ -266,7 +298,16 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 		switch {
 		case committed:
 			// Cell 5: the turn's commit landed; the crash hit between
-			// commit and marker-clear. Zero loss; journal is redundant.
+			// commit and journal-truncate (or an unsynced truncate
+			// resurrected the just-committed turn's journal after power
+			// loss — same observable, same handling). Zero loss; journal
+			// is redundant with the commit and is truncated at phase 7.
+			// (Divergence corner: a LEGACY op=turn marker FILE whose id
+			// equals HEADTURN but whose non-empty journal carries a
+			// DIFFERENT turn Tj would truncate Tj here unpreserved — but that
+			// state is unreachable without external tampering, since
+			// pre-addendum code wrote the marker file and journaled content
+			// for one and the same turn.)
 			rep.CellsHit = append(rep.CellsHit, Cell5TurnCommitted)
 			if dirty {
 				// Anomalous under the protocol (nothing canonical is written
@@ -278,7 +319,7 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 		case dirty:
 			// Cell 4 — the core torn turn.
 			rep.CellsHit = append(rep.CellsHit, Cell4TornTurn)
-			if err := preserveJournalContent(paths, &rep, eff.Turn, records); err != nil {
+			if err := preserveJournalContent(paths, &rep, eff.Turn, records, q); err != nil {
 				return rep, err
 			}
 			if err := resetSequence(ctx, paths, &rep, q); err != nil {
@@ -292,15 +333,17 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 			// the model call). Structurally nothing to reset; the journal
 			// holds whatever content existed (prompt at minimum). The
 			// untracked-debris sweep still runs — twice licensed: (a) the
-			// marker is present, so untracked non-ignored files are
-			// in-flight debris by the same Add(".")-corollary proof cell 4
-			// uses (a torn turn whose only canonical writes were NEW files
-			// presents exactly this clean-tracked shape); (b) cell-11
+			// in-flight-turn signal is present, so untracked non-ignored
+			// files are candidate in-flight debris (quarantined, never
+			// deleted — see sweepUntrackedDebris for why this is heuristic,
+			// not proof, under scoped per-turn commits; a torn turn whose
+			// only canonical writes were NEW files presents exactly this
+			// clean-tracked shape); (b) cell-11
 			// convergence — a cell-4 pass killed after its reset re-enters
 			// HERE (tree now clean), and skipping the sweep would leave the
 			// first pass's debris behind forever.
 			rep.CellsHit = append(rep.CellsHit, Cell6TurnNoWrites)
-			if err := preserveJournalContent(paths, &rep, eff.Turn, records); err != nil {
+			if err := preserveJournalContent(paths, &rep, eff.Turn, records, q); err != nil {
 				return rep, err
 			}
 			swept, serr := sweepUntrackedDebris(ctx, paths, q)
@@ -316,7 +359,7 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 		// between turns), so a non-empty journal is a contract anomaly —
 		// preserve it rather than destroy it, then proceed.
 		if len(records) > 0 || torn > 0 {
-			if err := preserveJournalContent(paths, &rep, "", records); err != nil {
+			if err := preserveJournalContent(paths, &rep, "", records, q); err != nil {
 				return rep, err
 			}
 		}
@@ -346,6 +389,19 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 		// self-heals on staleness. Any dirt is hand-edit territory —
 		// absorbed, never reset.
 		rep.CellsHit = append(rep.CellsHit, Cell10Sleep)
+		// Sleep runs strictly between turns (like archival), so a non-empty
+		// journal is a contract anomaly — preserve it rather than let phase 7
+		// truncate it away. This closes the post-CommitTurn pressure-gc
+		// window: power loss during MaybeGC's op=sleep scope can resurrect
+		// turn T's not-yet-durably-truncated journal, and if T's own commit
+		// is likewise not durable those journaled bytes are the only surviving
+		// copy. Mirror cell 8's preserve-if-nonempty handling; the artifact
+		// (or torn-journal quarantine) and its event log are the anomaly note.
+		if len(records) > 0 || torn > 0 {
+			if err := preserveJournalContent(paths, &rep, "", records, q); err != nil {
+				return rep, err
+			}
+		}
 
 	case dirty && !wmPresent:
 		// Cell 12: greenfield/legacy first-open — no watermark has ever
@@ -359,9 +415,14 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 		canonicalClean = true
 
 	case dirty:
-		// Cell 3 — the hand-edit. Absorbed forward by the next recovery
-		// point's own sweep; derived state reconciles on the next
-		// trigger. See the package doc for why this must never reset.
+		// Cell 3 — the hand-edit. Absorbed forward at the next FULL
+		// sweep — the session-close/backstop Checkpoint or the day-
+		// barrier sweep (TODO(R3b)) — NOT the next turn: per-turn
+		// commits stage only the turn's own recorded write set
+		// (R3-addendum item 3), so hand-edits stay dirty, untouched and
+		// unreset, until a full Add(".") pass. Derived state reconciles
+		// on the next trigger. See the package doc for why this must
+		// never reset.
 		rep.CellsHit = append(rep.CellsHit, Cell3HandEdit)
 
 	case !wmPresent || wm != head:
@@ -404,7 +465,8 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 
 	// Phase 7 — release the journal. Content that needed preserving was
 	// preserved above; anything left is redundant with a committed turn
-	// (a crash between marker-clear and truncate) or already surfaced.
+	// (cell 5: a crash between commit and truncate, or a power-loss
+	// resurrection of an unsynced truncate) or already surfaced.
 	if err := store.TruncateJournal(paths); err != nil {
 		return rep, fmt.Errorf("recovery: truncate journal: %w", err)
 	}
@@ -493,10 +555,13 @@ func adoptLegacy(ctx context.Context, paths store.PersonantPaths, rep *memops.Re
 	return nil
 }
 
-// canonicalDirty reports whether any tracked change lies outside the
+// CanonicalDirty reports whether any tracked change lies outside the
 // logs/ namespace — the WT observable with the append-only-log
-// carve-out (see the package doc).
-func canonicalDirty(dirtyPaths []string) bool {
+// carve-out (see the package doc). Exported because the fileadapter's
+// ReleaseTurn gates its no-commit release on the SAME observable: one
+// definition means the release predicate and the recovery predicate
+// cannot drift.
+func CanonicalDirty(dirtyPaths []string) bool {
 	for _, p := range dirtyPaths {
 		if !strings.HasPrefix(p, "logs/") {
 			return true

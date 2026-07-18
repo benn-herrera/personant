@@ -8,7 +8,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"personant/internal/memops"
-	"personant/internal/memops/fileadapter"
 )
 
 // archiveSummaryWidth caps the spine-summary column in `archive list` so a
@@ -31,11 +30,13 @@ var archiveListCmd = &cobra.Command{
 Recovered threads RETAIN their entry and are marked RECOVERED.
 Read-only — never writes a file.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		paths, err := resolvePaths()
+		// Reconcile-first (#94): the index may hold an unstamped entry a
+		// crash left behind; Reconcile's stamp-repair pass fixes it before
+		// the listing reads it.
+		ops, err := reconciledOps()
 		if err != nil {
 			return err
 		}
-		ops := fileadapter.NewFileAdapter(paths)
 		entries, err := ops.ListArchivedThreads(context.Background())
 		if err != nil {
 			return err
@@ -60,11 +61,13 @@ match.`,
 	SilenceErrors: false,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		thrID := args[0]
-		paths, err := resolvePaths()
+		// Reconcile-first (#94): recovery from the archive commits to an
+		// unreconciled worktree otherwise, and an unstamped entry must be
+		// stamp-repaired before RecoverThread can resolve it.
+		ops, err := reconciledOps()
 		if err != nil {
 			return err
 		}
-		ops := fileadapter.NewFileAdapter(paths)
 		rec, err := ops.RecoverThread(context.Background(), thrID)
 		if err != nil {
 			switch {

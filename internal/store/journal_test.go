@@ -162,3 +162,63 @@ func TestJournalRejectsBadInput(t *testing.T) {
 		t.Error("unknown kind accepted")
 	}
 }
+
+// TestJournalOwner covers the in-flight-turn signal reader (the
+// R3-addendum marker-into-journal fold): absent/empty = no turn, first
+// record = owner, torn or corrupt first line = in flight with unknown
+// owner (never adoptable).
+func TestJournalOwner(t *testing.T) {
+	t.Run("absent", func(t *testing.T) {
+		paths := PathsForHome(t.TempDir())
+		owner, inFlight, err := JournalOwner(paths)
+		if err != nil || inFlight || owner != "" {
+			t.Fatalf("absent journal: (%q,%v,%v), want (\"\",false,nil)", owner, inFlight, err)
+		}
+	})
+	t.Run("empty-after-truncate", func(t *testing.T) {
+		paths := PathsForHome(t.TempDir())
+		if err := AppendJournal(paths, "t_1", JournalPrompt, []byte("p")); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+		if err := TruncateJournal(paths); err != nil {
+			t.Fatalf("truncate: %v", err)
+		}
+		owner, inFlight, err := JournalOwner(paths)
+		if err != nil || inFlight || owner != "" {
+			t.Fatalf("empty journal: (%q,%v,%v), want (\"\",false,nil)", owner, inFlight, err)
+		}
+	})
+	t.Run("first-record-owns", func(t *testing.T) {
+		paths := PathsForHome(t.TempDir())
+		if err := AppendJournal(paths, "t_7", JournalPrompt, []byte("p")); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+		if err := AppendJournal(paths, "t_7", JournalResponse, []byte("r")); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+		owner, inFlight, err := JournalOwner(paths)
+		if err != nil || !inFlight || owner != "t_7" {
+			t.Fatalf("owned journal: (%q,%v,%v), want (t_7,true,nil)", owner, inFlight, err)
+		}
+	})
+	t.Run("torn-first-line-unknown-owner", func(t *testing.T) {
+		paths := PathsForHome(t.TempDir())
+		if err := os.WriteFile(paths.TurnJournal, []byte(`{"turn":"t_9","kind":"pro`), 0o644); err != nil {
+			t.Fatalf("seed torn journal: %v", err)
+		}
+		owner, inFlight, err := JournalOwner(paths)
+		if err != nil || !inFlight || owner != "" {
+			t.Fatalf("torn journal: (%q,%v,%v), want (\"\",true,nil)", owner, inFlight, err)
+		}
+	})
+	t.Run("corrupt-first-line-unknown-owner", func(t *testing.T) {
+		paths := PathsForHome(t.TempDir())
+		if err := os.WriteFile(paths.TurnJournal, []byte("{not json}\n"), 0o644); err != nil {
+			t.Fatalf("seed corrupt journal: %v", err)
+		}
+		owner, inFlight, err := JournalOwner(paths)
+		if err != nil || !inFlight || owner != "" {
+			t.Fatalf("corrupt journal: (%q,%v,%v), want (\"\",true,nil)", owner, inFlight, err)
+		}
+	})
+}

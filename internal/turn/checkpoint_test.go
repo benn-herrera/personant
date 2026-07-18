@@ -55,10 +55,12 @@ func TestCheckpoint_ThreadCreateCommitsOnce(t *testing.T) {
 	}
 }
 
-// TestCheckpoint_ContentOnlyTurnDoesNotCommit is the core policy assertion:
-// a turn with NO structural change (no thread create, no closure) writes NO
-// substrate commit — HEAD is unchanged.
-func TestCheckpoint_ContentOnlyTurnDoesNotCommit(t *testing.T) {
+// TestCheckpoint_ContentOnlyTurnCommitsOnce is the core #94 cadence
+// assertion (per-turn commit supersedes the structural-only cadence): a
+// turn with NO structural change still lands exactly one per-turn commit
+// — the durability recovery point that bounds crash loss to ≤1 turn —
+// and that commit carries the Personant-Turn trailer.
+func TestCheckpoint_ContentOnlyTurnCommitsOnce(t *testing.T) {
 	paths, meta := newTestHome(t)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
@@ -66,8 +68,18 @@ func TestCheckpoint_ContentOnlyTurnDoesNotCommit(t *testing.T) {
 	// No topic tag → no thread created, no thread engaged → content-only.
 	before, after := runTurn(t, paths, state, "Just a plain reply, no topic.", "hi")
 
-	if after != before {
-		t.Fatalf("content-only turn advanced HEAD: %s -> %s (cadence must not commit)", before, after)
+	if after == before {
+		t.Fatalf("content-only turn did not advance HEAD (per-turn commit missing, still %s)", before)
+	}
+	if n := commitCountBetween(t, paths, before, after); n != 1 {
+		t.Fatalf("content-only turn produced %d commits, want exactly 1", n)
+	}
+	headTurn, err := autogit.HeadTurn(context.Background(), paths)
+	if err != nil {
+		t.Fatalf("HeadTurn: %v", err)
+	}
+	if headTurn == "" {
+		t.Fatalf("per-turn commit carries no Personant-Turn trailer")
 	}
 }
 
@@ -88,9 +100,9 @@ func TestCheckpoint_CloseCommitsOnce(t *testing.T) {
 	state.Curator = stubCurator{summary: "gist", anchors: []string{"x", "y", "z", "w"}}
 	state.ClosureResolver = fixedOutcomeResolver(ClosureResolved)
 
-	// Content-only model output: the structural change is the closure, not a
-	// create. A content-only turn alone would not commit (prior test); here
-	// the closure is what trips the cadence.
+	// Content-only model output: the structural change is the closure, not
+	// a create. The closure write and the turn's content ride the SAME
+	// per-turn commit — still exactly one.
 	before, after := runTurn(t, paths, state, "plain reply", "anything")
 
 	rec, found, err := state.Ops.FindThread(context.Background(), "thr_1")
@@ -143,35 +155,37 @@ func TestCheckpoint_CloseAndCreateCoalesceToOneCommit(t *testing.T) {
 	}
 }
 
-// TestCheckpoint_SessionCloseFlushesContentOnlyTurns: content-only turns do
-// not commit (per-turn), accumulating uncommitted working-tree changes. The
-// session-close Checkpoint (the safety net chat.go calls after loop()) must
-// flush them — HEAD advances exactly once for the whole pending batch.
-func TestCheckpoint_SessionCloseFlushesContentOnlyTurns(t *testing.T) {
+// TestCheckpoint_SessionCloseBackstopIsNoOp: with the #94 per-turn commit
+// every turn's writes are already durable at session close, so the
+// session-close Checkpoint (chat.go's post-loop() safety net, demoted to
+// a belt-and-braces backstop by SOLUTION principle 1) normally commits
+// nothing — HEAD does not move.
+func TestCheckpoint_SessionCloseBackstopIsNoOp(t *testing.T) {
 	paths, meta := newTestHome(t)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
 
-	// Two content-only turns: each writes session/working-set + log bytes but
-	// no structural commit. (Working-set state is kept out of git, but the
-	// event log under logs/ is tracked, so the tree goes dirty.)
-	before := headHash(t, paths)
-	runTurn(t, paths, state, "plain reply one", "hi")
-	runTurn(t, paths, state, "plain reply two", "again")
-	if got := headHash(t, paths); got != before {
-		t.Fatalf("content-only turns committed mid-session: %s -> %s", before, got)
+	// newTestHome seeds projects/prj_1/meta.json OUTSIDE the adapter.
+	// Under scoped per-turn staging (R3-addendum item 3) out-of-band
+	// writes are absorbed only by a FULL sweep, never by a turn commit —
+	// so baseline-checkpoint the fixture before measuring, exactly as a
+	// real home's `personant init`/first backstop would have.
+	if err := state.Ops.Checkpoint(context.Background(), "fixture-baseline"); err != nil {
+		t.Fatalf("fixture-baseline Checkpoint: %v", err)
 	}
 
-	// Session-close safety net (mirrors chat.go's post-loop() call).
+	// Two content-only turns, each landing its own per-turn commit.
+	runTurn(t, paths, state, "plain reply one", "hi")
+	runTurn(t, paths, state, "plain reply two", "again")
+	before := headHash(t, paths)
+
+	// Session-close backstop (mirrors chat.go's post-loop() call): the
+	// per-turn commits left a clean tree, so this must be a no-op.
 	if err := state.Ops.Checkpoint(context.Background(), "session-close"); err != nil {
 		t.Fatalf("session-close Checkpoint: %v", err)
 	}
-	after := headHash(t, paths)
-	if after == before {
-		t.Fatalf("session-close did not flush pending content-only turns (HEAD still %s)", before)
-	}
-	if n := commitCountBetween(t, paths, before, after); n != 1 {
-		t.Fatalf("session-close produced %d commits, want exactly 1 batched flush", n)
+	if after := headHash(t, paths); after != before {
+		t.Fatalf("session-close backstop committed on a clean tree: %s -> %s", before, after)
 	}
 }
 

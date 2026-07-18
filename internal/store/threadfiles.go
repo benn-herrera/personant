@@ -69,7 +69,7 @@ type ThreadFiles struct {
 // tracked-file store: <ThreadsDir>/thr_<id>/files.json, inside the
 // thread's directory (see ThreadDir).
 func ThreadFilesPath(paths PersonantPaths, threadID string) string {
-	return filepath.Join(ThreadDir(paths, threadID), "files.json")
+	return filepath.Join(ThreadDir(paths, threadID), threadFilesFileName)
 }
 
 // LoadThreadFiles reads and parses the tracked-file sidecar for threadID.

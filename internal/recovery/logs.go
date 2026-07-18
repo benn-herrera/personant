@@ -34,12 +34,11 @@ const quarantineParentName = "quarantine"
 // their home-relative subpath) instead of being deleted, and dirty
 // tracked paths are byte-snapshotted here before a reset reverts them.
 //
-// Why recovery never deletes: the in-flight-debris proof (see
-// sweepUntrackedDebris) holds only at the last commit instant. A file
-// the user hand-created while the substrate sat idle under a stale
-// marker (crash → user edits → reopen) predates the marker window and
-// is indistinguishable from op debris — so the destructive paths are
-// made non-lossy at trivial cost. Everything lands under
+// Why recovery never deletes: in-flight-debris identification is
+// heuristic (see the honesty note on sweepUntrackedDebris — scoped
+// per-turn commits don't sweep, so an untracked hand file can predate
+// the crashed op's window by any number of turns), so the destructive
+// paths are made non-lossy at trivial cost. Everything lands under
 // recovery/quarantine/<reconcile-timestamp>/<original-relative-path>;
 // recovery/ is gitignored, so quarantined bytes survive any later reset
 // and are never committed. Each action is recorded in the report and as
@@ -261,16 +260,24 @@ func underDir(p, root string) bool {
 }
 
 // sweepUntrackedDebris quarantines untracked, non-gitignored files
-// after a reset. They are in-flight debris by the staging corollary:
-// every prior recovery point's whole-tree staging leaves the worktree
+// after a reset.
+//
+// HONESTY NOTE (R3-addendum item 3): debris identification here is
+// HEURISTIC, bounded by quarantine — no longer proof-clean. The old
+// proof ("every prior successful commit's Add('.') leaves the worktree
 // clean of untracked non-ignored files, so anything untracked now was
-// written since the last commit. But that proof holds only AT the last
-// commit instant — a file the user hand-created while the substrate
-// sat idle under a stale marker predates the marker window and is
-// indistinguishable from op debris. The sweep therefore MOVES files
-// into quarantine instead of deleting them: the destructive path stays
-// (the worktree converges to its recovery point) while remaining
-// non-lossy at trivial cost. Exemptions: logs/ (append-only forensics —
+// written since the last commit") lost its premise when per-turn
+// commits became scoped to the turn's recorded write set: a scoped
+// commit does NOT sweep, so an untracked hand-created file can survive
+// arbitrarily many turns and still be present at a crash — genuinely
+// predating the crashed op's window. It was already only
+// approximately true before (a hand-created file during a stale-marker
+// idle window was indistinguishable from op debris). What makes the
+// sweep safe is not the identification but the destination: files are
+// MOVED into quarantine, never deleted (the R2 consolidation), so a
+// misidentified hand file is recoverable byte-exact. The destructive
+// path stays (the worktree converges to its recovery point) while
+// remaining non-lossy at trivial cost. Exemptions: logs/ (append-only forensics —
 // an entirely new day's log file is untracked and legitimate) and
 // recovery/ (this package's own preserved artifacts + quarantine; also
 // gitignored, listed here as belt-and-braces for homes whose .gitignore

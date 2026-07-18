@@ -8,7 +8,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"personant/internal/memops"
-	"personant/internal/memops/fileadapter"
 )
 
 var verifyFlagQuiet bool
@@ -25,11 +24,15 @@ Output ordering is stable: errors first, warnings second, drift third,
 followed by a one-line summary. Exits 1 if any error or drift entry is
 reported, 0 otherwise.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		paths, err := resolvePaths()
+		// Reconcile-first (#94): verifying an unreconciled home reports
+		// crash debris as phantom schema/cross-ref errors. Reconcile may
+		// repair (marker-gated rollback, log-tail heal) before the
+		// read-only report runs — the one deliberate exception to this
+		// verb's never-writes posture.
+		ops, err := reconciledOps()
 		if err != nil {
 			return err
 		}
-		ops := fileadapter.NewFileAdapter(paths)
 		report, err := ops.Verify(context.Background())
 		if err != nil {
 			return err

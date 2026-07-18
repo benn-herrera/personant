@@ -22,7 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"personant/internal/clock"
@@ -57,6 +59,70 @@ type FileAdapter struct {
 	// recall-fire, invalidate on archive). See fmcache.go for the
 	// sole-mutator correctness invariant.
 	fmCache *frontmatterCache
+
+	// turnScope accumulates the repo-relative paths of every TRACKED
+	// canonical file this adapter has written since the last successful
+	// CommitTurn — the turn's known write set (#94 R3-addendum item 3).
+	// CommitTurn stages exactly this set (autogit.AddPaths, no whole-tree
+	// walk); the write methods record into it at the call site of each
+	// write, so the set is derived from what actually happened, never
+	// guessed. Entries persist across an aborted turn's ReleaseTurn (no
+	// commit ran, so the dirt is still pending) and are dropped only when
+	// a commit stages them — CommitTurn per-set, Checkpoint/ArchiveThreads
+	// wholesale (their Add(".") sweeps absorb everything). Guarded by
+	// scopeMu: the adapter itself is effectively single-writer, but Log
+	// can be reached from cleanup paths on other goroutines.
+	scopeMu   sync.Mutex
+	turnScope map[string]struct{}
+
+	// commitsSinceGCCheck throttles the count-triggered gc's loose-object
+	// readdir to every gcCheckEveryCommits per-turn commits (see MaybeGC
+	// in fileadapter_recovery.go). Single-writer like the turn path; no
+	// lock needed.
+	commitsSinceGCCheck int
+}
+
+// touchTurnScope records repo-relative tracked paths written by the
+// in-flight turn. Call AFTER a successful write — a recorded-but-never-
+// materialized path would force AddPaths through its slow fallback.
+func (a *FileAdapter) touchTurnScope(rels ...string) {
+	a.scopeMu.Lock()
+	defer a.scopeMu.Unlock()
+	if a.turnScope == nil {
+		a.turnScope = make(map[string]struct{}, 8)
+	}
+	for _, rel := range rels {
+		a.turnScope[rel] = struct{}{}
+	}
+}
+
+// snapshotTurnScope returns the current write set, sorted.
+func (a *FileAdapter) snapshotTurnScope() []string {
+	a.scopeMu.Lock()
+	defer a.scopeMu.Unlock()
+	rels := make([]string, 0, len(a.turnScope))
+	for rel := range a.turnScope {
+		rels = append(rels, rel)
+	}
+	sort.Strings(rels)
+	return rels
+}
+
+// dropFromTurnScope removes staged entries after a commit covered them.
+func (a *FileAdapter) dropFromTurnScope(rels []string) {
+	a.scopeMu.Lock()
+	defer a.scopeMu.Unlock()
+	for _, rel := range rels {
+		delete(a.turnScope, rel)
+	}
+}
+
+// resetTurnScope empties the write set — for callers whose Add(".")
+// full sweep just absorbed every pending path (Checkpoint, archival).
+func (a *FileAdapter) resetTurnScope() {
+	a.scopeMu.Lock()
+	defer a.scopeMu.Unlock()
+	a.turnScope = nil
 }
 
 // NewFileAdapter constructs an adapter rooted at paths.Home. Caller
@@ -87,13 +153,14 @@ func (a *FileAdapter) CreateThread(ctx context.Context, w memops.ThreadWrite) er
 	} else if found {
 		return fmt.Errorf("fileadapter: create thread %s: %w", w.Spine.ID, memops.ErrDuplicateThreadID)
 	}
-	if err := writeThread(a.paths, w); err != nil {
+	if err := a.writeThread(w); err != nil {
 		return fmt.Errorf("fileadapter: create thread: %w", err)
 	}
 	a.fmCache.Put(w.Meta) // write-through: thread.md just written
 	if err := store.AppendSpineRecord(a.paths, w.Spine); err != nil {
 		return fmt.Errorf("fileadapter: append spine: %w", err)
 	}
+	a.touchTurnScope(store.SpineRel())
 	return nil
 }
 
@@ -111,13 +178,14 @@ func (a *FileAdapter) EngageThread(ctx context.Context, w memops.ThreadWrite) er
 	} else if !found {
 		return fmt.Errorf("fileadapter: engage thread %s: %w", w.Spine.ID, memops.ErrThreadNotFound)
 	}
-	if err := writeThread(a.paths, w); err != nil {
+	if err := a.writeThread(w); err != nil {
 		return fmt.Errorf("fileadapter: engage thread: %w", err)
 	}
 	a.fmCache.Put(w.Meta) // write-through: thread.md just rewritten
 	if err := store.UpdateSpineRecord(a.paths, w.Spine); err != nil {
 		return fmt.Errorf("fileadapter: update spine: %w", err)
 	}
+	a.touchTurnScope(store.SpineRel())
 	return nil
 }
 
@@ -126,13 +194,18 @@ func (a *FileAdapter) EngageThread(ctx context.Context, w memops.ThreadWrite) er
 // w.Meta.TurnCount (a no-op when the excerpt is empty — the closure
 // path's meta-only update). The turn-excerpt directory is FIFO-windowed
 // by store.AppendThreadTurn. Shared by CreateThread and EngageThread;
-// the only difference between the two is the spine op.
-func writeThread(paths store.PersonantPaths, w memops.ThreadWrite) error {
-	if err := store.SaveThreadFrontmatter(paths, w.Meta.ID, w.Meta); err != nil {
+// the only difference between the two is the spine op. Each successful
+// write is recorded into the turn's scoped write set.
+func (a *FileAdapter) writeThread(w memops.ThreadWrite) error {
+	if err := store.SaveThreadFrontmatter(a.paths, w.Meta.ID, w.Meta); err != nil {
 		return fmt.Errorf("save thread.md: %w", err)
 	}
-	if err := store.AppendThreadTurn(paths, w.Meta.ID, w.Meta.TurnCount, w.TurnExcerpt); err != nil {
+	a.touchTurnScope(store.ThreadMetaRel(w.Meta.ID))
+	if err := store.AppendThreadTurn(a.paths, w.Meta.ID, w.Meta.TurnCount, w.TurnExcerpt); err != nil {
 		return fmt.Errorf("append turn excerpt: %w", err)
+	}
+	if w.TurnExcerpt != "" {
+		a.touchTurnScope(store.ThreadTurnRel(w.Meta.ID, w.Meta.TurnCount))
 	}
 	return nil
 }
@@ -278,6 +351,7 @@ func (a *FileAdapter) RecordRecallFire(ctx context.Context, threadID string) err
 	if err := store.UpdateSpineRecord(a.paths, rec); err != nil {
 		return fmt.Errorf("fileadapter: update spine: %w", err)
 	}
+	a.touchTurnScope(store.SpineRel())
 	fm, err := store.LoadThreadFrontmatter(a.paths, threadID)
 	if err != nil {
 		if errors.Is(err, memops.ErrThreadFileNotFound) {
@@ -292,6 +366,7 @@ func (a *FileAdapter) RecordRecallFire(ctx context.Context, threadID string) err
 		return fmt.Errorf("fileadapter: save thread.md: %w", err)
 	}
 	a.fmCache.Put(fm) // write-through: thread.md just rewritten
+	a.touchTurnScope(store.ThreadMetaRel(threadID))
 	return nil
 }
 
@@ -328,6 +403,7 @@ func (a *FileAdapter) CreateProject(ctx context.Context, meta memops.ProjectMeta
 	if err := store.SaveProjectMeta(a.paths, meta); err != nil {
 		return fmt.Errorf("fileadapter: create project: %w", err)
 	}
+	a.touchTurnScope(store.ProjectMetaRel(meta.ID))
 	return nil
 }
 
@@ -365,6 +441,7 @@ func (a *FileAdapter) SaveProject(ctx context.Context, meta memops.ProjectMeta) 
 	if err := store.SaveProjectMeta(a.paths, meta); err != nil {
 		return fmt.Errorf("fileadapter: save project: %w", err)
 	}
+	a.touchTurnScope(store.ProjectMetaRel(meta.ID))
 	return nil
 }
 
@@ -584,6 +661,7 @@ func (a *FileAdapter) EmitDelta(ctx context.Context, delta memops.Delta) error {
 	if err := eventlog.LogContextModified(a.paths, delta.Source, len(delta.Content)); err != nil {
 		return fmt.Errorf("fileadapter: emit delta: %w", err)
 	}
+	a.touchTurnScope(eventlog.DayLogRel(clock.Timeline()))
 	return nil
 }
 
@@ -595,6 +673,11 @@ func (a *FileAdapter) Log(ctx context.Context, category, action, details string)
 	if err := eventlog.Log(a.paths, category, action, details); err != nil {
 		return fmt.Errorf("fileadapter: log: %w", err)
 	}
+	// The event log is tracked and continuously appended; recording the
+	// day file here is what lets the scoped CommitTurn absorb log dirt
+	// without a tree walk. Lines written by OTHER writers (recovery's
+	// own events at open) land in the same day file and ride along.
+	a.touchTurnScope(eventlog.DayLogRel(clock.Timeline()))
 	return nil
 }
 
@@ -617,6 +700,7 @@ func (a *FileAdapter) RecordFileWrite(ctx context.Context, threadID, path, conte
 	if err := store.SaveThreadFiles(a.paths, tf); err != nil {
 		return fmt.Errorf("fileadapter: record file write %s: save: %w", threadID, err)
 	}
+	a.touchTurnScope(store.ThreadFilesRel(threadID))
 	return nil
 }
 
@@ -642,6 +726,7 @@ func (a *FileAdapter) RecordFileCommit(ctx context.Context, threadID, path, hash
 	if err := store.SaveThreadFiles(a.paths, tf); err != nil {
 		return fmt.Errorf("fileadapter: record file commit %s: save: %w", threadID, err)
 	}
+	a.touchTurnScope(store.ThreadFilesRel(threadID))
 	return nil
 }
 
@@ -779,6 +864,7 @@ func (a *FileAdapter) AgeFileChains(ctx context.Context, threadID string, curren
 				fmt.Sprintf("thr=%s path=%s hash=%s reason=%s", threadID, path, e.LastCommit, reason)); logErr != nil {
 				return agedPaths, bytesFreed, fmt.Errorf("fileadapter: age file chains %s: log refusal: %w", threadID, logErr)
 			}
+			a.touchTurnScope(eventlog.DayLogRel(clock.Timeline()))
 			continue
 		}
 		if freed, ok := tf.DropChain(path); ok {
@@ -795,10 +881,12 @@ func (a *FileAdapter) AgeFileChains(ctx context.Context, threadID string, curren
 	if err := store.SaveThreadFiles(a.paths, tf); err != nil {
 		return nil, 0, fmt.Errorf("fileadapter: age file chains %s: save: %w", threadID, err)
 	}
+	a.touchTurnScope(store.ThreadFilesRel(threadID))
 	if err := eventlog.Log(a.paths, "dedup", "chain-aged",
 		fmt.Sprintf("thr=%s paths=%s bytes=%d", threadID, strings.Join(agedPaths, ","), bytesFreed)); err != nil {
 		return agedPaths, bytesFreed, fmt.Errorf("fileadapter: age file chains %s: log: %w", threadID, err)
 	}
+	a.touchTurnScope(eventlog.DayLogRel(clock.Timeline()))
 	return agedPaths, bytesFreed, nil
 }
 

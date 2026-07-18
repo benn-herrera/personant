@@ -332,8 +332,18 @@ func Run(opts Options) error {
 	// last turn was structural, or nothing changed) is a benign no-op inside
 	// Checkpoint (ErrEmptyCommit swallowed). Non-fatal: warn and continue to
 	// the session-end log, consistent with the per-turn cadence call.
+	//
+	// A marker refusal is NOT a fault: a marker-retained turn failure left
+	// torn state that only the next open's Reconcile may touch — a
+	// checkpoint here would commit the torn prefix trailer-less and make it
+	// permanent (Checkpoint's guard exists for exactly this). Tell the user
+	// the state is preserved and skip, rather than warning as if broken.
 	if err := ops.Checkpoint(ctx, "session-close"); err != nil {
-		fmt.Fprintf(opts.Stderr, "warn: session-close checkpoint: %v\n", err)
+		if errors.Is(err, memops.ErrConflictingMarker) {
+			fmt.Fprintln(opts.Stdout, "unclean turn state preserved for recovery — will reconcile on next open")
+		} else {
+			fmt.Fprintf(opts.Stderr, "warn: session-close checkpoint: %v\n", err)
+		}
 	}
 
 	if err := ops.Log(ctx, memops.LogCategorySession, "ended", "active="+project.ID); err != nil {
@@ -537,8 +547,16 @@ func loop(ctx context.Context, opts Options, lr lineReader, ops memops.MemoryOps
 		default:
 			if err := runOneTurn(ctx, opts, state, input); err != nil {
 				// A bad turn does not kill the session — log the error and
-				// loop. The user can retry.
+				// loop. The user can usually retry; the one exception is a
+				// marker-retained failure (a CommitTurn failure this turn, or
+				// the JournalTurn refusal every later turn hits on the retained
+				// scope): in-session retry CANNOT work, and the prompt just
+				// typed was refused before it was journaled — it is not
+				// captured anywhere. Say both, instead of implying retry.
 				fmt.Fprintf(opts.Stderr, "turn error: %v\n", err)
+				if errors.Is(err, turn.ErrMarkerRetained) || errors.Is(err, memops.ErrConflictingMarker) {
+					fmt.Fprintln(opts.Stderr, "unrecoverable in this session: the failed turn's recovery scope is still open — restart personant to recover; prompts typed until then are NOT captured, so save this one if you still need it")
+				}
 				continue
 			}
 		}

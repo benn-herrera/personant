@@ -13,10 +13,18 @@ import (
 
 	"personant/internal/autogit"
 	"personant/internal/clock"
+	"personant/internal/crashpoint"
 	"personant/internal/eventlog"
 	pnlog "personant/internal/log"
 	"personant/internal/memops"
 	"personant/internal/store"
+)
+
+// Crashpoints for the R4 W-ARCH matrix: the op=archival marker scope
+// boundaries (#94 R3). Registered at import time for the coverage gate.
+var (
+	cpArchivalPreMarker  = crashpoint.Register("archival.preMarker")
+	cpArchivalPostMarker = crashpoint.Register("archival.postMarker")
 )
 
 // §3.8 recoverable git-based archival (task #99, design §3.2 / §7.2). This
@@ -72,19 +80,36 @@ func threadRelDir(threadID string) string {
 // on its deletion/recovery commits) and the standalone `personant verify`. A
 // cadence commit is a durability snapshot, not an integrity gate; keeping it
 // flag-free keeps per-commit cost flat.
+//
+// Scope guard (same family as ArchiveThreads/Consolidate): a checkpoint
+// under ANY in-flight scope — batch marker file or non-empty turn
+// journal — is refused. A checkpoint runs Add(".") + commit WITHOUT a
+// turn trailer, so committing a scope-retained turn's torn prefix would
+// make HEADTURN≠T with a clean tree — reconciling as cell 6 ("nothing
+// landed") and making the torn state permanent. Refusing is the loud,
+// honest choice: the caller (chat session-close) reports the unclean
+// state and leaves it for the next open's Reconcile.
 func (a *FileAdapter) Checkpoint(ctx context.Context, reason string) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if err := a.checkNoInFlightScope(); err != nil {
+		return fmt.Errorf("fileadapter: checkpoint: %w", err)
 	}
 	if err := autogit.Add(ctx, a.paths, "."); err != nil {
 		return fmt.Errorf("fileadapter: checkpoint: stage: %w", err)
 	}
 	if err := autogit.Commit(ctx, a.paths, fmt.Sprintf("checkpoint: %s", reason), 0, 0); err != nil {
 		if errors.Is(err, git.ErrEmptyCommit) {
-			return nil // clean tree — nothing to checkpoint
+			a.resetTurnScope() // the full Add(".") staged everything anyway
+			return nil         // clean tree — nothing to checkpoint
 		}
 		return fmt.Errorf("fileadapter: checkpoint: commit: %w", err)
 	}
+	// The full-tree sweep absorbed every pending scoped-write entry —
+	// this is the backstop/day-barrier full Add(".") the scoped per-turn
+	// CommitTurn deliberately does not pay (R3-addendum item 3).
+	a.resetTurnScope()
 	return nil
 }
 
@@ -104,12 +129,34 @@ func (a *FileAdapter) Consolidate(ctx context.Context, reason string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// Scope-boundary contract check + op=sleep scope (#94 R3): the gc's
+	// .git surgery (repack/prune) runs under an op=sleep marker so a crash
+	// mid-gc reconciles as cell 10 (clear marker; git self-heals; caches
+	// self-heal). A conflicting in-flight scope (batch marker OR non-empty
+	// turn journal) is refused — the sleep
+	// cycle never runs inside another operation's scope. The scope clears
+	// even on gc failure (non-fatal by contract, and gc failure leaves no
+	// torn canonical state — it touches only .git internals). The other
+	// sleep-cycle passes (RebuildTrees, SweepCache) touch only gitignored
+	// recall caches, which self-heal by content-hash keying (SOLUTION
+	// principle 9), so they run outside the marker by design; any future
+	// sleep sub-op that mutates CANONICAL state must adopt the full
+	// marker/commit protocol (cell 10's stated invariant).
+	if err := a.checkNoInFlightScope(); err != nil {
+		return fmt.Errorf("fileadapter: consolidate: %w", err)
+	}
+	if err := store.WriteMarker(a.paths, store.Marker{Op: store.OpSleep}); err != nil {
+		return fmt.Errorf("fileadapter: consolidate: marker: %w", err)
+	}
 	gcStatus := "ok"
 	if err := autogit.GC(ctx, a.paths); err != nil {
 		// Non-fatal: log and record, but do not abort the caller. The %s
 		// arg keeps any error text out of format-string position.
 		pnlog.Warn("fileadapter: consolidate: gc failed (non-fatal): %v", err)
 		gcStatus = "err"
+	}
+	if err := store.ClearMarker(a.paths); err != nil {
+		return fmt.Errorf("fileadapter: consolidate: clear marker: %w", err)
 	}
 	if err := eventlog.Log(a.paths, memops.LogCategoryConsolidate, consolidateAction,
 		fmt.Sprintf("reason=%s gc=%s", reason, gcStatus)); err != nil {
@@ -168,6 +215,16 @@ func (a *FileAdapter) Consolidate(ctx context.Context, reason string) error {
 func (a *FileAdapter) ArchiveThreads(ctx context.Context, threadIDs []string) (memops.ArchiveResult, error) {
 	if err := ctx.Err(); err != nil {
 		return memops.ArchiveResult{}, err
+	}
+
+	// Scope-boundary contract check (#94 R3): archival runs strictly
+	// BETWEEN turns in its own op=archival scope — an in-flight scope of
+	// ANY kind here (batch marker or non-empty turn journal) is a protocol
+	// violation (a turn's window still open, a prior archival's scope
+	// never released) and is refused before any mutation; silently
+	// adopting it would let two operations share one crash-recovery scope.
+	if err := a.checkNoInFlightScope(); err != nil {
+		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: %w", err)
 	}
 
 	// Sort + dedup the requested ids so the batch is order-independent and
@@ -286,6 +343,23 @@ func (a *FileAdapter) ArchiveThreads(ctx context.Context, threadIDs []string) (m
 		treeHashes[id] = th
 	}
 
+	// Open the op=archival marker scope (#94, SOLUTION principle 6) —
+	// written before the first destructive mutation (the RemoveAll loop
+	// below) and cleared only after the stamp commit lands. A crash inside
+	// the scope reconciles as cell 8 (reset to the last stable
+	// archival-sequence point; redrain re-triggers on the next pressure
+	// check). Everything above this line is non-destructive: validation,
+	// derived regen (idempotent), and the capture commit — a markerless
+	// crash there leaves a self-consistent home. An in-process error AFTER
+	// this point deliberately leaves the marker set: the worktree may be
+	// torn, and failing loudly into the recovery path beats continuing the
+	// session on it.
+	crashpoint.At(cpArchivalPreMarker)
+	if err := store.WriteMarker(a.paths, store.Marker{Op: store.OpArchival}); err != nil {
+		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: marker: %w", err)
+	}
+	crashpoint.At(cpArchivalPostMarker)
+
 	// (2) Stage removals: remove each thread directory + invalidate its
 	// frontmatter cache entry. os.RemoveAll on a missing dir is a no-op.
 	for _, id := range archivable {
@@ -361,6 +435,16 @@ func (a *FileAdapter) ArchiveThreads(ctx context.Context, threadIDs []string) (m
 		fmt.Sprintf("archive: stamp %d index entr%s", len(archivable), plural(len(archivable))),
 		0, autogit.CheckSpineIntegrity); err != nil {
 		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: stamp commit: %w", err)
+	}
+
+	// Close the op=archival marker scope: the batch's final commit landed,
+	// so the mutation is fully covered by recovery points. The event-log
+	// emission below is logs/-only (never canonical) and stays outside the
+	// scope by design. The batch's Add(".") sweeps also absorbed any
+	// pending scoped-write entries.
+	a.resetTurnScope()
+	if err := store.ClearMarker(a.paths); err != nil {
+		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: clear marker: %w", err)
 	}
 
 	// (7) Emit one archive.archived line per id (forensic + harness fold
@@ -517,6 +601,7 @@ func (a *FileAdapter) RecoverThread(ctx context.Context, thrID string) (memops.S
 		0, autogit.CheckDerivedFresh|autogit.CheckSpineIntegrity); err != nil {
 		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: commit: %w", thrID, err)
 	}
+	a.resetTurnScope() // the recovery commit's Add(".") absorbed pending entries
 
 	if err := eventlog.Log(a.paths, archiveLogCategory, archiveActionRecovered,
 		fmt.Sprintf("thr=%s project=%s", thrID, rec.Project)); err != nil {
@@ -565,6 +650,7 @@ func (a *FileAdapter) recoverDriftRecord(ctx context.Context, thrID string, entr
 		0, autogit.CheckDerivedFresh|autogit.CheckSpineIntegrity); err != nil {
 		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover drift record %s: commit: %w", thrID, err)
 	}
+	a.resetTurnScope() // the recovery commit's Add(".") absorbed pending entries
 	if err := eventlog.Log(a.paths, archiveLogCategory, archiveActionRecoveredRecord,
 		fmt.Sprintf("thr=%s project=%s", thrID, rec.Project)); err != nil {
 		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover drift record %s: log: %w", thrID, err)
