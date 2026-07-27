@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -13,6 +14,7 @@ import (
 	"personant/internal/model"
 	"personant/internal/store"
 	"personant/internal/turn"
+	"personant/internal/version"
 )
 
 // runChat drives a full REPL session with scripted stdin, failing on any
@@ -286,6 +288,49 @@ func TestClosureResolverSkipDefers(t *testing.T) {
 	}
 	if res.Outcome != turn.ClosureDefer {
 		t.Errorf("outcome = %v, want defer", res.Outcome)
+	}
+}
+
+// TestSlashVersion: /version prints the binary's identity plus the home's
+// on-disk format stamp, and is advertised in /help.
+func TestSlashVersion(t *testing.T) {
+	paths := scaffoldHome(t)
+	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
+
+	out, _ := runChat(t, paths, model.NewScriptedMock(nil, []model.ModelInfo{{ID: "test-model"}}),
+		"prj_1", "/version\n/quit\n")
+
+	if !strings.Contains(out, version.Long()) {
+		t.Errorf("/version missing the version long form:\n%s", out)
+	}
+	// chat.Run's idempotent Init scaffolds the stamp, so the session always
+	// reports a concrete revision here.
+	want := version.Row("home stamp", strconv.Itoa(version.CurrentHomeFormat))
+	if !strings.Contains(out, want) {
+		t.Errorf("/version missing %q:\n%s", want, out)
+	}
+	if !strings.Contains(helpText(), "/version") {
+		t.Error("/help does not advertise /version")
+	}
+}
+
+// TestSessionStartEventIsNotBootstrap: the session/project event is
+// session.started (§2.8). system.bootstrap is the version/identity line,
+// emitted once at the process boundary by eventlog.LogBootstrap — chat
+// must not emit a second, differently-shaped line under that name.
+func TestSessionStartEventIsNotBootstrap(t *testing.T) {
+	paths := scaffoldHome(t)
+	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
+
+	runChat(t, paths, model.NewScriptedMock(nil, []model.ModelInfo{{ID: "test-model"}}),
+		"prj_1", "/quit\n")
+
+	logs := readAllLogs(t, paths)
+	if !strings.Contains(logs, "session.started active=prj_1 provider=local") {
+		t.Errorf("event log missing the session.started line:\n%s", logs)
+	}
+	if strings.Contains(logs, "system.bootstrap") {
+		t.Errorf("chat emitted system.bootstrap; that name belongs to the identity line:\n%s", logs)
 	}
 }
 

@@ -27,6 +27,7 @@ import (
 	"personant/internal/model"
 	"personant/internal/recall/measure"
 	"personant/internal/turn"
+	"personant/internal/version"
 	"personant/internal/workset"
 )
 
@@ -242,9 +243,14 @@ func Run(opts Options) error {
 		return err
 	}
 
-	if err := ops.Log(ctx, memops.LogCategorySystem, "bootstrap",
+	// session.started, not system.bootstrap: §2.8 defines system.bootstrap
+	// as the version/identity line (emitted once at the process boundary by
+	// eventlog.LogBootstrap). THIS is the session/project event — which the
+	// warning below has always called it — and it pairs with the
+	// session.ended line at the bottom of Run.
+	if err := ops.Log(ctx, memops.LogCategorySession, "started",
 		fmt.Sprintf("active=%s provider=%s", project.ID, providerName)); err != nil {
-		fmt.Fprintf(opts.Stderr, "warn: log session.start: %v\n", err)
+		fmt.Fprintf(opts.Stderr, "warn: log session.started: %v\n", err)
 	}
 
 	// LoadSession (not NewState): reload the persisted Layer B/C working
@@ -607,6 +613,8 @@ func dispatchSlash(ctx context.Context, opts Options, ops memops.MemoryOps, stat
 		fmt.Fprintln(opts.Stdout, helpText())
 	case "/stats":
 		printStats(opts.Stdout, ops, state)
+	case "/version":
+		printVersion(ctx, opts.Stdout, ops)
 	case "/topic":
 		return false, cmdTopic(ctx, opts, state, rest)
 	case "/done":
@@ -794,6 +802,7 @@ func helpText() string {
   /project rename <new-name>   rename the active project
   /project switch <name-or-id> switch to a known project
   /stats                       print session and spine statistics
+  /version                     print version identity and home format
 
 stubbed (later phase):
   /no-revisit                  tighten recall threshold (recall accrual)
@@ -814,6 +823,19 @@ func printProjectInfo(w io.Writer, p memops.ProjectMeta) {
 	if len(p.RemoteURLs) > 0 {
 		fmt.Fprintf(w, "remote urls:  %s\n", strings.Join(p.RemoteURLs, ", "))
 	}
+}
+
+// printVersion implements /version: this binary's identity plus the
+// on-disk format of the home the session is running against. The CLI's
+// `personant version` prints the same two things; both render through
+// internal/version so they cannot drift.
+//
+// Never fails — an unreadable stamp renders as text. The session is
+// already open by the time this runs, so there is nothing to gate.
+func printVersion(ctx context.Context, w io.Writer, ops memops.MemoryOps) {
+	fmt.Fprint(w, version.Long())
+	found, format, err := ops.HomeFormat(ctx)
+	fmt.Fprint(w, version.Row("home stamp", version.HomeFormatLabel(found, format, err)))
 }
 
 func printStats(w io.Writer, ops memops.MemoryOps, state *turn.State) {

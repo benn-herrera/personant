@@ -36,6 +36,7 @@ On first run, `bin/personant` initializes `~/.personant/` as a git repository. O
 | `/project rename <new-name>` | rename the active project |
 | `/project switch <name-or-id>` | switch to a known project |
 | `/stats` | session and spine statistics |
+| `/version` | version identity + this home's on-disk format |
 | `/quit`, `/exit` | end the session |
 
 `/no-revisit`, `/cd-project`, and `/model` are recognized but stubbed for a later phase.
@@ -154,6 +155,7 @@ Personant stores all state under `~/.personant/` (override with `$PERSONANT_HOME
   history              REPL line-edit history (deduplicated, capped)
   providers.toml       provider pool connectivity catalog
   config.toml          active chat + embedding provider choices
+  version.toml         on-disk layout revision (`format = N`)
   api_keys/            secret-bearing key files — never read by agents
   archive/             deep cold archive index (recoverable git-based archival)
   recovery/            quarantine/ — byte-exact bytes preserved by crash recovery
@@ -176,10 +178,12 @@ away.
 
 ## Status
 
-Two independently-versioned tracks:
+Two independently-versioned tracks. Run `personant version` for the current values — they live in `internal/version`, not in this document.
 
-- **Substrate** (runtime + `MemoryOps` API): currently **v0.1.0**, converging toward **v0.5.0** via a four-month (120-day) realism-convergence acceptance simulation. "Done" means every identified realism element accounted for — simulated, modeled-and-unit-tested, or honestly parked as a known-unknown — converging to a run that surfaces no new gap. See [`SPEC.md` §9.1](SPEC.md) for the normative gate.
-- **Front end** (chat REPL + interactive feature set): **v0.0.1**. The REPL loop is closed but has not been validated by direct human use; the interactive feature set is incomplete. Front-end v0.1.0 gates on a human U/X phase after substrate v0.5.0 lands.
+- **Substrate** (runtime + `MemoryOps` API): converging toward **v0.5.0** via a four-month (120-day) realism-convergence acceptance simulation. "Done" means every identified realism element accounted for — simulated, modeled-and-unit-tested, or honestly parked as a known-unknown — converging to a run that surfaces no new gap. See [`SPEC.md` §9.1](SPEC.md) for the normative gate.
+- **Front end** (chat REPL + interactive feature set): the REPL loop is closed but has not been validated by direct human use; the interactive feature set is incomplete. Front-end **v0.1.0** gates on a human U/X phase after substrate v0.5.0 lands.
+
+A third, separate integer versions the home's on-disk layout (`~/.personant/version.toml`). A home written by a **newer** personant is refused rather than opened — `--allow-newer-home` overrides that at your own risk, and says so loudly. `personant version` reports the home's stamp even when the home is missing or unreadable; it is the one command that never gates.
 
 **What is shipped and validated:**
 

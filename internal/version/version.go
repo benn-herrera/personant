@@ -163,7 +163,7 @@ func longForm(b Build) string {
 	}
 	var sb strings.Builder
 	for _, r := range rows {
-		fmt.Fprintf(&sb, "%-12s %s\n", r[0]+":", r[1])
+		sb.WriteString(Row(r[0], r[1]))
 	}
 	return sb.String()
 }

@@ -102,13 +102,35 @@ accumulate a pip dependency surface.
 
 ## Repo state
 
-**Versioning & acceptance (read before judging "done").** Two
-independently-versioned tracks: the **substrate** (this runtime + the
-`MemoryOps` API; currently **v0.1.0**) and the **front end** (U/X +
-feature logic; currently **v0.0.1**, REPL-closed with the dogfood-minimum
-interactive set now in place — slash commands, `liner` line editing +
-history, SIGINT handling — but not yet validated by direct human use;
-dogfooding is the next step). The four-month (120-day) simulation gate converges the *substrate*
+**Versioning & acceptance (read before judging "done").** Three version
+lines, normatively defined in **SPEC.md §9.1**; the current **values live
+in `internal/version`** and are never restated in prose — a prose copy is
+a second definition that goes stale on the next bump. `personant version`
+(and `--version`, and the REPL's `/version`) prints the live ones.
+
+- **substrate** (`version.Substrate`) — this runtime + the `MemoryOps` API.
+- **front end** (`version.FrontEnd`) — U/X + feature logic. REPL-closed
+  with the dogfood-minimum interactive set now in place (slash commands,
+  `liner` line editing + history, SIGINT handling) but not yet validated
+  by direct human use; dogfooding is the next step.
+- **home on-disk `format`** (`version.CurrentHomeFormat`) — a plain
+  integer in `<home>/version.toml`, deliberately NOT semver: a layout is
+  either readable by a binary or it is not. A home written by a NEWER
+  binary is **REFUSED** at the process boundary, and the gate runs
+  **before** Reconcile (running crash recovery against a layout this
+  binary cannot interpret is exactly the wrong move). `--allow-newer-home`
+  overrides the refusal at the user's risk, leaving a loud stderr warning
+  plus a `system.home-format-override` event.
+
+**Front-end bump contract (binding when you change the front end).**
+During the living-with phase, **every front-end (CLI/REPL/UX) feature
+change bumps `version.FrontEnd`'s PATCH digit** unless the developer
+specifies otherwise. MINOR bumps are developer fiat at the milestone
+gates. The two semver lines move independently: a substrate-only change
+does not touch `FrontEnd`, and a front-end-only change does not touch
+`Substrate`.
+
+The four-month (120-day) simulation gate converges the *substrate*
 toward **v0.5.0** — and it is a *realism-convergence* gate, not a
 one-shot pass: "done" means the full top-rung span with **every identified realism
 element accounted for** (simulated, OR modeled-and-attempted with unit
@@ -335,8 +357,15 @@ Current top-level shape:
 
 ```
 cmd/                        cobra subcommands (init, index, verify,
-                            ping, models, chat — bare `personant`
-                            defaults to chat)
+                            ping, models, chat, version — bare
+                            `personant` defaults to chat). Persistent
+                            flags: `--home`, `--allow-newer-home`
+                            (§9.1 newer-home override); `--version`
+                            prints the short identity line. Every verb
+                            that opens the substrate goes through the
+                            one `openHome` helper (format gate, then
+                            Reconcile); `version` is deliberately
+                            ungated and never fails on a broken home.
 internal/memops/            MemoryOps port: interface + the domain
                             types it trades in (SpineRecord, Thread,
                             ProjectMeta, Provider, Config, the symbol

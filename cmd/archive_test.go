@@ -177,7 +177,11 @@ func captureCLI(home string, args ...string) (string, error) {
 
 	w.Close()
 	os.Stdout = orig
+	// Persistent flags keep their parsed value between Execute() calls in
+	// the same process — reset every one, or a test that passes an override
+	// silently arms the tests that follow it.
 	flagHome = ""
+	flagAllowNewerHome = false
 
 	var buf bytes.Buffer
 	_, _ = io.Copy(&buf, r)

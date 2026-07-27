@@ -48,6 +48,49 @@ func TestLogBootstrapLine(t *testing.T) {
 	}
 }
 
+// TestLogBootstrapHealsTornTailFirst: LogBootstrap is the first event a
+// process writes and it lands BEFORE Reconcile's phase-0 heal, so it must
+// carry the heal itself — otherwise it fuses its record onto a torn final
+// line and destroys both records.
+func TestLogBootstrapHealsTornTailFirst(t *testing.T) {
+	home := t.TempDir()
+	paths := store.PathsForHome(home)
+
+	fixed := time.Date(2026, 5, 8, 2, 55, 44, 0, time.UTC)
+	restore := clock.SetTimeline(func() time.Time { return fixed })
+	defer restore()
+
+	day := filepath.Join(paths.LogsDir, "2026-05-08.log")
+	if err := os.MkdirAll(paths.LogsDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+	const torn = "2026-05-08T02:00:00Z thread.engaged thr_1 turn_cou"
+	if err := os.WriteFile(day, []byte(torn), 0o644); err != nil {
+		t.Fatalf("seed torn tail: %v", err)
+	}
+
+	if err := LogBootstrap(paths, version.CurrentHomeFormat); err != nil {
+		t.Fatalf("LogBootstrap: %v", err)
+	}
+
+	data, err := os.ReadFile(day)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("log has %d lines, want 2 (torn fragment + bootstrap): %q", len(lines), data)
+	}
+	// The fragment is preserved byte-exact — the heal is additive, so
+	// Reconcile still finds and reports it.
+	if lines[0] != torn {
+		t.Errorf("torn fragment = %q, want it preserved as %q", lines[0], torn)
+	}
+	if !strings.HasPrefix(lines[1], fixed.Format(time.RFC3339)+" system.bootstrap ") {
+		t.Errorf("bootstrap line was merged or malformed: %q", lines[1])
+	}
+}
+
 // TestLogBootstrapCommitDegrades: an unstamped binary (every `go test`
 // build is one) still emits the commit field, as "unknown", so the line's
 // shape is constant for scrapers.

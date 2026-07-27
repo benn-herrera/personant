@@ -50,6 +50,7 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
       YYYY-MM.tar.gz                # rotated logs older than 90 days, gzipped
   providers.toml                    # provider pool — connectivity catalog (canonical; see §8.2.1)
   config.toml                       # configuration choices drawing from the pool (canonical; see §8.2.2)
+  version.toml                      # canonical; committed. on-disk layout revision, one key: `format = N` (§9.1)
   api_keys/                         # secret-bearing — apiKeyFile targets; never read by the agent
   README.md                         # layout documentation for human inspection
   last-active                       # operational; one line: prj_<n> of most-recently-active project (§4.5.7)
@@ -70,7 +71,7 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
 
 | Type | Examples | Drift policy |
 |---|---|---|
-| Canonical | `spine.jsonl` rows, `threads/*.md`, `directives/*.md`, `projects/prj_<n>/meta.json`, `logs/*.log`, `providers.toml`, `config.toml`, `archive/index.jsonl` | Source of truth. Hand-editable. Other files derive from these. (`logs/*.log` is canonical, not operational: it is the append-only turn-grain forensic record that crash recovery preserves and re-appends — §4.5.8, §9 non-goals.) |
+| Canonical | `spine.jsonl` rows, `threads/*.md`, `directives/*.md`, `projects/prj_<n>/meta.json`, `logs/*.log`, `providers.toml`, `config.toml`, `version.toml`, `archive/index.jsonl` | Source of truth. Hand-editable. Other files derive from these. (`logs/*.log` is canonical, not operational: it is the append-only turn-grain forensic record that crash recovery preserves and re-appends — §4.5.8, §9 non-goals.) |
 | Derived | `symbols.jsonl`, `projects/prj_<n>/digest.json` | Regenerable from canonical. `autogit.CheckDerivedFresh` fails any state-changing git op on stale. Never hand-edited. |
 | Operational | `.git/`, `.git-daily/`, `tmp/`, `last-active`, `history`, `turn-journal.jsonl`, `op-in-progress.json`, `derived-watermark`, `recovery/` | System-managed; not subject to drift checking. `tmp/`, `last-active`, `history`, `.git-daily/`, `turn-journal.jsonl`, `op-in-progress.json`, and `derived-watermark` are gitignored; `.git/` and `.git-daily/` are both in the managed gitignore block so neither repo sees the other as untracked (§4.5.8 INV-6). |
 | Secret-bearing | `api_keys/*` (apiKeyFile targets); `providers.toml` only if it uses `apiKeyUnsafe` | Contains API keys. Treated specially by the runtime: never included in any LLM-context artifact, log line, ack prompt, or captured output. See §8.2.1. |
@@ -485,7 +486,8 @@ Plain-text, append-only, one event per line. Free-form details after a fixed pre
 
 **Examples:**
 ```
-2026-05-08T02:55:44-07:00 system.bootstrap version=0.1.0 home=/home/user/.personant
+2026-05-08T02:55:44-07:00 system.bootstrap version=0.1.0 frontend=0.0.2 home-format=1 commit=abc1234 home=/home/user/.personant
+2026-05-08T02:55:45-07:00 session.started active=prj_3 provider=local
 2026-05-08T02:55:50-07:00 thread.engaged thr_42 turn_count=1247
 2026-05-08T02:55:51-07:00 spine.match-fire thr_88 score=0.62 matched=trefoil,unknot query_size=5
 2026-05-08T02:55:51-07:00 spine.embed-match-fire thr_88 score=0.610 query_chars=140
@@ -503,7 +505,7 @@ Actions ending in `-error` (and `warning`) are forensic diagnostics, not measure
 
 | Category | Events |
 |---|---|
-| `system` | `bootstrap`, `context-ceiling-breach`, `empty-response` (forensic; the final drained response carried zero visible content — with `reprompted=yes\|no`, `turn=`; §3.3 empty-response recovery); *(vocabulary; not yet emitted)* `shutdown`, `error`, `config-reload` |
+| `system` | `bootstrap` (the VERSION/IDENTITY line — one per process open, emitted at the process boundary after the §9.1 format gate resolves: `version=` substrate, `frontend=`, `home-format=` the EFFECTIVE on-disk revision this session ran against, `commit=` (`unknown` on an unstamped binary), `home=`. It is not the session/project event — that is `session.started`), `home-format-override` (a `--allow-newer-home` open waved a newer home through the §9.1 refusal — `on-disk=`, `binary=`; knowingly-unsafe, always paired with a stderr warning), `context-ceiling-breach`, `empty-response` (forensic; the final drained response carried zero visible content — with `reprompted=yes\|no`, `turn=`; §3.3 empty-response recovery); *(vocabulary; not yet emitted)* `shutdown`, `error`, `config-reload` |
 | `thread` | `engaged`, `engaged-non-owner`, `engaged-cross-project`, `engaged-miss`, `created`, `created-meta-only`, `state-change`, `fetch-miss`, `fetch-cross-project`, `anchor-projection-overflow`, `tag-defaulted` (with `thr=` — the bound owner, `cause=missing-tag\|empty-response`, `reprompted=yes\|no`; §3.3 owner-default) |
 | `spine` | `match-fire`, `embed-match-fire`, `intra-match-fire`; *(vocabulary)* `match-miss`, `entry-updated` |
 | `recall` | `offer` (with `count=N`), `accept` (with `thr=`, `layers=`), `decline` (with `thr=`, `reason=not-relevant\|wrong-project\|already-known`), `net-cap-hit`, `flush-backlog`, `W1-diag`, `fire-error`, `error`, `index-error`, `embed-error`, `debt-window-error`, `tree-error`; *(vocabulary)* `cross-project-fire` |
@@ -516,7 +518,7 @@ Actions ending in `-error` (and `warning`) are forensic diagnostics, not measure
 | `fs` | `edit-no-path`, `write-error`, `commit-untracked` (`unsynced-no-topic-tag` is **retracted** with the missing-tag abort — §3.3 recovery means edits always bind) |
 | `staging` | `promoted`, `evicted` (window-close GC, §3.10) |
 | `topic` | `re-prompt` (with `cause=missing-thread` + `fetched=` for the §5.5 fetch, `cause=missing-tag` for the §3.3 tag recovery, or `cause=empty-response` for the §3.3 empty-response recovery), `tag-missing`, `tag-invalid` (forensic; a near-miss tag candidate that failed strict validation — `reason=markdown-mangled\|bad-delimiters\|bad-thread-list\|bare-new-topic` + a short sanitized `snippet=`; ADDITIVE to `tag-missing`, not a measured decision event), `warning` |
-| `session` | `ended`, `working-set-save-error`, `checkpoint-error` |
+| `session` | `started` (with `active=`, `provider=` — the session/project event, distinct from the `system.bootstrap` identity line), `ended`, `working-set-save-error`, `checkpoint-error` |
 | `project` | `created`, `switched`, `renamed`; *(vocabulary)* `cd-changed`, `remote-adopted`, `remote-updated`, `remote-collision-prompt`, `meta-updated` |
 | `model` | `stream-close-warn` |
 | `workset` | `warning` (layer render failure, §3.1) |
@@ -1678,6 +1680,9 @@ Go binary subcommands (see also §2.1):
 - `personant verify` — full structural validation.
 - `personant ping` — send a single prompt to a configured provider and print the response (`--provider`, `--prompt`, `--model`, `--timeout` flags). Connectivity smoke test.
 - `personant models` — list models available from a provider (`--provider` flag).
+- `personant version` — print version identity (both semver lines, the home format this binary writes, the build stamp) plus the resolved home path and the format stamp found there. **Ungated by construction** (§9.1): never runs the format gate, never reconciles, never fails on a broken home. `personant --version` prints the one-line short form only.
+
+Persistent flags on every subcommand: `--home` (override `$PERSONANT_HOME` for the invocation) and `--allow-newer-home` (open a home whose on-disk format exceeds this binary's — §9.1; leaves a stderr warning and a `system.home-format-override` event).
 - `personant search <query>` — symbol/text search across spine and threads.
 - `personant deps <thr_id>` — show threads referenced by anchors of the given thread.
 - `personant permissions list` — show accrued grants from directive files (§6.2.3).
@@ -1703,6 +1708,7 @@ surface entirely.
 | `/cd-project <path>` | set active project root to `<path>` (see §4.5) |
 | `/model <id>` | switch active LLM |
 | `/stats` | runtime stats (active threads, layer fill, recent recall events, etc.) |
+| `/version` | version identity plus the on-disk format of the home this session opened (§9.1) |
 
 ### 4.3 Decline categorization UI
 
@@ -3154,16 +3160,75 @@ as runs surface new gaps):
   long-career design; the mechanisms exist (§3.1 truncation, §3.8
   archival) but no instrument is pointed at the handoff.
 
-**Two version lines.** The substrate (this spec's runtime + the
-`MemoryOps` API) and the front end (U/X + feature logic atop it) are
-versioned independently. The four-month gate converges the *substrate*;
-it says nothing about the front end, which is earned by a separate human
-U/X phase. Current state: **substrate v0.1.0** (earned through the test
-rigor to date), **front end v0.0.1** (REPL loop closed, untested by any
-direct human means, missing much minimally-required interactive
-behavior). Substrate **v0.5.0 is the realism-convergence milestone**, at
-which work switches gears to front-end logic; the front end reaches
-**v0.1.0** once a minimum interactive feature set exists in any form.
+**Two version lines — the values live in code, not here.** The substrate
+(this spec's runtime + the `MemoryOps` API) and the front end (U/X +
+feature logic atop it) are versioned independently. The four-month gate
+converges the *substrate*; it says nothing about the front end, which is
+earned by a separate human U/X phase.
+
+The current values are **`version.Substrate` and `version.FrontEnd` in
+`internal/version`** — the single source of truth. They are deliberately
+NOT restated here: a prose copy is a second definition that goes stale on
+the next bump. `personant version` (and `--version`, and the REPL's
+`/version`) prints them; `system.bootstrap` records them once per session
+(§2.8).
+
+The **milestone gates** are normative and stay here:
+
+- Substrate **v0.5.0 — realism convergence.** The four-month simulation
+  gate above, walked to the top rung with every identified realism
+  element accounted for (simulated, modeled-and-attempted, or honestly
+  parked). At v0.5.0 work switches gears to front-end logic.
+- Front end **v0.1.0 — minimum interactive set.** Earned once a minimum
+  interactive feature set exists in any form, validated by direct human
+  use rather than by simulation.
+
+**Front-end bump cadence.** During the living-with phase every front-end
+(CLI/REPL/UX) feature change bumps `version.FrontEnd`'s PATCH digit
+unless the developer specifies otherwise; MINOR bumps are developer fiat
+at the milestone gates above.
+
+**A third line, not semver: the home's on-disk `format`.**
+`<home>/version.toml` (§2.1) carries a single integer — `format = N` —
+recording the canonical layout revision the home's bytes were written in.
+`version.CurrentHomeFormat` is what this binary writes and understands.
+It is deliberately **not semver**: an on-disk layout is either one a
+binary can read or it is not, so there is nothing for a three-part
+version to express. It advances independently of both semver lines — most
+releases do not change the layout at all.
+
+**Gating** is `memops.GateHomeFormat`, a pure decision run at the process
+boundary. **Ordering invariant (load-bearing): the gate runs BEFORE
+Reconcile.** Reconcile is crash recovery (§4.5.8) and resets the worktree
+to a recovery point; running it against a layout this binary cannot
+interpret would rearrange bytes it does not understand. The open sequence
+is *gate → Reconcile → LoadSession*.
+
+- **Equal** → proceed.
+- **Newer on disk → REFUSE.** A home written by a newer personant may
+  carry fields, files, or invariants this binary does not know; operating
+  on it can corrupt it, and the honest move is to say so and stop.
+  `--allow-newer-home` overrides the refusal for one invocation. Because
+  that is knowingly unsafe, a waved-through open emits a loud stderr
+  warning AND a `system.home-format-override` event (§2.8) — the record
+  someone reads afterward must show that it happened.
+- **Older on disk → refuse**, pending a registered migration.
+  Deliberately unreachable today (there is exactly one format); the shape
+  exists so the first real migration changes a constant and registers a
+  migration rather than restructuring the gate.
+- **No stamp → adopt forward.** A home predating versioning is taken to
+  be `version.UnversionedHomeFormat` and stamped as such.
+  `UnversionedHomeFormat` is a separate constant pinned at 1 forever,
+  never an alias of `CurrentHomeFormat`: when `CurrentHomeFormat` later
+  advances, an unmigrated legacy home must resolve to 1 and take its
+  migration, not be silently declared modern.
+
+`personant version` is the deliberately **ungated** diagnostic — it
+reports the binary's identity, the resolved home path, and the home's
+stamp (a concrete revision, *absent*, or *unreadable*) and exits 0 either
+way. It is what you run precisely when the home is missing, broken, or
+newer than the binary, so it never gates, never reconciles, and never
+fails on a home it cannot read.
 
 This is the load-bearing test. Phase-1 unit tests, Phase-2 scenario
 tests, and Phase-3 churn tests all build toward enabling this

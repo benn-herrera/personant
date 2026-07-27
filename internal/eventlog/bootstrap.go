@@ -2,7 +2,9 @@ package eventlog
 
 import (
 	"fmt"
+	"path/filepath"
 
+	"personant/internal/clock"
 	"personant/internal/memops"
 	"personant/internal/store"
 	"personant/internal/version"
@@ -22,6 +24,17 @@ import (
 // degrades to "unknown" on an unstamped binary rather than dropping the
 // field, so the line's shape is constant for log scrapers.
 func LogBootstrap(paths store.PersonantPaths, homeFormat int) error {
+	// Heal first. This line is BY CONSTRUCTION the first event a process
+	// writes, and it lands BEFORE Reconcile — the §9.1 format gate must
+	// precede crash recovery, so recovery's phase-0 log-tail heal has not
+	// run yet. A crash mid-append leaves the day's log without a trailing
+	// newline; a plain append would fuse this record onto that fragment,
+	// which is exactly the merge HealTail exists to prevent. The heal is
+	// additive (never truncates), so the torn fragment survives on disk for
+	// Reconcile to find and report moments later.
+	if err := HealTail(filepath.Join(paths.LogsDir, dayFileName(clock.Timeline()))); err != nil {
+		return fmt.Errorf("eventlog: LogBootstrap: %w", err)
+	}
 	details := fmt.Sprintf("version=%s frontend=%s home-format=%d commit=%s home=%s",
 		version.Substrate,
 		version.FrontEnd,
