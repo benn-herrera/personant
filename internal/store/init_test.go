@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"personant/internal/version"
 )
 
 // hasGit skips the test if `git` is not available on the host.
@@ -73,6 +75,7 @@ func TestInitFreshHome(t *testing.T) {
 		paths.Providers,
 		paths.Readme,
 		paths.Gitignore,
+		paths.HomeVersion,
 	}
 	for _, f := range wantFiles {
 		stat, err := os.Stat(f)
@@ -471,6 +474,59 @@ func TestInitCanonicalEmptyFilesAreEmpty(t *testing.T) {
 		if stat.Size() != 0 {
 			t.Errorf("expected %s empty, got %d bytes", p, stat.Size())
 		}
+	}
+}
+
+// TestInitStampsHomeFormat: a fresh home is stamped with the format this
+// binary writes, and the stamp is CANONICAL — tracked by git, hence part
+// of the init commit, and not swept into the seeded .gitignore block.
+func TestInitStampsHomeFormat(t *testing.T) {
+	hasGit(t)
+	paths := initIntoTempDir(t)
+
+	found, format, err := ReadHomeFormat(paths)
+	if err != nil {
+		t.Fatalf("ReadHomeFormat: %v", err)
+	}
+	if !found || format != version.CurrentHomeFormat {
+		t.Errorf("ReadHomeFormat = (%v, %d), want (true, %d)", found, format, version.CurrentHomeFormat)
+	}
+
+	out, err := exec.Command("git", "-C", paths.Home, "ls-files", "--error-unmatch", homeVersionFileName).CombinedOutput()
+	if err != nil {
+		t.Errorf("%s is not tracked in the init commit: %v: %s", homeVersionFileName, err, out)
+	}
+	gi, err := os.ReadFile(paths.Gitignore)
+	if err != nil {
+		t.Fatalf("read gitignore: %v", err)
+	}
+	if strings.Contains(string(gi), homeVersionFileName) {
+		t.Errorf("%s must not be gitignored; .gitignore:\n%s", homeVersionFileName, gi)
+	}
+}
+
+// TestInitPreservesExistingHomeFormat: re-init is touch-if-missing on the
+// format stamp, never rewrite. Rewriting would silently re-declare an
+// unmigrated older home as current and skip its migration — the exact
+// failure the stamp exists to prevent.
+func TestInitPreservesExistingHomeFormat(t *testing.T) {
+	hasGit(t)
+	home := t.TempDir()
+	paths := PathsForHome(home)
+	if err := os.WriteFile(paths.HomeVersion, []byte("format = 99\n"), 0o644); err != nil {
+		t.Fatalf("write pre-existing stamp: %v", err)
+	}
+
+	if err := Init(paths, InitOptions{Quiet: true}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	found, format, err := ReadHomeFormat(paths)
+	if err != nil {
+		t.Fatalf("ReadHomeFormat: %v", err)
+	}
+	if !found || format != 99 {
+		t.Errorf("ReadHomeFormat = (%v, %d), want (true, 99): init rewrote the stamp", found, format)
 	}
 }
 

@@ -607,6 +607,41 @@ type MemoryOps interface {
 	// turn is refused (ErrConflictingMarker), never released.
 	ReleaseTurn(ctx context.Context, turnID string) error
 
+	// ---------- Home on-disk format (SPEC §9.1) ----------
+
+	// HomeFormat reads the substrate's canonical on-disk format revision —
+	// the integer layout version its bytes were written in. found=false is
+	// the legitimate "substrate predates versioning" state, NOT an error;
+	// callers feed (found, format) straight into GateHomeFormat. A present
+	// but corrupt/unreadable stamp IS an error: silently downgrading
+	// corruption to "unversioned" would let a garbled revision be
+	// overwritten with a wrong one.
+	//
+	// ORDERING INVARIANT (load-bearing): call this — and act on the gate's
+	// decision — BEFORE Reconcile. Reconcile is crash recovery and resets
+	// the worktree to a recovery point; running it against a layout this
+	// binary does not understand is exactly the wrong move. The open
+	// sequence is Init → HomeFormat/GateHomeFormat (+ StampHomeFormat) →
+	// Reconcile → LoadSession.
+	//
+	// Reading the stamp before Reconcile is safe by construction: the
+	// artifact is written only by Init (touch-if-missing) and by migration,
+	// never on a turn path, so no mid-turn crash can leave it torn — and
+	// the file adapter writes it atomically besides.
+	HomeFormat(ctx context.Context) (found bool, format int, err error)
+
+	// StampHomeFormat records `format` as the substrate's on-disk revision,
+	// replacing any existing stamp. Two callers only: the adopt-forward arm
+	// of GateHomeFormat (stamping an unversioned home as
+	// version.UnversionedHomeFormat) and a future migration on completion.
+	// Nothing on a turn path may call it — see HomeFormat's ordering note
+	// for why that discipline is what makes the pre-Reconcile read safe.
+	//
+	// The write is idempotent, which is what makes it safe to run before
+	// Reconcile: if recovery subsequently rolls the worktree back past an
+	// uncommitted stamp, the next open simply re-stamps.
+	StampHomeFormat(ctx context.Context, format int) error
+
 	// ---------- Bootstrap and verification ----------
 
 	// Init scaffolds the substrate for first-run use. Idempotent: a

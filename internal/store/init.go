@@ -16,6 +16,7 @@ import (
 	"github.com/go-git/go-git/v5/storage/filesystem"
 
 	"personant/internal/clock"
+	"personant/internal/version"
 )
 
 // InitOptions controls the behavior of Init.
@@ -45,6 +46,9 @@ type InitOptions struct {
 //     reconstruct them.
 //   - Canonical/derived data files (spine.jsonl, symbols.jsonl) are
 //     created empty if missing and never truncated.
+//   - The §9.1 home format stamp (version.toml) is written only when
+//     missing; an existing stamp is never rewritten (see the step itself
+//     for why re-stamping would be actively wrong).
 //
 // Git is managed in-process via go-git: `git init` plus the bootstrap
 // "personant init" commit run on the home tree. No git binary is
@@ -95,6 +99,24 @@ func Init(paths PersonantPaths, opts InitOptions) error {
 		if created {
 			logf("init: created %s", p)
 		}
+	}
+
+	// Home on-disk format stamp (§9.1): TOUCH-IF-MISSING, deliberately NOT
+	// the rewriteFiles treatment below. Init rewrites install-shipped
+	// templates on every run so they match the binary, but the format stamp
+	// is not a template — it is the home's own record of which layout its
+	// bytes are in. Rewriting it would silently re-declare an unmigrated
+	// older home as current, skipping the migration that makes it readable.
+	// An existing value is therefore left exactly as found; only a home that
+	// has never been stamped gets one. The file is canonical and tracked —
+	// it is NOT in the seeded .gitignore block, so the initial commit below
+	// includes it.
+	createdVersion, err := writeIfMissing(paths.HomeVersion, homeVersionTOML(version.CurrentHomeFormat))
+	if err != nil {
+		return fmt.Errorf("init: write %s: %w", filepath.Base(paths.HomeVersion), err)
+	}
+	if createdVersion {
+		logf("init: wrote %s", paths.HomeVersion)
 	}
 
 	// Install-shipped templates: rewrite on every init to match the binary.
