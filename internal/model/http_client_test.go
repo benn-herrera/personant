@@ -491,55 +491,6 @@ data: {"choices":[{"delta":{"content":"b"}}]}
 	}
 }
 
-// TestHTTPClientStreamDropsToolCallDeltas pins the item-2 guard: an SSE
-// stream that fragments a tool call across chunks (OpenAI style: id/name
-// once, then argument-string fragments keyed by index) must NOT surface as
-// fragmented arguments in Final().ToolCalls. The reader drops the deltas
-// (logging a guard) so a caller never acts on half-parsed arguments;
-// content still accumulates normally.
-func TestHTTPClientStreamDropsToolCallDeltas(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		const sse = `data: {"choices":[{"delta":{"content":"thinking"}}]}
-
-data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"loc"}}]}}]}
-
-data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ation\":\"SF\"}"}}]}}]}
-
-data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"total_tokens":9}}
-
-data: [DONE]
-
-`
-		_, _ = w.Write([]byte(sse))
-	}))
-	defer srv.Close()
-
-	c := NewHTTPClient(newTestProvider(srv.URL))
-	sr, err := c.ConsultStream(context.Background(), DefaultRequest("m", []Message{{Role: "user", Content: "weather?"}}))
-	if err != nil {
-		t.Fatalf("ConsultStream: %v", err)
-	}
-	defer sr.Close()
-	for {
-		if _, err := sr.Next(); errors.Is(err, io.EOF) {
-			break
-		} else if err != nil {
-			t.Fatalf("Next: %v", err)
-		}
-	}
-	final := sr.Final()
-	if len(final.ToolCalls) != 0 {
-		t.Errorf("Final().ToolCalls must be empty (fragments dropped by guard); got %+v", final.ToolCalls)
-	}
-	if final.Content != "thinking" {
-		t.Errorf("Final().Content: got %q, want %q", final.Content, "thinking")
-	}
-	if final.FinishReason != "tool_calls" {
-		t.Errorf("Final().FinishReason: got %q, want tool_calls", final.FinishReason)
-	}
-}
-
 // TestHTTPClientStreamCtxCancellation: a cancelled context mid-stream
 // should surface via Next().
 func TestHTTPClientStreamCtxCancellation(t *testing.T) {

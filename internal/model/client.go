@@ -132,6 +132,14 @@ type ToolSpec struct {
 }
 
 // ToolCall is one tool invocation requested by the model.
+//
+// Args is the raw JSON value of the wire `arguments` field, NOT the
+// decoded argument object. OpenAI-compatible providers send arguments as
+// a JSON-encoded string, so Args typically reads `"{\"q\":\"go\"}"` —
+// unmarshal it into a string first, then unmarshal that string into the
+// argument struct. Both the blocking and the streaming path produce this
+// same representation, and encodeRequest replays it verbatim when the
+// call is echoed back to the provider in an assistant message.
 type ToolCall struct {
 	ID       string
 	Function string
@@ -148,14 +156,17 @@ type Response struct {
 
 // Chunk is one delta in a streamed chat-completion response. Most chunks
 // carry a non-empty Content; the final chunk(s) typically carry empty
-// Content but a non-empty FinishReason and Usage. Tool-call streaming
-// is best-effort for v0.1 — providers vary in how they fragment tool
-// calls; the runtime surfaces what arrives per chunk and does not merge
-// deltas across chunks. Because per-chunk deltas cannot be safely merged
-// (id/name arrive once, argument strings are fragmented by index), the
-// httpStreamReader does NOT accumulate them into Final().ToolCalls — it
-// drops the fragments and logs a guard. Callers needing tool calls use
-// Consult, not ConsultStream.
+// Content but a non-empty FinishReason and Usage.
+//
+// ToolCalls is an IDENTITY-ONLY progress signal, not executable calls:
+// one entry per tool call this chunk carried a fragment for, holding the
+// ID and Function name known so far. Args is deliberately always nil —
+// a chunk holds a slice of the argument string, which is not valid JSON
+// on its own, so there is nothing safe to put there. It exists so a UI
+// can say "calling web.search…" the moment the name arrives.
+//
+// The complete, merged calls come from StreamReader.Final().ToolCalls,
+// which accumulates fragments by index across the whole stream.
 type Chunk struct {
 	Content      string
 	ToolCalls    []ToolCall
