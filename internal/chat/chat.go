@@ -218,6 +218,12 @@ func Run(opts Options) error {
 	lr := newLineReader(opts, in)
 	defer func() { _ = lr.close() }()
 
+	// The phase-labeled wait indicator. Built before the signal handler is
+	// installed so the forced-exit path can always clear it. Inert (zero
+	// bytes) unless the session is driving a real terminal.
+	pr := newProgress(opts.Stdout, interactiveTTY(opts))
+	defer pr.stop()
+
 	project, err := bootstrapProject(opts, lr, ops, cwd)
 	if err != nil {
 		return err
@@ -287,9 +293,15 @@ func Run(opts Options) error {
 		state.Recaller = measure.NewService(ops, nil)
 	}
 
+	// Progress reporting: the turn pipeline announces the stage it is in,
+	// the indicator renders it. Both interactive resolvers below write
+	// through pr.writer so that taking the terminal to ask the user a
+	// question retires any in-flight indicator first.
+	state.OnPhase = pr.phase
+
 	// §3.4 recall UI surface (Part B): install an interactive resolver
 	// so recalled threads can be pulled into Layer B at turn close.
-	state.RecallResolver = interactiveRecallResolver(lr, opts.Stdout)
+	state.RecallResolver = interactiveRecallResolver(lr, pr.writer(opts.Stdout))
 
 	// §3.5 decay-triggered closure flow: a model-backed curator drafts
 	// the closure summary, and an interactive resolver lets the user
@@ -301,7 +313,7 @@ func Run(opts Options) error {
 		closureModel = provider.DefaultModel
 	}
 	state.Curator = curator.NewHTTPCurator(client, closureModel)
-	state.ClosureResolver = interactiveClosureResolver(lr, opts.Stdout)
+	state.ClosureResolver = interactiveClosureResolver(lr, pr.writer(opts.Stdout))
 
 	banner := opts.Banner
 	if banner == "" {
@@ -331,11 +343,11 @@ func Run(opts Options) error {
 	}()
 	go func() {
 		for range sigCh {
-			onInterrupt(&interrupts, cancel, lr, opts.Stderr)
+			onInterrupt(&interrupts, cancel, lr, pr, opts.Stderr)
 		}
 	}()
 
-	if err := loop(runCtx, opts, lr, ops, state, &interrupts, cancel); err != nil {
+	if err := loop(runCtx, opts, lr, pr, ops, state, &interrupts, cancel); err != nil {
 		return err
 	}
 
@@ -514,7 +526,12 @@ func resolveChatModel(ctx context.Context, client model.Client, stderr io.Writer
 // terminal first. count is shared between the signal handler and the loop's
 // at-prompt handling so a Ctrl-C during shutdown always forces regardless of
 // which path saw the first one.
-func onInterrupt(count *atomic.Int32, cancel context.CancelFunc, lr lineReader, stderr io.Writer) {
+func onInterrupt(count *atomic.Int32, cancel context.CancelFunc, lr lineReader, pr *progress, stderr io.Writer) {
+	// Clear any in-flight indicator FIRST. On the forced-exit path below no
+	// deferred cleanup runs, so a half-drawn frame would be the last thing
+	// left on the terminal; on the clean path it keeps the interrupt notice
+	// from being drawn over.
+	pr.stop()
 	if count.Add(1) >= 2 {
 		_ = lr.close() // restore terminal before the forced exit
 		os.Exit(130)
@@ -526,7 +543,7 @@ func onInterrupt(count *atomic.Int32, cancel context.CancelFunc, lr lineReader, 
 // loop is the core REPL. Returns nil on a clean exit; non-nil on an
 // unrecoverable I/O error (e.g. the input reader failing, not a
 // per-turn LLM error which is logged and tolerated).
-func loop(ctx context.Context, opts Options, lr lineReader, ops memops.MemoryOps, state *turn.State, interrupts *atomic.Int32, cancel context.CancelFunc) error {
+func loop(ctx context.Context, opts Options, lr lineReader, pr *progress, ops memops.MemoryOps, state *turn.State, interrupts *atomic.Int32, cancel context.CancelFunc) error {
 	for {
 		if ctx.Err() != nil {
 			// A SIGINT during a turn cancelled the session — unwind cleanly.
@@ -537,7 +554,7 @@ func loop(ctx context.Context, opts Options, lr lineReader, ops memops.MemoryOps
 		case errors.Is(err, errInputAborted):
 			// Ctrl-C at the prompt (liner raw mode) — route through the same
 			// interrupt path as a delivered SIGINT, then unwind.
-			onInterrupt(interrupts, cancel, lr, opts.Stderr)
+			onInterrupt(interrupts, cancel, lr, pr, opts.Stderr)
 			return nil
 		case errors.Is(err, io.EOF):
 			if line == "" {
@@ -568,7 +585,7 @@ func loop(ctx context.Context, opts Options, lr lineReader, ops memops.MemoryOps
 		case strings.HasPrefix(trimmed, "$") || strings.HasPrefix(trimmed, "#"):
 			fmt.Fprintln(opts.Stderr, "shell escape ($/#) is not yet implemented (Phase 2.f)")
 		default:
-			if err := runOneTurn(ctx, opts, state, input); err != nil {
+			if err := runOneTurn(ctx, opts, pr, state, input); err != nil {
 				// A bad turn does not kill the session — log the error and
 				// loop. The user can usually retry; the one exception is a
 				// marker-retained failure (a CommitTurn failure this turn, or
@@ -586,16 +603,24 @@ func loop(ctx context.Context, opts Options, lr lineReader, ops memops.MemoryOps
 	}
 }
 
-func runOneTurn(ctx context.Context, opts Options, state *turn.State, input string) error {
+func runOneTurn(ctx context.Context, opts Options, pr *progress, state *turn.State, input string) error {
 	turnCtx, cancel := context.WithTimeout(ctx, turnTimeout)
 	defer cancel()
-	body, err := turn.Run(turnCtx, state, input, opts.Stdout)
+	// The body streams through pr.writer: its first byte retires the
+	// pre-token indicator, and the turn's closing phase restarts it for the
+	// post-stream wait.
+	_, err := turn.Run(turnCtx, state, input, pr.writer(opts.Stdout))
+	// Retire the closing-phase indicator on EVERY exit — normal, per-turn
+	// error, or a cancelled turn — before anything else touches the
+	// terminal. It owns the current line until it is stopped.
+	pr.stop()
 	if err != nil {
 		return err
 	}
-	// turn.Run streams the body to opts.Stdout as it arrives. Ensure the
-	// next prompt lands on a fresh line.
-	if !strings.HasSuffix(body, "\n") {
+	// Ensure the next prompt lands on a fresh line. The progress knows the
+	// cursor column (it and the body write through the same wrapper), which
+	// the returned body — already tag-stripped and newline-trimmed — does not.
+	if !pr.atLineStart() {
 		fmt.Fprintln(opts.Stdout)
 	}
 	return nil

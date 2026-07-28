@@ -336,6 +336,10 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 	if len(engaged) > 0 {
 		engagedOwner = engaged[0]
 	}
+	// §3.4 recall is the one close-time step that can make a network call
+	// (the embedding round-trip), so it gets its own label rather than
+	// hiding inside PhaseClosing.
+	emitPhase(state, PhaseRecall)
 	if err := surfaceRecallCandidates(ctx, state, userInput, engagedSet, engagedOwner); err != nil {
 		_ = state.Ops.Log(ctx, memops.LogCategoryRecall, "error", memops.SanitizeDetail(err.Error()))
 		// Non-fatal: opportunistic recall failure does not abort the turn.

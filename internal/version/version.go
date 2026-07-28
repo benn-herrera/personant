@@ -32,7 +32,7 @@ import (
 const Substrate = "0.1.0"
 
 // FrontEnd is the version of the U/X + feature-logic line.
-const FrontEnd = "0.0.2"
+const FrontEnd = "0.0.3"
 
 // CurrentHomeFormat is the home on-disk format revision this binary
 // writes and understands.
@@ -118,7 +118,7 @@ func (b Build) CommitLabel() string {
 
 // Short returns the one-line version identity, e.g.
 //
-//	personant 0.1.0 (front end 0.0.2, commit abc1234, home format 1)
+//	personant 0.1.0 (front end 0.0.3, commit abc1234, home format 1)
 //
 // The commit clause is omitted entirely when the binary is unstamped.
 func Short() string { return shortForm(ReadBuild()) }

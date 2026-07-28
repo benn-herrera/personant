@@ -111,8 +111,10 @@ a second definition that goes stale on the next bump. `personant version`
 - **substrate** (`version.Substrate`) — this runtime + the `MemoryOps` API.
 - **front end** (`version.FrontEnd`) — U/X + feature logic. REPL-closed
   with the dogfood-minimum interactive set now in place (slash commands,
-  `liner` line editing + history, SIGINT handling) but not yet validated
-  by direct human use; dogfooding is the next step.
+  `liner` line editing + history, SIGINT handling, the §4.3.2
+  phase-labeled turn progress indicator). Dogfooding is now driving it —
+  the progress indicator is the first change to land from direct human
+  use.
 - **home on-disk `format`** (`version.CurrentHomeFormat`) — a plain
   integer in `<home>/version.toml`, deliberately NOT semver: a layout is
   either readable by a binary or it is not. A home written by a NEWER

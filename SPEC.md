@@ -1732,6 +1732,43 @@ The chat REPL must support:
 - History deduplication (no consecutive duplicate entries).
 - History size cap (configurable; default 1000 entries).
 
+### 4.3.2 Turn progress indicator
+
+A turn has two windows in which the user gets no output: between pressing
+enter and the model's first token, and between the last token and the next
+prompt (§3.4 recall, the §3.5 closure scan, `CommitTurn`, working-set save).
+With a live embedding provider either can run for seconds.
+
+The REPL renders a **phase-labeled** indicator across both — the label
+names what the runtime is doing, not merely that it is busy. The phase
+vocabulary is fixed and small:
+
+| Phase | Window |
+|---|---|
+| composing context | §3.0 delta chain + working-set composition |
+| waiting on the model | the LLM round-trip (first-token latency) |
+| re-issuing request | a §5.5 fetch or D6 re-prompt aborted the stream |
+| searching memory | the §3.4 recall stack (the embedding round-trip) |
+| closing turn | response journal, engagement, closure scan, commit, save |
+
+Requirements:
+
+- The turn pipeline **announces** phases through an optional hook; it does
+  not render. Phases are a presentation signal only — never journaled,
+  logged, or committed, and nothing branches on them.
+- Rendering is **terminal-gated**. On a non-terminal stdout (piped runs,
+  the scenario harness, tests) the indicator emits zero bytes. On a
+  no-ANSI terminal (`TERM=dumb` or unset) it degrades to one static line
+  per phase.
+- Nothing is drawn until the wait passes a short reveal threshold, so
+  ordinary short turns stay visually silent.
+- Content always wins the terminal: the first response byte — and any
+  interactive offer prompt (§3.4 recall, §3.5 closure) — retires the
+  indicator and clears its line before writing. The indicator is restored
+  for the close window afterwards.
+- The line is cleared on every exit: normal completion, per-turn error,
+  and both interrupt paths (§4 clean shutdown and the forced quit).
+
 ### 4.4 Shell escape (`$` and `#`)
 
 The user can run arbitrary shell commands without leaving the personant
