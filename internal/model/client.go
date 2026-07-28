@@ -167,8 +167,20 @@ type Response struct {
 //
 // The complete, merged calls come from StreamReader.Final().ToolCalls,
 // which accumulates fragments by index across the whole stream.
+//
+// Reasoning carries thinking-mode output, kept strictly separate from
+// Content because they are different kinds of output: Content is the
+// model's committed answer, Reasoning is scratch. Reasoning must never be
+// concatenated into a response body — it must not be journaled as the
+// response, feed symbol extraction, or be replayed in history (providers
+// advise against replaying it, and it would blow the §6.5 budget). It is
+// available so a front end can display it, dimmed and optionally; it is
+// per-chunk only and is NOT accumulated into Final() (see the note there).
+// A reasoning-only chunk carries an empty Content — a stream can consist
+// almost entirely of them.
 type Chunk struct {
 	Content      string
+	Reasoning    string
 	ToolCalls    []ToolCall
 	FinishReason string
 	Usage        Usage
@@ -198,11 +210,26 @@ type StreamReader interface {
 }
 
 // Usage is the token-accounting block returned by the provider.
+//
+// ReasoningTokens is the thinking-mode share of CompletionTokens
+// (`completion_tokens_details.reasoning_tokens` on the wire), 0 when the
+// provider does not report it. It is the only measurement of what thinking
+// mode costs — on a reasoning-heavy turn it is most of CompletionTokens.
+//
+// On a STREAMED response every figure here is zero unless the request
+// carried `stream_options.include_usage` (encodeRequest sends it on the
+// streaming path). An all-zero Usage therefore means "not reported", not
+// "no tokens", and anything gated on a token count must treat it as an
+// unevaluable input rather than a passing one.
 type Usage struct {
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
+	ReasoningTokens  int
 }
+
+// IsZero reports whether the provider supplied no usage figures at all.
+func (u Usage) IsZero() bool { return u == Usage{} }
 
 // ErrMockExhausted is returned by a scripted MockClient when its response
 // queue has been drained. Tests check for this with errors.Is.

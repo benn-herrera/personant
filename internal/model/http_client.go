@@ -260,15 +260,29 @@ type wireToolSpecParams struct {
 // decode, zero-token cap respectively), not a "use server default"
 // sentinel. Callers that want sane defaults use model.DefaultRequest.
 type wireRequest struct {
-	Model              string         `json:"model"`
-	Messages           []wireMessage  `json:"messages"`
-	Tools              []wireToolSpec `json:"tools,omitempty"`
-	ToolChoice         string         `json:"tool_choice,omitempty"`
-	Temperature        float64        `json:"temperature"`
-	MaxTokens          int            `json:"max_tokens"`
-	Stop               []string       `json:"stop,omitempty"`
-	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
-	Stream             bool           `json:"stream,omitempty"`
+	Model              string             `json:"model"`
+	Messages           []wireMessage      `json:"messages"`
+	Tools              []wireToolSpec     `json:"tools,omitempty"`
+	ToolChoice         string             `json:"tool_choice,omitempty"`
+	Temperature        float64            `json:"temperature"`
+	MaxTokens          int                `json:"max_tokens"`
+	Stop               []string           `json:"stop,omitempty"`
+	ChatTemplateKwargs map[string]any     `json:"chat_template_kwargs,omitempty"`
+	Stream             bool               `json:"stream,omitempty"`
+	StreamOptions      *wireStreamOptions `json:"stream_options,omitempty"`
+}
+
+// wireStreamOptions is the `stream_options` request block. It is valid
+// ONLY on a streaming request — several OpenAI-compatible providers reject
+// its presence on a blocking one — so encodeRequest attaches it behind the
+// stream flag and the pointer stays nil (field omitted) otherwise.
+type wireStreamOptions struct {
+	// IncludeUsage asks the provider to emit a final, CHOICES-LESS chunk
+	// carrying only `usage`. Without it a streamed response carries NO
+	// usage payload at all: every token count comes back zero, which is
+	// indistinguishable from a real zero and silently disables anything
+	// gated on it (see internal/turn's #127 token-ceiling guard).
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type wireChoice struct {
@@ -278,9 +292,32 @@ type wireChoice struct {
 }
 
 type wireUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens            int                        `json:"prompt_tokens"`
+	CompletionTokens        int                        `json:"completion_tokens"`
+	TotalTokens             int                        `json:"total_tokens"`
+	CompletionTokensDetails *wireCompletionTokenDetail `json:"completion_tokens_details,omitempty"`
+}
+
+// wireCompletionTokenDetail is the OpenAI-compatible breakdown of the
+// completion half of the usage block. Only reasoning_tokens is read: it is
+// the sole measurement of what thinking mode actually costs, and on a
+// reasoning-heavy turn it is most of CompletionTokens.
+type wireCompletionTokenDetail struct {
+	ReasoningTokens int `json:"reasoning_tokens"`
+}
+
+// usage projects the wire block onto the caller-facing type. One
+// projection shared by the blocking decode and the SSE decode.
+func (w wireUsage) usage() Usage {
+	u := Usage{
+		PromptTokens:     w.PromptTokens,
+		CompletionTokens: w.CompletionTokens,
+		TotalTokens:      w.TotalTokens,
+	}
+	if w.CompletionTokensDetails != nil {
+		u.ReasoningTokens = w.CompletionTokensDetails.ReasoningTokens
+	}
+	return u
 }
 
 type wireResponse struct {
@@ -301,8 +338,11 @@ type wireModel struct {
 }
 
 // encodeRequest serializes a Request to the OpenAI chat-completions wire
-// format. stream toggles the `stream` field; it is otherwise identical
-// across blocking and streaming paths.
+// format. stream toggles the `stream` field AND attaches
+// `stream_options.include_usage` (see wireStreamOptions — usage is not
+// reported on a streamed response without it, and the field is a protocol
+// error on a blocking one); the encoding is otherwise identical across the
+// blocking and streaming paths.
 func encodeRequest(req Request, stream bool) ([]byte, error) {
 	wr := wireRequest{
 		Model:              req.Model,
@@ -312,6 +352,9 @@ func encodeRequest(req Request, stream bool) ([]byte, error) {
 		MaxTokens:          req.MaxTokens,
 		ChatTemplateKwargs: req.ChatTemplateKwargs,
 		Stream:             stream,
+	}
+	if stream {
+		wr.StreamOptions = &wireStreamOptions{IncludeUsage: true}
 	}
 	for _, m := range req.Messages {
 		wm := wireMessage{
@@ -359,11 +402,7 @@ func decodeResponse(body []byte) (Response, error) {
 	out := Response{
 		Content:      choice.Message.Content,
 		FinishReason: choice.FinishReason,
-		Usage: Usage{
-			PromptTokens:     w.Usage.PromptTokens,
-			CompletionTokens: w.Usage.CompletionTokens,
-			TotalTokens:      w.Usage.TotalTokens,
-		},
+		Usage:        w.Usage.usage(),
 	}
 	for _, tc := range choice.Message.ToolCalls {
 		out.ToolCalls = append(out.ToolCalls, ToolCall{

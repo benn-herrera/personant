@@ -502,6 +502,13 @@ var ErrMarkerRetained = errors.New("turn recovery marker retained")
 // is whatever Usage the mock client reports (often a canned value or 0):
 // no special-casing — the number flows through honestly.
 //
+// It is 0 when the provider reported no usage — every turn streams, and a
+// streamed response carries no usage block unless the request asked for one
+// (model.encodeRequest's stream_options.include_usage). 0 therefore means
+// "unmeasured", never "an empty request"; the turn logs
+// system.context-ceiling-unenforceable when that happens with a ceiling
+// configured, and a consumer of this field must not read it as a count.
+//
 // TurnID is the per-turn transaction id (#94) stamped into the commit
 // trailer; CommitDuration is the measured wall-clock cost of the turn's
 // CommitTurn call — the per-turn-commit latency the crash-stability
@@ -978,7 +985,26 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	// canned small value, so this never fires there (the assertion is
 	// meaningful only on the real-model rung); that is correct — the
 	// mock-independent guarantee is the byte pre-flight above.
-	if state.Budget.TokenCeiling > 0 && full.Usage.PromptTokens > state.Budget.TokenCeiling {
+	//
+	// A guard that cannot evaluate its input must SAY SO. `prompt_tokens=0`
+	// is not a passing check — it is an absent measurement, and a streamed
+	// response reports no usage at all unless the request asked for it
+	// (model.encodeRequest's stream_options.include_usage; before that
+	// existed this comparison was `0 > ceiling` on every real turn and the
+	// guard had never fired in production). The unenforceable case gets its
+	// own event so the absence is visible instead of reading as a pass.
+	// Deliberately NOT estimated: a guessed token count standing in for a
+	// real measurement would make the guard look enforced when it is not.
+	// One line per affected turn, not once per session — the count of
+	// unenforced turns is the measurement.
+	switch {
+	case state.Budget.TokenCeiling <= 0:
+		// No ceiling configured; nothing to enforce or report.
+	case full.Usage.PromptTokens == 0:
+		_ = state.Ops.Log(ctx, memops.LogCategorySystem, "context-ceiling-unenforceable",
+			fmt.Sprintf("reason=usage-unavailable ceiling=%d turn=%d",
+				state.Budget.TokenCeiling, state.TurnNumber))
+	case full.Usage.PromptTokens > state.Budget.TokenCeiling:
 		_ = state.Ops.Log(ctx, memops.LogCategorySystem, "context-ceiling-breach",
 			fmt.Sprintf("prompt_tokens=%d ceiling=%d turn=%d",
 				full.Usage.PromptTokens, state.Budget.TokenCeiling, state.TurnNumber))

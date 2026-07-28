@@ -141,9 +141,13 @@ func (r *httpStreamReader) Next() (Chunk, error) {
 		if chunk.FinishReason != "" {
 			r.finishReason = chunk.FinishReason
 		}
-		if chunk.Usage.TotalTokens != 0 || chunk.Usage.PromptTokens != 0 || chunk.Usage.CompletionTokens != 0 {
+		// Last non-empty usage block wins. The include_usage final chunk is
+		// choices-less, so it lands here with empty Content and no tool
+		// deltas and updates nothing but Usage.
+		if !chunk.Usage.IsZero() {
 			r.usage = chunk.Usage
 		}
+		// Reasoning is deliberately NOT accumulated — see Final().
 		// Merge tool-call fragments into the index-keyed accumulators and
 		// surface the identity-only per-chunk view (see Chunk.ToolCalls).
 		chunk.ToolCalls = r.mergeToolDeltas(sc.toolDeltas)
@@ -301,6 +305,18 @@ func (r *httpStreamReader) finalizeToolCalls() {
 // than returned truncated — the drop is reported as an error from Next and
 // logged. Calling Final before the stream has ended returns a snapshot of
 // what has merged so far without freezing it; a later Final sees the rest.
+//
+// Reasoning is NOT part of the accumulated Response and Response has no
+// field for it: reasoning is delivered per-Chunk only. Two reasons, in
+// order of weight. (1) Reasoning is model scratch, not its committed
+// answer — it must never reach the response body, the turn journal, symbol
+// extraction, or replayed history, and the cheapest guarantee of that is a
+// type in which it cannot be represented. (2) It is large: on a live probe
+// 48 of 50 payloads were reasoning against 1 byte of content, so
+// unconditional accumulation would buy every turn a second full-size
+// buffer for data nearly every caller discards. A caller that wants the
+// whole text (a REPL rendering it) is already iterating chunks and can
+// accumulate what it chooses to keep.
 func (r *httpStreamReader) Final() Response {
 	r.finalizeToolCalls()
 	return Response{
@@ -332,6 +348,14 @@ type wireStreamDelta struct {
 	Role      string               `json:"role,omitempty"`
 	Content   string               `json:"content,omitempty"`
 	ToolCalls []wireStreamToolCall `json:"tool_calls,omitempty"`
+
+	// ReasoningContent / Reasoning are the same field under two spellings.
+	// litellm normalizes most vendors to `reasoning_content`; `reasoning`
+	// appears in the wild (and is what some native endpoints emit). Both
+	// are decoded and collapsed by parseSSEChunk; neither ever joins
+	// Content — reasoning is model scratch, not its committed answer.
+	ReasoningContent string `json:"reasoning_content,omitempty"`
+	Reasoning        string `json:"reasoning,omitempty"`
 }
 
 // wireStreamToolCall is one tool-call FRAGMENT. It is deliberately not
@@ -388,18 +412,22 @@ func parseSSEChunk(payload []byte) (sseChunk, error) {
 		return sseChunk{}, err
 	}
 	var out sseChunk
+	// A choices-less payload is not malformed: with
+	// stream_options.include_usage the provider emits a final chunk whose
+	// only content is `usage`. Everything below is independently guarded so
+	// that chunk decodes to a Usage-only Chunk.
 	if len(w.Choices) > 0 {
 		c := w.Choices[0]
 		out.Content = c.Delta.Content
+		out.Reasoning = c.Delta.ReasoningContent
+		if out.Reasoning == "" {
+			out.Reasoning = c.Delta.Reasoning
+		}
 		out.FinishReason = c.FinishReason
 		out.toolDeltas = c.Delta.ToolCalls
 	}
 	if w.Usage != nil {
-		out.Usage = Usage{
-			PromptTokens:     w.Usage.PromptTokens,
-			CompletionTokens: w.Usage.CompletionTokens,
-			TotalTokens:      w.Usage.TotalTokens,
-		}
+		out.Usage = w.Usage.usage()
 	}
 	return out, nil
 }

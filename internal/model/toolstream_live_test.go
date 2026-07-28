@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -93,6 +94,17 @@ func TestStreamToolCallMerge_Live(t *testing.T) {
 	t.Logf("finish_reason=%q content=%dB usage=%+v tool_calls=%d",
 		final.FinishReason, len(final.Content), final.Usage, len(final.ToolCalls))
 
+	// Usage on a streamed response exists only because the request carried
+	// stream_options.include_usage (encodeRequest, streaming path). Without
+	// it the provider sends no usage payload at all and every count is 0 —
+	// which is what silently disabled the #127 token-ceiling guard for the
+	// life of the project. An all-zero usage here means the field stopped
+	// being sent or the provider stopped honoring it.
+	if final.Usage.PromptTokens <= 0 || final.Usage.TotalTokens <= 0 {
+		t.Errorf("streamed usage not reported (usage=%+v) — stream_options.include_usage "+
+			"is missing from the request or unsupported by the provider", final.Usage)
+	}
+
 	if len(final.ToolCalls) == 0 {
 		t.Fatalf("provider returned no merged tool calls; finish_reason=%q content=%q",
 			final.FinishReason, final.Content)
@@ -122,11 +134,21 @@ func TestStreamToolCallMerge_Live(t *testing.T) {
 // explicit index / id / name, and how long each argument fragment was.
 // This is the probe's other deliverable — it says whether litellm conforms
 // to the canonical OpenAI shape.
+//
+// It also reports the reasoning shape: how many payloads carried a
+// thinking delta, how many bytes of it, and the LITERAL delta field names
+// the provider used (read from the raw JSON keys, not the decoded struct —
+// the field name is the conformance datum for whoever wires the UI, and
+// both `reasoning_content` and `reasoning` are in the wild). Payloads that
+// carry nothing the runtime decodes are counted too: a large "inert" count
+// means the wire carries something this decoder still drops.
 func describeFragmentation(t *testing.T, raw []byte) string {
 	t.Helper()
 	var b strings.Builder
 	b.WriteString("provider fragmentation:\n")
 	var payloads, contentDeltas, toolDeltas int
+	var reasoningDeltas, reasoningBytes, inertPayloads int
+	deltaFields := map[string]int{}
 	for _, line := range strings.Split(string(raw), "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "data:") {
@@ -137,10 +159,21 @@ func describeFragmentation(t *testing.T, raw []byte) string {
 			continue
 		}
 		payloads++
+		for _, f := range rawDeltaFields([]byte(p)) {
+			deltaFields[f]++
+		}
 		sc, err := parseSSEChunk([]byte(p))
 		if err != nil {
 			fmt.Fprintf(&b, "  payload %d: DECODE ERROR: %v\n", payloads, err)
 			continue
+		}
+		if sc.Reasoning != "" {
+			reasoningDeltas++
+			reasoningBytes += len(sc.Reasoning)
+		}
+		if sc.Content == "" && sc.Reasoning == "" && len(sc.toolDeltas) == 0 &&
+			sc.FinishReason == "" && sc.Usage.IsZero() {
+			inertPayloads++
 		}
 		if sc.Content != "" {
 			contentDeltas++
@@ -159,7 +192,37 @@ func describeFragmentation(t *testing.T, raw []byte) string {
 			fmt.Fprintf(&b, "  payload %d: finish_reason=%q\n", payloads, sc.FinishReason)
 		}
 	}
-	fmt.Fprintf(&b, "  totals: payloads=%d content_deltas=%d tool_deltas=%d\n",
-		payloads, contentDeltas, toolDeltas)
+	fmt.Fprintf(&b, "  totals: payloads=%d content_deltas=%d tool_deltas=%d "+
+		"reasoning_deltas=%d reasoning_bytes=%d inert_payloads=%d\n",
+		payloads, contentDeltas, toolDeltas, reasoningDeltas, reasoningBytes, inertPayloads)
+	names := make([]string, 0, len(deltaFields))
+	for k := range deltaFields {
+		names = append(names, fmt.Sprintf("%s=%d", k, deltaFields[k]))
+	}
+	sort.Strings(names)
+	fmt.Fprintf(&b, "  literal delta fields observed: %s\n", strings.Join(names, " "))
 	return b.String()
+}
+
+// rawDeltaFields returns the literal JSON key names present in this
+// payload's first choice `delta` object. Decoding into a map keeps the
+// answer honest: a struct would report the names this code already knows
+// about and say nothing about the ones it drops.
+func rawDeltaFields(payload []byte) []string {
+	var w struct {
+		Choices []struct {
+			Delta map[string]json.RawMessage `json:"delta"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(payload, &w); err != nil || len(w.Choices) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(w.Choices[0].Delta))
+	for k, v := range w.Choices[0].Delta {
+		if len(v) == 0 || bytes.Equal(v, []byte("null")) || bytes.Equal(v, []byte(`""`)) {
+			continue
+		}
+		out = append(out, k)
+	}
+	return out
 }
