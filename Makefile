@@ -1,6 +1,6 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build fmt fmt-check test test-run cover sim sim-completeness-rung sim-tokenceiling-rung sim-shadow-slow-test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
+.PHONY: all build fmt fmt-check test test-be test-fe fe-scope-check test-run cover sim sim-completeness-rung sim-tokenceiling-rung sim-shadow-slow-test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
 
 all: build
 
@@ -42,12 +42,14 @@ BINDIR := bin
 # relaxation. Use $(GOPKGS), not ./..., in every vet/test/cover target.
 GOPKGS := ./cmd/... ./internal/...
 
-# GOFMTDIRS scopes gofmt to the Go source roots, mirroring the GOPKGS rationale:
-# gofmt walks directory trees, so pointing it at test/ would descend into
-# test/api_keys (mode 0700, benn-owned) and fail the walk for a non-owner. cmd/
-# and internal/ hold 100% of the Go code; test/ holds none. The pinned toolchain
-# in go.mod keeps gofmt output identical across machines/agents.
-GOFMTDIRS := cmd internal
+# GOSRCDIRS scopes directory WALKS to the Go source roots, mirroring the GOPKGS
+# rationale: gofmt (and git's untracked-file scan) walk directory trees, so
+# pointing either at test/ would descend into test/api_keys (mode 0700,
+# benn-owned) and fail the walk for a non-owner. cmd/ and internal/ hold 100% of
+# the Go code; test/ holds none. Used by fmt/fmt-check and by the fe-scope-check
+# untracked-file enumeration. The pinned toolchain in go.mod keeps gofmt output
+# identical across machines/agents.
+GOSRCDIRS := cmd internal
 
 # build is the compile EDIT GATE — a .PHONY target (declared above) that ALWAYS
 # recompiles. It is deliberately NOT a $(BINDIR)/personant file target: a
@@ -64,10 +66,10 @@ build:
 # checkpoint gate) below so formatting drift fails the gate — it runs in
 # milliseconds, so it fronts the slow go test run (fail fast).
 fmt:
-	gofmt -w $(GOFMTDIRS)
+	gofmt -w $(GOSRCDIRS)
 
 fmt-check:
-	@drift="$$(gofmt -l $(GOFMTDIRS))"; \
+	@drift="$$(gofmt -l $(GOSRCDIRS))"; \
 	if [ -n "$$drift" ]; then \
 	  echo "gofmt drift — these files are not canonically formatted:"; \
 	  echo "$$drift" | sed 's/^/  /'; \
@@ -151,6 +153,87 @@ test: build fmt-check recall-madlibs
 	# package past go test's default 10m per-package budget; 30m bounds a genuine
 	# hang without failing a healthy long run. Other packages finish in seconds.
 	go test $(GOPKGS) --count=1 -timeout 30m
+
+# test-be is the BACK-END/SUBSTRATE checkpoint gate and is EXACTLY `test` — the
+# full suite. The naming pair test-fe/test-be is deliberately NOT symmetric in
+# cost, because the dependency graph is not symmetric: cmd/ and internal/chat/
+# are a LEAF (nothing imports them), so a front-end-only change cannot regress
+# the substrate and gets a cheap scoped target. The front end DOES import the
+# substrate, so a substrate change can regress the front end and must run
+# everything. There is no back-end saving to be had; `test-be` exists only so
+# the fast target has an unambiguous counterpart to name. `test` is kept as the
+# primary spelling (habits, AGENTS.md, tooling) and this is a pure alias.
+test-be: test
+
+# FE_SCOPE_PREFIXES are the path prefixes a front-end-only change may touch.
+# internal/version/ is in the set on purpose: every front-end change bumps
+# version.FrontEnd (AGENTS.md front-end bump contract), so a "cmd/ + chat/ only"
+# guard would reject every legitimate front-end commit. internal/version is also
+# imported by substrate packages — see FE_TESTPKGS for how that is covered.
+FE_SCOPE_PREFIXES := cmd/ internal/chat/ internal/version/
+
+# FE_TESTPKGS is the package set `test-fe` runs: the front-end leaf itself plus
+# the CHEAP substrate importers of internal/version, as insurance against a
+# version const bump breaking a substrate assertion (eventlog 1.2s, memops 2.2s,
+# store — all seconds). Total lands around 10-12s versus ~29 minutes for the
+# full suite.
+#
+# ./internal/memops is EXACT — deliberately NOT ./internal/memops/..., because
+# the /... form pulls in internal/memops/fileadapter, whose tests are 229
+# SECONDS on their own and are pure substrate. Do not "fix" this to /...; the
+# whole point of the target is that it costs seconds.
+FE_TESTPKGS := ./cmd/... ./internal/chat/... ./internal/version/... \
+               ./internal/eventlog/... ./internal/store/... ./internal/memops
+
+# fe-scope-check is the MECHANICAL guard that makes `test-fe` safe to trust: it
+# refuses if the working tree contains any changed .go file outside
+# $(FE_SCOPE_PREFIXES), so scope classification is a property of the diff rather
+# than an agent's or a human's self-assessment. A clean tree passes (running the
+# fast target on an unmodified checkout is legitimate).
+#
+# Changed set = `git diff --name-only HEAD` (staged + unstaged + deletions)
+# plus untracked files, filtered to *.go. The untracked scan is scoped to
+# $(GOSRCDIRS) so it never descends into test/api_keys (mode 0700, benn-owned —
+# see the GOSRCDIRS comment); test/ holds no Go code, so nothing is missed.
+#
+# LIMITATION, stated rather than left implicit: the guard inspects GO SOURCE
+# ONLY. A Makefile, doc, testdata, or go.mod edit does not trip it — those are
+# either build tooling (this change), covered by the mechanical-diff exception,
+# or the caller's judgment. It is a Go-regression scope guard, not a
+# whole-tree change detector.
+fe-scope-check:
+	@changed="$$( { git diff --name-only HEAD; \
+	                git ls-files --others --exclude-standard -- $(GOSRCDIRS); } \
+	              | grep '\.go$$' | sort -u || true )"; \
+	outside=""; \
+	for f in $$changed; do \
+	  ok=""; \
+	  for p in $(FE_SCOPE_PREFIXES); do \
+	    case "$$f" in $$p*) ok=1 ;; esac; \
+	  done; \
+	  [ -n "$$ok" ] || outside="$$outside $$f"; \
+	done; \
+	if [ -n "$$outside" ]; then \
+	  echo "make test-fe REFUSED — changed Go files outside the front-end scope:"; \
+	  for f in $$outside; do echo "  $$f"; done; \
+	  echo "front-end scope is: $(FE_SCOPE_PREFIXES)"; \
+	  echo "the front end IMPORTS the substrate, so a substrate change is not covered"; \
+	  echo "by the fast target. run 'make test' (== 'make test-be', the full suite)."; \
+	  exit 1; \
+	fi
+
+# test-fe is the FRONT-END checkpoint gate: the scoped, ~10s counterpart to
+# `test` for a change confined to $(FE_SCOPE_PREFIXES). Safe by STRUCTURE, not
+# by judgment — cmd/ and internal/chat/ are a dependency leaf, and
+# fe-scope-check mechanically refuses anything else. Read the test-be comment
+# above before assuming the reverse direction works; it does not.
+#
+# Mirrors `test`'s build + fmt-check prerequisites, but NOT recall-madlibs: the
+# generated mad-libs query set is substrate-test input and no package in
+# $(FE_TESTPKGS) reads it.
+test-fe: build fmt-check fe-scope-check
+	go vet $(FE_TESTPKGS)
+	go test $(FE_TESTPKGS) --count=1
 
 # test-run is the EDIT GATE — the counterpart to `test` (the CHECKPOINT GATE).
 # `make test` runs the whole suite, including the sim package's multi-day mock

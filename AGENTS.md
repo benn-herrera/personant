@@ -426,7 +426,9 @@ Makefile                    build + agents-submodule pinning +
 ```sh
 make build            # bin/personant (compile only — the cheapest edit check)
 make fmt              # gofmt -w the Go source roots (cmd/, internal/) — fix formatting drift
-make test             # CHECKPOINT GATE: fmt-check (drift fails the gate) + go vet + go test $(GOPKGS) --count=1 (full suite, incl. multi-day sim rungs)
+make test             # CHECKPOINT GATE (substrate): fmt-check (drift fails the gate) + go vet + go test $(GOPKGS) --count=1 (full suite, incl. multi-day sim rungs)
+make test-be          # alias of `make test` — the same full suite, named for symmetry with test-fe
+make test-fe          # CHECKPOINT GATE (front-end-only change): scoped ~15s suite; mechanically REFUSES if the diff leaves cmd/ + internal/chat/ + internal/version/
 make test-run PKG=<pkg> RUN=<regexp>  # EDIT GATE: run only the touched test(s) — seconds, not minutes
 make integration-test # live reaper embedder/recall tests (opt-in)
 make sim              # acceptance rung-walk (mock); LIVE_EMBEDDING=true / LIVE_INFERENCE=true for live-mode
@@ -452,6 +454,44 @@ reflex. **Commit at meaningful checkpoints** — a complete, self-consistent cha
 — not per-edit, and run the checkpoint gate once at that point. (`make test` is
 still NEVER substituted by a raw `go test`; the slow/live opt-in tests below stay
 gated either way.)
+
+**The checkpoint gate is scope-dependent — and the scoping is ASYMMETRIC.**
+Which command satisfies the checkpoint gate depends on what the change touches:
+
+- **Front-end-only change** (files confined to `cmd/`, `internal/chat/`,
+  `internal/version/`) → **`make test-fe`**. ~15s.
+- **Anything touching the substrate** — any other `internal/` package —
+  → **`make test`** (a.k.a. **`make test-be`**), the full suite. **No exception.**
+
+The asymmetry is structural, not a budget compromise. `cmd/` and
+`internal/chat/` are a **dependency leaf**: nothing in the repo imports them,
+so a change confined to them cannot regress the substrate, and the scoped
+target is sound *by the import graph* rather than by anyone's estimate of
+blast radius. The reverse does not hold — the front end **imports** the
+substrate, so a substrate change can regress the front end and must run
+everything. **There is no back-end saving**; `test-be` is a pure alias of
+`test` and exists only so the fast target has an unambiguous counterpart to
+name. A symmetric-looking pair of target names invites exactly the wrong
+inference; do not draw it.
+
+`internal/version/` is inside the front-end scope because the front-end bump
+contract makes **every** front-end change touch `version.FrontEnd` — a
+"cmd/ + chat/ only" rule would reject every legitimate front-end commit. It
+is also imported by `eventlog`, `memops`, `store`, and `fileadapter`, so
+`test-fe` runs the three cheap ones as insurance against a version const bump
+breaking a substrate assertion (`fileadapter` is excluded — 229s, pure
+substrate).
+
+**The guard is mechanical; do not reason your way past it.** `test-fe`
+depends on `fe-scope-check`, which computes the changed `.go` set from
+`git diff --name-only HEAD` plus untracked files and **refuses, naming the
+offending paths**, if any of them fall outside the three front-end prefixes.
+Scope classification is therefore a property of the diff, not an agent's
+self-assessment — an agent neither needs to, nor may, talk itself into the
+fast path. If the guard refuses, the answer is `make test`. (The guard
+inspects Go source only: a Makefile, doc, or testdata edit does not trip it.
+Those are covered by the mechanical-diff exception below or by the caller's
+judgment.)
 
 **Mechanical-diff exception (user-ratified 2026-07-17).** A commit whose
 diff is semantics-preserving **by construction** — `gofmt`/`make fmt`

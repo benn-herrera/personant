@@ -51,7 +51,9 @@ Line editing and history come from `liner`: in-line editing plus Up/Down history
 
 ```sh
 make build                # compile bin/personant
-make test                 # go vet + go test ./... (standard gate)
+make test                 # go vet + go test ./... (standard gate; alias: make test-be)
+make test-fe              # fast scoped gate for a front-end-only change (cmd/, chat/, version/);
+                          #   refuses if the diff touches the substrate — see AGENTS.md "Two gates"
 make cover                # test coverage report across all packages
 make bench                # recall hot-path benchmarks (see Makefile for PKG/BENCH knobs)
 make sim                  # acceptance simulation (see Sim Knobs below)
