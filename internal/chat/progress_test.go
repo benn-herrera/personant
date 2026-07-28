@@ -179,6 +179,87 @@ func TestProgress_TickerAnimatesThenExits(t *testing.T) {
 	}
 }
 
+// The reported dogfooding bug: every frame landed on its own new line and
+// scrolled the terminal. An animated wait must be ONE line redrawn in
+// place — so across a run of frames the indicator emits zero newlines,
+// and each frame is introduced by the erase sequence that reclaims the
+// previous one.
+func TestProgress_AnimatedFramesRedrawInPlace(t *testing.T) {
+	f := newProgressFixture(true, true)
+	f.setElapsed(5 * time.Second)
+	f.p.phase(turn.PhaseWaiting)
+
+	const ticks = 4
+	for i := 0; i < ticks; i++ {
+		before := len(f.rendered())
+		f.tick(t)
+		waitFor(t, "an animated frame", func() bool { return len(f.rendered()) > before })
+	}
+	out := f.rendered()
+	f.p.stop()
+
+	if strings.Contains(out, "\n") {
+		t.Errorf("animated frames emitted a newline — one line per frame instead of an in-place redraw: %q", out)
+	}
+	// Split on the erase sequence: a leading empty element (the output
+	// opens with an erase) plus exactly one body per render.
+	parts := strings.Split(out, eraseLine)
+	if len(parts) != ticks+2 {
+		t.Fatalf("want %d in-place redraws separated by %q, got %d: %q", ticks+1, eraseLine, len(parts)-1, out)
+	}
+	if parts[0] != "" {
+		t.Errorf("first frame not preceded by the erase sequence: %q", out)
+	}
+	for _, body := range parts[1:] {
+		if !strings.Contains(body, string(turn.PhaseWaiting)) {
+			t.Errorf("frame %q is not a labeled indicator line; full output %q", body, out)
+		}
+	}
+}
+
+// A phase change mid-wait overwrites the existing indicator line rather
+// than pushing it down: the label is not "content", it is the same line
+// relabeled.
+func TestProgress_LabelChangeOverwritesInPlace(t *testing.T) {
+	f := newProgressFixture(true, true)
+	f.setElapsed(5 * time.Second)
+	f.p.phase(turn.PhaseComposing)
+	f.p.phase(turn.PhaseWaiting)
+	out := f.rendered()
+	f.p.stop()
+
+	if strings.Contains(out, "\n") {
+		t.Errorf("label change emitted a newline instead of overwriting in place: %q", out)
+	}
+	if n := strings.Count(out, eraseLine); n != 2 {
+		t.Fatalf("want 2 in-place redraws (one per label), got %d: %q", n, out)
+	}
+	tail := out[strings.LastIndex(out, eraseLine)+len(eraseLine):]
+	if !strings.Contains(tail, string(turn.PhaseWaiting)) || strings.Contains(tail, string(turn.PhaseComposing)) {
+		t.Errorf("the surviving line is not the new label: %q", tail)
+	}
+}
+
+// The counterpart to TestProgress_RestartsForClosingPhase: content that
+// already ended the line leaves the cursor at column 0, so the restarted
+// indicator must NOT open a second, blank line.
+func TestProgress_RestartAfterNewlineTerminatedContent(t *testing.T) {
+	f := newProgressFixture(true, true)
+	f.setElapsed(5 * time.Second)
+	f.p.phase(turn.PhaseWaiting)
+	if _, err := io.WriteString(f.p.writer(f.out), "body text\n"); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	f.p.phase(turn.PhaseClosing)
+	out := f.rendered()
+	f.p.stop()
+
+	after := out[strings.Index(out, "body text\n")+len("body text\n"):]
+	if !strings.HasPrefix(after, eraseLine) {
+		t.Errorf("restart on an already-clean line did not draw immediately: %q", after)
+	}
+}
+
 // First body byte hands the terminal back, and the body text arrives
 // intact and contiguous — no frame interleaved into it.
 func TestProgress_FirstBodyByteRetiresIndicator(t *testing.T) {

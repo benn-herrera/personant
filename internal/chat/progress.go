@@ -64,6 +64,11 @@ type progress struct {
 	label     turn.Phase
 	drawn     bool // the current label has been rendered
 	lineClean bool // the cursor sits at column 0
+	// onLine says the indicator's OWN frame currently occupies the line the
+	// cursor is on, so \r + erase-to-EOL reclaims it and no newline is
+	// wanted. Distinct from lineClean: mid-line with onLine false means
+	// FOREIGN content is on the line and must not be drawn over.
+	onLine    bool
 	frame     int
 	startedAt clock.ProfilingTime
 	stopCh    chan struct{}
@@ -154,9 +159,12 @@ func (p *progress) renderLocked() {
 	if !p.running || p.elapsed(p.startedAt) < progressShowAfter {
 		return
 	}
-	if !p.lineClean {
-		// Restarting under content that did not end in a newline: take a
-		// fresh line rather than drawing over text the user is reading.
+	if !p.lineClean && !p.onLine {
+		// Restarting under FOREIGN content that did not end in a newline:
+		// take a fresh line rather than drawing over text the user is
+		// reading. When the line is our own frame (onLine), the erase below
+		// reclaims it in place — a newline there would scroll one line per
+		// frame instead of animating.
 		fmt.Fprintln(p.out)
 		p.lineClean = true
 	}
@@ -172,6 +180,7 @@ func (p *progress) renderLocked() {
 		int(p.elapsed(p.startedAt).Seconds()))
 	p.drawn = true
 	p.lineClean = false
+	p.onLine = true
 }
 
 // eraseLocked removes an animated frame from the terminal. The static
@@ -182,6 +191,7 @@ func (p *progress) eraseLocked() {
 		p.lineClean = true
 	}
 	p.drawn = false
+	p.onLine = false // the line is given back; whatever lands next owns it
 }
 
 // stop retires the indicator and clears its line. Idempotent and safe

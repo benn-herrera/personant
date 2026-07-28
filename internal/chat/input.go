@@ -136,6 +136,14 @@ type linerLineReader struct {
 func newLinerReader(historyFile string) *linerLineReader {
 	ls := liner.NewLiner()
 	ls.SetCtrlCAborts(true)
+	// liner defaults to single-line mode, where a line wider than the
+	// terminal is HORIZONTALLY SCROLLED to a window centred on the cursor
+	// (line.go refreshSingleLine) and prefixed with a literal "{"
+	// truncation marker. Recalling a long prompt with ↑ leaves the cursor
+	// at end-of-line, so the user sees the tail of their own prompt
+	// starting mid-token. Multi-line mode wraps across terminal rows
+	// instead, keeping the whole line visible.
+	ls.SetMultiLineMode(true)
 	if historyFile != "" {
 		if f, err := os.Open(historyFile); err == nil {
 			_, _ = ls.ReadHistory(f) // newest last; a malformed tail is tolerated
