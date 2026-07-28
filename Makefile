@@ -1,6 +1,6 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build fmt fmt-check test test-be test-fe fe-scope-check test-run cover sim sim-completeness-rung sim-tokenceiling-rung sim-shadow-slow-test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
+.PHONY: all build fmt fmt-check test test-be test-fe fe-scope-check test-run test-race cover sim sim-completeness-rung sim-tokenceiling-rung sim-shadow-slow-test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
 
 all: build
 
@@ -246,6 +246,72 @@ test-fe: build fmt-check fe-scope-check
 # PKG/RUN reuse the bench vars (defaulted below); pass PKG explicitly.
 test-run: build recall-madlibs
 	go test $(PKG) -run '$(RUN)' -count=1 -timeout 30m
+
+# RACEPKGS is the package set the race detector is pointed at. Derived
+# EMPIRICALLY, not by taste: a package earns a place here if it launches a
+# goroutine in non-test code, or if its own tests run two or more goroutines
+# against shared state. -race instruments EVERY package linked into a test
+# binary, not just the package under test, so a package whose suite is
+# single-goroutine contributes cost and zero signal — the detector only reports
+# accesses it actually observes from two goroutines. That is the whole scoping
+# rule; the members:
+#
+#   internal/chat            §4.3.2 progress ticker + its mutex, the escwatch
+#                            reader goroutine, the chat.go signal handler —
+#                            three producers writing one terminal. The reason
+#                            this target exists.
+#   internal/recall/measure  the single indexer goroutine, atomic.Pointer
+#                            snapshot swap, dispatch watermark, job channel.
+#   internal/model           SSE stream reader closeOnce/closeMu; MockClient mu.
+#   internal/eventlog        package-level writeMu serializing append cycles.
+#   internal/metrics         Run.mu behind the metric series.
+#   internal/log             global atomic.Pointer logger + sync.Once init +
+#                            emit mutex, written from every goroutine above.
+#   internal/scenarios       the memtel heap-watchdog goroutine. EXACT, not
+#                            /... — see the sim exclusion below.
+#
+# EXCLUSIONS, so nobody "fixes" this later by broadening it to $(GOPKGS):
+#
+#   internal/scenarios/sim is ~1605s unraced. -race costs 2-10x, so the sim
+#   alone would put this target in the hours. A diagnostic nobody will ever
+#   wait for is the same as no diagnostic — and the sim's concurrency is the
+#   measure/chat/log code already covered above, exercised through a slower
+#   harness. This is why the entry is `./internal/scenarios` and not
+#   `./internal/scenarios/...` (the exact-package form, same trick as
+#   FE_TESTPKGS' ./internal/memops).
+#
+#   internal/memops/fileadapter holds real shared state (scopeMu, the
+#   frontmatter cache mutex) but its suite is 229s and entirely
+#   single-goroutine, so raced it would report nothing at 20+ minutes. It IS
+#   instrumented — as a linked dependency of the packages above, under their
+#   concurrent tests, which is where any race in it would actually surface.
+#
+#   internal/turn, internal/store, internal/index, internal/crashpoint were
+#   checked and rejected on the same rule: no non-test goroutine, no
+#   concurrent test. turn is the interesting one — it drives the stream reader
+#   and fires the State.OnPhase callbacks the chat ticker reads, but it does
+#   that on the caller's goroutine; the cross-goroutine half lives in chat and
+#   is covered there with turn linked in and instrumented.
+#
+# Never point this at test/ — test/api_keys is mode 0700 and benn-owned, and
+# fails the directory walk for a non-owner (see the GOPKGS comment).
+RACEPKGS := ./internal/chat/... ./internal/recall/measure/... ./internal/model/... \
+            ./internal/eventlog/... ./internal/metrics/... ./internal/log/... \
+            ./internal/scenarios
+
+# test-race is a DIAGNOSTIC, not a third gate. Run it deliberately when you
+# touch concurrent code — a new goroutine, a shared field, a lock. It is
+# NOT a prerequisite of test / test-be / test-fe and must not become one:
+# wiring it into a gate re-inflates the gate cost the fe/be split exists to
+# keep down, and the race detector finds nothing on a diff that added no
+# concurrency. The EDIT GATE / CHECKPOINT GATE pair is unchanged; this is a
+# tool that sits beside them.
+#
+# -count=1 defeats the test cache (a cached PASS proves nothing about a run
+# that never happened). -timeout 30m gives the raced packages the same
+# hang-bounding budget `test` gives the sim.
+test-race: build recall-madlibs
+	go test -race $(RACEPKGS) -count=1 -timeout 30m
 
 # bench runs benchmarks only (no unit tests) for a package selected by
 # PKG, with a regexp selected by BENCH. Defaults target the recall hot

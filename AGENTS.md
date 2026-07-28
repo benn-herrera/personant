@@ -430,6 +430,7 @@ make test             # CHECKPOINT GATE (substrate): fmt-check (drift fails the 
 make test-be          # alias of `make test` — the same full suite, named for symmetry with test-fe
 make test-fe          # CHECKPOINT GATE (front-end-only change): scoped ~15s suite; mechanically REFUSES if the diff leaves cmd/ + internal/chat/ + internal/version/
 make test-run PKG=<pkg> RUN=<regexp>  # EDIT GATE: run only the touched test(s) — seconds, not minutes
+make test-race        # DIAGNOSTIC (not a gate): -race over $(RACEPKGS), the packages with real concurrency; ~70s
 make integration-test # live reaper embedder/recall tests (opt-in)
 make sim              # acceptance rung-walk (mock); LIVE_EMBEDDING=true / LIVE_INFERENCE=true for live-mode
                       # DURATION=<span>  override sim span (default 1w for mock; e.g. 1d, 14d, 30d or <N>d / Go duration 168h)
@@ -505,6 +506,29 @@ commit later, attributably. The exception is construction-based, not
 size-based: a "small" logic change is NOT mechanical; anything touching
 executable code paths, go.mod dependency versions, or test assertions
 pays the full gate.
+
+**`make test-race` is a DIAGNOSTIC, not a third gate.** It runs the race
+detector over `$(RACEPKGS)` — the packages that either launch a goroutine in
+non-test code or run two goroutines against shared state in their own tests
+(`chat`, `recall/measure`, `model`, `eventlog`, `metrics`, `log`, and
+`scenarios` exact-package). ~70 seconds. Run it **deliberately, when you touch
+concurrent code**: a new goroutine, a shared field, a lock, a channel, a
+ticker. It is **not** a prerequisite of `test`, `test-be`, or `test-fe`, and
+must not become one — wiring it into a gate re-inflates exactly the cost the
+fe/be split exists to hold down, and on a diff that added no concurrency it
+finds nothing by construction. The EDIT GATE / CHECKPOINT GATE pair is
+unchanged; this is a tool that sits beside them.
+
+The scoping rule is in the Makefile comment and is empirical, not
+aesthetic: `-race` instruments every package linked into a test binary, so a
+package whose suite is single-goroutine contributes cost and zero signal —
+the detector reports only accesses it actually observes from two goroutines.
+That is why `internal/scenarios/sim` (~1605s unraced; hours under `-race`)
+and `internal/memops/fileadapter` (229s, entirely sequential) are excluded
+while still being *instrumented transitively* as linked dependencies of the
+concurrent suites. Do not "fix" `$(RACEPKGS)` by broadening it to
+`$(GOPKGS)`; that produces a target nobody will ever wait for, which is the
+same as no target.
 
 Slow / live tests use a **runtime opt-in**, not build tags: they always
 compile (so a refactor that breaks them fails `make test`), and gate
