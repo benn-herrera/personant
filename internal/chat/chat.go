@@ -18,7 +18,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"personant/internal/clock"
@@ -293,12 +292,6 @@ func Run(opts Options) error {
 		state.Recaller = measure.NewService(ops, nil)
 	}
 
-	// Progress reporting: the turn pipeline announces the stage it is in,
-	// the indicator renders it. Both interactive resolvers below write
-	// through pr.writer so that taking the terminal to ask the user a
-	// question retires any in-flight indicator first.
-	state.OnPhase = pr.phase
-
 	// §3.4 recall UI surface (Part B): install an interactive resolver
 	// so recalled threads can be pulled into Layer B at turn close.
 	state.RecallResolver = interactiveRecallResolver(lr, pr.writer(opts.Stdout))
@@ -322,17 +315,21 @@ func Run(opts Options) error {
 	fmt.Fprintln(opts.Stdout, banner)
 	fmt.Fprintf(opts.Stdout, "active: %s (%s)\n", project.Name, project.ID)
 
-	// SIGINT (§4 clean shutdown): the first interrupt cancels the session
-	// context so an in-flight turn unwinds and the loop exits through the
-	// clean-shutdown path below (recaller close → §3.11 session-close
-	// checkpoint → session-end log). A second interrupt during shutdown
-	// forces an immediate exit (onInterrupt). liner consumes Ctrl-C itself
-	// in raw mode (returns errInputAborted, handled in loop); this handler
-	// catches interrupts delivered while the terminal is in cooked mode
-	// (streaming a turn, shutting down, or the piped-stdin path).
+	// Terminal control (§4 clean shutdown + Esc-to-abort). Ctrl-C ends the
+	// session: the first interrupt cancels the session context so an
+	// in-flight turn unwinds and the loop exits through the clean-shutdown
+	// path below (recaller close → §3.11 session-close checkpoint →
+	// session-end log), and a second during shutdown forces an immediate
+	// exit. liner consumes Ctrl-C itself while it owns the terminal
+	// (returns errInputAborted, handled in loop); this handler catches
+	// interrupts delivered the rest of the time (streaming a turn, shutting
+	// down, or the piped-stdin path).
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	var interrupts atomic.Int32
+	ctl := newControl(opts, lr, pr, cancel)
+	// Esc is the per-turn abort, so the terminal must be handed back before
+	// anything else prompts — disarm on every return path.
+	defer ctl.disarm()
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, os.Interrupt)
 	// Stop delivery THEN close so the handler goroutine's range exits when
@@ -343,11 +340,18 @@ func Run(opts Options) error {
 	}()
 	go func() {
 		for range sigCh {
-			onInterrupt(&interrupts, cancel, lr, pr, opts.Stderr)
+			ctl.onSignal()
 		}
 	}()
 
-	if err := loop(runCtx, opts, lr, pr, ops, state, &interrupts, cancel); err != nil {
+	// Progress reporting: the turn pipeline announces the stage it is in,
+	// control routes it — closing the Esc window at the pre-canonical
+	// boundary before the indicator re-labels. Both interactive resolvers
+	// above write through pr.writer so that taking the terminal to ask the
+	// user a question retires any in-flight indicator first.
+	state.OnPhase = ctl.onPhase
+
+	if err := loop(runCtx, opts, ops, state, ctl); err != nil {
 		return err
 	}
 
@@ -520,41 +524,42 @@ func resolveChatModel(ctx context.Context, client model.Client, stderr io.Writer
 	return "", fmt.Errorf("chat: provider %q does not offer its own default model %q", providerName, providerDefault)
 }
 
-// onInterrupt handles one SIGINT (or an at-prompt Ctrl-C routed here). The
-// first interrupt cancels the session context so the REPL unwinds through
-// the clean-shutdown path; a second forces an immediate exit, restoring the
-// terminal first. count is shared between the signal handler and the loop's
-// at-prompt handling so a Ctrl-C during shutdown always forces regardless of
-// which path saw the first one.
-func onInterrupt(count *atomic.Int32, cancel context.CancelFunc, lr lineReader, pr *progress, stderr io.Writer) {
-	// Clear any in-flight indicator FIRST. On the forced-exit path below no
-	// deferred cleanup runs, so a half-drawn frame would be the last thing
-	// left on the terminal; on the clean path it keeps the interrupt notice
-	// from being drawn over.
-	pr.stop()
-	if count.Add(1) >= 2 {
-		_ = lr.close() // restore terminal before the forced exit
-		os.Exit(130)
+// promptLine reads the next REPL line. An Esc-retracted input is
+// re-offered as an EDITABLE DEFAULT — cursor at end — so the user can fix
+// and resubmit it, or clear it and move on. Re-submission is the ONLY way
+// a retracted prompt re-enters the pipeline (§4.3.3): the abort rolled
+// the session back, so nothing of it is in memory until the user
+// deliberately sends it again.
+func promptLine(lr lineReader, retracted string) (string, error) {
+	if retracted == "" {
+		return lr.prompt("> ")
 	}
-	cancel()
-	fmt.Fprintln(stderr, "\ninterrupt received — shutting down (Ctrl-C again to force quit)")
+	return lr.promptWithDefault("> ", retracted)
 }
 
 // loop is the core REPL. Returns nil on a clean exit; non-nil on an
 // unrecoverable I/O error (e.g. the input reader failing, not a
 // per-turn LLM error which is logged and tolerated).
-func loop(ctx context.Context, opts Options, lr lineReader, pr *progress, ops memops.MemoryOps, state *turn.State, interrupts *atomic.Int32, cancel context.CancelFunc) error {
+func loop(ctx context.Context, opts Options, ops memops.MemoryOps, state *turn.State, ctl *control) error {
+	lr := ctl.lr
+	// retracted carries an Esc-aborted input to the next prompt, where it
+	// is re-offered as an editable default. It is deliberately a local:
+	// nothing outside this loop may resurrect a retracted prompt.
+	retracted := ""
 	for {
 		if ctx.Err() != nil {
 			// A SIGINT during a turn cancelled the session — unwind cleanly.
 			return nil
 		}
-		line, err := lr.prompt("> ")
+		line, err := promptLine(lr, retracted)
+		retracted = ""
 		switch {
 		case errors.Is(err, errInputAborted):
-			// Ctrl-C at the prompt (liner raw mode) — route through the same
-			// interrupt path as a delivered SIGINT, then unwind.
-			onInterrupt(interrupts, cancel, lr, pr, opts.Stderr)
+			// Ctrl-C at the prompt — the user asked to leave, so this is
+			// /exit with a different key: begin the same clean shutdown and
+			// say nothing. It still counts as the first interrupt, so a
+			// second Ctrl-C while the shutdown runs force-quits.
+			ctl.exit(false)
 			return nil
 		case errors.Is(err, io.EOF):
 			if line == "" {
@@ -585,7 +590,9 @@ func loop(ctx context.Context, opts Options, lr lineReader, pr *progress, ops me
 		case strings.HasPrefix(trimmed, "$") || strings.HasPrefix(trimmed, "#"):
 			fmt.Fprintln(opts.Stderr, "shell escape ($/#) is not yet implemented (Phase 2.f)")
 		default:
-			if err := runOneTurn(ctx, opts, pr, state, input); err != nil {
+			back, err := runOneTurn(ctx, opts, ops, ctl, state, input)
+			retracted = back
+			if err != nil {
 				// A bad turn does not kill the session — log the error and
 				// loop. The user can usually retry; the one exception is a
 				// marker-retained failure (a CommitTurn failure this turn, or
@@ -603,19 +610,50 @@ func loop(ctx context.Context, opts Options, lr lineReader, pr *progress, ops me
 	}
 }
 
-func runOneTurn(ctx context.Context, opts Options, pr *progress, state *turn.State, input string) error {
+// abortNotice marks an Esc-aborted turn on screen. If the abort landed
+// mid-stream, partial response tokens are already on the user's terminal
+// and cannot be reliably erased — they may have scrolled, and they may
+// span many rows. Left unmarked, the transcript would assert something
+// false: a response the user can read that is not, and never was, in
+// memory. The brackets make the line unmistakably not model output.
+const abortNotice = "[cancelled — input retracted; nothing from this turn was saved]"
+
+// runOneTurn drives one turn. It returns retracted != "" when the user
+// pressed Esc: the input the REPL should re-offer as an editable default.
+// The turn's own error is separate — an abort is not a failure.
+func runOneTurn(ctx context.Context, opts Options, ops memops.MemoryOps, ctl *control, state *turn.State, input string) (retracted string, err error) {
 	turnCtx, cancel := context.WithTimeout(ctx, turnTimeout)
 	defer cancel()
+	pr := ctl.pr
+	// Open the Esc window on the turn's own context — Esc abandons the
+	// turn, never the session. Closed again at the pre-canonical phase
+	// boundary (control.onPhase); the defer is the backstop for a turn that
+	// never reaches it.
+	ctl.arm(cancel)
+	defer ctl.disarm()
 	// The body streams through pr.writer: its first byte retires the
 	// pre-token indicator, and the turn's closing phase restarts it for the
 	// post-stream wait.
-	_, err := turn.Run(turnCtx, state, input, pr.writer(opts.Stdout))
+	out := pr.writer(opts.Stdout)
+	_, info, err := turn.RunWithInfo(turnCtx, state, nil, input, out)
 	// Retire the closing-phase indicator on EVERY exit — normal, per-turn
 	// error, or a cancelled turn — before anything else touches the
 	// terminal. It owns the current line until it is stopped.
 	pr.stop()
+	// An Esc abort is an ORDINARY event, not a turn failure: the abort
+	// landed in the pre-canonical window, so RunWithInfo's deferred handler
+	// already rolled the session back and released the #94 recovery scope,
+	// and the next launch opens quiet. Keyed off the flag rather than the
+	// error because a Ctrl-C session cancel returns the same
+	// context.Canceled and must not be reported as "back to the prompt".
+	if err != nil && ctl.tookAbort() {
+		if lerr := ctl.reportRetraction(ctx, ops, out, info.TurnID, input); lerr != nil {
+			fmt.Fprintf(opts.Stderr, "warn: log system.turn-aborted: %v\n", lerr)
+		}
+		return input, nil
+	}
 	if err != nil {
-		return err
+		return "", err
 	}
 	// Ensure the next prompt lands on a fresh line. The progress knows the
 	// cursor column (it and the body write through the same wrapper), which
@@ -623,7 +661,7 @@ func runOneTurn(ctx context.Context, opts Options, pr *progress, state *turn.Sta
 	if !pr.atLineStart() {
 		fmt.Fprintln(opts.Stdout)
 	}
-	return nil
+	return "", nil
 }
 
 // dispatchSlash returns done=true to signal the loop should exit. A

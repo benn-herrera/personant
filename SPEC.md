@@ -505,7 +505,7 @@ Actions ending in `-error` (and `warning`) are forensic diagnostics, not measure
 
 | Category | Events |
 |---|---|
-| `system` | `bootstrap` (the VERSION/IDENTITY line — one per process open, emitted at the process boundary after the §9.1 format gate resolves: `version=` substrate, `frontend=`, `home-format=` the EFFECTIVE on-disk revision this session ran against, `commit=` (`unknown` on an unstamped binary), `home=`. It is not the session/project event — that is `session.started`), `home-format-override` (a `--allow-newer-home` open waved a newer home through the §9.1 refusal — `on-disk=`, `binary=`; knowingly-unsafe, always paired with a stderr warning), `context-ceiling-breach`, `empty-response` (forensic; the final drained response carried zero visible content — with `reprompted=yes\|no`, `turn=`; §3.3 empty-response recovery); *(vocabulary; not yet emitted)* `shutdown`, `error`, `config-reload` |
+| `system` | `bootstrap` (the VERSION/IDENTITY line — one per process open, emitted at the process boundary after the §9.1 format gate resolves: `version=` substrate, `frontend=`, `home-format=` the EFFECTIVE on-disk revision this session ran against, `commit=` (`unknown` on an unstamped binary), `home=`. It is not the session/project event — that is `session.started`), `home-format-override` (a `--allow-newer-home` open waved a newer home through the §9.1 refusal — `on-disk=`, `binary=`; knowingly-unsafe, always paired with a stderr warning), `context-ceiling-breach`, `empty-response` (forensic; the final drained response carried zero visible content — with `reprompted=yes\|no`, `turn=`; §3.3 empty-response recovery), `turn-aborted` (the user retracted a turn with Esc — `turn=` the #94 transaction id, `phase=` the labelled stage they gave up in, `bytes=` the retracted input's size; §4.3.3. **Never the text**: an event line is single-line free-form and a multi-line prompt would break the format — and the text is deliberately not durable anywhere, per the retraction rule), `turn-abort-release-error` (forensic; releasing an aborted turn's recovery scope failed); *(vocabulary; not yet emitted)* `shutdown`, `error`, `config-reload` |
 | `thread` | `engaged`, `engaged-non-owner`, `engaged-cross-project`, `engaged-miss`, `created`, `created-meta-only`, `state-change`, `fetch-miss`, `fetch-cross-project`, `anchor-projection-overflow`, `tag-defaulted` (with `thr=` — the bound owner, `cause=missing-tag\|empty-response`, `reprompted=yes\|no`; §3.3 owner-default) |
 | `spine` | `match-fire`, `embed-match-fire`, `intra-match-fire`; *(vocabulary)* `match-miss`, `entry-updated` |
 | `recall` | `offer` (with `count=N`), `accept` (with `thr=`, `layers=`), `decline` (with `thr=`, `reason=not-relevant\|wrong-project\|already-known`), `net-cap-hit`, `flush-backlog`, `W1-diag`, `fire-error`, `error`, `index-error`, `embed-error`, `debt-window-error`, `tree-error`; *(vocabulary)* `cross-project-fire` |
@@ -1768,6 +1768,92 @@ Requirements:
   for the close window afterwards.
 - The line is cleared on every exit: normal completion, per-turn error,
   and both interrupt paths (§4 clean shutdown and the forced quit).
+- While the turn is still abortable (§4.3.3) the label advertises the
+  abort key. The rendered line must stay short enough not to wrap: a
+  wrapped line turns the in-place redraw into a scroll.
+
+### 4.3.3 Interrupt and abort keys
+
+Two keys, two meanings. Conflating them is the U/X defect this section
+exists to prevent — the user needs a way to abandon a turn that does
+**not** cost them the session.
+
+| Key | At the prompt | During a turn |
+|---|---|---|
+| `Ctrl-C` | ends the session — identical to `/exit`, and silent | abandons the turn, then the same clean shutdown, with a one-line notice |
+| `Ctrl-D` | ends the session (end of input) | n/a — nothing is reading the line editor |
+| `Esc` | n/a — the line editor owns the key | aborts the turn and returns to the prompt; the session continues |
+
+- A **second `Ctrl-C` during shutdown** forces an immediate exit. This is
+  the safety valve for a shutdown that itself wedges, and it restores the
+  terminal before exiting.
+- The clean-shutdown path (recaller close, the §3.11 session-close
+  checkpoint, the session-end log) runs on the **uncancelled parent
+  context**, which is why a `Ctrl-C` exit loses no state.
+- **Honest wording.** The shutdown notice is a warning; an ordinary quit
+  earns no warning. It is printed only when a turn was actually in flight.
+- **Esc is a routine action, not a fault.** An abort must leave the
+  substrate exactly as a turn that never happened: no open §4.5.8 turn
+  scope, so the next launch opens quiet. This constrains *when* Esc may
+  fire — see below.
+- **Esc means "retract my input", not "stop generating".** The user is
+  declaring the input a mistake or incomplete, so any response to it is
+  irrelevant by construction. Timing relative to the model's first token
+  is therefore irrelevant too: there is no partial-response-keeping
+  behavior, at any point.
+
+**The retraction rule (normative).** A retracted prompt does **not enter
+memory**. The only way its text ever enters memory is the user
+deliberately re-submitting it. Three consequences:
+
+1. **Session rollback.** The `user.prompt` delta fires at step 1 of the
+   §3.0 chain, long before the model call, so by the time the user
+   reaches for Esc it has already run. A pre-canonical abort must
+   therefore restore the session-volatile runtime state — turn counter,
+   the §3.10 cross-turn staging buffer, Layer B/C membership, history,
+   recall-surfaced marks, embedding debt — to its pre-turn value.
+   Otherwise the retracted prompt still shapes the next turn: citing a
+   staged task-class symbol PROMOTES it out of staging, and the promotion
+   then evaporates with the turn-scoped coalesce buffer, permanently
+   consuming a symbol a later real prompt could have cited. The rollback
+   is pure in-memory work and must not perturb the §4.5.8 write ordering
+   it runs alongside. Post-canonical failures do **not** roll back —
+   canonical writes exist and recovery owns them.
+2. **Getting the text back.** The aborted input is re-offered at the next
+   prompt as an **editable default** (cursor at end), so the user can fix
+   and resubmit or clear it. It is also already in `↑` history. Neither is
+   memory; both require a deliberate re-submission.
+3. **No durable full-text artifact.** The abort record is one §2.8 event
+   line — `system.turn-aborted` with turn id, phase and byte count. Not
+   the text.
+
+**On-screen honesty.** If the abort lands mid-stream, partial response
+tokens are already on the terminal and cannot be reliably erased (the
+output may have scrolled and may span many rows). The REPL prints one
+terse, visually distinct marker so the transcript does not assert
+something false — the user must be able to see that what is on screen is
+not in memory and never was.
+- **Abort window.** Esc cancels the turn's context, and a cancelled
+  substrate op fails the turn. That is only safe while the turn is
+  **pre-canonical** (§4.5.8): before the first canonical write, the turn's
+  abort handler releases the recovery scope, so nothing is left behind.
+  After it, a failure deliberately leaves the scope open for recovery.
+  The abort window therefore closes at the first non-pre-canonical phase
+  (`closing turn`) and the front end must gate on an **allow-list** of
+  abortable phases, so a phase added later is non-abortable by default.
+- **Terminal mode.** Observing a keypress mid-turn requires `ICANON` and
+  `ECHO` off with a bounded read window (`VMIN`/`VTIME`), which is
+  **cbreak** — deliberately not raw mode. Raw clears `OPOST` (bare `\n`
+  would stop implying a carriage return, staircasing the response body and
+  the indicator) and `ISIG` (`Ctrl-C` would arrive as a byte instead of a
+  signal, forcing a reimplementation of the semantics above). Both stay on.
+- The mode is entered only between prompts and restored before the next
+  one, byte-for-byte as the line editor left it; and the reader watching
+  for the key must be retired before any mid-turn prompt (§3.4 recall,
+  §3.5 closure) asks the user a question.
+- **Non-terminal sessions** (piped stdin, the harness, tests) change no
+  terminal state, start no reader, and behave exactly as before. Platforms
+  with no cbreak implementation lose `Esc` only; everything else stands.
 
 ### 4.4 Shell escape (`$` and `#`)
 

@@ -111,10 +111,10 @@ a second definition that goes stale on the next bump. `personant version`
 - **substrate** (`version.Substrate`) — this runtime + the `MemoryOps` API.
 - **front end** (`version.FrontEnd`) — U/X + feature logic. REPL-closed
   with the dogfood-minimum interactive set now in place (slash commands,
-  `liner` line editing + history, SIGINT handling, the §4.3.2
-  phase-labeled turn progress indicator). Dogfooding is now driving it —
-  the progress indicator is the first change to land from direct human
-  use.
+  `liner` line editing + history, the §4.3.3 interrupt/abort keys, the
+  §4.3.2 phase-labeled turn progress indicator). Dogfooding is now driving
+  it — the progress indicator and the Esc-abort key both landed from
+  direct human use.
 - **home on-disk `format`** (`version.CurrentHomeFormat`) — a plain
   integer in `<home>/version.toml`, deliberately NOT semver: a layout is
   either readable by a binary or it is not. A home written by a NEWER
@@ -316,9 +316,25 @@ In progress:
   landed the **dogfood-minimum chat REPL**: the
   `/topic /done /pause /resume /back-to /project rename|switch` slash
   set, always-log `retire.ack` closure edit-ack with `edited=` logging,
-  `liner`-backed line editing + `~/.personant/history`, and SIGINT (first
-  interrupt cancels the in-flight turn to a clean shutdown, a second
-  forces immediate exit).
+  `liner`-backed line editing + `~/.personant/history`, and the §4.3.3
+  interrupt/abort keys: **Ctrl-C ends the session** (at the prompt it is
+  `/exit`, silent; mid-turn it abandons the turn first, and a second
+  Ctrl-C during shutdown forces immediate exit), while **Esc aborts the
+  in-flight turn** and returns to the prompt. Esc runs the terminal in
+  **cbreak** (`ICANON`/`ECHO` off, `VMIN`/`VTIME` set; `OPOST` and `ISIG`
+  deliberately left ON — raw mode would staircase output and turn Ctrl-C
+  into a byte), entered between prompts and restored before the next one.
+  The abort window is gated on an allow-list of PRE-CANONICAL turn phases
+  so an aborted turn releases its §4.5.8 recovery scope and the next open
+  stays quiet. Esc is **retraction, not stop-generating**: the §4.3.3
+  retraction rule makes a pre-canonical abort roll the session-volatile
+  runtime state (turn counter, §3.10 staging buffer, Layer B/C, history,
+  recall marks, embedding debt) back to its pre-turn value —
+  `internal/turn/rollback.go`, invariant-tested by
+  `TestPreCanonicalAbort_NoSessionResidue` — so a retracted prompt cannot
+  shape the next turn. The text comes back only as an editable default at
+  the next prompt; the durable trace is one `system.turn-aborted` event
+  line, never the text.
 
 Implemented and wired into the turn loop (pending full acceptance-validation):
 - Thread closure / retirement (§3.5): curator-drafted summary + ack flow;

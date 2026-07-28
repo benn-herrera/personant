@@ -453,6 +453,24 @@ func newTurnID(turnNumber int) string {
 // release failure — is cleanup that must still run. A release failure
 // is logged, never propagated — the abort's original error is the one
 // the caller needs, and an unreleased scope heals at the next Reconcile.
+// abortPreCanonical unwinds a turn that failed BEFORE its first canonical
+// write. Two halves, in this order:
+//
+//  1. Roll the SESSION back to its pre-turn snapshot (rollback.go). The
+//     §4.3.3 retraction rule: a turn the user abandoned — or one a
+//     provider outage killed — must not shape the next turn's symbols,
+//     working set or recall. Pure in-memory work, so it cannot perturb
+//     the #94 ordering that follows.
+//  2. Release the turn's crash-recovery scope (releaseAbortedTurn).
+//
+// Post-canonical failures never come here: they leave the scope open AND
+// keep their session mutations, because canonical writes exist and
+// recovery owns the reconciliation.
+func abortPreCanonical(ctx context.Context, state *State, turnID string, preTurn sessionState) {
+	preTurn.restore(state)
+	releaseAbortedTurn(ctx, state, turnID)
+}
+
 func releaseAbortedTurn(ctx context.Context, state *State, turnID string) {
 	rctx := context.WithoutCancel(ctx)
 	if err := state.Ops.ReleaseTurn(rctx, turnID); err != nil {
@@ -577,7 +595,7 @@ func RunWithDeltas(ctx context.Context, state *State, preEvents []Delta, userInp
 // out receives the streamed response body with the §5.1 topic tag
 // suppressed; pass io.Discard to keep the streaming behavior without
 // presenting tokens (e.g. tests that only assert on side-effects).
-func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput string, out io.Writer) (_ string, _ TurnInfo, err error) {
+func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput string, out io.Writer) (_ string, info TurnInfo, err error) {
 	if state == nil {
 		return "", TurnInfo{}, errors.New("turn: nil state")
 	}
@@ -648,6 +666,14 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	// TurnNumber. The transient-data lifecycle B.4 window-close GC keys
 	// off StagedAt-vs-TurnNumber, so the convention "TurnNumber reflects
 	// the in-flight turn" must hold for the whole of Run.
+	//
+	// Snapshot the session-volatile state FIRST. A turn that aborts before
+	// its first canonical write must leave the session exactly as it found
+	// it (§4.3.3 retraction rule) — see rollback.go for what that covers
+	// and why the snapshot point is here: after the day barrier's
+	// archived-thread eviction (which must NOT be undone) and before the
+	// first mutation this turn makes.
+	preTurn := snapshotSession(state)
 	state.TurnNumber++
 
 	// Crash-stability (#94 R3): open the turn's recovery scope by
@@ -659,25 +685,37 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	// journal failure aborts the turn before anything canonical happens —
 	// clean error to the caller, scope released by the deferred handler.
 	turnID := newTurnID(state.TurnNumber)
+	// Stamp the #94 transaction id onto EVERY return, the error ones
+	// included, so a caller that aborts a turn can name it in a forensic
+	// record. A deferred write to the named return reaches all twenty
+	// `return "", TurnInfo{}, err` sites below without touching one of
+	// them, and the emptiness guard leaves the success path — which fills
+	// TurnInfo itself — alone.
+	defer func() {
+		if info.TurnID == "" {
+			info.TurnID = turnID
+		}
+	}()
 	journalStart := clock.Profiling()
 	jerr := state.Ops.JournalTurn(ctx, turnID, memops.TurnContentPrompt, []byte(userInput))
 	journalDur := clock.Since(journalStart)
 	if jerr != nil {
 		err = fmt.Errorf("turn: journal prompt: %w", jerr)
-		// The deferred release below is not yet armed — release directly.
-		releaseAbortedTurn(ctx, state, turnID)
+		// The deferred handler below is not yet armed — abort directly.
+		abortPreCanonical(ctx, state, turnID, preTurn)
 		return "", TurnInfo{}, err
 	}
 	// Pre-canonical abort handler: any error return between here and the
-	// first canonical write releases the turn scope (see
-	// releaseAbortedTurn). Once canonicalStarted flips, failures leave the
-	// scope open (journal non-empty) so the turn fails loudly into the
-	// ≤1-loss recovery path — including a CommitTurn failure (never
-	// half-release).
+	// first canonical write rolls the session back and releases the turn
+	// scope (see abortPreCanonical). Once canonicalStarted flips, failures
+	// leave the scope open (journal non-empty) so the turn fails loudly
+	// into the ≤1-loss recovery path — including a CommitTurn failure
+	// (never half-release), and they do NOT roll back: canonical writes
+	// exist, and recovery — not this handler — owns them.
 	canonicalStarted := false
 	defer func() {
 		if err != nil && !canonicalStarted {
-			releaseAbortedTurn(ctx, state, turnID)
+			abortPreCanonical(ctx, state, turnID, preTurn)
 		}
 	}()
 

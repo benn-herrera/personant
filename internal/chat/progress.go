@@ -23,6 +23,13 @@ const (
 	// eraseLine returns the cursor to column 0 and clears to end of line —
 	// the only ANSI sequence the indicator emits.
 	eraseLine = "\r\x1b[K"
+
+	// abortHintSuffix advertises Esc-to-abort while the turn is still in
+	// its abortable window. Deliberately short: the rendered line is
+	// "<frame> <label> (Ns)<suffix>" and the longest label is 20 columns,
+	// so the whole line must stay well inside 80 or it wraps and the
+	// in-place redraw turns into a scroll.
+	abortHintSuffix = "  esc to abort"
 )
 
 // progressFrames is the spinner cycle. Deliberately ASCII: it is one
@@ -68,7 +75,12 @@ type progress struct {
 	// cursor is on, so \r + erase-to-EOL reclaims it and no newline is
 	// wanted. Distinct from lineClean: mid-line with onLine false means
 	// FOREIGN content is on the line and must not be drawn over.
-	onLine    bool
+	onLine bool
+	// abortHint says the turn is in its Esc-abortable window, so the label
+	// should advertise the key. Set by control.arm / cleared by
+	// control.disarm — never inferred here, because a session with no
+	// working cbreak must not advertise a key that does nothing.
+	abortHint bool
 	frame     int
 	startedAt clock.ProfilingTime
 	stopCh    chan struct{}
@@ -170,17 +182,41 @@ func (p *progress) renderLocked() {
 	}
 	if !p.animate {
 		if !p.drawn {
-			fmt.Fprintf(p.out, "%s...\n", p.label)
+			fmt.Fprintf(p.out, "%s...%s\n", p.label, p.hintLocked())
 			p.drawn = true
 		}
 		return
 	}
-	fmt.Fprintf(p.out, "%s%s %s (%ds)",
+	fmt.Fprintf(p.out, "%s%s %s (%ds)%s",
 		eraseLine, progressFrames[p.frame%len(progressFrames)], p.label,
-		int(p.elapsed(p.startedAt).Seconds()))
+		int(p.elapsed(p.startedAt).Seconds()), p.hintLocked())
 	p.drawn = true
 	p.lineClean = false
 	p.onLine = true
+}
+
+// hintLocked renders the Esc-to-abort advertisement, or nothing.
+func (p *progress) hintLocked() string {
+	if p.abortHint {
+		return abortHintSuffix
+	}
+	return ""
+}
+
+// setAbortHint toggles the Esc-to-abort advertisement and repaints, so
+// the hint appears and disappears with the abortable window rather than
+// one frame late. Safe from any goroutine; inert on a non-terminal.
+func (p *progress) setAbortHint(on bool) {
+	if !p.enabled {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.abortHint == on {
+		return
+	}
+	p.abortHint = on
+	p.renderLocked()
 }
 
 // eraseLocked removes an animated frame from the terminal. The static
