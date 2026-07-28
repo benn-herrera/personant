@@ -442,11 +442,13 @@ Makefile                    build + agents-submodule pinning +
 ```sh
 make build            # bin/personant (compile only — the cheapest edit check)
 make fmt              # gofmt -w the Go source roots (cmd/, internal/) — fix formatting drift
-make test             # CHECKPOINT GATE (substrate): fmt-check (drift fails the gate) + go vet + go test $(GOPKGS) --count=1 (full suite, incl. multi-day sim rungs)
+make test             # CHECKPOINT GATE (substrate): fmt-check (drift fails the gate) + go vet + go test $(GOPKGS) (full suite, incl. multi-day sim rungs; Go's test cache is ON — unchanged packages return instantly)
+make test-nocache     # `make test` with the cache DEFEATED (--count=1) — the forced-clean full run: pre-push, suspected cache artifact, post-toolchain change
 make test-be          # alias of `make test` — the same full suite, named for symmetry with test-fe
 make test-fe          # CHECKPOINT GATE (front-end-only change): scoped ~15s suite; mechanically REFUSES if the diff leaves cmd/ + internal/chat/ + internal/version/
 make test-run PKG=<pkg> RUN=<regexp>  # EDIT GATE: run only the touched test(s) — seconds, not minutes
 make test-race        # DIAGNOSTIC (not a gate): -race over $(RACEPKGS), the packages with real concurrency; ~70s
+make test-changed     # DIAGNOSTIC (not a gate): runs only the packages the working tree changed, plus their reverse-dependency closure. LIST=1 prints the selection without running it
 make integration-test # live reaper embedder/recall tests (opt-in)
 make sim              # acceptance rung-walk (mock); LIVE_EMBEDDING=true / LIVE_INFERENCE=true for live-mode
                       # DURATION=<span>  override sim span (default 1w for mock; e.g. 1d, 14d, 30d or <N>d / Go duration 168h)
@@ -545,6 +547,41 @@ while still being *instrumented transitively* as linked dependencies of the
 concurrent suites. Do not "fix" `$(RACEPKGS)` by broadening it to
 `$(GOPKGS)`; that produces a target nobody will ever wait for, which is the
 same as no target.
+
+**Go's test cache is ON for the routine gates (`test`, `test-be`, `test-fe`,
+`test-changed`).** `--count=1` used to be hard-coded into `test`, which meant
+every invocation re-executed the 1625s sim package even when nothing in it had
+moved. The cache key is content-addressed over a package's source, its full
+transitive dependency set, the testdata bytes a test actually reads, and the
+environment variables it calls `os.Getenv` on — so it invalidates precisely when
+a result could have changed, computed by the toolchain rather than estimated by
+an agent. A cached PASS is a real PASS for that content. The forced-clean path
+is **preserved, not removed**: **`make test-nocache`** is the same full suite
+with `--count=1`, for when a genuinely fresh run is the point (before a push,
+when a cached PASS is itself the suspicion, after a toolchain or `go.mod`
+change). Any scoped target can be forced the same way with
+`make test-fe GOTESTCOUNT=--count=1`. The deliberate/heavyweight targets —
+`test-race`, `test-run`, `sim*`, `integration-test`, `recall-corpus-test`,
+`cover` — keep `--count=1` hard-coded on purpose: they are invoked *because* a
+fresh run is wanted, and their cache keys do not cover what they actually probe
+(endpoint reachability, goroutine scheduling, an observed `-v` report).
+
+**`make test-changed` is a DIAGNOSTIC, not a gate — same standing as
+`test-race`.** It computes the changed paths from the working tree
+(`git diff --name-only HEAD` + untracked, scoped to `$(GOSRCDIRS)`), maps each to
+its owning package by walking up to the nearest directory containing `*.go`, and
+then runs the **reverse-dependency closure**: every package whose test binary
+links a changed package, inverted out of `go list -test -f '{{.Deps}}'` so that a
+dependent reached *only* through `_test.go` imports is still caught. The selected
+set is always printed before it runs (`LIST=1` prints and stops). A clean tree
+selects nothing and says so; a `go.mod`/`go.sum` change selects everything; a
+change outside `cmd/`/`internal/` is listed but selects nothing. It is a **fast
+iteration aid** and **a green `test-changed` does NOT satisfy the checkpoint
+gate** — the fe/be contract above is unchanged (front-end-only diff →
+`test-fe`; anything touching the substrate → the full `test`). Do not let it
+become a third scoping rule: it is derived from the working tree, so it is only
+as honest as the tree at the moment it ran, and it has no `fe-scope-check`-style
+mechanical refusal behind it.
 
 Slow / live tests use a **runtime opt-in**, not build tags: they always
 compile (so a refactor that breaks them fails `make test`), and gate

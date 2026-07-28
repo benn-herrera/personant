@@ -1,6 +1,6 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build fmt fmt-check test test-be test-fe fe-scope-check test-run test-race cover sim sim-completeness-rung sim-tokenceiling-rung sim-shadow-slow-test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
+.PHONY: all build fmt fmt-check test test-nocache test-be test-fe fe-scope-check test-run test-race test-changed cover sim sim-completeness-rung sim-tokenceiling-rung sim-shadow-slow-test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
 
 all: build
 
@@ -146,13 +146,51 @@ recall-corpus-fetch:
 sim-shadow-slow-test: build recall-madlibs
 	PERSONANT_SLOW_SIM_TESTS=1 go test ./internal/scenarios/sim/ -run 'TestShadowLayerB_ReverseDivergence|TestSimEmbeddingHeadToHead_Machinery|TestSimNoEmbedder_HeadToHeadAbsent' -count=1 -timeout 0 -v
 
+# GOTESTCOUNT is the test-cache control knob for the ROUTINE gates (`test`,
+# `test-be`, `test-fe`, `test-changed`). EMPTY by default — i.e. Go's test cache
+# is LEFT ON. That is deliberate and is the cheapest form of "test what changed":
+# the cache key is content-addressed over the package's source, its transitive
+# dependencies, the testdata files a test actually reads, and the environment
+# variables it calls os.Getenv on — so it invalidates exactly when a result could
+# have changed, computed by the toolchain rather than by anyone's judgment. With
+# --count=1 hard-coded, `make test` re-executed the 1625s sim package on a
+# one-line docs edit; without it an unchanged package returns in milliseconds and
+# the gate costs only what actually moved.
+#
+# The forced-clean path is preserved, not removed: `make test-nocache` runs the
+# same full suite with --count=1. Use it when a clean run is the POINT — before
+# a push, when chasing a suspected cache artifact, or after a toolchain/go.mod
+# change. Any scoped target can be forced the same way from the command line
+# (`make test-fe GOTESTCOUNT=--count=1`), since a command-line assignment
+# overrides this one.
+#
+# NOT applied to the deliberate/heavyweight targets — test-race, test-run, sim*,
+# integration-test, recall-corpus-test, cover — which keep --count=1 hard-coded.
+# Those are invoked BECAUSE a fresh run is wanted (a race detector or live
+# endpoint result that was served from cache is a footgun, and their cache keys
+# do not cover what they actually probe: endpoint reachability, scheduling
+# nondeterminism, an observed -v report).
+GOTESTCOUNT :=
+
 test: build fmt-check recall-madlibs
 	go vet $(GOPKGS)
 	# -timeout 30m: the sim package's in-suite mock rungs (the 1d TestSim, the
 	# multi-day #120 daily-series + #121 day-off harness guards) push that one
 	# package past go test's default 10m per-package budget; 30m bounds a genuine
 	# hang without failing a healthy long run. Other packages finish in seconds.
-	go test $(GOPKGS) --count=1 -timeout 30m
+	go test $(GOPKGS) $(GOTESTCOUNT) -timeout 30m
+
+# test-nocache is `test` with the test cache DEFEATED — the same full suite, the
+# same gate semantics, every package genuinely re-executed (~29 min). It is the
+# forced-clean counterpart to the now-cached `test`, not a separate gate: run it
+# before a push, when a cached PASS is itself the thing under suspicion, or after
+# a toolchain/dependency change. Routine iteration should use `test`.
+#
+# Implemented as a target-specific override on $(GOTESTCOUNT), which GNU make
+# also applies to the prerequisite's recipe — so there is ONE test recipe, not a
+# copy that can drift out of sync with it.
+test-nocache: GOTESTCOUNT := --count=1
+test-nocache: test
 
 # test-be is the BACK-END/SUBSTRATE checkpoint gate and is EXACTLY `test` — the
 # full suite. The naming pair test-fe/test-be is deliberately NOT symmetric in
@@ -233,7 +271,7 @@ fe-scope-check:
 # $(FE_TESTPKGS) reads it.
 test-fe: build fmt-check fe-scope-check
 	go vet $(FE_TESTPKGS)
-	go test $(FE_TESTPKGS) --count=1
+	go test $(FE_TESTPKGS) $(GOTESTCOUNT)
 
 # test-run is the EDIT GATE — the counterpart to `test` (the CHECKPOINT GATE).
 # `make test` runs the whole suite, including the sim package's multi-day mock
@@ -312,6 +350,101 @@ RACEPKGS := ./internal/chat/... ./internal/recall/measure/... ./internal/model/.
 # hang-bounding budget `test` gives the sim.
 test-race: build recall-madlibs
 	go test -race $(RACEPKGS) -count=1 -timeout 30m
+
+# test-changed is a CONVENIENCE/DIAGNOSTIC target, in the same category as
+# test-race — it is NOT a gate and NOT a third scoping rule. A green
+# `test-changed` does NOT satisfy the checkpoint gate: the fe/be contract is
+# unchanged (front-end-only diff -> `test-fe`; anything touching the substrate ->
+# the full `test`). What it buys is fast ITERATION — it runs only the packages
+# the working tree could have affected, so a change in a leaf package does not
+# drag the 1625s sim package along behind it.
+#
+# Selection, in four steps:
+#   1. Changed paths = `git diff --name-only HEAD` (staged + unstaged +
+#      deletions) plus untracked files. The untracked scan is scoped to
+#      $(GOSRCDIRS) so it never descends into test/api_keys (mode 0700,
+#      benn-owned — see the GOSRCDIRS comment).
+#   2. Path -> owning package, by walking UP from the path until a directory
+#      containing *.go is found. This is why the selector does not filter to
+#      *.go: a testdata edit under internal/scenarios/testdata/... resolves to
+#      ./internal/scenarios, which is correct — Go's cache hashes the testdata
+#      bytes a test reads, so a testdata change IS a change to that package's
+#      result. A .go file resolves to its own directory by the same walk.
+#   3. Reverse-dependency closure. `go list -test -f '{{.ImportPath}} {{.Deps}}'`
+#      over $(GOPKGS) emits, per package, its FULL TRANSITIVE dep set — and with
+#      -test it also emits the synthesized test variants (`p [p.test]`,
+#      `p_test [p.test]`, `p.test`), whose dep sets include imports that exist
+#      only in _test.go files. Any package whose line names a changed package is
+#      selected; the synthesized paths are folded back onto their base package.
+#      Inverting the forward edges this way is what makes the closure a
+#      SUPERSET: a dependent reached only through test code is still caught.
+#   4. `go test` over the closure, cached ($(GOTESTCOUNT)) like `test`.
+#
+# Deliberate handling of the awkward inputs, stated rather than left implicit:
+#   - CLEAN TREE -> selects nothing, says so, exits 0. It does not silently run
+#     everything (that would defeat the target) and it is not an error (running
+#     it on an unmodified checkout is legitimate).
+#   - go.mod / go.sum -> selects EVERY package. A dependency-version change can
+#     reach anything, and inferring otherwise is exactly the kind of false
+#     confidence this target must not manufacture.
+#   - Anything else outside cmd/ and internal/ (Makefile, SPEC.md, README,
+#     test/tools/*) -> IGNORED for selection, but LISTED in the output so the
+#     omission is visible and the caller can judge it. Those files are build
+#     tooling or docs; they change no package's test result. (This Makefile is
+#     itself in that set — a Makefile edit is not a Go change.)
+#
+# The selected set is always PRINTED before it runs. An opaque selector is how
+# people stop trusting a selector; `make test-changed LIST=1` prints the set and
+# stops without running anything.
+LIST ?=
+test-changed: build recall-madlibs
+	@set -e; \
+	changed="$$( { git diff --name-only HEAD; \
+	               git ls-files --others --exclude-standard -- $(GOSRCDIRS); } \
+	             | sort -u )"; \
+	forcefull=""; dirs=""; outside=""; \
+	for f in $$changed; do \
+	  case "$$f" in \
+	    go.mod|go.sum) forcefull=1 ;; \
+	    cmd/*|internal/*) \
+	      d="$$f"; \
+	      while [ -n "$$d" ] && ! ls "$$d"/*.go >/dev/null 2>&1; do \
+	        case "$$d" in */*) d="$${d%/*}" ;; *) d="" ;; esac; \
+	      done; \
+	      [ -z "$$d" ] || dirs="$$dirs ./$$d" ;; \
+	    *) outside="$$outside $$f" ;; \
+	  esac; \
+	done; \
+	if [ -n "$$outside" ]; then \
+	  echo "test-changed: changed paths outside $(GOSRCDIRS) — not selectors:"; \
+	  for f in $$outside; do echo "  $$f"; done; \
+	fi; \
+	if [ -n "$$forcefull" ]; then \
+	  echo "test-changed: go.mod/go.sum changed — selecting every package."; \
+	  sel="$$(go list $(GOPKGS) | sort -u)"; \
+	elif [ -z "$$dirs" ]; then \
+	  sel=""; \
+	else \
+	  sel="$$(go list -test -f '{{.ImportPath}}{{range .Deps}} {{.}}{{end}}' $(GOPKGS) \
+	          | awk -v ch="$$(go list -e $$dirs | sort -u | tr '\n' ' ')" \
+	                -v all="$$(go list $(GOPKGS) | tr '\n' ' ')" ' \
+	              BEGIN { n=split(ch, A, " "); for (i=1;i<=n;i++) if (A[i]!="") CH[A[i]]=1; \
+	                      m=split(all, B, " "); for (i=1;i<=m;i++) if (B[i]!="") ALL[B[i]]=1; } \
+	              { base=$$1; sub(/\.test$$/, "", base); sub(/_test$$/, "", base); \
+	                hit=(base in CH); \
+	                for (i=2;i<=NF;i++) if ($$i in CH) hit=1; \
+	                if (hit && (base in ALL)) SEL[base]=1; } \
+	              END { for (k in SEL) print k }' \
+	          | sort -u)"; \
+	fi; \
+	if [ -z "$$sel" ]; then \
+	  echo "test-changed: no changed Go packages — nothing to run."; \
+	  exit 0; \
+	fi; \
+	echo "test-changed: selected $$(echo $$sel | wc -w | tr -d ' ') package(s):"; \
+	for p in $$sel; do echo "  $$p"; done; \
+	if [ -n "$(LIST)" ]; then echo "test-changed: LIST=1 — not running."; exit 0; fi; \
+	go test $$sel $(GOTESTCOUNT) -timeout 30m
 
 # bench runs benchmarks only (no unit tests) for a package selected by
 # PKG, with a regexp selected by BENCH. Defaults target the recall hot
