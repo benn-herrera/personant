@@ -175,8 +175,8 @@ FE_SCOPE_PREFIXES := cmd/ internal/chat/ internal/version/
 # FE_TESTPKGS is the package set `test-fe` runs: the front-end leaf itself plus
 # the CHEAP substrate importers of internal/version, as insurance against a
 # version const bump breaking a substrate assertion (eventlog 1.2s, memops 2.2s,
-# store — all seconds). Total lands around 10-12s versus ~29 minutes for the
-# full suite.
+# store 14.5s — all seconds). Measured total is ~15-16s versus ~29 minutes for
+# the full suite: internal/store dominates and runs in parallel with the rest.
 #
 # ./internal/memops is EXACT — deliberately NOT ./internal/memops/..., because
 # the /... form pulls in internal/memops/fileadapter, whose tests are 229
