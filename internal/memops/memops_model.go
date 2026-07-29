@@ -352,11 +352,38 @@ type Config struct {
 }
 
 // ChatConfig is the [chat] section.
+//
+// Layering note (deliberate, do not "fix"): ShowThinking is a pure U/X
+// preference sitting in a substrate-owned config type. It lives here
+// because internal/chat never sees PersonantPaths — path resolution and
+// file reads are the adapter's job, and the application layer receives
+// config only through the port (see the Options.Ops godoc in
+// internal/chat/chat.go). A separate front-end-owned settings file would
+// mean a second config format, a second loader, and a second thing for
+// the user to find. One config file, delivered through the one port, is
+// the right trade; the type is the substrate's, the meaning is the front
+// end's, and nothing in the substrate reads this field.
 type ChatConfig struct {
 	// DefaultModel is a "<provider>/<model>" reference into the
 	// providers.toml pool — the default chat provider and model. The
 	// --provider / --model CLI flags override it.
 	DefaultModel string `toml:"defaultModel"`
+
+	// ShowThinking makes the REPL stream a thinking model's reasoning
+	// deltas to the terminal, dimmed, as they arrive. It is the SESSION
+	// DEFAULT only — the /thinking slash command overrides it for the
+	// running session and never writes back.
+	//
+	// Absent → false → off. That default is deliberate: on a thinking
+	// model the reasoning stream is the overwhelming majority of the
+	// bytes on the wire, so a fresh install must not suddenly fill the
+	// terminal with scratch the user did not ask for. It has no bearing
+	// on what is stored — reasoning is never journaled, never extracted
+	// for symbols, never replayed — so this switch is display-only, and
+	// ValidateConfig deliberately has nothing to say about it: an
+	// absent, false, or unrecognized display preference must never
+	// refuse a config and block the session.
+	ShowThinking bool `toml:"showThinking"`
 }
 
 // EmbeddingConfig is the [embedding] section — the §3.4 layer-2

@@ -1707,6 +1707,7 @@ surface entirely.
 | `/project rename <new-name>` | rename the active project; updates `name` only (id, path, remote URL unchanged) — see §4.5 |
 | `/cd-project <path>` | set active project root to `<path>` (see §4.5) |
 | `/model <id>` | switch active LLM |
+| `/thinking [on\|off]` | show/hide the model's live reasoning, dimmed; bare form reports the state. Session-scoped override of `[chat] showThinking` (§8.2.2) — never written back to `config.toml` |
 | `/stats` | runtime stats (active threads, layer fill, recent recall events, etc.) |
 | `/version` | version identity plus the on-disk format of the home this session opened (§9.1) |
 
@@ -2992,6 +2993,7 @@ Format:
 ```toml
 [chat]
 defaultModel = "provider/model"
+showThinking = false
 
 [embedding]
 model        = "provider/model"
@@ -2999,6 +3001,7 @@ vectorLength = 768
 ```
 
 - `[chat] defaultModel` — the default chat provider/model.
+- `[chat] showThinking` — optional display preference: stream a thinking model's reasoning deltas to the terminal, dimmed, as they arrive. **Absent → off**; a fresh install does not start showing scratch unasked. Display-only — reasoning is never journaled, never feeds §3.3 symbol extraction, and is never replayed in history — so it is deliberately outside cross-file validation: an absent or unrecognized display preference must never refuse a config. `/thinking` (§4.2) overrides it for the session.
 - `[embedding] model` — the embedding provider/model. This pin is **mandatory for embedding recall** and must be explicit: the embedding model defines the vector space, and an inferred or drifting model would silently invalidate the existing embedding cache.
 - `[embedding] vectorLength` — optional; for matryoshka-capable embedding models, requests this truncated dimensionality (passed as the `dimensions` parameter on the embeddings call).
 - `[recall] model` — (future, not yet built) the recall layer-3 judge model (`provider/model`). A separate reference from `[chat]` so the judge's **context ceiling can be tuned independently** of the main chat model's large window; a small dedicated window (~8K) is intentional (the judge's input is: a query + N ≤150-char candidate summaries). Default: a small-tier model (E2B). The empirical discipline: measure E2B → E4B → 26B against the embedding-only precision baseline; pick the smallest passing tier. See ARCHITECTURE.md §"Minimize infrastructural prompts" and §"Recall mechanisms" (layer-3 judgment).

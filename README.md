@@ -35,6 +35,7 @@ On first run, `bin/personant` initializes `~/.personant/` as a git repository. O
 | `/project` | print active project info |
 | `/project rename <new-name>` | rename the active project |
 | `/project switch <name-or-id>` | switch to a known project |
+| `/thinking [on\|off]` | show/hide the model's live reasoning (dimmed); bare form reports the state |
 | `/stats` | session and spine statistics |
 | `/version` | version identity + this home's on-disk format |
 | `/quit`, `/exit` | end the session |
@@ -42,6 +43,8 @@ On first run, `bin/personant` initializes `~/.personant/` as a git repository. O
 `/no-revisit`, `/cd-project`, and `/model` are recognized but stubbed for a later phase.
 
 While a turn is working — before the first token, and again while it closes out — a one-line indicator names the phase the runtime is in (composing context, waiting on the model, searching memory, closing turn) with an elapsed counter, and advertises `esc to abort` while the turn can still be abandoned. It appears only after a couple of seconds, only on a real terminal, and it clears itself the instant the response starts arriving; a piped or redirected run gets no decoration at all.
+
+A thinking model's reasoning is **off by default and never stored**. `config.toml`'s `[chat] showThinking` sets the session default and `/thinking on|off` overrides it for the running session; when on, the reasoning stream is rendered live and dimmed as it arrives, closed off on its own line before the answer begins (on a terminal with no ANSI support it is bracketed `[thinking] … [/thinking]` instead). It is scratch, not an answer: it is never journaled, never feeds symbol extraction, and is never replayed to the model. A piped or redirected run emits none of it regardless of the setting.
 
 Line editing and history come from `liner`: in-line editing plus Up/Down history recall. History persists across sessions in `~/.personant/history` (deduplicated, capped at 1000 entries).
 

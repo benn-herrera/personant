@@ -314,8 +314,8 @@ In progress:
   gate sharing one predicate with recovery), concurrency/robustness,
   DRY/dead-code removal, and the docs accuracy sweep (Wave 5). Also
   landed the **dogfood-minimum chat REPL**: the
-  `/topic /done /pause /resume /back-to /project rename|switch` slash
-  set, always-log `retire.ack` closure edit-ack with `edited=` logging,
+  `/topic /done /pause /resume /back-to /project rename|switch /thinking`
+  slash set, always-log `retire.ack` closure edit-ack with `edited=` logging,
   `liner`-backed line editing + `~/.personant/history`, and the §4.3.3
   interrupt/abort keys: **Ctrl-C ends the session** (at the prompt it is
   `/exit`, silent; mid-turn it abandons the turn first, and a second

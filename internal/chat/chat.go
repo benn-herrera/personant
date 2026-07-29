@@ -292,9 +292,19 @@ func Run(opts Options) error {
 		state.Recaller = measure.NewService(ops, nil)
 	}
 
+	// The session's one terminal-output writer: progress.writer (which
+	// retires the wait indicator on its first byte) wrapped by the
+	// thinking renderer (which closes any open reasoning run before other
+	// content lands). Every REPL producer that can fire mid-turn shares
+	// it — the response body, the §3.4 recall offer, the §3.5 closure
+	// prompt, the abort notice — so the three-way contention for the line
+	// is resolved in one place. Inert on a non-terminal session.
+	th := newThinking(pr, opts.Stdout, cfg.Chat.ShowThinking)
+	state.OnReasoning = th.reasoning
+
 	// §3.4 recall UI surface (Part B): install an interactive resolver
 	// so recalled threads can be pulled into Layer B at turn close.
-	state.RecallResolver = interactiveRecallResolver(lr, pr.writer(opts.Stdout))
+	state.RecallResolver = interactiveRecallResolver(lr, th)
 
 	// §3.5 decay-triggered closure flow: a model-backed curator drafts
 	// the closure summary, and an interactive resolver lets the user
@@ -306,7 +316,7 @@ func Run(opts Options) error {
 		closureModel = provider.DefaultModel
 	}
 	state.Curator = curator.NewHTTPCurator(client, closureModel)
-	state.ClosureResolver = interactiveClosureResolver(lr, pr.writer(opts.Stdout))
+	state.ClosureResolver = interactiveClosureResolver(lr, th)
 
 	banner := opts.Banner
 	if banner == "" {
@@ -351,7 +361,7 @@ func Run(opts Options) error {
 	// user a question retires any in-flight indicator first.
 	state.OnPhase = ctl.onPhase
 
-	if err := loop(runCtx, opts, ops, state, ctl); err != nil {
+	if err := loop(runCtx, opts, ops, state, ctl, th); err != nil {
 		return err
 	}
 
@@ -540,7 +550,7 @@ func promptLine(lr lineReader, retracted string) (string, error) {
 // loop is the core REPL. Returns nil on a clean exit; non-nil on an
 // unrecoverable I/O error (e.g. the input reader failing, not a
 // per-turn LLM error which is logged and tolerated).
-func loop(ctx context.Context, opts Options, ops memops.MemoryOps, state *turn.State, ctl *control) error {
+func loop(ctx context.Context, opts Options, ops memops.MemoryOps, state *turn.State, ctl *control, th *thinking) error {
 	lr := ctl.lr
 	// retracted carries an Esc-aborted input to the next prompt, where it
 	// is re-offered as an editable default. It is deliberately a local:
@@ -579,7 +589,7 @@ func loop(ctx context.Context, opts Options, ops memops.MemoryOps, state *turn.S
 
 		switch {
 		case strings.HasPrefix(trimmed, "/"):
-			done, derr := dispatchSlash(ctx, opts, ops, state, trimmed)
+			done, derr := dispatchSlash(ctx, opts, ops, state, th, trimmed)
 			if derr != nil {
 				fmt.Fprintf(opts.Stderr, "command error: %v\n", derr)
 				continue
@@ -590,7 +600,7 @@ func loop(ctx context.Context, opts Options, ops memops.MemoryOps, state *turn.S
 		case strings.HasPrefix(trimmed, "$") || strings.HasPrefix(trimmed, "#"):
 			fmt.Fprintln(opts.Stderr, "shell escape ($/#) is not yet implemented (Phase 2.f)")
 		default:
-			back, err := runOneTurn(ctx, opts, ops, ctl, state, input)
+			back, err := runOneTurn(ctx, opts, ops, ctl, state, th, input)
 			retracted = back
 			if err != nil {
 				// A bad turn does not kill the session — log the error and
@@ -621,7 +631,7 @@ const abortNotice = "[cancelled — input retracted; nothing from this turn was 
 // runOneTurn drives one turn. It returns retracted != "" when the user
 // pressed Esc: the input the REPL should re-offer as an editable default.
 // The turn's own error is separate — an abort is not a failure.
-func runOneTurn(ctx context.Context, opts Options, ops memops.MemoryOps, ctl *control, state *turn.State, input string) (retracted string, err error) {
+func runOneTurn(ctx context.Context, opts Options, ops memops.MemoryOps, ctl *control, state *turn.State, th *thinking, input string) (retracted string, err error) {
 	turnCtx, cancel := context.WithTimeout(ctx, turnTimeout)
 	defer cancel()
 	pr := ctl.pr
@@ -631,11 +641,17 @@ func runOneTurn(ctx context.Context, opts Options, ops memops.MemoryOps, ctl *co
 	// never reaches it.
 	ctl.arm(cancel)
 	defer ctl.disarm()
-	// The body streams through pr.writer: its first byte retires the
-	// pre-token indicator, and the turn's closing phase restarts it for the
-	// post-stream wait.
-	out := pr.writer(opts.Stdout)
+	// The body streams through th → pr.writer: its first byte closes any
+	// open reasoning run and retires the pre-token indicator, and the
+	// turn's closing phase restarts the indicator for the post-stream wait.
+	out := th
 	_, info, err := turn.RunWithInfo(turnCtx, state, nil, input, out)
+	// Close a still-open reasoning run before anything else claims the
+	// terminal. The content path closes it implicitly, so this only fires
+	// when the turn produced reasoning and no body — a real shape (the
+	// D6 empty-response case) and the one that would otherwise leave the
+	// terminal dim.
+	th.end()
 	// Retire the closing-phase indicator on EVERY exit — normal, per-turn
 	// error, or a cancelled turn — before anything else touches the
 	// terminal. It owns the current line until it is stopped.
@@ -667,7 +683,7 @@ func runOneTurn(ctx context.Context, opts Options, ops memops.MemoryOps, ctl *co
 // dispatchSlash returns done=true to signal the loop should exit. A
 // returned error is per-command and non-fatal — the loop prints it and
 // continues. Stubs and unknown commands write to stderr and return nil.
-func dispatchSlash(ctx context.Context, opts Options, ops memops.MemoryOps, state *turn.State, line string) (bool, error) {
+func dispatchSlash(ctx context.Context, opts Options, ops memops.MemoryOps, state *turn.State, th *thinking, line string) (bool, error) {
 	cmd, rest := splitCommand(line)
 	switch cmd {
 	case "/quit", "/exit":
@@ -690,6 +706,8 @@ func dispatchSlash(ctx context.Context, opts Options, ops memops.MemoryOps, stat
 		return false, cmdBackTo(ctx, opts, state, rest)
 	case "/project":
 		return false, cmdProject(ctx, opts, ops, state, rest)
+	case "/thinking":
+		return false, cmdThinking(opts, th, rest)
 	case "/no-revisit":
 		fmt.Fprintln(opts.Stderr, "/no-revisit is not yet implemented (recall accrual loop, §3.4)")
 	case "/cd-project", "/model":
@@ -754,6 +772,31 @@ func cmdBackTo(ctx context.Context, opts Options, state *turn.State, rest string
 		return err
 	}
 	fmt.Fprintf(opts.Stdout, "re-engaged %s\n", id)
+	return nil
+}
+
+// cmdThinking implements /thinking [on|off] — the session-scoped
+// override of the config.toml [chat] showThinking default. The bare form
+// reports the current state. The override is session-scoped by design: it
+// is never written back to config.toml, so the file stays the user's
+// hand-edited default and the command stays a display toggle.
+//
+// The setting is reported honestly on a non-terminal session: it is
+// accepted and remembered, and the reply says plainly that nothing will
+// be shown, rather than silently pretending it took effect.
+func cmdThinking(opts Options, th *thinking, rest string) error {
+	if strings.TrimSpace(rest) != "" {
+		on, ok := parseThinkingArg(rest)
+		if !ok {
+			return fmt.Errorf("usage: /thinking [on|off]")
+		}
+		th.setOn(on)
+	}
+	suffix := ""
+	if th.on && !th.interactive {
+		suffix = " (not a terminal — nothing will be shown)"
+	}
+	fmt.Fprintf(opts.Stdout, "thinking display: %s%s\n", thinkingStateLabel(th.on), suffix)
 	return nil
 }
 
@@ -864,6 +907,7 @@ func helpText() string {
   /project                     print active project info
   /project rename <new-name>   rename the active project
   /project switch <name-or-id> switch to a known project
+  /thinking [on|off]           show/hide the model's live reasoning (dimmed)
   /stats                       print session and spine statistics
   /version                     print version identity and home format
 

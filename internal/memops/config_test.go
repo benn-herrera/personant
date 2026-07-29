@@ -118,6 +118,22 @@ func TestValidateConfig(t *testing.T) {
 		}
 	})
 
+	// A display preference is never a reason to refuse a config. The
+	// past bug here was an over-strict check that blocked launch
+	// entirely, so this locks the rule at the port: showThinking in
+	// EITHER position, with or without a model reference, validates
+	// clean.
+	t.Run("showThinking never refuses a config", func(t *testing.T) {
+		for _, show := range []bool{false, true} {
+			for _, ref := range []string{"", "local/small-local-model"} {
+				cfg := memops.Config{Chat: memops.ChatConfig{DefaultModel: ref, ShowThinking: show}}
+				if issues := memops.ValidateConfig(cfg, providers); len(issues) != 0 {
+					t.Errorf("showThinking=%v defaultModel=%q yielded issues %+v, want none", show, ref, issues)
+				}
+			}
+		}
+	})
+
 	t.Run("malformed chat ref", func(t *testing.T) {
 		cfg := memops.Config{Chat: memops.ChatConfig{DefaultModel: "noslash"}}
 		issues := memops.ValidateConfig(cfg, providers)

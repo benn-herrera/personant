@@ -72,6 +72,17 @@ func emitPhase(state *State, p Phase) {
 	}
 }
 
+// emitReasoning forwards one chunk's thinking-mode delta to the optional
+// State.OnReasoning hook. Same discipline as emitPhase: the nil (and
+// empty-delta) check lives here and nowhere else. Nothing accumulates —
+// the delta is handed straight to the hook and dropped.
+func emitReasoning(state *State, s string) {
+	if s == "" || state.OnReasoning == nil {
+		return
+	}
+	state.OnReasoning(s)
+}
+
 // State is the per-session mutable runtime state passed to Run. Most
 // fields are stable across a session; the coalesce buffer is reset at
 // the start of every Run.
@@ -116,6 +127,21 @@ type State struct {
 	// seam only — the hook must not block and must not mutate State, and
 	// nothing in the pipeline observes it.
 	OnPhase func(Phase)
+
+	// OnReasoning receives each streamed thinking-mode delta
+	// (model.Chunk.Reasoning) as it arrives. nil → reasoning is dropped
+	// at the chunk loop and never leaves the turn (the default: the
+	// scenario harness and every non-interactive caller). The chat REPL
+	// installs a dimmed live renderer.
+	//
+	// Presentation seam only, and a deliberately LOSSY one: reasoning is
+	// model scratch, not its committed answer, so it is handed over
+	// per-chunk and never accumulated. It must not reach the response
+	// body, the turn journal, §3.3 symbol extraction, or replayed
+	// history — which is why there is no field for it on model.Response
+	// and none here. Like OnPhase, the hook must not block and must not
+	// mutate State, and nothing in the pipeline observes it.
+	OnReasoning func(string)
 
 	// Model overrides the provider's DefaultModel when non-empty.
 	Model string
@@ -847,7 +873,7 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 			return "", TurnInfo{}, fmt.Errorf("turn: model consult: %w", err)
 		}
 
-		pre, err := readPreamble(sr)
+		pre, err := readPreamble(state, sr)
 		if err != nil {
 			_ = sr.Close()
 			return "", TurnInfo{}, fmt.Errorf("turn: read preamble: %w", err)
@@ -942,7 +968,7 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		}
 		var streamErr error
 		if !pre.ended {
-			streamErr = streamThroughFilter(sr, filter)
+			streamErr = streamThroughFilter(state, sr, filter)
 		}
 		// Always flush the filter (even on error) so any buffered non-tag
 		// content reaches the user before we surface the failure.
