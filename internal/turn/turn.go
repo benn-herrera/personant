@@ -535,6 +535,12 @@ type TurnInfo struct {
 	// the seal happens INSIDE the turn call, so this is the only place
 	// the measurements surface.
 	Barrier memops.DayBarrierResult
+	// Telemetry is the provider's non-standard extended inference-timing
+	// block for this turn's chat round-trip (model.Usage.Telemetry): the
+	// prefill-vs-generation split, the provider's own throughput figures.
+	// Zero on every provider that does not send it — absence is normal;
+	// gate on model.Usage.HasTelemetry at the source, not on a field here.
+	Telemetry model.InferenceTelemetry
 }
 
 // Run drives one complete user turn end-to-end (spec §3.0). It is a thin
@@ -1010,6 +1016,19 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 				full.Usage.PromptTokens, state.Budget.TokenCeiling, state.TurnNumber))
 	}
 
+	// The provider's extended inference-telemetry block (§2.8
+	// `model.inference-telemetry`) — the prefill-vs-generation split that
+	// separates a context-too-large slow turn from a model-too-slow one,
+	// plus the prompt-cache hit. Written once per turn so slow-turn
+	// forensics are greppable after the fact from the one spelunking
+	// location. NOTHING is written when the provider sends no telemetry:
+	// it is a non-standard extension, absence is normal, and an all-zero
+	// line every turn would train the reader to skip the event.
+	if full.Usage.HasTelemetry() {
+		_ = state.Ops.Log(ctx, memops.LogCategoryModel, "inference-telemetry",
+			full.Usage.TelemetryLogDetail()+" turn="+strconv.Itoa(state.TurnNumber))
+	}
+
 	// D6 persistent-empty forensic line: the FINAL drained response carries
 	// zero visible content — either the empty-response re-prompt also came
 	// back empty, or a pathological over-bound all-whitespace shape slipped
@@ -1156,5 +1175,6 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		JournalDuration: journalDur,
 		GCDuration:      gcDur,
 		Barrier:         bres,
+		Telemetry:       full.Usage.Telemetry,
 	}, nil
 }

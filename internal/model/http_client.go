@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -291,11 +292,35 @@ type wireChoice struct {
 	FinishReason string      `json:"finish_reason"`
 }
 
+// wireUsage is the `usage` block. The first four fields are the OpenAI
+// schema; everything below the marker is the de-facto MLX/oMLX extension
+// (see InferenceTelemetry) and is ABSENT on most providers — absence
+// decodes to zero, which is the documented, non-erroneous outcome.
+//
+// `input_tokens` / `output_tokens` are deliberately NOT decoded. The
+// captured MLX payload sends them as exact duplicates of `prompt_tokens` /
+// `completion_tokens` (962/900 in both spellings), so capturing them would
+// create a second field per count that must always agree with the first —
+// two projections of one shape, with no rule for a caller to choose
+// between them if they ever disagreed. If a provider ever sends ONLY the
+// input/output spelling, add them then, as a documented fallback inside
+// usage(); there is no evidence of that today.
 type wireUsage struct {
 	PromptTokens            int                        `json:"prompt_tokens"`
 	CompletionTokens        int                        `json:"completion_tokens"`
 	TotalTokens             int                        `json:"total_tokens"`
 	CompletionTokensDetails *wireCompletionTokenDetail `json:"completion_tokens_details,omitempty"`
+	PromptTokensDetails     *wirePromptTokenDetail     `json:"prompt_tokens_details,omitempty"`
+
+	// --- non-standard inference-telemetry extension (oMLX via litellm) ---
+	// Durations are FRACTIONAL SECONDS on the wire (0.61, 6.89); the
+	// rates are tokens per second.
+	TimeToFirstToken          float64 `json:"time_to_first_token"`
+	PromptEvalDuration        float64 `json:"prompt_eval_duration"`
+	GenerationDuration        float64 `json:"generation_duration"`
+	TotalTime                 float64 `json:"total_time"`
+	PromptTokensPerSecond     float64 `json:"prompt_tokens_per_second"`
+	GenerationTokensPerSecond float64 `json:"generation_tokens_per_second"`
 }
 
 // wireCompletionTokenDetail is the OpenAI-compatible breakdown of the
@@ -306,6 +331,12 @@ type wireCompletionTokenDetail struct {
 	ReasoningTokens int `json:"reasoning_tokens"`
 }
 
+// wirePromptTokenDetail is the prompt half's breakdown. Only cached_tokens
+// is read — the provider's prompt-cache hit count.
+type wirePromptTokenDetail struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
 // usage projects the wire block onto the caller-facing type. One
 // projection shared by the blocking decode and the SSE decode.
 func (w wireUsage) usage() Usage {
@@ -313,11 +344,29 @@ func (w wireUsage) usage() Usage {
 		PromptTokens:     w.PromptTokens,
 		CompletionTokens: w.CompletionTokens,
 		TotalTokens:      w.TotalTokens,
+		Telemetry: InferenceTelemetry{
+			TimeToFirstToken:          secondsToDuration(w.TimeToFirstToken),
+			PrefillDuration:           secondsToDuration(w.PromptEvalDuration),
+			GenerationDuration:        secondsToDuration(w.GenerationDuration),
+			TotalDuration:             secondsToDuration(w.TotalTime),
+			PrefillTokensPerSecond:    w.PromptTokensPerSecond,
+			GenerationTokensPerSecond: w.GenerationTokensPerSecond,
+		},
 	}
 	if w.CompletionTokensDetails != nil {
 		u.ReasoningTokens = w.CompletionTokensDetails.ReasoningTokens
 	}
+	if w.PromptTokensDetails != nil {
+		u.CachedPromptTokens = w.PromptTokensDetails.CachedTokens
+	}
 	return u
+}
+
+// secondsToDuration converts a wire figure expressed in FRACTIONAL SECONDS
+// to a time.Duration. Rounded, not truncated: 6.89 has no exact binary
+// float representation, and truncation would render it 6.889999999s.
+func secondsToDuration(sec float64) time.Duration {
+	return time.Duration(math.Round(sec * float64(time.Second)))
 }
 
 type wireResponse struct {

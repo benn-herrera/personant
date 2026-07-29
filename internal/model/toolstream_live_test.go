@@ -105,6 +105,21 @@ func TestStreamToolCallMerge_Live(t *testing.T) {
 			"is missing from the request or unsupported by the provider", final.Usage)
 	}
 
+	// The extended inference-telemetry block. It is a non-standard MLX/oMLX
+	// extension — absence is NEVER an error in production — but this probe
+	// runs against reaper, which does send it, so a zero block here means
+	// the provider stopped sending it or renamed a field. The values are
+	// logged so a run puts the real prefill-vs-generation split on the
+	// record.
+	t.Logf("inference telemetry: %s", final.Usage.TelemetryLogDetail())
+	if !final.Usage.HasTelemetry() {
+		t.Errorf("no inference telemetry decoded from the reaper provider (usage=%+v) — "+
+			"the extended block is gone from the wire or its field names changed", final.Usage)
+	} else if tel := final.Usage.Telemetry; tel.TimeToFirstToken <= 0 ||
+		tel.GenerationDuration <= 0 || tel.GenerationTokensPerSecond <= 0 {
+		t.Errorf("inference telemetry decoded but partially zero: %+v", tel)
+	}
+
 	if len(final.ToolCalls) == 0 {
 		t.Fatalf("provider returned no merged tool calls; finish_reason=%q content=%q",
 			final.FinishReason, final.Content)

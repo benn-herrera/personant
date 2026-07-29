@@ -11,6 +11,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"time"
 )
 
 // Client is the abstraction the runtime depends on for an LLM round-trip.
@@ -216,20 +218,102 @@ type StreamReader interface {
 // provider does not report it. It is the only measurement of what thinking
 // mode costs — on a reasoning-heavy turn it is most of CompletionTokens.
 //
+// CachedPromptTokens is the share of PromptTokens the provider served from
+// its prompt cache (`prompt_tokens_details.cached_tokens`), 0 when not
+// reported. It is standard OpenAI accounting — a token count, hence its
+// place beside the others and NOT inside Telemetry — and it is directly
+// load-bearing for a design that reassembles a large context every turn.
+//
 // On a STREAMED response every figure here is zero unless the request
 // carried `stream_options.include_usage` (encodeRequest sends it on the
 // streaming path). An all-zero Usage therefore means "not reported", not
 // "no tokens", and anything gated on a token count must treat it as an
 // unevaluable input rather than a passing one.
 type Usage struct {
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
-	ReasoningTokens  int
+	PromptTokens       int
+	CompletionTokens   int
+	TotalTokens        int
+	ReasoningTokens    int
+	CachedPromptTokens int
+
+	// Telemetry is the provider's non-standard inference-timing extension.
+	// Zero on every provider that does not send it; test with
+	// HasTelemetry rather than reading a field and hoping.
+	Telemetry InferenceTelemetry
 }
 
-// IsZero reports whether the provider supplied no usage figures at all.
+// InferenceTelemetry is the extended inference-timing block MLX-backed
+// OpenAI-compatible servers (oMLX, reached here via litellm) attach to
+// `usage`. It is a DE-FACTO extension, not part of the OpenAI schema:
+// absence is normal, never an error and never a warning — every field is
+// simply zero on a provider that does not send the block.
+//
+// The four durations arrive on the wire as FRACTIONAL SECONDS
+// (`"total_time":6.89`) and are converted once, at decode, to
+// time.Duration, so the unit travels with the value instead of living in a
+// comment that the next caller may not read.
+//
+// The split matters more than the total: TimeToFirstToken / PrefillDuration
+// against GenerationDuration separates a PREFILL-bound slow turn (the
+// assembled context is too large) from a GENERATION-bound one (the model is
+// too slow). For a system that reassembles a large context every turn that
+// is the single most useful diagnostic available.
+type InferenceTelemetry struct {
+	// TimeToFirstToken is `time_to_first_token`: request start to first
+	// emitted token.
+	TimeToFirstToken time.Duration
+	// PrefillDuration is `prompt_eval_duration`: prompt evaluation
+	// (prefill) alone.
+	PrefillDuration time.Duration
+	// GenerationDuration is `generation_duration`: token generation alone.
+	GenerationDuration time.Duration
+	// TotalDuration is `total_time`: the provider's own end-to-end figure.
+	TotalDuration time.Duration
+
+	// PrefillTokensPerSecond and GenerationTokensPerSecond are the
+	// provider's own throughput measurements (`prompt_tokens_per_second`,
+	// `generation_tokens_per_second`), in TOKENS PER SECOND. They stay
+	// float64: a rate has no stdlib unit type, and the wire value is
+	// already the provider's computed figure — re-deriving it from the
+	// durations above would be a second, divergent answer.
+	PrefillTokensPerSecond    float64
+	GenerationTokensPerSecond float64
+}
+
+// IsZero reports whether the provider supplied no usage figures at all —
+// no token counts AND no telemetry. It is the whole-struct zero test, and
+// deliberately so: its callers ask "did this block carry anything?", and a
+// telemetry-only block carries something.
 func (u Usage) IsZero() bool { return u == Usage{} }
+
+// HasTelemetry reports whether the provider supplied the non-standard
+// inference-timing extension. This is the predicate for "did I get
+// telemetry?" — false is the normal answer on most providers, and callers
+// must treat it as absence, not as a fault.
+func (u Usage) HasTelemetry() bool { return u.Telemetry != InferenceTelemetry{} }
+
+// TelemetryLogDetail renders the telemetry as the §2.8 event-log detail
+// string for `model.inference-telemetry`: one line, `key=value`, greppable.
+// Durations are rendered in MILLISECONDS (the wire's fractional seconds are
+// unreadable at a glance next to the runtime's other millisecond gauges);
+// rates are tokens/second. The token counts and the prompt-cache hit ride
+// along because a timing is only interpretable beside the work it measured.
+//
+// Callers must gate on HasTelemetry: this renders an all-zero line for an
+// absent block, and an all-zero line every turn is noise that trains the
+// reader to skip the event.
+func (u Usage) TelemetryLogDetail() string {
+	t := u.Telemetry
+	return fmt.Sprintf("ttft_ms=%.1f prefill_ms=%.1f gen_ms=%.1f total_ms=%.1f "+
+		"prefill_tps=%.1f gen_tps=%.1f prompt_tokens=%d completion_tokens=%d cached_tokens=%d",
+		durationMillis(t.TimeToFirstToken), durationMillis(t.PrefillDuration),
+		durationMillis(t.GenerationDuration), durationMillis(t.TotalDuration),
+		t.PrefillTokensPerSecond, t.GenerationTokensPerSecond,
+		u.PromptTokens, u.CompletionTokens, u.CachedPromptTokens)
+}
+
+// durationMillis renders a Duration as fractional milliseconds.
+func durationMillis(d time.Duration) float64 { return float64(d.Microseconds()) / 1000.0 }
 
 // ErrMockExhausted is returned by a scripted MockClient when its response
 // queue has been drained. Tests check for this with errors.Is.
