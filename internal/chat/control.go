@@ -92,7 +92,17 @@ func newControl(opts Options, lr lineReader, pr *progress, cancel context.Cancel
 // default, which fails safe: the cost of not honouring Esc for a moment
 // is a slightly late abort, while the cost of honouring it one step too
 // late is a half-written turn that greets the user with a recovery banner.
+// The §6.1 tool-execution phases are the one FAMILY on the list rather
+// than a constant: the label carries the tool name, so it cannot be
+// matched by value. turn.IsToolPhase owns the membership test, keeping the
+// family's definition in one place. Tool rounds run entirely between model
+// streams and add no canonical write, so the whole family is
+// pre-canonical — and admitting it is what makes Esc cancel a slow fetch
+// instead of waiting it out.
 func abortablePhase(p turn.Phase) bool {
+	if turn.IsToolPhase(p) {
+		return true
+	}
 	switch p {
 	case turn.PhaseComposing, turn.PhaseWaiting, turn.PhaseReissuing:
 		return true

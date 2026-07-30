@@ -544,6 +544,8 @@ Future consideration, not v0.1 — and distinct from multi-*user* (v2.0): this i
 
 **v1.0 will add Python-only computational tools** (`python.run`, `python.format`, `python.lint`) for math/physics simulation. Targeted; not a general "agent can run anything."
 
+**Mechanism, as of front end 0.0.8:** the registry (`internal/tools`) and the turn-side execution loop are built; the tool list above is still EMPTY. The inventory and the machinery to run it are deliberately separate concerns — a registry with nothing in it sends no `tools` field, so the model is never invited to call what cannot be serviced. Two properties are worth carrying: a dispatch **never fails** (unknown tool, handler error, handler timeout are all results the model can recover from, because a provider that saw N calls requires N replies), and tool execution is **at-least-once** under crash replay, which is fine for read-only tools and is mechanically refused for mutating ones. See SPEC §6.1.4.
+
 ---
 
 ## Permission tiers

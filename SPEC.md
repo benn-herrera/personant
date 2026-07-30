@@ -1749,8 +1749,19 @@ vocabulary is fixed and small:
 | composing context | §3.0 delta chain + working-set composition |
 | waiting on the model | the LLM round-trip (first-token latency) |
 | re-issuing request | a §5.5 fetch or D6 re-prompt aborted the stream |
+| running `<tool>` | §6.1 tool execution between two model streams |
 | searching memory | the §3.4 recall stack (the embedding round-trip) |
 | closing turn | response journal, engagement, closure scan, commit, save |
+
+`running <tool>` is the one label that is a FAMILY rather than a constant:
+it carries the tool's name from the identity-only `Chunk.ToolCalls` view
+(ID + function, never arguments), because "waiting on the model" left up
+for the whole of a multi-round tool turn names the wrong thing. A round
+with several calls summarizes (`running web.search +2 more`) so the line
+cannot wrap. The family shares the `running ` prefix, and
+`turn.IsToolPhase` is its single membership test — the front end's §4.3.3
+abort allow-list admits the family through that predicate rather than by
+listing labels it cannot know in advance.
 
 Requirements:
 
@@ -1842,6 +1853,10 @@ not in memory and never was.
   The abort window therefore closes at the first non-pre-canonical phase
   (`closing turn`) and the front end must gate on an **allow-list** of
   abortable phases, so a phase added later is non-abortable by default.
+  The §6.1 `running <tool>` family is ON that list: a tool round runs
+  entirely between model streams and writes nothing canonical, and a slow
+  fetch is exactly the wait a user reaches for Esc during. Cancelling the
+  turn cancels the running tool — handlers receive the turn's context.
 - **Terminal mode.** Observing a keypress mid-turn requires `ICANON` and
   `ECHO` off with a bounded read window (`VMIN`/`VTIME`), which is
   **cbreak** — deliberately not raw mode. Raw clears `OPOST` (bare `\n`
@@ -2855,6 +2870,70 @@ notable cases:
 
 These do not enter scope by accident.
 
+#### 6.1.4 Registry and execution loop
+
+The inventory and the machinery that runs it are separate concerns.
+`internal/tools` holds the registry: name → (`model.ToolSpec`, handler,
+tier, mutates). It is substrate-free and unaware of the turn loop; a
+handler is `(context, raw JSON args) → (bytes, error)`.
+
+- **An empty registry sends no `tools` field.** `Registry.Specs()` returns
+  nil when nothing is registered, and the wire encoder omits an empty
+  field — the model is never invited to call what cannot be serviced. The
+  registry ships empty.
+- **Spec order is deterministic** (sorted by name). Map order would make
+  otherwise-identical requests differ in their prefix, which is both
+  unreproducible and a prompt-cache miss on a block that did not change.
+- **`Registry.Dispatch` never fails.** Every call yields a result whose
+  content is safe to return as a tool message: an unknown tool, a handler
+  error, and a handler timeout each become an error result naming what
+  went wrong and what to do next. The one exception is the caller's
+  context ending (§4.3.3 Esc, shutdown), which is reported to the caller
+  and never to the model. A provider that saw N tool calls requires N tool
+  replies; dropping one wedges the conversation.
+- **Handlers are bounded.** Dispatch derives a per-call deadline from the
+  turn context, so a wedged tool costs a bounded wait rather than the
+  session.
+
+The execution loop lives in `internal/turn` and reuses the §5.5 / D6
+re-issue machinery rather than opening a parallel request path. After a
+stream completes carrying tool calls: run them in emission order
+(sequentially — a deterministic result order is worth more than a shorter
+multi-fetch round until a tool exists whose latency is the complaint),
+append the assistant message that carried the calls followed by one tool
+message per result, fire each result through the §3.0 chain as a
+`tool.result` delta, and re-issue.
+
+- A **tool-call-only response carries zero visible content**, which is
+  byte-identical to the §3.3 empty-response signature. The identity-only
+  `Chunk.ToolCalls` view is what separates them, so a tool round never
+  burns the empty-response re-prompt.
+- **Tool rounds are bounded per turn**, by a counter DISTINCT from the
+  §5.5/§3.3 re-prompt caps. Those bound recovery from a protocol failure,
+  where repeating a just-failed intervention is known-useless; a tool
+  round is the model working, and each round carries new information.
+  Folding them would let one tool-using turn consume the budget that
+  exists to recover a malformed topic tag. Exhausting the tool budget is
+  surfaced to the user on screen AND logged (`tool.truncated`) — never a
+  silent truncation.
+- **The user is never left with silence.** A turn that renders no text —
+  tool calls only, a spent round budget, a persistently empty reply —
+  emits one bracketed runtime notice, so a working system is never
+  indistinguishable from a broken one.
+
+**Crash stability (§4.5.8): tool calls and results are NOT journaled, and
+execution is AT-LEAST-ONCE.** The turn journal holds the (prompt,
+response) byte pair — the authored content that must survive a crash.
+Tool results are derived: replay re-issues the prompt, which re-elicits
+the calls and re-runs the tools, so journaling buys back no content, and a
+third record kind would perturb the recovery state machine's vocabulary
+and ordering. Tool rounds add no canonical write, so they need no recovery
+point of their own. Re-running a **read-only** tool is harmless, and every
+§6.1.1 tool is read-only. It would not be harmless for a mutating one.
+**This decision must be revisited before any mutating tool lands** — the
+trip-wire is mechanical: `tools.Registry.Register` REFUSES a tool
+declaring `Mutates`, citing this decision.
+
 ### 6.2 Permission tiers and accrual
 
 Acknowledgement on every workspace mutation defeats the architectural thesis
@@ -2990,7 +3069,7 @@ additions (extends §2.8 table):
 
 | Category | Events |
 |---|---|
-| `tool` | *(vocabulary; not yet emitted)* `call`, `result`, `error`, `denied`, `truncated` |
+| `tool` | `call` (a §6.1.4 dispatch is starting — `name=`, `id=` the provider's call id, `round=`. Deliberately NOT the arguments: an argument blob is multi-line and free-form, and an event line is neither), `result` (the call returned — `name= id= round= bytes=`, the byte count BEFORE the §6.5 cap), `error` (unknown tool, handler failure, or handler timeout — `name= id= round= detail=`; the model got a recoverable error result and the turn continued), `truncated` (the turn's tool-round budget was exhausted with the model still asking — `reason=round-cap rounds= pending= turn=`; paired with an on-screen notice, §6.1.4); *(vocabulary; not yet emitted)* `denied` |
 | `permissions` | `redaction-fire` (§8.2.1 user-initiated redaction fired on a `#` capture — `source=` the delta source, `occurrences=`, `bytes=` how much key material was removed. **Never what matched**: §8.2.1 forbids resolved key material in any log line, so the event records that it fired and how much, and there is deliberately no field that could carry the secret); *(vocabulary; not yet emitted)* `prompt`, `grant`, `deny`, `revoke`, `accrual-update`, `suspicious-access` |
 
 Symbol extraction over tool I/O is unchanged from §3.3: the deterministic pass
@@ -3013,6 +3092,11 @@ current-turn budget. Default policy:
   are task-class but whose content is the file body written to the
   per-thread tracked-file store — truncating one would not bound a budget,
   it would corrupt a file.
+- The cap is applied to the **delta**, and the bounded content is what
+  builds the tool message too. Bounding only the memory copy would leave
+  the wire copy unbounded, which is the budget the cap exists to protect —
+  so one implementation (`boundTaskResultDeltas`) covers both, and a
+  truncation always carries its honest marker.
 - Agent can re-fetch with a narrower query or a byte range if it needs more.
 - Pathological cases (a 50 MB file the agent asked for) reject at the tool
   layer with a message asking for a narrower fetch.

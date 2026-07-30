@@ -51,6 +51,18 @@ type preambleResult struct {
 	head  []byte           // accumulated preamble bytes (re-fed to the filter)
 	tag   *prompt.TopicTag // non-nil iff a §5.1.2 topic tag was located in head
 	ended bool             // true when EOF arrived before the scan resolved
+	// tools holds the IDENTITY-ONLY tool calls (model.Chunk.ToolCalls:
+	// ID + Function, Args always nil) observed while reading the preamble.
+	//
+	// It is what tells a TOOL-CALL-ONLY response apart from an empty one.
+	// A response that is nothing but tool calls carries zero visible
+	// content, so the bounded scan never resolves and the stream reaches
+	// EOF with an empty head — byte-for-byte the D6 empty-response
+	// signature. Without this, the §6.1 tool round would be misread as a
+	// protocol failure, burn the empty-response re-prompt, and then render
+	// nothing. It is the identity channel doing exactly the job it was
+	// added for.
+	tools []model.ToolCall
 }
 
 // readPreamble accumulates chunks from sr until the bounded preamble scan
@@ -70,23 +82,54 @@ type preambleResult struct {
 // committed content.
 func readPreamble(state *State, sr model.StreamReader) (preambleResult, error) {
 	var buf []byte
+	var seen []model.ToolCall
 	for {
 		chunk, err := sr.Next()
 		if errors.Is(err, io.EOF) {
-			return classifyPreamble(buf, true), nil
+			res := classifyPreamble(buf, true)
+			res.tools = seen
+			return res, nil
 		}
 		if err != nil {
 			return preambleResult{}, err
 		}
 		emitReasoning(state, chunk.Reasoning)
+		seen = appendToolIdentities(seen, chunk.ToolCalls)
 		if chunk.Content == "" {
 			continue
 		}
 		buf = append(buf, chunk.Content...)
 		if _, _, _, done := prompt.PreambleScan(buf); done {
-			return classifyPreamble(append([]byte(nil), buf...), false), nil
+			res := classifyPreamble(append([]byte(nil), buf...), false)
+			res.tools = seen
+			return res, nil
 		}
 	}
+}
+
+// appendToolIdentities merges one chunk's identity-only tool-call view
+// into the running set, keyed by call ID. A chunk repeats the identity of
+// every call it carried a fragment for, so the same ID arrives many times
+// over a stream; only the first occurrence (and any later one that finally
+// supplies the function name) is kept.
+func appendToolIdentities(seen []model.ToolCall, chunkCalls []model.ToolCall) []model.ToolCall {
+	for _, c := range chunkCalls {
+		found := false
+		for i := range seen {
+			if seen[i].ID != c.ID {
+				continue
+			}
+			found = true
+			if seen[i].Function == "" {
+				seen[i].Function = c.Function
+			}
+			break
+		}
+		if !found {
+			seen = append(seen, model.ToolCall{ID: c.ID, Function: c.Function})
+		}
+	}
+	return seen
 }
 
 // classifyPreamble locates a §5.1.2 topic tag anywhere within the bounded

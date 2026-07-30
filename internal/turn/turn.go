@@ -19,6 +19,7 @@ import (
 	"personant/internal/model"
 	"personant/internal/prompt"
 	"personant/internal/recall/measure"
+	"personant/internal/tools"
 )
 
 // Crashpoints for the R4 W-TURN matrix (#94 R3): the turn pipeline's own
@@ -91,6 +92,14 @@ type State struct {
 	ActiveProject memops.ProjectMeta
 	Provider      memops.Provider
 	Client        model.Client
+
+	// Tools is the §6.1 external tool inventory offered to the model. nil
+	// (the NewState default) is a valid EMPTY registry: no `tools` field
+	// goes on the wire, so the model is never invited to call something
+	// the runtime cannot service. Callers that have tools build a
+	// tools.Registry at startup and install it here; it must be treated as
+	// immutable once turns are running.
+	Tools *tools.Registry
 
 	// Recaller is the §3.4 recall stack (measure.Recaller). NewState
 	// installs a default symbolic-only Service; callers that have an
@@ -835,15 +844,34 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		chosenModel = state.Provider.DefaultModel
 	}
 
-	// The stream filter strips the §5.1 topic tag from the user-visible
-	// body. It is created once and only receives writes on the final
-	// (non-aborted) attempt; aborted attempts never touch out.
-	filter := prompt.NewStreamFilter(out)
-
 	// Per-cause re-prompt caps (see the mid-turn re-prompt bound comment
 	// above NewState). fetchReprompted is loop-local; the tag cause lives
 	// on State because the close-time owner-default reads it.
 	fetchReprompted := false
+
+	// noticed records that this turn already wrote a runtime notice to
+	// out. The user must never get a blank prompt back: a tool-call-only
+	// response, a spent tool-round budget, and a persistently empty model
+	// reply all render nothing on their own. notify is the single place
+	// that speaks for the runtime, and the brackets make the line
+	// unmistakably not model output.
+	noticed := false
+	notify := func(msg string) {
+		noticed = true
+		fmt.Fprintf(out, "\n[personant: %s]\n", msg)
+	}
+
+	// §6.1 tool conversation for this turn: the assistant messages that
+	// carried tool calls and the tool messages answering them, in protocol
+	// order. Appended after the user message on every subsequent request
+	// so the model sees its own calls and their results.
+	var toolMessages []model.Message
+	toolRounds := 0
+	// Visible text from every round of this turn, joined once the loop
+	// ends. A tool-using turn is ONE turn with several assistant segments;
+	// the user saw them all, so the returned body, History, and the §3.0
+	// model.response delta must all carry them all.
+	var bodyParts []string
 
 	var full model.Response
 	for attempt := 0; ; attempt++ {
@@ -858,8 +886,13 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		messages = append(messages, model.Message{Role: "system", Content: systemPrompt})
 		messages = append(messages, historyTail...)
 		messages = append(messages, model.Message{Role: "user", Content: userInput})
+		messages = append(messages, toolMessages...)
 
 		req := model.DefaultRequest(chosenModel, messages)
+		// §6.1 tool inventory. Deterministically ordered, and nil for an
+		// empty registry — which is what keeps the `tools` field off the
+		// wire so the model is never invited to call what we cannot run.
+		req.Tools = state.Tools.Specs()
 		// State-level overrides — when set, they win over the defaults.
 		if state.Temperature != 0 {
 			req.Temperature = state.Temperature
@@ -890,7 +923,14 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		// the owner-default (empty excerpt), a conversational turn surfaces
 		// the empty body to the caller; either way the system.empty-response
 		// forensic line below records it.
-		emptyResponse := preambleIsEmpty(pre)
+		// A TOOL-CALL-ONLY response is byte-identical to an empty one at
+		// this point — zero visible content, stream ended — so the
+		// identity-only chunk view (pre.tools) is what separates them.
+		// Misreading a §6.1 tool round as a protocol failure would spend a
+		// D6 re-prompt on a model that did nothing wrong, discard the calls,
+		// and then render nothing.
+		toolRound := len(pre.tools) > 0
+		emptyResponse := preambleIsEmpty(pre) && !toolRound
 		if emptyResponse && !state.emptyReprompted {
 			state.emptyReprompted = true
 			_ = sr.Close()
@@ -946,7 +986,12 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		// a tag reminder on a model that twice produced no content would
 		// re-run the just-failed intervention class (see the bound comment
 		// above NewState); it falls through to the owner-default directly.
-		if !emptyResponse && !state.tagReprompted && len(state.fileEdits) > 0 && preambleLacksTag(pre) {
+		// Gated on !toolRound for the same reason: a tool-call-only round
+		// is tag-less because the model has not started its reply yet, not
+		// because it forgot the protocol. The tag arrives with the answer
+		// after the results come back, and this branch would throw the
+		// calls away to ask for it early.
+		if !emptyResponse && !toolRound && !state.tagReprompted && len(state.fileEdits) > 0 && preambleLacksTag(pre) {
 			state.tagReprompted = true
 			_ = sr.Close()
 			_ = state.Ops.Log(ctx, memops.LogCategoryTopic, "re-prompt",
@@ -963,6 +1008,14 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		// with the buffered preamble. The filter independently locates and
 		// suppresses the tag line within the same bounded preamble region
 		// while forwarding the surrounding text.
+		//
+		// The filter is per-DRAINED-ROUND, not per-turn: a §6.1 tool round
+		// re-issues the request and the model may open the next segment
+		// with its own topic tag. One filter across rounds would pass that
+		// tag straight through (it stays flushed after Close), leaking
+		// `*topic: …*` to the terminal. Re-prompt attempts never reach here,
+		// so they never allocate one.
+		filter := prompt.NewStreamFilter(out)
 		if _, werr := filter.Write(pre.head); werr != nil {
 			_ = sr.Close()
 			return "", TurnInfo{}, fmt.Errorf("turn: filter write head: %w", werr)
@@ -988,7 +1041,82 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 			_ = state.Ops.Log(ctx, memops.LogCategoryModel, "stream-close-warn", closeErr.Error())
 		}
 		full = sr.Final()
-		break
+		bodyParts = append(bodyParts, full.Content)
+
+		// §6.1 tool round. The model asked for tools; run them, append the
+		// assistant/tool message pair to the conversation, and re-issue.
+		// This reuses the SAME re-issue machinery as the §5.5 fetch and the
+		// D6 reminders (rebuild messages at the top of the loop, continue)
+		// rather than opening a parallel request path, and it adds no
+		// canonical write — a tool round is entirely pre-canonical.
+		if len(full.ToolCalls) == 0 {
+			break
+		}
+		if toolRounds >= maxToolRoundsPerTurn {
+			// Honest surfacing, not a silent truncation: the model still
+			// wants tools and we are refusing. Both the user and the event
+			// log are told, and the turn proceeds to close with whatever
+			// text the rounds produced.
+			logToolRoundsExhausted(ctx, state, len(full.ToolCalls))
+			notify(fmt.Sprintf("tool-round limit (%d) reached — %d further tool call(s) were not run",
+				maxToolRoundsPerTurn, len(full.ToolCalls)))
+			break
+		}
+		toolRounds++
+		// The tool names come from the merged calls we are about to run, so
+		// the label can never name a tool that does not execute. The
+		// identity-only chunk view (pre.tools) carries the same ID+Function
+		// data and is what detected the round above.
+		emitPhase(state, PhaseRunningTool(toolCallNames(full.ToolCalls)...))
+		round, rerr := runToolRound(ctx, state, toolRounds, full.ToolCalls)
+		if rerr != nil {
+			// Only a cancelled turn gets here — every tool-side failure is
+			// a result the model reads. Pre-canonical, so the deferred
+			// handler rolls the session back and releases the scope.
+			return "", TurnInfo{}, rerr
+		}
+		// The results enter memory through the §3.0 chain like any other
+		// delta, which is what gives §3.3 symbol extraction over tool
+		// output for free (§6.4) — identifiers and URLs in a fetched page
+		// stage as task-class symbols the response can then cite.
+		for _, d := range round.deltas {
+			if err := onContextDelta(ctx, state, d); err != nil {
+				return "", TurnInfo{}, err
+			}
+		}
+		toolMessages = append(toolMessages, round.messages...)
+		emitPhase(state, PhaseReissuing)
+		systemPrompt, err = buildSystemPrompt()
+		if err != nil {
+			return "", TurnInfo{}, fmt.Errorf("turn: recompose working set: %w", err)
+		}
+	}
+
+	// One turn, one response body: the visible text of every round joined
+	// in order. Empty segments (a tool-call-only round) contribute nothing.
+	// full keeps the LAST round's Usage and FinishReason — the last request
+	// is the largest assembled one, so it is the honest input to the #127
+	// ceiling gate below.
+	full.Content = joinRoundBodies(bodyParts)
+
+	// Step 3b: the tag-stripped body, derived ONCE here and reused as the
+	// return value at step 6. It is computed before turn close so the
+	// silent-turn guard can speak while the user is still watching the
+	// stream, rather than after the whole close window.
+	body := full.Content
+	if pr, perr := prompt.Parse(full.Content); perr == nil {
+		body = pr.Body
+	}
+	body = strings.TrimRight(body, "\n")
+
+	// The silent-turn guard. A turn whose model output was nothing but
+	// tool calls, or that ended on a persistently empty response, renders
+	// zero bytes — the user gets their prompt back and cannot tell a
+	// working system from a broken one. Whatever else happened, say
+	// something. (Skipped when a notice already went out, so the round-cap
+	// case is not announced twice.)
+	if !noticed && strings.TrimSpace(body) == "" {
+		notify("the model returned no reply text this turn")
 	}
 
 	// The body has finished streaming; everything below is the second
@@ -1170,13 +1298,9 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		_ = state.Ops.Log(ctx, memops.LogCategorySession, "working-set-save-error", memops.SanitizeDetail(err.Error()))
 	}
 
-	// Step 6: derive the topic-tag-stripped body for the return value.
-	// (out has already received the same content in chunks.)
-	body := full.Content
-	if pr, perr := prompt.Parse(full.Content); perr == nil {
-		body = pr.Body
-	}
-	body = strings.TrimRight(body, "\n")
+	// Step 6: the topic-tag-stripped body is the return value; it was
+	// derived at step 3b (out has already received the same content in
+	// chunks).
 
 	// Append to History so the next turn sees the exchange, then enforce
 	// the sessionHistoryCapTurns FIFO bound (MAD B1). History is always

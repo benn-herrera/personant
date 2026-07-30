@@ -587,3 +587,39 @@ func TestArgFragment(t *testing.T) {
 		})
 	}
 }
+
+// TestNoToolsFieldWhenInventoryIsEmpty — the wire counterpart of the
+// wave-2 registry rule: an empty tool inventory must leave `tools` (and
+// `tool_choice`) OFF the request entirely. Advertising an empty tool list
+// invites calls nothing can service — the live probe already showed this
+// provider emitting tool calls unprompted.
+func TestNoToolsFieldWhenInventoryIsEmpty(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		tools []ToolSpec
+	}{
+		{"nil", nil},
+		{"empty slice", []ToolSpec{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, stream := range []bool{false, true} {
+				req := DefaultRequest("m", []Message{{Role: "user", Content: "hi"}})
+				req.Tools = tc.tools
+				body, err := encodeRequest(req, stream)
+				if err != nil {
+					t.Fatalf("encodeRequest(stream=%v): %v", stream, err)
+				}
+				var got map[string]any
+				if err := json.Unmarshal(body, &got); err != nil {
+					t.Fatalf("decode: %v", err)
+				}
+				if _, present := got["tools"]; present {
+					t.Errorf("stream=%v: `tools` present on an empty inventory: %s", stream, body)
+				}
+				if _, present := got["tool_choice"]; present {
+					t.Errorf("stream=%v: `tool_choice` present on an empty inventory: %s", stream, body)
+				}
+			}
+		})
+	}
+}

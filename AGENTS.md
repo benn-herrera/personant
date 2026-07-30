@@ -353,6 +353,26 @@ In progress:
   is **redacted** against the resolved provider keys on the context path
   only (§8.2.1; the terminal keeps the unredacted bytes, and the
   `permissions.redaction-fire` event records a count, never a match).
+- **§6.1 tool surface, waves 1–2** (front end 0.0.8). Wave 1 landed the
+  index-keyed merge of streamed tool-call deltas (`model.Chunk.ToolCalls`
+  is IDENTITY-ONLY — ID + function, never args; the merged calls come from
+  `Final()`). Wave 2 landed the **registry** (`internal/tools`:
+  name → spec + handler + tier + mutates, substrate-free) and the
+  **execution loop** in `internal/turn` — see SPEC §6.1.4. Still ZERO real
+  tools; the registry ships empty and an empty registry sends no `tools`
+  field. Load-bearing points: a tool-call-only response is byte-identical
+  to the §3.3 empty-response shape and is told apart by the identity-only
+  chunk view; the tool-round cap is a SEPARATE counter from the §5.5/§3.3
+  re-prompt caps; `Dispatch` never fails (unknown tool / handler error /
+  timeout all become results the model can recover from) except on a
+  cancelled turn; the §6.5 cap is applied once, to the delta, and the
+  bounded bytes build the tool message too; and the user is never left with
+  silence — a text-less turn emits one bracketed runtime notice.
+  **Tool execution is AT-LEAST-ONCE under #94 crash replay** (calls and
+  results are deliberately not journaled) — harmless for the read-only
+  §6.1.1 tools, NOT harmless for a mutating one, so
+  `tools.Registry.Register` mechanically REFUSES a tool declaring
+  `Mutates`. Revisit that decision before any mutating tool lands.
   Fixed in passing: the §6.5 byte cap bounded `tool.result` ONLY, so a
   `# cat bigfile` blew the current-turn budget unbounded —
   `boundToolResultDeltas` is now **`boundTaskResultDeltas`** and covers
@@ -443,6 +463,9 @@ internal/recall/measure/    application-side recall stack (Service,
 internal/curator/           closure-summary drafting (§3.5/§5.2):
                             model-backed summary + anchor selection
 internal/chat/              REPL, slash dispatch, bootstrap UX
+internal/tools/             §6.1 tool registry + dispatch (substrate-free;
+                            ships EMPTY — no real tools yet). The turn-side
+                            execution loop lives in internal/turn/toolloop.go
 internal/shell/             §4.4 shell escape: per-command `$SHELL -c`,
                             shell-cwd tracking via the fd-3 cwd epilogue,
                             bounded capture, §8.2.1 key redaction
