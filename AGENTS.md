@@ -470,7 +470,7 @@ make fmt              # gofmt -w the Go source roots (cmd/, internal/) — fix f
 make test             # CHECKPOINT GATE (substrate): fmt-check (drift fails the gate) + go vet + go test $(GOPKGS) (full suite, incl. multi-day sim rungs; Go's test cache is ON — unchanged packages return instantly)
 make test-nocache     # `make test` with the cache DEFEATED (--count=1) — the forced-clean full run: pre-push, suspected cache artifact, post-toolchain change
 make test-be          # alias of `make test` — the same full suite, named for symmetry with test-fe
-make test-fe          # CHECKPOINT GATE (front-end-only change): scoped ~15s suite; mechanically REFUSES if the diff leaves cmd/ + internal/chat/ + internal/version/
+make test-fe          # CHECKPOINT GATE (front-end-only change): scoped ~15s suite; mechanically REFUSES if the diff leaves cmd/ + internal/chat/ + internal/version/ + internal/shell/
 make test-run PKG=<pkg> RUN=<regexp>  # EDIT GATE: run only the touched test(s) — seconds, not minutes
 make test-race        # DIAGNOSTIC (not a gate): -race over $(RACEPKGS), the packages with real concurrency; ~70s
 make test-changed     # DIAGNOSTIC (not a gate): runs only the packages the working tree changed, plus their reverse-dependency closure. LIST=1 prints the selection without running it
@@ -503,12 +503,14 @@ gated either way.)
 Which command satisfies the checkpoint gate depends on what the change touches:
 
 - **Front-end-only change** (files confined to `cmd/`, `internal/chat/`,
-  `internal/version/`) → **`make test-fe`**. ~15s.
+  `internal/version/`, `internal/shell/`) → **`make test-fe`**. ~15s.
 - **Anything touching the substrate** — any other `internal/` package —
   → **`make test`** (a.k.a. **`make test-be`**), the full suite. **No exception.**
 
-The asymmetry is structural, not a budget compromise. `cmd/` and
-`internal/chat/` are a **dependency leaf**: nothing in the repo imports them,
+The asymmetry is structural, not a budget compromise. `cmd/`,
+`internal/chat/`, and `internal/shell/` are a **dependency leaf**: nothing
+outside that set imports them (`internal/shell` — the §4.4 `$`/`#` escape —
+only by `internal/chat`),
 so a change confined to them cannot regress the substrate, and the scoped
 target is sound *by the import graph* rather than by anyone's estimate of
 blast radius. The reverse does not hold — the front end **imports** the

@@ -208,7 +208,15 @@ test-be: test
 # version.FrontEnd (AGENTS.md front-end bump contract), so a "cmd/ + chat/ only"
 # guard would reject every legitimate front-end commit. internal/version is also
 # imported by substrate packages — see FE_TESTPKGS for how that is covered.
-FE_SCOPE_PREFIXES := cmd/ internal/chat/ internal/version/
+#
+# internal/shell/ qualifies by the SAME leaf rule that admits internal/chat:
+# nothing outside this set imports it (only internal/chat does), so a
+# shell-only change cannot regress the substrate. It is the §4.4 $/# escape
+# implementation — front-end by nature. Before adding any further prefix here,
+# verify the leaf property holds for it: `grep -rl personant/internal/<pkg>`
+# must show importers only from within this set. Widening this list is what
+# makes the guard untrustworthy.
+FE_SCOPE_PREFIXES := cmd/ internal/chat/ internal/version/ internal/shell/
 
 # FE_TESTPKGS is the package set `test-fe` runs: the front-end leaf itself plus
 # the CHEAP substrate importers of internal/version, as insurance against a
@@ -221,6 +229,7 @@ FE_SCOPE_PREFIXES := cmd/ internal/chat/ internal/version/
 # SECONDS on their own and are pure substrate. Do not "fix" this to /...; the
 # whole point of the target is that it costs seconds.
 FE_TESTPKGS := ./cmd/... ./internal/chat/... ./internal/version/... \
+               ./internal/shell/... \
                ./internal/eventlog/... ./internal/store/... ./internal/memops
 
 # fe-scope-check is the MECHANICAL guard that makes `test-fe` safe to trust: it
