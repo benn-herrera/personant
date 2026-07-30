@@ -668,7 +668,13 @@ here — it is fast unit-grade and runs in the default suite.
     gitops/policy refactor);
     `github.com/peterh/liner` (consumer: `internal/chat/` for the §4.3.1
     REPL line editing + persistent history; lightest well-trodden
-    readline-class dep, one transitive dep `mattn/go-runewidth`). Do not
+    readline-class dep, one transitive dep `mattn/go-runewidth`);
+    `codeberg.org/readeck/go-readability/v2` +
+    `github.com/JohannesKaufmann/html-to-markdown/v2` (consumer: `web.fetch`,
+    §6.1.1 — boilerplate-stripped article extraction then HTML→Markdown, so
+    the model reads the article rather than the nav bar. Both MIT, pure Go,
+    no cgo. `html-to-markdown` composes with `golang.org/x/net/html`, already
+    in the graph via go-git, so no second parser). Do not
     pull these in speculatively; do pull them in when the consumer arrives.
   - **`langchaingo/llms`** is *compatible* but excluded on dep-hygiene
     + scope grounds for v0.1 (30+ transitive deps; a thin OpenAI-compatible
@@ -676,6 +682,24 @@ here — it is fast unit-grade and runs in the default suite.
     v0.2+ if any of: (1) genuine multi-provider need with format-normalization
     burden; (2) `langchaingo/embeddings` covers the §3.4 embedding-recall path
     well; (3) a future capability costs >500 LoC of custom writing.
+  - **Vet adoption and maintenance before proposing a dependency — from the
+    registry, not the README.** Choosing on what a project says on the tin is
+    a rookie mistake. Record these in the proposal, measured, not asserted:
+    (1) **last release date** — a stale port is a bus-factor bet no benchmark
+    score offsets; (2) **`Imported by` count** on pkg.go.dev — the concrete
+    form of "well-trodden"; (3) **deprecation status** — pkg.go.dev shows it,
+    READMEs often do not; (4) **transitive dep count** — the metric that
+    already excluded `langchaingo/llms` above; (5) **license**.
+    **The specific trap: for a port, verify the PORT's activity, not its
+    upstream's.** A port's README will describe the upstream project's release
+    cadence, which says nothing about whether the port has shipped in two
+    years. This is not hypothetical — it is how `go-trafilatura` (better
+    extraction benchmarks, but 21 months without a release and 5 importers)
+    was nearly adopted over the maintained readability fork above, on a
+    ~1-point F1 difference. **Default to the well-trodden option** unless the
+    off-standard gain is genuinely substantial: weight the cost of being
+    wrong, not just the benchmark delta. A stale dependency's cost lands
+    later, on whoever has to replace it mid-feature.
 - **Application code talks to `MemoryOps`, not to the substrate directly.**
   `internal/turn`, `internal/chat`, `internal/recall/measure`, cmd/*, and
   the scenarios harness all depend on the port (`memops.MemoryOps`).
