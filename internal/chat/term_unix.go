@@ -25,6 +25,22 @@ const cbreakReadDeciseconds = 1
 // mode untouched.
 type termState struct{ mode unix.Termios }
 
+// captureTerm reads the terminal's current mode WITHOUT changing it.
+//
+// It exists for the §4.4 shell escape, which needs the mode personant
+// found at startup — before liner took the terminal — so a child process
+// runs under normal line discipline. liner.NewLiner applies ICANON/ECHO
+// off ONCE for the whole session and only restores at Close, so "the
+// current mode" during a session is liner's, not the user's; the session
+// captures the real original at startup and hands that to children.
+func captureTerm() (*termState, error) {
+	current, err := unix.IoctlGetTermios(unix.Stdin, ioctlGetTermios)
+	if err != nil {
+		return nil, fmt.Errorf("chat: read terminal mode: %w", err)
+	}
+	return &termState{mode: *current}, nil
+}
+
 // enterCbreak switches stdin to the mid-turn read mode and returns the
 // mode it replaced.
 //
@@ -54,19 +70,18 @@ type termState struct{ mode unix.Termios }
 // belt-and-braces for the case where something else restored a cooked
 // mode underneath us.
 func enterCbreak() (*termState, error) {
-	current, err := unix.IoctlGetTermios(unix.Stdin, ioctlGetTermios)
+	saved, err := captureTerm()
 	if err != nil {
-		return nil, fmt.Errorf("chat: read terminal mode: %w", err)
+		return nil, err
 	}
-	saved := *current
-	mode := *current
+	mode := saved.mode
 	mode.Lflag &^= unix.ICANON | unix.ECHO
 	mode.Cc[unix.VMIN] = 0
 	mode.Cc[unix.VTIME] = cbreakReadDeciseconds
 	if err := unix.IoctlSetTermios(unix.Stdin, ioctlSetTermios, &mode); err != nil {
 		return nil, fmt.Errorf("chat: set terminal mode: %w", err)
 	}
-	return &termState{mode: saved}, nil
+	return saved, nil
 }
 
 // restore puts back the saved mode byte-for-byte.

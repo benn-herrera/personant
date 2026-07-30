@@ -2,9 +2,9 @@
 // (and the bare `personant` invocation, which delegates here).
 //
 // The REPL bootstraps the active project (spec §4.5.7), prints a
-// banner, and loops on stdin: dispatches slash commands, stubs shell
-// escapes, and otherwise hands input to the turn package
-// (internal/turn) for the §3.0 chain.
+// banner, and loops on stdin: dispatches slash commands, runs §4.4 shell
+// escapes through internal/shell, and otherwise hands input to the turn
+// package (internal/turn) for the §3.0 chain.
 package chat
 
 import (
@@ -25,6 +25,7 @@ import (
 	"personant/internal/memops"
 	"personant/internal/model"
 	"personant/internal/recall/measure"
+	"personant/internal/shell"
 	"personant/internal/turn"
 	"personant/internal/version"
 	"personant/internal/workset"
@@ -205,6 +206,36 @@ func Run(opts Options) error {
 		return fmt.Errorf("chat: getwd: %w", err)
 	}
 
+	// §4.4 shell escape. The shell cwd starts at the process cwd and is
+	// tracked SEPARATELY from the active project root for the rest of the
+	// session (§4.5.1): `$ cd /etc` moves the shell and nothing else.
+	sh := shell.NewRunner(cwd)
+
+	// §6.4/§8.2.1 redaction over `#` captures. The key set is the loaded
+	// pool's ALREADY-RESOLVED keys — this reads no key files of its own and
+	// never emits what it matched, only a count.
+	keys := make([]string, 0, len(providers))
+	for _, p := range providers {
+		if p.APIKey != "" {
+			keys = append(keys, p.APIKey)
+		}
+	}
+	redactor := shell.NewRedactor(keys)
+
+	// The terminal mode as personant found it, captured BEFORE liner takes
+	// the terminal (its NewLiner applies ICANON/ECHO-off once for the whole
+	// session). This is what a `$`/`#` child gets handed so it runs under
+	// normal line discipline. A non-terminal session yields nil and the
+	// handoff becomes a no-op.
+	var origTerm *termState
+	if interactiveTTY(opts) {
+		if ts, terr := captureTerm(); terr == nil {
+			origTerm = ts
+		} else {
+			fmt.Fprintf(opts.Stderr, "warn: %v\n", terr)
+		}
+	}
+
 	// One buffered reader services the entire session: bootstrap prompts
 	// and the REPL loop both read from it. Splitting the reader between
 	// stages would risk dropping bytes already buffered by the first
@@ -337,6 +368,11 @@ func Run(opts Options) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	ctl := newControl(opts, lr, pr, cancel)
+	// Written once here, before the signal-handler goroutine below starts —
+	// the goroutine-creation edge is the happens-before that makes these
+	// safe to read from it. Neither is ever written again.
+	ctl.origTerm = origTerm
+	ctl.sh = sh
 	// Esc is the per-turn abort, so the terminal must be handed back before
 	// anything else prompts — disarm on every return path.
 	defer ctl.disarm()
@@ -361,7 +397,7 @@ func Run(opts Options) error {
 	// user a question retires any in-flight indicator first.
 	state.OnPhase = ctl.onPhase
 
-	if err := loop(runCtx, opts, ops, state, ctl, th); err != nil {
+	if err := loop(runCtx, opts, ops, state, ctl, th, sh, redactor); err != nil {
 		return err
 	}
 
@@ -550,12 +586,28 @@ func promptLine(lr lineReader, retracted string) (string, error) {
 // loop is the core REPL. Returns nil on a clean exit; non-nil on an
 // unrecoverable I/O error (e.g. the input reader failing, not a
 // per-turn LLM error which is logged and tolerated).
-func loop(ctx context.Context, opts Options, ops memops.MemoryOps, state *turn.State, ctl *control, th *thinking) error {
+func loop(ctx context.Context, opts Options, ops memops.MemoryOps, state *turn.State, ctl *control, th *thinking, sh *shell.Runner, red *shell.Redactor) error {
 	lr := ctl.lr
 	// retracted carries an Esc-aborted input to the next prompt, where it
 	// is re-offered as an editable default. It is deliberately a local:
 	// nothing outside this loop may resurrect a retracted prompt.
 	retracted := ""
+	// pending holds §4.4 `#` captures taken since the last turn, in order,
+	// to be delivered as that turn's pre-prompt deltas. It is deliberately
+	// NOT durable: a capture is a convenience for the next thing the user
+	// types, and a crash (or a session that ends before the next prompt)
+	// simply loses it. Inventing durability for it would mean journaling
+	// arbitrary command output on a path that has no recovery contract.
+	var pending []turn.Delta
+	defer func() {
+		if len(pending) == 0 {
+			return
+		}
+		// context.WithoutCancel: the common way to reach here with captures
+		// still buffered is a Ctrl-C exit, which has already cancelled ctx.
+		_ = ops.Log(context.WithoutCancel(ctx), memops.LogCategoryUser, "shell-capture-dropped",
+			fmt.Sprintf("count=%d", len(pending)))
+	}()
 	for {
 		if ctx.Err() != nil {
 			// A SIGINT during a turn cancelled the session — unwind cleanly.
@@ -598,10 +650,27 @@ func loop(ctx context.Context, opts Options, ops memops.MemoryOps, state *turn.S
 				return nil
 			}
 		case strings.HasPrefix(trimmed, "$") || strings.HasPrefix(trimmed, "#"):
-			fmt.Fprintln(opts.Stderr, "shell escape ($/#) is not yet implemented (Phase 2.f)")
+			delta, serr := runShellEscape(ctx, opts, ops, ctl, sh, red, trimmed)
+			if serr != nil {
+				fmt.Fprintf(opts.Stderr, "shell error: %v\n", serr)
+				continue
+			}
+			if delta != nil {
+				pending = appendCapture(pending, *delta)
+			}
 		default:
-			back, err := runOneTurn(ctx, opts, ops, ctl, state, th, input)
+			// The buffered captures are consumed by this turn. On an Esc
+			// retraction they come BACK: the turn was rolled back whole
+			// (§4.3.3), and the captures were taken before it, so dropping
+			// them would silently detach output the user is about to
+			// resubmit a prompt about.
+			consumed := pending
+			pending = nil
+			back, err := runOneTurn(ctx, opts, ops, ctl, state, th, consumed, input)
 			retracted = back
+			if back != "" {
+				pending = consumed
+			}
 			if err != nil {
 				// A bad turn does not kill the session — log the error and
 				// loop. The user can usually retry; the one exception is a
@@ -631,7 +700,11 @@ const abortNotice = "[cancelled — input retracted; nothing from this turn was 
 // runOneTurn drives one turn. It returns retracted != "" when the user
 // pressed Esc: the input the REPL should re-offer as an editable default.
 // The turn's own error is separate — an abort is not a failure.
-func runOneTurn(ctx context.Context, opts Options, ops memops.MemoryOps, ctl *control, state *turn.State, th *thinking, input string) (retracted string, err error) {
+//
+// pre carries the §4.4 `#` captures taken since the last prompt. They fire
+// through the §3.0 chain BEFORE the user.prompt delta and share its turn
+// number, so the prompt can cite symbols the capture staged.
+func runOneTurn(ctx context.Context, opts Options, ops memops.MemoryOps, ctl *control, state *turn.State, th *thinking, pre []turn.Delta, input string) (retracted string, err error) {
 	turnCtx, cancel := context.WithTimeout(ctx, turnTimeout)
 	defer cancel()
 	pr := ctl.pr
@@ -645,7 +718,7 @@ func runOneTurn(ctx context.Context, opts Options, ops memops.MemoryOps, ctl *co
 	// open reasoning run and retires the pre-token indicator, and the
 	// turn's closing phase restarts the indicator for the post-stream wait.
 	out := th
-	_, info, err := turn.RunWithInfo(turnCtx, state, nil, input, out)
+	_, info, err := turn.RunWithInfo(turnCtx, state, pre, input, out)
 	// Close a still-open reasoning run before anything else claims the
 	// terminal. The content path closes it implicitly, so this only fires
 	// when the turn produced reasoning and no body — a real shape (the
@@ -916,9 +989,12 @@ stubbed (later phase):
   /cd-project <path>           set active project root
   /model <id>                  switch active model
 
-shell escape:
-  $<cmd>                       fire-and-forget shell (not yet implemented)
-  #<cmd>                       shell with capture (not yet implemented)`
+shell escape (§4.4 — your shell, your privileges; interactive apps
+such as vim/less/top are not supported):
+  $<cmd>                       run it; output goes to your terminal only
+  #<cmd>                       run it; output also joins the next turn's context
+                               (cd persists between commands, separately
+                                from the active project root)`
 }
 
 func printProjectInfo(w io.Writer, p memops.ProjectMeta) {

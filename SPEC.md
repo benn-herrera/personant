@@ -526,7 +526,7 @@ Actions ending in `-error` (and `warning`) are forensic diagnostics, not measure
 | `dissect` | *(vocabulary; not yet emitted)* `fire`, `cluster-proposed`, `complete` |
 | `directive` | *(vocabulary; not yet emitted)* `accrual-update`, `parameter-read` (sampled) |
 | `index` | *(vocabulary; not yet emitted)* `rebuild-start`, `rebuild-complete`, `verify-fail` |
-| `user` | *(vocabulary; not yet emitted)* `shell` (with `$`/`#` discriminant), `slash` (see §4.2 / §4.4) |
+| `user` | `shell` (one line per §4.4 invocation: `kind=` the `$`/`#` discriminant, `exit=` the command's status (NEGATIVE when the shell was killed by a signal — the Ctrl-C path), `dir=` the shell cwd after the command, `cmd=` the invocation, quoted so a multi-word or newline-bearing command stays on one line. For `#` additionally `bytes=` the CAPTURED byte count, plus `truncated=yes produced=` when the in-memory capture bound clipped the output. **Never the captured content** — an event line is single-line free-form and a capture is large and multi-line; `cmd=` is passed through the §8.2.1 redactor first, because the never-in-a-log-line rule for key material does not care which end typed the bytes), `shell-capture-dropped` (a session ended with `#` captures still buffered for a prompt that never came — `count=`; the captures are discarded, §4.4.1); *(vocabulary; not yet emitted)* `slash` (see §4.2) |
 
 ---
 
@@ -1875,17 +1875,86 @@ extraction the same way turn content does — file paths, identifiers, and
 URLs in the output are extracted automatically and feed the symbol
 extractor.
 
-#### 4.4.2 Shell process
+**Delivery.** A `#` capture is buffered in the REPL and delivered as a
+**pre-prompt delta** (§3.0, source `user.shell-capture`) on the NEXT turn,
+firing before that turn's `user.prompt` delta and sharing its turn number.
+Multiple `#` commands taken before one prompt are all delivered, in order.
+The buffer is **not durable and deliberately so**: a capture is a
+convenience for the next thing the user types, so a session that ends with
+captures unconsumed simply drops them (logged as
+`user.shell-capture-dropped`), and a crash between capture and prompt loses
+them. Journaling arbitrary command output on a path with no recovery
+contract would be inventing durability nothing asked for. An Esc-retracted
+turn (§4.3.3) returns its captures to the buffer along with the input,
+since they were taken before the turn began.
 
-The runtime spawns one long-lived `$SHELL -i` (fall back to `/bin/sh -i`)
-subprocess at personant startup. `$`/`#` lines are written to its stdin;
-output is streamed to the user's terminal and (for `#`) tee'd into a
-capture buffer for context inclusion.
+Two bounds apply, at different layers and for different reasons: the
+in-memory capture buffer is bounded so a runaway command cannot balloon the
+process before anything else runs, and the §6.5 byte cap bounds what
+actually reaches the model's working window. Key material in a capture is
+redacted on the context path only — see §8.2.1.
 
-Shell state — cwd, environment, aliases, functions, history — persists
-naturally across the personant session because the same process services
-all `$`/`#` invocations. The shell process is destroyed cleanly on
-personant exit.
+#### 4.4.2 Shell process — per-command execution (AMENDED)
+
+**Original specification (superseded).** The runtime spawns one long-lived
+`$SHELL -i` (fall back to `/bin/sh -i`) subprocess at personant startup;
+`$`/`#` lines are written to its stdin, and shell state — cwd, environment,
+aliases, functions, history — persists naturally because the same process
+services every invocation.
+
+**As built (amendment, front end 0.0.7).** Each `$`/`#` line runs a **fresh
+`$SHELL -c <command>`** (falling back to `/bin/sh`). There is no long-lived
+shell subprocess.
+
+Rationale. The persistent shell exists mainly to preserve cwd/env/aliases
+across invocations, but §4.4.3 already excludes the interactive applications
+a persistent PTY would principally serve, and a long-lived shell on pipes
+needs a sentinel-marker protocol with a timeout and hang recovery for
+commands that consume the sentinel from stdin. Per-command execution gets
+exit codes for free, cannot hang the session, and — with the cwd epilogue
+below — satisfies §4.5.1's "shell cwd" concept, which is the load-bearing
+part. The REPL-facing seam is identical, so a persistent shell can replace
+the implementation later without touching the surface.
+
+**cwd persistence — epilogue, not `cd`-parsing.** A reporting epilogue is
+appended to every command and the runtime adopts the reported directory as
+the shell cwd for subsequent invocations (passed as the child's working
+directory). `cd` is deliberately **not** intercepted or parsed: naive
+parsing misses `cd /x && ls`, `pushd`, a cd inside a function or subshell,
+and any rc-driven change. The report goes out on a **dedicated file
+descriptor (fd 3)**, not delimited inside stdout — a separate channel cannot
+collide with command output at all, so the trailer never has to be stripped
+back out of the live terminal stream or the capture buffer, and the reported
+path is carried verbatim (a path containing a newline, a NUL, or a space is
+safe). The exit status is **not** in the trailer: the epilogue re-exits with
+the user command's status, so the process exit code is the single source of
+truth. A reported directory that no longer exists is refused, leaving the
+last known-good cwd in place.
+
+**Accepted loss.** Aliases, shell functions, and exported environment
+defined *mid-session* do not persist from one `$`/`#` line to the next. Only
+the cwd does. What rc files contribute was measured, not assumed (macOS
+zsh 5.9 / bash-3.2-as-`sh`):
+
+- `zsh -c` sources `/etc/zshenv` and `~/.zshenv` **only**. `~/.zshrc` is
+  **not** sourced — it is interactive-only — so aliases defined there are
+  unavailable. Aliases in `.zshenv` are available.
+- `sh -c` sources **nothing**: not `~/.profile`, and not `$ENV`/`$BASH_ENV`
+  (both are interactive-only for `sh`).
+
+**Ctrl-C.** The child runs in its **own process group**. Ctrl-C during a
+`$`/`#` command is forwarded to that group and does **not** end the session
+(which is what Ctrl-C means at the prompt, §4.3.3) — standard shell
+semantics: the running command dies and the prompt returns. The session's
+interrupt count is untouched, so a later Ctrl-C at the prompt still behaves
+as the first one.
+
+**Terminal state.** `liner` applies its terminal mode once for the whole
+session (`ICANON`/`ECHO` off from the first prompt until close, §4.3.1/§4.3.3),
+so a naively-spawned child would inherit a terminal with no echo and no line
+discipline. The mode personant found at startup is captured before `liner`
+takes the terminal and restored around every child; the pre-handoff mode is
+put back after the child exits.
 
 #### 4.4.3 Interactive applications
 
@@ -1895,6 +1964,13 @@ as wiring the user's terminal to that shell's PTY for arbitrary
 sub-applications, which requires terminal-mode handoff (raw mode +
 signal forwarding + state restoration). If the user wants `vim`, they
 suspend personant or open another terminal.
+
+The child's **stdin is the null device**. That is the enforcement, not a
+detail: an interactive program reads EOF and exits with its own complaint
+instead of wedging the REPL forever on input that will never arrive. A
+non-zero exit is announced on the terminal (`[exit N]`, or `[interrupted]`
+for a signalled command) so the failure is legible rather than looking like
+the command silently doing nothing.
 
 #### 4.4.4 Permission tiers do not apply to `$`/`#`
 
@@ -1914,7 +1990,7 @@ The runtime tracks two cwds:
 | Concept | Set by | Used for |
 |---|---|---|
 | Active project root | `/cd-project <path>` or `/project switch <name-or-id>` | path resolution for agent tools (`fs.read`/`fs.list`/`fs.grep`/`propose_*`); permission-tier classification (§6.2.6); project-scoped directives (§2.5, §2.6) |
-| Shell cwd | `$ cd <path>` within the interactive shell (§4.4) | path resolution for `$` and `#` shell commands only |
+| Shell cwd | any directory change a `$`/`#` command performs, learned from the §4.4.2 cwd epilogue rather than by parsing `cd` | path resolution for `$` and `#` shell commands only |
 
 They diverge freely. The user `$ cd`-ing the shell into `/etc` for grep
 convenience does not change the active project or grant the agent any new
@@ -2914,8 +2990,8 @@ additions (extends §2.8 table):
 
 | Category | Events |
 |---|---|
-| `tool` | `call`, `result`, `error`, `denied`, `truncated` |
-| `permissions` | `prompt`, `grant`, `deny`, `revoke`, `accrual-update` |
+| `tool` | *(vocabulary; not yet emitted)* `call`, `result`, `error`, `denied`, `truncated` |
+| `permissions` | `redaction-fire` (§8.2.1 user-initiated redaction fired on a `#` capture — `source=` the delta source, `occurrences=`, `bytes=` how much key material was removed. **Never what matched**: §8.2.1 forbids resolved key material in any log line, so the event records that it fired and how much, and there is deliberately no field that could carry the secret); *(vocabulary; not yet emitted)* `prompt`, `grant`, `deny`, `revoke`, `accrual-update`, `suspicious-access` |
 
 Symbol extraction over tool I/O is unchanged from §3.3: the deterministic pass
 runs over tool result content the same way it runs over turn content. File
@@ -2930,6 +3006,13 @@ current-turn budget. Default policy:
 - Hard byte cap on tool result inclusion in the model's working window
   (default 8 KB; configurable). Above the cap: head + tail with ellipsis;
   full body written to the engaged thread's file under a tool-result section.
+- The cap is a **task-class** bound, not a `tool.result`-only one: a §4.4 `#`
+  shell capture (`user.shell-capture`) is machine output the user merely
+  asked for, and §2.8 marks it subject to this cap for that reason. It does
+  **not** extend to the §3.9 `fs.read`/`fs.write`/`fs.commit` deltas, which
+  are task-class but whose content is the file body written to the
+  per-thread tracked-file store — truncating one would not bound a budget,
+  it would corrupt a file.
 - Agent can re-fetch with a narrower query or a byte range if it needs more.
 - Pathological cases (a 50 MB file the agent asked for) reject at the tool
   layer with a message asking for a narrower fetch.
@@ -2979,6 +3062,7 @@ One TOML table per provider. The provider name is the lookup key used by config 
 
 - **Agent-initiated reads** (`fs.read`, `fs.grep`, `fs.list` listing the file's parent dir) targeting a key file (after symlink resolution): the runtime **refuses outright** — the tool returns a deny-error to the model like `permission denied: API-key file is secret-bearing and cannot be read by the agent`. Logged as `permissions.suspicious-access`.
 - **User-initiated captures** (`#`-prefixed shell commands per §4.4 whose output contains key material): the runtime **redacts before reaching context** — captured output is replaced with `[redacted: API-key content]`. The user's terminal still sees the unredacted output; only the path-into-LLM-context is filtered. Logged as `permissions.redaction-fire`.
+  - *Resolved reading (front end 0.0.7):* the replacement is **per occurrence**, not whole-buffer — each run of key material inside the capture is substituted with the placeholder, and the surrounding output survives. The key bytes never reach context either way, so per-occurrence substitution is no less protective, and it keeps the rest of a `# env` or `# grep -r` capture useful. The key set is the pool's already-resolved keys; the redactor reads no key files of its own. Degenerately short "keys" (under 8 bytes) are not scanned for: such a value protects nothing, and a redactor that shreds every capture is a worse failure than one that misses a two-byte secret. The same redactor is applied to the *invocation* before it is logged, so `$ export API_KEY=…` cannot leak through the `user.shell` event line.
 
 The split reflects intent: an agent reaching for secrets is suspicious and warrants refusal; a user `#`-grepping their own home dir for context inclusion is reasonable but accidental and just gets quietly cleaned up.
 

@@ -63,32 +63,46 @@ func TestCheckUserInputReject(t *testing.T) {
 	}
 }
 
-// boundToolResultDeltas truncates oversized tool.result content with a
-// marker, leaves within-budget content and non-tool-result deltas
+// boundTaskResultDeltas truncates oversized task-class result content
+// with a marker, leaves within-budget content and non-task-result deltas
 // untouched, and does not mutate the input slice.
-func TestBoundToolResultDeltas(t *testing.T) {
-	b := budgetWithLiveTurn(1000) // tool-result share = 150
+//
+// The user.shell-capture arm is the §4.4 regression case: the bound
+// originally covered tool.result ONLY, so a `# cat bigfile` blew the
+// current-turn budget unbounded despite §2.8 marking user.shell-capture
+// "subject to §6.5 byte cap". The fs.write arm is its counterweight — a
+// task-class source that must NOT be truncated, because that Content is
+// the file body applyFileEdit stores, not model-window filler.
+func TestBoundTaskResultDeltas(t *testing.T) {
+	b := budgetWithLiveTurn(1000) // task-result share = 150
 	_, _, share := liveTurnShares(b)
 
 	big := strings.Repeat("x", share*4)
 	in := []Delta{
 		{Source: memops.SourceToolResult, Content: big},
-		{Source: memops.SourceUserShellCapture, Content: big}, // not tool.result → untouched
+		{Source: memops.SourceUserShellCapture, Content: big},
 		{Source: memops.SourceToolResult, Content: "small"},
+		{Source: memops.SourceFSWrite, Content: big}, // file body → never truncated
+		{Source: memops.SourceUserPrompt, Content: big},
 	}
-	out := boundToolResultDeltas(in, b)
+	out := boundTaskResultDeltas(in, b)
 
-	if len(out[0].Content) > share {
-		t.Errorf("oversized tool.result not bounded: %d > %d", len(out[0].Content), share)
-	}
-	if !strings.Contains(out[0].Content, "truncated") {
-		t.Errorf("truncation not marked: %q", out[0].Content)
-	}
-	if out[1].Content != big {
-		t.Errorf("non-tool-result delta must be untouched")
+	for _, i := range []int{0, 1} {
+		if len(out[i].Content) > share {
+			t.Errorf("delta %d (%s) not bounded: %d > %d", i, out[i].Source, len(out[i].Content), share)
+		}
+		if !strings.Contains(out[i].Content, "truncated") {
+			t.Errorf("delta %d (%s) truncation not marked: %q", i, out[i].Source, out[i].Content)
+		}
 	}
 	if out[2].Content != "small" {
 		t.Errorf("within-budget tool.result must be untouched")
+	}
+	if out[3].Content != big {
+		t.Errorf("fs.write content must be untouched — it is the stored file body")
+	}
+	if out[4].Content != big {
+		t.Errorf("decision-class delta must be untouched")
 	}
 	// Input slice unmutated.
 	if len(in[0].Content) != len(big) {

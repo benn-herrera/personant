@@ -335,6 +335,29 @@ In progress:
   shape the next turn. The text comes back only as an editable default at
   the next prompt; the durable trace is one `system.turn-aborted` event
   line, never the text.
+- **§4.4 shell escape** (`internal/shell`, front end 0.0.7): `$`
+  fire-and-forget and `#` capture-into-next-turn, built as **per-command
+  `$SHELL -c`** rather than SPEC §4.4.2's long-lived `$SHELL -i` (the
+  amendment is recorded in §4.4.2 — the persistent shell mainly buys state
+  persistence that §4.4.3 already makes moot, while per-command execution
+  gets exit codes for free and cannot hang the session). The §4.5.1 shell
+  cwd is tracked by a **cwd-reporting epilogue on a dedicated fd**, never by
+  parsing `cd`, and stays distinct from the active project root. The child
+  gets its **own process group** so Ctrl-C kills the command rather than the
+  session; the **startup terminal mode** is restored around the child
+  (liner holds `ICANON`/`ECHO` off for the whole session, so a naively
+  spawned child inherits a terminal with no echo); **stdin is the null
+  device** so a §4.4.3 interactive app fails fast instead of wedging, and a
+  non-zero exit is announced. A `#` capture rides the existing `preEvents`
+  slot into the next turn — buffered, in order, non-durable by design — and
+  is **redacted** against the resolved provider keys on the context path
+  only (§8.2.1; the terminal keeps the unredacted bytes, and the
+  `permissions.redaction-fire` event records a count, never a match).
+  Fixed in passing: the §6.5 byte cap bounded `tool.result` ONLY, so a
+  `# cat bigfile` blew the current-turn budget unbounded —
+  `boundToolResultDeltas` is now **`boundTaskResultDeltas`** and covers
+  `user.shell-capture` too, deliberately NOT the task-class `fs.*` deltas
+  whose content is the stored file body.
 
 Implemented and wired into the turn loop (pending full acceptance-validation):
 - Thread closure / retirement (§3.5): curator-drafted summary + ack flow;
@@ -367,8 +390,7 @@ Queued:
   single-digit seconds, trading away the ~20-min/4-month iteration
   budget, so the goal is max coverage/rigor per unit per-turn overhead.
 - v0.2: deep cold archival via git; working-set content dedup;
-  shell escape `$`/`#` with long-lived subprocess; transient-data
-  event-log compaction + class-aware tool-output budget.
+  transient-data event-log compaction + class-aware tool-output budget.
 - v1.0: Python computational workflow (math/physics simulation).
 
 Current top-level shape:
@@ -421,6 +443,9 @@ internal/recall/measure/    application-side recall stack (Service,
 internal/curator/           closure-summary drafting (§3.5/§5.2):
                             model-backed summary + anchor selection
 internal/chat/              REPL, slash dispatch, bootstrap UX
+internal/shell/             §4.4 shell escape: per-command `$SHELL -c`,
+                            shell-cwd tracking via the fd-3 cwd epilogue,
+                            bounded capture, §8.2.1 key redaction
 internal/workset/           layered context composition (E/A1/A2/B/C)
 internal/prompt/            template + topic-tag parser + stream filter
 internal/model/             OpenAI-compatible HTTP client + scripted/

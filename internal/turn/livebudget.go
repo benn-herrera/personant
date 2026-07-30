@@ -23,9 +23,12 @@ import (
 //   - userInput is USER-AUTHORED → an oversized paste is REJECTED with a
 //     user-facing message, never silently truncated (the user decides
 //     what to keep).
-//   - the history tail and tool.result deltas are NON-user-authored (the
+//   - the history tail and task-result deltas are NON-user-authored (the
 //     user cannot split them) → bounded by truncation/recency, not
-//     rejected.
+//     rejected. "Task-result" is the class, not just tool.result: a §4.4
+//     `#` shell capture is machine output the user merely asked for, and
+//     §2.8 marks user.shell-capture "subject to §6.5 byte cap" for exactly
+//     that reason.
 
 // ErrInputExceedsBudget is returned by RunWithInfo when a single
 // user-authored userInput exceeds the live-turn reserve. Its message is
@@ -54,13 +57,13 @@ func IsInputExceedsBudget(err error) bool {
 // live-turn components are reserved against each other (none can starve
 // the others), mirroring how the memory layers split the system-prompt
 // budget. userInput gets the largest share (it carries the turn's
-// intent); the history tail and tool-result deltas get the remainder.
+// intent); the history tail and task-result deltas get the remainder.
 // These are calibration starting points (§9.4), not load-bearing
 // constants — only their sum (= LiveTurnReserve) is the I2 guarantee.
 const (
 	liveTurnPctUserInput   = 50
 	liveTurnPctHistoryTail = 35
-	liveTurnPctToolResult  = 15
+	liveTurnPctTaskResult  = 15
 )
 
 // liveTurnShares carves Budget.LiveTurnReserve into the three component
@@ -68,15 +71,15 @@ const (
 // caller treats a zero userInput share as "no bound configured" and
 // neither rejects nor truncates (fail-open, matching the pre-#127
 // behavior of an unset budget).
-func liveTurnShares(b memops.Budget) (userInput, historyTail, toolResult int) {
+func liveTurnShares(b memops.Budget) (userInput, historyTail, taskResult int) {
 	r := b.LiveTurnReserve
 	if r <= 0 {
 		return 0, 0, 0
 	}
 	userInput = r * liveTurnPctUserInput / 100
 	historyTail = r * liveTurnPctHistoryTail / 100
-	toolResult = r * liveTurnPctToolResult / 100
-	return userInput, historyTail, toolResult
+	taskResult = r * liveTurnPctTaskResult / 100
+	return userInput, historyTail, taskResult
 }
 
 // checkUserInput enforces the §3.4/Q3 reject policy on user-authored
@@ -95,13 +98,35 @@ func checkUserInput(userInput string, b memops.Budget) error {
 	return nil
 }
 
-// boundToolResultDeltas truncates-with-marker the content of current-turn
-// tool.result deltas so a single verbose tool result (design §1 m1)
-// cannot balloon the request via the chain. It is bounded truncation, not
-// rejection — the content is non-user-authored (the user cannot split a
-// tool's output), so honesty-with-marker beats interruption. Returns a
-// new slice; the input is not mutated. A zero share fails open.
-func boundToolResultDeltas(deltas []Delta, b memops.Budget) []Delta {
+// isBudgetedTaskDelta reports whether a delta source carries MACHINE
+// OUTPUT bound for the model's working window, and is therefore subject
+// to the §6.5 byte cap.
+//
+// It is an explicit two-source list rather than a retention-class test,
+// and that distinction is load-bearing. provisionalRetention also classes
+// the §3.9 fs.read/fs.write/fs.commit deltas as task, but their Content is
+// the FILE BODY that applyFileEdit writes to the per-thread tracked-file
+// store — truncating one would not bound a budget, it would corrupt a
+// file. Only sources whose content exists solely to be shown to the model
+// belong here.
+func isBudgetedTaskDelta(source string) bool {
+	switch source {
+	case memops.SourceToolResult, memops.SourceUserShellCapture:
+		return true
+	default:
+		return false
+	}
+}
+
+// boundTaskResultDeltas truncates-with-marker the content of current-turn
+// task-class result deltas — tool.result and §4.4 user.shell-capture — so
+// a single verbose tool result or a `# cat bigfile` (design §1 m1) cannot
+// balloon the request via the chain. It is bounded truncation, not
+// rejection: the content is non-user-authored (the user cannot split a
+// tool's or a command's output), so honesty-with-marker beats
+// interruption. Returns a new slice; the input is not mutated. A zero
+// share fails open.
+func boundTaskResultDeltas(deltas []Delta, b memops.Budget) []Delta {
 	_, _, share := liveTurnShares(b)
 	if share <= 0 || len(deltas) == 0 {
 		return deltas
@@ -109,7 +134,7 @@ func boundToolResultDeltas(deltas []Delta, b memops.Budget) []Delta {
 	out := make([]Delta, len(deltas))
 	copy(out, deltas)
 	for i := range out {
-		if out[i].Source != memops.SourceToolResult {
+		if !isBudgetedTaskDelta(out[i].Source) {
 			continue
 		}
 		if len(out[i].Content) > share {
@@ -166,7 +191,7 @@ func truncateWithMarker(s string, budget int) string {
 	if len(s) <= budget {
 		return s
 	}
-	marker := fmt.Sprintf("\n... [tool result truncated; budget=%d bytes] ...\n", budget)
+	marker := fmt.Sprintf("\n... [output truncated; budget=%d bytes] ...\n", budget)
 	if len(marker) >= budget {
 		return truncateRunes(marker, budget)
 	}

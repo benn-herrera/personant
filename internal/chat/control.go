@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"personant/internal/memops"
+	"personant/internal/shell"
 	"personant/internal/turn"
 )
 
@@ -41,6 +42,20 @@ type control struct {
 	// interactive TTY whose mode we can actually drive. Written only from
 	// the REPL goroutine (in arm), read only there.
 	escAvailable bool
+
+	// origTerm is the terminal mode the session found at startup, BEFORE
+	// liner took the terminal. nil on a non-terminal session, or where the
+	// platform has no termios path. See handoffTerminal.
+	//
+	// Assigned once by Run, before the signal-handler goroutine starts, and
+	// never written again.
+	origTerm *termState
+
+	// sh is the §4.4 shell runner, consulted by onSignal so a Ctrl-C during
+	// a `$`/`#` command kills the command instead of the session. nil until
+	// Run wires it, on the same write-once-before-the-goroutine basis as
+	// origTerm.
+	sh *shell.Runner
 
 	interrupts atomic.Int32
 	inTurn     atomic.Bool
@@ -258,6 +273,57 @@ func (c *control) exit(announce bool) {
 	}
 }
 
-// onSignal handles one delivered SIGINT. The wording is honest by
-// construction: it announces only when a turn was actually in flight.
-func (c *control) onSignal() { c.exit(c.inTurn.Load()) }
+// handoffTerminal hands the terminal to a child process and returns the
+// function that takes it back. Both halves are no-ops on a session that
+// does not drive a terminal, so the caller never branches.
+//
+// This is necessary, not defensive. liner.NewLiner applies its mode ONCE
+// for the whole session — ICANON and ECHO are off from the first prompt
+// until Close, not just while Prompt is blocked — so a child spawned
+// mid-session inherits a terminal with no echo and no line discipline.
+// Anything that reads input, or merely expects typed characters to
+// appear, misbehaves. Restoring the mode personant found at STARTUP is
+// what gives the child a normal terminal.
+//
+// The mode in force at handoff time is captured and put back afterwards,
+// rather than assuming it was liner's: that way an Esc-window cbreak mode
+// left in place by some future caller is also restored faithfully.
+func (c *control) handoffTerminal() func() {
+	if c.origTerm == nil {
+		return func() {}
+	}
+	current, err := captureTerm()
+	if err != nil {
+		fmt.Fprintf(c.stderr, "warn: %v\n", err)
+		return func() {}
+	}
+	if err := c.origTerm.restore(); err != nil {
+		fmt.Fprintf(c.stderr, "warn: %v\n", err)
+		return func() {}
+	}
+	return func() {
+		if err := current.restore(); err != nil {
+			fmt.Fprintf(c.stderr, "warn: %v\n", err)
+		}
+	}
+}
+
+// onSignal handles one delivered SIGINT.
+//
+// A `$`/`#` child running is the one case where Ctrl-C does NOT mean "end
+// the session": standard shell semantics are that it kills the running
+// command and returns you to the prompt, and a shell escape that quit
+// personant on Ctrl-C would be a trap. Runner.Interrupt forwards the
+// signal to the child's process group and reports that it consumed the
+// interrupt; the session's interrupt COUNT is deliberately left untouched,
+// so a later Ctrl-C at the prompt is still the first one and behaves
+// exactly as it would have.
+//
+// Otherwise the wording is honest by construction: it announces only when
+// a turn was actually in flight.
+func (c *control) onSignal() {
+	if c.sh != nil && c.sh.Interrupt() {
+		return
+	}
+	c.exit(c.inTurn.Load())
+}

@@ -307,6 +307,11 @@ test-run: build recall-madlibs
 #                            emit mutex, written from every goroutine above.
 #   internal/scenarios       the memtel heap-watchdog goroutine. EXACT, not
 #                            /... — see the sim exclusion below.
+#   internal/shell           the §4.4 trailer-reader goroutine in non-test
+#                            code, and Runner.pgid written by Run on the REPL
+#                            goroutine while Interrupt reads it from the
+#                            signal handler. Its own tests run the child in
+#                            one goroutine and signal it from another.
 #
 # EXCLUSIONS, so nobody "fixes" this later by broadening it to $(GOPKGS):
 #
@@ -335,7 +340,7 @@ test-run: build recall-madlibs
 # fails the directory walk for a non-owner (see the GOPKGS comment).
 RACEPKGS := ./internal/chat/... ./internal/recall/measure/... ./internal/model/... \
             ./internal/eventlog/... ./internal/metrics/... ./internal/log/... \
-            ./internal/scenarios
+            ./internal/shell/... ./internal/scenarios
 
 # test-race is a DIAGNOSTIC, not a third gate. Run it deliberately when you
 # touch concurrent code — a new goroutine, a shared field, a lock. It is

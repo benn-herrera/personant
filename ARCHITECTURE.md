@@ -560,7 +560,9 @@ The ack prompt is the accrual UI: single-keystroke `[y]/[d]/[p]/[n]/[e]` choices
 
 The active-project boundary is an additional axis: ops on paths *outside* the active project root bump tier (§6.2.6).
 
-`providers.toml` is **secret-bearing** with a hybrid redaction policy: agent-initiated reads refuse outright; user-initiated `#` captures redact before reaching context.
+`providers.toml` is **secret-bearing** with a hybrid redaction policy: agent-initiated reads refuse outright; user-initiated `#` captures redact before reaching context. The capture half is implemented (front end 0.0.7): the resolved-key set from the loaded pool is substituted out of the capture text on the path into context — per occurrence, so the rest of the output survives — while the user's terminal keeps the unredacted bytes it already streamed. The event says only that redaction fired and how many bytes went; §8.2.1's "key material never appears in any log line" makes recording the match itself a bug, not a diagnostic.
+
+`$`/`#` are the counter-example that makes the tier model coherent: they take the user's line straight to `$SHELL -c` as a shell string, with metacharacters intact and no tier check, because §4.4.4 makes them user-initiated at the user's own privilege. The future model-facing `fs.*` tools are the inverse — LLM-supplied arguments, argv exec, no shell interpolation. Same repo, opposite rule, and the difference is *who authored the string*.
 
 ---
 
@@ -693,7 +695,7 @@ These are not "v0.2 / v0.3" — they are role-bounded.
 - Submind via clone — isolated exploration and frontier-model collaboration (future; see Mechanisms)
 - Concurrent sessions — one user multitasking across multiple live conversations (future; see Mechanisms)
 - REPL line editing + history (v0.1 polish)
-- Shell escape (`$`/`#`) implementation with long-lived `$SHELL -i` subprocess (v0.1 polish; PTY mode-handoff for nested apps held until empirical pressure)
+- ~~Shell escape (`$`/`#`) implementation~~ **landed** (front end 0.0.7, `internal/shell`) — as **per-command `$SHELL -c`**, not the long-lived `$SHELL -i` subprocess SPEC §4.4.2 originally specified. The persistent shell mainly buys cwd/env/alias persistence, but §4.4.3 already excludes the interactive apps a persistent PTY would serve, and a long-lived shell on pipes needs a sentinel protocol with timeout and hang recovery. Per-command execution gets exit codes for free, cannot hang the session, and recovers the load-bearing part — the §4.5.1 shell cwd — via a **cwd-reporting epilogue on a dedicated fd**, never by parsing `cd`. Accepted loss: mid-session aliases/functions/exports do not persist. PTY mode-handoff for nested apps remains held until empirical pressure.
 
 ---
 

@@ -14,6 +14,11 @@ type termState struct{}
 
 func enterCbreak() (*termState, error) { return nil, errCbreakUnsupported }
 
+// captureTerm has no implementation here for the same reason enterCbreak
+// does not: the §4.4 shell escape simply skips the terminal handoff, and
+// the child inherits whatever mode the session is in.
+func captureTerm() (*termState, error) { return nil, errCbreakUnsupported }
+
 func (s *termState) restore() error { return nil }
 
 func readStdin([]byte) (int, error) { return 0, errCbreakUnsupported }

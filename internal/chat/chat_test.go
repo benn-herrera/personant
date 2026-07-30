@@ -170,12 +170,16 @@ func TestRunUnknownSlashContinues(t *testing.T) {
 	}
 }
 
-func TestRunShellEscapeStubbed(t *testing.T) {
+// The §4.4 escapes run for real through the whole REPL, with no turn
+// driven — the model client is never consulted. Deeper behavior lives in
+// shellescape_test.go; this pins the dispatch path itself.
+func TestRunShellEscapeDispatch(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
 	paths := scaffoldHome(t)
 	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
-	mock := model.NewScriptedMock(nil, nil)
+	mock := model.NewScriptedMock(nil, nil) // no turns issued
 	var stdout, stderr bytes.Buffer
-	in := strings.NewReader("$ ls\n# pwd\n/quit\n")
+	in := strings.NewReader("$echo fire-and-forget\n#echo captured\n/quit\n")
 
 	if err := Run(Options{
 		Ops:             newOps(paths),
@@ -187,8 +191,10 @@ func TestRunShellEscapeStubbed(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if c := strings.Count(stderr.String(), "shell escape ($/#) is not yet implemented"); c != 2 {
-		t.Errorf("expected 2 shell-escape stub messages; got %d in %q", c, stderr.String())
+	for _, want := range []string{"fire-and-forget", "captured"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("missing shell output %q in %q", want, stdout.String())
+		}
 	}
 }
 

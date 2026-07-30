@@ -772,11 +772,12 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	// they share the same TurnNumber as the user.prompt that follows and
 	// can stage task-class symbols for that prompt to cite.
 	//
-	// #127: bound current-turn tool.result content (truncate-with-marker)
-	// before it enters the chain so a single verbose tool result (design
-	// m1) cannot balloon the request via staging/memory. Non-user-authored,
-	// so truncated rather than rejected (design §3.4).
-	preEvents = boundToolResultDeltas(preEvents, state.Budget)
+	// #127: bound current-turn task-class result content
+	// (truncate-with-marker) before it enters the chain so a single verbose
+	// tool result or a §4.4 `# cat bigfile` capture (design m1) cannot
+	// balloon the request via staging/memory. Non-user-authored, so
+	// truncated rather than rejected (design §3.4).
+	preEvents = boundTaskResultDeltas(preEvents, state.Budget)
 	for _, pre := range preEvents {
 		if err := onContextDelta(ctx, state, pre); err != nil {
 			return "", TurnInfo{}, err
