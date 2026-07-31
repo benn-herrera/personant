@@ -46,9 +46,19 @@ func TestLoadProvidersFixture(t *testing.T) {
 		t.Fatalf("LoadProviders: %v", err)
 	}
 
-	for _, name := range []string{"local", "dummyrouter", "superinf", "dummy-emb-provider"} {
+	for _, name := range []string{"local", "dummy-router", "dummy-inference", "dummy-embedding", "dummy-search"} {
 		if _, ok := got.Get(name); !ok {
 			t.Errorf("missing provider %q (got %v)", name, keysOf(got))
+		}
+	}
+
+	// Kind is what keeps a search backend out of inference selection.
+	if search, ok := got.Get("dummy-search"); ok {
+		if search.Kind() != memops.ProviderTypeSearch {
+			t.Errorf("dummy-search Kind() = %q, want %q", search.Kind(), memops.ProviderTypeSearch)
+		}
+		if n := len(got.OfKind(memops.ProviderTypeInference)); n != 4 {
+			t.Errorf("inference subset has %d entries, want 4 (got %v)", n, keysOf(got.OfKind(memops.ProviderTypeInference)))
 		}
 	}
 
@@ -81,7 +91,7 @@ func TestLoadProvidersFixture(t *testing.T) {
 	// The remaining providers use apiKeyFile — the loader must resolve
 	// the key from the referenced file (path relative to the
 	// providers.toml directory).
-	for _, name := range []string{"dummyrouter", "superinf", "dummy-emb-provider"} {
+	for _, name := range []string{"dummy-router", "dummy-inference", "dummy-embedding", "dummy-search"} {
 		p, ok := got.Get(name)
 		if !ok {
 			continue
@@ -91,9 +101,6 @@ func TestLoadProvidersFixture(t *testing.T) {
 		}
 		if p.BaseURL == "" {
 			t.Errorf("%s: BaseURL empty", name)
-		}
-		if p.DefaultModel == "" {
-			t.Errorf("%s: DefaultModel empty", name)
 		}
 	}
 }
@@ -189,7 +196,8 @@ func TestLoadProvidersAPIKeyAbsentFromParseError(t *testing.T) {
 	body := `[clean]
 baseUrl = "https://api.example.com/v1"
 apiKeyUnsafe = "` + sentinel + `"
-defaultModel = "m1"
+type = "inference"
+api = "openai"
 
 [broken
 this is not valid toml
@@ -213,4 +221,47 @@ func keysOf(p memops.Providers) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestLoadProvidersRejectsUndeclaredKind: `type` and `api` are REQUIRED
+// and must agree. An entry that declares neither, or declares a pairing
+// the runtime cannot route, is dropped as a NAMED fault — never silently
+// absent from the selection lists, which is how a "why is my provider
+// gone?" afternoon starts. The healthy entry beside it still loads.
+func TestLoadProvidersRejectsUndeclaredKind(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		entry    string
+		wantHint string
+	}{
+		{"no type or api", "baseUrl = \"http://x/v1\"\napiKeyUnsafe = \"k\"\n", "no type declared"},
+		{"unknown type", "baseUrl = \"http://x/v1\"\napiKeyUnsafe = \"k\"\ntype = \"telepathy\"\napi = \"openai\"\n", "unknown type"},
+		{"no api", "baseUrl = \"http://x/v1\"\napiKeyUnsafe = \"k\"\ntype = \"search\"\n", "no api declared"},
+		{"api does not match type", "baseUrl = \"http://x/v1\"\napiKeyUnsafe = \"k\"\ntype = \"inference\"\napi = \"exa\"\n", "not valid for a inference provider"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "providers.toml")
+			body := "[healthy]\nbaseUrl = \"http://ok/v1\"\napiKeyUnsafe = \"k\"\ntype = \"inference\"\napi = \"openai\"\n\n[suspect]\n" + tc.entry
+			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+				t.Fatalf("write providers.toml: %v", err)
+			}
+
+			got, faults, err := LoadProviders(path)
+			if err != nil {
+				t.Fatalf("an invalid ENTRY must not fail the whole load: %v", err)
+			}
+			if _, ok := got.Get("suspect"); ok {
+				t.Error("an unroutable provider was admitted to the pool")
+			}
+			if _, ok := got.Get("healthy"); !ok {
+				t.Error("one bad entry took the rest of the pool with it")
+			}
+			if len(faults) != 1 || faults[0].Name != "suspect" {
+				t.Fatalf("want exactly one fault naming suspect, got %+v", faults)
+			}
+			if !strings.Contains(faults[0].Reason, tc.wantHint) {
+				t.Errorf("fault reason %q does not contain %q", faults[0].Reason, tc.wantHint)
+			}
+		})
+	}
 }

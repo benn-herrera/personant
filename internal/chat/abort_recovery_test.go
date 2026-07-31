@@ -75,7 +75,7 @@ func TestEscAbortLeavesNoRecoveryScope(t *testing.T) {
 	}
 
 	client := &blockingClient{entered: make(chan struct{})}
-	state, err := turn.LoadSession(ctx, ops, project, memops.Provider{DefaultModel: "test-model"}, client)
+	state, err := turn.LoadSession(ctx, ops, project, memops.Provider{Name: "test"}, client)
 	if err != nil {
 		t.Fatalf("load session: %v", err)
 	}

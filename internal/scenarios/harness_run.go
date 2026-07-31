@@ -697,9 +697,9 @@ func restartSession(t *testing.T, h *Harness, idx int, label string) {
 
 	// Rebuild against the client the run is driving: the live chat client under
 	// inference-in-loop (#98), else the scripted mock. A relaunched real runtime
-	// would re-resolve its live client too, so the live model name is re-applied
-	// below — without it LoadSession's State would revert to the sentinel
-	// harness DefaultModel.
+	// would re-resolve its live client too, so the model name is re-applied
+	// below — a provider names no models, so LoadSession's State carries
+	// none and the harness must restore the one it was running under.
 	client := model.Client(h.Mock)
 	if h.liveClient != nil {
 		client = h.liveClient
@@ -708,6 +708,7 @@ func restartSession(t *testing.T, h *Harness, idx int, label string) {
 	if err != nil {
 		t.Fatalf("scenario step %d (%s): simulated relaunch: turn.LoadSession: %v", idx+1, label, err)
 	}
+	rebuilt.Model = harnessMockModel
 	if h.liveClient != nil {
 		rebuilt.Model = h.liveModel
 	}

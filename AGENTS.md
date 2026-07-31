@@ -353,14 +353,13 @@ In progress:
   is **redacted** against the resolved provider keys on the context path
   only (§8.2.1; the terminal keeps the unredacted bytes, and the
   `permissions.redaction-fire` event records a count, never a match).
-- **§6.1 tool surface, waves 1–2** (front end 0.0.8). Wave 1 landed the
+- **§6.1 tool surface, waves 1–3** (front end 0.0.9). Wave 1 landed the
   index-keyed merge of streamed tool-call deltas (`model.Chunk.ToolCalls`
   is IDENTITY-ONLY — ID + function, never args; the merged calls come from
   `Final()`). Wave 2 landed the **registry** (`internal/tools`:
   name → spec + handler + tier + mutates, substrate-free) and the
-  **execution loop** in `internal/turn` — see SPEC §6.1.4. Still ZERO real
-  tools; the registry ships empty and an empty registry sends no `tools`
-  field. Load-bearing points: a tool-call-only response is byte-identical
+  **execution loop** in `internal/turn` — see SPEC §6.1.4. An empty
+  registry sends no `tools` field. Load-bearing points: a tool-call-only response is byte-identical
   to the §3.3 empty-response shape and is told apart by the identity-only
   chunk view; the tool-round cap is a SEPARATE counter from the §5.5/§3.3
   re-prompt caps; `Dispatch` never fails (unknown tool / handler error /
@@ -378,6 +377,53 @@ In progress:
   `boundToolResultDeltas` is now **`boundTaskResultDeltas`** and covers
   `user.shell-capture` too, deliberately NOT the task-class `fs.*` deltas
   whose content is the stored file body.
+  **Wave 3 landed the two real tools** (`internal/tools/web`), the first
+  entries the registry ever ships with:
+  - **`web.fetch`** — plain GET → readability extraction → Markdown, with
+    NO headless browser. Scheme allowlist is `http`/`https` only, on the
+    initial URL and every redirect hop: it blocks `file://`, `data:`,
+    `ftp://` and everything else, and it deliberately does NOT block
+    loopback or any IP range (user ruling — a deliberately exposed local
+    server is fair game; do not "harden" this into SSRF filtering).
+    Timeout + redirect cap + a size cap enforced WHILE READING. HTML goes
+    through the pipeline, Markdown/text/JSON pass through, binary is
+    REFUSED rather than parsed as garbage. **Empty-shell detection** is
+    the load-bearing behaviour: a client-rendered SPA returns an explicit
+    "requires JavaScript rendering" signal instead of a blank body,
+    because a model told "the page is blank" answers confidently and
+    wrongly. Readability metadata (title/byline/date/language) is
+    surfaced with the content — staleness judgement is the point.
+  - **`web.search`** — ranked results behind a ONE-METHOD
+    `SearchProvider` interface (Exa is the first backend). The contract
+    that matters: **"search failed" and "search found nothing" are
+    distinguishable and the model is told which** — a failure is an error
+    result saying NO search happened, an empty index is a success result
+    saying it ran and matched zero. A **local per-turn/per-day query
+    cap** (config `[search] maxPerTurn`/`maxPerDay`, defaults 5/100) is
+    enforced in our code, bounds ATTEMPTS not successes, and rides the
+    existing `tool.error` event for logging. Counters are in-process: the
+    per-turn cap is exact (keyed on the turn number the loop puts on the
+    tool context), the per-day cap resets on restart.
+  - Tier ruling for both (SPEC §6.2.7, closing a real spec gap): **tier 0
+    (silent), with the scheme allowlist as the boundary instead of an
+    ack** — a user cannot meaningfully adjudicate whether a URL is an
+    internal-network probe, and a prompt they learn to clear is worse
+    than a mechanical bound.
+  - Configuration: the search backend is a **providers.toml pool entry**
+    (`type = "search"`, `api = "exa"`, its own `apiKeyFile`), selected by
+    `config.toml [search] provider`. No key ever appears in config.toml,
+    and `ValidateConfig` says NOTHING about `[search]` — it gates one
+    optional tool and must never refuse a session.
+  - Pool entries gained **required `type`/`api` fields** (no defaults —
+    there is no installed base to be compatible with, and the only
+    plausible default is a silent guess about an endpoint about to
+    receive a credential). An invalid pair is faulted out at load with a
+    named reason. `defaultModel` was **removed** from the provider entry
+    (user ruling: catalogues rotate, so a model id pinned on a
+    connectivity record goes stale, and the stale fallback fires exactly
+    when the configured model is unavailable). The chat model now comes
+    from `config.toml [chat]` or `--model`, verified once at session open
+    against the one provider's `/models`.
 
 Implemented and wired into the turn loop (pending full acceptance-validation):
 - Thread closure / retirement (§3.5): curator-drafted summary + ack flow;
@@ -463,9 +509,14 @@ internal/recall/measure/    application-side recall stack (Service,
 internal/curator/           closure-summary drafting (§3.5/§5.2):
                             model-backed summary + anchor selection
 internal/chat/              REPL, slash dispatch, bootstrap UX
-internal/tools/             §6.1 tool registry + dispatch (substrate-free;
-                            ships EMPTY — no real tools yet). The turn-side
-                            execution loop lives in internal/turn/toolloop.go
+internal/tools/             §6.1 tool registry + dispatch + the shared
+                            arg-decoder and turn-context seam
+                            (substrate-free). The turn-side execution loop
+                            lives in internal/turn/toolloop.go
+internal/tools/web/         §6.1.1 web.fetch + web.search: readability →
+                            Markdown extraction, empty-shell detection, the
+                            SearchProvider seam + Exa backend, local query
+                            caps
 internal/shell/             §4.4 shell escape: per-command `$SHELL -c`,
                             shell-cwd tracking via the fd-3 cwd epilogue,
                             bounded capture, §8.2.1 key redaction
@@ -489,6 +540,10 @@ Makefile                    build + agents-submodule pinning +
 
 ```sh
 make build            # bin/personant (compile only — the cheapest edit check)
+make add-dependency MOD=<module>@<version>   # pin ONE vetted dep into go.mod/go.sum
+                      #   (the AGENTS.md vetting checklist is a PRECONDITION, not
+                      #   something the target can check; `update-dependencies` is
+                      #   the wrong tool — its `go get -u ./...` churns the whole graph)
 make fmt              # gofmt -w the Go source roots (cmd/, internal/) — fix formatting drift
 make test             # CHECKPOINT GATE (substrate): fmt-check (drift fails the gate) + go vet + go test $(GOPKGS) (full suite, incl. multi-day sim rungs; Go's test cache is ON — unchanged packages return instantly)
 make test-nocache     # `make test` with the cache DEFEATED (--count=1) — the forced-clean full run: pre-push, suspected cache artifact, post-toolchain change
@@ -692,12 +747,13 @@ here — it is fast unit-grade and runs in the default suite.
     `github.com/peterh/liner` (consumer: `internal/chat/` for the §4.3.1
     REPL line editing + persistent history; lightest well-trodden
     readline-class dep, one transitive dep `mattn/go-runewidth`);
-    `codeberg.org/readeck/go-readability/v2` +
-    `github.com/JohannesKaufmann/html-to-markdown/v2` (consumer: `web.fetch`,
-    §6.1.1 — boilerplate-stripped article extraction then HTML→Markdown, so
-    the model reads the article rather than the nav bar. Both MIT, pure Go,
-    no cgo. `html-to-markdown` composes with `golang.org/x/net/html`, already
-    in the graph via go-git, so no second parser). Do not
+    `codeberg.org/readeck/go-readability/v2` v2.1.2 +
+    `github.com/JohannesKaufmann/html-to-markdown/v2` v2.5.2 (**LANDED**
+    with their consumer, `web.fetch`, §6.1.1 — boilerplate-stripped article
+    extraction then HTML→Markdown, so the model reads the article rather
+    than the nav bar. Both MIT, pure Go, no cgo. `html-to-markdown` composes
+    with `golang.org/x/net/html`, which was already in the graph via go-git
+    and is now a direct require — no second parser). Do not
     pull these in speculatively; do pull them in when the consumer arrives.
   - **`langchaingo/llms`** is *compatible* but excluded on dep-hygiene
     + scope grounds for v0.1 (30+ transitive deps; a thin OpenAI-compatible

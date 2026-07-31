@@ -3,6 +3,7 @@ package memops
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -300,10 +301,49 @@ type ProjectDigest struct {
 // default provider for CLI subcommands when --provider is unset.
 const LocalProviderName = "local"
 
+// Provider kinds and wire protocols. A pool entry declares both, and
+// both are REQUIRED: what the endpoint IS (`type`) and how to talk to
+// it (`api`). There is deliberately no default for either. A default
+// would have to be "inference over openai", which is a silent guess
+// about an endpoint the runtime is about to send a credential to — and
+// the failure it produces (a search backend selected as a chat provider)
+// is far more confusing than the missing field it papered over. An entry
+// that declares neither is a config the user has not finished writing,
+// and Provider.Validate says so.
+const (
+	// ProviderTypeInference is an LLM endpoint: chat, embeddings,
+	// model listing. The default when `type` is absent.
+	ProviderTypeInference = "inference"
+	// ProviderTypeSearch is a §6.1.1 web.search backend. It is NOT an
+	// inference endpoint and must never be selected as one.
+	ProviderTypeSearch = "search"
+
+	// ProviderAPIOpenAI is the OpenAI-compatible HTTP protocol. The
+	// default when `api` is absent.
+	ProviderAPIOpenAI = "openai"
+	// ProviderAPIExa is Exa's search protocol.
+	ProviderAPIExa = "exa"
+)
+
+// A provider declares WHERE and HOW to reach an endpoint — never WHICH
+// MODEL to use. The former `defaultModel` field was removed (user
+// ruling): providers rotate their catalogues constantly, so a model id
+// pinned on a pool entry is a field that begs to go stale, and a stale
+// fallback fires exactly when the configured model is unavailable —
+// the moment it is least likely to still be right. The model choice
+// lives in config.toml [chat] / [embedding] (or --model), which is the
+// one place a user looks for it.
 type Provider struct {
-	Name         string `toml:"-"` // table header from TOML; populated post-decode
-	BaseURL      string `toml:"baseUrl"`
-	DefaultModel string `toml:"defaultModel"`
+	Name    string `toml:"-"` // table header from TOML; populated post-decode
+	BaseURL string `toml:"baseUrl"`
+
+	// Type is the provider kind — ProviderTypeInference or
+	// ProviderTypeSearch. Required; see Validate.
+	Type string `toml:"type"`
+
+	// API is the wire protocol — ProviderAPIOpenAI or ProviderAPIExa.
+	// Required, and it must match the Type; see Validate.
+	API string `toml:"api"`
 
 	// APIKeyUnsafe is an inline API key. Discouraged — it places a
 	// secret directly in providers.toml, making the file unsafe to
@@ -340,6 +380,73 @@ func (p Providers) Get(name string) (Provider, bool) {
 	return v, ok
 }
 
+// Kind returns the normalized (trimmed, lower-cased) provider type. It
+// exists so selection sites compare against the constants without each
+// one re-deciding how to normalize a hand-edited TOML value.
+func (p Provider) Kind() string { return strings.ToLower(strings.TrimSpace(p.Type)) }
+
+// Protocol returns the normalized wire protocol.
+func (p Provider) Protocol() string { return strings.ToLower(strings.TrimSpace(p.API)) }
+
+// protocolsByKind is the legal (type, api) pairing — the single source
+// of truth for both the validity check and the error messages it
+// produces, so a new backend is one entry rather than three edits.
+var protocolsByKind = map[string][]string{
+	ProviderTypeInference: {ProviderAPIOpenAI},
+	ProviderTypeSearch:    {ProviderAPIExa},
+}
+
+// Validate reports whether a pool entry is usable, checking the fields
+// that decide WHERE traffic goes rather than the ones that merely
+// decorate it.
+//
+// It is enforced at POOL LOAD, where an invalid entry is dropped and
+// reported as a ProviderFault: the rest of the pool still loads, and the
+// user gets a named reason instead of an endpoint that quietly went
+// missing from the selection list.
+func (p Provider) Validate() error {
+	kind := p.Kind()
+	if kind == "" {
+		return fmt.Errorf("no type declared (known types: %s)", strings.Join(sortedKinds(), ", "))
+	}
+	apis, known := protocolsByKind[kind]
+	if !known {
+		return fmt.Errorf("unknown type %q (known types: %s)", p.Type, strings.Join(sortedKinds(), ", "))
+	}
+	api := p.Protocol()
+	if api == "" {
+		return fmt.Errorf("no api declared (a %s provider speaks: %s)", kind, strings.Join(apis, ", "))
+	}
+	if !slices.Contains(apis, api) {
+		return fmt.Errorf("api %q is not valid for a %s provider (which speaks: %s)",
+			p.API, kind, strings.Join(apis, ", "))
+	}
+	return nil
+}
+
+func sortedKinds() []string {
+	out := make([]string, 0, len(protocolsByKind))
+	for k := range protocolsByKind {
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// OfKind returns the subset of the pool whose Kind matches. It exists so
+// selection sites state which kind they want: a pool now holds
+// non-inference endpoints, and an unfiltered "pick the first provider"
+// fallback would happily hand a search backend to the chat client.
+func (p Providers) OfKind(kind string) Providers {
+	out := make(Providers, len(p))
+	for name, prov := range p {
+		if prov.Kind() == kind {
+			out[name] = prov
+		}
+	}
+	return out
+}
+
 // ---------- Config ----------
 
 // Config is the personant settings file (config.toml) — the choices
@@ -349,6 +456,7 @@ func (p Providers) Get(name string) (Provider, bool) {
 type Config struct {
 	Chat      ChatConfig      `toml:"chat"`
 	Embedding EmbeddingConfig `toml:"embedding"`
+	Search    SearchConfig    `toml:"search"`
 }
 
 // ChatConfig is the [chat] section.
@@ -402,6 +510,34 @@ type EmbeddingConfig struct {
 	VectorLength int `toml:"vectorLength"`
 }
 
+// SearchConfig is the [search] section — the CHOICE of §6.1.1
+// `web.search` backend from the pool, plus its local query caps.
+//
+// It follows config.toml's existing division of labour exactly:
+// providers.toml lists what is AVAILABLE (a `type = "search"` entry
+// with its own apiKeyFile), config.toml says which to USE. The key is
+// therefore resolved by the one provider-pool loader, under the one
+// apiKeyFile discipline — a path reference, never an inline secret —
+// and no second key-resolution path exists to drift from it.
+//
+// The section is entirely OPTIONAL, and so is the pool entry: with no
+// search provider in the pool, `web.search` is simply not registered,
+// and §6.1.4's empty-registry semantics already handle an absent tool
+// correctly. `web.fetch` needs no credential and registers either way.
+type SearchConfig struct {
+	// Provider names which pooled search provider to use. It is needed
+	// only to disambiguate a pool holding more than one; with exactly
+	// one, that one is used. An unrecognized name disables the tool
+	// with a warning — it never refuses the session.
+	Provider string `toml:"provider"`
+
+	// MaxPerTurn / MaxPerDay are the local query caps, enforced by
+	// personant rather than by watching a provider dashboard. 0 → the
+	// defaults in internal/tools/web.
+	MaxPerTurn int `toml:"maxPerTurn"`
+	MaxPerDay  int `toml:"maxPerDay"`
+}
+
 // ConfigIssue is one cross-file validation problem found by ValidateConfig.
 type ConfigIssue struct {
 	Section string // "chat" or "embedding"
@@ -416,10 +552,17 @@ type ConfigIssue struct {
 // Both the chat and embedding references are validated for shape (a
 // well-formed "provider/model" string) and provider-existence (the named
 // provider is present in the pool) only. Neither model id is checked
-// against the provider's defaultModel: defaultModel is the chat fallback,
-// not an embedding pin, and a single provider legitimately serves both a
-// chat model and a distinct embedding model. The specific model id (chat
-// or embedding) is resolved at runtime against the provider.
+// statically: a pool entry names no models at all (Provider carries no
+// defaultModel — see its doc), and a single provider legitimately serves
+// both a chat model and a distinct embedding model. The specific model
+// id is resolved at runtime against the provider's own catalogue.
+//
+// [search] is DELIBERATELY UNVALIDATED — absent, partial, or naming a
+// backend this binary does not know must never refuse a config. The
+// section gates ONE optional tool, and the correct handling of every bad
+// value is to not register it (with a warning), not to block the user's
+// session. An over-strict check here has already blocked a launch once;
+// this validator's failure mode is total, so it stays conservative.
 func ValidateConfig(cfg Config, providers Providers) []ConfigIssue {
 	var issues []ConfigIssue
 

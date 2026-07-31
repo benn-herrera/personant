@@ -70,12 +70,14 @@ func Run(ops memops.MemoryOps, opts Options) error {
 		return fmt.Errorf("ping: provider %q not found in providers.toml", opts.Provider)
 	}
 
+	// A pool entry names no models (memops.Provider carries no
+	// defaultModel — a pinned id goes stale every time a provider
+	// rotates its catalogue), so --model is required. `personant models
+	// --provider <name>` lists what the endpoint currently serves.
 	chosenModel := opts.Model
 	if chosenModel == "" {
-		chosenModel = provider.DefaultModel
-	}
-	if chosenModel == "" {
-		return fmt.Errorf("ping: no model specified and provider %q has no defaultModel", opts.Provider)
+		return fmt.Errorf("ping: no model specified — pass --model "+
+			"(run `personant models --provider %s` to list what it serves)", opts.Provider)
 	}
 
 	client := model.NewHTTPClient(provider)

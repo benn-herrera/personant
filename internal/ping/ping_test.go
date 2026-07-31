@@ -58,12 +58,14 @@ func writeProvidersWithFault(t *testing.T, baseURL string) store.PersonantPaths 
 	body := fmt.Sprintf(`[good]
 baseUrl = %q
 apiKey = "dummy"
-defaultModel = "m"
+type = "inference"
+api = "openai"
 
 [bad]
 baseUrl = "http://unused.example"
 apiKeyFile = "does-not-exist.key"
-defaultModel = "m"
+type = "inference"
+api = "openai"
 `, baseURL)
 	if err := os.WriteFile(filepath.Join(home, "providers.toml"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write providers.toml: %v", err)
@@ -84,7 +86,7 @@ func TestRunSurfacesLoadFaultsAsWarnings(t *testing.T) {
 	paths := writeProvidersWithFault(t, srv.URL)
 	var stdout, stderr bytes.Buffer
 	if err := Run(fileadapter.NewFileAdapter(paths), Options{
-		Provider: "good", Prompt: "hi", Stdout: &stdout, Stderr: &stderr,
+		Provider: "good", Model: "m", Prompt: "hi", Stdout: &stdout, Stderr: &stderr,
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}

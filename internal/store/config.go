@@ -13,6 +13,10 @@ import (
 // LoadConfig reads config.toml at path. A nonexistent file yields a
 // zero Config and a nil error — a fresh home may have no config.toml,
 // in which case all choices fall back to their defaults.
+//
+// No key material is resolved here: config.toml holds CHOICES, and every
+// credential — including the §6.1.1 search backend's — lives on its
+// providers.toml pool entry and is resolved by LoadProviders.
 func LoadConfig(path string) (memops.Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

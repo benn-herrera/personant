@@ -150,21 +150,20 @@ func TestValidateConfig(t *testing.T) {
 // against inline provider pools (no fixture I/O), covering the
 // single-provider / dedicated-provider / unknown / malformed shapes.
 //
-// The key regression: an embedding model id that differs from the
-// provider's defaultModel is legitimate — defaultModel is the chat
-// fallback, not an embedding pin — so a single provider serving both a
-// chat model and a distinct embedding model must validate clean.
+// The key regression: a provider pins no model at all (Provider carries
+// no defaultModel), so one provider referenced by both [chat] and
+// [embedding] with distinct model ids must validate clean.
 func TestValidateConfig_ProviderModelSplit(t *testing.T) {
-	// singleProvider mirrors the real dogfood shape: one provider whose
-	// defaultModel is a chat model, referenced by both [chat] and
-	// [embedding] with distinct model ids.
+	// singleProvider mirrors the real dogfood shape: one inference
+	// provider referenced by both [chat] and [embedding] with distinct
+	// model ids.
 	singleProvider := memops.Providers{
-		"reaper": {Name: "reaper", DefaultModel: "gemma-4-main"},
+		"reaper": {Name: "reaper"},
 	}
 	// twoProviders adds a dedicated embedding provider.
 	twoProviders := memops.Providers{
-		"reaper": {Name: "reaper", DefaultModel: "gemma-4-main"},
-		"embco":  {Name: "embco", DefaultModel: "embco-default"},
+		"reaper": {Name: "reaper"},
+		"embco":  {Name: "embco"},
 	}
 
 	cases := []struct {

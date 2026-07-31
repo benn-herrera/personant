@@ -518,11 +518,25 @@ ones accrued automatically from ack-prompt scope grants and decline
 categorizations. See spec §2.6 for precedence rules.
 `
 
-const seedProvidersTOML = `# personant LLM provider configuration — the provider POOL.
+const seedProvidersTOML = `# personant provider configuration — the endpoint POOL.
 #
 # One TOML table per provider; the bracket header is the lookup key.
-# This file lists what is AVAILABLE. The chat/embedding CHOICES that
-# draw from this pool live in config.toml. See spec §8.2.1.
+# This file lists what is AVAILABLE. The CHOICES that draw from this
+# pool live in config.toml. See spec §8.2.1.
+#
+# Each entry MUST declare what the endpoint is and how to talk to it:
+#   type = "inference"   an LLM endpoint (chat, embeddings, /models)
+#   type = "search"      a web.search backend (spec §6.1.1)
+#   api  = "openai"      OpenAI-compatible HTTP  (inference)
+#   api  = "exa"         Exa search protocol     (search)
+# Neither has a default — an entry missing one, or pairing a type with an
+# api it does not speak, is dropped from the pool with a named warning
+# rather than being guessed at.
+#
+# Providers deliberately name NO model: catalogues rotate constantly, so
+# a model id pinned here is a field that goes stale. Models are chosen in
+# config.toml (or --model); ` + "`personant models --provider <name>`" + ` lists
+# what an endpoint currently serves.
 #
 # API keys: prefer apiKeyFile — a path to a file holding the key, kept
 # out of this file so providers.toml stays safe to scan and git-track.
@@ -534,20 +548,28 @@ const seedProvidersTOML = `# personant LLM provider configuration — the provid
 # Example:
 #
 # [openai]
-# baseUrl      = "https://api.openai.com/v1"
-# apiKeyFile   = "../.api_keys/openai.txt"
-# defaultModel = "gpt-5.4-2026-03-05"
+# baseUrl    = "https://api.openai.com/v1"
+# apiKeyFile = "../.api_keys/openai.txt"
+# type       = "inference"
+# api        = "openai"
 #
 # [reaper]
-# baseUrl      = "http://reaper.local:4000/v1"
-# apiKeyFile   = "../.api_keys/reaper.txt"
-# defaultModel = "gemma-4-main"
+# baseUrl    = "http://reaper.local:4000/v1"
+# apiKeyFile = "../.api_keys/reaper.txt"
+# type       = "inference"
+# api        = "openai"
+#
+# [exa]
+# baseUrl    = "https://api.exa.ai/search"
+# apiKeyFile = "../.api_keys/exa.txt"
+# type       = "search"
+# api        = "exa"
 `
 
-const seedConfigTOML = `# personant configuration — the chat/embedding CHOICES.
+const seedConfigTOML = `# personant configuration — the CHOICES.
 #
-# These select from the provider POOL in providers.toml, referenced as
-# "<provider>/<model>". See spec §8.2.
+# These select from the endpoint POOL in providers.toml. Model
+# references are "<provider>/<model>". See spec §8.2.
 #
 # Example:
 #
@@ -557,6 +579,16 @@ const seedConfigTOML = `# personant configuration — the chat/embedding CHOICES
 # [embedding]
 # model = "reaper/nomicai-embed"
 # # vectorLength = 768   # optional: Matryoshka-truncated dimension
+#
+# [search] tunes the optional web.search tool (spec §6.1.1). The backend
+# itself is a ` + "`type = \"search\"`" + ` entry in providers.toml, which is where
+# its key lives; with no such entry, web.search is simply not offered to
+# the model. web.fetch needs no key and is always available.
+#
+# [search]
+# # provider = "exa"   # only needed to pick among several search entries
+# # maxPerTurn = 5     # local query caps, enforced by personant itself
+# # maxPerDay  = 100
 `
 
 const seedReadmeMD = "# personant home\n" +

@@ -17,6 +17,12 @@ import (
 )
 
 // newHarness builds an isolated home, default project, and starting
+// harnessMockModel is the sentinel model name a mock-driven scenario
+// issues requests under. It is installed on State (not on the provider:
+// a pool entry names no models), and a live-inference run replaces it
+// with Scenario.LiveModel.
+const harnessMockModel = "harness-mock"
+
 // turn.State for the scenario. Mock is left as nil and is populated by
 // RunScenario after Steps are known so the queue can be sized exactly.
 func newHarness(t *testing.T, sc Scenario) *Harness {
@@ -43,17 +49,19 @@ func newHarness(t *testing.T, sc Scenario) *Harness {
 	providersTOML := `[test]
 baseUrl      = "http://harness.invalid"
 apiKeyUnsafe = "harness-key"
-defaultModel = "harness-mock"
+type         = "inference"
+api          = "openai"
 `
 	if err := os.WriteFile(paths.Providers, []byte(providersTOML), 0o644); err != nil {
 		t.Fatalf("scenario %s: write providers.toml: %v", sc.Name, err)
 	}
 
 	provider := memops.Provider{
-		Name:         "test",
-		BaseURL:      "http://harness.invalid",
-		APIKey:       "harness-key",
-		DefaultModel: "harness-mock",
+		Name:    "test",
+		BaseURL: "http://harness.invalid",
+		APIKey:  "harness-key",
+		Type:    memops.ProviderTypeInference,
+		API:     memops.ProviderAPIOpenAI,
 	}
 
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC).Format(time.RFC3339)
@@ -76,6 +84,10 @@ defaultModel = "harness-mock"
 
 	ops := fileadapter.NewFileAdapter(paths)
 	state := turn.NewState(ops, project, provider, nil)
+	// The model name rides on State, never on the provider: a pool entry
+	// names no models. A live-inference run overwrites this with
+	// Scenario.LiveModel in harness_run.
+	state.Model = harnessMockModel
 
 	mPath := sc.MetricsPath
 	if mPath == "" {

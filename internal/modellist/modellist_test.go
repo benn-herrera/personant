@@ -26,7 +26,8 @@ func writeProviders(t *testing.T, baseURL string) store.PersonantPaths {
 	body := fmt.Sprintf(`[test]
 baseUrl = %q
 apiKey = "dummy"
-defaultModel = "m"
+type = "inference"
+api = "openai"
 `, baseURL)
 	path := filepath.Join(home, "providers.toml")
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
@@ -119,12 +120,14 @@ func writeProvidersWithFault(t *testing.T, baseURL string) store.PersonantPaths 
 	body := fmt.Sprintf(`[good]
 baseUrl = %q
 apiKey = "dummy"
-defaultModel = "m"
+type = "inference"
+api = "openai"
 
 [bad]
 baseUrl = "http://unused.example"
 apiKeyFile = "does-not-exist.key"
-defaultModel = "m"
+type = "inference"
+api = "openai"
 `, baseURL)
 	if err := os.WriteFile(filepath.Join(home, "providers.toml"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write providers.toml: %v", err)
@@ -181,7 +184,8 @@ func TestRunDefaultsToLocal(t *testing.T) {
 	body := fmt.Sprintf(`[local]
 baseUrl = %q
 apiKey = ""
-defaultModel = "m"
+type = "inference"
+api = "openai"
 `, srv.URL)
 	if err := os.WriteFile(filepath.Join(home, "providers.toml"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -245,7 +249,8 @@ func TestRunHTTPErrorScrubsKey(t *testing.T) {
 	body := fmt.Sprintf(`[test]
 baseUrl = %q
 apiKey = %q
-defaultModel = "m"
+type = "inference"
+api = "openai"
 `, srv.URL, apiKey)
 	if err := os.WriteFile(filepath.Join(home, "providers.toml"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write: %v", err)

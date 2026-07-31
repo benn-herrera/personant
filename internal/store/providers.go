@@ -23,9 +23,10 @@ import (
 //
 // The error return is reserved for file-level failures only: the
 // providers.toml file unreadable (non-not-exist) or malformed TOML. A
-// provider whose apiKeyFile is set but unreadable does NOT abort the
-// load — it is omitted from the returned map and appended to the
-// returned []ProviderFault so the rest of the pool still loads.
+// provider that is individually unusable — an undeclared or mismatched
+// `type`/`api` pair, or an apiKeyFile that cannot be read — does NOT
+// abort the load: it is omitted from the returned map and appended to
+// the returned []ProviderFault so the rest of the pool still loads.
 //
 // Errors and faults are constructed without TOML value content or key
 // material — a parse error references line/column, and a key-file read
@@ -49,6 +50,15 @@ func LoadProviders(path string) (memops.Providers, []memops.ProviderFault, error
 	var faults []memops.ProviderFault
 	for name, p := range raw {
 		p.Name = name
+		// Shape before secrets: an entry that declares no `type`/`api` is
+		// dropped with a named reason rather than silently vanishing from
+		// the selection lists it would never have matched. Checked first
+		// because there is no point reading a key file for an entry
+		// nothing can route to.
+		if err := p.Validate(); err != nil {
+			faults = append(faults, memops.ProviderFault{Name: name, Reason: err.Error()})
+			continue
+		}
 		key, err := resolveAPIKey(p, dir)
 		if err != nil {
 			faults = append(faults, memops.ProviderFault{Name: name, Reason: err.Error()})

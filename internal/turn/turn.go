@@ -839,10 +839,11 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	}
 
 	// Step 3: LLM round-trip (streaming) with §5.5 mid-turn re-prompt.
+	// State.Model is the only source: a provider names no models (the
+	// pool entry's `defaultModel` was removed as a field that goes stale
+	// with every provider catalogue rotation), so the session resolves
+	// the model once at open and stores it here.
 	chosenModel := state.Model
-	if chosenModel == "" {
-		chosenModel = state.Provider.DefaultModel
-	}
 
 	// Per-cause re-prompt caps (see the mid-turn re-prompt bound comment
 	// above NewState). fetchReprompted is loop-local; the tag cause lives

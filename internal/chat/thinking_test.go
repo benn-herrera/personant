@@ -249,12 +249,12 @@ func TestConfigShowThinkingIsTheSessionDefault(t *testing.T) {
 	}{
 		{"absent section", "", "off"},
 		{"absent field", "[chat]\ndefaultModel = \"local/test-model\"\n", "off"},
-		{"explicitly false", "[chat]\nshowThinking = false\n", "off"},
-		{"explicitly true", "[chat]\nshowThinking = true\n", "on"},
+		{"explicitly false", "[chat]\ndefaultModel = \"local/test-model\"\nshowThinking = false\n", "off"},
+		{"explicitly true", "[chat]\ndefaultModel = \"local/test-model\"\nshowThinking = true\n", "on"},
 		// An unrecognized key in [chat] must not refuse the config: a
 		// display preference from a newer binary is not a reason to
 		// block the session.
-		{"unknown key tolerated", "[chat]\nshowThinking = true\nshowSomethingElse = 3\n", "on"},
+		{"unknown key tolerated", "[chat]\ndefaultModel = \"local/test-model\"\nshowThinking = true\nshowSomethingElse = 3\n", "on"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

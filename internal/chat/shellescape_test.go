@@ -317,11 +317,15 @@ func TestOnSignal_ShellChildTakesTheInterrupt(t *testing.T) {
 		}
 	}()
 
-	// Poll for the child rather than for a pgid: probing via Interrupt
-	// would consume the very signal under test.
+	// Wait until the runner has PUBLISHED the child's process group, not
+	// merely until the child has run: Interrupt() reports "no child"
+	// until the pgid lands, so signalling on evidence from the child
+	// (the marker file) races the publication and, under load, loses.
+	// The marker is still waited on first — it proves the child really
+	// started rather than the runner having failed silently.
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if _, err := os.Stat(marker); err == nil {
+		if _, err := os.Stat(marker); err == nil && h.sh.Running() {
 			break
 		}
 		if time.Now().After(deadline) {

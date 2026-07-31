@@ -125,9 +125,12 @@ func timeoutMessage(name string, d time.Duration) string {
 
 func failureMessage(name string, err error) string {
 	return fmt.Sprintf("ERROR: tool %q failed: %s. Retry with corrected arguments if the error names a fixable problem, otherwise answer without it.",
-		name, oneLine(err.Error()))
+		name, OneLine(err.Error()))
 }
 
-// oneLine collapses whitespace runs so a multi-line error from a handler
-// stays a single readable sentence in the tool message.
-func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
+// OneLine collapses whitespace runs so a multi-line string stays a
+// single readable line in a tool message or a metadata block. Exported
+// because every tool that renders model-facing text needs it and three
+// private copies of `strings.Join(strings.Fields(s), " ")` is three
+// chances to drift.
+func OneLine(s string) string { return strings.Join(strings.Fields(s), " ") }

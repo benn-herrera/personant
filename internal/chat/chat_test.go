@@ -44,9 +44,18 @@ func scaffoldHome(t *testing.T) store.PersonantPaths {
 	if err := os.WriteFile(paths.Providers, []byte(`
 [local]
 baseUrl = "http://127.0.0.1:0/v1"
-defaultModel = "test-model"
+type = "inference"
+api = "openai"
 `), 0o644); err != nil {
 		t.Fatalf("write providers: %v", err)
+	}
+	// A pool entry names no models, so the chat model comes from
+	// config.toml (or --model). Without one, Run refuses to open.
+	if err := os.WriteFile(paths.Config, []byte(`
+[chat]
+defaultModel = "local/test-model"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
 	}
 	return paths
 }
@@ -297,9 +306,15 @@ func TestRunAbsentProviderFallsBackToDefault(t *testing.T) {
 	if err := os.WriteFile(paths.Providers, []byte(`
 [zephyr]
 baseUrl = "http://127.0.0.1:0/v1"
-defaultModel = "test-model"
+type = "inference"
+api = "openai"
 `), 0o644); err != nil {
 		t.Fatalf("write providers: %v", err)
+	}
+	// Drop scaffoldHome's [chat] pin: this test is about provider
+	// selection with NO pin at all. The model then comes from --model.
+	if err := os.WriteFile(paths.Config, nil, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
 	}
 	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
 
@@ -309,6 +324,7 @@ defaultModel = "test-model"
 	if err := Run(Options{
 		Ops:             newOps(paths),
 		ExplicitProject: "prj_1",
+		Model:           "test-model",
 		Stdin:           in,
 		Stdout:          &stdout,
 		Stderr:          &stderr,
@@ -344,7 +360,7 @@ func TestRunNoProvidersIsFatal(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error for missing providers")
 	}
-	if !strings.Contains(err.Error(), "no providers configured") {
+	if !strings.Contains(err.Error(), "no inference providers configured") {
 		t.Errorf("error message: %q", err.Error())
 	}
 }

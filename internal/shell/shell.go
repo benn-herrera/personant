@@ -264,11 +264,18 @@ func (r *Runner) Run(ctx context.Context, mode Mode, command string, term io.Wri
 		trailerW.Close()
 		return Result{Dir: r.Dir()}, fmt.Errorf("shell: start %s: %w", r.shell, err)
 	}
+	// Publish the process group FIRST — before any other post-start work.
+	// Interrupt() reports "no child" until this lands, so every
+	// instruction between Start and here is a window in which a Ctrl-C
+	// would be treated as a session interrupt while a child is in fact
+	// running. The window cannot be closed entirely (the child is
+	// executing the moment Start returns), but nothing else belongs
+	// inside it.
+	r.setPGID(cmd.Process.Pid)
+
 	// The parent's copy of the write end must go, or the trailer read
 	// below never sees EOF.
 	trailerW.Close()
-
-	r.setPGID(cmd.Process.Pid)
 
 	trailerCh := make(chan []byte, 1)
 	go func() {
@@ -336,6 +343,19 @@ func (r *Runner) Interrupt() bool {
 	// concerned, so report true and leave the session alone.
 	_ = interruptGroup(pgid)
 	return true
+}
+
+// Running reports whether a child's process group is currently
+// published — i.e. whether Interrupt() would have something to signal.
+//
+// It exists because "the child process exists" and "Interrupt can reach
+// it" are not the same instant, and only the second one is actionable.
+// A caller (or a test) that waits on evidence from the child itself is
+// synchronizing on the wrong event.
+func (r *Runner) Running() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.pgid > 0
 }
 
 func (r *Runner) setPGID(pid int) {

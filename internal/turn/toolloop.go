@@ -143,6 +143,15 @@ func runToolRound(ctx context.Context, state *State, round int, calls []model.To
 		ToolCalls: calls,
 	})
 
+	// Turn identity on the tool context. A handler that budgets itself
+	// per turn (the §6.1.1 web.search local query cap) has no other way
+	// to see a turn boundary: the registry is built once at startup and a
+	// handler is a plain function. An int on the context keeps
+	// internal/tools turn-unaware, and a monotonic counter compared
+	// against a stored one cannot be forgotten the way a reset callback
+	// can.
+	ctx = tools.ContextWithTurn(ctx, state.TurnNumber)
+
 	results := make([]tools.Result, 0, len(calls))
 	for _, call := range calls {
 		_ = state.Ops.Log(ctx, memops.LogCategoryTool, "call",

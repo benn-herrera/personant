@@ -2812,9 +2812,69 @@ invocation protocol).
 | `fs.read` | `(path) → bytes` | read a workspace file |
 | `fs.list` | `(path) → entries[]` | list a directory |
 | `fs.grep` | `(pattern, path, opts) → matches[]` | regex/literal search across a tree |
-| `web.fetch` | `(url) → bytes + meta` | retrieve a URL |
-| `web.search` | `(query) → results[]` | search query → URLs |
+| `web.fetch` | `(url) → bytes + meta` | retrieve a URL — **BUILT** (wave 3) |
+| `web.search` | `(query) → results[]` | search query → URLs — **BUILT** (wave 3) |
 | `model.consult` | `(prompt, model_id) → response` | ask a guest model |
+
+**Status:** the `web.*` pair is built and registered; the `fs.*` tools are
+not yet. Both web tools are tier 0 / non-mutating (§6.2), and both are
+described below at the level of the behaviour that is load-bearing rather
+than as an API listing.
+
+**`web.fetch`** is a plain HTTP GET → readability extraction → Markdown.
+**There is no headless browser and no JavaScript execution**, which is a
+scope decision, not a gap. Load-bearing properties:
+
+- **Scheme allowlist: `http` and `https` ONLY** — see §6.2 for the ruling
+  and its precise extent (it blocks `file://`, `data:`, `ftp://` and
+  everything else; it deliberately does NOT block loopback or any IP
+  range). Enforced on the initial URL AND on every redirect hop.
+- **Bounded**: a timeout, a redirect cap, and a response size cap
+  enforced WHILE READING, so an oversize body cannot balloon memory
+  before the cap applies. Over the cap is a §6.5-style refusal asking for
+  a narrower fetch.
+- **Content-type branch**: HTML through the extraction pipeline;
+  Markdown, plain text and JSON/XML passed through verbatim; binary and
+  unknown types REFUSED with a reason, never fed to the parser as
+  garbage.
+- **Empty-shell detection.** A client-rendered SPA answers a plain GET
+  with a near-empty document. When the extracted text is tiny relative to
+  the document, the tool returns an explicit *"this page requires
+  JavaScript rendering; content unavailable"* signal instead of the
+  shell. **Returning an empty shell as if it were content is the failure
+  mode this exists to prevent**: a model told the page is blank concludes
+  the information does not exist and says so confidently, while a model
+  told the fetch was incomplete goes and looks elsewhere. The notice
+  names both possible causes (client-side rendering, or a genuinely
+  text-less page), so the heuristic's false-positive case is still an
+  honest message.
+- **Metadata is surfaced with the content** — title, byline, published
+  date, site, language. For a memory system whose whole business is
+  information over a long career, "when was this written?" is not
+  decoration; it is how staleness gets judged.
+
+**`web.search`** returns ranked results (title, URL, snippet) from a
+pluggable backend behind a one-method `SearchProvider` interface, so a
+different engine drops in without the tool changing. Exa is the first
+implementation. Two properties are load-bearing:
+
+- **"Search failed" and "search found nothing" are distinguishable, and
+  the model is told which.** A backend failure is an ERROR result stating
+  that NO search happened and that this says nothing about whether
+  results exist; an empty index is a SUCCESS result stating that the
+  search ran and matched zero. Collapsing them — a silent empty on
+  failure — teaches the model that the web has no answer, which is the
+  single worst outcome this tool can produce.
+- **A local query cap, per turn and per day, enforced in personant's own
+  code** (§8.2.2 `[search] maxPerTurn` / `maxPerDay`; defaults 5 and
+  100). A metered API plus a model in a retry loop is a real failure
+  mode, and a provider dashboard reports it only after the budget is
+  gone. The cap bounds ATTEMPTS, not successes — a loop against a
+  *failing* backend is the one most likely to run away — and hitting it
+  produces an honest, logged result telling the model to stop rather
+  than retry. Scope, stated honestly: the counters live in the process,
+  so the per-turn cap is exact and the per-day cap resets on restart;
+  the runaway-loop case is intra-session, which is where it is exact.
 
 #### 6.1.2 Draft/mutate tools (6)
 
@@ -2879,8 +2939,16 @@ handler is `(context, raw JSON args) → (bytes, error)`.
 
 - **An empty registry sends no `tools` field.** `Registry.Specs()` returns
   nil when nothing is registered, and the wire encoder omits an empty
-  field — the model is never invited to call what cannot be serviced. The
-  registry ships empty.
+  field — the model is never invited to call what cannot be serviced.
+  This is also how an OPTIONAL tool is handled: `web.search` with no
+  configured backend is simply absent from the inventory, so there is no
+  "configured but broken" state for the model to trip over.
+- **Registration is per-session and config-driven.** The registry is
+  built once at session open and immutable thereafter. `web.fetch`
+  registers unconditionally (it needs no credential); `web.search`
+  registers only when the pool holds a usable `type = "search"` provider.
+  Everything that can go wrong with the optional half degrades to a
+  warning and a smaller registry — never to a refused session.
 - **Spec order is deterministic** (sorted by name). Map order would make
   otherwise-identical requests differ in their prefix, which is both
   unreproducible and a prompt-cache miss on a block that did not change.
@@ -2945,7 +3013,7 @@ toward zero as the system learns the user's working pattern.
 
 | Tier | Default | Covers |
 |---|---|---|
-| 0 (silent) | never ack | all reads; all writes inside `.personant/**`; all `fs.tmp_*` |
+| 0 (silent) | never ack | all reads; **both `web.*` tools**; all writes inside `.personant/**`; all `fs.tmp_*` |
 | 1 (first-time ack with scope-grant offer) | ack once, then auto-allow within granted scope | `propose_promote` (new and overwrite), `propose_rename` to workspace |
 | 2 (always individual ack) | every time | `propose_delete` on tracked files; `propose_rename` overwriting tracked files; ops matching always-confirm patterns; batches over a threshold |
 
@@ -3048,6 +3116,38 @@ permission bypass.
 `$`/`#` user shell commands (§4.4) are not subject to this — the user is
 initiating, not the agent.
 
+#### 6.2.7 Network tools: tier 0, bounded by an allowlist
+
+The tier table above grades filesystem operations; it assigned no tier to
+`web.fetch` / `web.search`, which was a genuine gap. **The ruling: tier 0
+(silent), with a SCHEME ALLOWLIST as the boundary instead of an
+acknowledgement.**
+
+An ack is worth its interruption only when the user can adjudicate the
+question being asked, and *"is this URL an internal-network probe?"* is
+not a question a human can answer from a prompt at typing speed. They
+would learn to press `y`, which is worse than no gate at all — it
+manufactures consent and trains the reflex that clears the *next* prompt
+too. A mechanical boundary that always holds beats a prompt that gets
+reflexively cleared.
+
+The allowlist is **`http` and `https`, and nothing else**, applied to the
+initial URL and to every redirect hop:
+
+- It **blocks** `file://`, `data:`, `ftp://`, and every other scheme.
+  This is the boundary that matters: it is the difference between "fetch
+  a web page" and "read the filesystem through a tool that was not
+  supposed to".
+- It **deliberately does NOT block** loopback, RFC1918, link-local, or
+  any other IP range. This is a user ruling, recorded verbatim: *"block
+  file:// urls, do not block localhost urls (if I'm deliberately exposing
+  a web server, it's fair game)."* A personal agent on the user's own
+  machine reaching the user's own dev server is the intended case, not
+  the threat. Do not "harden" this into SSRF filtering.
+
+Both tools are read-only (`Mutates: false`), so they also clear the
+§6.1.4 at-least-once bar without further argument.
+
 ### 6.3 `.personant/tmp/` lifecycle
 
 - Tmps live for the active thread's life. On thread retirement, unpromoted
@@ -3118,18 +3218,32 @@ The runtime reads configuration from four sources, each with distinct purpose an
 
 #### 8.2.1 Provider pool: `providers.toml`
 
-LLM provider connectivity lives in `$PERSONANT_HOME/providers.toml`. This file is **the pool of available providers** — a connectivity catalog only. It pins nothing and expresses no preference; the choices that *draw from* the pool live in `config.toml` (§8.2.2).
+Endpoint connectivity lives in `$PERSONANT_HOME/providers.toml`. This file is **the pool of available providers** — a connectivity catalog only. It pins nothing and expresses no preference; the choices that *draw from* the pool live in `config.toml` (§8.2.2).
 
 Format:
 
 ```toml
 [provider-name]
-baseUrl      = "https://api.example.com/v1"
-apiKeyFile   = "api_keys/example.key"
-defaultModel = "gpt-5.4-2026-03-05"
+baseUrl    = "https://api.example.com/v1"
+apiKeyFile = "api_keys/example.key"
+type       = "inference"          # or "search"
+api        = "openai"             # or "exa"
 ```
 
-One TOML table per provider. The provider name is the lookup key used by config references and by the runtime's outbound LLM-client wiring. `defaultModel` is the provider's own fallback model, used when no model is named elsewhere.
+One TOML table per provider. The provider name is the lookup key used by config references and by the runtime's outbound client wiring.
+
+**Kind and protocol.** `type` says what the endpoint IS and `api` says how to talk to it. The pool is not LLM-only: a §6.1.1 `web.search` backend is a pool entry like any other, with its own `apiKeyFile` under the same discipline.
+
+| `type` | Meaning | `api` values |
+|---|---|---|
+| `inference` | LLM endpoint: chat, embeddings, `/models` | `openai` |
+| `search` | `web.search` backend (§6.1.1) | `exa` |
+
+**Both fields are REQUIRED, and they must agree.** There is deliberately no default for either: the only plausible default is "inference over openai", which is a silent guess about an endpoint the runtime is about to send a credential to, and the failure it produces (a search backend selected as a chat provider) is far more confusing than the missing field it papered over. An entry that declares neither, declares an unknown kind, or pairs a kind with a protocol it does not speak is **dropped at pool load and reported as a named `ProviderFault`** — never silently absent from the selection lists it would not have matched.
+
+**Kind is a selection boundary, not a label.** Chat, embedding and `/models` selection run over the `inference` subset only. Without that filter the documented alphabetical default-provider fallback would hand the chat client a search API the moment one sorts ahead of the LLM endpoints.
+
+**A provider names no models.** There is deliberately no `defaultModel` field (removed by user ruling): providers rotate their catalogues constantly, so a model id pinned on a connectivity entry is a field that goes stale — and a stale fallback fires exactly when the configured model is unavailable, which is when it is least likely to still be right. The model choice lives in `config.toml` (or `--model`), and `personant models --provider <name>` lists what an endpoint currently serves.
 
 **API-key forms.** A provider supplies its key one of two ways:
 
@@ -3139,7 +3253,7 @@ One TOML table per provider. The provider name is the lookup key used by config 
 **Security boundary (load-bearing):**
 
 - Because keys are referenced by file rather than embedded, `providers.toml` using `apiKeyFile` throughout is **safely scannable** — agents and tooling may read and edit it. The **secret-bearing artifacts are the `apiKeyFile` targets**, not the catalog.
-- The runtime resolves a provider name → `baseUrl`/key/`defaultModel` at the moment of an outbound API call; the resolved key material is **never** included in any LLM context, log line, ack prompt, or captured shell output.
+- The runtime resolves a provider name → `baseUrl`/key at the moment of an outbound API call; the resolved key material is **never** included in any LLM context, log line, ack prompt, or captured shell output. This holds for a `search` provider exactly as for an inference one: the §6.1.1 search backend's key is held by the provider object and appears in no error string, event line, or tool result.
 - The refuse-vs-redact policy below applies to the key files (and to any `providers.toml` that still uses `apiKeyUnsafe`), not to an `apiKeyFile`-only `providers.toml`.
 
 **Hybrid redaction policy** (refuse vs. redact, by initiator) — for the secret-bearing artifacts (`apiKeyFile` targets; `providers.toml` only when it carries `apiKeyUnsafe`):
@@ -3149,6 +3263,8 @@ One TOML table per provider. The provider name is the lookup key used by config 
   - *Resolved reading (front end 0.0.7):* the replacement is **per occurrence**, not whole-buffer — each run of key material inside the capture is substituted with the placeholder, and the surrounding output survives. The key bytes never reach context either way, so per-occurrence substitution is no less protective, and it keeps the rest of a `# env` or `# grep -r` capture useful. The key set is the pool's already-resolved keys; the redactor reads no key files of its own. Degenerately short "keys" (under 8 bytes) are not scanned for: such a value protects nothing, and a redactor that shreds every capture is a worse failure than one that misses a two-byte secret. The same redactor is applied to the *invocation* before it is logged, so `$ export API_KEY=…` cannot leak through the `user.shell` event line.
 
 The split reflects intent: an agent reaching for secrets is suspicious and warrants refusal; a user `#`-grepping their own home dir for context inclusion is reasonable but accidental and just gets quietly cleaned up.
+
+**Load-time validation.** Shape is checked before secrets: an entry whose `type`/`api` pair is missing or unroutable is faulted out before its key file is even read.
 
 **Load-time key resolution.** Every provider's key is resolved when the pool is loaded — an `apiKeyFile` is read and trimmed. A provider whose `apiKeyFile` cannot be read (missing file, permission error) is **dropped from the pool and reported as a fault**: it does not abort the load, and the remaining providers stay usable. The runtime surfaces each fault as a startup warning. A `providers.toml` that is itself unreadable or malformed is a hard error. (Resolution and fault strings carry only the file path, never key content — see the security boundary above.)
 
@@ -3166,12 +3282,19 @@ showThinking = false
 [embedding]
 model        = "provider/model"
 vectorLength = 768
+
+[search]
+provider   = "exa"                # a `type = "search"` pool entry
+maxPerTurn = 5
+maxPerDay  = 100
 ```
 
 - `[chat] defaultModel` — the default chat provider/model.
 - `[chat] showThinking` — optional display preference: stream a thinking model's reasoning deltas to the terminal, dimmed, as they arrive. **Absent → off**; a fresh install does not start showing scratch unasked. Display-only — reasoning is never journaled, never feeds §3.3 symbol extraction, and is never replayed in history — so it is deliberately outside cross-file validation: an absent or unrecognized display preference must never refuse a config. `/thinking` (§4.2) overrides it for the session.
 - `[embedding] model` — the embedding provider/model. This pin is **mandatory for embedding recall** and must be explicit: the embedding model defines the vector space, and an inferred or drifting model would silently invalidate the existing embedding cache.
 - `[embedding] vectorLength` — optional; for matryoshka-capable embedding models, requests this truncated dimensionality (passed as the `dimensions` parameter on the embeddings call).
+- `[search] provider` — which `type = "search"` pool entry backs §6.1.1 `web.search`. Needed only to disambiguate a pool holding more than one; with exactly one, that one is used. The section is optional in full: with no search provider in the pool, `web.search` is simply not registered and the model is never offered it. **No key appears here** — the backend's `apiKeyFile` lives on its pool entry, so `config.toml` stays a choices-only, non-secret-bearing file.
+- `[search] maxPerTurn` / `[search] maxPerDay` — the LOCAL query caps (§6.1.1), enforced by personant itself rather than by watching a provider dashboard. Defaults 5 and 100.
 - `[recall] model` — (future, not yet built) the recall layer-3 judge model (`provider/model`). A separate reference from `[chat]` so the judge's **context ceiling can be tuned independently** of the main chat model's large window; a small dedicated window (~8K) is intentional (the judge's input is: a query + N ≤150-char candidate summaries). Default: a small-tier model (E2B). The empirical discipline: measure E2B → E4B → 26B against the embedding-only precision baseline; pick the smallest passing tier. See ARCHITECTURE.md §"Minimize infrastructural prompts" and §"Recall mechanisms" (layer-3 judgment).
 
 Model references are `"provider/model"`, split on the **first** `/` (the model portion may itself contain slashes, e.g. `openrouter/google/gemma-4-31b-it`).
@@ -3179,12 +3302,13 @@ Model references are `"provider/model"`, split on the **first** `/` (the model p
 **Cross-file validation.** At bootstrap the runtime validates `config.toml` against the loaded pool:
 
 - Each non-empty `[chat]`/`[embedding]` reference must be a well-formed `provider/model` string, and the named provider must exist in `providers.toml`. This is the full extent of the bootstrap cross-check: shape plus provider-existence.
-- Neither model id is statically checked against the provider's `defaultModel`. `defaultModel` is the **chat fallback**, not an embedding pin — a single provider legitimately serves both a chat model and a distinct embedding model, so gating the `[embedding]` reference on `defaultModel` equality would reject the common single-provider shape. The embedding model still matters (it defines the vector space, so changing it invalidates the persisted embedding cache), but that is a lifecycle concern, not a bootstrap cross-file equality check.
-- Neither model id is validated against the provider at use time by probing `/models` at startup. A chat or embedding model is resolved at use time against the provider's `/models` endpoint; a no-such-model condition (or an absent/invalid provider `defaultModel`) surfaces as a runtime error then, with the provider's `defaultModel` used as the chat fallback. This is checked only when the provider is actually used — the runtime does not probe every provider's `/models` at startup.
+- Neither model id is statically checked against the pool: a provider names no models at all (§8.2.1), and a single provider legitimately serves both a chat model and a distinct embedding model. The embedding model still matters (it defines the vector space, so changing it invalidates the persisted embedding cache), but that is a lifecycle concern, not a bootstrap cross-file check.
+- The chat model IS verified at session open against the resolved provider's `/models` — the one provider actually being used, never the whole pool. An unreachable or model-less `/models` degrades to a warning and an unverified model; a `/models` list that does not contain the configured model is a hard startup error naming what the provider does offer, because the alternative is a 404 at the first turn.
+- **`[search]` is deliberately unvalidated.** Absent, partial, or naming a backend this binary does not know must never refuse a config: the section gates ONE optional tool, and the correct handling of every bad value is to leave that tool unregistered (with a warning), not to block the session. This validator's failure mode is total — an over-strict check here has blocked a launch before.
 
 Any cross-file validation failure is fatal at bootstrap. (A faulted provider per §8.2.1 is *not* itself fatal — but a `config.toml` reference to a provider that faulted out of the pool fails this check, since it is no longer in the pool.)
 
-**Precedence** (chat model resolution): CLI flag > `config.toml` `[chat]` > the resolved provider's own `defaultModel`.
+**Precedence** (chat model resolution): CLI flag > `config.toml` `[chat]`. There is no third fallback — see §8.2.1 on why a provider names no models. A session with neither refuses to open, naming both fixes.
 
 #### 8.2.3 Environment variables
 

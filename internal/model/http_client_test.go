@@ -18,10 +18,9 @@ const testAPIKey = "sk-TEST-MUST-NOT-LEAK-1234567890abcdef"
 
 func newTestProvider(baseURL string) memops.Provider {
 	return memops.Provider{
-		Name:         "test",
-		BaseURL:      baseURL,
-		APIKey:       testAPIKey,
-		DefaultModel: "test-model",
+		Name:    "test",
+		BaseURL: baseURL,
+		APIKey:  testAPIKey,
 	}
 }
 
@@ -124,7 +123,7 @@ func TestHTTPClientNoAPIKeyOmitsAuthHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := memops.Provider{Name: "nokey", BaseURL: srv.URL, DefaultModel: "m"}
+	p := memops.Provider{Name: "nokey", BaseURL: srv.URL}
 	c := NewHTTPClient(p)
 	if _, err := c.Consult(context.Background(), Request{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}}); err != nil {
 		t.Fatalf("Consult: %v", err)

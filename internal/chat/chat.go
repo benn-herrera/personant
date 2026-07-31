@@ -131,17 +131,28 @@ func Run(opts Options) error {
 		fmt.Fprintf(opts.Stdout, "day barrier: sealed day(s) %v into permanent history\n", res.DaysSealed)
 	}
 
-	providers, faults, err := ops.LoadProviders(ctx)
+	rawProviders, faults, err := ops.LoadProviders(ctx)
 	if err != nil {
 		return fmt.Errorf("chat: load providers: %w", err)
 	}
+	// The port hands back the bare map; the named type is what carries
+	// the pool's own vocabulary (OfKind, Get).
+	providers := memops.Providers(rawProviders)
 	// A broken pool entry is non-fatal: warn and carry on, so a session
 	// that does not use the broken provider still starts.
 	for _, fault := range faults {
 		fmt.Fprintf(opts.Stderr, "warn: provider %q unavailable: %s\n", fault.Name, fault.Reason)
 	}
-	if len(providers) == 0 {
-		return errors.New("chat: no providers configured in providers.toml; edit it to add one (see spec §8.2.1)")
+	// The chat client may only be pointed at an INFERENCE provider. The
+	// pool now also holds non-inference endpoints (a §6.1.1 `type =
+	// "search"` backend), and the unfiltered default-selection fallback
+	// below picks the first provider by name — which would hand the chat
+	// client a search API the moment one sorts ahead of the LLM
+	// endpoints.
+	inference := providers.OfKind(memops.ProviderTypeInference)
+	if len(inference) == 0 {
+		return errors.New("chat: no inference providers configured in providers.toml; " +
+			"edit it to add one (a `type = \"search\"` entry is not a chat endpoint — see spec §8.2.1)")
 	}
 
 	cfg, err := ops.LoadConfig(ctx)
@@ -162,10 +173,11 @@ func Run(opts Options) error {
 	}
 
 	// Resolve the chat provider and model. Precedence: CLI flag >
-	// config.toml [chat] > the conventional default / provider's own
-	// defaultModel. config.toml's "<provider>/<model>" reference names
-	// both; ValidateConfig has already verified the reference is
-	// well-formed and names a provider in the pool.
+	// config.toml [chat] > the conventional default provider name.
+	// config.toml's "<provider>/<model>" reference names both;
+	// ValidateConfig has already verified the reference is well-formed
+	// and names a provider in the pool. Selection runs over the
+	// INFERENCE subset only.
 	providerName := opts.ProviderName
 	explicitProvider := opts.ProviderName != ""
 	chatModel := opts.Model
@@ -181,24 +193,28 @@ func Run(opts Options) error {
 	if providerName == "" {
 		providerName = memops.LocalProviderName
 	}
-	provider, ok := providers[providerName]
+	provider, ok := inference[providerName]
 	if !ok {
 		// An explicitly-requested provider (--provider) that doesn't resolve
 		// is a HARD bootstrap error: silently retargeting to another endpoint
 		// would send traffic to an unintended provider. Name the unknown value
 		// and list the available provider names (names only — never key
-		// material or apiKeyFile paths). config.toml [chat] pins are not
-		// checked here: ValidateConfig has already verified they name a
-		// provider in the pool, so a pinned name always resolves above.
+		// material or apiKeyFile paths). A named provider that exists but is
+		// not an inference endpoint gets its own message: "unknown" would be
+		// a lie, and the user would go looking for a typo that isn't there.
 		if explicitProvider {
-			return fmt.Errorf("chat: unknown provider %q; available providers: %s",
-				providerName, strings.Join(sortedProviderNames(providers), ", "))
+			if p, declared := providers[providerName]; declared {
+				return fmt.Errorf("chat: provider %q is a %q provider, not an inference endpoint; "+
+					"inference providers: %s", providerName, p.Kind(), strings.Join(sortedProviderNames(inference), ", "))
+			}
+			return fmt.Errorf("chat: unknown provider %q; available inference providers: %s",
+				providerName, strings.Join(sortedProviderNames(inference), ", "))
 		}
 		// No explicit provider and the conventional default ("local") isn't in
 		// the pool: keep the documented default-selection behavior and pick the
-		// first provider by name. The empty pool is already rejected above, so
-		// this always resolves.
-		provider, providerName = firstProvider(providers)
+		// first INFERENCE provider by name. The empty case is already rejected
+		// above, so this always resolves.
+		provider, providerName = firstProvider(inference)
 	}
 
 	cwd, err := os.Getwd()
@@ -274,7 +290,7 @@ func Run(opts Options) error {
 	// that is not statically validated — it is checked here, when the
 	// provider is actually used. Embedding is validated separately by
 	// ValidateConfig; this probe is chat-provider only.
-	effectiveModel, err := resolveChatModel(ctx, client, opts.Stderr, providerName, chatModel, provider.DefaultModel)
+	effectiveModel, err := resolveChatModel(ctx, client, opts.Stderr, providerName, chatModel)
 	if err != nil {
 		return err
 	}
@@ -300,6 +316,16 @@ func Run(opts Options) error {
 	if effectiveModel != "" {
 		state.Model = effectiveModel
 	}
+
+	// §6.1 tool surface. Built from config once, immutable thereafter.
+	// `web.fetch` always registers; `web.search` registers only when
+	// [search] carries a readable key, and its absence is silent — an
+	// empty slot in the inventory, not a fault.
+	toolReg, err := buildToolRegistry(cfg, providers, opts.Stderr)
+	if err != nil {
+		return err
+	}
+	state.Tools = toolReg
 
 	// §3.4 layer-2 embedding recall. The embedding provider+model are
 	// pinned explicitly via config.toml [embedding] model — never
@@ -341,12 +367,9 @@ func Run(opts Options) error {
 	// the closure summary, and an interactive resolver lets the user
 	// pick the retire / wip / defer outcome. Both must be installed for
 	// the per-turn decay scan to run; the curator reuses the session's
-	// chat client and resolved chat model.
-	closureModel := effectiveModel
-	if closureModel == "" {
-		closureModel = provider.DefaultModel
-	}
-	state.Curator = curator.NewHTTPCurator(client, closureModel)
+	// chat client and resolved chat model. resolveChatModel guarantees a
+	// non-empty model or an error, so there is nothing to fall back to.
+	state.Curator = curator.NewHTTPCurator(client, effectiveModel)
 	state.ClosureResolver = interactiveClosureResolver(lr, th)
 
 	banner := opts.Banner
@@ -512,27 +535,29 @@ func firstProvider(providers map[string]memops.Provider) (memops.Provider, strin
 // modelResolveTimeout caps the single /models probe at chat startup.
 const modelResolveTimeout = 30 * time.Second
 
-// resolveChatModel verifies the effective chat model against the
-// provider's /models endpoint and returns the model the session should
-// use.
+// resolveChatModel verifies the configured chat model against the
+// provider's /models endpoint and returns the model the session uses.
 //
-// The effective model is configModel when non-empty, else providerDefault.
+// There is NO provider-side fallback: a pool entry names no models (see
+// memops.Provider's doc — `defaultModel` was removed because a pinned id
+// goes stale as providers rotate their catalogues, and a stale fallback
+// fires exactly when the configured model is unavailable, which is when
+// it is least likely to still be right). The model comes from --model or
+// config.toml [chat] defaultModel, and nowhere else.
 //
 // Graceful degradation: if /models cannot be reached or reports no
-// models, the check is skipped — a warning is printed and the effective
+// models, the check is skipped — a warning is printed and the configured
 // model is returned unverified, so an offline provider does not block
 // the session.
 //
-// When /models returns a non-empty list:
-//   - effective model present → returned as-is.
-//   - configModel set but absent → warn and fall back to providerDefault;
-//     if providerDefault is present return it, otherwise fail.
-//   - configModel empty and providerDefault absent → fail: the provider
-//     does not offer its own default model.
-func resolveChatModel(ctx context.Context, client model.Client, stderr io.Writer, providerName, configModel, providerDefault string) (string, error) {
-	effective := configModel
-	if effective == "" {
-		effective = providerDefault
+// When /models returns a non-empty list, a configured model that is not
+// on it is a hard error naming what the provider does offer: silently
+// proceeding would produce a 404 at the first turn instead of a fixable
+// message at startup.
+func resolveChatModel(ctx context.Context, client model.Client, stderr io.Writer, providerName, configModel string) (string, error) {
+	if configModel == "" {
+		return "", fmt.Errorf("chat: no model configured for provider %q — set [chat] defaultModel "+
+			"in config.toml as \"%s/<model>\", or pass --model", providerName, providerName)
 	}
 
 	probeCtx, cancel := context.WithTimeout(ctx, modelResolveTimeout)
@@ -540,34 +565,23 @@ func resolveChatModel(ctx context.Context, client model.Client, stderr io.Writer
 	models, err := client.ListModels(probeCtx)
 	if err != nil {
 		fmt.Fprintf(stderr, "warn: could not verify model against provider %q /models: %v\n", providerName, err)
-		return effective, nil
+		return configModel, nil
 	}
 	if len(models) == 0 {
 		fmt.Fprintf(stderr, "warn: could not verify model against provider %q /models: provider reported no models\n", providerName)
-		return effective, nil
+		return configModel, nil
 	}
 
-	offered := make(map[string]struct{}, len(models))
+	offered := make([]string, 0, len(models))
 	for _, m := range models {
-		offered[m.ID] = struct{}{}
-	}
-	if _, ok := offered[effective]; ok {
-		return effective, nil
-	}
-
-	if configModel != "" {
-		fmt.Fprintf(stderr, "warn: model %q is not offered by provider %q; falling back to provider default %q\n",
-			configModel, providerName, providerDefault)
-		if providerDefault == "" {
-			return "", fmt.Errorf("chat: configured model %q unavailable and provider %q has no default model", configModel, providerName)
+		if m.ID == configModel {
+			return configModel, nil
 		}
-		if _, ok := offered[providerDefault]; !ok {
-			return "", fmt.Errorf("chat: configured model %q unavailable and provider %q default %q is also not offered", configModel, providerName, providerDefault)
-		}
-		return providerDefault, nil
+		offered = append(offered, m.ID)
 	}
-
-	return "", fmt.Errorf("chat: provider %q does not offer its own default model %q", providerName, providerDefault)
+	sort.Strings(offered)
+	return "", fmt.Errorf("chat: provider %q does not offer model %q; it offers: %s",
+		providerName, configModel, strings.Join(offered, ", "))
 }
 
 // promptLine reads the next REPL line. An Esc-retracted input is

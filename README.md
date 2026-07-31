@@ -162,8 +162,8 @@ Personant stores all state under `~/.personant/` (override with `$PERSONANT_HOME
   directives/          tunable behavior (defaults / user / per-project)
   logs/                YYYY-MM-DD.log, plain text, append-only; archive/ for old months
   history              REPL line-edit history (deduplicated, capped)
-  providers.toml       provider pool connectivity catalog
-  config.toml          active chat + embedding provider choices
+  providers.toml       endpoint pool: inference + search connectivity catalog
+  config.toml          active chat / embedding / search choices
   version.toml         on-disk layout revision (`format = N`)
   api_keys/            secret-bearing key files — never read by agents
   archive/             deep cold archive index (recoverable git-based archival)
@@ -228,6 +228,8 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full architectural orientation.
 | Package | Author / Org | License | Use |
 |---|---|---|---|
 | `github.com/BurntSushi/toml` | BurntSushi | MIT | `providers.toml` and `config.toml` parsing |
+| `codeberg.org/readeck/go-readability/v2` | Readeck contributors | MIT | `web.fetch` — boilerplate-stripped article extraction |
+| `github.com/JohannesKaufmann/html-to-markdown/v2` | Johannes Kaufmann | MIT | `web.fetch` — HTML → Markdown conversion |
 | `github.com/go-git/go-git/v5` | go-git contributors | Apache 2.0 | `internal/autogit` — autonomic git operations on `~/.personant/` |
 | `github.com/peterh/liner` | Peter Harris | MIT | `internal/chat` — REPL line editing + persistent history |
 | `github.com/spf13/cobra` | Steve Francia | Apache 2.0 | CLI subcommand dispatch (`cmd/`) |

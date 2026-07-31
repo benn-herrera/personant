@@ -1,6 +1,6 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build fmt fmt-check test test-nocache test-be test-fe fe-scope-check test-run test-race test-changed cover sim sim-completeness-rung sim-tokenceiling-rung sim-shadow-slow-test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
+.PHONY: all build fmt fmt-check add-dependency test test-nocache test-be test-fe fe-scope-check test-run test-race test-changed cover sim sim-completeness-rung sim-tokenceiling-rung sim-shadow-slow-test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
 
 all: build
 
@@ -80,6 +80,22 @@ fmt-check:
 update-dependencies: update-agents-dependency
 	go mod tidy
 	go get -u ./...
+	go mod tidy
+
+# add-dependency pins ONE vetted module into go.mod/go.sum. It exists so
+# adding a dependency has a make target like every other toolchain
+# operation — `update-dependencies` is the wrong tool (its `go get -u ./...`
+# upgrades the whole graph, which is unrelated churn on a commit whose
+# subject is one new import).
+#
+#   make add-dependency MOD=example.com/mod/v2@v2.1.2
+#
+# The AGENTS.md vetting checklist (release date, importers, deprecation
+# status, transitive dep count, license) is a PRECONDITION of running this,
+# not something it can check.
+add-dependency:
+	@[ -n "$(MOD)" ] || { echo "usage: make add-dependency MOD=<module>@<version>"; exit 1; }
+	go get $(MOD)
 	go mod tidy
 
 # recall-madlibs regenerates the derived recall-fidelity query sets

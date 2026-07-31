@@ -2,28 +2,39 @@
 baseurl = "http:127.0.0.1:4000/v1"
 # do not use for actual paid service keys or any services exposed to the WAN!
 apiKeyUnsafe = "somekey"
-# not actually required - models/ endpoint will be used to populate list
-# but allows for user specification
-defaultModel = "small-local-model"
+type = "inference"
+api = "openai"
 
-[dummyrouter]
-baseUrl = "https://dummyrouter.ai/api/v1"
+[dummy-router]
+baseUrl = "https://dummy-router.ai/api/v1"
 # recommended usage
-apiKeyFile = "api_keys/dummyrouter.key"
-defaultModel = "google/gemma-4-31b-it"
+apiKeyFile = "api_keys/dummy-router.key"
+type = "inference"
+api = "openai"
 
-[superinf]
-baseUrl = "https://api.superinf.ai/v1"
+[dummy-inference]
+baseUrl = "https://api.dummy-inference.ai/v1"
 # recommended usage
-apiKeyFile = "api_keys/superinf.txt"
-defaultModel = "gpt-5.4-2026-03-05"
+apiKeyFile = "api_keys/dummy-inference.key"
+type = "inference"
+api = "openai"
 
-[dummy-emb-provider]
-baseUrl = "https://dummy-emb-provider.com/api/v1"
-apiKeyFile = "api_keys/dummy-emb.key"
-defaultModel = "dummy-creator/dummy-emb-model"
+[dummy-embedding]
+baseUrl = "https://dummy-embedding.com/api/v1"
+apiKeyFile = "api_keys/dummy-embedding.key"
+type = "inference"
+api = "openai"
+
+# A search backend (spec §6.1.1 web.search) — NOT an inference endpoint.
+# `type` is what keeps it out of chat/embedding/model-list selection.
+[dummy-search]
+baseUrl = "https://api.dummy-search.example/search"
+apiKeyFile = "api_keys/dummy-search.key"
+type = "search"
+api = "exa"
 
 [broken-provider]
 baseUrl = "https://broken-provider.com/api/v1"
 apiKeyFile = "api_keys/non-existent.key"
-defaultModel = "broken-maker/broken-model"
+type = "inference"
+api = "openai"
