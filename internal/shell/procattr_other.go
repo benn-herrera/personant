@@ -13,6 +13,10 @@ import (
 // only Ctrl-C forwarding is unavailable.
 func setProcessGroup(*exec.Cmd) {}
 
+// confirmProcessGroup has nothing to confirm where there are no process
+// groups; interrupt forwarding is unavailable here in any case.
+func confirmProcessGroup(int) {}
+
 // groupInterruptSupported is false here, so Runner.Interrupt declines the
 // interrupt and the REPL's ordinary Ctrl-C handling still applies. A
 // silently-swallowed Ctrl-C would be worse than an un-interruptible

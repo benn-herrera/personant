@@ -300,3 +300,97 @@ func TestNewRunnerShellResolution(t *testing.T) {
 		t.Errorf("$SHELL: got %q want /bin/zsh", got)
 	}
 }
+
+// The interrupt-ownership invariant, driven deterministically through the
+// HookChildStarting seam: a SIGINT that lands after Run commits to a
+// command but before the child's process group exists is CLAIMED by the
+// runner (so the REPL never routes it to session-cancel) and DELIVERED to
+// the child the instant the group lands.
+//
+// This is the window that a real Ctrl-C hit under load. Racing a
+// goroutine against it reproduces it only on a busy machine; standing
+// inside it reproduces it every run.
+func TestInterrupt_ClaimsAndDeliversInTheChildStartWindow(t *testing.T) {
+	if !groupInterruptSupported {
+		t.Skip("process-group interrupt unsupported on this platform")
+	}
+	r := newTestRunner(t, t.TempDir())
+
+	var claimed, running bool
+	disarm := ArmHook(HookChildStarting, func() {
+		// Inside the window: committed to a command, no pgid yet.
+		running = r.Running()
+		claimed = r.Interrupt()
+	})
+	defer disarm()
+
+	done := make(chan Result, 1)
+	go func() {
+		res, err := r.Run(context.Background(), ModeFire, "sleep 30", nil)
+		if err != nil {
+			t.Errorf("Run: %v", err)
+		}
+		done <- res
+	}()
+
+	var res Result
+	select {
+	case res = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("an interrupt claimed in the child-start window never reached the child")
+	}
+	if !running {
+		t.Error("Running() must be true from the moment Run commits to a child")
+	}
+	if !claimed {
+		t.Error("Interrupt() must CLAIM the signal in the child-start window; " +
+			"reporting false is what lets a Ctrl-C fall through and kill the session")
+	}
+	if res.ExitCode >= 0 {
+		t.Errorf("expected a signal-killed exit status, got %d", res.ExitCode)
+	}
+}
+
+// Outside the window the signal belongs to the session: with no command
+// in flight Interrupt declines it, and it declines again once the child
+// has been reaped.
+func TestInterrupt_DeclinesWithNoCommandInFlight(t *testing.T) {
+	r := newTestRunner(t, t.TempDir())
+	if r.Interrupt() {
+		t.Error("Interrupt() must decline when no command is in flight")
+	}
+	if r.Running() {
+		t.Error("Running() must be false when no command is in flight")
+	}
+	if _, err := r.Run(context.Background(), ModeFire, "true", nil); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if r.Interrupt() {
+		t.Error("Interrupt() must decline once the child has been reaped")
+	}
+	if r.Running() {
+		t.Error("Running() must be false once the child has been reaped")
+	}
+}
+
+// A child that never starts must not strand the claim: an interrupt taken
+// in the window is discarded WITH the failed command (the returned error
+// is what tells the user it did not run), and the next signal is the
+// session's again.
+func TestInterrupt_ClaimReleasedWhenTheChildNeverStarts(t *testing.T) {
+	r := newTestRunner(t, t.TempDir())
+	r.shell = filepath.Join(t.TempDir(), "no-such-shell")
+
+	disarm := ArmHook(HookChildStarting, func() { r.Interrupt() })
+	defer disarm()
+
+	if _, err := r.Run(context.Background(), ModeFire, "true", nil); err == nil {
+		t.Fatal("expected an error when the shell binary does not exist")
+	}
+	if r.Running() {
+		t.Error("the claim must be released when the child never started")
+	}
+	if r.Interrupt() {
+		t.Error("Interrupt() must decline once the failed command is over")
+	}
+}

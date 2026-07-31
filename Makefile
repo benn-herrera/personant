@@ -155,7 +155,8 @@ recall-corpus-fetch:
 # TestShadowLayerB_ReverseDivergence, plus the fixed-24h #98 embedding
 # head-to-head machinery rungs (#94 R4 suite-budget move). All ALWAYS COMPILE
 # (part of the normal `make test` compile) but their wall-clock would blow
-# `make test`'s 30m sim-package timeout budget, so EXECUTION is opted in here.
+# `make test`'s per-package timeout budget ($(GOTESTTIMEOUT)), so EXECUTION is
+# opted in here.
 # Without the env var they skip and only the fast default-suite rungs run.
 # -timeout 0 disables go test's default ceiling for these deliberate, watched
 # long rungs (a runaway is the user's to Ctrl-C).
@@ -188,13 +189,35 @@ sim-shadow-slow-test: build recall-madlibs
 # nondeterminism, an observed -v report).
 GOTESTCOUNT :=
 
+# GOTESTTIMEOUT is the per-package ceiling for every target that can reach the
+# sim package — `test` (and its test-be/test-nocache aliases), `test-run`, and
+# `test-changed`. The sim's in-suite mock rungs (the 1d TestSim, the multi-day
+# #120 daily-series + #121 day-off harness guards) push that one package far
+# past go test's default 10m per-package budget; every other package finishes
+# in seconds.
+#
+# It was 30m, and 30m was too tight — measured, not guessed. On a quiet machine
+# internal/scenarios/sim runs 1508.8s (verified, exit 0), which left 16%
+# headroom under the 1800s ceiling. Under contention that headroom vanished and
+# the package hit `panic: test timed out after 30m0s`, turning the whole
+# checkpoint gate red for a reason unrelated to correctness — and a false red on
+# this gate costs a 30-minute re-run to disprove.
+#
+# 60m is 2.4x the measured healthy run: enough to absorb a machine that is
+# roughly twice as slow as the quiet-run baseline, which is what contention on a
+# 14-core box actually looks like. The tradeoff is accepted deliberately and it
+# is one-sided in the right direction: a GENUINE hang is now detected 30 minutes
+# later than before, which is annoying once, while a false red is a measured
+# 30-minute re-run plus the doubt it casts on an otherwise-green change. A hang
+# is also rarely diagnosed by waiting for the ceiling — it is diagnosed by
+# noticing the run stopped making progress.
+#
+# test-race deliberately does NOT use this: see its own comment.
+GOTESTTIMEOUT := 60m
+
 test: build fmt-check recall-madlibs
 	go vet $(GOPKGS)
-	# -timeout 30m: the sim package's in-suite mock rungs (the 1d TestSim, the
-	# multi-day #120 daily-series + #121 day-off harness guards) push that one
-	# package past go test's default 10m per-package budget; 30m bounds a genuine
-	# hang without failing a healthy long run. Other packages finish in seconds.
-	go test $(GOPKGS) $(GOTESTCOUNT) -timeout 30m
+	go test $(GOPKGS) $(GOTESTCOUNT) -timeout $(GOTESTTIMEOUT)
 
 # test-nocache is `test` with the test cache DEFEATED — the same full suite, the
 # same gate semantics, every package genuinely re-executed (~29 min). It is the
@@ -308,7 +331,7 @@ test-fe: build fmt-check fe-scope-check
 #   make test-run PKG=./internal/recall/scoring RUN='TestScanChunks'
 # PKG/RUN reuse the bench vars (defaulted below); pass PKG explicitly.
 test-run: build recall-madlibs
-	go test $(PKG) -run '$(RUN)' -count=1 -timeout 30m
+	go test $(PKG) -run '$(RUN)' -count=1 -timeout $(GOTESTTIMEOUT)
 
 # RACEPKGS is the package set the race detector is pointed at. Derived
 # EMPIRICALLY, not by taste: a package earns a place here if it launches a
@@ -376,8 +399,15 @@ RACEPKGS := ./internal/chat/... ./internal/recall/measure/... ./internal/model/.
 # tool that sits beside them.
 #
 # -count=1 defeats the test cache (a cached PASS proves nothing about a run
-# that never happened). -timeout 30m gives the raced packages the same
-# hang-bounding budget `test` gives the sim.
+# that never happened).
+#
+# -timeout 30m is a LITERAL here, deliberately not $(GOTESTTIMEOUT). That
+# variable was raised to 60m for the targets that can reach the sim package;
+# RACEPKGS EXCLUDES the sim by construction (see the scoping rule above), so
+# nothing in this target is anywhere near the ceiling — the whole run is ~70s,
+# and 30m is already 25x that. Inheriting the raise would buy no margin this
+# target lacks while delaying hang detection on the one target whose entire
+# selling point is a 70-second turnaround.
 test-race: build recall-madlibs
 	go test -race $(RACEPKGS) -count=1 -timeout 30m
 
@@ -474,7 +504,7 @@ test-changed: build recall-madlibs
 	echo "test-changed: selected $$(echo $$sel | wc -w | tr -d ' ') package(s):"; \
 	for p in $$sel; do echo "  $$p"; done; \
 	if [ -n "$(LIST)" ]; then echo "test-changed: LIST=1 — not running."; exit 0; fi; \
-	go test $$sel $(GOTESTCOUNT) -timeout 30m
+	go test $$sel $(GOTESTCOUNT) -timeout $(GOTESTTIMEOUT)
 
 # bench runs benchmarks only (no unit tests) for a package selected by
 # PKG, with a regexp selected by BENCH. Defaults target the recall hot

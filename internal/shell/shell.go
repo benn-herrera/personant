@@ -159,6 +159,34 @@ type Result struct {
 //
 // One Runner per session. Run is called only from the REPL goroutine;
 // Interrupt is called from the signal-handler goroutine.
+//
+// # Interrupt-ownership invariant
+//
+//	From the moment Run commits to a `$`/`#` command until that child is
+//	reaped, a SIGINT must NEVER reach the session-cancel path.
+//
+// This is an INVARIANT, not a best effort, because the failure is
+// user-hostile and silent: chat.onSignal asks Interrupt first and falls
+// through to "end the session" when it declines, so any instant in which
+// a command is running and Interrupt says otherwise is an instant in
+// which Ctrl-C quits personant instead of killing the command — the
+// §4.3.3 design's stated non-goal.
+//
+// The obvious implementation — publish the child's process group as early
+// as possible and treat "have pgid" as "have child" — cannot hold it. It
+// makes the bad window SMALL rather than EMPTY, and a small window is
+// exactly what a loaded machine finds. Ownership is therefore tracked
+// separately from deliverability, in three states:
+//
+//	inFlight=false, pgid=0  no command; the signal is the session's
+//	inFlight=true,  pgid=0  committed, group not yet in existence: the
+//	                        signal is CLAIMED and QUEUED
+//	inFlight=true,  pgid>0  running: the signal is forwarded at once
+//
+// Claiming without a pgid is what makes the window empty; queuing is what
+// keeps the claimed signal from being swallowed. The claim is opened
+// before anything that could block or fail, and closed atomically with
+// the pgid at reap.
 type Runner struct {
 	shell      string
 	captureMax int
@@ -166,10 +194,17 @@ type Runner struct {
 	mu sync.Mutex
 	// dir is the tracked shell cwd, adopted from each command's epilogue.
 	dir string
-	// pgid is the process group of the in-flight child, or 0 when no
-	// command is running. Guarded by mu because the signal handler reads
-	// it concurrently with Run writing it.
+	// inFlight spans the whole ownership window above: set when Run
+	// commits to a command, cleared when its child has been reaped (or
+	// when the child could never be created at all).
+	inFlight bool
+	// pgid is the process group of the in-flight child, or 0 when there is
+	// no child to signal — which includes the interval between committing
+	// to a command and the group existing.
 	pgid int
+	// pendingInterrupt records an interrupt claimed while pgid was still 0.
+	// publishPGID delivers it the instant the group lands.
+	pendingInterrupt bool
 }
 
 // NewRunner builds a session's runner. dir is the initial shell cwd —
@@ -229,6 +264,13 @@ func (r *Runner) Run(ctx context.Context, mode Mode, command string, term io.Wri
 		term = io.Discard
 	}
 
+	// The commit point. Everything below — the pipe, the fork, the exec —
+	// can block or fail, and from here on an interrupt belongs to the
+	// command. The deferred release is the backstop that closes the window
+	// on every early return; the happy path releases earlier, at the reap.
+	r.claimInterrupts()
+	defer r.releaseInterrupts()
+
 	trailerR, trailerW, err := os.Pipe()
 	if err != nil {
 		return Result{Dir: r.Dir()}, fmt.Errorf("shell: trailer pipe: %w", err)
@@ -260,18 +302,23 @@ func (r *Runner) Run(ctx context.Context, mode Mode, command string, term io.Wri
 
 	setProcessGroup(cmd)
 
+	at(HookChildStarting)
+
 	if err := cmd.Start(); err != nil {
 		trailerW.Close()
+		// No child was ever created, so an interrupt claimed in the window
+		// above has nothing to kill. The deferred release drops it — NOT
+		// silently: the returned error is what tells the user the command
+		// did not run, which is the outcome the interrupt was asking for.
+		// Handing it back to the session instead would quit personant on a
+		// keypress aimed at a command, which is the whole point of the
+		// invariant.
 		return Result{Dir: r.Dir()}, fmt.Errorf("shell: start %s: %w", r.shell, err)
 	}
-	// Publish the process group FIRST — before any other post-start work.
-	// Interrupt() reports "no child" until this lands, so every
-	// instruction between Start and here is a window in which a Ctrl-C
-	// would be treated as a session interrupt while a child is in fact
-	// running. The window cannot be closed entirely (the child is
-	// executing the moment Start returns), but nothing else belongs
-	// inside it.
-	r.setPGID(cmd.Process.Pid)
+	// Make the group exist for the PARENT before publishing it, then
+	// publish — which also delivers an interrupt claimed before now.
+	confirmProcessGroup(cmd.Process.Pid)
+	r.publishPGID(cmd.Process.Pid)
 
 	// The parent's copy of the write end must go, or the trailer read
 	// below never sees EOF.
@@ -284,7 +331,11 @@ func (r *Runner) Run(ctx context.Context, mode Mode, command string, term io.Wri
 	}()
 
 	waitErr := cmd.Wait()
-	r.setPGID(0)
+	// The child is reaped: the invariant's window ends exactly here, so the
+	// signal goes back to meaning "end the session" from this instruction
+	// on. The trailer wait below can take seconds when a backgrounded
+	// grandchild holds fd 3, and Ctrl-C must not be dead through it.
+	r.releaseInterrupts()
 
 	res := Result{ExitCode: exitCodeOf(cmd), Dir: r.Dir()}
 	if capBuf != nil {
@@ -317,14 +368,19 @@ func (r *Runner) Run(ctx context.Context, mode Mode, command string, term io.Wri
 	return res, nil
 }
 
-// Interrupt forwards SIGINT to the process group of the in-flight child,
-// if there is one, and reports whether it signalled anything.
+// Interrupt claims a SIGINT on behalf of an in-flight `$`/`#` command and
+// reports whether it did. A claimed signal is forwarded to the child's
+// process group, or QUEUED when the group does not exist yet.
 //
-// This is what keeps Ctrl-C meaning "kill the running command" while a
-// `$`/`#` child runs, rather than the REPL's "end the session". The child
-// runs in its OWN process group (see setProcessGroup), so the kernel does
-// not deliver the terminal's SIGINT to it — forwarding here is the whole
-// delivery path, and personant's own handler is left untouched.
+// The return value is the load-bearing part: chat.onSignal ends the
+// session whenever this reports false, so declining while a command is in
+// flight — for any reason, including "the child was started a microsecond
+// ago" — quits personant on a keypress the user aimed at the command.
+// Hence the invariant on Runner: in flight is claimed, full stop.
+//
+// The child runs in its OWN process group (see setProcessGroup), so the
+// kernel does not deliver the terminal's SIGINT to it — forwarding here is
+// the whole delivery path, and personant's own handler is left untouched.
 //
 // Called from the signal-handler goroutine.
 func (r *Runner) Interrupt() bool {
@@ -332,36 +388,75 @@ func (r *Runner) Interrupt() bool {
 		return false
 	}
 	r.mu.Lock()
-	pgid := r.pgid
+	inFlight, pgid := r.inFlight, r.pgid
+	if inFlight && pgid <= 0 {
+		// Committed to a command whose process group is not in existence
+		// yet. Take the signal anyway and leave it for publishPGID, which
+		// delivers it the moment there is something to deliver it to.
+		r.pendingInterrupt = true
+	}
 	r.mu.Unlock()
-	if pgid <= 0 {
+
+	if !inFlight {
 		return false
 	}
-	// A group that already exited (the child finished between the signal
-	// arriving and this call) reports ESRCH. Nothing to do, but the
-	// interrupt WAS consumed by the shell command as far as the user is
-	// concerned, so report true and leave the session alone.
-	_ = interruptGroup(pgid)
+	if pgid > 0 {
+		// A group that already exited (the child finished between the signal
+		// arriving and this call) reports ESRCH. Nothing to do, but the
+		// interrupt WAS consumed by the shell command as far as the user is
+		// concerned, so report true and leave the session alone.
+		_ = interruptGroup(pgid)
+	}
 	return true
 }
 
-// Running reports whether a child's process group is currently
-// published — i.e. whether Interrupt() would have something to signal.
+// Running reports whether a `$`/`#` command is in flight — equivalently,
+// whether Interrupt() would claim the signal for the command instead of
+// letting it reach the session.
 //
-// It exists because "the child process exists" and "Interrupt can reach
-// it" are not the same instant, and only the second one is actionable.
-// A caller (or a test) that waits on evidence from the child itself is
-// synchronizing on the wrong event.
+// It spans the WHOLE ownership window, so it is already true in the
+// instant before the child's process group exists. That is deliberate:
+// "the child process exists" and "Interrupt owns the signal" are not the
+// same event, and only the second one is actionable.
 func (r *Runner) Running() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.pgid > 0
+	return r.inFlight
 }
 
-func (r *Runner) setPGID(pid int) {
+// claimInterrupts opens the ownership window. Called once per Run, before
+// anything that can block or fail.
+func (r *Runner) claimInterrupts() {
 	r.mu.Lock()
-	r.pgid = pid
+	r.inFlight, r.pgid, r.pendingInterrupt = true, 0, false
 	r.mu.Unlock()
+}
+
+// releaseInterrupts closes the window, handing SIGINT back to the session.
+// Idempotent — Run calls it at the reap and again on the deferred backstop
+// path — and it clears inFlight and pgid TOGETHER, so no observer can see
+// a runner that owns the signal but has nothing to signal.
+func (r *Runner) releaseInterrupts() {
+	r.mu.Lock()
+	r.inFlight, r.pgid, r.pendingInterrupt = false, 0, false
+	r.mu.Unlock()
+}
+
+// publishPGID records the started child's process group and delivers an
+// interrupt that was claimed before the group existed.
+//
+// Delivery happens outside the lock; a group whose only member has already
+// exited reports ESRCH, which is the right outcome anyway — the interrupt
+// asked for a dead command and got one.
+func (r *Runner) publishPGID(pgid int) {
+	r.mu.Lock()
+	r.pgid = pgid
+	pending := r.pendingInterrupt
+	r.pendingInterrupt = false
+	r.mu.Unlock()
+	if pending {
+		_ = interruptGroup(pgid)
+	}
 }
 
 // adoptDir takes the epilogue's reported cwd as the new tracked cwd and

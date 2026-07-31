@@ -342,7 +342,19 @@ In progress:
   persistence that §4.4.3 already makes moot, while per-command execution
   gets exit codes for free and cannot hang the session). The §4.5.1 shell
   cwd is tracked by a **cwd-reporting epilogue on a dedicated fd**, never by
-  parsing `cd`, and stays distinct from the active project root. The child
+  parsing `cd`, and stays distinct from the active project root. Ctrl-C
+  during a command is an **invariant, not a best effort** (front end
+  0.0.10, SPEC §4.4.2): from the runner's commit point until the child is
+  reaped a SIGINT never reaches the session-cancel path. Interrupt
+  OWNERSHIP is tracked separately from DELIVERABILITY — the runner claims
+  the signal before `cmd.Start`, and an interrupt claimed before the
+  process group exists is queued and delivered the instant it does, because
+  publishing the pgid earlier only makes the bad window smaller and a small
+  window is what a loaded machine finds. The deterministic regression test
+  drives a SIGINT into that window through `shell.ArmHook` /
+  `shell.HookChildStarting` — the same Arm/At shape as `internal/crashpoint`
+  but a rendezvous rather than a panic (and deliberately NOT registered
+  there, since crashpoint's registry feeds the R4 coverage gate). The child
   gets its **own process group** so Ctrl-C kills the command rather than the
   session; the **startup terminal mode** is restored around the child
   (liner holds `ICANON`/`ECHO` off for the whole session, so a naively

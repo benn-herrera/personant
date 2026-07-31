@@ -1964,6 +1964,28 @@ semantics: the running command dies and the prompt returns. The session's
 interrupt count is untouched, so a later Ctrl-C at the prompt still behaves
 as the first one.
 
+This is an **invariant, not a best effort**:
+
+> From the moment the runner commits to a `$`/`#` command until that
+> child is reaped, a SIGINT must **never** reach the session-cancel path.
+
+The stronger statement is required because the REPL asks the runner first
+and ends the session whenever the runner declines, so *any* instant in
+which a command is running and the runner says otherwise is an instant in
+which Ctrl-C quits personant instead of killing the command. Publishing
+the child's process group as early as possible and treating "have a pgid"
+as "have a child" makes that window small rather than empty, and a small
+window is what a loaded machine finds. **Interrupt ownership is therefore
+tracked separately from deliverability**: the runner claims the signal
+from the commit point, and an interrupt claimed before the process group
+exists is **queued** and delivered the instant it does. A claimed
+interrupt is never silently dropped; the one case where it cannot be
+delivered is a child that failed to start at all, where the command's
+own error is the report and there is nothing left to kill. The parent
+re-asserts `setpgid` after `fork` so the group provably exists before it
+is published, closing the fork/exec race in which `kill(-pid)` would find
+no group.
+
 **Terminal state.** `liner` applies its terminal mode once for the whole
 session (`ICANON`/`ECHO` off from the first prompt until close, §4.3.1/§4.3.3),
 so a naively-spawned child would inherit a terminal with no echo and no line

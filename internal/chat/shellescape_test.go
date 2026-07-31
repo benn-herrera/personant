@@ -317,12 +317,13 @@ func TestOnSignal_ShellChildTakesTheInterrupt(t *testing.T) {
 		}
 	}()
 
-	// Wait until the runner has PUBLISHED the child's process group, not
-	// merely until the child has run: Interrupt() reports "no child"
-	// until the pgid lands, so signalling on evidence from the child
-	// (the marker file) races the publication and, under load, loses.
-	// The marker is still waited on first — it proves the child really
-	// started rather than the runner having failed silently.
+	// Wait on BOTH the marker and Running(). The marker proves the child
+	// really started rather than the runner having failed silently;
+	// Running() is the runner's own statement that it owns the interrupt.
+	// Since the ownership window now opens at Run's commit point rather
+	// than at pgid publication, this loop no longer races anything — the
+	// window-interior case is covered deterministically by the seam-driven
+	// test below, which is where a load-dependent failure would surface.
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		if _, err := os.Stat(marker); err == nil && h.sh.Running() {
@@ -356,6 +357,64 @@ func TestOnSignal_ShellChildTakesTheInterrupt(t *testing.T) {
 	}
 	if n := h.ctl.interrupts.Load(); n != 1 {
 		t.Errorf("interrupt count: got %d want 1 (a forwarded interrupt must not have pre-charged it)", n)
+	}
+}
+
+// The same guarantee, driven DETERMINISTICALLY at the instant that used
+// to break it: a Ctrl-C delivered after the runner has committed to the
+// command but before the child's process group exists.
+//
+// TestOnSignal_ShellChildTakesTheInterrupt above synchronizes on the
+// window being OVER, so it can only observe the good case. This one
+// stands inside the window via the shell.HookChildStarting seam and
+// asserts the invariant there: from commit to reap, a SIGINT never
+// reaches the session-cancel path. Under load the old code took that path
+// and Ctrl-C quit personant instead of killing the command.
+func TestOnSignal_InterruptInChildStartWindowSparesTheSession(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	h := newShellHarness(t)
+	cancelled := false
+	h.ctl.cancel = func() { cancelled = true }
+
+	fired := make(chan struct{})
+	disarm := shell.ArmHook(shell.HookChildStarting, func() {
+		close(fired)
+		h.ctl.onSignal()
+	})
+	defer disarm()
+
+	done := make(chan shell.Result, 1)
+	go func() {
+		res, err := h.sh.Run(context.Background(), shell.ModeFire, "sleep 30", nil)
+		if err != nil {
+			t.Errorf("Run: %v", err)
+		}
+		done <- res
+	}()
+
+	var res shell.Result
+	select {
+	case res = <-done:
+	case <-time.After(10 * time.Second):
+		// Naming the session state here is what makes the failure diagnostic
+		// rather than merely late: cancelled=true says the signal did not
+		// just miss the child, it went to the session-cancel path.
+		t.Fatalf("the interrupt did not reach the shell child (session cancelled=%v)", cancelled)
+	}
+	select {
+	case <-fired:
+	default:
+		t.Fatal("the child-start hook never ran — the seam is not wired")
+	}
+
+	if cancelled {
+		t.Error("a Ctrl-C in the child-start window must NOT cancel the session")
+	}
+	if n := h.ctl.interrupts.Load(); n != 0 {
+		t.Errorf("session interrupt count must be untouched, got %d", n)
+	}
+	if res.ExitCode >= 0 {
+		t.Errorf("the command should have been signal-killed, got exit %d", res.ExitCode)
 	}
 }
 
