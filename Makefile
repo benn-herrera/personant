@@ -56,8 +56,17 @@ GOSRCDIRS := cmd internal
 # file target with no prerequisites no-ops once bin/personant exists, so an
 # edit-then-`make build` check silently passed against a stale binary. Compile
 # is cheap; correctness of the gate beats a stale-file micro-optimization.
+#
+# It compiles in TWO steps and both are load-bearing. `go build $(GOPKGS)`
+# type-checks EVERY package; building only ./cmd walks the import graph from
+# main, so a package nothing imports yet is never compiled and an edit gate run
+# against it passes vacuously (internal/term was written and "gated" that way).
+# Multi-package `go build` discards its objects — it is exactly a compile check.
+# It runs first so the broadest check fails fastest; the linked binary follows,
+# nearly free off the build cache.
 build:
 	@mkdir -p $(BINDIR)
+	go build $(GOPKGS)
 	go build -o $(BINDIR)/personant ./cmd
 
 # fmt canonically formats every Go source root in place. fmt-check is its
