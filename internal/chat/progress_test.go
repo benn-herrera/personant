@@ -20,8 +20,41 @@ import (
 // the test exercises the same S1→S2 composition production uses rather
 // than a parallel one.
 type fakeDevice struct {
-	out  *bytes.Buffer
+	out  io.Writer
 	size term.Size
+}
+
+// syncBuffer is the fixture's byte sink.
+//
+// term serializes its own writers under one lock, but that lock does not
+// extend to a TEST's reads, and the animation goroutine is still writing
+// while an assertion inspects the stream. So the sink carries its own —
+// and, because every escape sequence term emits leaves it in a single
+// Write, a read taken under this lock can never land inside one. That is
+// the precondition screentest.Feed states.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) Bytes() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return bytes.Clone(s.b.Bytes())
+}
+
+func (s *syncBuffer) String() string { return string(s.Bytes()) }
+
+func (s *syncBuffer) Len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Len()
 }
 
 func (d *fakeDevice) Read([]byte) (int, error)    { return 0, io.EOF }
@@ -40,7 +73,10 @@ func (d *fakeDevice) Close() error             { return nil }
 type progressFixture struct {
 	p   *progress
 	tm  *term.Terminal
-	out *bytes.Buffer
+	out *syncBuffer
+	// size is the geometry the injected device reports, kept so the screen
+	// model in render_test.go can be built with the same one.
+	size term.Size
 
 	mu        sync.Mutex
 	ticks     chan time.Time // most recently created ticker channel
@@ -49,15 +85,24 @@ type progressFixture struct {
 	elapsedNS atomic.Int64
 }
 
+// fixtureSize is the geometry a fixture gets unless the test is ABOUT the
+// geometry (the narrow-terminal checklist item passes its own).
+var fixtureSize = term.Size{Cols: 80, Rows: 24}
+
 // newProgressFixture builds an indicator over a terminal that is
 // interactive (an injected platform) or not (buffers, the plain backend).
 // ansi selects whether that terminal accepts the erase sequence.
-func newProgressFixture(t *testing.T, interactive, ansi bool) *progressFixture {
+//
+// Stdout and Stderr are ONE buffer on purpose. On a real terminal both fds
+// are the same tty, and term serializes them under one lock precisely so
+// that an error mid-stream cannot interleave into the indicator's line —
+// splitting them here would throw away the ordering that claim is about.
+func newProgressFixture(t *testing.T, interactive, ansi bool, size term.Size) *progressFixture {
 	t.Helper()
-	f := &progressFixture{out: &bytes.Buffer{}}
-	opts := term.Options{Stdout: f.out}
+	f := &progressFixture{out: &syncBuffer{}, size: size}
+	opts := term.Options{Stdout: f.out, Stderr: f.out}
 	if interactive {
-		opts.Platform = term.NewUnixPlatform(&fakeDevice{out: f.out, size: term.Size{Cols: 80, Rows: 24}})
+		opts.Platform = term.NewUnixPlatform(&fakeDevice{out: f.out, size: size})
 		if ansi {
 			opts.TermEnv = "xterm-256color"
 		}
@@ -127,7 +172,7 @@ func (f *progressFixture) tick(t *testing.T) {
 // every piped invocation: a non-terminal session must not emit a single
 // byte of decoration, while still passing content through untouched.
 func TestProgress_DisabledWritesZeroBytes(t *testing.T) {
-	f := newProgressFixture(t, false, false)
+	f := newProgressFixture(t, false, false, fixtureSize)
 	f.setElapsed(time.Hour)
 	f.p.phase(turn.PhaseComposing)
 	f.p.phase(turn.PhaseWaiting)
@@ -150,7 +195,7 @@ func TestProgress_DisabledWritesZeroBytes(t *testing.T) {
 // Short turns stay visually quiet: nothing is handed to the slot until the
 // wait exceeds progressShowAfter.
 func TestProgress_QuietBelowThreshold(t *testing.T) {
-	f := newProgressFixture(t, true, true)
+	f := newProgressFixture(t, true, true, fixtureSize)
 	f.setElapsed(progressShowAfter - time.Millisecond)
 	f.p.phase(turn.PhaseWaiting)
 	if got := f.slot(); got != "" {
@@ -167,7 +212,7 @@ func TestProgress_QuietBelowThreshold(t *testing.T) {
 // Each phase re-labels the ONE slot; a run of phase changes inside one
 // wait is one ticker lifecycle, not one per label.
 func TestProgress_PhaseTransitionsUpdateLabel(t *testing.T) {
-	f := newProgressFixture(t, true, true)
+	f := newProgressFixture(t, true, true, fixtureSize)
 	f.setElapsed(5 * time.Second)
 	for _, ph := range []turn.Phase{turn.PhaseComposing, turn.PhaseWaiting, turn.PhaseReissuing} {
 		f.p.phase(ph)
@@ -184,7 +229,7 @@ func TestProgress_PhaseTransitionsUpdateLabel(t *testing.T) {
 // The ticker goroutine animates while the wait runs and is GONE once stop
 // returns — stop joins it, so a leak would hang here rather than pass.
 func TestProgress_TickerAnimatesThenExits(t *testing.T) {
-	f := newProgressFixture(t, true, true)
+	f := newProgressFixture(t, true, true, fixtureSize)
 	f.setElapsed(5 * time.Second)
 	f.p.phase(turn.PhaseWaiting)
 	before := f.slot()
@@ -214,7 +259,7 @@ func TestProgress_TickerAnimatesThenExits(t *testing.T) {
 // The indicator asks term whether its frame is still on screen instead of
 // keeping a flag, which is precisely the flag bug 1 got wrong.
 func TestProgress_HeartbeatDoesNotRetakeTheLineFromContent(t *testing.T) {
-	f := newProgressFixture(t, true, true)
+	f := newProgressFixture(t, true, true, fixtureSize)
 	f.setElapsed(5 * time.Second)
 	f.p.phase(turn.PhaseWaiting)
 	if f.slot() == "" {
@@ -246,7 +291,7 @@ func TestProgress_HeartbeatDoesNotRetakeTheLineFromContent(t *testing.T) {
 // than one frame late, and it is never inferred — a session with no
 // working cbreak must not advertise a key that does nothing.
 func TestProgress_AbortHintTracksTheWindow(t *testing.T) {
-	f := newProgressFixture(t, true, true)
+	f := newProgressFixture(t, true, true, fixtureSize)
 	f.setElapsed(5 * time.Second)
 	f.p.phase(turn.PhaseWaiting)
 	if strings.Contains(f.slot(), abortHintSuffix) {
@@ -268,7 +313,7 @@ func TestProgress_AbortHintTracksTheWindow(t *testing.T) {
 // term drops them. No cursor games and no escape codes reach a terminal
 // that cannot render them.
 func TestProgress_DumbTerminalDegradesToStaticLines(t *testing.T) {
-	f := newProgressFixture(t, true, false)
+	f := newProgressFixture(t, true, false, fixtureSize)
 	f.setElapsed(5 * time.Second)
 	f.p.phase(turn.PhaseWaiting)
 	f.p.phase(turn.PhaseWaiting) // repeat must not re-print
@@ -295,7 +340,7 @@ func TestProgress_DumbTerminalDegradesToStaticLines(t *testing.T) {
 // it leaves term's ownership books untouched and unviolated, which is the
 // parity assertion the off-TTY suite exists to make.
 func TestProgress_LeavesOwnershipBooksClean(t *testing.T) {
-	f := newProgressFixture(t, true, true)
+	f := newProgressFixture(t, true, true, fixtureSize)
 	f.setElapsed(5 * time.Second)
 	f.p.phase(turn.PhaseWaiting)
 	f.tick(t)

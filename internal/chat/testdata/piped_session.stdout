@@ -1,0 +1,33 @@
+personant — type /help for commands; Ctrl-D to exit
+active: alpha (prj_1)
+> available commands:
+  /help                        show this help
+  /quit, /exit                 exit the session
+  /topic <name>                start a new thread and engage it
+  /done [thr_id|name]          close the active (or named) thread (§3.5)
+  /pause [thr_id|name]         pause the active (or named) thread
+  /resume [thr_id|name]        resume a paused thread
+  /back-to <thr_id|name>       re-engage a thread into the working set
+  /project                     print active project info
+  /project rename <new-name>   rename the active project
+  /project switch <name-or-id> switch to a known project
+  /thinking [on|off]           show/hide the model's live reasoning (dimmed)
+  /stats                       print session and spine statistics
+  /version                     print version identity and home format
+
+stubbed (later phase):
+  /no-revisit                  tighten recall threshold (recall accrual)
+  /cd-project <path>           set active project root
+  /model <id>                  switch active model
+
+shell escape (§4.4 — your shell, your privileges; interactive apps
+such as vim/less/top are not supported):
+  $<cmd>                       run it; output goes to your terminal only
+  #<cmd>                       run it; output also joins the next turn's context
+                               (cd persists between commands, separately
+                                from the active project root)
+> thinking display: on (not a terminal — nothing will be shown)
+> > fire-and-forget
+> captured
+> Hi there. This is the body.
+> > 
