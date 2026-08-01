@@ -224,13 +224,12 @@ func NewPlainPlatform(r io.Reader, w io.Writer) Platform {
 }
 
 type plainPlatform struct {
-	// r is held UNWRAPPED on purpose. Buffering it here would put a
-	// second reservoir over a stream internal/chat is still reading
-	// through its own bufio.Reader until W3 — liner's three byte
-	// reservoirs over one fd is the exact defect this package exists to
-	// remove, and reproducing it in our own code while nothing here even
-	// reads yet would be gratuitous. W3 wraps it when the pump becomes
-	// the single reader.
+	// r is held UNWRAPPED on purpose, and nothing here reads it. The plain
+	// backend's ONE buffered reader lives on Terminal, built by the read
+	// path in readline.go; a second reservoir over the same stream is what
+	// strands bytes at a handover, which is liner's defect and not one to
+	// reproduce in our own code. W3 makes the pump the reader and this the
+	// place it reads from.
 	r io.Reader
 	w io.Writer
 }

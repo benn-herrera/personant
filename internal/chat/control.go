@@ -40,7 +40,6 @@ type control struct {
 	// notice on Out — so an interrupt arriving mid-stream cannot
 	// interleave into the wait indicator's line.
 	t  *term.Terminal
-	lr lineReader
 	pr *progress
 
 	// escAvailable is whether Esc-to-abort is wired up at all: an
@@ -78,11 +77,10 @@ type control struct {
 	lastPhase turn.Phase
 }
 
-func newControl(t *term.Terminal, lr lineReader, pr *progress, cancel context.CancelFunc) *control {
+func newControl(t *term.Terminal, pr *progress, cancel context.CancelFunc) *control {
 	return &control{
 		cancel:       cancel,
 		t:            t,
-		lr:           lr,
 		pr:           pr,
 		escAvailable: t.Interactive(),
 	}
@@ -145,9 +143,8 @@ func (c *control) abortPhase() turn.Phase {
 // arm opens the Esc window for one turn. abortTurn must be the in-flight
 // turn's cancel — never the session's.
 //
-// Called AFTER lineReader.prompt has returned, so liner is not holding
-// the terminal; disarm restores liner's exact mode before the next prompt
-// call. That ordering is load-bearing rather than merely tidy: liner
+// Called AFTER term.ReadLine has returned, so liner is not holding the
+// terminal; disarm restores liner's exact mode before the next read. That ordering is load-bearing rather than merely tidy: liner
 // captures whatever mode it finds at prompt entry and restores it at
 // prompt exit, so leaving VMIN=0/VTIME=1 in place would make liner adopt
 // it and read end-of-input from every 100 ms of user thinking time.
@@ -279,9 +276,11 @@ func (c *control) exit(announce bool) {
 	// drawn over.
 	c.pr.stop()
 	if c.interrupts.Add(1) >= 2 {
-		c.disarm()       // hand the terminal back before it stops being ours
-		_ = c.lr.close() // restore the pre-session mode and flush history
-		_ = c.t.Close()  // retire any decoration; no deferred cleanup runs here
+		c.disarm() // hand the terminal back before it stops being ours
+		// One Close, not two: term owns the read path from W2, so retiring
+		// the decoration, flushing history and restoring the editor's mode
+		// are all behind this call. No deferred cleanup runs after it.
+		_ = c.t.Close()
 		os.Exit(forcedExitCode)
 	}
 	c.cancel()

@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -25,10 +24,8 @@ import (
 func newTestControl(t *testing.T) (*control, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	in := strings.NewReader("")
-	tm := openTestTerm(t, in, &stdout, &stderr)
-	lr := &bufLineReader{in: bufio.NewReader(in), out: tm.Out()}
-	return newControl(tm, lr, newProgress(tm), func() {}), &stdout, &stderr
+	tm := openTestTerm(t, strings.NewReader(""), &stdout, &stderr)
+	return newControl(tm, newProgress(tm), func() {}), &stdout, &stderr
 }
 
 // openTestTerm opens the arbiter over injected streams and closes it with
@@ -144,52 +141,45 @@ func TestControl_DisarmBeatsEsc(t *testing.T) {
 	}
 }
 
-// recordingReader records which lineReader method the REPL used and with
-// what default, so the re-offer routing can be asserted without a
-// terminal.
-type recordingReader struct {
-	bufLineReader
-	calls    []string
-	defaults []string
-}
-
-func (r *recordingReader) prompt(p string) (string, error) {
-	r.calls = append(r.calls, "prompt")
-	r.defaults = append(r.defaults, "")
-	return "", io.EOF
-}
-
-func (r *recordingReader) promptWithDefault(p, def string) (string, error) {
-	r.calls = append(r.calls, "promptWithDefault")
-	r.defaults = append(r.defaults, def)
-	return def, nil
-}
-
 // TestPromptLine_ReOffersRetractedInput pins the §4.3.3 recovery path for
-// a retracted prompt: it comes back as an EDITABLE DEFAULT, through the
-// lineReader seam that already exists for exactly this, and an ordinary
-// prompt is untouched.
+// a retracted prompt: it comes back as an EDITABLE DEFAULT, and an
+// ordinary prompt is untouched.
+//
+// W2 rewrote it. The previous version counted calls on the lineReader
+// seam, and that seam is gone — term.ReadLine is the only read path now,
+// so "which method did it call" has no answer and would be a checksum of
+// the call rather than a test of the recovery. What is asserted instead is
+// what the user experiences off a TTY: the retracted text is offered as a
+// value a bare Enter ACCEPTS and a typed line REPLACES, which is the same
+// contract the editor's pre-filled line carries on a terminal.
 func TestPromptLine_ReOffersRetractedInput(t *testing.T) {
 	tests := []struct {
 		name      string
 		retracted string
-		wantCall  string
+		typed     string
+		want      string
+		wantEcho  string
 	}{
-		{"ordinary prompt", "", "prompt"},
-		{"after a retraction", "the mistaken input", "promptWithDefault"},
+		{"ordinary prompt", "", "typed anew\n", "typed anew", "> "},
+		{"retraction accepted unedited", "the mistaken input", "\n", "the mistaken input",
+			"> [the mistaken input]\n> "},
+		{"retraction replaced", "the mistaken input", "something else\n", "something else",
+			"> [the mistaken input]\n> "},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := &recordingReader{}
-			line, _ := promptLine(r, tt.retracted)
-			if len(r.calls) != 1 || r.calls[0] != tt.wantCall {
-				t.Fatalf("calls = %v, want [%s]", r.calls, tt.wantCall)
+			var out, errw bytes.Buffer
+			tm := openTestTerm(t, strings.NewReader(tt.typed), &out, &errw)
+
+			line, err := promptLine(context.Background(), tm, tt.retracted)
+			if err != nil {
+				t.Fatalf("promptLine: %v", err)
 			}
-			if r.defaults[0] != tt.retracted {
-				t.Errorf("offered default = %q, want %q", r.defaults[0], tt.retracted)
+			if line != tt.want {
+				t.Errorf("line = %q, want %q", line, tt.want)
 			}
-			if tt.retracted != "" && line != tt.retracted {
-				t.Errorf("re-offered line = %q, want %q", line, tt.retracted)
+			if got := out.String(); got != tt.wantEcho {
+				t.Errorf("prompt echo = %q, want %q", got, tt.wantEcho)
 			}
 		})
 	}

@@ -8,7 +8,6 @@
 package chat
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -76,6 +75,10 @@ const (
 	// Banner is printed once on startup. Single line, terse.
 	Banner = "personant — type /help for commands; Ctrl-D to exit"
 
+	// replPrompt is the REPL's own single-line prompt — the one string the
+	// editor renders and must not repaint above.
+	replPrompt = "> "
+
 	// turnTimeout caps a single LLM round-trip. Phase 2.c.2 does not yet
 	// thread a deadline through from a directive; this is a process-wide
 	// safety bound.
@@ -105,15 +108,17 @@ func Run(opts Options) error {
 	// frame, reasoning — passes through one serialization point and an
 	// error mid-stream cannot interleave into the wait indicator's line.
 	//
-	// W1 installs NO terminal mode: liner still applies its own at
-	// construction until W3, and a second installer here would be bug 3
-	// with the parties reversed. HistoryFile is withheld for the same
-	// reason — liner owns that file through W2.
+	// term installs NO terminal mode before W3: liner still applies its own
+	// at construction, and a second installer here would be bug 3 with the
+	// parties reversed. It does own the READ PATH from W2 — every prompt in
+	// this package goes through tm.ReadLine — which is why the history file
+	// is handed over here rather than opened a second time.
 	tm, err := term.Open(term.Options{
-		Stdin:   opts.Stdin,
-		Stdout:  opts.Stdout,
-		Stderr:  opts.Stderr,
-		TermEnv: os.Getenv("TERM"),
+		Stdin:       opts.Stdin,
+		Stdout:      opts.Stdout,
+		Stderr:      opts.Stderr,
+		HistoryFile: opts.HistoryFile,
+		TermEnv:     os.Getenv("TERM"),
 	})
 	if err != nil {
 		return fmt.Errorf("chat: open terminal: %w", err)
@@ -265,11 +270,12 @@ func Run(opts Options) error {
 	}
 	redactor := shell.NewRedactor(keys)
 
-	// The terminal mode as personant found it, captured BEFORE liner takes
-	// the terminal (its NewLiner applies ICANON/ECHO-off once for the whole
-	// session). This is what a `$`/`#` child gets handed so it runs under
-	// normal line discipline. A non-terminal session yields nil and the
-	// handoff becomes a no-op.
+	// The terminal mode as personant found it, captured BEFORE the first
+	// prompt builds liner (its NewLiner applies ICANON/ECHO-off once for
+	// the whole session, which is why term builds it lazily at the first
+	// read rather than at Open). This is what a `$`/`#` child gets handed
+	// so it runs under normal line discipline. A non-terminal session
+	// yields nil and the handoff becomes a no-op.
 	var origTerm *termState
 	if tm.Interactive() {
 		if ts, terr := captureTerm(); terr == nil {
@@ -279,25 +285,13 @@ func Run(opts Options) error {
 		}
 	}
 
-	// One buffered reader services the entire session: bootstrap prompts
-	// and the REPL loop both read from it. Splitting the reader between
-	// stages would risk dropping bytes already buffered by the first
-	// stage when stdin is a pipe.
-	in := bufio.NewReader(opts.Stdin)
-
-	// The line reader is the input seam (§4.3.1): liner-backed editing +
-	// history on a real terminal, buffered reads for pipes/tests. Closed on
-	// every return path so terminal state is restored and history flushed.
-	lr := newLineReader(tm, in, opts.HistoryFile)
-	defer func() { _ = lr.close() }()
-
 	// The phase-labeled wait indicator. Built before the signal handler is
 	// installed so the forced-exit path can always clear it. Inert (zero
 	// bytes) unless the session is driving a real terminal.
 	pr := newProgress(tm)
 	defer pr.stop()
 
-	project, err := bootstrapProject(tm, lr, ops, cwd, opts.ExplicitProject)
+	project, err := bootstrapProject(tm, ops, cwd, opts.ExplicitProject)
 	if err != nil {
 		return err
 	}
@@ -387,7 +381,7 @@ func Run(opts Options) error {
 
 	// §3.4 recall UI surface (Part B): install an interactive resolver
 	// so recalled threads can be pulled into Layer B at turn close.
-	state.RecallResolver = interactiveRecallResolver(lr, tm.Out())
+	state.RecallResolver = interactiveRecallResolver(tm)
 
 	// §3.5 decay-triggered closure flow: a model-backed curator drafts
 	// the closure summary, and an interactive resolver lets the user
@@ -396,7 +390,7 @@ func Run(opts Options) error {
 	// chat client and resolved chat model. resolveChatModel guarantees a
 	// non-empty model or an error, so there is nothing to fall back to.
 	state.Curator = curator.NewHTTPCurator(client, effectiveModel)
-	state.ClosureResolver = interactiveClosureResolver(lr, tm.Out())
+	state.ClosureResolver = interactiveClosureResolver(tm)
 
 	banner := opts.Banner
 	if banner == "" {
@@ -410,13 +404,13 @@ func Run(opts Options) error {
 	// in-flight turn unwinds and the loop exits through the clean-shutdown
 	// path below (recaller close → §3.11 session-close checkpoint →
 	// session-end log), and a second during shutdown forces an immediate
-	// exit. liner consumes Ctrl-C itself while it owns the terminal
-	// (returns errInputAborted, handled in loop); this handler catches
-	// interrupts delivered the rest of the time (streaming a turn, shutting
-	// down, or the piped-stdin path).
+	// exit. The editor consumes Ctrl-C itself while it owns the terminal
+	// (term.ReadLine returns term.ErrAborted, handled in loop); this handler
+	// catches interrupts delivered the rest of the time (streaming a turn,
+	// shutting down, or the piped-stdin path).
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	ctl := newControl(tm, lr, pr, cancel)
+	ctl := newControl(tm, pr, cancel)
 	// Written once here, before the signal-handler goroutine below starts —
 	// the goroutine-creation edge is the happens-before that makes these
 	// safe to read from it. Neither is ever written again.
@@ -616,18 +610,26 @@ func resolveChatModel(ctx context.Context, client model.Client, stderr io.Writer
 // a retracted prompt re-enters the pipeline (§4.3.3): the abort rolled
 // the session back, so nothing of it is in memory until the user
 // deliberately sends it again.
-func promptLine(lr lineReader, retracted string) (string, error) {
-	if retracted == "" {
-		return lr.prompt("> ")
-	}
-	return lr.promptWithDefault("> ", retracted)
+//
+// An empty retracted value is an absent Default, not an empty one: term
+// reads that as "no value to pre-fill" and prompts normally.
+//
+// This is the one [term.ActivityEditor] read in the program — the read AT
+// the prompt, the outermost input consumer of the session. Every other
+// read in this package is an ask nested inside turn close.
+func promptLine(ctx context.Context, tm *term.Terminal, retracted string) (string, error) {
+	answer, err := tm.ReadLine(ctx, term.ActivityEditor, term.Question{
+		Prompt:  replPrompt,
+		Default: retracted,
+	})
+	return answer.Text, err
 }
 
 // loop is the core REPL. Returns nil on a clean exit; non-nil on an
 // unrecoverable I/O error (e.g. the input reader failing, not a
 // per-turn LLM error which is logged and tolerated).
 func loop(ctx context.Context, ops memops.MemoryOps, state *turn.State, ctl *control, th *thinking, sh *shell.Runner, red *shell.Redactor) error {
-	lr, tm := ctl.lr, ctl.t
+	tm := ctl.t
 	// retracted carries an Esc-aborted input to the next prompt, where it
 	// is re-offered as an editable default. It is deliberately a local:
 	// nothing outside this loop may resurrect a retracted prompt.
@@ -653,10 +655,10 @@ func loop(ctx context.Context, ops memops.MemoryOps, state *turn.State, ctl *con
 			// A SIGINT during a turn cancelled the session — unwind cleanly.
 			return nil
 		}
-		line, err := promptLine(lr, retracted)
+		line, err := promptLine(ctx, tm, retracted)
 		retracted = ""
 		switch {
-		case errors.Is(err, errInputAborted):
+		case errors.Is(err, term.ErrAborted):
 			// Ctrl-C at the prompt — the user asked to leave, so this is
 			// /exit with a different key: begin the same clean shutdown and
 			// say nothing. It still counts as the first interrupt, so a
@@ -677,7 +679,7 @@ func loop(ctx context.Context, ops memops.MemoryOps, state *turn.State, ctl *con
 		if trimmed == "" {
 			continue
 		}
-		lr.appendHistory(input)
+		tm.AppendHistory(input)
 
 		switch {
 		case strings.HasPrefix(trimmed, "/"):
@@ -1099,11 +1101,11 @@ func printStats(w io.Writer, ops memops.MemoryOps, state *turn.State) {
 //
 // Returns a zero ProjectMeta only if the user cancels at every prompt.
 // The caller treats that as a clean exit.
-func bootstrapProject(tm *term.Terminal, lr lineReader, ops memops.MemoryOps, cwd, explicit string) (memops.ProjectMeta, error) {
-	return bootstrapProjectWithExplicit(tm, lr, ops, cwd, explicit)
+func bootstrapProject(tm *term.Terminal, ops memops.MemoryOps, cwd, explicit string) (memops.ProjectMeta, error) {
+	return bootstrapProjectWithExplicit(tm, ops, cwd, explicit)
 }
 
-func bootstrapProjectWithExplicit(tm *term.Terminal, lr lineReader, ops memops.MemoryOps, cwd string, explicit string) (memops.ProjectMeta, error) {
+func bootstrapProjectWithExplicit(tm *term.Terminal, ops memops.MemoryOps, cwd string, explicit string) (memops.ProjectMeta, error) {
 	ctx := context.Background()
 	result, err := ops.ResolveActiveProject(ctx, memops.BootstrapHints{
 		ExplicitProject: explicit,
@@ -1121,10 +1123,10 @@ func bootstrapProjectWithExplicit(tm *term.Terminal, lr lineReader, ops memops.M
 		return *result.Resolved, nil
 
 	case memops.StepNeedsConfirmation:
-		return promptConfirmation(tm, lr, ops, cwd, result.Candidate)
+		return promptConfirmation(tm, ops, cwd, result.Candidate)
 
 	case memops.StepNeedsFallback:
-		return promptFallback(tm, lr, ops, cwd)
+		return promptFallback(tm, ops, cwd)
 
 	default:
 		return memops.ProjectMeta{}, fmt.Errorf("chat: bootstrap: unrecognized step %v", result.Step)
@@ -1132,24 +1134,28 @@ func bootstrapProjectWithExplicit(tm *term.Terminal, lr lineReader, ops memops.M
 }
 
 // promptConfirmation surfaces the §4.5.7 last-active resume prompt.
-func promptConfirmation(tm *term.Terminal, lr lineReader, ops memops.MemoryOps, cwd string, candidate *memops.ProjectMeta) (memops.ProjectMeta, error) {
+//
+// No Keys: this menu also accepts <other-name-or-id>, and a project named
+// "nomad" starts with a letter the menu would otherwise claim. A fast path
+// here would answer "no" to a user who is typing a name — which is why
+// [term.Question.Keys] is set only where every unlisted answer is already
+// invalid.
+func promptConfirmation(tm *term.Terminal, ops memops.MemoryOps, cwd string, candidate *memops.ProjectMeta) (memops.ProjectMeta, error) {
 	if candidate == nil {
-		return promptFallback(tm, lr, ops, cwd)
+		return promptFallback(tm, ops, cwd)
 	}
 	ctx := context.Background()
-	out := tm.Out()
-	if candidate.LastActive == "" {
-		fmt.Fprintf(out, "Resume work on '%s'? [y]es / [n]o / <other-name-or-id>: ",
-			candidate.Name)
-	} else {
-		fmt.Fprintf(out, "Resume work on '%s' (last active %s)? [y]es / [n]o / <other-name-or-id>: ",
+	q := term.Question{Prompt: fmt.Sprintf(
+		"Resume work on '%s'? [y]es / [n]o / <other-name-or-id>: ", candidate.Name)}
+	if candidate.LastActive != "" {
+		q.Prompt = fmt.Sprintf("Resume work on '%s' (last active %s)? [y]es / [n]o / <other-name-or-id>: ",
 			candidate.Name, candidate.LastActive)
 	}
-	ans, err := lr.prompt("")
+	answer, err := tm.ReadLine(ctx, term.ActivityAsk, q)
 	if err != nil {
 		return memops.ProjectMeta{}, err
 	}
-	ans = strings.TrimSpace(ans)
+	ans := strings.TrimSpace(answer.Text)
 	switch ans {
 	case "", "y", "Y", "yes":
 		if err := ops.SetLastActiveProject(ctx, candidate.ID); err != nil {
@@ -1157,37 +1163,47 @@ func promptConfirmation(tm *term.Terminal, lr lineReader, ops memops.MemoryOps, 
 		}
 		return *candidate, nil
 	case "n", "N", "no":
-		return promptFallback(tm, lr, ops, cwd)
+		return promptFallback(tm, ops, cwd)
 	default:
 		// Treat as <other-name-or-id> — re-resolve with explicit override.
-		return bootstrapProjectWithExplicit(tm, lr, ops, cwd, ans)
+		return bootstrapProjectWithExplicit(tm, ops, cwd, ans)
 	}
 }
 
 // promptFallback surfaces the §4.5.7 final fallback prompt.
-func promptFallback(tm *term.Terminal, lr lineReader, ops memops.MemoryOps, cwd string) (memops.ProjectMeta, error) {
+//
+// Keys is safe here (unlike the resume prompt above) because every answer
+// that is not one of the three letters is already invalid. READ
+// term.Question.Keys before assuming it means no-Enter: through W2 the
+// fast path is NOT live — the set is matched against the first rune of the
+// submitted line, which is what these menus have always done — and W3 is
+// where a single keystroke starts taking effect on its own.
+func promptFallback(tm *term.Terminal, ops memops.MemoryOps, cwd string) (memops.ProjectMeta, error) {
 	ctx := context.Background()
-	out := tm.Out()
 	for {
-		fmt.Fprintln(out, "No active project resolved.")
-		fmt.Fprint(out, "  [c] create a new project rooted at this directory\n")
-		fmt.Fprint(out, "  [s] switch to a known project\n")
-		fmt.Fprint(out, "  [n] no project (use prj_default)\n")
-		fmt.Fprint(out, "choice: ")
-		ans, err := lr.prompt("")
+		answer, err := tm.ReadLine(ctx, term.ActivityAsk, term.Question{
+			Preamble: []string{
+				"No active project resolved.",
+				"  [c] create a new project rooted at this directory",
+				"  [s] switch to a known project",
+				"  [n] no project (use prj_default)",
+			},
+			Prompt: "choice: ",
+			Keys:   "csn",
+		})
 		if err != nil {
 			return memops.ProjectMeta{}, err
 		}
-		switch strings.TrimSpace(strings.ToLower(ans)) {
+		switch strings.TrimSpace(strings.ToLower(answer.Text)) {
 		case "c":
-			meta, err := createNewProject(tm, lr, ops, cwd)
+			meta, err := createNewProject(tm, ops, cwd)
 			if err != nil {
 				fmt.Fprintf(tm.Diag(), "create failed: %v\n", err)
 				continue
 			}
 			return meta, nil
 		case "s":
-			meta, ok, err := pickExistingProject(tm, lr, ops)
+			meta, ok, err := pickExistingProject(tm, ops)
 			if err != nil {
 				return memops.ProjectMeta{}, err
 			}
@@ -1213,14 +1229,13 @@ func promptFallback(tm *term.Terminal, lr lineReader, ops memops.MemoryOps, cwd 
 	}
 }
 
-func createNewProject(tm *term.Terminal, lr lineReader, ops memops.MemoryOps, cwd string) (memops.ProjectMeta, error) {
+func createNewProject(tm *term.Terminal, ops memops.MemoryOps, cwd string) (memops.ProjectMeta, error) {
 	ctx := context.Background()
-	fmt.Fprint(tm.Out(), "display name: ")
-	name, err := lr.prompt("")
+	answer, err := tm.ReadLine(ctx, term.ActivityAsk, term.Question{Prompt: "display name: "})
 	if err != nil {
 		return memops.ProjectMeta{}, err
 	}
-	name = strings.TrimSpace(name)
+	name := strings.TrimSpace(answer.Text)
 	if name == "" {
 		return memops.ProjectMeta{}, errors.New("chat: empty project name")
 	}
@@ -1258,26 +1273,29 @@ func createNewProject(tm *term.Terminal, lr lineReader, ops memops.MemoryOps, cw
 	return meta, nil
 }
 
-func pickExistingProject(tm *term.Terminal, lr lineReader, ops memops.MemoryOps) (memops.ProjectMeta, bool, error) {
-	metas, err := ops.ListProjects(context.Background())
+func pickExistingProject(tm *term.Terminal, ops memops.MemoryOps) (memops.ProjectMeta, bool, error) {
+	ctx := context.Background()
+	metas, err := ops.ListProjects(ctx)
 	if err != nil {
 		return memops.ProjectMeta{}, false, err
 	}
-	out := tm.Out()
 	if len(metas) == 0 {
 		fmt.Fprintln(tm.Diag(), "no known projects to switch to")
 		return memops.ProjectMeta{}, false, nil
 	}
-	fmt.Fprintln(out, "known projects:")
+	preamble := make([]string, 0, len(metas)+1)
+	preamble = append(preamble, "known projects:")
 	for _, m := range metas {
-		fmt.Fprintf(out, "  %s  %s\n", m.ID, m.Name)
+		preamble = append(preamble, fmt.Sprintf("  %s  %s", m.ID, m.Name))
 	}
-	fmt.Fprint(out, "id or name: ")
-	ans, err := lr.prompt("")
+	answer, err := tm.ReadLine(ctx, term.ActivityAsk, term.Question{
+		Preamble: preamble,
+		Prompt:   "id or name: ",
+	})
 	if err != nil {
 		return memops.ProjectMeta{}, false, err
 	}
-	ans = strings.TrimSpace(ans)
+	ans := strings.TrimSpace(answer.Text)
 	for _, m := range metas {
 		if m.ID == ans || m.Name == ans {
 			return m, true, nil
@@ -1290,16 +1308,23 @@ func pickExistingProject(tm *term.Terminal, lr lineReader, ops memops.MemoryOps)
 // interactiveRecallResolver returns a turn.RecallResolver that surfaces
 // the §3.4 recall offer at the prompt and reads the user's accept /
 // decline decision. Kept deliberately small — U/X polish is deferred.
-func interactiveRecallResolver(lr lineReader, out io.Writer) turn.RecallResolver {
-	return func(_ context.Context, offer turn.RecallOffer) (turn.RecallResolution, error) {
-		fmt.Fprintln(out, "recalled threads related to this turn:")
+func interactiveRecallResolver(tm *term.Terminal) turn.RecallResolver {
+	out := tm.Out()
+	return func(ctx context.Context, offer turn.RecallOffer) (turn.RecallResolution, error) {
+		preamble := make([]string, 0, len(offer.Candidates)+1)
+		preamble = append(preamble, "recalled threads related to this turn:")
 		for i, c := range offer.Candidates {
-			fmt.Fprintf(out, "  [%d] %s  score=%.2f  (%s)\n",
-				i+1, c.ThreadID, c.Score, strings.Join(c.Layers(), "+"))
+			preamble = append(preamble, fmt.Sprintf("  [%d] %s  score=%.2f  (%s)",
+				i+1, c.ThreadID, c.Score, strings.Join(c.Layers(), "+")))
 		}
-		fmt.Fprint(out, "accept which? [numbers / a=all / n=none]: ")
-		ans, err := lr.prompt("")
-		if isEndOrAbort(err) {
+		// ActivityAsk, not Editor: this prompts from INSIDE turn close, over
+		// the turn that is still the outer owner of the terminal.
+		answer, err := tm.ReadLine(ctx, term.ActivityAsk, term.Question{
+			Preamble: preamble,
+			Prompt:   "accept which? [numbers / a=all / n=none]: ",
+			Keys:     "an",
+		})
+		if term.IsEndOrAbort(err) {
 			// Session is ending / interrupted — decline all, no error.
 			return turn.RecallResolution{}, nil
 		}
@@ -1308,7 +1333,7 @@ func interactiveRecallResolver(lr lineReader, out io.Writer) turn.RecallResolver
 		}
 
 		var accept []int
-		switch trimmed := strings.ToLower(strings.TrimSpace(ans)); trimmed {
+		switch trimmed := strings.ToLower(strings.TrimSpace(answer.Text)); trimmed {
 		case "", "n":
 			// accept nothing
 		case "a":
@@ -1328,10 +1353,13 @@ func interactiveRecallResolver(lr lineReader, out io.Writer) turn.RecallResolver
 
 		reason := turn.DeclineNotRelevant
 		if len(accept) < len(offer.Candidates) {
-			fmt.Fprint(out, "decline reason [not-relevant / wrong-project / already-known] (default not-relevant): ")
-			rans, rerr := lr.prompt("")
+			// No Keys: the answers are words matched by prefix, so every
+			// first rune is the start of a longer legal answer.
+			rans, rerr := tm.ReadLine(ctx, term.ActivityAsk, term.Question{
+				Prompt: "decline reason [not-relevant / wrong-project / already-known] (default not-relevant): ",
+			})
 			if rerr == nil {
-				if r, ok := matchDeclineReason(rans); ok {
+				if r, ok := matchDeclineReason(rans.Text); ok {
 					reason = r
 				}
 			}
@@ -1347,18 +1375,25 @@ func interactiveRecallResolver(lr lineReader, out io.Writer) turn.RecallResolver
 // non-identical summary flows back as ClosureResolution.EditedSummary so
 // applyClosureResolution stores it and logs retire.ack edited=yes. On EOF
 // or Ctrl-C it returns ClosureDefer so the thread is left untouched.
-func interactiveClosureResolver(lr lineReader, out io.Writer) turn.ClosureResolver {
-	askOutcome := func() (string, error) {
-		fmt.Fprint(out, "close as? [r]esolved / [d]ecided / [a]bandoned / [w]ip / [e]dit summary / [s]kip: ")
-		ans, err := lr.prompt("")
-		return strings.ToLower(strings.TrimSpace(ans)), err
+func interactiveClosureResolver(tm *term.Terminal) turn.ClosureResolver {
+	// The offer's two context lines are the question's PREAMBLE, so they are
+	// committed above the editor rather than printed by a separate call that
+	// the editor could then repaint over — bug 5's exact shape. The re-ask
+	// after an edit passes none: the context is already in scrollback.
+	askOutcome := func(ctx context.Context, preamble []string) (string, error) {
+		answer, err := tm.ReadLine(ctx, term.ActivityAsk, term.Question{
+			Preamble: preamble,
+			Prompt:   "close as? [r]esolved / [d]ecided / [a]bandoned / [w]ip / [e]dit summary / [s]kip: ",
+			Keys:     "rdawes",
+		})
+		return strings.ToLower(strings.TrimSpace(answer.Text)), err
 	}
-	return func(_ context.Context, offer turn.ClosureOffer) (turn.ClosureResolution, error) {
-		fmt.Fprintf(out, "thread %s has gone idle — closure suggested.\n", offer.ThreadID)
-		fmt.Fprintf(out, "  summary: %s\n", offer.Summary)
-
-		choice, err := askOutcome()
-		if isEndOrAbort(err) {
+	return func(ctx context.Context, offer turn.ClosureOffer) (turn.ClosureResolution, error) {
+		choice, err := askOutcome(ctx, []string{
+			fmt.Sprintf("thread %s has gone idle — closure suggested.", offer.ThreadID),
+			fmt.Sprintf("  summary: %s", offer.Summary),
+		})
+		if term.IsEndOrAbort(err) {
 			return turn.ClosureResolution{Outcome: turn.ClosureDefer}, nil
 		}
 		if err != nil {
@@ -1367,14 +1402,18 @@ func interactiveClosureResolver(lr lineReader, out io.Writer) turn.ClosureResolv
 
 		edited := ""
 		if choice == "e" {
-			revised, perr := lr.promptWithDefault("edit summary: ", offer.Summary)
-			if isEndOrAbort(perr) {
+			// Default, not Keys: the draft is a value to edit in place.
+			answer, perr := tm.ReadLine(ctx, term.ActivityAsk, term.Question{
+				Prompt:  "edit summary: ",
+				Default: offer.Summary,
+			})
+			if term.IsEndOrAbort(perr) {
 				return turn.ClosureResolution{Outcome: turn.ClosureDefer}, nil
 			}
 			if perr != nil {
 				return turn.ClosureResolution{}, perr
 			}
-			revised = strings.TrimSpace(revised)
+			revised := strings.TrimSpace(answer.Text)
 			// Only a genuinely changed summary counts as an edit; resubmitting
 			// the draft unchanged keeps edited=no (the ack-edit-rate canary
 			// must not read a rubber-stamp as an edit).
@@ -1382,8 +1421,8 @@ func interactiveClosureResolver(lr lineReader, out io.Writer) turn.ClosureResolv
 				edited = revised
 			}
 			// Re-ask for the outcome now that the summary is settled.
-			choice, err = askOutcome()
-			if isEndOrAbort(err) {
+			choice, err = askOutcome(ctx, nil)
+			if term.IsEndOrAbort(err) {
 				return turn.ClosureResolution{Outcome: turn.ClosureDefer}, nil
 			}
 			if err != nil {

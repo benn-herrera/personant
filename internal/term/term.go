@@ -17,14 +17,17 @@
 // # Migration state
 //
 // The package lands in waves (SOLUTION.md §8, IMPLEMENTATION-PLAN.md §2).
-// W1 — this one — is the OUTPUT half plus the bookkeeping: backend
-// selection, the four channels, the activity stack, the abort window, the
-// cursor column. Everything on the INPUT half still panics, and every
-// panic names the wave that lands it. In particular W1 deliberately does
-// NOT touch termios: liner still owns the terminal mode until W3 and
-// applies it at construction, so a mode installed here would fight it and
-// reintroduce bug 3. [StateSnapshot.ModeInstalls] is 0 for the whole
-// session in W1, by construction and not by accident.
+// W1 landed the OUTPUT half plus the bookkeeping: backend selection, the
+// four channels, the activity stack, the abort window, the cursor column.
+// W2 — this one — lands the SINGLE READ PATH, [Terminal.ReadLine], with
+// liner as the editor underneath it (readline.go says what that costs and
+// what it defers). Everything still unimplemented panics, and every panic
+// names the wave that lands it.
+//
+// Neither wave touches termios: liner still owns the terminal mode until
+// W3 and applies it at construction, so a mode installed here would fight
+// it and reintroduce bug 3. [StateSnapshot.ModeInstalls] is 0 for the
+// whole session through W2, by construction and not by accident.
 //
 // # The five bugs and the structural answer to each
 //
@@ -62,19 +65,21 @@
 package term
 
 import (
-	"context"
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
+
+	"github.com/peterh/liner"
 )
 
 // The unimplemented bodies, each naming the wave that lands it. They are
 // separate constants rather than one string with a variable in it so that
 // a panic message is a grep-able statement of schedule.
 const (
-	notImplementedW2 = "term: not implemented (W2 — Question + the menu sites)"
 	notImplementedW3 = "term: not implemented (W3 — pump, decoder, editor, mode ownership)"
 	notImplementedW4 = "term: not implemented (W4 — interrupt routing over the activity stack)"
 )
@@ -128,9 +133,10 @@ type Options struct {
 	// HistoryFile is where [Terminal.ReadLine]'s history is loaded from
 	// and flushed to at [Terminal.Close]. Empty disables history.
 	//
-	// W1 leaves it unread: liner still owns the history file through W2,
-	// and two owners of one file is the defect class this package exists
-	// to remove. W3 takes it over with the editor.
+	// W2 took it over with the read path. The file is one file and it has
+	// one owner: the editor now lives inside term (readline.go), so the
+	// load-at-first-prompt and flush-at-Close pair moved here with it
+	// rather than being kept in a second place that also opens it.
 	HistoryFile string
 
 	// TermEnv is $TERM. A "dumb" or empty value means no ANSI: the
@@ -185,8 +191,9 @@ type Options struct {
 // liner is the standing proof that a dependency can mutate termios where
 // no compiler rule of ours reaches.
 type Terminal struct {
-	plat Platform
-	diag io.Writer
+	plat  Platform
+	diag  io.Writer
+	stdin io.Reader
 
 	// interactive and ansi are the session's two display determinations,
 	// each made ONCE at Open. interactive is the ONE TTY predicate the
@@ -194,6 +201,14 @@ type Terminal struct {
 	// erase and dim sequences.
 	interactive bool
 	ansi        bool
+
+	// realTTY is the read half's backend determination, and it is NARROWER
+	// than interactive: an injected [Options.Platform] is interactive by
+	// definition but is not a terminal anyone may hand to liner, which
+	// hardcodes the process's own stdin. Made once at Open, same as the
+	// other two. See readline.go.
+	realTTY  bool
+	histFile string
 
 	// The three channel writers are built once and handed out by value of
 	// pointer, so Out()/Diag()/Reasoning() are allocation-free and two
@@ -216,6 +231,14 @@ type Terminal struct {
 	reasoningOpen bool
 	violations    int
 	closed        bool
+
+	// The read half's two lazily-built halves, exactly one of which a
+	// session ever has: the liner editor on a real terminal, the buffered
+	// reader everywhere else. Both are under mu for construction only —
+	// ReadLine never holds the lock across a blocking read, or an error
+	// arriving on Diag would deadlock behind a user who has not typed yet.
+	editor *liner.State
+	in     *bufio.Reader
 }
 
 // Open captures the terminal, selects a backend, installs the session
@@ -283,14 +306,26 @@ func Open(opts Options) (*Terminal, error) {
 	if opts.Stderr == nil {
 		opts.Stderr = io.Discard
 	}
+	if opts.Stdin == nil {
+		// An empty stream rather than nil: the read path must have
+		// something to reach end-of-input on, and "no stdin" and "stdin
+		// closed" are the same session to every caller.
+		opts.Stdin = strings.NewReader("")
+	}
 
 	plat, interactive := selectBackend(opts)
 
 	t := &Terminal{
 		plat:        plat,
 		diag:        opts.Stderr,
+		stdin:       opts.Stdin,
 		interactive: interactive,
-		ansi:        interactive && ansiCapable(opts.TermEnv),
+		// A session drives a REAL terminal only when term selected the unix
+		// backend itself. An injected platform is interactive and is not
+		// one; see the field.
+		realTTY:  interactive && opts.Platform == nil,
+		histFile: opts.HistoryFile,
+		ansi:     interactive && ansiCapable(opts.TermEnv),
 		// The cursor starts at column 0: nothing has been written yet.
 		// ColumnUnknown is the ZERO value of CursorColumn and means "a
 		// child owned the fd", so it must be assigned away here rather
@@ -352,11 +387,17 @@ func charDevice(v any) (*os.File, bool) {
 // removes the signal handlers. Idempotent, and safe from a forced-exit
 // path where no deferred cleanup runs.
 //
-// W1 has no mode to restore, no history of its own and no pump (see
-// [Open]); what it does have is decoration that must not outlive the
-// session — a half-drawn status frame or an unterminated dim run would
-// otherwise be the last thing on the user's terminal. Retiring both is
+// Through W2 there is no pump and no mode of term's own to restore — the
+// editor's Close is what hands liner's mode back (see [Open]). What there
+// is: history to flush, and decoration that must not outlive the session,
+// since a half-drawn status frame or an unterminated dim run would
+// otherwise be the last thing on the user's terminal. All of it is
 // unconditional and idempotent, so the forced-exit path gets it too.
+//
+// The editor is DETACHED under the lock before it is closed, so a read
+// racing a forced exit cannot revive a closed editor, and the close itself
+// happens outside the lock — liner's Close touches the terminal, and
+// holding the serialization point across it would block every writer.
 func (t *Terminal) Close() error {
 	t.mu.Lock()
 	if t.closed {
@@ -366,8 +407,15 @@ func (t *Terminal) Close() error {
 	t.closed = true
 	t.retireStatusLocked()
 	t.endReasoningLocked()
+	ls := t.editor
+	t.editor = nil
 	t.mu.Unlock()
-	return t.plat.Close()
+
+	err := closeEditor(ls, t.histFile)
+	if perr := t.plat.Close(); err == nil {
+		err = perr
+	}
+	return err
 }
 
 // Interactive reports whether this session drives a real terminal. It is
@@ -763,58 +811,9 @@ func (t *Terminal) State() StateSnapshot {
 }
 
 // --- Reading ---------------------------------------------------------
-
-// ReadLine is the ONLY read path in personant.
 //
-// There is deliberately no API that writes text and then separately
-// reads a line. That shape is bug 5: seven sites print a question with
-// Fprint and then call a reader with an empty prompt, and the reader —
-// never told the question exists — repaints from column 0 over it. When
-// the question is an argument to the read, the reader knows the width it
-// must not repaint above, and the defect has nowhere to live.
-//
-// It pushes a for the duration of the call and pops it before returning.
-// Exactly two activities are legal, and §3's ownership table names them
-// separately for a reason:
-//
-//   - [ActivityEditor] — the read AT THE PROMPT, the outermost input
-//     consumer of a session.
-//   - [ActivityAsk] — a resolver prompting from INSIDE TURN CLOSE (the
-//     §3.4 recall and §3.5 closure offers). It is pushed OVER
-//     [ActivityTurn], which is the whole reason the stack is LIFO rather
-//     than a single current-owner slot.
-//
-// [ActivityTurn] and [ActivityChild] return [ErrQuestion]. Neither reads
-// a line: a turn watches for its abort key, and a child window has
-// handed the fd away entirely.
-//
-// The activity is an EXPLICIT ARGUMENT rather than something term infers
-// from stack state, and the rule is [Handler.Interrupt]'s rule. Inferring
-// it — "a read while a turn is on the stack must be an ask" — would make
-// the stack consult itself to decide what the caller meant, which §4
-// forbids for dispositions and forbids here for the same mechanical
-// reason: the windows NEST, so an inference drawn from stack position is
-// wrong exactly in the slivers where the nesting is imperfect, and it is
-// wrong silently. The caller never has to guess — it knows which of the
-// two it is without looking at anything.
-//
-// ctx cancels the read: a cancelled session or turn unblocks it rather
-// than leaving a goroutine parked on a keypress that will never come.
-// The error contract is [io.EOF] for end of input (Ctrl-D) and
-// [ErrAborted] for an interrupt at the prompt; [IsEndOrAbort] tests for
-// either. A caller error — an illegal a, or a malformed q — is
-// [ErrQuestion], which IsEndOrAbort deliberately does not match.
-//
-// AppendHistory is NOT called here. What deserves to be recalled with ↑
-// is policy — a menu answer is not a prompt — and the caller decides.
-func (t *Terminal) ReadLine(ctx context.Context, a Activity, q Question) (Answer, error) {
-	panic(notImplementedW2)
-}
-
-// AppendHistory records an accepted line for ↑/↓ recall. Blank lines and
-// consecutive duplicates are dropped, and the store is capped at
-// [HistoryLimit] entries; the file is flushed at [Terminal.Close].
-func (t *Terminal) AppendHistory(line string) { panic(notImplementedW2) }
+// The read half is readline.go: [Terminal.ReadLine] and
+// [Terminal.AppendHistory], plus the editor scaffolding they run on.
 
 // errNotTerminal is what a device or platform returns when it has no
 // window geometry to report. It is a fallback trigger for

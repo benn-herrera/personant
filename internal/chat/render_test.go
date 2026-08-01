@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -35,9 +36,17 @@ import (
 // a real terminal is.
 func (f *progressFixture) screen(t *testing.T) *screentest.Screen {
 	t.Helper()
-	s := screentest.New(f.size.Cols, f.size.Rows)
-	if err := s.Feed(f.out.Bytes()); err != nil {
-		t.Fatalf("%v\n\nemitted stream: %q", err, f.out.String())
+	return replay(t, f.size, f.out)
+}
+
+// replay is the model over a recorded stream, in one place: it fails
+// closed on any sequence term does not emit today, so every caller is also
+// a standing check that the alphabet has not quietly grown.
+func replay(t *testing.T, size term.Size, out *syncBuffer) *screentest.Screen {
+	t.Helper()
+	s := screentest.New(size.Cols, size.Rows)
+	if err := s.Feed(out.Bytes()); err != nil {
+		t.Fatalf("%v\n\nemitted stream: %q", err, out.String())
 	}
 	return s
 }
@@ -462,3 +471,119 @@ func TestW1Item10_DumbTerminalEmitsNoEscapeBytes(t *testing.T) {
 // here because it is unexported there. Its absence is the one failure the
 // reasoning channel must not have: scratch that reads as the answer.
 const reasoningNoANSIOpenMark = "[thinking]"
+
+// --- W2: the menus (bug 5) -------------------------------------------
+//
+// What these can and cannot see, stated so the coverage is not overread.
+// In W2 the EDITOR is still liner and liner writes straight to the tty, so
+// the screen model — which reconstructs from what TERM emitted — cannot
+// see the prompt line being edited, and the keystroke-survival property is
+// therefore not assertable yet. It becomes assertable in W3, when term
+// owns the editor's bytes; faking it here would be a test of the fixture.
+//
+// What IS assertable, and is exactly R2-14, is the split: the preamble is
+// COMMITTED to scrollback above the editor and only the single-line prompt
+// is left for the editor to repaint. That is the structural half of bug 5
+// — a question that lives in scrollback is a question no line editor is
+// allowed to draw over, whatever is doing the editing.
+
+// newQuestionFixture opens an interactive terminal over an injected
+// platform and a scripted stdin. Interactive but NOT a real terminal, so
+// the read falls to the plain path (readline.go: liner would otherwise
+// read the process's own stdin behind the test's back) while every
+// DECORATION decision — the status slot, the erase alphabet — is the TTY
+// one, which is the combination these assertions need.
+func newQuestionFixture(t *testing.T, script string) (*term.Terminal, *syncBuffer) {
+	t.Helper()
+	out := &syncBuffer{}
+	tm, err := term.Open(term.Options{
+		Stdin:    strings.NewReader(script),
+		Stdout:   out,
+		Stderr:   out,
+		TermEnv:  "xterm-256color",
+		Platform: term.NewUnixPlatform(&fakeDevice{out: out, size: fixtureSize}),
+	})
+	if err != nil {
+		t.Fatalf("term.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = tm.Close() })
+	return tm, out
+}
+
+// A menu question with a multi-line preamble: every preamble line is
+// COMMITTED on its own row, and the prompt is the live line — alone, not
+// wrapped, and not part of what the editor was handed.
+//
+// The preamble is a real §4.5.7 menu rather than a synthetic one, so a
+// change to the menu's shape that broke the split would fail here.
+func TestW2_MenuPreambleIsCommittedAndThePromptIsTheLiveLine(t *testing.T) {
+	tm, out := newQuestionFixture(t, "c\n")
+
+	preamble := []string{
+		"No active project resolved.",
+		"  [c] create a new project rooted at this directory",
+		"  [s] switch to a known project",
+		"  [n] no project (use prj_default)",
+	}
+	ans, err := tm.ReadLine(context.Background(), term.ActivityAsk, term.Question{
+		Preamble: preamble,
+		Prompt:   "choice: ",
+		Keys:     "csn",
+	})
+	if err != nil {
+		t.Fatalf("ReadLine: %v", err)
+	}
+	if ans.Text != "c" {
+		t.Errorf("answer = %q, want %q", ans.Text, "c")
+	}
+
+	s := replay(t, fixtureSize, out)
+	for i, want := range preamble {
+		if got := s.Row(i); got != want {
+			t.Errorf("preamble row %d = %q, want %q\n%s", i, got, want, s)
+		}
+	}
+	// The model reports a row's content without its trailing blanks, so the
+	// prompt's own trailing space is not part of what it can see.
+	if got := s.Line(); got != strings.TrimRight("choice: ", " ") {
+		t.Errorf("live line = %q, want the prompt alone\n%s", got, s)
+	}
+	if s.Wraps() != 0 {
+		t.Errorf("the question wrapped %d time(s)\n%s", s.Wraps(), s)
+	}
+	if got, want := s.TotalRows(), len(preamble)+1; got != want {
+		t.Errorf("the question took %d rows, want %d (one per preamble line, plus the prompt)\n%s",
+			got, want, s)
+	}
+}
+
+// A question retires the ephemeral slot BEFORE it renders. The indicator
+// and a menu contend for the same physical line — turn close prompts while
+// the phase indicator is still up — and a menu drawn onto a live slot is a
+// question the next erase takes back.
+func TestW2_QuestionRetiresTheStatusSlotBeforeItRenders(t *testing.T) {
+	tm, out := newQuestionFixture(t, "s\n")
+	tm.Status().Set("closing (4s)")
+	if tm.State().Status == "" {
+		t.Fatal("the slot did not take the line")
+	}
+
+	if _, err := tm.ReadLine(context.Background(), term.ActivityAsk, term.Question{
+		Preamble: []string{"thread thr_1 has gone idle — closure suggested."},
+		Prompt:   "close as? [r]esolved / [s]kip: ",
+		Keys:     "rs",
+	}); err != nil {
+		t.Fatalf("ReadLine: %v", err)
+	}
+
+	if got := tm.State().Status; got != "" {
+		t.Errorf("the slot survived into the question: %q", got)
+	}
+	s := replay(t, fixtureSize, out)
+	if s.Contains("closing (4s)") {
+		t.Errorf("an indicator frame is still on screen under the question\n%s", s)
+	}
+	if got := s.Row(0); got != "thread thr_1 has gone idle — closure suggested." {
+		t.Errorf("the question did not start on a clean row: %q\n%s", got, s)
+	}
+}

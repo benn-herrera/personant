@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"os"
@@ -242,8 +241,8 @@ func TestSlashDoneClosesThread(t *testing.T) {
 // acking resolved yields EditedSummary set to the revision.
 func TestClosureResolverEditPath(t *testing.T) {
 	var out bytes.Buffer
-	lr := &bufLineReader{in: bufio.NewReader(strings.NewReader("e\nrevised gist\nr\n")), out: &out}
-	resolve := interactiveClosureResolver(lr, &out)
+	tm := openTestTerm(t, strings.NewReader("e\nrevised gist\nr\n"), &out, &out)
+	resolve := interactiveClosureResolver(tm)
 
 	res, err := resolve(context.Background(), turn.ClosureOffer{ThreadID: "thr_1", Summary: "curator draft"})
 	if err != nil {
@@ -262,8 +261,8 @@ func TestClosureResolverEditPath(t *testing.T) {
 // read a rubber-stamp as an edit).
 func TestClosureResolverEditUnchanged(t *testing.T) {
 	var out bytes.Buffer
-	lr := &bufLineReader{in: bufio.NewReader(strings.NewReader("e\ncurator draft\nw\n")), out: &out}
-	resolve := interactiveClosureResolver(lr, &out)
+	tm := openTestTerm(t, strings.NewReader("e\ncurator draft\nw\n"), &out, &out)
+	resolve := interactiveClosureResolver(tm)
 
 	res, err := resolve(context.Background(), turn.ClosureOffer{ThreadID: "thr_1", Summary: "curator draft"})
 	if err != nil {
@@ -279,8 +278,8 @@ func TestClosureResolverEditUnchanged(t *testing.T) {
 
 func TestClosureResolverSkipDefers(t *testing.T) {
 	var out bytes.Buffer
-	lr := &bufLineReader{in: bufio.NewReader(strings.NewReader("s\n")), out: &out}
-	resolve := interactiveClosureResolver(lr, &out)
+	tm := openTestTerm(t, strings.NewReader("s\n"), &out, &out)
+	resolve := interactiveClosureResolver(tm)
 
 	res, err := resolve(context.Background(), turn.ClosureOffer{ThreadID: "thr_1", Summary: "d"})
 	if err != nil {
@@ -334,44 +333,9 @@ func TestSessionStartEventIsNotBootstrap(t *testing.T) {
 	}
 }
 
-// TestHistoryFileRoundTrip exercises the §4.3.1 persistent history file:
-// append (with consecutive dedup), flush on close, reload on next open,
-// newest-last ordering.
-func TestHistoryFileRoundTrip(t *testing.T) {
-	hp := filepath.Join(t.TempDir(), "history")
-
-	r1 := newLinerReader(hp)
-	r1.appendHistory("first")
-	r1.appendHistory("second")
-	r1.appendHistory("second") // consecutive duplicate — dropped
-	if err := r1.close(); err != nil {
-		t.Fatalf("close r1: %v", err)
-	}
-
-	got := string(mustReadFile(t, hp))
-	if strings.Count(got, "second") != 1 {
-		t.Errorf("consecutive dedup failed: %q", got)
-	}
-	if !strings.Contains(got, "first") {
-		t.Errorf("history missing 'first': %q", got)
-	}
-
-	// Reload, append, and confirm the prior entries round-tripped.
-	r2 := newLinerReader(hp)
-	r2.appendHistory("third")
-	if err := r2.close(); err != nil {
-		t.Fatalf("close r2: %v", err)
-	}
-	got2 := string(mustReadFile(t, hp))
-	for _, w := range []string{"first", "second", "third"} {
-		if !strings.Contains(got2, w) {
-			t.Errorf("history missing %q after round-trip: %q", w, got2)
-		}
-	}
-	if strings.Index(got2, "first") > strings.Index(got2, "third") {
-		t.Errorf("history not newest-last: %q", got2)
-	}
-}
+// The §4.3.1 persistent-history round trip moved to internal/term with the
+// editor it exercises (W2): the file has one owner, and the test belongs
+// beside it rather than in the package that used to open it too.
 
 func mustReadFile(t *testing.T, path string) []byte {
 	t.Helper()

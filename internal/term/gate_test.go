@@ -85,8 +85,12 @@ type exemption struct {
 // this whole design removes.
 var terminalAccessAllowlist = []exemption{
 	// --- W3: liner leaves, and chat's private termios goes with it ---
-	{"internal/chat/input.go", ruleLiner,
-		"W3 — liner is the editor until the pump and decoder land; it hardcodes os.Stdin and applies its own mode at construction"},
+	//
+	// internal/chat/input.go's liner entry was BURNED DOWN by W2, not
+	// weakened: the read path moved inside this package, so the one liner
+	// import in the tree is internal/term's own (readline.go) and the gate
+	// exempts internal/term by design — it is the package allowed to know.
+	// liner itself does not leave until W3; what left is the SECOND owner.
 	{"internal/chat/term_unix.go", ruleTermios,
 		"W3 — captureTerm/enterCbreak/readStdin; term takes mode ownership and the single reader in W3"},
 	{"internal/chat/termios_bsd.go", ruleTermios,
@@ -109,9 +113,10 @@ var terminalAccessAllowlist = []exemption{
 		"permanent — internal/log is the SUBSTRATE's leveled stderr sink, not a terminal client: it serves cmd/ verbs and background subsystems that have no session terminal"},
 }
 
-// maxTerminalAccessExemptions is the ratchet. It is the count as of W1;
-// lower it as waves burn entries down.
-const maxTerminalAccessExemptions = 9
+// maxTerminalAccessExemptions is the ratchet. W1 set it at 9; W2 burned
+// chat's liner entry down and lowered it to 8. Lower it as waves burn
+// further entries down.
+const maxTerminalAccessExemptions = 8
 
 // sleepBanAllowlist is the burn-down list for gate 2.
 var sleepBanAllowlist = []exemption{

@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"os"
@@ -40,11 +39,9 @@ func newShellHarness(t *testing.T, keys ...string) *shellHarness {
 	t.Setenv("SHELL", "/bin/sh")
 	paths := scaffoldHome(t)
 	var stdout, stderr bytes.Buffer
-	in := strings.NewReader("")
-	tm := openTestTerm(t, in, &stdout, &stderr)
-	lr := &bufLineReader{in: bufio.NewReader(in), out: tm.Out()}
+	tm := openTestTerm(t, strings.NewReader(""), &stdout, &stderr)
 	sh := shell.NewRunner(t.TempDir())
-	ctl := newControl(tm, lr, newProgress(tm), func() {})
+	ctl := newControl(tm, newProgress(tm), func() {})
 	// Mirror Run's wiring: the control consults the runner so a Ctrl-C
 	// during a command goes to the command.
 	ctl.sh = sh
