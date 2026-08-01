@@ -257,6 +257,76 @@ func TestW1Item6_DiagLandsOnItsOwnLineNotInsideTheIndicator(t *testing.T) {
 	f.p.stop()
 }
 
+// Item 6, failed-turn half — a turn that ERRORS after a partial body. The
+// body is already on the user's line and the loop's `turn error:` goes to
+// Diag, which term deliberately does not newline-align (in a pipe stdout
+// and stderr are separate streams). Without runOneTurn's re-align the two
+// jam together as `partial answer so fturn error: …`, which reads as
+// model output.
+//
+// The re-align is called here the way runOneTurn calls it — after the
+// indicator is retired and before the branch — so this test fails if the
+// call moves back inside the success branch.
+func TestW1Item6_TurnErrorAfterPartialBodyLandsOnItsOwnRow(t *testing.T) {
+	f := newProgressFixture(t, true, true, fixtureSize)
+	f.setElapsed(5 * time.Second)
+	f.p.phase(turn.PhaseWaiting)
+
+	const body = "partial answer so f"
+	if _, err := io.WriteString(f.tm.Out(), body); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// The turn returns an error here: retire the indicator, re-align, and
+	// let the REPL loop report it.
+	f.p.stop()
+	realign(f.tm)
+	const msg = "turn error: turn: stream: connection reset"
+	fmt.Fprintf(f.tm.Diag(), "%s\n", msg)
+
+	s := f.screen(t)
+	if got := s.Row(0); got != body {
+		t.Errorf("the body's row is not exactly the body: %q\n%s", got, s)
+	}
+	if got := s.Row(1); got != msg {
+		t.Errorf("the error did not land on its own row: %q\n%s", got, s)
+	}
+	if got := s.TotalRows(); got != 3 {
+		t.Errorf("body + error + the fresh line took %d rows, want 3\n%s", got, s)
+	}
+}
+
+// The abort half of the same shape: an Esc retraction after partial
+// tokens. reportRetraction re-aligns through the SAME helper, so the
+// notice cannot be jammed onto the body either — and the notice reading as
+// model output is the exact failure it exists to prevent.
+func TestW1_AbortNoticeAfterPartialBodyLandsOnItsOwnRow(t *testing.T) {
+	f := newProgressFixture(t, true, true, fixtureSize)
+	f.setElapsed(5 * time.Second)
+	f.p.phase(turn.PhaseWaiting)
+
+	const body = "partial answer so f"
+	if _, err := io.WriteString(f.tm.Out(), body); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	f.p.stop()
+	realign(f.tm)
+	// reportRetraction's own re-align must be a no-op here, not a blank row.
+	realign(f.tm)
+	fmt.Fprintln(f.tm.Out(), abortNotice)
+
+	s := f.screen(t)
+	if got := s.Row(0); got != body {
+		t.Errorf("the body's row is not exactly the body: %q\n%s", got, s)
+	}
+	if got := s.Row(1); got != abortNotice {
+		t.Errorf("the abort notice did not land on its own row: %q\n%s", got, s)
+	}
+	if got := s.TotalRows(); got != 3 {
+		t.Errorf("a second re-align inserted a blank row: %d rows, want 3\n%s", got, s)
+	}
+}
+
 // Item 7 — a 30-column terminal. The status truncates to Cols minus
 // term.StatusColumnInset and does NOT wrap or scroll: writing the final
 // column puts xterm-family terminals into pending wrap, where the next

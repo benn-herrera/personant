@@ -249,14 +249,11 @@ func (c *control) tookAbort() bool {
 // next prompt — but it is not in MEMORY, and re-submitting it is the only
 // way it ever will be.
 func (c *control) reportRetraction(ctx context.Context, ops memops.MemoryOps, turnID, input string) error {
-	out := c.t.Out()
-	// term owns the cursor column, as a tri-state: ColumnUnknown (a child
-	// wrote whatever it liked) takes the newline too, which is the
-	// deterministic answer rather than a guess.
-	if c.t.State().Column != term.ColumnStart {
-		fmt.Fprintln(out)
-	}
-	fmt.Fprintln(out, abortNotice)
+	// The notice takes its own row: a mid-stream abort leaves a partial
+	// body on the current one. Idempotent with runOneTurn's re-align, and
+	// kept here so the marker does not depend on the caller's ordering.
+	realign(c.t)
+	fmt.Fprintln(c.t.Out(), abortNotice)
 	return ops.Log(ctx, memops.LogCategorySystem, "turn-aborted",
 		fmt.Sprintf("turn=%s phase=%q bytes=%d", turnID, c.abortPhase(), len(input)))
 }

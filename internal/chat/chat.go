@@ -767,6 +767,12 @@ func runOneTurn(ctx context.Context, ops memops.MemoryOps, ctl *control, state *
 	// empty-response case) and the one shape that would otherwise leave
 	// the terminal dim.
 	pr.stop()
+	// Re-align BEFORE the branches, for the same reason pr.stop() runs
+	// before them: a turn that failed or was aborted mid-stream has partial
+	// body text on screen exactly as a successful one does, and whatever
+	// comes next — the loop's `turn error:` Diag line, the abort notice,
+	// the next prompt — must not land on that body's tail.
+	realign(tm)
 	// An Esc abort is an ORDINARY event, not a turn failure: the abort
 	// landed in the pre-canonical window, so RunWithInfo's deferred handler
 	// already rolled the session back and released the #94 recovery scope,
@@ -782,14 +788,24 @@ func runOneTurn(ctx context.Context, ops memops.MemoryOps, ctl *control, state *
 	if err != nil {
 		return "", err
 	}
-	// Ensure the next prompt lands on a fresh line. term knows the cursor
-	// column — every byte that reached the terminal went through it —
-	// which the returned body, already tag-stripped and newline-trimmed,
-	// does not.
+	return "", nil
+}
+
+// realign puts the cursor at the start of a line, so that whatever is
+// written next begins on its own row. term knows the cursor column — every
+// byte that reached the terminal went through it — which a streamed body,
+// already tag-stripped and newline-trimmed, does not. The column is a
+// tri-state and ColumnUnknown (a child wrote whatever it liked) takes the
+// newline too: the deterministic answer rather than a guess.
+//
+// This is policy's job, on every path where a partial body may be on
+// screen. term deliberately does NOT force a newline of its own for a Diag
+// write: in a pipe stdout and stderr are separate streams, and term must
+// not inject bytes into stdout on stderr's behalf.
+func realign(tm *term.Terminal) {
 	if tm.State().Column != term.ColumnStart {
 		fmt.Fprintln(tm.Out())
 	}
-	return "", nil
 }
 
 // dispatchSlash returns done=true to signal the loop should exit. A
