@@ -3,7 +3,6 @@ package chat
 import (
 	"bytes"
 	"io"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -11,14 +10,36 @@ import (
 	"time"
 
 	"personant/internal/clock"
+	"personant/internal/term"
 	"personant/internal/turn"
 )
 
+// fakeDevice is the S1 byte-level stand-in (SOLUTION.md §7): it makes a
+// session INTERACTIVE without a terminal, so the indicator's formatter can
+// be driven off a TTY. Composed through the real term.NewUnixPlatform, so
+// the test exercises the same S1→S2 composition production uses rather
+// than a parallel one.
+type fakeDevice struct {
+	out  *bytes.Buffer
+	size term.Size
+}
+
+func (d *fakeDevice) Read([]byte) (int, error)    { return 0, io.EOF }
+func (d *fakeDevice) Write(p []byte) (int, error) { return d.out.Write(p) }
+func (d *fakeDevice) InstallMode(term.ModeIntent) error {
+	panic("test device: nothing may install a mode before W3")
+}
+func (d *fakeDevice) Size() (term.Size, error) { return d.size, nil }
+func (d *fakeDevice) Resized() <-chan struct{} { return nil }
+func (d *fakeDevice) Close() error             { return nil }
+
 // progressFixture drives a progress with an injected tick source and an
 // injected elapsed clock, so no assertion here depends on real time
-// passing (neither the 2s reveal threshold nor the frame interval).
+// passing (neither the 2s reveal threshold nor the frame interval) — and,
+// per the terminal-test sleep ban, no assertion polls one either.
 type progressFixture struct {
 	p   *progress
+	tm  *term.Terminal
 	out *bytes.Buffer
 
 	mu        sync.Mutex
@@ -28,17 +49,29 @@ type progressFixture struct {
 	elapsedNS atomic.Int64
 }
 
-func newProgressFixture(enabled, animate bool) *progressFixture {
+// newProgressFixture builds an indicator over a terminal that is
+// interactive (an injected platform) or not (buffers, the plain backend).
+// ansi selects whether that terminal accepts the erase sequence.
+func newProgressFixture(t *testing.T, interactive, ansi bool) *progressFixture {
+	t.Helper()
 	f := &progressFixture{out: &bytes.Buffer{}}
-	f.p = &progress{
-		out:       f.out,
-		enabled:   enabled,
-		animate:   animate,
-		lineClean: true,
-		newTicker: f.makeTicker,
-		elapsed: func(clock.ProfilingTime) time.Duration {
-			return time.Duration(f.elapsedNS.Load())
-		},
+	opts := term.Options{Stdout: f.out}
+	if interactive {
+		opts.Platform = term.NewUnixPlatform(&fakeDevice{out: f.out, size: term.Size{Cols: 80, Rows: 24}})
+		if ansi {
+			opts.TermEnv = "xterm-256color"
+		}
+	}
+	tm, err := term.Open(opts)
+	if err != nil {
+		t.Fatalf("term.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = tm.Close() })
+	f.tm = tm
+	f.p = newProgress(tm)
+	f.p.newTicker = f.makeTicker
+	f.p.elapsed = func(clock.ProfilingTime) time.Duration {
+		return time.Duration(f.elapsedNS.Load())
 	}
 	return f
 }
@@ -57,13 +90,12 @@ func (f *progressFixture) makeTicker() (<-chan time.Time, func()) {
 
 func (f *progressFixture) setElapsed(d time.Duration) { f.elapsedNS.Store(int64(d)) }
 
-// rendered reads the captured output under the progress mutex — the
-// ticker goroutine writes to the same buffer.
-func (f *progressFixture) rendered() string {
-	f.p.mu.Lock()
-	defer f.p.mu.Unlock()
-	return f.out.String()
-}
+// slot is what term believes occupies the ephemeral slot — the formatter's
+// actual output, read from its one owner rather than reconstructed from
+// bytes.
+func (f *progressFixture) slot() string { return f.tm.State().Status }
+
+func (f *progressFixture) rendered() string { return f.out.String() }
 
 func (f *progressFixture) stops() int {
 	f.mu.Lock()
@@ -71,37 +103,31 @@ func (f *progressFixture) stops() int {
 	return f.stopCount
 }
 
-// tick delivers one heartbeat to the running ticker goroutine.
+// tick delivers heartbeats and returns only once the FIRST of them has
+// been fully rendered. The channel is unbuffered, so the second send is
+// accepted only after the goroutine has looped back to its select — which
+// it does after renderLocked returns. That is a happens-before, not a
+// duration: nothing here waits on an idle machine, which is exactly how
+// two of the five §2 bugs were declared fixed.
 func (f *progressFixture) tick(t *testing.T) {
 	t.Helper()
 	f.mu.Lock()
 	ch := f.ticks
 	f.mu.Unlock()
-	select {
-	case ch <- time.Time{}:
-	case <-time.After(2 * time.Second):
-		t.Fatal("ticker goroutine is not consuming its channel")
-	}
-}
-
-// waitFor polls cond to a deadline. It synchronizes with the ticker
-// goroutine; it never asserts a duration.
-func waitFor(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-	for i := 0; i < 2000; i++ {
-		if cond() {
-			return
+	for i := 0; i < 2; i++ {
+		select {
+		case ch <- time.Time{}:
+		case <-time.After(5 * time.Second):
+			t.Fatal("ticker goroutine is not consuming its channel")
 		}
-		time.Sleep(time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for %s", what)
 }
 
 // The regression that protects the sim harness, the scenario tests, and
 // every piped invocation: a non-terminal session must not emit a single
 // byte of decoration, while still passing content through untouched.
 func TestProgress_DisabledWritesZeroBytes(t *testing.T) {
-	f := newProgressFixture(false, false)
+	f := newProgressFixture(t, false, false)
 	f.setElapsed(time.Hour)
 	f.p.phase(turn.PhaseComposing)
 	f.p.phase(turn.PhaseWaiting)
@@ -110,8 +136,8 @@ func TestProgress_DisabledWritesZeroBytes(t *testing.T) {
 	if got := f.rendered(); got != "" {
 		t.Fatalf("disabled progress wrote %q, want no output", got)
 	}
-	if _, err := io.WriteString(f.p.writer(f.out), "body\n"); err != nil {
-		t.Fatalf("writer: %v", err)
+	if _, err := io.WriteString(f.tm.Out(), "body\n"); err != nil {
+		t.Fatalf("write: %v", err)
 	}
 	if got := f.rendered(); got != "body\n" {
 		t.Errorf("content not passed through verbatim: %q", got)
@@ -121,30 +147,32 @@ func TestProgress_DisabledWritesZeroBytes(t *testing.T) {
 	}
 }
 
-// Short turns stay visually quiet: nothing is drawn until the wait
-// exceeds progressShowAfter.
+// Short turns stay visually quiet: nothing is handed to the slot until the
+// wait exceeds progressShowAfter.
 func TestProgress_QuietBelowThreshold(t *testing.T) {
-	f := newProgressFixture(true, true)
+	f := newProgressFixture(t, true, true)
 	f.setElapsed(progressShowAfter - time.Millisecond)
 	f.p.phase(turn.PhaseWaiting)
-	if got := f.rendered(); got != "" {
+	if got := f.slot(); got != "" {
 		t.Fatalf("drew before the reveal threshold: %q", got)
 	}
 	f.setElapsed(progressShowAfter)
 	f.p.phase(turn.PhaseClosing)
-	if got := f.rendered(); !strings.Contains(got, string(turn.PhaseClosing)) {
+	if got := f.slot(); !strings.Contains(got, string(turn.PhaseClosing)) {
 		t.Errorf("nothing drawn past the threshold: %q", got)
 	}
 	f.p.stop()
 }
 
+// Each phase re-labels the ONE slot; a run of phase changes inside one
+// wait is one ticker lifecycle, not one per label.
 func TestProgress_PhaseTransitionsUpdateLabel(t *testing.T) {
-	f := newProgressFixture(true, true)
+	f := newProgressFixture(t, true, true)
 	f.setElapsed(5 * time.Second)
 	for _, ph := range []turn.Phase{turn.PhaseComposing, turn.PhaseWaiting, turn.PhaseReissuing} {
 		f.p.phase(ph)
-		if got := f.rendered(); !strings.HasSuffix(got, string(ph)+" (5s)") {
-			t.Errorf("phase %q not the current label; rendered %q", ph, got)
+		if got := f.slot(); !strings.HasSuffix(got, string(ph)+" (5s)") {
+			t.Errorf("phase %q not the current label; slot %q", ph, got)
 		}
 	}
 	f.p.stop()
@@ -156,22 +184,21 @@ func TestProgress_PhaseTransitionsUpdateLabel(t *testing.T) {
 // The ticker goroutine animates while the wait runs and is GONE once stop
 // returns — stop joins it, so a leak would hang here rather than pass.
 func TestProgress_TickerAnimatesThenExits(t *testing.T) {
-	f := newProgressFixture(true, true)
+	f := newProgressFixture(t, true, true)
 	f.setElapsed(5 * time.Second)
 	f.p.phase(turn.PhaseWaiting)
-	before := len(f.rendered())
+	before := f.slot()
 	f.tick(t)
-	waitFor(t, "an animated frame", func() bool { return len(f.rendered()) > before })
+	if got := f.slot(); got == before {
+		t.Errorf("a heartbeat did not advance the frame: still %q", got)
+	}
 
 	f.p.stop()
 	if f.stops() != 1 {
 		t.Errorf("ticker goroutine did not exit exactly once: %d", f.stops())
 	}
-	if got := f.rendered(); !strings.HasSuffix(got, eraseLine) {
-		t.Errorf("stop did not clear the line: %q", got)
-	}
-	if !f.p.atLineStart() {
-		t.Error("cursor not at column 0 after stop")
+	if got := f.slot(); got != "" {
+		t.Errorf("stop did not give the line back: slot still %q", got)
 	}
 	f.p.stop() // idempotent
 	if f.stops() != 1 {
@@ -179,189 +206,108 @@ func TestProgress_TickerAnimatesThenExits(t *testing.T) {
 	}
 }
 
-// The reported dogfooding bug: every frame landed on its own new line and
-// scrolled the terminal. An animated wait must be ONE line redrawn in
-// place — so across a run of frames the indicator emits zero newlines,
-// and each frame is introduced by the erase sequence that reclaims the
-// previous one.
-func TestProgress_AnimatedFramesRedrawInPlace(t *testing.T) {
-	f := newProgressFixture(true, true)
+// Bug 1, at the formatter's end of the seam. Content taking the terminal
+// retires the slot; a HEARTBEAT must not take it back, or a spinner lands
+// on top of the response the user is reading. An ANNOUNCEMENT (a new
+// phase) still may — that is how turn close restarts the indicator.
+//
+// The indicator asks term whether its frame is still on screen instead of
+// keeping a flag, which is precisely the flag bug 1 got wrong.
+func TestProgress_HeartbeatDoesNotRetakeTheLineFromContent(t *testing.T) {
+	f := newProgressFixture(t, true, true)
 	f.setElapsed(5 * time.Second)
 	f.p.phase(turn.PhaseWaiting)
-
-	const ticks = 4
-	for i := 0; i < ticks; i++ {
-		before := len(f.rendered())
-		f.tick(t)
-		waitFor(t, "an animated frame", func() bool { return len(f.rendered()) > before })
-	}
-	out := f.rendered()
-	f.p.stop()
-
-	if strings.Contains(out, "\n") {
-		t.Errorf("animated frames emitted a newline — one line per frame instead of an in-place redraw: %q", out)
-	}
-	// Split on the erase sequence: a leading empty element (the output
-	// opens with an erase) plus exactly one body per render.
-	parts := strings.Split(out, eraseLine)
-	if len(parts) != ticks+2 {
-		t.Fatalf("want %d in-place redraws separated by %q, got %d: %q", ticks+1, eraseLine, len(parts)-1, out)
-	}
-	if parts[0] != "" {
-		t.Errorf("first frame not preceded by the erase sequence: %q", out)
-	}
-	for _, body := range parts[1:] {
-		if !strings.Contains(body, string(turn.PhaseWaiting)) {
-			t.Errorf("frame %q is not a labeled indicator line; full output %q", body, out)
-		}
-	}
-}
-
-// A phase change mid-wait overwrites the existing indicator line rather
-// than pushing it down: the label is not "content", it is the same line
-// relabeled.
-func TestProgress_LabelChangeOverwritesInPlace(t *testing.T) {
-	f := newProgressFixture(true, true)
-	f.setElapsed(5 * time.Second)
-	f.p.phase(turn.PhaseComposing)
-	f.p.phase(turn.PhaseWaiting)
-	out := f.rendered()
-	f.p.stop()
-
-	if strings.Contains(out, "\n") {
-		t.Errorf("label change emitted a newline instead of overwriting in place: %q", out)
-	}
-	if n := strings.Count(out, eraseLine); n != 2 {
-		t.Fatalf("want 2 in-place redraws (one per label), got %d: %q", n, out)
-	}
-	tail := out[strings.LastIndex(out, eraseLine)+len(eraseLine):]
-	if !strings.Contains(tail, string(turn.PhaseWaiting)) || strings.Contains(tail, string(turn.PhaseComposing)) {
-		t.Errorf("the surviving line is not the new label: %q", tail)
-	}
-}
-
-// The counterpart to TestProgress_RestartsForClosingPhase: content that
-// already ended the line leaves the cursor at column 0, so the restarted
-// indicator must NOT open a second, blank line.
-func TestProgress_RestartAfterNewlineTerminatedContent(t *testing.T) {
-	f := newProgressFixture(true, true)
-	f.setElapsed(5 * time.Second)
-	f.p.phase(turn.PhaseWaiting)
-	if _, err := io.WriteString(f.p.writer(f.out), "body text\n"); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	f.p.phase(turn.PhaseClosing)
-	out := f.rendered()
-	f.p.stop()
-
-	after := out[strings.Index(out, "body text\n")+len("body text\n"):]
-	if !strings.HasPrefix(after, eraseLine) {
-		t.Errorf("restart on an already-clean line did not draw immediately: %q", after)
-	}
-}
-
-// First body byte hands the terminal back, and the body text arrives
-// intact and contiguous — no frame interleaved into it.
-func TestProgress_FirstBodyByteRetiresIndicator(t *testing.T) {
-	f := newProgressFixture(true, true)
-	f.setElapsed(5 * time.Second)
-	f.p.phase(turn.PhaseWaiting)
-	if !strings.Contains(f.rendered(), string(turn.PhaseWaiting)) {
+	if f.slot() == "" {
 		t.Fatal("indicator did not draw")
 	}
-	w := f.p.writer(f.out)
-	for _, chunk := range []string{"Hello, ", "world", "."} {
-		if _, err := io.WriteString(w, chunk); err != nil {
-			t.Fatalf("write: %v", err)
-		}
-	}
-	out := f.rendered()
-	if !strings.Contains(out, "Hello, world.") {
-		t.Errorf("body corrupted by the indicator: %q", out)
-	}
-	if f.stops() != 1 {
-		t.Errorf("body write did not stop the ticker: %d", f.stops())
-	}
-	tail := out[strings.Index(out, "Hello, "):]
-	if strings.Contains(tail, string(turn.PhaseWaiting)) {
-		t.Errorf("a frame landed after the body started: %q", tail)
-	}
-}
 
-// After the stream ends the closing phase restarts the indicator — on a
-// clean line, never drawn over the response the user is reading.
-func TestProgress_RestartsForClosingPhase(t *testing.T) {
-	f := newProgressFixture(true, true)
-	f.setElapsed(5 * time.Second)
-	f.p.phase(turn.PhaseWaiting)
-	if _, err := io.WriteString(f.p.writer(f.out), "body text"); err != nil {
+	if _, err := io.WriteString(f.tm.Out(), "Hello, world."); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	f.p.phase(turn.PhaseClosing)
-
-	out := f.rendered()
-	if !strings.Contains(out, string(turn.PhaseClosing)) {
-		t.Fatalf("closing phase did not restart the indicator: %q", out)
+	if got := f.slot(); got != "" {
+		t.Fatalf("content did not retire the slot: %q", got)
 	}
-	after := out[strings.Index(out, "body text")+len("body text"):]
-	if !strings.HasPrefix(after, "\n") {
-		t.Errorf("restarted indicator drew onto the body's line: %q", after)
+	f.tick(t)
+	if got := f.slot(); got != "" {
+		t.Errorf("a heartbeat took the line back from content: %q", got)
+	}
+	if got := f.rendered(); !strings.HasSuffix(got, "Hello, world.") {
+		t.Errorf("a frame landed after the body started: %q", got)
+	}
+
+	f.p.phase(turn.PhaseClosing)
+	if got := f.slot(); !strings.Contains(got, string(turn.PhaseClosing)) {
+		t.Errorf("the closing phase did not restart the indicator: %q", got)
 	}
 	f.p.stop()
-	if f.stops() != 2 {
-		t.Errorf("want 2 ticker lifecycles (wait + closing), got %d", f.stops())
-	}
 }
 
-// TERM=dumb / no ANSI: one static line per phase, no frames, no cursor
-// games, and no heartbeat goroutine at all.
+// The Esc hint appears and disappears with the abortable window rather
+// than one frame late, and it is never inferred — a session with no
+// working cbreak must not advertise a key that does nothing.
+func TestProgress_AbortHintTracksTheWindow(t *testing.T) {
+	f := newProgressFixture(t, true, true)
+	f.setElapsed(5 * time.Second)
+	f.p.phase(turn.PhaseWaiting)
+	if strings.Contains(f.slot(), abortHintSuffix) {
+		t.Errorf("hint advertised before the window opened: %q", f.slot())
+	}
+	f.p.setAbortHint(true)
+	if !strings.Contains(f.slot(), abortHintSuffix) {
+		t.Errorf("hint missing while the window is open: %q", f.slot())
+	}
+	f.p.setAbortHint(false)
+	if strings.Contains(f.slot(), abortHintSuffix) {
+		t.Errorf("hint outlived the window: %q", f.slot())
+	}
+	f.p.stop()
+}
+
+// TERM=dumb / no ANSI: the slot cannot be erased, so it commits one line
+// per occupancy instead of animating over itself. The frames still tick;
+// term drops them. No cursor games and no escape codes reach a terminal
+// that cannot render them.
 func TestProgress_DumbTerminalDegradesToStaticLines(t *testing.T) {
-	f := newProgressFixture(true, false)
+	f := newProgressFixture(t, true, false)
 	f.setElapsed(5 * time.Second)
 	f.p.phase(turn.PhaseWaiting)
 	f.p.phase(turn.PhaseWaiting) // repeat must not re-print
+	f.tick(t)                    // nor may a heartbeat
 	f.p.phase(turn.PhaseClosing)
 	f.p.stop()
 
-	want := string(turn.PhaseWaiting) + "...\n" + string(turn.PhaseClosing) + "...\n"
 	got := f.rendered()
-	if got != want {
-		t.Errorf("static rendering = %q, want %q", got, want)
-	}
 	if strings.ContainsAny(got, "\x1b\r") {
 		t.Errorf("no-ANSI rendering emitted control sequences: %q", got)
 	}
-	if f.stops() != 0 {
-		t.Errorf("static mode started %d tickers, want none", f.stops())
+	lines := strings.Count(got, "\n")
+	if lines != 2 {
+		t.Errorf("want one committed line per label (2), got %d: %q", lines, got)
 	}
-}
-
-func TestAnsiCapable(t *testing.T) {
-	for _, tc := range []struct {
-		term string
-		want bool
-	}{
-		{"xterm-256color", true},
-		{"screen", true},
-		{"dumb", false},
-		{"", false},
-	} {
-		if got := ansiCapable(tc.term); got != tc.want {
-			t.Errorf("ansiCapable(%q) = %v, want %v", tc.term, got, tc.want)
+	for _, want := range []string{string(turn.PhaseWaiting), string(turn.PhaseClosing)} {
+		if !strings.Contains(got, want) {
+			t.Errorf("label %q missing from the static rendering: %q", want, got)
 		}
 	}
 }
 
-func TestIsCharDevice(t *testing.T) {
-	if isCharDevice(&bytes.Buffer{}) {
-		t.Error("a bytes.Buffer is not a terminal")
+// The indicator holds no registration of its own; this pins that driving
+// it leaves term's ownership books untouched and unviolated, which is the
+// parity assertion the off-TTY suite exists to make.
+func TestProgress_LeavesOwnershipBooksClean(t *testing.T) {
+	f := newProgressFixture(t, true, true)
+	f.setElapsed(5 * time.Second)
+	f.p.phase(turn.PhaseWaiting)
+	f.tick(t)
+	f.p.stop()
+	st := f.tm.State()
+	if st.Violations != 0 {
+		t.Errorf("violations = %d, want 0", st.Violations)
 	}
-	f, err := os.CreateTemp(t.TempDir(), "out")
-	if err != nil {
-		t.Fatalf("temp file: %v", err)
+	if len(st.Stack) != 0 {
+		t.Errorf("activity stack = %v, want empty", st.Stack)
 	}
-	defer f.Close()
-	if isCharDevice(f) {
-		t.Error("a regular file is not a terminal")
+	if st.ModeInstalls != 0 {
+		t.Errorf("mode installs = %d, want 0 — liner owns the mode until W3", st.ModeInstalls)
 	}
 }

@@ -2,7 +2,6 @@ package chat
 
 import (
 	"bytes"
-	"io"
 	"os"
 	"strings"
 	"testing"
@@ -10,16 +9,34 @@ import (
 	"personant/internal/memops"
 	"personant/internal/model"
 	"personant/internal/store"
+	"personant/internal/term"
 )
 
-// newThinkingFixture builds a thinking renderer over a progress with the
-// given terminal determinations, capturing everything either of them
-// writes. It mirrors newThinking's own wiring (both determinations are
-// READ from the progress) so the test cannot drift from production.
-func newThinkingFixture(interactive, ansi, on bool) (*thinking, *bytes.Buffer) {
+// newThinkingFixture builds a thinking renderer over a terminal with the
+// given determinations, capturing every byte it emits. Both
+// determinations are READ FROM term — the one TTY predicate and the one
+// ANSI determination — so the test cannot drift from production.
+//
+// What is asserted here is POLICY: whether reasoning is offered to the
+// channel at all. How the channel renders it (dim brackets, the words
+// fallback, closing the run before content) belongs to term and is
+// asserted there, which is the whole point of the W1 collapse.
+func newThinkingFixture(t *testing.T, interactive, ansi, on bool) (*thinking, *bytes.Buffer) {
+	t.Helper()
 	out := &bytes.Buffer{}
-	pr := &progress{out: out, enabled: interactive, animate: ansi, lineClean: true}
-	return newThinking(pr, out, on), out
+	opts := term.Options{Stdout: out}
+	if interactive {
+		opts.Platform = term.NewUnixPlatform(&fakeDevice{out: out, size: term.Size{Cols: 80, Rows: 24}})
+		if ansi {
+			opts.TermEnv = "xterm-256color"
+		}
+	}
+	tm, err := term.Open(opts)
+	if err != nil {
+		t.Fatalf("term.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = tm.Close() })
+	return newThinking(tm, on), out
 }
 
 // The regression that protects the sim harness, the scenario tests, and
@@ -28,126 +45,66 @@ func newThinkingFixture(interactive, ansi, on bool) (*thinking, *bytes.Buffer) {
 // byte-for-byte.
 func TestThinking_NonTTYWritesZeroReasoningBytes(t *testing.T) {
 	for _, on := range []bool{false, true} {
-		th, out := newThinkingFixture(false, false, on)
+		th, out := newThinkingFixture(t, false, false, on)
 		th.reasoning("scratch that must never appear")
 		th.reasoning("more scratch")
-		th.end()
 		if got := out.String(); got != "" {
 			t.Errorf("showThinking=%v on a non-terminal wrote %q, want nothing", on, got)
-		}
-		if _, err := io.WriteString(th, "the answer\n"); err != nil {
-			t.Fatalf("write: %v", err)
-		}
-		if got := out.String(); got != "the answer\n" {
-			t.Errorf("showThinking=%v: content not passed through verbatim: %q", on, got)
 		}
 	}
 }
 
 // Off is off even on a real terminal — the config default.
 func TestThinking_DisabledOnTerminalWritesNothing(t *testing.T) {
-	th, out := newThinkingFixture(true, true, false)
+	th, out := newThinkingFixture(t, true, true, false)
 	th.reasoning("scratch")
-	th.end()
 	if got := out.String(); got != "" {
 		t.Errorf("disabled thinking wrote %q, want nothing", got)
 	}
 }
 
-// The reasoning→content transition, which is the whole risk: the answer
-// must not arrive dimmed, and must not be jammed onto the tail of the
-// reasoning line. One dim-open, one dim-close, a newline, then the body
-// verbatim.
-func TestThinking_ReasoningThenContentTransition(t *testing.T) {
-	th, out := newThinkingFixture(true, true, true)
-	th.reasoning("first ")
-	th.reasoning("second")
-	if _, err := io.WriteString(th, "the answer"); err != nil {
-		t.Fatalf("write: %v", err)
+// Toggling off stops offering deltas to the channel; toggling on
+// resumes. The RENDERING of the run — dim brackets, the words fallback
+// on a dumb terminal, and closing the run before content lands — is
+// term's and is asserted in internal/term, where the one serialization
+// point that performs it lives.
+func TestThinking_ToggleGatesTheChannel(t *testing.T) {
+	th, out := newThinkingFixture(t, true, true, true)
+	th.reasoning("shown")
+	if !strings.Contains(out.String(), "shown") {
+		t.Fatalf("enabled thinking rendered nothing: %q", out.String())
 	}
-	want := dimOn + "first " + "second" + dimOff + "\n" + "the answer"
-	if got := out.String(); got != want {
-		t.Fatalf("got %q, want %q", got, want)
-	}
-	// The body is intact and undimmed: everything after the reset is the
-	// answer, byte-for-byte.
-	body := out.String()[strings.Index(out.String(), dimOff)+len(dimOff):]
-	if body != "\nthe answer" {
-		t.Errorf("body after the reasoning run = %q, want %q", body, "\nthe answer")
-	}
-}
-
-// A second content write must not re-open or re-close anything: the run
-// is closed exactly once, at the transition.
-func TestThinking_RunClosesExactlyOnce(t *testing.T) {
-	th, out := newThinkingFixture(true, true, true)
-	th.reasoning("scratch")
-	io.WriteString(th, "one ")
-	io.WriteString(th, "two")
-	th.end() // defensive call from runOneTurn — must be a no-op here
-	if got, want := strings.Count(out.String(), dimOff), 1; got != want {
-		t.Errorf("dim reset written %d times, want %d (%q)", got, want, out.String())
-	}
-	if got, want := strings.Count(out.String(), dimOn), 1; got != want {
-		t.Errorf("dim open written %d times, want %d (%q)", got, want, out.String())
-	}
-}
-
-// The reasoning-only turn (the D6 empty-response shape): no content ever
-// arrives, so runOneTurn's explicit end() is what returns the terminal to
-// undimmed, column 0.
-func TestThinking_ReasoningOnlyTurnEndsClean(t *testing.T) {
-	th, out := newThinkingFixture(true, true, true)
-	th.reasoning("thought hard, said nothing")
-	th.end()
-	if !strings.HasSuffix(out.String(), dimOff+"\n") {
-		t.Errorf("reasoning-only turn left the terminal at %q, want a dim reset and a newline", out.String())
-	}
-}
-
-// No-ANSI degradation (TERM=dumb / unset): escape codes would be printed
-// literally, so the distinction is carried by words instead. The one
-// thing that must not happen is reasoning that reads as the answer.
-func TestThinking_NoANSIFallbackIsReadable(t *testing.T) {
-	th, out := newThinkingFixture(true, false, true)
-	th.reasoning("scratch")
-	io.WriteString(th, "the answer")
-	got := out.String()
-	if strings.Contains(got, "\x1b") {
-		t.Errorf("no-ANSI terminal got escape codes: %q", got)
-	}
-	want := thinkingOpen + "scratch" + thinkingClose + "\n" + "the answer"
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
-}
-
-// Toggling off mid-run must not leave the terminal dim.
-func TestThinking_SetOffClosesOpenRun(t *testing.T) {
-	th, out := newThinkingFixture(true, true, true)
-	th.reasoning("scratch")
 	th.setOn(false)
-	if !strings.HasSuffix(out.String(), dimOff+"\n") {
-		t.Errorf("toggling off left the terminal at %q, want a dim reset", out.String())
-	}
-	th.reasoning("more scratch")
-	if strings.Contains(out.String(), "more scratch") {
+	th.reasoning("hidden after off")
+	if strings.Contains(out.String(), "hidden after off") {
 		t.Errorf("reasoning still rendered after /thinking off: %q", out.String())
 	}
+	th.setOn(true)
+	th.reasoning("shown again")
+	if !strings.Contains(out.String(), "shown again") {
+		t.Errorf("post-toggle reasoning missing: %q", out.String())
+	}
 }
 
-// Toggling on mid-session takes effect for the next delta.
-func TestThinking_SetOnStartsRendering(t *testing.T) {
-	th, out := newThinkingFixture(true, true, false)
-	th.reasoning("hidden")
-	th.setOn(true)
-	th.reasoning("shown")
-	got := out.String()
-	if strings.Contains(got, "hidden") {
-		t.Errorf("pre-toggle reasoning rendered: %q", got)
-	}
-	if !strings.Contains(got, "shown") {
-		t.Errorf("post-toggle reasoning missing: %q", got)
+// A non-terminal session shows nothing whatever the setting says, and
+// showing() is the single predicate that says so — both halves, one
+// place.
+func TestThinking_ShowingNeedsBothHalves(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		interactive, on, want bool
+	}{
+		{"terminal + on", true, true, true},
+		{"terminal + off", true, false, false},
+		{"pipe + on", false, true, false},
+		{"pipe + off", false, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			th, _ := newThinkingFixture(t, tc.interactive, true, tc.on)
+			if got := th.showing(); got != tc.want {
+				t.Errorf("showing() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

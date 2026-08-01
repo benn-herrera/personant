@@ -3,79 +3,50 @@ package chat
 import (
 	"io"
 	"strings"
+
+	"personant/internal/term"
 )
 
-const (
-	// dimOn / dimOff bracket reasoning output in ANSI SGR faint. Faint
-	// (2) rather than a colour: it degrades sanely on terminals that
-	// render it as normal text, and it makes no assumption about the
-	// user's palette. Reset (0) rather than 22 for the same reason —
-	// 22 is the exact undo, but 0 is the sequence every terminal
-	// implements.
-	dimOn  = "\x1b[2m"
-	dimOff = "\x1b[0m"
-
-	// thinkingOpen / thinkingClose are the no-ANSI fallback. On a dumb
-	// terminal dimming is unavailable, so the distinction has to be
-	// carried by words: reasoning that could be mistaken for the answer
-	// is the one failure this feature must not have.
-	thinkingOpen  = "[thinking] "
-	thinkingClose = " [/thinking]"
-)
-
-// thinking renders a thinking model's live reasoning stream, dimmed and
-// visually separated from the response body.
+// thinking is the /thinking POLICY — and, since W1, nothing else.
 //
-// It is BOTH the reasoning sink (reasoning, wired to turn.State.OnReasoning)
-// and the content writer every other REPL producer goes through (Write) —
-// deliberately one object, because the whole problem is the handoff
-// between them. A reasoning run stays open across many chunks; the moment
-// anything else wants the terminal, the run has to be closed first or the
-// user's answer arrives dim and jammed onto the tail of a scratch line.
-// Making content writes flow through the same object is what guarantees
-// that, without a second mechanism to keep in sync.
+// It used to be BOTH the reasoning sink and the content writer every
+// other REPL producer went through, deliberately one object because the
+// handoff between them was the whole problem: a reasoning run stays open
+// across many chunks, and the moment anything else wants the terminal the
+// run has to be closed or the user's answer arrives dim and jammed onto
+// the tail of a scratch line.
 //
-// It wraps progress.writer rather than stdout: every byte it emits still
-// retires the wait indicator on its first write and keeps the indicator's
-// cursor-column bookkeeping honest. It writes ZERO bytes of its own when
-// disabled, so the piped/test/sim paths are byte-for-byte unaffected
-// regardless of the config setting.
+// That object existed because the (tty-only, scrollback) cell of the §5
+// output model had no name, so thinking.go was the only thing that knew
+// about the reasoning-to-content transition and every other producer had
+// to route through it to be serialized. term.Reasoning names the cell,
+// and the transition is now handled once inside term's serialization
+// point — an open run is closed by the first byte on Out or Diag and by
+// either Status operation. Naming the cell dissolved the object.
 //
-// Not safe for concurrent use, and does not need to be: reasoning() and
-// Write() are both called from the turn goroutine, and the toggle runs on
-// the REPL loop between turns. Its own terminal writes are unchecked, as
-// in progress.go — this is decoration around a stream whose real payload
-// reports its own errors, and there is no per-byte recovery for a
-// terminal that stopped accepting them.
+// What is left is the two decisions that are genuinely chat's: whether
+// the user asked for reasoning to be shown (/thinking, config), and
+// reporting that state. Whether it can be shown at all, whether it is
+// dimmed or bracketed with words on a dumb terminal, and when the run
+// closes are term's.
 type thinking struct {
+	// w is term's reasoning channel. It writes ZERO bytes when the
+	// session is not interactive, so the piped/test/sim paths are
+	// byte-for-byte unaffected regardless of the config setting.
 	w io.Writer
 
-	// enabled is the terminal determination AND the user's choice. The
-	// terminal half is fixed for the session (interactiveTTY, via the
-	// progress indicator); the choice half moves with /thinking.
+	// interactive is term's ONE TTY predicate; on is the user's choice.
+	// Both halves must hold for anything to be shown, and the terminal
+	// half is fixed for the session while the choice half moves with
+	// /thinking.
 	interactive bool
 	on          bool
-	// ansi is the progress indicator's own ANSI determination, shared so
-	// the two can never disagree about what the terminal accepts.
-	ansi bool
-
-	// active says a reasoning run is open on the terminal — dim is on (or
-	// the [thinking] marker has been printed) and nothing else may write
-	// until it is closed.
-	active bool
 }
 
-// newThinking builds the renderer over the progress indicator's writer
-// discipline. on is the config default (memops.ChatConfig.ShowThinking).
-// The interactivity and ANSI determinations are READ FROM pr rather than
-// recomputed, so there is exactly one of each per session.
-func newThinking(pr *progress, out io.Writer, on bool) *thinking {
-	return &thinking{
-		w:           pr.writer(out),
-		interactive: pr.enabled,
-		on:          on,
-		ansi:        pr.animate,
-	}
+// newThinking builds the renderer over the session's terminal. on is the
+// config default (memops.ChatConfig.ShowThinking).
+func newThinking(t *term.Terminal, on bool) *thinking {
+	return &thinking{w: t.Reasoning(), interactive: t.Interactive(), on: on}
 }
 
 // showing reports whether reasoning is currently being displayed. Both
@@ -83,62 +54,25 @@ func newThinking(pr *progress, out io.Writer, on bool) *thinking {
 // setting says.
 func (t *thinking) showing() bool { return t.interactive && t.on }
 
-// setOn applies the /thinking override for the rest of the session. An
-// open run is closed on the way to off so the terminal is not left dim.
-func (t *thinking) setOn(on bool) {
-	if !on {
-		t.end()
-	}
-	t.on = on
-}
+// setOn applies the /thinking override for the rest of the session.
+//
+// It does not close an open reasoning run, because it cannot leave one
+// dangling: the command's own reply goes out on term's content channel,
+// which closes any open run before it lands. There is deliberately no
+// end-the-run call anywhere in this package — that was the second
+// mechanism that had to be kept in sync, and term removed the need for
+// it.
+func (t *thinking) setOn(on bool) { t.on = on }
 
 // reasoning renders one thinking-mode delta. It is the
 // turn.State.OnReasoning hook. Deltas arrive with no line structure of
-// their own, so the run is bracketed rather than prefixed per line — a
-// per-line prefix would need lookahead the stream does not offer.
+// their own; term brackets the run rather than prefixing per line, since
+// a per-line prefix would need lookahead the stream does not offer.
 func (t *thinking) reasoning(s string) {
 	if !t.showing() || s == "" {
 		return
 	}
-	if !t.active {
-		t.active = true
-		if t.ansi {
-			io.WriteString(t.w, dimOn)
-		} else {
-			io.WriteString(t.w, thinkingOpen)
-		}
-	}
-	io.WriteString(t.w, s)
-}
-
-// end closes an open reasoning run and returns the terminal to a clean
-// line. Idempotent, and a no-op when no run is open, so callers can fire
-// it defensively at any handoff.
-func (t *thinking) end() {
-	if !t.active {
-		return
-	}
-	t.active = false
-	if t.ansi {
-		io.WriteString(t.w, dimOff)
-	} else {
-		io.WriteString(t.w, thinkingClose)
-	}
-	// Always a newline: the answer must start on its own line, never on
-	// the tail of the scratch. The dim reset alone would leave the two
-	// sharing a row.
-	io.WriteString(t.w, "\n")
-}
-
-// Write is the content path — the response body, the §3.4 recall offer,
-// the §3.5 closure prompt, the abort notice. Closing any open reasoning
-// run first is the entire point: this is the reasoning→content
-// transition, and it is handled once, here, for every producer.
-func (t *thinking) Write(b []byte) (int, error) {
-	if len(b) > 0 {
-		t.end()
-	}
-	return t.w.Write(b)
+	_, _ = io.WriteString(t.w, s)
 }
 
 // thinkingStateLabel renders the current setting for /thinking's report.

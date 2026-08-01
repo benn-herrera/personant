@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/peterh/liner"
+
+	"personant/internal/term"
 )
 
 // errInputAborted signals the user pressed Ctrl-C at an interactive prompt.
@@ -42,44 +44,30 @@ type lineReader interface {
 
 // isEndOrAbort reports whether err ends interactive input — end-of-stream
 // (Ctrl-D) or an abort (Ctrl-C). Both mean "stop asking".
+//
+// term.IsEndOrAbort is the same test over term's own sentinels; the two
+// coexist only while liner does, and this one goes with it in W3.
 func isEndOrAbort(err error) bool {
 	return errors.Is(err, io.EOF) || errors.Is(err, errInputAborted)
 }
 
-// interactiveTTY reports whether the session is driving a real terminal.
-// It is the package's ONE terminal determination: the input seam
-// (newLineReader) and the progress indicator both read it, so they can
-// never disagree about whether the session is interactive.
-//
-// Two conditions, one per direction. liner reads os.Stdin directly, so
-// stdin must BE os.Stdin; the progress indicator paints stdout, so stdout
-// must be a character device. A run with either end redirected
-// (`personant chat > out.txt`, the tests' injected buffers) is not
-// interactive: line editing has nowhere to render and decoration would
-// corrupt the captured stream.
-func interactiveTTY(opts Options) bool {
-	return opts.Stdin == os.Stdin && isCharDevice(opts.Stdout)
-}
-
-// isCharDevice reports whether w is a terminal rather than a file, a pipe
-// or an in-memory buffer. Stdlib-only — an *os.File whose mode carries
-// os.ModeCharDevice.
-func isCharDevice(w io.Writer) bool {
-	f, ok := w.(*os.File)
-	if !ok {
-		return false
-	}
-	fi, err := f.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
-}
-
 // newLineReader picks the input implementation: liner-backed editing on
 // an interactive terminal, a plain buffered reader everywhere else.
-func newLineReader(opts Options, in *bufio.Reader) lineReader {
-	if interactiveTTY(opts) {
-		return newLinerReader(opts.HistoryFile)
+//
+// The interactivity determination comes from term — axiom §4.2 requires
+// exactly ONE TTY predicate, and it now lives in the package that owns
+// the terminal rather than being re-derived here from os.Stdin and a
+// stat. The non-interactive reader writes its prompt through term's
+// content channel, so even the prompt echo is inside the arbiter and the
+// cursor-column belief stays honest. The liner path still writes
+// straight to the terminal and still reads os.Stdin: that is the
+// scaffolding W3 removes, and it is why internal/chat/input.go carries an
+// entry on the no-direct-terminal-access allowlist.
+func newLineReader(t *term.Terminal, in *bufio.Reader, historyFile string) lineReader {
+	if t.Interactive() {
+		return newLinerReader(historyFile)
 	}
-	return &bufLineReader{in: in, out: opts.Stdout}
+	return &bufLineReader{in: in, out: t.Out()}
 }
 
 // bufLineReader is the non-interactive reader: piped stdin and tests. It

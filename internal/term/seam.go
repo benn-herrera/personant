@@ -3,7 +3,6 @@ package term
 import (
 	"context"
 	"io"
-	"os"
 )
 
 // The platform structure is TWO cuts, not one (§7). Each participant in
@@ -31,8 +30,26 @@ import (
 // Neither seam mentions the output model. The WRITE side stays bytes at
 // both cuts: term formats, the seam transports.
 //
-// There is no Windows implementation and W0 does not add one. The
+// There is no Windows implementation and W1 does not add one. The
 // requirement is only that S2 admits one later (axiom §4.6).
+//
+// # Both seams carry TWO files, not one
+//
+// W0 gave the unix device a single *os.File. Implementation contradicted
+// it: reads, termios and the winsize ioctl come from STDIN while every
+// emitted byte goes to STDOUT, and [Options] names them separately
+// because the process genuinely has two — a session with stdout
+// redirected is not a terminal even when stdin is one. Writing bytes to
+// fd 0 because it happens to be the same tty would work by coincidence
+// on the common case and silently disagree with Options everywhere else.
+// [NewPlainPlatform] already took a reader and a writer; the unix device
+// now matches it.
+//
+// Diag/stderr is deliberately NOT at either seam. It is a third fd that
+// only the arbiter knows about, held on Terminal and written under the
+// same lock — see the invariant at the top of output.go. Putting it in
+// the seam would let a backend decide where errors go, which is the
+// stderr-escapes-the-arbiter defect W1 closes.
 
 // ModeIntent names WHAT the terminal is being used for, never which
 // flags are set. Termios lives strictly below [Device]; a Windows
@@ -52,6 +69,9 @@ const (
 	// `$`/`#` child must run under, and what the terminal is left in at
 	// exit (U4: today SIGTERM/SIGHUP leave it in no-echo mode, because
 	// only os.Interrupt is registered).
+	//
+	// It is also the only mode W1 ever reports: term captures the entry
+	// mode at Open and installs nothing until W3. See [Open].
 	ModeEntry ModeIntent = iota
 
 	// ModeSession is the one mode personant runs under, at the prompt
@@ -92,6 +112,8 @@ const (
 	//
 	// The INTENT does not change either way, which is the point of naming
 	// intents instead of flags; what changes is what the pump sees.
+	//
+	// Nothing installs it before W3.
 	ModeSession
 )
 
@@ -162,17 +184,25 @@ type Platform interface {
 	Close() error
 }
 
-// NewUnixDevice opens the S1 device over a terminal file, capturing the
-// entry mode. It fails when f is not a terminal or the mode cannot be
-// read — and that failure is what selects the plain backend for the
-// WHOLE session (U12).
-func NewUnixDevice(f *os.File) (Device, error) { panic(notImplemented) }
-
 // NewUnixPlatform composes S2 out of S1 plus the decoder: on unix, that
 // composition IS the platform seam. It is also where a byte-level
 // scripted fake becomes a source of decoded events, so the decoder is
 // testable with real terminal byte sequences and no terminal.
-func NewUnixPlatform(d Device) Platform { panic(notImplemented) }
+//
+// The decoder is W3's; W1 composes the halves that do not need it.
+func NewUnixPlatform(d Device) Platform { return &unixPlatform{d: d} }
+
+type unixPlatform struct{ d Device }
+
+// NextEvent is the decoder, and the decoder is the whole of W3's input
+// half — ESC disambiguation held across a timeout inside the pump, which
+// is why no consumer may read bytes for itself (§3).
+func (p *unixPlatform) NextEvent(context.Context) (Event, error) { panic(notImplementedW3) }
+
+func (p *unixPlatform) Write(b []byte) (int, error)    { return p.d.Write(b) }
+func (p *unixPlatform) InstallMode(m ModeIntent) error { return p.d.InstallMode(m) }
+func (p *unixPlatform) Size() (Size, error)            { return p.d.Size() }
+func (p *unixPlatform) Close() error                   { return p.d.Close() }
 
 // NewPlainPlatform is the non-TTY backend: a buffered reader, no mode,
 // no decoration, and byte-identical output to today's piped path.
@@ -180,7 +210,52 @@ func NewUnixPlatform(d Device) Platform { panic(notImplemented) }
 // It is not a degraded stub. It keeps the SAME BOOKS as the TTY backend
 // — activity stack, mode-install count, abort window, cursor column —
 // which is the load-bearing half of the verification posture: those
-// facts emit no bytes, so the existing sim and scenario suites become an
-// ordering sensor for the exact defect class (bugs 3 and 4) that shipped
-// through a green suite.
-func NewPlainPlatform(r io.Reader, w io.Writer) Platform { panic(notImplemented) }
+// facts emit no bytes, so the off-TTY suites become an ordering sensor
+// for the exact defect class (bugs 3 and 4) that shipped through a green
+// suite.
+//
+// The books themselves live on [Terminal], deliberately: a backend that
+// kept its own copy would be a second opinion about ownership, and two
+// opinions is the defect. What this constructor supplies is the half
+// that genuinely differs — where bytes go, and the fact that there is no
+// mode and no geometry to report.
+func NewPlainPlatform(r io.Reader, w io.Writer) Platform {
+	return &plainPlatform{r: r, w: w}
+}
+
+type plainPlatform struct {
+	// r is held UNWRAPPED on purpose. Buffering it here would put a
+	// second reservoir over a stream internal/chat is still reading
+	// through its own bufio.Reader until W3 — liner's three byte
+	// reservoirs over one fd is the exact defect this package exists to
+	// remove, and reproducing it in our own code while nothing here even
+	// reads yet would be gratuitous. W3 wraps it when the pump becomes
+	// the single reader.
+	r io.Reader
+	w io.Writer
+}
+
+// NextEvent on the plain backend is the buffered reader feeding the same
+// event stream. It lands with the pump in W3; nothing consumes events
+// before then, which is why r is still unbuffered above.
+func (p *plainPlatform) NextEvent(context.Context) (Event, error) { panic(notImplementedW3) }
+
+func (p *plainPlatform) Write(b []byte) (int, error) {
+	if p.w == nil {
+		return len(b), nil
+	}
+	return p.w.Write(b)
+}
+
+// InstallMode has no meaning off a terminal, and saying so by panicking
+// rather than by returning nil is deliberate: nothing may install a mode
+// before W3 on EITHER backend, and a silent success here would make the
+// plain backend the one place a premature install went unnoticed.
+func (p *plainPlatform) InstallMode(ModeIntent) error { panic(notImplementedW3) }
+
+// Size has no geometry to report; [Terminal.Size] supplies the
+// [DefaultCols] x [DefaultRows] fallback, which the W3 row cap and
+// status truncation still need a number for.
+func (p *plainPlatform) Size() (Size, error) { return Size{}, errNotTerminal }
+
+func (p *plainPlatform) Close() error { return nil }

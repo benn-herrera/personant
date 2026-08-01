@@ -20,11 +20,11 @@ import (
 const fakeAPIKey = "sk-chat-0123456789abcdefghijklmn"
 
 // shellHarness wires the pieces runShellEscape needs, over in-memory
-// streams. Stdin is deliberately not os.Stdin, so interactiveTTY is false
-// and the terminal handoff is a no-op — the non-TTY path production takes
-// under piped stdin.
+// streams. The streams are buffers rather than character devices, so term
+// selects the plain backend, Interactive() is false and the terminal
+// handoff is a no-op — the non-TTY path production takes under piped
+// stdin.
 type shellHarness struct {
-	opts   Options
 	ops    memops.MemoryOps
 	ctl    *control
 	sh     *shell.Runner
@@ -40,16 +40,15 @@ func newShellHarness(t *testing.T, keys ...string) *shellHarness {
 	t.Setenv("SHELL", "/bin/sh")
 	paths := scaffoldHome(t)
 	var stdout, stderr bytes.Buffer
-	opts := Options{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
-	lr := &bufLineReader{in: bufio.NewReader(opts.Stdin), out: &stdout}
-	pr := newProgress(&stdout, interactiveTTY(opts))
+	in := strings.NewReader("")
+	tm := openTestTerm(t, in, &stdout, &stderr)
+	lr := &bufLineReader{in: bufio.NewReader(in), out: tm.Out()}
 	sh := shell.NewRunner(t.TempDir())
-	ctl := newControl(opts, lr, pr, func() {})
+	ctl := newControl(tm, lr, newProgress(tm), func() {})
 	// Mirror Run's wiring: the control consults the runner so a Ctrl-C
 	// during a command goes to the command.
 	ctl.sh = sh
 	return &shellHarness{
-		opts:   opts,
 		ops:    newOps(paths),
 		ctl:    ctl,
 		sh:     sh,
@@ -62,7 +61,7 @@ func newShellHarness(t *testing.T, keys ...string) *shellHarness {
 
 func (h *shellHarness) run(t *testing.T, line string) *turn.Delta {
 	t.Helper()
-	d, err := runShellEscape(context.Background(), h.opts, h.ops, h.ctl, h.sh, h.red, line)
+	d, err := runShellEscape(context.Background(), h.ops, h.ctl, h.sh, h.red, line)
 	if err != nil {
 		t.Fatalf("runShellEscape(%q): %v", line, err)
 	}

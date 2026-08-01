@@ -36,19 +36,19 @@ const pendingCaptureMax = 512 << 10
 // and in the event line, exactly as a shell reports it.
 func runShellEscape(
 	ctx context.Context,
-	opts Options,
 	ops memops.MemoryOps,
 	ctl *control,
 	sh *shell.Runner,
 	red *shell.Redactor,
 	line string,
 ) (*turn.Delta, error) {
+	tm := ctl.t
 	mode, command, ok := shell.Parse(line)
 	if !ok {
 		return nil, fmt.Errorf("not a shell escape: %q", line)
 	}
 	if command == "" {
-		fmt.Fprintf(opts.Stderr, "usage: %s<command> — %s\n", mode, modeHint(mode))
+		fmt.Fprintf(tm.Diag(), "usage: %s<command> — %s\n", mode, modeHint(mode))
 		return nil, nil
 	}
 
@@ -60,7 +60,10 @@ func runShellEscape(
 	ctl.pr.stop()
 
 	restore := ctl.handoffTerminal()
-	res, runErr := sh.Run(ctx, mode, command, opts.Stdout)
+	// The child's output is COMMITTED content and goes out on term's Out
+	// channel like any other — which is also what keeps the cursor-column
+	// belief current across the command.
+	res, runErr := sh.Run(ctx, mode, command, tm.Out())
 	restore()
 
 	if runErr != nil {
@@ -73,7 +76,7 @@ func runShellEscape(
 	// stdin at /dev/null and bailing) would otherwise look like the command
 	// silently doing nothing.
 	if res.ExitCode != 0 {
-		fmt.Fprintln(opts.Stdout, exitNotice(res.ExitCode))
+		fmt.Fprintln(tm.Out(), exitNotice(res.ExitCode))
 	}
 
 	// The event line carries the invocation, never the output: §2.8 lines
@@ -90,7 +93,7 @@ func runShellEscape(
 		}
 	}
 	if err := ops.Log(ctx, memops.LogCategoryUser, "shell", details); err != nil {
-		fmt.Fprintf(opts.Stderr, "warn: log user.shell: %v\n", err)
+		fmt.Fprintf(tm.Diag(), "warn: log user.shell: %v\n", err)
 	}
 
 	if mode != shell.ModeCapture || res.Capture == "" {
@@ -104,7 +107,7 @@ func runShellEscape(
 	if hits > 0 {
 		if err := ops.Log(ctx, memops.LogCategoryPermissions, "redaction-fire",
 			fmt.Sprintf("source=%s occurrences=%d bytes=%d", memops.SourceUserShellCapture, hits, removed)); err != nil {
-			fmt.Fprintf(opts.Stderr, "warn: log permissions.redaction-fire: %v\n", err)
+			fmt.Fprintf(tm.Diag(), "warn: log permissions.redaction-fire: %v\n", err)
 		}
 	}
 

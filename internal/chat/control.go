@@ -3,13 +3,13 @@ package chat
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"sync"
 	"sync/atomic"
 
 	"personant/internal/memops"
 	"personant/internal/shell"
+	"personant/internal/term"
 	"personant/internal/turn"
 )
 
@@ -34,9 +34,14 @@ const forcedExitCode = 130
 type control struct {
 	// cancel cancels the SESSION context. Ctrl-C only.
 	cancel context.CancelFunc
-	lr     lineReader
-	pr     *progress
-	stderr io.Writer
+
+	// t is the arbiter. Every byte this file emits goes through it —
+	// warnings and the shutdown announcement on Diag, the retraction
+	// notice on Out — so an interrupt arriving mid-stream cannot
+	// interleave into the wait indicator's line.
+	t  *term.Terminal
+	lr lineReader
+	pr *progress
 
 	// escAvailable is whether Esc-to-abort is wired up at all: an
 	// interactive TTY whose mode we can actually drive. Written only from
@@ -73,13 +78,13 @@ type control struct {
 	lastPhase turn.Phase
 }
 
-func newControl(opts Options, lr lineReader, pr *progress, cancel context.CancelFunc) *control {
+func newControl(t *term.Terminal, lr lineReader, pr *progress, cancel context.CancelFunc) *control {
 	return &control{
 		cancel:       cancel,
+		t:            t,
 		lr:           lr,
 		pr:           pr,
-		stderr:       opts.Stderr,
-		escAvailable: interactiveTTY(opts),
+		escAvailable: t.Interactive(),
 	}
 }
 
@@ -161,7 +166,7 @@ func (c *control) arm(abortTurn context.CancelFunc) {
 		// still runs and Ctrl-C is unaffected; the indicator must not
 		// advertise a key that does nothing, so latch it off.
 		c.escAvailable = false
-		fmt.Fprintf(c.stderr, "warn: esc-to-abort unavailable: %v\n", err)
+		fmt.Fprintf(c.t.Diag(), "warn: esc-to-abort unavailable: %v\n", err)
 		return
 	}
 	c.mu.Lock()
@@ -188,7 +193,7 @@ func (c *control) disarm() {
 	c.pr.setAbortHint(false)
 	w.close() // joined BEFORE the restore: no read may straddle a mode change
 	if err := saved.restore(); err != nil {
-		fmt.Fprintf(c.stderr, "warn: %v\n", err)
+		fmt.Fprintf(c.t.Diag(), "warn: %v\n", err)
 	}
 }
 
@@ -243,8 +248,12 @@ func (c *control) tookAbort() bool {
 // — it is in ↑ history and is re-offered as an editable default at the
 // next prompt — but it is not in MEMORY, and re-submitting it is the only
 // way it ever will be.
-func (c *control) reportRetraction(ctx context.Context, ops memops.MemoryOps, out io.Writer, turnID, input string) error {
-	if !c.pr.atLineStart() {
+func (c *control) reportRetraction(ctx context.Context, ops memops.MemoryOps, turnID, input string) error {
+	out := c.t.Out()
+	// term owns the cursor column, as a tri-state: ColumnUnknown (a child
+	// wrote whatever it liked) takes the newline too, which is the
+	// deterministic answer rather than a guess.
+	if c.t.State().Column != term.ColumnStart {
 		fmt.Fprintln(out)
 	}
 	fmt.Fprintln(out, abortNotice)
@@ -275,11 +284,12 @@ func (c *control) exit(announce bool) {
 	if c.interrupts.Add(1) >= 2 {
 		c.disarm()       // hand the terminal back before it stops being ours
 		_ = c.lr.close() // restore the pre-session mode and flush history
+		_ = c.t.Close()  // retire any decoration; no deferred cleanup runs here
 		os.Exit(forcedExitCode)
 	}
 	c.cancel()
 	if announce {
-		fmt.Fprintln(c.stderr, "\ninterrupt received — abandoning the turn and shutting down (Ctrl-C again to force quit)")
+		fmt.Fprintln(c.t.Diag(), "\ninterrupt received — abandoning the turn and shutting down (Ctrl-C again to force quit)")
 	}
 }
 
@@ -304,16 +314,16 @@ func (c *control) handoffTerminal() func() {
 	}
 	current, err := captureTerm()
 	if err != nil {
-		fmt.Fprintf(c.stderr, "warn: %v\n", err)
+		fmt.Fprintf(c.t.Diag(), "warn: %v\n", err)
 		return func() {}
 	}
 	if err := c.origTerm.restore(); err != nil {
-		fmt.Fprintf(c.stderr, "warn: %v\n", err)
+		fmt.Fprintf(c.t.Diag(), "warn: %v\n", err)
 		return func() {}
 	}
 	return func() {
 		if err := current.restore(); err != nil {
-			fmt.Fprintf(c.stderr, "warn: %v\n", err)
+			fmt.Fprintf(c.t.Diag(), "warn: %v\n", err)
 		}
 	}
 }

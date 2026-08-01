@@ -2,12 +2,11 @@ package chat
 
 import (
 	"fmt"
-	"io"
-	"os"
 	"sync"
 	"time"
 
 	"personant/internal/clock"
+	"personant/internal/term"
 	"personant/internal/turn"
 )
 
@@ -20,15 +19,12 @@ const (
 	// progressFrameInterval is the animation period.
 	progressFrameInterval = 120 * time.Millisecond
 
-	// eraseLine returns the cursor to column 0 and clears to end of line —
-	// the only ANSI sequence the indicator emits.
-	eraseLine = "\r\x1b[K"
-
 	// abortHintSuffix advertises Esc-to-abort while the turn is still in
 	// its abortable window. Deliberately short: the rendered line is
 	// "<frame> <label> (Ns)<suffix>" and the longest label is 20 columns,
-	// so the whole line must stay well inside 80 or it wraps and the
-	// in-place redraw turns into a scroll.
+	// so the whole line stays well inside a normal width. term truncates
+	// it to the real width regardless (term.StatusColumnInset), so an
+	// over-long line can no longer wrap and turn the redraw into a scroll.
 	abortHintSuffix = "  esc to abort"
 )
 
@@ -36,28 +32,36 @@ const (
 // column wide on every terminal and font.
 var progressFrames = [...]string{"|", "/", "-", "\\"}
 
-// progress is the REPL's phase-labeled wait indicator. It renders one
-// line — frame, the turn.Phase label, and elapsed seconds — while the
-// runtime is busy, and clears it the moment content needs the terminal.
+// progress is the REPL's phase-labeled wait indicator — and, since W1, a
+// FORMATTER and nothing more. It decides WHAT the wait line says (frame,
+// the turn.Phase label, elapsed seconds, the Esc hint) and hands the
+// finished string to term's ephemeral slot. Whether that string reaches
+// the terminal, how it is erased, whether the terminal can erase at all,
+// and what the cursor column is afterwards are all term's, under term's
+// one lock.
 //
-// It owns the single mutex guarding terminal writes. Three producers
-// touch the terminal during a turn: the ticker goroutine (frames), the
-// turn goroutine's phase callbacks, and the response body / offer
-// prompts streaming through writer(). All three go through mu, so a
-// frame can never interleave with content.
+// That split is the structural end of bug 1. The old indicator tracked
+// "cursor at column 0" and "I own this line" in flags of its own, and
+// mistook its own previous frame for foreign content — one line per frame
+// instead of a redraw. There is now exactly one owner of both facts and
+// this object holds neither, so there is no flag left here to get wrong.
 //
-// A disabled progress (non-terminal stdout) writes ZERO bytes of its
-// own — the piped and test paths must stay byte-for-byte undecorated.
+// Its mutex guards its OWN fields only (the label, the frame counter, the
+// ticker handles). Terminal serialization is term.Terminal's mutex, one
+// level down; this one exists because the ticker goroutine and the turn
+// goroutine both re-label.
+//
+// A non-interactive session never starts a wait at all, and the slot is
+// inert underneath regardless — the piped and test paths stay
+// byte-for-byte undecorated by both belts.
 type progress struct {
-	out io.Writer
+	t  *term.Terminal
+	st *term.Status
 
-	// enabled is the session interactivity determination (interactiveTTY).
-	// false → the indicator is inert and writer() is a pure pass-through.
-	enabled bool
-	// animate is false on a no-ANSI terminal (TERM=dumb or unset): the
-	// indicator degrades to one static line per phase — no frames, no
-	// cursor movement, no erase.
-	animate bool
+	// interactive is term's ONE TTY predicate, read once. false → the
+	// indicator does no work; the slot would swallow it anyway, but there
+	// is no reason to run a ticker for output nobody can see.
+	interactive bool
 
 	// newTicker supplies the animation heartbeat; tests inject a
 	// hand-driven channel so no assertion waits on the wall clock.
@@ -69,42 +73,29 @@ type progress struct {
 	mu        sync.Mutex
 	running   bool
 	label     turn.Phase
-	drawn     bool // the current label has been rendered
-	lineClean bool // the cursor sits at column 0
-	// onLine says the indicator's OWN frame currently occupies the line the
-	// cursor is on, so \r + erase-to-EOL reclaims it and no newline is
-	// wanted. Distinct from lineClean: mid-line with onLine false means
-	// FOREIGN content is on the line and must not be drawn over.
-	onLine bool
+	frame     int
+	startedAt clock.ProfilingTime
 	// abortHint says the turn is in its Esc-abortable window, so the label
 	// should advertise the key. Set by control.arm / cleared by
 	// control.disarm — never inferred here, because a session with no
 	// working cbreak must not advertise a key that does nothing.
 	abortHint bool
-	frame     int
-	startedAt clock.ProfilingTime
 	stopCh    chan struct{}
 	doneCh    chan struct{}
 }
 
-// newProgress builds the indicator for a session. interactive comes from
-// interactiveTTY — the one place the session decides it is driving a real
-// terminal.
-func newProgress(out io.Writer, interactive bool) *progress {
+// newProgress builds the indicator over the session's terminal. The
+// interactivity determination is READ from term rather than recomputed:
+// axiom §4.2 requires exactly one TTY predicate and term owns it.
+func newProgress(t *term.Terminal) *progress {
 	return &progress{
-		out:       out,
-		enabled:   interactive,
-		animate:   interactive && ansiCapable(os.Getenv("TERM")),
-		newTicker: realTicker,
-		elapsed:   clock.Since,
-		lineClean: true,
+		t:           t,
+		st:          t.Status(),
+		interactive: t.Interactive(),
+		newTicker:   realTicker,
+		elapsed:     clock.Since,
 	}
 }
-
-// ansiCapable reports whether TERM names a terminal that can handle the
-// cursor-return + erase-to-end-of-line sequence. "dumb" and an unset TERM
-// cannot; anything else is assumed to.
-func ansiCapable(term string) bool { return term != "" && term != "dumb" }
 
 func realTicker() (<-chan time.Time, func()) {
 	t := time.NewTicker(progressFrameInterval)
@@ -116,7 +107,7 @@ func realTicker() (<-chan time.Time, func()) {
 // restart after content retired it — turn close re-announces its phase
 // for exactly that reason).
 func (p *progress) phase(ph turn.Phase) {
-	if !p.enabled {
+	if !p.interactive {
 		return
 	}
 	p.mu.Lock()
@@ -124,24 +115,32 @@ func (p *progress) phase(ph turn.Phase) {
 	if p.running && p.label == ph {
 		return
 	}
-	p.label = ph
-	p.drawn = false
-	if !p.running {
+	if p.running {
+		// A new label re-OCCUPIES the slot rather than appending to it.
+		// Releasing first is what lets a terminal with no erase commit a
+		// fresh line per label instead of one per animation tick.
+		p.st.Clear()
+	} else {
 		p.startLocked()
 	}
-	p.renderLocked()
+	p.label = ph
+	p.renderLocked(true)
 }
 
-// startLocked opens a wait: it resets the elapsed clock and, in animated
-// mode, launches the ticker goroutine. The goroutine's only exit is
-// stopCh, and stop joins it, so it can never outlive the turn.
+// startLocked opens a wait: it resets the elapsed clock and launches the
+// ticker goroutine. The goroutine's only exit is stopCh, and stop joins
+// it, so it can never outlive the turn.
+//
+// The heartbeat runs whatever kind of terminal this is. It used to be
+// suppressed on a no-ANSI one, which meant this object had to know
+// whether the terminal could erase — the knowledge the W1 split moved to
+// its owner. A ticker whose frames term drops costs one wakeup every
+// 120ms on a TERM=dumb session; a second opinion about the terminal's
+// capabilities costs a class of bug.
 func (p *progress) startLocked() {
 	p.running = true
 	p.frame = 0
 	p.startedAt = clock.Profiling()
-	if !p.animate {
-		return // static mode has no heartbeat to run
-	}
 	ticks, stopTicker := p.newTicker()
 	stopCh := make(chan struct{})
 	doneCh := make(chan struct{})
@@ -157,7 +156,7 @@ func (p *progress) startLocked() {
 				p.mu.Lock()
 				if p.running {
 					p.frame++
-					p.renderLocked()
+					p.renderLocked(false)
 				}
 				p.mu.Unlock()
 			}
@@ -165,34 +164,26 @@ func (p *progress) startLocked() {
 	}()
 }
 
-// renderLocked draws the indicator. Nothing appears until the wait passes
-// progressShowAfter.
-func (p *progress) renderLocked() {
+// renderLocked hands the current frame to the slot.
+//
+// reveal distinguishes an ANNOUNCEMENT — a new phase, or the abort hint
+// appearing — from the animation HEARTBEAT. An announcement claims the
+// slot unconditionally. A heartbeat may only redraw a frame that is still
+// on screen: content taking the terminal retires the slot, and a
+// heartbeat that took it back would stamp a spinner over the response the
+// user is reading. Whether the frame is still on screen is term's own
+// bookkeeping (State().Status), not a flag kept here — asking the owner
+// is exactly what bug 1's indicator failed to do.
+func (p *progress) renderLocked(reveal bool) {
 	if !p.running || p.elapsed(p.startedAt) < progressShowAfter {
 		return
 	}
-	if !p.lineClean && !p.onLine {
-		// Restarting under FOREIGN content that did not end in a newline:
-		// take a fresh line rather than drawing over text the user is
-		// reading. When the line is our own frame (onLine), the erase below
-		// reclaims it in place — a newline there would scroll one line per
-		// frame instead of animating.
-		fmt.Fprintln(p.out)
-		p.lineClean = true
-	}
-	if !p.animate {
-		if !p.drawn {
-			fmt.Fprintf(p.out, "%s...%s\n", p.label, p.hintLocked())
-			p.drawn = true
-		}
+	if !reveal && p.t.State().Status == "" {
 		return
 	}
-	fmt.Fprintf(p.out, "%s%s %s (%ds)%s",
-		eraseLine, progressFrames[p.frame%len(progressFrames)], p.label,
-		int(p.elapsed(p.startedAt).Seconds()), p.hintLocked())
-	p.drawn = true
-	p.lineClean = false
-	p.onLine = true
+	p.st.Set(fmt.Sprintf("%s %s (%ds)%s",
+		progressFrames[p.frame%len(progressFrames)], p.label,
+		int(p.elapsed(p.startedAt).Seconds()), p.hintLocked()))
 }
 
 // hintLocked renders the Esc-to-abort advertisement, or nothing.
@@ -207,7 +198,7 @@ func (p *progress) hintLocked() string {
 // the hint appears and disappears with the abortable window rather than
 // one frame late. Safe from any goroutine; inert on a non-terminal.
 func (p *progress) setAbortHint(on bool) {
-	if !p.enabled {
+	if !p.interactive {
 		return
 	}
 	p.mu.Lock()
@@ -216,36 +207,31 @@ func (p *progress) setAbortHint(on bool) {
 		return
 	}
 	p.abortHint = on
-	p.renderLocked()
+	p.renderLocked(true)
 }
 
-// eraseLocked removes an animated frame from the terminal. The static
-// (no-ANSI) rendering is a committed line and is deliberately left alone.
-func (p *progress) eraseLocked() {
-	if p.animate && p.drawn {
-		io.WriteString(p.out, eraseLine)
-		p.lineClean = true
-	}
-	p.drawn = false
-	p.onLine = false // the line is given back; whatever lands next owns it
-}
-
-// stop retires the indicator and clears its line. Idempotent and safe
+// stop retires the indicator and gives the line back. Idempotent and safe
 // from any goroutine — including the signal handler on the forced-exit
 // path, where no deferred cleanup runs and a half-drawn frame would be
 // the last thing left on the terminal. It joins the ticker goroutine, so
 // no frame can land after it returns.
+//
+// The slot is released UNCONDITIONALLY, before the running check. Two
+// reasons, and both matter: the call must be safe on a wait that never
+// started, and term.Status.Clear is also what closes an open reasoning
+// run — the turn that produced reasoning and no body ends here, and it
+// must not leave the terminal dim.
 func (p *progress) stop() {
-	if !p.enabled {
+	if !p.interactive {
 		return
 	}
 	p.mu.Lock()
+	p.st.Clear()
 	if !p.running {
 		p.mu.Unlock()
 		return
 	}
 	p.running = false
-	p.eraseLocked()
 	p.label = ""
 	stopCh, doneCh := p.stopCh, p.doneCh
 	p.stopCh, p.doneCh = nil, nil
@@ -254,38 +240,4 @@ func (p *progress) stop() {
 		close(stopCh)
 		<-doneCh // the goroutine is gone before any caller writes content
 	}
-}
-
-// atLineStart reports whether the cursor sits at column 0, i.e. whether
-// the next prompt would land on a fresh line. The REPL asks the progress
-// rather than inspecting the response body, because the indicator writes
-// to the same line the body left the cursor on.
-func (p *progress) atLineStart() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.lineClean
-}
-
-// writer wraps w so that content emitted during a wait retires the
-// indicator first. Every REPL producer that can fire mid-turn goes
-// through it: the streamed response body (first byte hands the terminal
-// back) and the §3.4 recall / §3.5 closure offer prompts.
-func (p *progress) writer(w io.Writer) io.Writer { return &progressWriter{p: p, w: w} }
-
-type progressWriter struct {
-	p *progress
-	w io.Writer
-}
-
-func (pw *progressWriter) Write(b []byte) (int, error) {
-	// Idempotent: the first write of a wait clears the line and joins the
-	// ticker goroutine; every write after that returns immediately.
-	pw.p.stop()
-	pw.p.mu.Lock()
-	defer pw.p.mu.Unlock()
-	n, err := pw.w.Write(b)
-	if n > 0 {
-		pw.p.lineClean = b[n-1] == '\n'
-	}
-	return n, err
 }

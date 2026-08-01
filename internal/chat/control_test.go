@@ -13,20 +13,35 @@ import (
 
 	"personant/internal/memops"
 	"personant/internal/store"
+	"personant/internal/term"
 	"personant/internal/turn"
 )
 
-// newTestControl builds a control over in-memory streams. Options.Stdin is
-// deliberately NOT os.Stdin, so interactiveTTY is false and the session
-// takes the non-terminal path — the same path the tests and piped stdin
-// take in production.
+// newTestControl builds a control over in-memory streams. The streams are
+// buffers rather than character devices, so term selects the PLAIN backend
+// and Interactive() is false — the same path the tests and piped stdin
+// take in production, and the one that keeps the same books as the TTY
+// backend (the parity half of the verification posture).
 func newTestControl(t *testing.T) (*control, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	opts := Options{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
-	lr := &bufLineReader{in: bufio.NewReader(opts.Stdin), out: &stdout}
-	pr := newProgress(&stdout, interactiveTTY(opts))
-	return newControl(opts, lr, pr, func() {}), &stdout, &stderr
+	in := strings.NewReader("")
+	tm := openTestTerm(t, in, &stdout, &stderr)
+	lr := &bufLineReader{in: bufio.NewReader(in), out: tm.Out()}
+	return newControl(tm, lr, newProgress(tm), func() {}), &stdout, &stderr
+}
+
+// openTestTerm opens the arbiter over injected streams and closes it with
+// the test. It is the one place chat's tests construct a terminal, so a
+// change to term's Options reaches every fixture at once.
+func openTestTerm(t *testing.T, in io.Reader, out, errw io.Writer) *term.Terminal {
+	t.Helper()
+	tm, err := term.Open(term.Options{Stdin: in, Stdout: out, Stderr: errw})
+	if err != nil {
+		t.Fatalf("term.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = tm.Close() })
+	return tm
 }
 
 // TestAbortablePhase pins the allow-list. The turn's PRE-CANONICAL window
@@ -192,12 +207,13 @@ func TestReportRetraction(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 
-	ctl, _, _ := newTestControl(t)
-	ctl.lastPhase = turn.PhaseWaiting
 	const secret = "a prompt the user retracted and does not want remembered"
 
-	var screen bytes.Buffer
-	if err := ctl.reportRetraction(ctx, ops, &screen, "t7-123456789", secret); err != nil {
+	// The marker goes out on term's content channel — there is no
+	// separate screen writer to hand in any more.
+	ctl, screen, _ := newTestControl(t)
+	ctl.lastPhase = turn.PhaseWaiting
+	if err := ctl.reportRetraction(ctx, ops, "t7-123456789", secret); err != nil {
 		t.Fatalf("reportRetraction: %v", err)
 	}
 

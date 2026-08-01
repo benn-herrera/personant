@@ -1,0 +1,600 @@
+package term
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"testing"
+)
+
+// --- fixtures --------------------------------------------------------
+
+// fakeDevice is the S1 byte-level stand-in (§7). It is what lets an
+// INTERACTIVE session be driven with no terminal, and it plugs in through
+// the real NewUnixPlatform, so these tests exercise the same S1→S2
+// composition production uses rather than a parallel one.
+type fakeDevice struct {
+	out     bytes.Buffer
+	size    Size
+	sizeErr error
+	// sizeCalls counts ioctl-equivalent calls, so U12 can be asserted:
+	// a failing size must not re-select the backend, however often it is
+	// asked.
+	sizeCalls int
+}
+
+func (d *fakeDevice) Read([]byte) (int, error)    { return 0, io.EOF }
+func (d *fakeDevice) Write(p []byte) (int, error) { return d.out.Write(p) }
+func (d *fakeDevice) InstallMode(ModeIntent) error {
+	panic("test device: nothing may install a mode before W3")
+}
+func (d *fakeDevice) Size() (Size, error) {
+	d.sizeCalls++
+	return d.size, d.sizeErr
+}
+func (d *fakeDevice) Resized() <-chan struct{} { return nil }
+func (d *fakeDevice) Close() error             { return nil }
+
+// fixture is a terminal plus the two byte sinks behind it. Nothing here
+// touches a real fd, and nothing sleeps.
+type fixture struct {
+	t     *Terminal
+	dev   *fakeDevice
+	diag  bytes.Buffer
+	plain bytes.Buffer
+}
+
+// newTTY opens an interactive terminal over the fake device.
+func newTTY(t *testing.T, termEnv string, cols int) *fixture {
+	t.Helper()
+	f := &fixture{dev: &fakeDevice{size: Size{Cols: cols, Rows: 24}}}
+	tm, err := Open(Options{
+		Platform: NewUnixPlatform(f.dev),
+		Stderr:   &f.diag,
+		TermEnv:  termEnv,
+	})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = tm.Close() })
+	f.t = tm
+	return f
+}
+
+// newPipe opens a non-interactive terminal over buffers — the plain
+// backend, which is the path every test, the sim and every piped
+// invocation take.
+func newPipe(t *testing.T) *fixture {
+	t.Helper()
+	f := &fixture{}
+	tm, err := Open(Options{Stdin: strings.NewReader(""), Stdout: &f.plain, Stderr: &f.diag})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = tm.Close() })
+	f.t = tm
+	return f
+}
+
+// screen is every byte that reached stdout, whichever backend carried it.
+func (f *fixture) screen() string {
+	if f.dev != nil {
+		return f.dev.out.String()
+	}
+	return f.plain.String()
+}
+
+// --- backend selection (U12) -----------------------------------------
+
+// U12: the backend is chosen ONCE, at Open, for the session. The cases
+// below are every input shape Open can be handed.
+func TestOpen_BackendSelectedOnce(t *testing.T) {
+	regular, err := os.CreateTemp(t.TempDir(), "out")
+	if err != nil {
+		t.Fatalf("temp file: %v", err)
+	}
+	t.Cleanup(func() { _ = regular.Close() })
+
+	tests := []struct {
+		name string
+		opts Options
+		want bool
+	}{
+		{"buffers", Options{Stdin: strings.NewReader(""), Stdout: &bytes.Buffer{}}, false},
+		{"regular file on both ends", Options{Stdin: regular, Stdout: regular}, false},
+		{"nil streams", Options{}, false},
+		{"injected platform", Options{Platform: NewUnixPlatform(&fakeDevice{})}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tm, err := Open(tc.opts)
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			defer func() { _ = tm.Close() }()
+			if got := tm.Interactive(); got != tc.want {
+				t.Errorf("Interactive() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// An ioctl failure is a FALLBACK, never a re-selection: the session keeps
+// the backend it opened with, however many times the failing call is
+// made. A backend that changed underneath a running turn would be the
+// same ownership ambiguity in a smaller window.
+func TestSize_IoctlFailureDoesNotDegradeTheBackend(t *testing.T) {
+	f := newTTY(t, "xterm", 100)
+	f.dev.sizeErr = errors.New("ioctl: ENOTTY")
+
+	for i := 0; i < 3; i++ {
+		if got := f.t.Size(); got != (Size{Cols: DefaultCols, Rows: DefaultRows}) {
+			t.Fatalf("Size() = %v, want the %dx%d fallback", got, DefaultCols, DefaultRows)
+		}
+		if !f.t.Interactive() {
+			t.Fatal("a failing size call demoted the session to the plain backend")
+		}
+	}
+	if f.dev.sizeCalls < 3 {
+		t.Errorf("size was asked %d times, want at least 3 (the fallback must not cache a demotion)", f.dev.sizeCalls)
+	}
+}
+
+// The plain backend has no geometry, and the callers that need a number
+// still get one.
+func TestSize_PlainBackendFallsBack(t *testing.T) {
+	f := newPipe(t)
+	if got := f.t.Size(); got != (Size{Cols: DefaultCols, Rows: DefaultRows}) {
+		t.Errorf("Size() = %v, want the default geometry", got)
+	}
+}
+
+// --- channel routing --------------------------------------------------
+
+// Out lands on stdout, Diag on stderr, and both are committed. The two
+// fds differ; the serialization point does not.
+func TestChannels_RouteToTheirOwnFds(t *testing.T) {
+	f := newPipe(t)
+	fmt.Fprint(f.t.Out(), "body")
+	fmt.Fprint(f.t.Diag(), "warn")
+	if got := f.plain.String(); got != "body" {
+		t.Errorf("stdout = %q, want %q", got, "body")
+	}
+	if got := f.diag.String(); got != "warn" {
+		t.Errorf("stderr = %q, want %q", got, "warn")
+	}
+}
+
+// The (tty-only, scrollback) cell: reasoning writes ZERO bytes off a
+// terminal, whatever the /thinking setting says, so piped, sim and test
+// output are unaffected. It still reports the bytes consumed — a short
+// write is an error, and there is no error here.
+func TestReasoning_WritesNothingOffATerminal(t *testing.T) {
+	f := newPipe(t)
+	n, err := io.WriteString(f.t.Reasoning(), "model scratch")
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if n != len("model scratch") {
+		t.Errorf("reported %d bytes written, want %d — a short write is an error", n, len("model scratch"))
+	}
+	if got := f.screen() + f.diag.String(); got != "" {
+		t.Errorf("reasoning reached a non-terminal session: %q", got)
+	}
+}
+
+// The forbidden cell of the §5 2x2 is (always, ephemeral) — a pipe has no
+// erasure. It is enforced by the ephemeral slot being tty-only: off a
+// terminal it emits nothing at all, so no caller can produce erasable
+// output on a stream that cannot erase.
+func TestStatus_InertOffATerminal(t *testing.T) {
+	f := newPipe(t)
+	f.t.Status().Set("waiting (5s)")
+	f.t.Status().Set("closing (7s)")
+	f.t.Status().Clear()
+	if got := f.screen() + f.diag.String(); got != "" {
+		t.Errorf("the ephemeral slot wrote %q on a stream that cannot erase", got)
+	}
+	if got := f.t.State().Status; got != "" {
+		t.Errorf("State().Status = %q on a non-terminal session, want empty", got)
+	}
+}
+
+// --- the serialization point ------------------------------------------
+
+// The whole of W1's rendering contract, in one sequence: content retires
+// the ephemeral slot AND closes an open reasoning run before it lands, so
+// the answer can never arrive dim or jammed onto the tail of a scratch
+// line.
+func TestSerialization_ContentRetiresDecorationFirst(t *testing.T) {
+	f := newTTY(t, "xterm-256color", 80)
+	f.t.Status().Set("waiting (5s)")
+	io.WriteString(f.t.Reasoning(), "first ")
+	io.WriteString(f.t.Reasoning(), "second")
+	io.WriteString(f.t.Out(), "the answer")
+
+	want := eraseLine + "waiting (5s)" + // the slot draws
+		eraseLine + // reasoning retires it
+		dimOn + "first " + "second" + // one run, opened once
+		dimOff + "\n" + // closed by the content write
+		"the answer"
+	if got := f.screen(); got != want {
+		t.Fatalf("emitted\n  %q\nwant\n  %q", got, want)
+	}
+	if n := strings.Count(f.screen(), dimOn); n != 1 {
+		t.Errorf("dim opened %d times across one run, want 1", n)
+	}
+	if got := f.t.State().Column; got != ColumnMid {
+		t.Errorf("column after unterminated content = %v, want ColumnMid", got)
+	}
+}
+
+// The stderr/indicator collision W1 closes: Diag lands on a different fd
+// but passes through the same point, so an error arriving mid-stream
+// retires the indicator instead of interleaving into its line.
+func TestSerialization_DiagRetiresTheStatusLine(t *testing.T) {
+	f := newTTY(t, "xterm", 80)
+	f.t.Status().Set("waiting (5s)")
+	fmt.Fprintln(f.t.Diag(), "warn: something")
+
+	if got := f.screen(); got != eraseLine+"waiting (5s)"+eraseLine {
+		t.Errorf("stdout = %q; the error did not retire the slot in place", got)
+	}
+	if got := f.diag.String(); got != "warn: something\n" {
+		t.Errorf("stderr = %q", got)
+	}
+	if got := f.t.State().Status; got != "" {
+		t.Errorf("the slot survived a diagnostic: %q", got)
+	}
+}
+
+// A turn that produced reasoning and no body — the D6 empty-response
+// shape. Releasing the slot is what closes the run, so there is no
+// end-the-run call for a caller to forget.
+func TestSerialization_StatusClearClosesAnOpenReasoningRun(t *testing.T) {
+	f := newTTY(t, "xterm", 80)
+	io.WriteString(f.t.Reasoning(), "thought hard, said nothing")
+	f.t.Status().Clear()
+	if !strings.HasSuffix(f.screen(), dimOff+"\n") {
+		t.Errorf("reasoning-only turn left the terminal at %q, want a dim reset and a newline", f.screen())
+	}
+	if got := f.t.State().Column; got != ColumnStart {
+		t.Errorf("column = %v, want ColumnStart after the run closed", got)
+	}
+}
+
+// Close is the last line of defence on a forced exit, where no deferred
+// cleanup runs: neither a half-drawn frame nor an unterminated dim run
+// may be the last thing on the user's terminal. Idempotent.
+func TestClose_RetiresDecoration(t *testing.T) {
+	f := newTTY(t, "xterm", 80)
+	io.WriteString(f.t.Reasoning(), "scratch")
+	if err := f.t.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if !strings.HasSuffix(f.screen(), dimOff+"\n") {
+		t.Errorf("Close left the terminal at %q", f.screen())
+	}
+	before := f.screen()
+	if err := f.t.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+	if f.screen() != before {
+		t.Errorf("Close is not idempotent: %q then %q", before, f.screen())
+	}
+}
+
+// --- the ephemeral slot ------------------------------------------------
+
+// Bug 1, structurally. A run of frames is ONE line redrawn in place: no
+// newline is ever emitted, and each frame is introduced by the erase that
+// reclaims the previous one. There is no client flag involved — the slot
+// knows whether it is on the line because it is the only thing that puts
+// it there.
+func TestStatus_RedrawsInPlace(t *testing.T) {
+	f := newTTY(t, "xterm", 80)
+	for _, frame := range []string{"| waiting (5s)", "/ waiting (5s)", "- waiting (6s)"} {
+		f.t.Status().Set(frame)
+	}
+	got := f.screen()
+	if strings.Contains(got, "\n") {
+		t.Errorf("the slot emitted a newline — one line per frame instead of a redraw: %q", got)
+	}
+	if n := strings.Count(got, eraseLine); n != 3 {
+		t.Errorf("want 3 in-place redraws, got %d: %q", n, got)
+	}
+	if got := f.t.State().Status; got != "- waiting (6s)" {
+		t.Errorf("State().Status = %q, want the last frame", got)
+	}
+}
+
+// The slot must never draw OVER committed content. A body that did not
+// end its line leaves the cursor mid-line, so the frame takes a fresh one
+// — and ColumnUnknown (a child owned the fd) takes the same deterministic
+// newline rather than a guess.
+func TestStatus_NeverDrawsOverCommittedContent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want bool // a newline is taken before the frame
+	}{
+		{"content left the cursor mid-line", "body text", true},
+		{"content ended its own line", "body text\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newTTY(t, "xterm", 80)
+			io.WriteString(f.t.Out(), tc.body)
+			f.t.Status().Set("| waiting (5s)")
+			after := f.screen()[len(tc.body):]
+			if got := strings.HasPrefix(after, "\n"); got != tc.want {
+				t.Errorf("newline before the frame = %v, want %v (emitted %q)", got, tc.want, after)
+			}
+		})
+	}
+}
+
+// Truncation is to width-StatusColumnInset. Writing the FINAL column puts
+// xterm-family terminals into pending-wrap, where the next glyph scrolls
+// the screen — and a status line that scrolls is bug 1 again.
+func TestStatus_TruncatesShortOfTheFinalColumn(t *testing.T) {
+	tests := []struct {
+		name string
+		cols int
+		text string
+		want string
+	}{
+		{"fits", 20, "waiting (5s)", "waiting (5s)"},
+		{"exactly the writable width", 13, "waiting (5s)", "waiting (5s)"},
+		{"one column too long", 12, "waiting (5s)", "waiting (5s"},
+		{"narrow", 5, "waiting (5s)", "wait"},
+		{"multi-byte glyphs are cut on a rune boundary", 5, "αβγδεζ", "αβγδ"},
+		{"no room at all", 1, "waiting", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newTTY(t, "xterm", tc.cols)
+			f.t.Status().Set(tc.text)
+			if got := f.t.State().Status; got != tc.want {
+				t.Errorf("slot = %q, want %q at %d columns", got, tc.want, tc.cols)
+			}
+		})
+	}
+}
+
+// TERM=dumb: the slot cannot be erased, so it commits at most ONE line
+// per occupancy and drops the frames in between. No escape sequence
+// reaches a terminal that would print it literally.
+func TestStatus_NoANSICommitsOneLinePerOccupancy(t *testing.T) {
+	f := newTTY(t, "dumb", 80)
+	f.t.Status().Set("waiting (5s)")
+	f.t.Status().Set("waiting (6s)")
+	f.t.Status().Set("waiting (7s)")
+	f.t.Status().Clear()
+	f.t.Status().Set("closing (8s)")
+
+	got := f.screen()
+	if strings.ContainsAny(got, "\x1b\r") {
+		t.Errorf("no-ANSI rendering emitted control sequences: %q", got)
+	}
+	if want := "waiting (5s)\nclosing (8s)\n"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestAnsiCapable(t *testing.T) {
+	for _, tc := range []struct {
+		termEnv string
+		want    bool
+	}{
+		{"xterm-256color", true},
+		{"screen", true},
+		{"dumb", false},
+		{"", false},
+	} {
+		if got := ansiCapable(tc.termEnv); got != tc.want {
+			t.Errorf("ansiCapable(%q) = %v, want %v", tc.termEnv, got, tc.want)
+		}
+	}
+}
+
+// --- the ownership state machine --------------------------------------
+
+// The books the plain backend keeps are the SAME books — that is the
+// load-bearing half of the verification posture, since none of this emits
+// a byte. Asserted on the plain backend deliberately.
+func TestStack_LIFODisciplineIsClean(t *testing.T) {
+	f := newPipe(t)
+	turnReg := f.t.Push(ActivityTurn, Handler{})
+	askReg := f.t.Push(ActivityAsk, Handler{})
+
+	if got, want := f.t.State().Stack, []Activity{ActivityTurn, ActivityAsk}; !sameStack(got, want) {
+		t.Fatalf("stack = %v, want %v (bottom first)", got, want)
+	}
+	askReg.Pop()
+	if got, want := f.t.State().Stack, []Activity{ActivityTurn}; !sameStack(got, want) {
+		t.Errorf("stack after popping the top = %v, want %v", got, want)
+	}
+	turnReg.Pop()
+	st := f.t.State()
+	if len(st.Stack) != 0 {
+		t.Errorf("stack = %v, want empty", st.Stack)
+	}
+	if st.Violations != 0 {
+		t.Errorf("violations = %d on a clean LIFO sequence, want 0", st.Violations)
+	}
+	if f.diag.String() != "" {
+		t.Errorf("a clean sequence reported %q on Diag", f.diag.String())
+	}
+}
+
+// U8: the ownership sensor sits at RELEASE, not acquire — acquisition is
+// unambiguous and release ordering is where the interleavings go wrong.
+// An out-of-order release still releases; refusing would leave an entry
+// nobody can remove, which is worse than the violation it reports.
+func TestStack_OutOfOrderPopIsAViolation(t *testing.T) {
+	f := newPipe(t)
+	turnReg := f.t.Push(ActivityTurn, Handler{})
+	askReg := f.t.Push(ActivityAsk, Handler{})
+
+	turnReg.Pop() // the ask is still above it
+	st := f.t.State()
+	if st.Violations != 1 {
+		t.Errorf("violations = %d, want 1", st.Violations)
+	}
+	if got, want := st.Stack, []Activity{ActivityAsk}; !sameStack(got, want) {
+		t.Errorf("stack = %v, want %v — the entry must still be released", got, want)
+	}
+	if !strings.Contains(f.diag.String(), string(ActivityTurn)) {
+		t.Errorf("the violation was not reported on Diag: %q", f.diag.String())
+	}
+	askReg.Pop()
+	if got := f.t.State().Violations; got != 1 {
+		t.Errorf("violations = %d after a legal pop, want 1", got)
+	}
+}
+
+// A second Pop of the same registration means two owners believe they
+// hold one entry. It is a violation, not a tolerated no-op, and it must
+// not corrupt the stack underneath it.
+func TestStack_DoublePopIsAViolation(t *testing.T) {
+	f := newPipe(t)
+	outer := f.t.Push(ActivityTurn, Handler{})
+	inner := f.t.Push(ActivityAsk, Handler{})
+	inner.Pop()
+	inner.Pop()
+
+	st := f.t.State()
+	if st.Violations != 1 {
+		t.Errorf("violations = %d, want 1", st.Violations)
+	}
+	if got, want := st.Stack, []Activity{ActivityTurn}; !sameStack(got, want) {
+		t.Errorf("a double pop corrupted the stack: %v, want %v", got, want)
+	}
+	outer.Pop()
+}
+
+// The abort window, C12 form (i): opened by a non-nil Handler.Abort,
+// closed by a single unconditional argument-free idempotent call whose
+// OMISSION is detectable in the snapshot. Popping closes it too — a
+// released registration cannot hold a window.
+func TestAbortWindow_OpensWithTheHandlerAndRevokesIdempotently(t *testing.T) {
+	f := newPipe(t)
+	if f.t.State().AbortWindow {
+		t.Fatal("an abort window was open before anything registered")
+	}
+
+	reg := f.t.Push(ActivityTurn, Handler{Abort: func() {}})
+	if !f.t.State().AbortWindow {
+		t.Fatal("a non-nil Abort handler did not open the window")
+	}
+	reg.RevokeAbort()
+	if f.t.State().AbortWindow {
+		t.Error("RevokeAbort did not close the window")
+	}
+	reg.RevokeAbort() // idempotent: the boundary is crossed once, the call also fires at turn end
+	if f.t.State().AbortWindow {
+		t.Error("a second RevokeAbort re-opened the window")
+	}
+	reg.Pop()
+
+	// A turn that never reached the pre-canonical boundary: the window is
+	// open right up to the release, which is the shape the snapshot makes
+	// detectable.
+	reg2 := f.t.Push(ActivityTurn, Handler{Abort: func() {}})
+	if !f.t.State().AbortWindow {
+		t.Fatal("window not open")
+	}
+	reg2.Pop()
+	if f.t.State().AbortWindow {
+		t.Error("a popped registration is still holding an abort window")
+	}
+	if got := f.t.State().Violations; got != 0 {
+		t.Errorf("violations = %d, want 0", got)
+	}
+}
+
+// A registration with no Abort handler declines by construction, so it
+// never opens a window to leak.
+func TestAbortWindow_NilHandlerNeverOpensOne(t *testing.T) {
+	f := newPipe(t)
+	reg := f.t.Push(ActivityTurn, Handler{})
+	if f.t.State().AbortWindow {
+		t.Error("a nil Abort handler opened an abort window")
+	}
+	reg.RevokeAbort()
+	reg.Pop()
+	if got := f.t.State().Violations; got != 0 {
+		t.Errorf("violations = %d, want 0", got)
+	}
+}
+
+// W1 installs no mode on EITHER backend: liner still owns it until W3,
+// and a second installer would be bug 3 with the parties reversed. This
+// is the assertion that catches term starting to fight liner early.
+func TestMode_UntouchedThroughW1(t *testing.T) {
+	for name, f := range map[string]*fixture{"tty": newTTY(t, "xterm", 80), "pipe": newPipe(t)} {
+		t.Run(name, func(t *testing.T) {
+			f.t.Status().Set("waiting (5s)")
+			io.WriteString(f.t.Out(), "body\n")
+			reg := f.t.Push(ActivityTurn, Handler{Abort: func() {}})
+			reg.RevokeAbort()
+			reg.Pop()
+			st := f.t.State()
+			if st.ModeInstalls != 0 {
+				t.Errorf("ModeInstalls = %d, want 0 — liner owns the mode until W3", st.ModeInstalls)
+			}
+			if st.Mode != ModeEntry {
+				t.Errorf("Mode = %v, want ModeEntry", st.Mode)
+			}
+			if st.PumpReading {
+				t.Error("PumpReading is true, but there is no pump before W3")
+			}
+		})
+	}
+}
+
+// The two backends agree on the cursor column, which is the point of
+// plain-backend parity: the belief emits no bytes, so the off-TTY suite
+// is the only place it can be observed at all.
+func TestColumn_TrackedIdenticallyOnBothBackends(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want CursorColumn
+	}{
+		{"fresh session", "", ColumnStart},
+		{"unterminated content", "body", ColumnMid},
+		{"content ending its line", "body\n", ColumnStart},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tty, pipe := newTTY(t, "xterm", 80), newPipe(t)
+			for _, f := range []*fixture{tty, pipe} {
+				if tc.body != "" {
+					io.WriteString(f.t.Out(), tc.body)
+				}
+			}
+			if got := tty.t.State().Column; got != tc.want {
+				t.Errorf("tty column = %v, want %v", got, tc.want)
+			}
+			if got := pipe.t.State().Column; got != tc.want {
+				t.Errorf("plain column = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func sameStack(got, want []Activity) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}

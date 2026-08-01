@@ -11,10 +11,20 @@
 // signal DELIVERY. Everything else becomes a client that requests an
 // effect and can never name the fd.
 //
-// This file is the W0 API surface: types, signatures and the rationale
-// for each. There are no implementations — every body panics. Read
-// mad-design/terminal-layer/SOLUTION.md first; the section references
-// below are to that document.
+// Read mad-design/terminal-layer/SOLUTION.md first; the section
+// references below are to that document.
+//
+// # Migration state
+//
+// The package lands in waves (SOLUTION.md §8, IMPLEMENTATION-PLAN.md §2).
+// W1 — this one — is the OUTPUT half plus the bookkeeping: backend
+// selection, the four channels, the activity stack, the abort window, the
+// cursor column. Everything on the INPUT half still panics, and every
+// panic names the wave that lands it. In particular W1 deliberately does
+// NOT touch termios: liner still owns the terminal mode until W3 and
+// applies it at construction, so a mode installed here would fight it and
+// reintroduce bug 3. [StateSnapshot.ModeInstalls] is 0 for the whole
+// session in W1, by construction and not by accident.
 //
 // # The five bugs and the structural answer to each
 //
@@ -46,19 +56,28 @@
 // BYTE-INVISIBLE defect class — bugs 3 and 4 emit no bytes, which is
 // exactly why they shipped green — is plain-backend bookkeeping parity:
 // the non-TTY backend keeps the SAME books as the TTY backend, so the
-// existing sim and scenario suites become an ordering sensor for free.
+// existing off-TTY suites become an ordering sensor for free.
 // [Terminal.State] is what those assertions read. It is first-class API,
 // not a debug helper.
 package term
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"os"
+	"sync"
 )
 
-// notImplemented is the W0 body. Every function in this package panics
-// with it; W1 replaces the bodies, not the signatures.
-const notImplemented = "term: not implemented (W1)"
+// The unimplemented bodies, each naming the wave that lands it. They are
+// separate constants rather than one string with a variable in it so that
+// a panic message is a grep-able statement of schedule.
+const (
+	notImplementedW2 = "term: not implemented (W2 — Question + the menu sites)"
+	notImplementedW3 = "term: not implemented (W3 — pump, decoder, editor, mode ownership)"
+	notImplementedW4 = "term: not implemented (W4 — interrupt routing over the activity stack)"
+)
 
 // Sizing constants. Each is used by more than one caller (status
 // truncation, the W3 row cap, the editor's wrap math), so each is named
@@ -108,6 +127,10 @@ type Options struct {
 
 	// HistoryFile is where [Terminal.ReadLine]'s history is loaded from
 	// and flushed to at [Terminal.Close]. Empty disables history.
+	//
+	// W1 leaves it unread: liner still owns the history file through W2,
+	// and two owners of one file is the defect class this package exists
+	// to remove. W3 takes it over with the editor.
 	HistoryFile string
 
 	// TermEnv is $TERM. A "dumb" or empty value means no ANSI: the
@@ -134,7 +157,7 @@ type Options struct {
 	// bug 2 (mid-token rendering of long recalled lines) into a strictly
 	// worse bug rather than fixing it.
 	//
-	// W0 only names it; the cap is enforced by the W3 editor.
+	// W0 named it; the cap is enforced by the W3 editor.
 	InputRowCap int
 
 	// Platform, when non-nil, overrides backend selection. This is the
@@ -144,6 +167,11 @@ type Options struct {
 	// session rather than per call, because a backend that changes
 	// underneath a running turn is the same ownership ambiguity in a
 	// smaller window.
+	//
+	// An injected platform is INTERACTIVE by definition: the plain
+	// backend is what "not a terminal" means here, and a caller that
+	// supplies its own platform is standing in for a real one. That is
+	// the whole of [Terminal.Interactive]'s rule — see it.
 	Platform Platform
 }
 
@@ -153,10 +181,42 @@ type Options struct {
 // There is deliberately no accessor for the fd, the mode, or the
 // decoder: Go cannot express capability confinement across a struct
 // field, so the confinement is enforced by there being nothing to reach
-// for, backed by the no-direct-terminal-access grep gate. liner is the
-// standing proof that a dependency can mutate termios where no compiler
-// rule of ours reaches.
-type Terminal struct{ _ struct{} }
+// for, backed by the no-direct-terminal-access gate in gate_test.go.
+// liner is the standing proof that a dependency can mutate termios where
+// no compiler rule of ours reaches.
+type Terminal struct {
+	plat Platform
+	diag io.Writer
+
+	// interactive and ansi are the session's two display determinations,
+	// each made ONCE at Open. interactive is the ONE TTY predicate the
+	// whole program shares; ansi is whether the terminal accepts the
+	// erase and dim sequences.
+	interactive bool
+	ansi        bool
+
+	// The three channel writers are built once and handed out by value of
+	// pointer, so Out()/Diag()/Reasoning() are allocation-free and two
+	// callers of the same channel are literally the same object.
+	outW, diagW, reasonW *channelWriter
+	status               *Status
+
+	// mu is THE serialization point. Every emitted byte and every piece
+	// of bookkeeping below is under it, which is what makes an error
+	// mid-stream unable to interleave into the status line — Diag lands
+	// on a different fd but passes through the same lock.
+	mu            sync.Mutex
+	stack         []*Registration
+	abortWindows  int
+	modeInstalls  int
+	mode          ModeIntent
+	column        CursorColumn
+	statusText    string
+	statusLive    bool
+	reasoningOpen bool
+	violations    int
+	closed        bool
+}
 
 // Open captures the terminal, selects a backend, installs the session
 // mode, and starts the input pump.
@@ -171,12 +231,21 @@ type Terminal struct{ _ struct{} }
 // be observed, adopted, or left stale by anything, so bug 3's category
 // stops existing rather than being disciplined.
 //
-// Open also installs the handlers for the signals that MUTATE TERMINAL
-// STATE — SIGWINCH, SIGTERM/SIGHUP (U4: today these leave the terminal
-// in no-echo mode), SIGTSTP/SIGCONT — and the single SIGINT dispatcher
-// described at [Handler.Interrupt]. Signals that carry USER INTENT stay
-// with policy; signals that change the terminal belong to whoever owns
-// it (§4, layering rule).
+// # W1 installs no mode at all, and that is deliberate
+//
+// The paragraph above describes the END state, from W3. In W1 liner still
+// owns the terminal mode and applies it at ITS construction; a mode
+// installed here would fight it, which is bug 3 with the parties
+// reversed. So W1 captures the entry mode (a read — it is also the
+// is-this-a-terminal test) and installs nothing:
+// [StateSnapshot.ModeInstalls] stays 0 and [StateSnapshot.Mode] reports
+// [ModeEntry] for the whole session. W3 takes the mode over, and the
+// count becomes the hard number described at [StateSnapshot.ModeInstalls].
+//
+// Signal handling — SIGWINCH, SIGTERM/SIGHUP (U4), SIGTSTP/SIGCONT, and
+// the single SIGINT dispatcher described at [Handler.Interrupt] — lands
+// with the pump in W3/W4 for the same reason: a handler that restores a
+// mode term never installed would restore the wrong thing.
 //
 // # Ctrl-C is not one of those signals while term holds the fd
 //
@@ -207,125 +276,127 @@ type Terminal struct{ _ struct{} }
 // control of their shell. Add a hook when a client turns up that needs
 // one; an unused hook is a second opinion about terminal state, which is
 // the shape this package exists to remove.
-func Open(opts Options) (*Terminal, error) { panic(notImplemented) }
+func Open(opts Options) (*Terminal, error) {
+	if opts.Stdout == nil {
+		opts.Stdout = io.Discard
+	}
+	if opts.Stderr == nil {
+		opts.Stderr = io.Discard
+	}
+
+	plat, interactive := selectBackend(opts)
+
+	t := &Terminal{
+		plat:        plat,
+		diag:        opts.Stderr,
+		interactive: interactive,
+		ansi:        interactive && ansiCapable(opts.TermEnv),
+		// The cursor starts at column 0: nothing has been written yet.
+		// ColumnUnknown is the ZERO value of CursorColumn and means "a
+		// child owned the fd", so it must be assigned away here rather
+		// than left to the zero value.
+		column: ColumnStart,
+		mode:   ModeEntry,
+	}
+	t.outW = &channelWriter{t: t, ch: chanOut}
+	t.diagW = &channelWriter{t: t, ch: chanDiag}
+	t.reasonW = &channelWriter{t: t, ch: chanReasoning}
+	t.status = &Status{t: t}
+	return t, nil
+}
+
+// selectBackend makes the ONE backend decision of a session (U12).
+//
+// The TTY backend requires BOTH ends to be character devices: the device
+// reads and sizes through stdin, and every byte term emits goes to
+// stdout. A run with either end redirected (`personant chat > out.txt`,
+// a test's injected buffers) is not a terminal — line editing has
+// nowhere to render and decoration would corrupt the captured stream.
+// This is the whole of the old chat.interactiveTTY predicate, moved to
+// the package that owns the answer.
+//
+// Every failure below falls through to the plain backend and is NOT
+// retried later. That is U12: an ioctl failure selects the plain backend
+// for the WHOLE session, because a backend that changes underneath a
+// running turn is the same ownership ambiguity in a smaller window.
+func selectBackend(opts Options) (Platform, bool) {
+	if opts.Platform != nil {
+		return opts.Platform, true
+	}
+	in, okIn := charDevice(opts.Stdin)
+	out, okOut := charDevice(opts.Stdout)
+	if okIn && okOut {
+		if d, err := NewUnixDevice(in, out); err == nil {
+			return NewUnixPlatform(d), true
+		}
+	}
+	return NewPlainPlatform(opts.Stdin, opts.Stdout), false
+}
+
+// charDevice reports whether v is an *os.File backed by a character
+// device — a terminal rather than a file, a pipe or an in-memory buffer.
+// Stdlib-only; no dependency knows more than os.FileMode does here.
+func charDevice(v any) (*os.File, bool) {
+	f, ok := v.(*os.File)
+	if !ok || f == nil {
+		return nil, false
+	}
+	fi, err := f.Stat()
+	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return nil, false
+	}
+	return f, true
+}
 
 // Close restores the entry mode, flushes history, joins the pump, and
 // removes the signal handlers. Idempotent, and safe from a forced-exit
 // path where no deferred cleanup runs.
-func (t *Terminal) Close() error { panic(notImplemented) }
+//
+// W1 has no mode to restore, no history of its own and no pump (see
+// [Open]); what it does have is decoration that must not outlive the
+// session — a half-drawn status frame or an unterminated dim run would
+// otherwise be the last thing on the user's terminal. Retiring both is
+// unconditional and idempotent, so the forced-exit path gets it too.
+func (t *Terminal) Close() error {
+	t.mu.Lock()
+	if t.closed {
+		t.mu.Unlock()
+		return nil
+	}
+	t.closed = true
+	t.retireStatusLocked()
+	t.endReasoningLocked()
+	t.mu.Unlock()
+	return t.plat.Close()
+}
 
 // Interactive reports whether this session drives a real terminal. It is
-// the ONE TTY predicate (axiom §4.2 requires exactly one, and the
-// current code's interactiveTTY is it). Clients ask term rather than
-// re-deriving it, which is why the tty-only channels can be inert
+// the ONE TTY predicate (axiom §4.2 requires exactly one, and it now
+// lives here rather than in chat.interactiveTTY). Clients ask term rather
+// than re-deriving it, which is why the tty-only channels can be inert
 // without every caller branching.
+//
+// It is exactly "the plain backend was not selected", which is what makes
+// it one fact rather than two that can disagree: an injected
+// [Options.Platform] is interactive, a real terminal on both ends is
+// interactive, and everything else is not.
 //
 // Deliberately NOT duplicated in [StateSnapshot]: two projections of one
 // fact is how the flag in bug 1 came to disagree with itself.
-func (t *Terminal) Interactive() bool { panic(notImplemented) }
+func (t *Terminal) Interactive() bool { return t.interactive }
 
 // Size reports the current window geometry, falling back to
 // [DefaultCols] x [DefaultRows] when it cannot be read. Clients need it
 // for the W3 row cap; term needs it for status truncation and wrapping.
-func (t *Terminal) Size() Size { panic(notImplemented) }
-
-// --- Output: the §5 2x2, with one cell that has no name -------------
 //
-//	                | scrollback (persists) | ephemeral (erasable)
-//	----------------+-----------------------+---------------------
-//	always (TTY+pipe)| Out(), Diag()        | FORBIDDEN
-//	tty-only         | Reasoning()          | Status()
-//
-// The forbidden cell is (always, ephemeral) and it is forbidden for a
-// mechanical reason: a pipe has no erasure. There is no method for it,
-// no channel enum with a fourth member, and no way to compose one out of
-// the three that exist — that is what "inexpressible" means here. Any
-// client that believes it needs it wants Out().
-//
-// The missing (tty-only, scrollback) cell is precisely why thinking.go
-// existed and why it ended up the writer for EVERYTHING: it was the only
-// object that knew about the reasoning-to-content transition, so every
-// other producer had to route through it to be serialized. Naming the
-// cell dissolves the object. All four channels share one serialization
-// point inside term, so the transition is handled once, invisibly.
-
-// Out is the committed content channel: the streamed response body, menu
-// and question text, banners, ordinary notices. Present on a TTY and in
-// a pipe alike, and byte-identical between them — the sim and scenario
-// goldens are the gate on that.
-//
-// A write to Out first retires whatever ephemeral decoration is on
-// screen (the status slot) and closes any open reasoning run, so content
-// can never arrive dim or jammed onto the tail of a scratch line.
-//
-// Body text passes through UNWRAPPED (user ruling, 2026-07-31): term
-// does not re-flow the streamed response, and the terminal's own soft
-// wrap does the work. In-app wrapping would insert real newlines that
-// survive copy-paste, `tee` and every downstream reader, which is
-// exactly what the §4.1 scrollback-fidelity bar forbids — what is on
-// screen must be what the user gets when they take it away. This is a
-// starting position, not a closed question: if a case for wrapping here
-// appears, it is a ruling to revisit, not a rule of the architecture.
-//
-// It says nothing about the other two places term does width math.
-// [Status] truncation and the editor's wrap are term's business by
-// construction: both write to a region term must be able to erase or
-// repaint, so both need the width and neither commits a newline to
-// scrollback.
-func (t *Terminal) Out() io.Writer { panic(notImplemented) }
-
-// Diag is the committed diagnostic channel — errors and warnings. It
-// lands on stderr, but it is INSIDE the arbiter (§5, U2): it passes
-// through the same serialization point as Out, which is what stops an
-// error mid-stream from interleaving into the status line. stderr
-// escaping the arbiter is the collision W1 closes.
-//
-// Diag is (always, scrollback), not ephemeral: an error the user did not
-// see is worse than an error that stayed on screen.
-func (t *Terminal) Diag() io.Writer { panic(notImplemented) }
-
-// Reasoning is the live model-reasoning channel: dimmed, tty-only, and
-// PERSISTENT in scrollback (user ruling, 2026-07-31 — arbitration item 1;
-// the brief's "or scrollback" phrasing was an error). It is a channel,
-// NOT a bounded rewriteable region: dimmed reasoning stays in scrollback
-// exactly as it does today and survives scrolling back.
-//
-// tty-only means it writes ZERO bytes when [Terminal.Interactive] is
-// false, so piped, sim and test output are unaffected regardless of the
-// /thinking setting. Axiom §4.5 — reasoning is model scratch and never
-// enters memory — is unaffected by this package: there is no path from
-// here to storage, and none may be created.
-//
-// Interleaving with Out is term's problem, not the caller's: an open
-// reasoning run is closed (dim reset, newline) by the first byte written
-// to Out or Diag.
-func (t *Terminal) Reasoning() io.Writer { panic(notImplemented) }
-
-// Status returns the session's single ephemeral slot — the phase-labeled
-// progress indicator's home.
-//
-// It is TOKEN-LESS by design (§5, retired contention C13): every caller
-// gets the same slot and there is no handle proving ownership, so two
-// producers cannot each believe they own a line. That belief was bug 1.
-// The slot holds one line, replaced whole; it is not an io.Writer,
-// because append semantics on an erasable region is the thing that made
-// the old indicator track its own previous frame.
-//
-// On a non-interactive session the slot is inert and writes nothing.
-func (t *Terminal) Status() *Status { panic(notImplemented) }
-
-// Status is the ephemeral single-line slot. See [Terminal.Status].
-type Status struct{ _ struct{} }
-
-// Set replaces the slot's contents and redraws it in place. The text is
-// truncated to Size().Cols-[StatusColumnInset]; see that constant for
-// why the final column is left alone.
-func (s *Status) Set(text string) { panic(notImplemented) }
-
-// Clear erases the slot and gives the line back. Idempotent, and safe
-// from any goroutine including a signal path, where a half-drawn frame
-// would otherwise be the last thing on the terminal.
-func (s *Status) Clear() { panic(notImplemented) }
+// A read failure is a fallback, never a re-selection of the backend
+// (U12) — see [Device.Size].
+func (t *Terminal) Size() Size {
+	if s, err := t.plat.Size(); err == nil && s.Cols > 0 && s.Rows > 0 {
+		return s
+	}
+	return Size{Cols: DefaultCols, Rows: DefaultRows}
+}
 
 // --- Input ownership: the LIFO activity stack ------------------------
 
@@ -369,6 +440,12 @@ const (
 
 // Handler is what an activity supplies when it registers. Every field is
 // optional; a nil field declines by construction.
+//
+// W1 records handlers and never calls them: key dispatch arrives with the
+// decoder in W3 and interrupt dispatch with the offer chain in W4. What
+// W1 does keep is the BOOKKEEPING they imply — stack order and the abort
+// window — because that is the half that emits no bytes and is therefore
+// the half that shipped green (see [StateSnapshot]).
 type Handler struct {
 	// Key is offered each decoded keystroke while this registration is
 	// the TOP of the stack. A declined key falls to the next handler
@@ -381,6 +458,8 @@ type Handler struct {
 	//
 	// Window resize is not offered here: it is term's own business (it
 	// repaints the status slot and re-wraps the editor).
+	//
+	// Dispatched from W3.
 	Key func(Key) Disposition
 
 	// Interrupt is offered SIGINT. Read this before implementing it.
@@ -422,6 +501,8 @@ type Handler struct {
 	// it cannot get from there to a disposition without writing a switch
 	// on Activity, which is visibly the wrong thing next to this
 	// comment.
+	//
+	// Dispatched from W4.
 	Interrupt func() Disposition
 
 	// Abort, when non-nil, OPENS the abort window for this registration:
@@ -431,18 +512,40 @@ type Handler struct {
 	//
 	// While the window is open the abort key is claimed here and is not
 	// offered to Key. [Registration.RevokeAbort] closes it.
+	//
+	// Dispatched from W3 (Esc is a decoded key). The WINDOW itself —
+	// opened here, closed by RevokeAbort, observable in
+	// [StateSnapshot.AbortWindow] — is bookkeeping and is live in W1.
 	Abort func()
 }
 
 // Push registers a consumer on top of the LIFO activity stack. The
 // returned registration must be popped; see [Registration.Pop] for what
 // happens when the stack discipline is broken.
-func (t *Terminal) Push(a Activity, h Handler) *Registration { panic(notImplemented) }
+func (t *Terminal) Push(a Activity, h Handler) *Registration {
+	r := &Registration{t: t, activity: a, handler: h, abort: h.Abort != nil}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if r.abort {
+		t.abortWindows++
+	}
+	t.stack = append(t.stack, r)
+	return r
+}
 
 // Registration is one entry on the activity stack. Holding it is the
 // only way to release it, so a client cannot pop an entry it did not
 // push.
-type Registration struct{ _ struct{} }
+type Registration struct {
+	t        *Terminal
+	activity Activity
+	handler  Handler
+
+	// abort and popped are guarded by t.mu, not by the registration:
+	// they are facts about the STACK, and the stack has one lock.
+	abort  bool
+	popped bool
+}
 
 // Pop releases the registration.
 //
@@ -453,12 +556,68 @@ type Registration struct{ _ struct{} }
 // go wrong). A violation increments [StateSnapshot.Violations] and is
 // reported on [Terminal.Diag].
 //
+// The entry is released either way. Refusing an out-of-order Pop would
+// leave a registration nobody can remove — a leak on top of a violation
+// — and the sensor's job is to REPORT the interleaving, not to make the
+// program worse for having one.
+//
+// A second Pop of the same registration is a violation too, not a
+// tolerated no-op: it means two owners believe they hold one entry,
+// which is the belief this package exists to make impossible.
+//
 // It deliberately does NOT return an error. Pop is the archetypal
 // deferred call; an error return that every call site drops into a
 // `defer` is a sensor reporting to nobody. Routing it to observable
 // state instead is what makes the plain-backend parity assertions — the
 // only automated coverage this defect class has — able to see it.
-func (r *Registration) Pop() { panic(notImplemented) }
+func (r *Registration) Pop() {
+	t := r.t
+	t.mu.Lock()
+	violation := ""
+	switch {
+	case r.popped:
+		t.violations++
+		violation = fmt.Sprintf("term: %s popped twice", r.activity)
+	default:
+		i := t.indexOfLocked(r)
+		if i != len(t.stack)-1 {
+			t.violations++
+			violation = fmt.Sprintf("term: %s released out of order (%d entr%s above it)",
+				r.activity, len(t.stack)-1-i, plural(len(t.stack)-1-i))
+		}
+		t.stack = append(t.stack[:i], t.stack[i+1:]...)
+		r.popped = true
+		if r.abort {
+			r.abort = false
+			t.abortWindows--
+		}
+	}
+	t.mu.Unlock()
+	// Reported OUTSIDE the lock: Diag's write path takes the same mutex,
+	// so reporting under it would deadlock the sensor on its own report.
+	if violation != "" {
+		fmt.Fprintln(t.Diag(), violation)
+	}
+}
+
+// indexOfLocked finds r on the stack, or returns the top index when it is
+// not there (the double-pop case, which the caller has already
+// classified). Callers hold t.mu.
+func (t *Terminal) indexOfLocked(r *Registration) int {
+	for i := len(t.stack) - 1; i >= 0; i-- {
+		if t.stack[i] == r {
+			return i
+		}
+	}
+	return len(t.stack) - 1
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
+}
 
 // RevokeAbort closes the abort window opened by [Handler.Abort].
 //
@@ -475,7 +634,16 @@ func (r *Registration) Pop() { panic(notImplemented) }
 // The boundary matters: past it, a turn has begun writing canonical
 // state, and honouring an abort there leaves a half-written turn that
 // greets the user with a §4.5.8 recovery banner.
-func (r *Registration) RevokeAbort() { panic(notImplemented) }
+func (r *Registration) RevokeAbort() {
+	t := r.t
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !r.abort {
+		return
+	}
+	r.abort = false
+	t.abortWindows--
+}
 
 // --- Handoff ---------------------------------------------------------
 
@@ -495,7 +663,7 @@ func (r *Registration) RevokeAbort() { panic(notImplemented) }
 // the child's interrupt handler on the offer chain. Errors from fn pass
 // through unchanged; a failure to restore or reinstall the mode is
 // reported on [Terminal.Diag] and does not mask fn's result.
-func (t *Terminal) Handoff(fn func() error) error { panic(notImplemented) }
+func (t *Terminal) Handoff(fn func() error) error { panic(notImplementedW3) }
 
 // --- Observable state ------------------------------------------------
 
@@ -525,7 +693,7 @@ const (
 // emit no bytes; bugs 3 and 4 look identical to a correct run right up
 // until they bite, which is exactly why they shipped green. The plain
 // backend keeps the SAME books as the TTY backend, so the existing
-// off-TTY suite asserts against this for free.
+// off-TTY suites assert against this for free.
 //
 // Read it for assertions and diagnostics. NEVER consult it to decide the
 // disposition of a signal — see [Handler.Interrupt].
@@ -534,13 +702,19 @@ type StateSnapshot struct {
 	// top. Values, not handlers, deliberately.
 	Stack []Activity
 
-	// Mode is the mode currently installed.
+	// Mode is the mode currently installed. [ModeEntry] for the whole of
+	// W1 — see [Open] for why term installs nothing while liner owns the
+	// mode.
 	Mode ModeIntent
 
 	// ModeInstalls counts installations since Open. The expected value
 	// is a hard number, not a range: 1 at Open, +2 per Handoff, +1 at
 	// Close. Any other value means someone transitioned the mode, which
 	// is bug 3.
+	//
+	// In W1 the expected value is 0 — for the whole session, on both
+	// backends. liner owns the mode until W3; a nonzero here before W3
+	// means term started fighting it.
 	ModeInstalls int
 
 	// AbortWindow reports whether an abort window is open. Its being
@@ -550,6 +724,9 @@ type StateSnapshot struct {
 
 	// PumpReading reports whether the input pump is running. It is false
 	// exactly inside a [Terminal.Handoff] window and at no other time.
+	//
+	// W1 has no pump, so it is false for the whole session. W3 lands it
+	// with the pump.
 	PumpReading bool
 
 	// Column is term's cursor-column belief. See [CursorColumn].
@@ -566,7 +743,24 @@ type StateSnapshot struct {
 
 // State returns a snapshot. Cheap enough to assert on in a loop and safe
 // from any goroutine.
-func (t *Terminal) State() StateSnapshot { panic(notImplemented) }
+func (t *Terminal) State() StateSnapshot {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	stack := make([]Activity, len(t.stack))
+	for i, r := range t.stack {
+		stack[i] = r.activity
+	}
+	return StateSnapshot{
+		Stack:        stack,
+		Mode:         t.mode,
+		ModeInstalls: t.modeInstalls,
+		AbortWindow:  t.abortWindows > 0,
+		PumpReading:  false, // W3 lands the pump.
+		Column:       t.column,
+		Status:       t.statusText,
+		Violations:   t.violations,
+	}
+}
 
 // --- Reading ---------------------------------------------------------
 
@@ -614,10 +808,15 @@ func (t *Terminal) State() StateSnapshot { panic(notImplemented) }
 // AppendHistory is NOT called here. What deserves to be recalled with ↑
 // is policy — a menu answer is not a prompt — and the caller decides.
 func (t *Terminal) ReadLine(ctx context.Context, a Activity, q Question) (Answer, error) {
-	panic(notImplemented)
+	panic(notImplementedW2)
 }
 
 // AppendHistory records an accepted line for ↑/↓ recall. Blank lines and
 // consecutive duplicates are dropped, and the store is capped at
 // [HistoryLimit] entries; the file is flushed at [Terminal.Close].
-func (t *Terminal) AppendHistory(line string) { panic(notImplemented) }
+func (t *Terminal) AppendHistory(line string) { panic(notImplementedW2) }
+
+// errNotTerminal is what a device or platform returns when it has no
+// window geometry to report. It is a fallback trigger for
+// [Terminal.Size], never a session-level failure (U12).
+var errNotTerminal = errors.New("term: not a terminal")

@@ -264,7 +264,12 @@ test-be: test
 # verify the leaf property holds for it: `grep -rl personant/internal/<pkg>`
 # must show importers only from within this set. Widening this list is what
 # makes the guard untrustworthy.
-FE_SCOPE_PREFIXES := cmd/ internal/chat/ internal/version/ internal/shell/
+#
+# internal/term/ qualifies by the same leaf rule, verified the same way: only
+# internal/chat imports it. It is the terminal arbiter (mad-design/
+# terminal-layer/) — the fds, the mode, the single reader and every emitted
+# byte — so it is front-end by nature and by import graph alike.
+FE_SCOPE_PREFIXES := cmd/ internal/chat/ internal/version/ internal/shell/ internal/term/
 
 # FE_TESTPKGS is the package set `test-fe` runs: the front-end leaf itself plus
 # the CHEAP substrate importers of internal/version, as insurance against a
@@ -277,7 +282,7 @@ FE_SCOPE_PREFIXES := cmd/ internal/chat/ internal/version/ internal/shell/
 # SECONDS on their own and are pure substrate. Do not "fix" this to /...; the
 # whole point of the target is that it costs seconds.
 FE_TESTPKGS := ./cmd/... ./internal/chat/... ./internal/version/... \
-               ./internal/shell/... \
+               ./internal/shell/... ./internal/term/... \
                ./internal/eventlog/... ./internal/store/... ./internal/memops
 
 # fe-scope-check is the MECHANICAL guard that makes `test-fe` safe to trust: it
@@ -355,6 +360,13 @@ test-run: build recall-madlibs
 #                            reader goroutine, the chat.go signal handler —
 #                            three producers writing one terminal. The reason
 #                            this target exists.
+#   internal/term            the terminal arbiter: ONE mutex serializing every
+#                            emitted byte and the whole ownership state, read
+#                            and written from the same three producers above
+#                            (the ticker relabels the ephemeral slot while the
+#                            turn goroutine streams content). It is the lock
+#                            those three now contend on, so it belongs here by
+#                            the same empirical rule that put chat here.
 #   internal/recall/measure  the single indexer goroutine, atomic.Pointer
 #                            snapshot swap, dispatch watermark, job channel.
 #   internal/model           SSE stream reader closeOnce/closeMu; MockClient mu.
@@ -397,7 +409,7 @@ test-run: build recall-madlibs
 # fails the directory walk for a non-owner (see the GOPKGS comment).
 RACEPKGS := ./internal/chat/... ./internal/recall/measure/... ./internal/model/... \
             ./internal/eventlog/... ./internal/metrics/... ./internal/log/... \
-            ./internal/shell/... ./internal/scenarios
+            ./internal/shell/... ./internal/term/... ./internal/scenarios
 
 # test-race is a DIAGNOSTIC, not a third gate. Run it deliberately when you
 # touch concurrent code — a new goroutine, a shared field, a lock. It is
