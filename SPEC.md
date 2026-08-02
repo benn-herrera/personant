@@ -2585,6 +2585,51 @@ archival (primary) never races a turn.
   30-min checkpoint budget); a 2-day barrier-crossing sim rung
   (`TestSimBarrier2Day`) runs in the default suite.
 
+### 4.6 Math rendering (deferred; non-optional)
+
+**Requirement (recorded 2026-08-01).** As a research assistant, personant
+must eventually render mathematics in a conveniently visible form —
+inline images in image-capable terminals, not raw LaTeX or lossy unicode
+approximation. Deferred, but **non-optional**: it shapes several nearer
+decisions, recorded here so they are honored cheaply now rather than
+retrofitted.
+
+**Ecosystem finding (empirical, decides the shape).** The well-trodden
+third-party path for LaTeX→terminal-image rendering (renderer, kitty /
+OSC 1337 / sixel emission, Windows parity) exists in **Rust** and not in
+Go — measured directly during the `laterm` project's development, where
+Go was explored first and rejected on this ground. Consequently the
+rendering and protocol-encoding work stays on the Rust side in every
+option below; personant does not grow Go rendering or sixel-encoding
+dependencies.
+
+**Delivery ladder** (each rung independently shippable):
+
+1. **Sidecar** — personant pushes committed turns to `laterm`'s local
+   socket (the hook shape laterm already ingests from Claude Code).
+   Math renders in a second window; no personant architecture change.
+2. **Inline, Rust renders / Go splices** — a laterm-derived tool takes
+   LaTeX + a target protocol and emits finished protocol bytes;
+   `internal/term` splices them as an opaque committed block in the
+   `(tty-only, scrollback)` cell, with LaTeX source text on the piped
+   path. Cost on our side: term's cursor/erase bookkeeping and the
+   `screentest` model must learn N-row committed blocks.
+3. **Rust front end** — the far-horizon front/back split (two
+   executables; Go substrate, Rust terminal front end) unifying laterm's
+   renderer with the `internal/term` architecture, which is
+   language-portable by design.
+
+**Protocol principle, binding now:** any future backend↔frontend
+boundary carries *semantic* content — markdown with LaTeX source — never
+pre-rendered bytes. Rendering decisions (protocol choice, styling,
+wrapping) belong wholly to the front end. Corollary: nothing on the Go
+side may bake rendered output into stored or transmitted turn content;
+memory and the piped path always see source text.
+
+**Model-output posture (open):** rendering requires the model to emit
+LaTeX; the prompt/template stance (LaTeX vs unicode math in responses)
+is decided when the first rung ships.
+
 ---
 
 ## 5. Model interaction
