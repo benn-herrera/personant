@@ -91,6 +91,77 @@ func TestW1Item1_IndicatorRedrawsInPlace(t *testing.T) {
 	f.p.stop()
 }
 
+// Item 1, the regression a real terminal found: the SINGLE-PHASE wait.
+//
+// A wait announces its phase at t≈0, inside the reveal delay, so the
+// announcement paints nothing; every tick after it is a heartbeat, and a
+// heartbeat may not claim an empty slot. Those two rules deadlocked, and
+// the indicator never appeared at all unless a SECOND phase change
+// happened to land past the threshold — which is why every test above
+// passes while the user watches a blank line with /thinking off.
+//
+// The deferred announcement is therefore owed, not dropped: the first
+// heartbeat past the threshold delivers it, and the ones after it are
+// redraw-only again.
+func TestW1Item1_SinglePhaseWaitRevealsAfterTheDelay(t *testing.T) {
+	f := newProgressFixture(t, true, true, fixtureSize)
+	f.setElapsed(progressShowAfter - time.Millisecond)
+	f.p.phase(turn.PhaseWaiting)
+	if got := f.slot(); got != "" {
+		t.Fatalf("drew inside the reveal delay: %q", got)
+	}
+
+	// Past the threshold, with NO second phase change: only the heartbeat.
+	f.setElapsed(progressShowAfter + time.Second)
+	f.tick(t)
+	if got := f.slot(); !strings.Contains(got, string(turn.PhaseWaiting)) {
+		t.Fatalf("the wait stayed invisible past the threshold: slot %q", got)
+	}
+	s := f.screen(t)
+	if got := s.TotalRows(); got != 1 {
+		t.Errorf("the revealed indicator took %d rows, want 1\n%s", got, s)
+	}
+	if !strings.Contains(s.Line(), string(turn.PhaseWaiting)) {
+		t.Errorf("the revealed line does not carry the label: %q\n%s", s.Line(), s)
+	}
+
+	// …and the claim is spent. Content retires the frame, and the
+	// heartbeats after it must go back to emitting nothing at all.
+	if _, err := io.WriteString(f.tm.Out(), "Hi there."); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	quiet := f.out.Len()
+	f.tick(t)
+	if got := f.out.Len(); got != quiet {
+		t.Errorf("a heartbeat emitted %d bytes after content took the line: %q",
+			got-quiet, f.out.String()[quiet:])
+	}
+	f.p.stop()
+}
+
+// The same delay, with the abort window opening inside it: the hint is an
+// announcement too, so it is owed exactly as the phase is and must be on
+// the line the moment the line appears — not one window later.
+func TestW1Item8_AbortHintOpenedInsideTheDelayStillSurfaces(t *testing.T) {
+	f := newProgressFixture(t, true, true, fixtureSize)
+	f.setElapsed(time.Second)
+	f.p.phase(turn.PhaseWaiting)
+	f.p.setAbortHint(true)
+	if got := f.slot(); got != "" {
+		t.Fatalf("drew inside the reveal delay: %q", got)
+	}
+
+	f.setElapsed(5 * time.Second)
+	f.tick(t)
+	if got := f.slot(); !strings.HasSuffix(got, abortHintSuffix) {
+		t.Errorf("the hint did not surface with the indicator: %q", got)
+	}
+	if got := f.screen(t).Line(); !strings.Contains(got, string(turn.PhaseWaiting)) {
+		t.Errorf("the revealed line lost its label: %q", got)
+	}
+	f.p.stop()
+}
+
 // Items 2 and 3 — the first body token retires the indicator cleanly, and
 // no frame appears at all while the body streams.
 //

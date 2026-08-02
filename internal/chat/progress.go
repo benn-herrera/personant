@@ -80,8 +80,13 @@ type progress struct {
 	// control.disarm — never inferred here, because a session with no
 	// working cbreak must not advertise a key that does nothing.
 	abortHint bool
-	stopCh    chan struct{}
-	doneCh    chan struct{}
+	// pendingReveal says this wait has an ANNOUNCEMENT that the reveal
+	// delay swallowed and that has not landed since. It is progress's own
+	// fact and nothing else can hold it: term knows what is on the line,
+	// but not that this object still owes it a frame.
+	pendingReveal bool
+	stopCh        chan struct{}
+	doneCh        chan struct{}
 }
 
 // newProgress builds the indicator over the session's terminal. The
@@ -140,6 +145,7 @@ func (p *progress) phase(ph turn.Phase) {
 func (p *progress) startLocked() {
 	p.running = true
 	p.frame = 0
+	p.pendingReveal = false
 	p.startedAt = clock.Profiling()
 	ticks, stopTicker := p.newTicker()
 	stopCh := make(chan struct{})
@@ -174,11 +180,40 @@ func (p *progress) startLocked() {
 // user is reading. Whether the frame is still on screen is term's own
 // bookkeeping (State().Status), not a flag kept here — asking the owner
 // is exactly what bug 1's indicator failed to do.
+//
+// The reveal delay does not DISCARD an announcement, it DEFERS one. A
+// wait announces its phase at t≈0, inside the delay; if that were simply
+// dropped, a single-phase wait would never draw at all, because every
+// later tick is a heartbeat and a heartbeat may not claim an empty slot.
+// The two rules deadlocked and the indicator stayed invisible for the
+// whole of exactly the wait it exists to decorate. So a swallowed
+// announcement stays owed, and the first heartbeat past the threshold
+// delivers it; after that heartbeats are redraw-only again.
 func (p *progress) renderLocked(reveal bool) {
-	if !p.running || p.elapsed(p.startedAt) < progressShowAfter {
+	if !p.running {
 		return
 	}
-	if !reveal && p.t.State().Status == "" {
+	if p.elapsed(p.startedAt) < progressShowAfter {
+		p.pendingReveal = p.pendingReveal || reveal
+		return
+	}
+	// The debt is settled at the FIRST opportunity past the threshold and
+	// cleared whether or not it draws. A claim left armed would fire later,
+	// in the middle of a response, which is the stamp the heartbeat rule
+	// exists to prevent.
+	deferred := p.pendingReveal && !reveal
+	p.pendingReveal = false
+
+	st := p.t.State()
+	if !reveal && !deferred && st.Status == "" {
+		return
+	}
+	// A deferred announcement lands only on a line nothing else has taken.
+	// Content that arrived during the delay retired no frame — there was
+	// none — so the slot is empty for the innocent reason as well as the
+	// guilty one, and term's cursor belief is what tells them apart. Drawing
+	// anyway would push a spinner under a half-streamed response.
+	if deferred && st.Column != term.ColumnStart {
 		return
 	}
 	p.st.Set(fmt.Sprintf("%s %s (%ds)%s",
