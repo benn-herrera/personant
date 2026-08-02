@@ -2,6 +2,7 @@ package term
 
 import (
 	"context"
+	"errors"
 	"io"
 )
 
@@ -65,13 +66,15 @@ import (
 type ModeIntent int
 
 const (
-	// ModeEntry is the mode personant FOUND at startup. It is what a
-	// `$`/`#` child must run under, and what the terminal is left in at
-	// exit (U4: today SIGTERM/SIGHUP leave it in no-echo mode, because
-	// only os.Interrupt is registered).
+	// ModeEntry is the mode personant FOUND at startup, restored BYTE FOR
+	// BYTE rather than reconstructed. It is what a `$`/`#` child must run
+	// under (ISIG included — see [Terminal.Handoff]), what a suspend puts
+	// back before it raises SIGTSTP, and what the terminal is left in at
+	// exit, on the SIGTERM/SIGHUP path as well as the ordinary one (U4).
 	//
-	// It is also the only mode W1 ever reports: term captures the entry
-	// mode at Open and installs nothing until W3. See [Open].
+	// It is also the only mode a session where term does not own the
+	// terminal ever reports: a pipe, a redirected end, or a terminal that
+	// cannot erase installs nothing at all. See [Open].
 	ModeEntry ModeIntent = iota
 
 	// ModeSession is the one mode personant runs under, at the prompt
@@ -113,7 +116,7 @@ const (
 	// The INTENT does not change either way, which is the point of naming
 	// intents instead of flags; what changes is what the pump sees.
 	//
-	// Nothing installs it before W3.
+	// See [unixDevice.InstallMode] for the flags this becomes.
 	ModeSession
 )
 
@@ -165,8 +168,8 @@ type Platform interface {
 	// physical reader is the whole of §3's stdin answer: consumers
 	// register on the LIFO activity stack and receive events, so no
 	// second party can strand a partially-read escape sequence in a
-	// private buffer. liner holding three byte reservoirs while
-	// escwatch.go read the same fd is the defect this forecloses.
+	// private buffer. liner holding three byte reservoirs while chat's
+	// escwatch read the same fd is the defect this forecloses.
 	NextEvent(ctx context.Context) (Event, error)
 
 	// Write emits bytes. Formatting happened above this line.
@@ -188,16 +191,73 @@ type Platform interface {
 // composition IS the platform seam. It is also where a byte-level
 // scripted fake becomes a source of decoded events, so the decoder is
 // testable with real terminal byte sequences and no terminal.
-//
-// The decoder is W3's; W1 composes the halves that do not need it.
 func NewUnixPlatform(d Device) Platform { return &unixPlatform{d: d} }
 
-type unixPlatform struct{ d Device }
+type unixPlatform struct {
+	d Device
 
-// NextEvent is the decoder, and the decoder is the whole of W3's input
-// half — ESC disambiguation held across a timeout inside the pump, which
-// is why no consumer may read bytes for itself (§3).
-func (p *unixPlatform) NextEvent(context.Context) (Event, error) { panic(notImplementedW3) }
+	// Everything below is touched by the PUMP GOROUTINE ONLY (see
+	// [Platform.NextEvent]), which is why none of it is locked. A second
+	// caller would be a second reader, which is the defect being removed.
+	dec  decoder
+	buf  []byte
+	q    []Event
+	done bool // EventEOF has been queued; the stream is over
+}
+
+// NextEvent decodes one event, blocking until it has one.
+//
+// The loop's shape is the §3 argument made executable: ONE reader, whose
+// leftover bytes stay in its own decoder across reads, and whose idle
+// windows are events in their own right. An expired window resolves a
+// pending ESC; a resize arrives out of band because it is a signal and
+// never a byte.
+func (p *unixPlatform) NextEvent(ctx context.Context) (Event, error) {
+	for {
+		if len(p.q) > 0 {
+			ev := p.q[0]
+			p.q = p.q[1:]
+			return ev, nil
+		}
+		if p.done {
+			return Event{}, io.EOF
+		}
+		if err := ctx.Err(); err != nil {
+			return Event{}, err
+		}
+		select {
+		case <-p.d.Resized():
+			if s, err := p.d.Size(); err == nil {
+				return Event{Kind: EventResize, Size: s}, nil
+			}
+			continue // no geometry to report; the caller keeps its fallback
+		default:
+		}
+		if p.buf == nil {
+			p.buf = make([]byte, readBufBytes)
+		}
+		n, err := p.d.Read(p.buf)
+		if n > 0 {
+			p.q = append(p.q, p.dec.feed(p.buf[:n], false)...)
+		}
+		switch {
+		case err == nil && n == 0:
+			// The expired window. It is the ONLY thing that resolves a
+			// pending ESC, and it carries no wall clock with it.
+			p.q = append(p.q, p.dec.feed(nil, true)...)
+		case err != nil:
+			if !errors.Is(err, io.EOF) {
+				return Event{}, err
+			}
+			// End of input resolves the lookahead exactly as an expiry does
+			// — an ESC typed as the last byte of a stream was a bare Esc —
+			// and then says so once.
+			p.q = append(p.q, p.dec.feed(nil, true)...)
+			p.q = append(p.q, Event{Kind: EventEOF})
+			p.done = true
+		}
+	}
+}
 
 func (p *unixPlatform) Write(b []byte) (int, error)    { return p.d.Write(b) }
 func (p *unixPlatform) InstallMode(m ModeIntent) error { return p.d.InstallMode(m) }
@@ -225,19 +285,24 @@ func NewPlainPlatform(r io.Reader, w io.Writer) Platform {
 
 type plainPlatform struct {
 	// r is held UNWRAPPED on purpose, and nothing here reads it. The plain
-	// backend's ONE buffered reader lives on Terminal, built by the read
-	// path in readline.go; a second reservoir over the same stream is what
-	// strands bytes at a handover, which is liner's defect and not one to
-	// reproduce in our own code. W3 makes the pump the reader and this the
-	// place it reads from.
+	// backend's ONE reader is the buffered line reader on Terminal, built
+	// by the read path in readline.go; a second reservoir over the same
+	// stream is what strands bytes at a handover, which is liner's defect
+	// and not one to reproduce in our own code.
 	r io.Reader
 	w io.Writer
 }
 
-// NextEvent on the plain backend is the buffered reader feeding the same
-// event stream. It lands with the pump in W3; nothing consumes events
-// before then, which is why r is still unbuffered above.
-func (p *plainPlatform) NextEvent(context.Context) (Event, error) { panic(notImplementedW3) }
+// NextEvent has nothing to decode. Off a terminal there is no keystroke —
+// there are lines, delivered by the kernel or by whatever is on the other
+// end of the pipe — so this backend runs NO PUMP and the read path is the
+// buffered line reader instead (readline.go). Returning an error rather
+// than a stub event is what keeps that a stated fact: a pump started here
+// would stop immediately instead of quietly consuming the stream the line
+// reader owns.
+func (p *plainPlatform) NextEvent(context.Context) (Event, error) {
+	return Event{}, errNoEventStream
+}
 
 func (p *plainPlatform) Write(b []byte) (int, error) {
 	if p.w == nil {
@@ -246,11 +311,13 @@ func (p *plainPlatform) Write(b []byte) (int, error) {
 	return p.w.Write(b)
 }
 
-// InstallMode has no meaning off a terminal, and saying so by panicking
-// rather than by returning nil is deliberate: nothing may install a mode
-// before W3 on EITHER backend, and a silent success here would make the
-// plain backend the one place a premature install went unnoticed.
-func (p *plainPlatform) InstallMode(ModeIntent) error { panic(notImplementedW3) }
+// InstallMode has no meaning off a terminal: a pipe has no line
+// discipline to change. It succeeds so that the mode lifecycle is written
+// ONCE, without a backend test at each transition point — and, because
+// term only reaches this when it owns the read path, and it never owns the
+// read path off a terminal, in practice nothing calls it. See
+// [StateSnapshot.ModeInstalls] for what the two backends' books say.
+func (p *plainPlatform) InstallMode(ModeIntent) error { return nil }
 
 // Size has no geometry to report; [Terminal.Size] supplies the
 // [DefaultCols] x [DefaultRows] fallback, which the W3 row cap and

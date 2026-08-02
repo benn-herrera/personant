@@ -15,13 +15,21 @@ import (
 )
 
 // fakeDevice is the S1 byte-level stand-in (SOLUTION.md §7): it makes a
-// session INTERACTIVE without a terminal, so the indicator's formatter can
-// be driven off a TTY. Composed through the real term.NewUnixPlatform, so
-// the test exercises the same S1→S2 composition production uses rather
-// than a parallel one.
+// session INTERACTIVE without a terminal, so the indicator's formatter and
+// the line editor can both be driven off a TTY. Composed through the real
+// term.NewUnixPlatform, so the test exercises the same S1→S2 composition
+// production uses — the real decoder, the real pump — rather than a
+// parallel one.
+//
+// script is the keystrokes, one entry per read(2). It is nil for the
+// rendering fixtures, whose sessions have nothing to type: the stream then
+// ends immediately, which is what a scripted piped session does too.
 type fakeDevice struct {
 	out  io.Writer
 	size term.Size
+
+	mu     sync.Mutex
+	script [][]byte
 }
 
 // syncBuffer is the fixture's byte sink.
@@ -57,11 +65,28 @@ func (s *syncBuffer) Len() int {
 	return s.b.Len()
 }
 
-func (d *fakeDevice) Read([]byte) (int, error)    { return 0, io.EOF }
-func (d *fakeDevice) Write(p []byte) (int, error) { return d.out.Write(p) }
-func (d *fakeDevice) InstallMode(term.ModeIntent) error {
-	panic("test device: nothing may install a mode before W3")
+func (d *fakeDevice) Read(p []byte) (int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.script) == 0 {
+		return 0, io.EOF
+	}
+	chunk := d.script[0]
+	d.script = d.script[1:]
+	if len(chunk) == 0 {
+		return 0, nil // an expired read window: how a bare Esc is proven
+	}
+	return copy(p, chunk), nil
 }
+
+func (d *fakeDevice) Write(p []byte) (int, error) { return d.out.Write(p) }
+
+// InstallMode succeeds. From W3 term owns the terminal mode, so a session
+// over this device installs one at Open and restores it at Close — the
+// arithmetic is asserted in internal/term, and refusing it here would
+// only stop these fixtures opening at all.
+func (d *fakeDevice) InstallMode(term.ModeIntent) error { return nil }
+
 func (d *fakeDevice) Size() (term.Size, error) { return d.size, nil }
 func (d *fakeDevice) Resized() <-chan struct{} { return nil }
 func (d *fakeDevice) Close() error             { return nil }
@@ -148,12 +173,21 @@ func (f *progressFixture) stops() int {
 	return f.stopCount
 }
 
-// tick delivers heartbeats and returns only once the FIRST of them has
-// been fully rendered. The channel is unbuffered, so the second send is
-// accepted only after the goroutine has looped back to its select — which
-// it does after renderLocked returns. That is a happens-before, not a
-// duration: nothing here waits on an idle machine, which is exactly how
-// two of the five §2 bugs were declared fixed.
+// tick delivers heartbeats THROUGH THE TICKER GOROUTINE and returns once
+// the FIRST of them has been fully rendered. The channel is unbuffered, so
+// the second send is accepted only after the goroutine has looped back to
+// its select — which it does after renderLocked returns. That is a
+// happens-before, not a duration: nothing here waits on an idle machine,
+// which is exactly how two of the five §2 bugs were declared fixed.
+//
+// Note what it CANNOT prove, and use beat instead when that matters: the
+// second tick's own render is still in flight when this returns, because
+// the only proof a render finished is the NEXT send being accepted, and
+// that send starts another render. There is always exactly one outstanding.
+// So a byte count taken after tick can be overtaken by a frame — which is
+// what it does under -race, at random.
+//
+// Use tick to assert that the GOROUTINE is alive and consuming.
 func (f *progressFixture) tick(t *testing.T) {
 	t.Helper()
 	f.mu.Lock()
@@ -166,6 +200,25 @@ func (f *progressFixture) tick(t *testing.T) {
 			t.Fatal("ticker goroutine is not consuming its channel")
 		}
 	}
+}
+
+// beat delivers ONE heartbeat synchronously — the same two statements the
+// ticker goroutine runs, on the test's own goroutine, under the same lock.
+// On return the frame has either been emitted or deliberately not, with
+// nothing left in flight.
+//
+// It is what every BYTE-LEVEL assertion uses. The animation heartbeat's
+// contract is renderLocked(false), not "a value arrived on a channel", and
+// driving it directly is the difference between asserting the rule and
+// asserting the fixture's scheduling.
+func (f *progressFixture) beat() {
+	f.p.mu.Lock()
+	defer f.p.mu.Unlock()
+	if !f.p.running {
+		return
+	}
+	f.p.frame++
+	f.p.renderLocked(false)
 }
 
 // The regression that protects the sim harness, the scenario tests, and
@@ -272,7 +325,7 @@ func TestProgress_HeartbeatDoesNotRetakeTheLineFromContent(t *testing.T) {
 	if got := f.slot(); got != "" {
 		t.Fatalf("content did not retire the slot: %q", got)
 	}
-	f.tick(t)
+	f.beat()
 	if got := f.slot(); got != "" {
 		t.Errorf("a heartbeat took the line back from content: %q", got)
 	}
@@ -317,7 +370,7 @@ func TestProgress_DumbTerminalDegradesToStaticLines(t *testing.T) {
 	f.setElapsed(5 * time.Second)
 	f.p.phase(turn.PhaseWaiting)
 	f.p.phase(turn.PhaseWaiting) // repeat must not re-print
-	f.tick(t)                    // nor may a heartbeat
+	f.beat()                     // nor may a heartbeat
 	f.p.phase(turn.PhaseClosing)
 	f.p.stop()
 
@@ -343,7 +396,7 @@ func TestProgress_LeavesOwnershipBooksClean(t *testing.T) {
 	f := newProgressFixture(t, true, true, fixtureSize)
 	f.setElapsed(5 * time.Second)
 	f.p.phase(turn.PhaseWaiting)
-	f.tick(t)
+	f.beat()
 	f.p.stop()
 	st := f.tm.State()
 	if st.Violations != 0 {
@@ -352,7 +405,10 @@ func TestProgress_LeavesOwnershipBooksClean(t *testing.T) {
 	if len(st.Stack) != 0 {
 		t.Errorf("activity stack = %v, want empty", st.Stack)
 	}
-	if st.ModeInstalls != 0 {
-		t.Errorf("mode installs = %d, want 0 — liner owns the mode until W3", st.ModeInstalls)
+	// ONE install, from Open, and driving the indicator adds none: §3's
+	// "zero prompt/turn transitions" seen from the one object that used to
+	// hold flags about the terminal.
+	if st.ModeInstalls != 1 {
+		t.Errorf("mode installs = %d, want the session's single install", st.ModeInstalls)
 	}
 }

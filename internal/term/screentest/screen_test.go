@@ -22,7 +22,11 @@ func TestFeed_FailsClosedOnAnythingUnmodeled(t *testing.T) {
 		name   string
 		stream string
 	}{
-		{"cursor up (W3 territory)", "abc\x1b[A"},
+		{"cursor up with no count — term always writes one", "abc\x1b[A"},
+		{"cursor up with a zero count", "abc\x1b[0A"},
+		{"cursor DOWN, which the editor never needs", "abc\x1b[2B"},
+		{"cursor BACK, which \\r plus forward replaces", "abc\x1b[2D"},
+		{"erase to the start of the screen", "abc\x1b[1J"},
 		{"absolute positioning", "\x1b[2;5H"},
 		{"alternate screen", "\x1b[?1049h"},
 		{"colour", "\x1b[31mred"},
@@ -47,12 +51,72 @@ func TestFeed_FailsClosedOnAnythingUnmodeled(t *testing.T) {
 	}
 }
 
-// The whole of term's current alphabet, and nothing about it errors.
+// The whole of term's current alphabet, and nothing about it errors: the
+// status slot's, the reasoning brackets, and the editor's three.
 func TestFeed_AcceptsExactlyTermsAlphabet(t *testing.T) {
 	s := New(40, 5)
 	feed(t, s, "\r\x1b[K| waiting (2s)"+"\r\x1b[K"+"\x1b[2mreasoning\x1b[0m\n"+"body\n")
+	feed(t, s, "\x1b[J> a line\r\x1b[2C")
+	feed(t, s, "\r\x1b[1A\x1b[J")
 	if got, want := s.TotalRows(), 3; got != want {
 		t.Errorf("TotalRows = %d, want %d\n%s", got, want, s)
+	}
+}
+
+// --- the editor's three sequences -------------------------------------
+
+// eraseDown clears from the cursor to the END OF THE SCREEN — the current
+// row from the cursor rightward, and every row below it whole. That is
+// what lets a multi-row input block be taken back in one sequence instead
+// of one per row.
+func TestEraseDown_ClearsTheRestOfTheScreen(t *testing.T) {
+	s := New(10, 4)
+	feed(t, s, "keepXgone\nrow one\nrow two")
+	// Back to row 0, column 4, and clear everything from there.
+	feed(t, s, "\r\x1b[2A\x1b[4C\x1b[J")
+	if got := s.Row(0); got != "keep" {
+		t.Errorf("row 0 = %q, want %q — the erase took content to the LEFT of the cursor\n%s", got, "keep", s)
+	}
+	for _, i := range []int{1, 2, 3} {
+		if got := s.Row(i); got != "" {
+			t.Errorf("row %d = %q, want empty\n%s", i, got, s)
+		}
+	}
+}
+
+// Cursor up and cursor forward are RELATIVE and CLAMP at the screen edge,
+// which is what a real terminal does. The clamp matters: term.InputRowCap
+// exists precisely so the editor never asks for a row that is not there,
+// and a model that scrolled instead would hide the day it did.
+func TestRelativeMoves_ClampAtTheEdges(t *testing.T) {
+	s := New(6, 3)
+	feed(t, s, "ab\ncd\nef")
+	feed(t, s, "\r\x1b[9A") // nine rows up from row 2
+	if row, col := s.Cursor(); row != 0 || col != 0 {
+		t.Errorf("cursor = (%d,%d), want (0,0) — cursor-up must clamp, not scroll", row, col)
+	}
+	feed(t, s, "\x1b[99C")
+	if _, col := s.Cursor(); col != 6 {
+		t.Errorf("cursor col = %d, want the width (%d) — forward must clamp", col, 6)
+	}
+}
+
+// A repaint — up, erase, rewrite, walk back — does not grow the screen.
+// This is TotalRows' load-bearing property under the editor: it counts the
+// deepest row reached, not the line feeds, so re-emitting the same rows on
+// every keystroke does not read as new screen.
+func TestTotalRows_IsUnmovedByAnEditorRepaint(t *testing.T) {
+	s := New(10, 5)
+	feed(t, s, "> abcdefgh\nijkl") // two rows of one wrapped input block
+	before := s.TotalRows()
+	for range 5 {
+		feed(t, s, "\r\x1b[1A\x1b[J> abcdefgh\nijkl\r\x1b[4C")
+	}
+	if got := s.TotalRows(); got != before {
+		t.Errorf("five repaints grew the row count: %d → %d\n%s", before, got, s)
+	}
+	if got := s.Row(1); got != "ijkl" {
+		t.Errorf("the repainted second row = %q\n%s", got, s)
 	}
 }
 

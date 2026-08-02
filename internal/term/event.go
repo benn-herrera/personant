@@ -57,9 +57,17 @@ const (
 	// that has to know the encoding.
 	//
 	// Because [ModeSession] clears ISIG, this includes Ctrl-C: it is a
-	// key here, not a signal, whenever term owns the fd. Ctrl-Z is the
-	// one control key that is NOT delivered — 0x1A is consumed by term,
-	// which owns suspend and exposes no hook for it (see [Open]).
+	// key here, not a signal, whenever term owns the fd.
+	//
+	// Ctrl-Z is DECODED here and never DELIVERED. The distinction is not
+	// pedantry — it is where the seam falls. This vocabulary is S2, and a
+	// Windows ReadConsoleInput backend produces the same event from its own
+	// INPUT_RECORD, so a decoder that dropped 0x1A would be hiding a fact
+	// the platform genuinely reported. What consumes it is the PUMP, one
+	// layer above: term owns suspend and exposes no hook for it, because no
+	// client needs to observe one and none has standing to veto one (see
+	// [Open]). So {KeyCtrl, 'z'} is a legal event that no [Handler.Key]
+	// will ever be offered.
 	KeyCtrl
 
 	KeyEnter
@@ -81,8 +89,9 @@ const (
 // that introduces an arrow key is the decoder's job and nobody else's:
 // it requires holding bytes read-but-not-yet-interpreted across a
 // timeout, inside the pump, where the lookahead cannot be stranded by a
-// handover (§3). Today that disambiguation is duplicated in escwatch.go
-// while liner holds three separate byte reservoirs over the same fd.
+// handover (§3). Before W3 that disambiguation lived in chat's escwatch.go
+// while liner held three separate byte reservoirs over the same fd, so an
+// Esc typed as type-ahead was silently never seen.
 type Key struct {
 	Name KeyName
 	Rune rune

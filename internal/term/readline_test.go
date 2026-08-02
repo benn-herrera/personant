@@ -3,6 +3,7 @@ package term
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,14 +11,15 @@ import (
 	"testing"
 )
 
-// The read path (W2). Every test here runs on the PLAIN backend, which is
-// not a limitation of the fixture but the whole reach of the wave's
-// automation: the editor path is liner, liner hardcodes the process's own
-// stdin, and driving it would mean a test typing into the terminal running
-// the suite. What the plain backend does cover is the contract every
-// caller depends on — validation, the preamble/prompt split (R2-14), the
-// Default and Keys semantics, and the bookkeeping the ownership sensor
-// reads.
+// The read path, PLAIN backend: the contract every caller depends on off a
+// terminal term owns — validation, the preamble/prompt split (R2-14), the
+// Default and Keys semantics, the buffered end-of-input shapes, and the
+// bookkeeping the ownership sensor reads.
+//
+// The EDITOR half is editor_test.go, which drives the same ReadLine over a
+// scripted device. In W2 that was impossible — liner hardcoded the
+// process's own stdin, so a test would have been typing into the terminal
+// running the suite — and it is the coverage W3 buys.
 
 // newReadFixture opens a plain-backend terminal over a scripted stdin.
 func newReadFixture(t *testing.T, script string) *fixture {
@@ -255,7 +257,7 @@ func TestReadLine_PushesAndPopsItsActivity(t *testing.T) {
 			t.Errorf("after ReadLine(%s) violations = %d, want 0", act, st.Violations)
 		}
 		if st.ModeInstalls != 0 {
-			t.Errorf("a read installed %d mode(s) — liner owns the mode until W3", st.ModeInstalls)
+			t.Errorf("a read installed %d mode(s) on a terminal term does not own", st.ModeInstalls)
 		}
 	}
 }
@@ -279,48 +281,60 @@ func TestAppendHistory_InertOffARealTerminal(t *testing.T) {
 	}
 }
 
-// The §4.3.1 persistent history file: append with consecutive dedup, flush
-// on close, reload on the next open, newest last. Moved here from
-// internal/chat with the editor in W2 — the file has exactly one owner and
-// the test belongs beside it.
+// The §4.3.1 persistent history file: append with consecutive dedup and a
+// blank-line drop, flush on close, reload on the next open, newest last.
 //
-// It drives newEditor/closeEditor directly rather than a Terminal, because
-// a session that would BUILD an editor is a session with a real terminal
-// attached, which a test does not have. liner itself is safe to construct
-// here: with stdin redirected it installs no mode.
+// The FORMAT is the point of this test surviving liner's removal: it is
+// still newline-delimited text with the same cap, so the file a user has
+// been accumulating for weeks is read by the replacement without a
+// migration. A change that broke that would break here.
 func TestHistoryFileRoundTrip(t *testing.T) {
 	hp := filepath.Join(t.TempDir(), "history")
 
-	e1 := newEditor(hp)
-	e1.AppendHistory("first")
-	e1.AppendHistory("second")
-	e1.AppendHistory("second") // consecutive duplicate — dropped
-	if err := closeEditor(e1, hp); err != nil {
-		t.Fatalf("close e1: %v", err)
+	h1 := loadHistory(hp)
+	h1.add("first")
+	h1.add("second")
+	h1.add("second") // consecutive duplicate — dropped
+	h1.add("   ")    // blank — dropped
+	if err := h1.flush(); err != nil {
+		t.Fatalf("flush h1: %v", err)
 	}
 
 	got := readFile(t, hp)
 	if strings.Count(got, "second") != 1 {
 		t.Errorf("consecutive dedup failed: %q", got)
 	}
-	if !strings.Contains(got, "first") {
-		t.Errorf("history missing 'first': %q", got)
+	if got != "first\nsecond\n" {
+		t.Errorf("history file = %q, want the newline-delimited form liner wrote", got)
 	}
 
 	// Reload, append, and confirm the prior entries round-tripped.
-	e2 := newEditor(hp)
-	e2.AppendHistory("third")
-	if err := closeEditor(e2, hp); err != nil {
-		t.Fatalf("close e2: %v", err)
+	h2 := loadHistory(hp)
+	h2.add("third")
+	if err := h2.flush(); err != nil {
+		t.Fatalf("flush h2: %v", err)
 	}
-	got2 := readFile(t, hp)
-	for _, w := range []string{"first", "second", "third"} {
-		if !strings.Contains(got2, w) {
-			t.Errorf("history missing %q after round-trip: %q", w, got2)
-		}
+	if got2 := readFile(t, hp); got2 != "first\nsecond\nthird\n" {
+		t.Errorf("after round-trip = %q, want newest last", got2)
 	}
-	if strings.Index(got2, "first") > strings.Index(got2, "third") {
-		t.Errorf("history not newest-last: %q", got2)
+}
+
+// The §4.3.1 cap, asserted at its own boundary rather than by writing a
+// thousand lines through an editor: the store drops the OLDEST, so what a
+// user can still recall is the most recent HistoryLimit lines.
+func TestHistory_CapDropsTheOldest(t *testing.T) {
+	h := &history{}
+	for i := range HistoryLimit + 5 {
+		h.add(fmt.Sprintf("line %d", i))
+	}
+	if len(h.entries) != HistoryLimit {
+		t.Fatalf("kept %d entries, want the %d cap", len(h.entries), HistoryLimit)
+	}
+	if want := fmt.Sprintf("line %d", HistoryLimit+4); h.entries[len(h.entries)-1] != want {
+		t.Errorf("newest entry = %q, want %q", h.entries[len(h.entries)-1], want)
+	}
+	if want := "line 5"; h.entries[0] != want {
+		t.Errorf("oldest surviving entry = %q, want %q", h.entries[0], want)
 	}
 }
 

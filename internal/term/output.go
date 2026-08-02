@@ -37,13 +37,49 @@ import "io"
 // was a client holding two flags that could disagree; there are no
 // client flags here to disagree with each other, and the arbiter's own
 // two are mutually exclusive by construction.
+//
+// # W3 adds a third transient occupant, and it wins
+//
+// The EDITOR's block is on the live line while a read is in flight, and it
+// is repainted RELATIVE to where term believes it starts. So:
+//
+//   - While an editor is on the terminal the ephemeral slot is SUSPENDED:
+//     [Status.Set] writes nothing and records nothing. A frame drawn over
+//     a line being typed is a frame the editor's next repaint has to
+//     account for, and it cannot — the frame may have taken a newline
+//     first. Suspending is one rule; reconciling two owners of one line is
+//     the defect this package exists to remove.
+//   - Every COMMITTED write invalidates the block. The rows the editor
+//     drew are no longer the rows above the cursor, so the next repaint
+//     starts a fresh block below rather than moving up over content that
+//     is not its to take back.
 
+// The EMITTED ALPHABET, in full. internal/term/screentest models exactly
+// these and FAILS on anything else, so the commit that teaches term a new
+// sequence is the commit that teaches the model to interpret it — or it
+// does not go green. Keep this list short and keep it here.
+//
+// There is no absolute positioning, no alternate screen, no scroll region
+// and no damage model: personant is a scrollback CLI (axiom §4.1), and
+// every sequence below is RELATIVE, so nothing term draws can reach above
+// the rows term itself put on the screen.
 const (
 	// eraseLine returns the cursor to column 0 and clears to end of line.
-	// It is the only cursor-motion sequence this package emits: personant
-	// is a scrollback CLI (axiom §4.1), so there is no absolute
-	// positioning, no alternate screen, and no damage model.
+	// The ephemeral status slot's whole vocabulary.
 	eraseLine = "\r\x1b[K"
+
+	// The editor's three, added in W3. A repaint is: back to the block's
+	// first row (cursorUp), clear everything from there down (eraseDown),
+	// rewrite the rows, then walk the cursor to its cell (cursorUp again,
+	// then cursorRight from column 0).
+	//
+	// eraseDown rather than a per-row eraseLine because the block is
+	// multi-row and the rows below the cursor must go too — and because one
+	// sequence per repaint is one sequence the model has to agree about
+	// instead of one per row.
+	eraseDown   = "\x1b[J"
+	cursorUp    = "\x1b[%dA"
+	cursorRight = "\x1b[%dC"
 
 	// dimOn / dimOff bracket reasoning output in ANSI SGR faint. Faint
 	// (2) rather than a colour: it degrades sanely on terminals that
@@ -152,6 +188,11 @@ func (t *Terminal) write(ch channel, b []byte) (int, error) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	// Committed content ends the editor's claim on its block, whichever
+	// channel carried it: on a terminal both fds are the same tty, and a
+	// Diag line pushes the editor's rows up exactly as an Out line does.
+	t.edDrawn, t.edRow = false, 0
 
 	if ch == chanReasoning {
 		if !t.interactive {
@@ -285,11 +326,19 @@ type Status struct{ t *Terminal }
 // until the slot is released again. That keeps the animated caller's
 // frames — which change on every tick — from becoming one line per tick,
 // without the caller having to know which kind of terminal it is on.
+// # The editor holds the line
+//
+// While a read is in flight the slot is SUSPENDED: this writes nothing and
+// records nothing, so [StateSnapshot.Status] stays empty and an animated
+// caller's heartbeat rule ("only redraw a frame that is still on screen")
+// keeps it quiet without the caller knowing a prompt is up. The next
+// announcement after the read completes draws normally. See the third
+// transient occupant at the top of this file.
 func (s *Status) Set(text string) {
 	t := s.t
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if !t.interactive {
+	if !t.interactive || t.ed != nil {
 		return
 	}
 	t.endReasoningLocked()
@@ -364,14 +413,22 @@ func (t *Terminal) sizeLocked() Size {
 	return Size{Cols: DefaultCols, Rows: DefaultRows}
 }
 
-// truncateStatus cuts text to the writable width. Runes, not bytes: a
-// multi-byte glyph cut in half is worse than a line one column short.
+// truncateStatus cuts text to the slot's writable width.
 func truncateStatus(text string, cols int) string {
-	max := cols - StatusColumnInset
+	return truncateCells(text, cols-StatusColumnInset)
+}
+
+// truncateCells cuts text to max terminal cells. Runes, not bytes: a
+// multi-byte glyph cut in half is worse than a line one column short.
+//
+// Shared by the status slot and by the editor's row-cap placeholder, which
+// need the same thing for the same reason — both write a line that must
+// not reach the final column and turn a redraw into a scroll.
+func truncateCells(text string, max int) string {
 	if max <= 0 {
 		return ""
 	}
-	if len(text) <= max { // fast path: ASCII frames, the common case
+	if len(text) <= max { // fast path: ASCII, the common case
 		return text
 	}
 	r := []rune(text)

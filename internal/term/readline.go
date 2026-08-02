@@ -6,65 +6,23 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
-
-	"github.com/peterh/liner"
 )
 
-// The read half (SOLUTION.md §5, W2). One path in, two ways to acquire a
-// line under it:
+// The read half (SOLUTION.md §5). One path in, two ways to acquire a line
+// under it:
 //
-//   - the EDITOR path, liner, on a session that drives a real terminal.
-//     This is scaffolding and it is the last wave it survives: liner
-//     hardcodes os.Stdin, applies its mode at construction and holds three
-//     byte reservoirs, all of which W3 removes with the pump and decoder.
-//     It lives HERE rather than in internal/chat because there may be
-//     exactly one of it — two liner.States over one fd would be the defect
-//     this package exists to remove, wearing a migration badge.
-//   - the PLAIN path, a buffered reader, everywhere else: pipes, tests,
-//     and an injected [Options.Platform] (which has no decoder until W3).
+//   - the EDITOR path (editor.go), on a session where term owns the mode
+//     and the reader. Keys arrive decoded, from the one pump, and the
+//     editor renders every byte of the line itself.
+//   - the PLAIN path, a buffered line reader, everywhere else: pipes,
+//     tests, and a terminal that cannot erase.
 //
-// Which one a session gets is decided ONCE at [Open], by the same U12 rule
-// the backend follows, and is narrower than [Terminal.Interactive]: an
-// injected platform is interactive but is NOT a real terminal, and handing
-// it to liner would mean liner reading the process's actual stdin behind a
-// test's back.
-//
-// # What W2 does NOT land: the [Question.Keys] first-keystroke fast path
-//
-// Read this before assuming a single-key menu answers without Enter — it
-// does not, yet, and the reason is mechanical.
-//
-// The fast path needs the FIRST KEYSTROKE before the editor owns the line.
-// liner has no hook for it, so the only way to get one while liner still
-// holds the fd is to read a byte off the terminal ourselves before calling
-// Prompt. Verified against liner v1.2.2, that read is unsafe in three
-// independent ways:
-//
-//  1. liner's bufio.Reader over os.Stdin PERSISTS BETWEEN PROMPTS
-//     (input.go: `s.r = bufio.NewReader(os.Stdin)`, built once in
-//     NewLiner). Type-ahead already pulled into that reservoir is
-//     invisible to a raw read of the fd, so the pre-read would block for a
-//     key the user has already pressed. This is precisely the reservoir
-//     argument SOLUTION.md §3 used to reject "the lessee reads": a lease
-//     can be released at an instant, the lookahead cannot.
-//  2. ISIG is cleared only INSIDE liner's Prompt (startPrompt/stopPrompt),
-//     so between prompts Ctrl-C is still a signal. A pre-read cannot see
-//     it as a byte, which would turn "Ctrl-C declines this menu" into "the
-//     session takes a SIGINT while a read stays blocked".
-//  3. An ESC-prefixed sequence (an arrow key at a menu) would be split
-//     across the two readers, leaving its tail to be typed into the line.
-//
-// So W2 takes the third option ruled acceptable for this wave: Keys
-// questions are ENTER-TERMINATED here, and [Question.Keys] degrades to
-// "the first rune of the submitted line, when it is in the set" — which is
-// exactly today's menu behaviour, expressed once instead of at seven call
-// sites. [Answer.Key] is therefore ALWAYS 0 in W2, because no keystroke
-// path exists to set it; callers switch on [Answer.Text], which is what
-// [Answer.Key]'s doc says lets the menus keep their shape. W3 owns the fd
-// and the decoder and makes the fast path a first event rather than a
-// second reader.
+// Which one a session gets is decided ONCE at [Open] — see
+// [Terminal.owns], and read the reason there before assuming "interactive"
+// is the predicate. It is not: a terminal with no erase sequence cannot
+// have an in-place editor at all, and the kernel's own line discipline is
+// the honest fallback rather than a half-drawn one of ours.
 
 // plainDefaultPrompt is what the plain backend prints to collect a line
 // for a question carrying a [Question.Default]. It is deliberately NOT
@@ -86,9 +44,9 @@ const plainDefaultPrompt = "> "
 //
 // [Question.Preamble] is COMMITTED through [Terminal.Out] before the
 // editor is entered and only [Question.Prompt] reaches it (constraint
-// R2-14, and mandatory rather than tidy — see the field's own doc for the
-// erase-math reason). That is also what makes the off-TTY bytes today's
-// bytes minus the empty prompt.
+// R2-14). The property survived liner's removal by construction: the
+// editor returns to its block by moving up over the rows IT drew, so a
+// committed line above is unreachable rather than merely un-drawn-over.
 //
 // It pushes a for the duration of the call and pops it before returning.
 // Exactly two activities are legal, and §3's ownership table names them
@@ -112,17 +70,14 @@ const plainDefaultPrompt = "> "
 // forbids for dispositions and forbids here for the same mechanical
 // reason: the windows NEST, so an inference drawn from stack position is
 // wrong exactly in the slivers where the nesting is imperfect, and it is
-// wrong silently. The caller never has to guess — it knows which of the
-// two it is without looking at anything.
+// wrong silently.
 //
-// ctx cancels the read. In W2 it is honoured AT ENTRY ONLY, and that
-// limitation is structural rather than an omission: the read below blocks
-// inside liner or inside a buffered Read, neither of which term can
-// interrupt without being the one holding the fd. W3's pump makes the
-// cancellation reach a read already in progress. An already-cancelled ctx
-// returns [ErrAborted] — the same disposition the user's own interrupt
-// produces, so a resolver's single "stop asking" test ([IsEndOrAbort])
-// covers both without learning a third sentinel.
+// ctx cancels the read, and from W3 it reaches a read ALREADY IN PROGRESS:
+// the pump's readiness is a poll(2) argument, so no read blocks longer
+// than one window and the editor can be torn down under a cancelled
+// context. An already-cancelled ctx returns [ErrAborted] without touching
+// the terminal — the same disposition the user's own interrupt produces,
+// so a resolver's single "stop asking" test ([IsEndOrAbort]) covers both.
 //
 // The error contract is [io.EOF] for end of input (Ctrl-D) and
 // [ErrAborted] for an interrupt at the prompt; [IsEndOrAbort] tests for
@@ -139,16 +94,22 @@ func (t *Terminal) ReadLine(ctx context.Context, a Activity, q Question) (Answer
 		return Answer{}, ErrAborted
 	}
 
-	reg := t.Push(a, Handler{})
-	defer reg.Pop()
-
+	// Committed BEFORE the activity is pushed, so a key typed while the
+	// menu text is going out lands in the pump's reservoir and is offered
+	// to the editor the moment it registers. Pushing first would put those
+	// keys in front of an editor that has not painted yet.
 	t.commitPreamble(q.Preamble)
 
-	line, err := t.readLine(q)
-	if err != nil {
-		return Answer{}, err
+	if !t.owns {
+		reg := t.Push(a, Handler{})
+		defer reg.Pop()
+		line, err := t.readPlain(q)
+		if err != nil {
+			return Answer{}, err
+		}
+		return q.answer(line), nil
 	}
-	return q.answer(line), nil
+	return t.readEdited(ctx, a, q)
 }
 
 // validate rejects the two caller errors the read boundary can detect
@@ -173,12 +134,13 @@ func (q Question) validate(a Activity) error {
 
 // answer projects a submitted line onto the [Answer] contract.
 //
-// The [Question.Keys] half is W2's degradation, in one place rather than
-// at each menu: the first rune of the line resolves the question when it
-// is in the set, so "resolved" answers a [r]esolved menu and "1 3 5" still
-// falls through to the caller's own parsing. [Answer.Key] stays 0 — no
-// keystroke path exists in this wave, and reporting one would be a lie
-// about which path the answer came from. See the file header.
+// It is the SUBMITTED-LINE half only. The [Question.Keys] fast path
+// resolves inside the editor, on the first keystroke, and never reaches
+// here — which is what makes [Answer.Key] a statement about which path
+// produced the answer rather than about its value. The set is still
+// matched against the first rune of a typed line, because a menu that
+// takes "resolved" as well as "r" is a menu that has both shapes, and off
+// a TTY the fast path does not exist at all.
 func (q Question) answer(line string) Answer {
 	if q.Keys == "" {
 		return Answer{Text: line}
@@ -212,46 +174,71 @@ func (t *Terminal) commitPreamble(lines []string) {
 	_, _ = io.WriteString(t.Out(), b.String())
 }
 
-// readLine acquires one line on whichever backend this session opened.
-func (t *Terminal) readLine(q Question) (string, error) {
-	if ls := t.ensureEditor(); ls != nil {
-		return readViaEditor(ls, q)
-	}
-	return t.readPlain(q)
-}
-
-// readViaEditor is the liner scaffolding. The prompt is liner's to render
-// — it is the single line the editor may repaint over — and the preamble
-// above it is already committed, which is R2-14 satisfied by construction.
+// readEdited runs one line through the editor.
 //
-// term's cursor-column belief is deliberately NOT updated here. liner
-// writes straight to the terminal and ends every completed read with a
-// newline, so ColumnStart — the belief the committed preamble already left
-// behind — is still true when this returns. W3 removes the question by
-// making the editor's writes term's own.
-func readViaEditor(ls *liner.State, q Question) (string, error) {
-	var (
-		s   string
-		err error
-	)
-	if q.Default != "" {
-		// The cursor sits at the END of the pre-filled value. Runes, not
-		// bytes: liner takes a rune index, and a multi-byte default with a
-		// byte length would place the cursor past the end of its own line.
-		s, err = ls.PromptWithSuggestion(q.Prompt, q.Default, len([]rune(q.Default)))
-	} else {
-		s, err = ls.Prompt(q.Prompt)
+// The ORDER here is the contract: build, paint, publish, push. The editor
+// must be on the terminal before it is on the stack, because the instant
+// it is on the stack the pump may offer it a key — including a key the
+// user typed while the preamble was still being written.
+func (t *Terminal) readEdited(ctx context.Context, a Activity, q Question) (Answer, error) {
+	ed := newEditor(t, q)
+	ed.start()
+	t.mu.Lock()
+	t.ed = ed
+	t.mu.Unlock()
+
+	// Push and attach under the editor's own lock: the pump must take that
+	// lock to deliver a key, so it cannot reach an editor that does not yet
+	// know which registration to retire when it completes.
+	ed.mu.Lock()
+	reg := t.Push(a, Handler{Key: ed.key})
+	ed.reg = reg
+	ed.mu.Unlock()
+
+	defer func() {
+		reg.Pop()
+		t.mu.Lock()
+		t.ed = nil
+		t.mu.Unlock()
+	}()
+
+	select {
+	case res := <-ed.result:
+		return editedAnswer(q, res)
+	case <-ctx.Done():
+	case <-t.eofCh:
 	}
-	if errors.Is(err, liner.ErrPromptAborted) {
-		return "", ErrAborted
+	// Both non-result exits race a result the pump may have produced a
+	// moment earlier, and a completed line must never be thrown away for a
+	// cancellation that arrived after it.
+	select {
+	case res := <-ed.result:
+		return editedAnswer(q, res)
+	default:
 	}
-	return s, err // io.EOF passes through unchanged
+	ed.abandon()
+	if ctx.Err() != nil {
+		return Answer{}, ErrAborted
+	}
+	return Answer{}, io.EOF
 }
 
-// readPlain is the non-interactive path: piped stdin, tests, and an
-// injected platform. It preserves the buffered semantics exactly — a final
-// line without a trailing newline is returned BEFORE io.EOF, and a
-// [Question.Default] prints as a hint that an empty line accepts.
+func editedAnswer(q Question, res editorResult) (Answer, error) {
+	if res.err != nil {
+		return Answer{}, res.err
+	}
+	if res.key != 0 {
+		// The fast path: Text is string(Key), so a caller that only cares
+		// about the value can switch on Text and never look at Key.
+		return Answer{Text: res.text, Key: res.key}, nil
+	}
+	return q.answer(res.text), nil
+}
+
+// readPlain is the non-interactive path: piped stdin, tests, and a
+// terminal term does not own. It preserves the buffered semantics exactly
+// — a final line without a trailing newline is returned BEFORE io.EOF, and
+// a [Question.Default] prints as a hint that an empty line accepts.
 func (t *Terminal) readPlain(q Question) (string, error) {
 	if q.Default == "" {
 		return t.readPlainLine(q.Prompt)
@@ -300,88 +287,11 @@ func (t *Terminal) reader() *bufio.Reader {
 // consecutive duplicates are dropped, and the store is capped at
 // [HistoryLimit] entries; the file is flushed at [Terminal.Close].
 //
-// All three of those are liner's own behaviour in W2 (liner.HistoryLimit
-// is 1000, the same number [HistoryLimit] names, which is why the on-disk
-// file needs no migration when W3 replaces the editor). Off a real
-// terminal there is no history at all and this is a no-op, exactly as the
-// buffered reader always was.
-//
-// It deliberately does not BUILD the editor: constructing liner applies
-// its terminal mode, and doing that from a bookkeeping call rather than
-// from a read would install a mode at a moment when nothing is prompting.
+// A session with no editor has no history at all and this is a no-op,
+// exactly as the buffered reader always was — which is also why a piped
+// run never writes the file.
 func (t *Terminal) AppendHistory(line string) {
-	if strings.TrimSpace(line) == "" {
-		return
+	if h := t.history(); h != nil {
+		h.add(line)
 	}
-	t.mu.Lock()
-	ls := t.editor
-	t.mu.Unlock()
-	if ls != nil {
-		ls.AppendHistory(line)
-	}
-}
-
-// ensureEditor returns the liner scaffolding, building it on first use,
-// and nil on every session that is not a real terminal.
-//
-// Construction is LAZY rather than at [Open], and the reason is bug 3's:
-// liner applies ICANON/ECHO-off at construction and holds it for the whole
-// session, so building it early would change the terminal mode before the
-// caller had captured the mode a `$`/`#` child must be handed. First use
-// is the first prompt, which is no earlier than the old chat-side
-// construction ever was.
-func (t *Terminal) ensureEditor() *liner.State {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if !t.realTTY || t.closed {
-		return nil
-	}
-	if t.editor == nil {
-		t.editor = newEditor(t.histFile)
-	}
-	return t.editor
-}
-
-// newEditor builds the liner state: line editing plus persistent,
-// deduplicated, capped history (§4.3.1).
-func newEditor(historyFile string) *liner.State {
-	ls := liner.NewLiner()
-	ls.SetCtrlCAborts(true)
-	// liner defaults to single-line mode, where a line wider than the
-	// terminal is HORIZONTALLY SCROLLED to a window centred on the cursor
-	// (line.go refreshSingleLine) and prefixed with a literal "{"
-	// truncation marker. Recalling a long prompt with ↑ leaves the cursor
-	// at end-of-line, so the user sees the tail of their own prompt
-	// starting mid-token. Multi-line mode wraps across terminal rows
-	// instead, keeping the whole line visible.
-	ls.SetMultiLineMode(true)
-	if historyFile != "" {
-		if f, err := os.Open(historyFile); err == nil {
-			_, _ = ls.ReadHistory(f) // newest last; a malformed tail is tolerated
-			_ = f.Close()
-		}
-	}
-	return ls
-}
-
-// closeEditor flushes history and hands the terminal mode back. Called
-// once, from [Terminal.Close], with the editor already detached from the
-// Terminal so no later read can revive it.
-//
-// A free function rather than a method: it needs the editor and the path
-// and nothing else, which is also what lets the history round-trip be
-// asserted without a terminal to build a session over.
-func closeEditor(ls *liner.State, historyFile string) error {
-	if ls == nil {
-		return nil
-	}
-	if historyFile != "" {
-		// WriteHistory is goroutine-safe (liner docs), so flushing here is
-		// safe even from the force-quit signal path.
-		if f, err := os.Create(historyFile); err == nil {
-			_, _ = ls.WriteHistory(f)
-			_ = f.Close()
-		}
-	}
-	return ls.Close()
 }

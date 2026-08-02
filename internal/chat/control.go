@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"sync"
 	"sync/atomic"
 
@@ -17,20 +18,25 @@ import (
 // user force-quit.
 const forcedExitCode = 130
 
-// control is the session's terminal-control state: the shared interrupt
-// count, the session cancel, and the per-turn Esc-to-abort window. One
-// value per session, read by three goroutines — the REPL loop (which also
-// runs the turn and its phase callbacks), the signal handler, and the Esc
-// watcher.
+// control is the session's terminal POLICY: what a key means, what an
+// abort implies, and how a session shuts down. Since W3 it owns none of
+// the mechanism — no termios, no reader, no key detection. term decodes;
+// this decides.
 //
 // Two keys, two meanings, and the split is the point:
 //
-//   - Ctrl-C ENDS THE SESSION, at the prompt and mid-turn alike. At the
-//     prompt it is exactly /exit. Mid-turn it cancels the turn first and
-//     then takes the same clean-shutdown path. A second Ctrl-C during
-//     shutdown force-quits.
+//   - Ctrl-C ENDS THE SESSION. At the prompt that is term's editor's
+//     decision (an empty line hints, then a deliberate second press
+//     aborts the read); mid-turn it arrives here as a decoded key and
+//     takes the same clean-shutdown path. A second Ctrl-C during shutdown
+//     force-quits.
 //   - Esc ABORTS THE IN-FLIGHT TURN and returns to the prompt. It cancels
-//     the turn's context only; the session is untouched.
+//     the turn's context only; the session is untouched. Esc is
+//     RETRACTION (axiom §4.3): nothing from the turn enters memory.
+//
+// One value per session, read by three goroutines — the REPL loop (which
+// also runs the turn and its phase callbacks), the signal-servicing
+// goroutine, and term's pump, which is where the key handlers below run.
 type control struct {
 	// cancel cancels the SESSION context. Ctrl-C only.
 	cancel context.CancelFunc
@@ -42,35 +48,31 @@ type control struct {
 	t  *term.Terminal
 	pr *progress
 
-	// escAvailable is whether Esc-to-abort is wired up at all: an
-	// interactive TTY whose mode we can actually drive. Written only from
-	// the REPL goroutine (in arm), read only there.
-	escAvailable bool
-
-	// origTerm is the terminal mode the session found at startup, BEFORE
-	// liner took the terminal. nil on a non-terminal session, or where the
-	// platform has no termios path. See handoffTerminal.
-	//
-	// Assigned once by Run, before the signal-handler goroutine starts, and
-	// never written again.
-	origTerm *termState
-
 	// sh is the §4.4 shell runner, consulted by onSignal so a Ctrl-C during
 	// a `$`/`#` command kills the command instead of the session. nil until
-	// Run wires it, on the same write-once-before-the-goroutine basis as
-	// origTerm.
+	// Run wires it, before the servicing goroutine starts.
 	sh *shell.Runner
+
+	// sigCh carries BOTH delivered SIGINTs and the in-band Ctrl-C the
+	// editor's pump decodes mid-turn. One queue, because they are one
+	// intent — and because a key handler must not do the shutdown work
+	// itself: it runs on the pump goroutine, and shutting down joins the
+	// pump (see term.Handler.Key). It is deliberately never closed, so the
+	// pump's non-blocking send can never race a close and panic.
+	sigCh chan os.Signal
 
 	interrupts atomic.Int32
 	inTurn     atomic.Bool
 
 	mu sync.Mutex
 	// abortTurn cancels the IN-FLIGHT turn; nil whenever the Esc window is
-	// closed. Called under mu — see disarm for why that ordering matters.
+	// closed. Called under mu — see onEsc for why that ordering matters.
 	abortTurn context.CancelFunc
-	watcher   *escWatcher
-	saved     *termState
-	aborted   bool
+	// reg is the turn's registration on term's activity stack: the thing
+	// that puts Esc-to-abort and mid-turn Ctrl-C on the offer chain, and
+	// the thing StateSnapshot.AbortWindow reports on.
+	reg     *term.Registration
+	aborted bool
 	// lastPhase is the stage the turn had reached, kept so an abort record
 	// can say WHERE the user gave up — the one piece of forensic context
 	// the REPL has that the event log cannot reconstruct.
@@ -79,10 +81,55 @@ type control struct {
 
 func newControl(t *term.Terminal, pr *progress, cancel context.CancelFunc) *control {
 	return &control{
-		cancel:       cancel,
-		t:            t,
-		pr:           pr,
-		escAvailable: t.Interactive(),
+		cancel: cancel,
+		t:      t,
+		pr:     pr,
+		sigCh:  make(chan os.Signal, 2),
+	}
+}
+
+// watchInterrupts installs the SIGINT handler and services the queue,
+// returning the function that retires both.
+//
+// The servicing goroutine is what keeps shutdown OFF the pump goroutine.
+// term's pump calls onKey in-line, and a handler that joined the pump
+// would be joining itself; sending on sigCh hands the work to a goroutine
+// that is free to do it.
+//
+// SIGINT reaching this handler at all is narrower than "Ctrl-C" now:
+// term clears ISIG while it owns the fd, so what arrives here is a signal
+// from OUTSIDE the terminal (`kill -INT`), a Ctrl-C inside a
+// term.Handoff window where the entry mode is restored, or the in-band key
+// this file forwards.
+func (c *control) watchInterrupts() func() {
+	signal.Notify(c.sigCh, os.Interrupt)
+	quit := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-quit:
+				return
+			case <-c.sigCh:
+				c.onSignal()
+			}
+		}
+	}()
+	return func() {
+		signal.Stop(c.sigCh)
+		close(quit)
+		<-done
+	}
+}
+
+// requestInterrupt queues an in-band Ctrl-C as if the kernel had delivered
+// it. Non-blocking: two queued interrupts already mean "shut down, and
+// force it if that wedges", and a third has nothing left to say.
+func (c *control) requestInterrupt() {
+	select {
+	case c.sigCh <- os.Interrupt:
+	default:
 	}
 }
 
@@ -117,15 +164,18 @@ func abortablePhase(p turn.Phase) bool {
 // onPhase is the turn.State.OnPhase hook: it closes the Esc window at the
 // pre-canonical boundary, then re-labels the indicator.
 //
-// Closing here does double duty. It is the correctness gate above, AND it
-// is what hands the terminal back: the §3.4 recall and §3.5 closure
-// resolvers PROMPT THE USER from inside turn close, and they run strictly
-// after the first non-abortable phase. Retiring the watcher at that
-// boundary is what guarantees nothing is holding stdin when liner wants
-// it back mid-turn.
+// This is C12 form (i)'s call site. revokeAbort is unconditional,
+// idempotent and argument-free, and its OMISSION is detectable: the abort
+// window would still be open in term's StateSnapshot past the boundary.
+//
+// The registration itself is NOT popped here. The §3.4 recall and §3.5
+// closure resolvers prompt the user from inside turn close, and they push
+// term.ActivityAsk OVER this entry — which is the whole reason the stack
+// is LIFO. Popping at the boundary would take the floor out from under
+// them and make every resolver read an out-of-order release.
 func (c *control) onPhase(p turn.Phase) {
 	if !abortablePhase(p) {
-		c.disarm()
+		c.revokeAbort()
 	}
 	c.mu.Lock()
 	c.lastPhase = p
@@ -140,71 +190,87 @@ func (c *control) abortPhase() turn.Phase {
 	return c.lastPhase
 }
 
-// arm opens the Esc window for one turn. abortTurn must be the in-flight
-// turn's cancel — never the session's.
+// arm opens the Esc window for one turn by REGISTERING it. abortTurn must
+// be the in-flight turn's cancel — never the session's.
 //
-// Called AFTER term.ReadLine has returned, so liner is not holding the
-// terminal; disarm restores liner's exact mode before the next read. That ordering is load-bearing rather than merely tidy: liner
-// captures whatever mode it finds at prompt entry and restores it at
-// prompt exit, so leaving VMIN=0/VTIME=1 in place would make liner adopt
-// it and read end-of-input from every 100 ms of user thinking time.
+// There is no terminal mode to change and no watcher goroutine to start:
+// term installs ONE mode for the whole session and one pump reads the fd
+// from Open to Close. The window is now purely a registration, which is
+// why the indicator's hint and term's StateSnapshot.AbortWindow are the
+// same fact rather than two that can disagree — the defect the W1.5 pinned
+// test was holding open.
 func (c *control) arm(abortTurn context.CancelFunc) {
 	c.inTurn.Store(true)
 	c.mu.Lock()
 	c.aborted = false
 	c.lastPhase = ""
-	c.mu.Unlock()
-	if !c.escAvailable {
-		return
-	}
-	saved, err := enterCbreak()
-	if err != nil {
-		// Esc is simply unavailable for the rest of the session. The turn
-		// still runs and Ctrl-C is unaffected; the indicator must not
-		// advertise a key that does nothing, so latch it off.
-		c.escAvailable = false
-		fmt.Fprintf(c.t.Diag(), "warn: esc-to-abort unavailable: %v\n", err)
-		return
-	}
-	c.mu.Lock()
 	c.abortTurn = abortTurn
-	c.saved = saved
-	c.watcher = startEscWatcher(readStdin, c.onEsc)
+	c.reg = c.t.Push(term.ActivityTurn, term.Handler{Key: c.onKey, Abort: c.onEsc})
 	c.mu.Unlock()
 	c.pr.setAbortHint(true)
 }
 
-// disarm closes the Esc window: it joins the watcher goroutine and
-// restores the mode liner left, so nothing is reading the terminal — and
-// nothing has changed under it — when the next prompt runs. Idempotent;
-// it fires both at the pre-canonical phase boundary and at turn end.
-func (c *control) disarm() {
-	c.inTurn.Store(false)
+// revokeAbort closes the Esc window without releasing the registration.
+// Idempotent; it fires at the pre-canonical phase boundary and again at
+// turn end.
+func (c *control) revokeAbort() {
 	c.mu.Lock()
-	w, saved := c.watcher, c.saved
-	c.watcher, c.saved, c.abortTurn = nil, nil, nil
+	reg := c.reg
+	c.abortTurn = nil
 	c.mu.Unlock()
-	if w == nil {
+	if reg == nil {
 		return
 	}
+	reg.RevokeAbort()
 	c.pr.setAbortHint(false)
-	w.close() // joined BEFORE the restore: no read may straddle a mode change
-	if err := saved.restore(); err != nil {
-		fmt.Fprintf(c.t.Diag(), "warn: %v\n", err)
+}
+
+// disarm ends the turn's registration: the Esc window closes and the entry
+// leaves the stack, so the next prompt is the outermost input consumer
+// again. Idempotent, and safe from any goroutine.
+func (c *control) disarm() {
+	c.inTurn.Store(false)
+	c.revokeAbort()
+	c.mu.Lock()
+	reg := c.reg
+	c.reg = nil
+	c.mu.Unlock()
+	if reg != nil {
+		reg.Pop()
 	}
 }
 
-// onEsc fires on a bare Esc. The cancel is issued WHILE HOLDING mu, and
-// that is the whole synchronisation argument for the pre-canonical
-// guarantee:
+// onKey is the turn's term.Handler.Key. It claims exactly one key.
 //
-//   - If disarm takes mu first, abortTurn is already nil and no cancel is
-//     ever issued — the turn runs to completion untouched.
-//   - If onEsc takes mu first, the cancel is issued before disarm returns,
-//     hence before the phase callback returns, hence before the turn's
-//     next substrate call. Every adapter op checks ctx.Err() on entry, so
-//     that call fails inside the pre-canonical window and the turn's
-//     deferred handler releases the recovery scope.
+// Ctrl-C mid-turn is SESSION EXIT (user ruling, 2026-07-31 — arbitration
+// item 4), consistent with the second press at the prompt: the reference
+// guidance genuinely runs out here, because Esc already carries retraction
+// semantics the reference model has no analogue for, and a third
+// context-dependent meaning for Ctrl-C would earn nothing.
+//
+// Everything else is DECLINED, which — with nothing below a turn on the
+// stack — means keys typed while the model is working are discarded, as
+// they always were. They are discarded by one reader now instead of racing
+// three, which is the part that changed.
+func (c *control) onKey(k term.Key) term.Disposition {
+	if k.Name == term.KeyCtrl && k.Rune == 'c' {
+		c.requestInterrupt()
+		return term.Claimed
+	}
+	return term.Declined
+}
+
+// onEsc fires on a bare Esc while the window is open. The cancel is issued
+// WHILE HOLDING mu, and that is the whole synchronisation argument for the
+// pre-canonical guarantee:
+//
+//   - If revokeAbort takes mu first, abortTurn is already nil and no cancel
+//     is ever issued — the turn runs to completion untouched.
+//   - If onEsc takes mu first, the cancel is issued before revokeAbort
+//     returns, hence before the phase callback returns, hence before the
+//     turn's next substrate call. Every adapter op checks ctx.Err() on
+//     entry, so that call fails inside the pre-canonical window and the
+//     turn's deferred handler releases the recovery scope.
 //
 // Issuing the cancel after releasing mu would break the second case: the
 // turn could already be past its last pre-canonical step.
@@ -264,6 +330,9 @@ func (c *control) reportRetraction(ctx context.Context, ops memops.MemoryOps, tu
 // Ctrl-C exit loses no state. A second call forces an immediate exit: the
 // safety valve for a shutdown that itself wedges.
 //
+// It runs on the servicing goroutine or on the REPL's, never on term's
+// pump: the forced path calls term.Close, which joins the pump.
+//
 // announce is true only when something was actually interrupted. An
 // ordinary quit says nothing at all: "shutting down (Ctrl-C again to
 // force quit)" is a warning, and there is nothing to warn about when the
@@ -276,10 +345,11 @@ func (c *control) exit(announce bool) {
 	// drawn over.
 	c.pr.stop()
 	if c.interrupts.Add(1) >= 2 {
-		c.disarm() // hand the terminal back before it stops being ours
-		// One Close, not two: term owns the read path from W2, so retiring
-		// the decoration, flushing history and restoring the editor's mode
-		// are all behind this call. No deferred cleanup runs after it.
+		c.disarm() // release the stack entry before the stack stops being ours
+		// One Close: term owns the read path, the terminal mode and the
+		// pump, so retiring the decoration, joining the reader, restoring
+		// the entry mode and flushing history are all behind this call. No
+		// deferred cleanup runs after it.
 		_ = c.t.Close()
 		os.Exit(forcedExitCode)
 	}
@@ -289,51 +359,22 @@ func (c *control) exit(announce bool) {
 	}
 }
 
-// handoffTerminal hands the terminal to a child process and returns the
-// function that takes it back. Both halves are no-ops on a session that
-// does not drive a terminal, so the caller never branches.
-//
-// This is necessary, not defensive. liner.NewLiner applies its mode ONCE
-// for the whole session — ICANON and ECHO are off from the first prompt
-// until Close, not just while Prompt is blocked — so a child spawned
-// mid-session inherits a terminal with no echo and no line discipline.
-// Anything that reads input, or merely expects typed characters to
-// appear, misbehaves. Restoring the mode personant found at STARTUP is
-// what gives the child a normal terminal.
-//
-// The mode in force at handoff time is captured and put back afterwards,
-// rather than assuming it was liner's: that way an Esc-window cbreak mode
-// left in place by some future caller is also restored faithfully.
-func (c *control) handoffTerminal() func() {
-	if c.origTerm == nil {
-		return func() {}
-	}
-	current, err := captureTerm()
-	if err != nil {
-		fmt.Fprintf(c.t.Diag(), "warn: %v\n", err)
-		return func() {}
-	}
-	if err := c.origTerm.restore(); err != nil {
-		fmt.Fprintf(c.t.Diag(), "warn: %v\n", err)
-		return func() {}
-	}
-	return func() {
-		if err := current.restore(); err != nil {
-			fmt.Fprintf(c.t.Diag(), "warn: %v\n", err)
-		}
-	}
-}
-
-// onSignal handles one delivered SIGINT.
+// onSignal handles one interrupt, delivered or in-band.
 //
 // A `$`/`#` child running is the one case where Ctrl-C does NOT mean "end
 // the session": standard shell semantics are that it kills the running
 // command and returns you to the prompt, and a shell escape that quit
-// personant on Ctrl-C would be a trap. Runner.Interrupt forwards the
-// signal to the child's process group and reports that it consumed the
-// interrupt; the session's interrupt COUNT is deliberately left untouched,
-// so a later Ctrl-C at the prompt is still the first one and behaves
-// exactly as it would have.
+// personant on Ctrl-C would be a trap. That window is also the only place
+// a Ctrl-C is still a real SIGINT — term restores the entry mode, ISIG
+// included, precisely so the kernel generates one for personant while the
+// child runs in its own process group. Runner.Interrupt forwards it and
+// reports that it consumed the interrupt; the session's interrupt COUNT is
+// deliberately left untouched, so a later Ctrl-C at the prompt is still
+// the first one.
+//
+// W4 formalises this consult into the offer chain at term.Handler.Interrupt.
+// It is left as a direct call here on purpose: the chain is that wave's
+// deliverable, and building half of it now would leave two mechanisms.
 //
 // Otherwise the wording is honest by construction: it announces only when
 // a turn was actually in flight.

@@ -32,7 +32,7 @@ import (
 const Substrate = "0.1.0"
 
 // FrontEnd is the version of the U/X + feature-logic line.
-const FrontEnd = "0.0.14"
+const FrontEnd = "0.0.15"
 
 // CurrentHomeFormat is the home on-disk format revision this binary
 // writes and understands.

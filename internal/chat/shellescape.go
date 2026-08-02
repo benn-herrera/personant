@@ -52,20 +52,32 @@ func runShellEscape(
 		return nil, nil
 	}
 
-	// Nothing may be holding or decorating the terminal while a child owns
-	// it. No turn is in flight at the prompt, so the Esc watcher should
-	// already be stopped and the indicator already retired — these two
-	// calls are idempotent and assert that cheaply rather than trusting it.
+	// Nothing may be decorating the terminal while a child owns it. No turn
+	// is in flight at the prompt, so the registration should already be
+	// released and the indicator already retired — these two calls are
+	// idempotent and assert that cheaply rather than trusting it.
 	ctl.disarm()
 	ctl.pr.stop()
 
-	restore := ctl.handoffTerminal()
+	// term.Handoff is the §4.4 window, and it is a CALLBACK so it cannot be
+	// leaked: the pump is joined before the child starts, the entry mode
+	// (ISIG included, so the kernel still generates SIGINT for personant
+	// while the child runs in its own process group) is restored for its
+	// duration, and both are put back afterwards. Child spawn and terminal
+	// handoff now compose in exactly one function — U9, which the old
+	// capture/restore pair could not promise.
+	//
 	// The child's output is COMMITTED content and goes out on term's Out
 	// channel like any other — which is also what keeps the cursor-column
 	// belief current across the command.
-	res, runErr := sh.Run(ctx, mode, command, tm.Out())
-	restore()
-
+	var res shell.Result
+	var runErr error
+	if herr := tm.Handoff(func() error {
+		res, runErr = sh.Run(ctx, mode, command, tm.Out())
+		return nil
+	}); herr != nil {
+		return nil, herr
+	}
 	if runErr != nil {
 		return nil, runErr
 	}

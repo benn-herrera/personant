@@ -6,8 +6,9 @@
 // (IMPLEMENTATION-PLAN.md §1 dropped it in favour of dogfooding, and W1
 // then established that a wave's rendering had no standing automated
 // gate at all). It is deliberately NOT a VT100 emulator. It models
-// exactly the alphabet term emits — `\r`, `\x1b[K`, `\x1b[2m`,
-// `\x1b[0m`, `\n`, printable runes — and it FAILS on anything else.
+// exactly the alphabet term emits — `\r`, `\n`, printable runes, `\x1b[K`,
+// `\x1b[2m`, `\x1b[0m`, and (from W3, with the editor) `\x1b[J`,
+// `\x1b[<n>A` and `\x1b[<n>C` — and it FAILS on anything else.
 //
 // # Fail-closed is the load-bearing property
 //
@@ -15,8 +16,8 @@
 // writer silently, and its green runs would mean nothing. Failing keeps
 // the two sharing ONE finite alphabet: the commit that teaches term a new
 // sequence is the commit that teaches this package to interpret it, or it
-// does not go green. W3 adds cursor motion; nothing speculative is
-// modelled here before then.
+// does not go green. W1 predicted the editor would widen it and W3 did,
+// by three sequences; nothing speculative is modelled beyond them.
 //
 // # Two modelling decisions worth stating
 //
@@ -46,8 +47,18 @@ import (
 const (
 	esc       = 0x1b
 	eraseLine = "\x1b[K" // erase from the cursor to end of line
+	eraseDown = "\x1b[J" // erase from the cursor to the end of the screen
 	dimOn     = "\x1b[2m"
 	dimOff    = "\x1b[0m"
+
+	// The parameterised pair. Both are RELATIVE, which is the property
+	// worth restating at this end of the seam: term never positions
+	// absolutely, so nothing it draws can reach a row it did not put there
+	// — and a model that accepted absolute positioning would be a model
+	// that could not notice if term started.
+	csiPrefix    = "\x1b["
+	finalUp      = 'A'
+	finalForward = 'C'
 )
 
 // Cell is one screen position: the rune on it and whether it was written
@@ -69,9 +80,9 @@ type Screen struct {
 
 	scroll [][]Cell // lines that have scrolled off the top, oldest first
 
-	rowsBegun int // every row the cursor has moved onto; TotalRows-1
-	wraps     int
-	scrolls   int
+	maxRow  int // the lowest row the cursor has reached since the last scroll
+	wraps   int
+	scrolls int
 }
 
 // New returns a blank screen of the given geometry.
@@ -143,10 +154,14 @@ func (s *Screen) escapeAt(b []byte, i int) (int, error) {
 	rest := string(b[i:])
 	switch {
 	case strings.HasPrefix(rest, eraseLine):
-		for c := s.col; c < s.cols; c++ {
-			s.grid[s.row][c] = Cell{}
-		}
+		s.eraseToEndOfRow(s.row, s.col)
 		return len(eraseLine), nil
+	case strings.HasPrefix(rest, eraseDown):
+		s.eraseToEndOfRow(s.row, s.col)
+		for r := s.row + 1; r < s.rows; r++ {
+			s.eraseToEndOfRow(r, 0)
+		}
+		return len(eraseDown), nil
 	case strings.HasPrefix(rest, dimOn):
 		s.dim = true
 		return len(dimOn), nil
@@ -154,9 +169,50 @@ func (s *Screen) escapeAt(b []byte, i int) (int, error) {
 		s.dim = false
 		return len(dimOff), nil
 	}
+	if n, ok := s.relativeMove(rest); ok {
+		return n, nil
+	}
 	// Quote enough to identify it without dumping the rest of the stream.
 	end := min(len(rest), 8)
 	return 0, &UnmodeledError{Offset: i, Seq: fmt.Sprintf("%q", rest[:end])}
+}
+
+// relativeMove interprets "ESC [ <n> A" (up) and "ESC [ <n> C" (forward),
+// the editor's two cursor motions. A count is REQUIRED and must be
+// positive: term always writes one, and accepting the defaulted form would
+// let a "\x1b[A" typo through as a legal move.
+//
+// Both CLAMP at the screen edge rather than scrolling, which is what a
+// real terminal does — and it matters, because the editor's row-cap exists
+// precisely so that it never asks for a row that is not there.
+func (s *Screen) relativeMove(rest string) (int, bool) {
+	if !strings.HasPrefix(rest, csiPrefix) {
+		return 0, false
+	}
+	j := len(csiPrefix)
+	n := 0
+	for j < len(rest) && rest[j] >= '0' && rest[j] <= '9' {
+		n = n*10 + int(rest[j]-'0')
+		j++
+	}
+	if j == len(csiPrefix) || j >= len(rest) || n <= 0 {
+		return 0, false
+	}
+	switch rest[j] {
+	case finalUp:
+		s.row = max(s.row-n, 0)
+	case finalForward:
+		s.col = min(s.col+n, s.cols)
+	default:
+		return 0, false
+	}
+	return j + 1, true
+}
+
+func (s *Screen) eraseToEndOfRow(row, from int) {
+	for c := from; c < s.cols; c++ {
+		s.grid[row][c] = Cell{}
+	}
 }
 
 // put writes one glyph, resolving a pending wrap first.
@@ -173,9 +229,9 @@ func (s *Screen) put(r rune) {
 // already on the last one.
 func (s *Screen) lineFeed() {
 	s.col = 0
-	s.rowsBegun++
 	if s.row < s.rows-1 {
 		s.row++
+		s.maxRow = max(s.maxRow, s.row)
 		return
 	}
 	s.scrolls++
@@ -193,7 +249,12 @@ func (s *Screen) Cursor() (row, col int) { return s.row, s.col }
 // rows included. It is MONOTONE, which is what makes "the indicator
 // redraws in place" assertable: take it before a run of frames and after,
 // and a spinner that emitted one line per frame moved it.
-func (s *Screen) TotalRows() int { return s.rowsBegun + 1 }
+//
+// It is the DEEPEST row reached plus the rows scrolled past it, not a
+// count of line feeds. Those coincided for W1's append-only writers, and
+// W3's editor separates them: a repaint moves the cursor up and writes the
+// same rows again, which must not read as new screen.
+func (s *Screen) TotalRows() int { return s.scrolls + s.maxRow + 1 }
 
 // Wraps counts soft wraps — a glyph that arrived with the cursor past the
 // last column. Nonzero means something term wrote was wider than the

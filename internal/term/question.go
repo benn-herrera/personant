@@ -87,13 +87,11 @@ type Question struct {
 	// to edit cannot also be dismissed by its first keystroke. Setting
 	// both returns [ErrQuestion] rather than silently picking one.
 	//
-	// W2 STATUS — the fast path is NOT live yet. While liner is the editor
-	// it owns the whole line read and there is no safe way to see the first
-	// keystroke first (readline.go's header gives the three verified
-	// reasons). Until W3 a Keys question is Enter-terminated and the set is
-	// matched against the FIRST RUNE OF THE SUBMITTED LINE, which is what
-	// the menus did before this API existed. [Answer.Key] is 0 throughout,
-	// because no keystroke path exists to have produced it.
+	// OFF A TERMINAL term owns there are no keystrokes, only lines, so the
+	// set is matched against the FIRST RUNE OF THE SUBMITTED LINE and
+	// [Answer.Key] stays 0. That is the same degradation the piped path has
+	// always had, and it is what keeps a scripted session's answers working
+	// unchanged.
 	Keys string
 }
 

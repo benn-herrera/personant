@@ -11,6 +11,7 @@ import (
 	"personant/internal/memops"
 	"personant/internal/shell"
 	"personant/internal/store"
+	"personant/internal/term"
 	"personant/internal/turn"
 )
 
@@ -20,11 +21,11 @@ const fakeAPIKey = "sk-chat-0123456789abcdefghijklmn"
 
 // shellHarness wires the pieces runShellEscape needs, over in-memory
 // streams. The streams are buffers rather than character devices, so term
-// selects the plain backend, Interactive() is false and the terminal
-// handoff is a no-op — the non-TTY path production takes under piped
-// stdin.
+// selects the plain backend, Interactive() is false and there is no mode
+// to hand a child — the non-TTY path production takes under piped stdin.
 type shellHarness struct {
 	ops    memops.MemoryOps
+	tm     *term.Terminal
 	ctl    *control
 	sh     *shell.Runner
 	red    *shell.Redactor
@@ -47,6 +48,7 @@ func newShellHarness(t *testing.T, keys ...string) *shellHarness {
 	ctl.sh = sh
 	return &shellHarness{
 		ops:    newOps(paths),
+		tm:     tm,
 		ctl:    ctl,
 		sh:     sh,
 		red:    shell.NewRedactor(keys),
@@ -414,14 +416,30 @@ func TestOnSignal_InterruptInChildStartWindowSparesTheSession(t *testing.T) {
 	}
 }
 
-// On a session that drives no terminal there is nothing to hand off, and
-// the handoff must be a silent no-op rather than a warning or an error.
+// On a session that drives no terminal there is no mode to hand over, and
+// the window must be a silent no-op rather than a warning or an error —
+// while still keeping the same BOOKS as the TTY backend, which is the half
+// the off-TTY suite exists to sense.
 func TestHandoffTerminal_NonTTYIsInert(t *testing.T) {
 	h := newShellHarness(t)
-	if h.ctl.origTerm != nil {
-		t.Fatal("a non-terminal session must capture no terminal state")
+	inside := true
+	if err := h.tm.Handoff(func() error {
+		inside = h.tm.State().PumpReading
+		return nil
+	}); err != nil {
+		t.Fatalf("Handoff: %v", err)
 	}
-	h.ctl.handoffTerminal()()
+	if inside {
+		t.Error("the read path was still held while a child ran")
+	}
+	st := h.tm.State()
+	if st.ModeInstalls != 0 {
+		t.Errorf("a non-terminal session installed %d mode(s)", st.ModeInstalls)
+	}
+	if !st.PumpReading || len(st.Stack) != 0 || st.Violations != 0 {
+		t.Errorf("books after the window: reading=%v stack=%v violations=%d",
+			st.PumpReading, st.Stack, st.Violations)
+	}
 	if h.stderr.Len() != 0 {
 		t.Errorf("handoff wrote to stderr on a non-terminal session: %q", h.stderr.String())
 	}

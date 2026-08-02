@@ -66,33 +66,119 @@ func TestAbortablePhase(t *testing.T) {
 	}
 }
 
-// TestControl_NonTTYIsInert is the zero-change guarantee for piped stdin
-// and every test in this package: no terminal mode is touched, no watcher
-// goroutine starts, nothing is written, and Esc has no effect.
-func TestControl_NonTTYIsInert(t *testing.T) {
+// TestControl_ArmIsBookkeepingOnly is the zero-change guarantee for piped
+// stdin and every test in this package: arming a turn touches no terminal
+// mode, starts no goroutine, and writes no bytes. Since W3 it is a
+// REGISTRATION and nothing else — the cbreak/watcher pair it used to be is
+// what term absorbed.
+func TestControl_ArmIsBookkeepingOnly(t *testing.T) {
 	ctl, stdout, stderr := newTestControl(t)
-	if ctl.escAvailable {
-		t.Fatal("esc abort armed on a non-terminal session")
-	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	ctl.arm(cancel)
-	if ctl.watcher != nil {
-		t.Error("arm started a watcher goroutine on a non-terminal session")
+	st := ctl.t.State()
+	if len(st.Stack) != 1 || st.Stack[0] != term.ActivityTurn {
+		t.Errorf("stack = %v, want [turn]", st.Stack)
 	}
-	ctl.onEsc() // whatever fires it, there is nothing armed to abort
+	if st.ModeInstalls != 0 {
+		t.Errorf("arming installed %d terminal mode(s)", st.ModeInstalls)
+	}
 	ctl.disarm()
 
 	if ctx.Err() != nil {
-		t.Error("the turn context was cancelled on a non-terminal session")
+		t.Error("arming cancelled the turn context")
 	}
 	if ctl.tookAbort() {
 		t.Error("tookAbort reported an abort that could not have happened")
 	}
+	if st := ctl.t.State(); len(st.Stack) != 0 || st.Violations != 0 {
+		t.Errorf("stack = %v violations = %d after disarm, want empty and 0", st.Stack, st.Violations)
+	}
 	if stdout.Len() != 0 || stderr.Len() != 0 {
 		t.Errorf("non-terminal session wrote bytes: stdout=%q stderr=%q", stdout, stderr)
 	}
+}
+
+// The abort window is term's, opened by the registration and closed by
+// C12 form (i)'s single unconditional call. This is the correlation the
+// W1.5 pinned test was holding a place for: hint, window and snapshot are
+// now ONE fact, and the snapshot is what an off-TTY suite can see.
+func TestControl_AbortWindowTracksTheTurnRegistration(t *testing.T) {
+	ctl, _, _ := newTestControl(t)
+	if ctl.t.State().AbortWindow {
+		t.Fatal("an abort window was open before a turn armed")
+	}
+
+	ctl.arm(func() {})
+	if !ctl.t.State().AbortWindow {
+		t.Fatal("arming a turn did not open term's abort window")
+	}
+
+	// The pre-canonical boundary. Idempotent, and the entry STAYS on the
+	// stack — turn close prompts over it.
+	ctl.onPhase(turn.PhaseClosing)
+	ctl.onPhase(turn.PhaseClosing)
+	st := ctl.t.State()
+	if st.AbortWindow {
+		t.Error("the window survived the pre-canonical boundary — RevokeAbort's omission is exactly what this senses")
+	}
+	if len(st.Stack) != 1 || st.Stack[0] != term.ActivityTurn {
+		t.Errorf("stack = %v after the boundary, want the turn still registered", st.Stack)
+	}
+
+	ctl.disarm()
+	ctl.disarm() // idempotent: a second release must not be a violation
+	if st := ctl.t.State(); len(st.Stack) != 0 || st.Violations != 0 {
+		t.Errorf("stack = %v violations = %d, want empty and 0", st.Stack, st.Violations)
+	}
+}
+
+// A turn that never reaches the pre-canonical boundary still gives the
+// window back at turn end — the backstop runOneTurn defers.
+func TestControl_DisarmClosesAWindowThatNeverReachedTheBoundary(t *testing.T) {
+	ctl, _, _ := newTestControl(t)
+	ctl.arm(func() {})
+	ctl.disarm()
+	if ctl.t.State().AbortWindow {
+		t.Error("the abort window outlived the turn")
+	}
+}
+
+// Mid-turn Ctrl-C is SESSION EXIT (arbitration item 4), and it arrives as
+// a decoded KEY because ModeSession clears ISIG. The handler must not do
+// the shutdown itself — it runs on term's pump goroutine, and shutting
+// down joins that pump — so it queues the interrupt and returns.
+func TestControl_MidTurnCtrlCQueuesAnInterrupt(t *testing.T) {
+	ctl, _, _ := newTestControl(t)
+	cancelled := false
+	ctl.cancel = func() { cancelled = true }
+	ctl.arm(func() {})
+
+	if got := ctl.onKey(term.Key{Name: term.KeyCtrl, Rune: 'c'}); got != term.Claimed {
+		t.Errorf("Ctrl-C disposition = %v, want Claimed", got)
+	}
+	if cancelled {
+		t.Error("the key handler shut the session down in line; it must queue and return")
+	}
+	select {
+	case <-ctl.sigCh:
+	default:
+		t.Fatal("Ctrl-C queued no interrupt")
+	}
+
+	// Everything else falls through: keys typed while the model works are
+	// discarded, as they always were.
+	for _, k := range []term.Key{
+		{Name: term.KeyRune, Rune: 'x'},
+		{Name: term.KeyUp},
+		{Name: term.KeyCtrl, Rune: 'd'},
+	} {
+		if got := ctl.onKey(k); got != term.Declined {
+			t.Errorf("onKey(%v) = %v, want Declined", k, got)
+		}
+	}
+	ctl.disarm()
 }
 
 // TestControl_EscCancelsTurnOnce checks the armed core: Esc cancels the

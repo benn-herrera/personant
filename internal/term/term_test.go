@@ -2,11 +2,14 @@ package term
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -15,28 +18,120 @@ import (
 // fakeDevice is the S1 byte-level stand-in (§7). It is what lets an
 // INTERACTIVE session be driven with no terminal, and it plugs in through
 // the real NewUnixPlatform, so these tests exercise the same S1→S2
-// composition production uses rather than a parallel one.
+// composition production uses — the real decoder, the real pump, the real
+// editor — rather than a parallel one.
+//
+// A SCRIPT is a list of reads. Each entry is one Read's worth of bytes; an
+// EMPTY entry is a read window that expired with nothing typed, which is
+// the decoder's only proof that an ESC was bare. There is no clock here
+// and no sleep anywhere: the timeout is data.
+//
+// Once the script is exhausted the stream ENDS. A fake that idled instead
+// would either spin or have to be woken, and every test below wants the
+// session to finish on its own.
 type fakeDevice struct {
-	out     bytes.Buffer
+	mu     sync.Mutex
+	script []scriptStep
+	out    bytes.Buffer
+	modes  []ModeIntent
+
 	size    Size
 	sizeErr error
 	// sizeCalls counts ioctl-equivalent calls, so U12 can be asserted:
 	// a failing size must not re-select the backend, however often it is
 	// asked.
 	sizeCalls int
+
+	resized chan struct{}
+
+	// hold, when non-nil, parks the read once the script is exhausted
+	// instead of ending the stream — a terminal with nobody typing at it.
+	// Closing it releases the read. It is what lets a test assert on a read
+	// that is genuinely IN PROGRESS.
+	hold chan struct{}
 }
 
-func (d *fakeDevice) Read([]byte) (int, error)    { return 0, io.EOF }
-func (d *fakeDevice) Write(p []byte) (int, error) { return d.out.Write(p) }
-func (d *fakeDevice) InstallMode(ModeIntent) error {
-	panic("test device: nothing may install a mode before W3")
+// scriptStep is one read's worth of terminal.
+type scriptStep struct {
+	in     []byte
+	resize *Size
 }
+
+// typed, idle and resized build script steps.
+//
+//   - typed delivers bytes.
+//   - idle is a read window that expired with nothing typed — the ONLY
+//     thing that resolves a pending ESC, and the reason no test here needs
+//     a clock.
+//   - resized changes the reported geometry and rings the out-of-band
+//     channel, exactly as SIGWINCH does between two reads.
+func typed(s string) scriptStep { return scriptStep{in: []byte(s)} }
+func idle() scriptStep          { return scriptStep{} }
+func resized(cols, rows int) scriptStep {
+	return scriptStep{resize: &Size{Cols: cols, Rows: rows}}
+}
+
+func (d *fakeDevice) Read(p []byte) (int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.script) == 0 {
+		if d.hold != nil {
+			d.mu.Unlock()
+			<-d.hold
+			d.mu.Lock()
+		}
+		return 0, io.EOF
+	}
+	step := d.script[0]
+	d.script = d.script[1:]
+	if step.resize != nil {
+		d.size = *step.resize
+		select {
+		case d.resized <- struct{}{}:
+		default:
+		}
+		return 0, nil
+	}
+	if len(step.in) == 0 {
+		return 0, nil
+	}
+	return copy(p, step.in), nil
+}
+
+func (d *fakeDevice) Write(p []byte) (int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.out.Write(p)
+}
+
+func (d *fakeDevice) InstallMode(m ModeIntent) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.modes = append(d.modes, m)
+	return nil
+}
+
 func (d *fakeDevice) Size() (Size, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.sizeCalls++
 	return d.size, d.sizeErr
 }
-func (d *fakeDevice) Resized() <-chan struct{} { return nil }
+
+func (d *fakeDevice) Resized() <-chan struct{} { return d.resized }
 func (d *fakeDevice) Close() error             { return nil }
+
+func (d *fakeDevice) emitted() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.out.String()
+}
+
+func (d *fakeDevice) installed() []ModeIntent {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]ModeIntent(nil), d.modes...)
+}
 
 // fixture is a terminal plus the two byte sinks behind it. Nothing here
 // touches a real fd, and nothing sleeps.
@@ -47,18 +142,38 @@ type fixture struct {
 	plain bytes.Buffer
 }
 
-// newTTY opens an interactive terminal over the fake device.
+// newTTY opens an interactive terminal over the fake device with no script
+// — the stream ends at once, which is what the OUTPUT assertions want.
 func newTTY(t *testing.T, termEnv string, cols int) *fixture {
 	t.Helper()
-	f := &fixture{dev: &fakeDevice{size: Size{Cols: cols, Rows: 24}}}
-	tm, err := Open(Options{
+	return newScripted(t, termEnv, Size{Cols: cols, Rows: 24}, nil)
+}
+
+// newScripted opens an interactive terminal whose keystrokes are the given
+// script. This is the harness for everything the pump, the decoder and the
+// editor do; opt tunes the Options a particular test is about.
+func newScripted(t *testing.T, termEnv string, size Size, script []scriptStep, opt ...func(*Options)) *fixture {
+	t.Helper()
+	f := &fixture{dev: &fakeDevice{size: size, script: script, resized: make(chan struct{}, 1)}}
+	opts := Options{
 		Platform: NewUnixPlatform(f.dev),
 		Stderr:   &f.diag,
 		TermEnv:  termEnv,
-	})
+	}
+	for _, o := range opt {
+		o(&opts)
+	}
+	tm, err := Open(opts)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
+	// Nothing may raise SIGTSTP under `go test`: it would stop the test
+	// binary, which no assertion can come back from. The lifecycle AROUND
+	// the suspend is what is worth asserting, and this is what makes it
+	// assertable. Under the lock, because the pump reads it.
+	tm.mu.Lock()
+	tm.raiseTSTP = func() {}
+	tm.mu.Unlock()
 	t.Cleanup(func() { _ = tm.Close() })
 	f.t = tm
 	return f
@@ -82,7 +197,7 @@ func newPipe(t *testing.T) *fixture {
 // screen is every byte that reached stdout, whichever backend carried it.
 func (f *fixture) screen() string {
 	if f.dev != nil {
-		return f.dev.out.String()
+		return f.dev.emitted()
 	}
 	return f.plain.String()
 }
@@ -531,28 +646,164 @@ func TestAbortWindow_NilHandlerNeverOpensOne(t *testing.T) {
 	}
 }
 
-// W1 installs no mode on EITHER backend: liner still owns it until W3,
-// and a second installer would be bug 3 with the parties reversed. This
-// is the assertion that catches term starting to fight liner early.
-func TestMode_UntouchedThroughW1(t *testing.T) {
-	for name, f := range map[string]*fixture{"tty": newTTY(t, "xterm", 80), "pipe": newPipe(t)} {
+// The mode-install arithmetic, which is §3's load-bearing simplification
+// made into a number: ONE session mode, installed once, with ZERO
+// transitions between prompt and turn. The only legal changes are the ones
+// enumerated at StateSnapshot.ModeInstalls, and every one of them is
+// exercised here in sequence.
+//
+// It replaces W1's TestMode_UntouchedThroughW1, which pinned the opposite
+// fact for the waves where liner owned the mode.
+func TestMode_InstallArithmeticOnAnOwnedTerminal(t *testing.T) {
+	f := newScripted(t, "xterm", Size{Cols: 80, Rows: 24}, nil)
+
+	st := f.t.State()
+	if st.ModeInstalls != 1 || st.Mode != ModeSession {
+		t.Fatalf("after Open: installs=%d mode=%v, want 1 and ModeSession", st.ModeInstalls, st.Mode)
+	}
+	if !st.PumpReading {
+		t.Error("term does not hold the read path after Open")
+	}
+
+	// A prompt and a turn: reads, writes, registrations. NONE of it may
+	// touch the mode — that is the whole of bug 3's category ceasing to
+	// exist rather than being disciplined.
+	f.t.Status().Set("waiting (5s)")
+	io.WriteString(f.t.Out(), "body\n")
+	reg := f.t.Push(ActivityTurn, Handler{Abort: func() {}})
+	reg.RevokeAbort()
+	reg.Pop()
+	if _, err := f.t.ReadLine(context.Background(), ActivityEditor, Question{Prompt: "> "}); !errors.Is(err, io.EOF) {
+		t.Fatalf("ReadLine err = %v, want io.EOF (the script is empty)", err)
+	}
+	if got := f.t.State().ModeInstalls; got != 1 {
+		t.Errorf("a prompt/turn cycle installed %d modes, want 1 — there are no prompt/turn transitions", got)
+	}
+
+	// A child window: restore entry, run, re-install. +2, and the pump is
+	// not reading for the duration.
+	insideReading, insideMode := true, ModeSession
+	if err := f.t.Handoff(func() error {
+		s := f.t.State()
+		insideReading, insideMode = s.PumpReading, s.Mode
+		return nil
+	}); err != nil {
+		t.Fatalf("Handoff: %v", err)
+	}
+	if insideReading {
+		t.Error("something was still reading stdin while a child owned the terminal")
+	}
+	if insideMode != ModeEntry {
+		t.Errorf("mode inside the child window = %v, want ModeEntry (ISIG restored for the child)", insideMode)
+	}
+	st = f.t.State()
+	if st.ModeInstalls != 3 || st.Mode != ModeSession {
+		t.Fatalf("after Handoff: installs=%d mode=%v, want 3 and ModeSession", st.ModeInstalls, st.Mode)
+	}
+	if !st.PumpReading {
+		t.Error("the read path was not taken back after the child")
+	}
+
+	// An in-band Ctrl-Z: the same restore/re-install pair, for the same
+	// reason — the shell must inherit the terminal personant found.
+	f.t.suspend()
+	if got := f.t.State().ModeInstalls; got != 5 {
+		t.Errorf("after a suspend: installs=%d, want 5", got)
+	}
+
+	if err := f.t.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	st = f.t.State()
+	if st.ModeInstalls != 6 || st.Mode != ModeEntry {
+		t.Errorf("after Close: installs=%d mode=%v, want 6 and ModeEntry", st.ModeInstalls, st.Mode)
+	}
+	if st.PumpReading {
+		t.Error("term still claims the read path after Close")
+	}
+	// The device's own log, which is the fact the count is a projection of.
+	want := []ModeIntent{ModeSession, ModeEntry, ModeSession, ModeEntry, ModeSession, ModeEntry}
+	if got := f.dev.installed(); !slices.Equal(got, want) {
+		t.Errorf("installed %v, want %v", got, want)
+	}
+}
+
+// The other side of the same rule: a session term does NOT own installs
+// nothing at all, for the whole session, on either kind of stream. A pipe
+// has no line discipline to change, and a terminal that cannot erase is
+// one where the kernel's own line discipline is doing the editing — taking
+// it away and putting no editor in its place is the bug, not the fix.
+func TestMode_UntouchedWhereTermDoesNotOwnTheTerminal(t *testing.T) {
+	fixtures := map[string]*fixture{
+		"pipe":                  newPipe(t),
+		"tty that cannot erase": newTTY(t, "dumb", 80),
+	}
+	for name, f := range fixtures {
 		t.Run(name, func(t *testing.T) {
-			f.t.Status().Set("waiting (5s)")
 			io.WriteString(f.t.Out(), "body\n")
-			reg := f.t.Push(ActivityTurn, Handler{Abort: func() {}})
-			reg.RevokeAbort()
-			reg.Pop()
+			if err := f.t.Handoff(func() error { return nil }); err != nil {
+				t.Fatalf("Handoff: %v", err)
+			}
 			st := f.t.State()
 			if st.ModeInstalls != 0 {
-				t.Errorf("ModeInstalls = %d, want 0 — liner owns the mode until W3", st.ModeInstalls)
+				t.Errorf("ModeInstalls = %d, want 0", st.ModeInstalls)
 			}
 			if st.Mode != ModeEntry {
 				t.Errorf("Mode = %v, want ModeEntry", st.Mode)
 			}
-			if st.PumpReading {
-				t.Error("PumpReading is true, but there is no pump before W3")
+			if !st.PumpReading {
+				t.Error("term does not hold the read path — the books must match the TTY backend's")
 			}
 		})
+	}
+}
+
+// PumpReading is false EXACTLY inside a child window, on both backends.
+// That is the parity claim in its sharpest form: the plain backend has no
+// pump goroutine at all, and still keeps the same book, so the off-TTY
+// suite can sense an unbalanced Handoff on the TTY backend's behalf.
+func TestHandoff_SuspendsTheReadPathOnBothBackends(t *testing.T) {
+	for name, f := range map[string]*fixture{"tty": newTTY(t, "xterm", 80), "pipe": newPipe(t)} {
+		t.Run(name, func(t *testing.T) {
+			inside := true
+			if err := f.t.Handoff(func() error {
+				s := f.t.State()
+				inside = s.PumpReading
+				if len(s.Stack) != 1 || s.Stack[0] != ActivityChild {
+					t.Errorf("stack inside the window = %v, want [child]", s.Stack)
+				}
+				return nil
+			}); err != nil {
+				t.Fatalf("Handoff: %v", err)
+			}
+			if inside {
+				t.Error("the read path was still held while a child ran")
+			}
+			st := f.t.State()
+			if !st.PumpReading {
+				t.Error("the read path was not taken back")
+			}
+			if len(st.Stack) != 0 || st.Violations != 0 {
+				t.Errorf("stack=%v violations=%d after the window, want empty and 0", st.Stack, st.Violations)
+			}
+		})
+	}
+}
+
+// An error from fn passes through unchanged, and the window still closes
+// around it — a child that failed is still a child that ran.
+func TestHandoff_ErrorPassesThroughAndTheWindowStillCloses(t *testing.T) {
+	f := newTTY(t, "xterm", 80)
+	sentinel := errors.New("child exploded")
+	if err := f.t.Handoff(func() error { return sentinel }); !errors.Is(err, sentinel) {
+		t.Fatalf("err = %v, want the child's own error", err)
+	}
+	st := f.t.State()
+	if st.ModeInstalls != 3 || st.Mode != ModeSession {
+		t.Errorf("installs=%d mode=%v, want 3 and ModeSession", st.ModeInstalls, st.Mode)
+	}
+	if !st.PumpReading || len(st.Stack) != 0 {
+		t.Errorf("PumpReading=%v stack=%v after a failed child", st.PumpReading, st.Stack)
 	}
 }
 

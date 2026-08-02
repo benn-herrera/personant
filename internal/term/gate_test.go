@@ -29,12 +29,14 @@ import (
 //
 // # The allowlists, and why they are the important part
 //
-// At W1 internal/chat still uses liner and still calls termios directly.
-// A strict gate would fail on the day it lands, and a gate weakened to
-// pass is worse than no gate at all. So each rule carries an EXPLICIT
-// allowlist whose every entry names the wave that removes it, plus an
-// assertion that the list HAS NOT GROWN. The gate's job in W1 is to stop
-// NEW violations while the known ones are burned down on schedule.
+// At W1 internal/chat still used liner and still called termios directly.
+// A strict gate would have failed on the day it landed, and a gate
+// weakened to pass is worse than no gate at all. So each rule carries an
+// EXPLICIT allowlist whose every entry names the wave that removes it,
+// plus an assertion that the list HAS NOT GROWN — the gate's job being to
+// stop NEW violations while the known ones are burned down on schedule.
+// W3 burned four of them down; what remains is one W5 item and the
+// permanent composition-root entries.
 //
 // The ceiling is `<=`, not `==`, on purpose: burning an entry down must
 // not break the build of the commit that burns it, while adding one must.
@@ -83,21 +85,18 @@ type exemption struct {
 // MUST NOT GROW. Adding an entry means a package outside internal/term
 // started talking to the terminal on its own, which is the defect class
 // this whole design removes.
+//
+// # W3 burned the termios entries down, and the liner rule now has no
+// # subject at all
+//
+// internal/chat/term_unix.go, termios_bsd.go and termios_linux.go are
+// DELETED: term owns the mode and the single reader, so chat has no ioctl
+// to make. liner is gone from the tree entirely — the rule stays because
+// the rule is about the CLASS ("a dependency can mutate termios where no
+// compiler rule of ours reaches"), and a rule that is retired the moment
+// its one known offender leaves is a rule that has to be rediscovered by
+// the next one.
 var terminalAccessAllowlist = []exemption{
-	// --- W3: liner leaves, and chat's private termios goes with it ---
-	//
-	// internal/chat/input.go's liner entry was BURNED DOWN by W2, not
-	// weakened: the read path moved inside this package, so the one liner
-	// import in the tree is internal/term's own (readline.go) and the gate
-	// exempts internal/term by design — it is the package allowed to know.
-	// liner itself does not leave until W3; what left is the SECOND owner.
-	{"internal/chat/term_unix.go", ruleTermios,
-		"W3 — captureTerm/enterCbreak/readStdin; term takes mode ownership and the single reader in W3"},
-	{"internal/chat/termios_bsd.go", ruleTermios,
-		"W3 — the ioctl constants term_unix.go needs; deleted with it"},
-	{"internal/chat/termios_linux.go", ruleTermios,
-		"W3 — as termios_bsd.go"},
-
 	// --- W5: the defaulting moves to the composition root ---
 	{"internal/chat/chat.go", ruleStdFD,
 		"W5 — Options.Std* defaulting; the process fds are named once here and handed straight to term.Open, and cmd/ is where that belongs"},
@@ -114,19 +113,25 @@ var terminalAccessAllowlist = []exemption{
 }
 
 // maxTerminalAccessExemptions is the ratchet. W1 set it at 9; W2 burned
-// chat's liner entry down and lowered it to 8. Lower it as waves burn
-// further entries down.
-const maxTerminalAccessExemptions = 8
+// chat's liner entry down to 8; W3 burned the three termios entries down
+// to 5. What is left is one W5 item and four permanent ones. Lower it as
+// waves burn further entries down.
+const maxTerminalAccessExemptions = 5
 
 // sleepBanAllowlist is the burn-down list for gate 2.
+//
+// W3 removed escwatch_test.go's entry with escwatch itself: the
+// disambiguation timeout is now expressed as DATA (a read window that
+// expired, delivered by the device fake), so the decoder's tests need no
+// duration at all. That was the design working as advertised — the fake
+// clock the old test needed was the shape of the old reader, not of the
+// problem.
 var sleepBanAllowlist = []exemption{
-	{"internal/chat/escwatch_test.go", ruleSleep,
-		"W3 — a busy-wait guard in a scripted reader fake; escwatch.go and its test are deleted when the decoder lands"},
 	{"internal/chat/shellescape_test.go", ruleSleep,
 		"permanent — child-process reaping, not terminal timing: the sleep is inside a fake command, and the assertion it feeds is about exit codes"},
 }
 
-const maxSleepExemptions = 2
+const maxSleepExemptions = 1
 
 // TestGate_NoDirectTerminalAccess is gate 1.
 func TestGate_NoDirectTerminalAccess(t *testing.T) {

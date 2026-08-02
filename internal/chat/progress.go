@@ -76,9 +76,10 @@ type progress struct {
 	frame     int
 	startedAt clock.ProfilingTime
 	// abortHint says the turn is in its Esc-abortable window, so the label
-	// should advertise the key. Set by control.arm / cleared by
-	// control.disarm — never inferred here, because a session with no
-	// working cbreak must not advertise a key that does nothing.
+	// should advertise the key. Set by control.arm and cleared by
+	// control.revokeAbort — the same two calls that open and close term's
+	// registration, so the hint and term.StateSnapshot.AbortWindow are
+	// projections of ONE fact and cannot drift.
 	abortHint bool
 	// pendingReveal says this wait has an ANNOUNCEMENT that the reveal
 	// delay swallowed and that has not landed since. It is progress's own

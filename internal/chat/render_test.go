@@ -66,7 +66,7 @@ func TestW1Item1_IndicatorRedrawsInPlace(t *testing.T) {
 	opening := first.Line()
 
 	for range 3 { // six frames: the glyph cycle is 4, so the frame must move
-		f.tick(t)
+		f.beat()
 	}
 	animated := f.screen(t)
 	if animated.Line() == opening {
@@ -113,7 +113,7 @@ func TestW1Item1_SinglePhaseWaitRevealsAfterTheDelay(t *testing.T) {
 
 	// Past the threshold, with NO second phase change: only the heartbeat.
 	f.setElapsed(progressShowAfter + time.Second)
-	f.tick(t)
+	f.beat()
 	if got := f.slot(); !strings.Contains(got, string(turn.PhaseWaiting)) {
 		t.Fatalf("the wait stayed invisible past the threshold: slot %q", got)
 	}
@@ -131,7 +131,7 @@ func TestW1Item1_SinglePhaseWaitRevealsAfterTheDelay(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	quiet := f.out.Len()
-	f.tick(t)
+	f.beat()
 	if got := f.out.Len(); got != quiet {
 		t.Errorf("a heartbeat emitted %d bytes after content took the line: %q",
 			got-quiet, f.out.String()[quiet:])
@@ -152,7 +152,7 @@ func TestW1Item8_AbortHintOpenedInsideTheDelayStillSurfaces(t *testing.T) {
 	}
 
 	f.setElapsed(5 * time.Second)
-	f.tick(t)
+	f.beat()
 	if got := f.slot(); !strings.HasSuffix(got, abortHintSuffix) {
 		t.Errorf("the hint did not surface with the indicator: %q", got)
 	}
@@ -194,7 +194,7 @@ func TestW1Items2And3_BodyRetiresTheSlotAndNoFramePaintsOverIt(t *testing.T) {
 	// Item 3: heartbeats between body writes must not paint.
 	for _, chunk := range []string{" The answer", " is", " forty-two."} {
 		quiet := f.out.Len()
-		f.tick(t)
+		f.beat()
 		if got := f.out.Len(); got != quiet {
 			t.Fatalf("a heartbeat emitted %d bytes while the body was streaming: %q",
 				got-quiet, f.out.String()[quiet:])
@@ -427,7 +427,7 @@ func TestW1Item7_NarrowTerminalTruncatesAndNeverWraps(t *testing.T) {
 	}
 
 	for range 3 {
-		f.tick(t)
+		f.beat()
 	}
 	s := f.screen(t)
 	if want := cols - term.StatusColumnInset; len([]rune(s.Line())) > want {
@@ -477,19 +477,59 @@ func TestW1Item8_AbortHintAppearsAndLeavesNoResidue(t *testing.T) {
 		t.Errorf("closing the window destroyed the label: %q\n%s", closed.Line(), closed)
 	}
 
-	// The STATE half of item 8 is not chat's to report in W1, and pinning
-	// that here is the point rather than an omission. term's abort window
-	// (StateSnapshot.AbortWindow, opened by Handler.Abort and closed by
-	// Registration.RevokeAbort) is asserted in internal/term; nothing in
-	// this package registers one, because chat still runs its own Esc
-	// window through control.arm/disarm and its own escwatch until W3
-	// takes the mode and the decoder. So the indicator's hint and term's
-	// window are two facts today, and this asserts they are still
-	// unconnected. When W3 wires the hint to a real registration, this
-	// fails and gets replaced by the correlation it should have been.
-	if f.tm.State().AbortWindow {
-		t.Error("term now reports an abort window from chat — wire item 8's state half " +
-			"to the hint and replace this assertion with the correlation")
+	f.p.stop()
+}
+
+// Item 8's STATE half, which W1.5 could only pin as ABSENT.
+//
+// Until W3 the Esc window was three independent facts — control.arm, a
+// private escwatch goroutine, and progress.setAbortHint — and term's
+// StateSnapshot.AbortWindow was inert because nothing in chat ever
+// registered a Handler{Abort}. The pinned test asserted that inertia and
+// said it should fail the day the wiring landed. It has, and this is the
+// correlation it was holding a place for:
+//
+//	the hint is visible ⇔ the abort window is open ⇔ StateSnapshot.AbortWindow
+//
+// All three are now projections of ONE registration, which is why they
+// cannot drift — and the snapshot half is the one an off-TTY suite can
+// see, since none of it emits a byte.
+func TestW3Item8_AbortHintAndTermsAbortWindowAreOneFact(t *testing.T) {
+	f := newProgressFixture(t, true, true, fixtureSize)
+	ctl := newControl(f.tm, f.p, func() {})
+	f.setElapsed(5 * time.Second)
+	f.p.phase(turn.PhaseWaiting)
+
+	hinted := func() bool { return strings.HasSuffix(f.slot(), abortHintSuffix) }
+	windowed := func() bool { return f.tm.State().AbortWindow }
+
+	if hinted() || windowed() {
+		t.Fatalf("hint=%v window=%v before the turn armed", hinted(), windowed())
+	}
+
+	ctl.arm(func() {})
+	if !hinted() || !windowed() {
+		t.Errorf("after arm: hint=%v window=%v, want both open\n%s", hinted(), windowed(), f.screen(t))
+	}
+
+	// The pre-canonical boundary closes BOTH, through one call.
+	ctl.onPhase(turn.PhaseClosing)
+	if hinted() || windowed() {
+		t.Errorf("after the boundary: hint=%v window=%v, want both closed\n%s",
+			hinted(), windowed(), f.screen(t))
+	}
+	if !strings.Contains(f.slot(), string(turn.PhaseClosing)) {
+		t.Errorf("closing the window destroyed the label: %q", f.slot())
+	}
+	// And no residue on the line the hint used to occupy — the half only
+	// the screen can see.
+	if s := f.screen(t); strings.Contains(s.Line(), "esc") {
+		t.Errorf("the hint left residue on the line: %q\n%s", s.Line(), s)
+	}
+
+	ctl.disarm()
+	if st := f.tm.State(); len(st.Stack) != 0 || st.Violations != 0 {
+		t.Errorf("stack=%v violations=%d after the turn", st.Stack, st.Violations)
 	}
 	f.p.stop()
 }
@@ -505,7 +545,7 @@ func TestW1Item10_DumbTerminalEmitsNoEscapeBytes(t *testing.T) {
 	f.setElapsed(5 * time.Second)
 
 	f.p.phase(turn.PhaseWaiting)
-	f.tick(t)
+	f.beat()
 	th.reasoning("scratch on a terminal that cannot dim it")
 	if _, err := io.WriteString(f.tm.Out(), "the answer\n"); err != nil {
 		t.Fatalf("write: %v", err)
@@ -543,36 +583,34 @@ func TestW1Item10_DumbTerminalEmitsNoEscapeBytes(t *testing.T) {
 // reasoning channel must not have: scratch that reads as the answer.
 const reasoningNoANSIOpenMark = "[thinking]"
 
-// --- W2: the menus (bug 5) -------------------------------------------
+// --- W2/W3: the menus (bug 5) ----------------------------------------
 //
-// What these can and cannot see, stated so the coverage is not overread.
-// In W2 the EDITOR is still liner and liner writes straight to the tty, so
-// the screen model — which reconstructs from what TERM emitted — cannot
-// see the prompt line being edited, and the keystroke-survival property is
-// therefore not assertable yet. It becomes assertable in W3, when term
-// owns the editor's bytes; faking it here would be a test of the fixture.
+// R2-14, and now the whole of it: the preamble is COMMITTED to scrollback
+// above the editor and only the single-line prompt is left for the editor
+// to repaint. A question that lives in scrollback is a question no line
+// editor is allowed to draw over.
 //
-// What IS assertable, and is exactly R2-14, is the split: the preamble is
-// COMMITTED to scrollback above the editor and only the single-line prompt
-// is left for the editor to repaint. That is the structural half of bug 5
-// — a question that lives in scrollback is a question no line editor is
-// allowed to draw over, whatever is doing the editing.
+// W2 could assert only the split, because liner wrote straight to the tty
+// and the screen model — which reconstructs from what TERM emitted — could
+// not see the line being edited at all. W3 owns those bytes, so the
+// keystroke half is here too: the answer the user typed is on screen,
+// under a question that survived it.
 
-// newQuestionFixture opens an interactive terminal over an injected
-// platform and a scripted stdin. Interactive but NOT a real terminal, so
-// the read falls to the plain path (readline.go: liner would otherwise
-// read the process's own stdin behind the test's back) while every
-// DECORATION decision — the status slot, the erase alphabet — is the TTY
-// one, which is the combination these assertions need.
+// newQuestionFixture opens an interactive terminal whose keystrokes are
+// the given script, delivered through the real device fake, decoder, pump
+// and editor.
 func newQuestionFixture(t *testing.T, script string) (*term.Terminal, *syncBuffer) {
 	t.Helper()
 	out := &syncBuffer{}
 	tm, err := term.Open(term.Options{
-		Stdin:    strings.NewReader(script),
-		Stdout:   out,
-		Stderr:   out,
-		TermEnv:  "xterm-256color",
-		Platform: term.NewUnixPlatform(&fakeDevice{out: out, size: fixtureSize}),
+		Stdout:  out,
+		Stderr:  out,
+		TermEnv: "xterm-256color",
+		Platform: term.NewUnixPlatform(&fakeDevice{
+			out:    out,
+			size:   fixtureSize,
+			script: [][]byte{[]byte(script)},
+		}),
 	})
 	if err != nil {
 		t.Fatalf("term.Open: %v", err)
@@ -582,13 +620,15 @@ func newQuestionFixture(t *testing.T, script string) (*term.Terminal, *syncBuffe
 }
 
 // A menu question with a multi-line preamble: every preamble line is
-// COMMITTED on its own row, and the prompt is the live line — alone, not
-// wrapped, and not part of what the editor was handed.
+// COMMITTED on its own row, and only the prompt is the editor's — which is
+// what makes the question survive the first keystroke.
 //
 // The preamble is a real §4.5.7 menu rather than a synthetic one, so a
-// change to the menu's shape that broke the split would fail here.
-func TestW2_MenuPreambleIsCommittedAndThePromptIsTheLiveLine(t *testing.T) {
-	tm, out := newQuestionFixture(t, "c\n")
+// change to the menu's shape that broke the split would fail here. The
+// answer is a SINGLE KEYSTROKE with no Enter: the Question.Keys fast path,
+// which W2 documented as not live and W3 lands.
+func TestW3_MenuPreambleSurvivesTheKeystrokeThatAnswersIt(t *testing.T) {
+	tm, out := newQuestionFixture(t, "c")
 
 	preamble := []string{
 		"No active project resolved.",
@@ -604,36 +644,37 @@ func TestW2_MenuPreambleIsCommittedAndThePromptIsTheLiveLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadLine: %v", err)
 	}
-	if ans.Text != "c" {
-		t.Errorf("answer = %q, want %q", ans.Text, "c")
+	if ans.Text != "c" || ans.Key != 'c' {
+		t.Errorf("Answer{Text:%q, Key:%q}, want {\"c\", 'c'} — the fast path is live in W3",
+			ans.Text, ans.Key)
 	}
 
 	s := replay(t, fixtureSize, out)
 	for i, want := range preamble {
 		if got := s.Row(i); got != want {
-			t.Errorf("preamble row %d = %q, want %q\n%s", i, got, want, s)
+			t.Errorf("preamble row %d = %q, want %q — bug 5's exact shape\n%s", i, got, want, s)
 		}
 	}
-	// The model reports a row's content without its trailing blanks, so the
-	// prompt's own trailing space is not part of what it can see.
-	if got := s.Line(); got != strings.TrimRight("choice: ", " ") {
-		t.Errorf("live line = %q, want the prompt alone\n%s", got, s)
+	if got, want := s.Row(len(preamble)), "choice: c"; got != want {
+		t.Errorf("the answered question row = %q, want %q\n%s", got, want, s)
 	}
 	if s.Wraps() != 0 {
 		t.Errorf("the question wrapped %d time(s)\n%s", s.Wraps(), s)
 	}
-	if got, want := s.TotalRows(), len(preamble)+1; got != want {
-		t.Errorf("the question took %d rows, want %d (one per preamble line, plus the prompt)\n%s",
-			got, want, s)
+	// One row per preamble line, the prompt's row, and the fresh row the
+	// committed answer left the cursor on.
+	if got, want := s.TotalRows(), len(preamble)+2; got != want {
+		t.Errorf("the question took %d rows, want %d\n%s", got, want, s)
 	}
 }
 
-// A question retires the ephemeral slot BEFORE it renders. The indicator
-// and a menu contend for the same physical line — turn close prompts while
-// the phase indicator is still up — and a menu drawn onto a live slot is a
-// question the next erase takes back.
-func TestW2_QuestionRetiresTheStatusSlotBeforeItRenders(t *testing.T) {
-	tm, out := newQuestionFixture(t, "s\n")
+// A question retires the ephemeral slot BEFORE it renders, and the slot
+// stays suspended for the duration. The indicator and a menu contend for
+// the same physical line — turn close prompts while the phase indicator is
+// still up — and a frame drawn over a line being typed is a frame the
+// editor's next repaint cannot account for.
+func TestW3_QuestionTakesTheLineFromTheStatusSlotAndKeepsIt(t *testing.T) {
+	tm, out := newQuestionFixture(t, "s")
 	tm.Status().Set("closing (4s)")
 	if tm.State().Status == "" {
 		t.Fatal("the slot did not take the line")
@@ -656,5 +697,8 @@ func TestW2_QuestionRetiresTheStatusSlotBeforeItRenders(t *testing.T) {
 	}
 	if got := s.Row(0); got != "thread thr_1 has gone idle — closure suggested." {
 		t.Errorf("the question did not start on a clean row: %q\n%s", got, s)
+	}
+	if got := s.Row(1); got != "close as? [r]esolved / [s]kip: s" {
+		t.Errorf("the answered question row = %q\n%s", got, s)
 	}
 }

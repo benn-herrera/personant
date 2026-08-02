@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"sort"
 	"strconv"
 	"strings"
@@ -108,11 +107,12 @@ func Run(opts Options) error {
 	// frame, reasoning — passes through one serialization point and an
 	// error mid-stream cannot interleave into the wait indicator's line.
 	//
-	// term installs NO terminal mode before W3: liner still applies its own
-	// at construction, and a second installer here would be bug 3 with the
-	// parties reversed. It does own the READ PATH from W2 — every prompt in
-	// this package goes through tm.ReadLine — which is why the history file
-	// is handed over here rather than opened a second time.
+	// From W3 this call also captures the entry terminal mode, installs the
+	// ONE session mode, and starts the single input pump — so it must
+	// happen before anything else touches the terminal, and the deferred
+	// Close below is what puts the mode back. Every prompt in this package
+	// goes through tm.ReadLine, which is why the history file is handed
+	// over here rather than opened a second time.
 	tm, err := term.Open(term.Options{
 		Stdin:       opts.Stdin,
 		Stdout:      opts.Stdout,
@@ -270,21 +270,6 @@ func Run(opts Options) error {
 	}
 	redactor := shell.NewRedactor(keys)
 
-	// The terminal mode as personant found it, captured BEFORE the first
-	// prompt builds liner (its NewLiner applies ICANON/ECHO-off once for
-	// the whole session, which is why term builds it lazily at the first
-	// read rather than at Open). This is what a `$`/`#` child gets handed
-	// so it runs under normal line discipline. A non-terminal session
-	// yields nil and the handoff becomes a no-op.
-	var origTerm *termState
-	if tm.Interactive() {
-		if ts, terr := captureTerm(); terr == nil {
-			origTerm = ts
-		} else {
-			fmt.Fprintf(tm.Diag(), "warn: %v\n", terr)
-		}
-	}
-
 	// The phase-labeled wait indicator. Built before the signal handler is
 	// installed so the forced-exit path can always clear it. Inert (zero
 	// bytes) unless the session is driving a real terminal.
@@ -404,34 +389,26 @@ func Run(opts Options) error {
 	// in-flight turn unwinds and the loop exits through the clean-shutdown
 	// path below (recaller close → §3.11 session-close checkpoint →
 	// session-end log), and a second during shutdown forces an immediate
-	// exit. The editor consumes Ctrl-C itself while it owns the terminal
-	// (term.ReadLine returns term.ErrAborted, handled in loop); this handler
-	// catches interrupts delivered the rest of the time (streaming a turn,
-	// shutting down, or the piped-stdin path).
+	// exit.
+	//
+	// Where a Ctrl-C ARRIVES changed in W3. term clears ISIG while it owns
+	// the fd, so at the prompt it is the editor's key (term.ReadLine
+	// returns term.ErrAborted after a deliberate second press) and mid-turn
+	// it is the turn registration's key. What still reaches the signal
+	// handler is a `kill -INT`, a Ctrl-C inside a term.Handoff window, and
+	// the in-band key control forwards onto the same queue.
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	ctl := newControl(tm, pr, cancel)
-	// Written once here, before the signal-handler goroutine below starts —
-	// the goroutine-creation edge is the happens-before that makes these
-	// safe to read from it. Neither is ever written again.
-	ctl.origTerm = origTerm
+	// Written once here, before the servicing goroutine below starts — the
+	// goroutine-creation edge is the happens-before that makes it safe to
+	// read from there. Never written again.
 	ctl.sh = sh
-	// Esc is the per-turn abort, so the terminal must be handed back before
-	// anything else prompts — disarm on every return path.
+	// The turn's registration holds term's abort window, so it must be
+	// released on every return path or the next prompt inherits it.
 	defer ctl.disarm()
-	sigCh := make(chan os.Signal, 2)
-	signal.Notify(sigCh, os.Interrupt)
-	// Stop delivery THEN close so the handler goroutine's range exits when
-	// Run returns (signal.Stop guarantees no send races the close).
-	defer func() {
-		signal.Stop(sigCh)
-		close(sigCh)
-	}()
-	go func() {
-		for range sigCh {
-			ctl.onSignal()
-		}
-	}()
+	stopInterrupts := ctl.watchInterrupts()
+	defer stopInterrupts()
 
 	// Progress reporting: the turn pipeline announces the stage it is in,
 	// control routes it — closing the Esc window at the pre-canonical
@@ -659,10 +636,19 @@ func loop(ctx context.Context, ops memops.MemoryOps, state *turn.State, ctl *con
 		retracted = ""
 		switch {
 		case errors.Is(err, term.ErrAborted):
+			if ctx.Err() != nil {
+				// The read was cancelled BY the shutdown, not by the user:
+				// term's pump now honours ctx mid-read, so a session cancel
+				// arriving while the prompt is up unblocks it here. Counting
+				// it as a fresh interrupt would make one `kill -INT` the
+				// second press and force-quit past the clean path.
+				return nil
+			}
 			// Ctrl-C at the prompt — the user asked to leave, so this is
-			// /exit with a different key: begin the same clean shutdown and
-			// say nothing. It still counts as the first interrupt, so a
-			// second Ctrl-C while the shutdown runs force-quits.
+			// /exit with a different key (after the deliberate second press
+			// term's editor requires): begin the same clean shutdown and say
+			// nothing. It still counts as the first interrupt, so a further
+			// Ctrl-C while the shutdown runs force-quits.
 			ctl.exit(false)
 			return nil
 		case errors.Is(err, io.EOF):
@@ -1173,11 +1159,10 @@ func promptConfirmation(tm *term.Terminal, ops memops.MemoryOps, cwd string, can
 // promptFallback surfaces the §4.5.7 final fallback prompt.
 //
 // Keys is safe here (unlike the resume prompt above) because every answer
-// that is not one of the three letters is already invalid. READ
-// term.Question.Keys before assuming it means no-Enter: through W2 the
-// fast path is NOT live — the set is matched against the first rune of the
-// submitted line, which is what these menus have always done — and W3 is
-// where a single keystroke starts taking effect on its own.
+// that is not one of the three letters is already invalid — and from W3 it
+// means what it says: on a terminal term owns, the first keystroke in the
+// set answers the menu WITHOUT Enter. Off one it degrades to the first
+// rune of the submitted line, which is what these menus have always done.
 func promptFallback(tm *term.Terminal, ops memops.MemoryOps, cwd string) (memops.ProjectMeta, error) {
 	ctx := context.Background()
 	for {

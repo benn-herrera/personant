@@ -19,15 +19,16 @@
 // The package lands in waves (SOLUTION.md §8, IMPLEMENTATION-PLAN.md §2).
 // W1 landed the OUTPUT half plus the bookkeeping: backend selection, the
 // four channels, the activity stack, the abort window, the cursor column.
-// W2 — this one — lands the SINGLE READ PATH, [Terminal.ReadLine], with
-// liner as the editor underneath it (readline.go says what that costs and
-// what it defers). Everything still unimplemented panics, and every panic
-// names the wave that lands it.
+// W2 landed the SINGLE READ PATH, [Terminal.ReadLine], with liner
+// underneath it. W3 — this one — takes the fd: the terminal mode
+// (device_unix.go), the single reader (pump.go), the decoder (decode.go)
+// and a hand-written editor (editor.go). liner is gone, and with it the
+// three byte reservoirs and the second owner of the mode.
 //
-// Neither wave touches termios: liner still owns the terminal mode until
-// W3 and applies it at construction, so a mode installed here would fight
-// it and reintroduce bug 3. [StateSnapshot.ModeInstalls] is 0 for the
-// whole session through W2, by construction and not by accident.
+// What is left for W4 is the SIGINT offer chain at [Handler.Interrupt] —
+// which serves the [Terminal.Handoff] window and signals raised from
+// outside the terminal, because everything typed while term holds the fd
+// is now a decoded key.
 //
 // # The five bugs and the structural answer to each
 //
@@ -54,34 +55,26 @@
 //
 // # Verification posture
 //
-// The screen model and the pty runner were dropped by user ruling
-// (IMPLEMENTATION-PLAN.md §1). What remains as automated coverage of the
-// BYTE-INVISIBLE defect class — bugs 3 and 4 emit no bytes, which is
-// exactly why they shipped green — is plain-backend bookkeeping parity:
-// the non-TTY backend keeps the SAME books as the TTY backend, so the
-// existing off-TTY suites become an ordering sensor for free.
+// Two layers, and neither is sufficient alone. The screen model
+// (internal/term/screentest) reconstructs what the user would see from the
+// bytes this package emitted and FAILS on any sequence it does not model,
+// so writer and model share one finite alphabet and cannot drift. And
+// plain-backend bookkeeping parity covers the BYTE-INVISIBLE defect class
+// — bugs 3 and 4 emit no bytes, which is exactly why they shipped green —
+// by having the non-TTY backend keep the same books as the TTY backend.
 // [Terminal.State] is what those assertions read. It is first-class API,
 // not a debug helper.
 package term
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"sync"
-
-	"github.com/peterh/liner"
-)
-
-// The unimplemented bodies, each naming the wave that lands it. They are
-// separate constants rather than one string with a variable in it so that
-// a panic message is a grep-able statement of schedule.
-const (
-	notImplementedW3 = "term: not implemented (W3 — pump, decoder, editor, mode ownership)"
-	notImplementedW4 = "term: not implemented (W4 — interrupt routing over the activity stack)"
 )
 
 // Sizing constants. Each is used by more than one caller (status
@@ -133,10 +126,11 @@ type Options struct {
 	// HistoryFile is where [Terminal.ReadLine]'s history is loaded from
 	// and flushed to at [Terminal.Close]. Empty disables history.
 	//
-	// W2 took it over with the read path. The file is one file and it has
-	// one owner: the editor now lives inside term (readline.go), so the
-	// load-at-first-prompt and flush-at-Close pair moved here with it
-	// rather than being kept in a second place that also opens it.
+	// The file is one file and it has one owner: the editor lives inside
+	// term (editor.go, history.go), so the load-at-open and flush-at-Close
+	// pair live here rather than in a second place that also opens it. The
+	// on-disk format is newline-delimited text — liner's — and needs no
+	// migration now that liner is gone.
 	HistoryFile string
 
 	// TermEnv is $TERM. A "dumb" or empty value means no ANSI: the
@@ -163,7 +157,8 @@ type Options struct {
 	// bug 2 (mid-token rendering of long recalled lines) into a strictly
 	// worse bug rather than fixing it.
 	//
-	// W0 named it; the cap is enforced by the W3 editor.
+	// The floor is 2: one row is the placeholder, so a cap of 1 would
+	// render a line the user cannot see at all.
 	InputRowCap int
 
 	// Platform, when non-nil, overrides backend selection. This is the
@@ -202,19 +197,54 @@ type Terminal struct {
 	interactive bool
 	ansi        bool
 
-	// realTTY is the read half's backend determination, and it is NARROWER
-	// than interactive: an injected [Options.Platform] is interactive by
-	// definition but is not a terminal anyone may hand to liner, which
-	// hardcodes the process's own stdin. Made once at Open, same as the
-	// other two. See readline.go.
-	realTTY  bool
+	// owns says term owns the terminal MODE, the READER and the EDITOR for
+	// this session. It is the read half's determination and it is NARROWER
+	// than interactive, deliberately.
+	//
+	// It starts as `interactive && ansi` — not as `interactive` — because
+	// an in-place line editor on a terminal with no erase sequence cannot
+	// exist: it could draw a line but never take it back, so every
+	// backspace, every ↑ recall and every wrap would append. The honest
+	// fallback there is the kernel's own line discipline, which is exactly
+	// the plain read path, with no mode installed and no pump running. It
+	// is cleared at Open if the mode cannot be installed, for the same
+	// reason and by the same rule (U12: decided once, for the session).
+	//
+	// This is not a second projection of `ansi`. They answer different
+	// questions — can this terminal erase, and is the read path ours — and
+	// they coincide only because the first is a precondition of the second.
+	owns     bool
 	histFile string
+	// rowCapOpt is [Options.InputRowCap] as given. Resolved against the
+	// live geometry at each read, because the window can be resized between
+	// two prompts.
+	rowCapOpt int
 
 	// The three channel writers are built once and handed out by value of
 	// pointer, so Out()/Diag()/Reasoning() are allocation-free and two
 	// callers of the same channel are literally the same object.
 	outW, diagW, reasonW *channelWriter
 	status               *Status
+
+	// raiseTSTP suspends the process for an in-band Ctrl-Z. A field, not a
+	// call, so the mode lifecycle around a suspend can be asserted without
+	// a test stopping the test binary. See [Terminal.suspend].
+	raiseTSTP func()
+
+	// eofCh is CLOSED once, when input ends, releasing every blocked read
+	// then and thereafter. End of input is permanent; a value would have to
+	// be put back.
+	eofCh   chan struct{}
+	eofOnce sync.Once
+
+	// wake nudges the pump when the activity stack gains an entry. It only
+	// matters once the stream has ended and the pump has no read left to
+	// return and notice with; see [Terminal.drainThenEOF].
+	wake chan struct{}
+
+	// sigCh carries SIGTERM/SIGHUP (U4). Written once at Open and cleared
+	// by Close, both from the session's own goroutine.
+	sigCh chan os.Signal
 
 	// mu is THE serialization point. Every emitted byte and every piece
 	// of bookkeeping below is under it, which is what makes an error
@@ -231,14 +261,23 @@ type Terminal struct {
 	reasoningOpen bool
 	violations    int
 	closed        bool
+	reading       bool
 
-	// The read half's two lazily-built halves, exactly one of which a
-	// session ever has: the liner editor on a real terminal, the buffered
-	// reader everywhere else. Both are under mu for construction only —
-	// ReadLine never holds the lock across a blocking read, or an error
-	// arriving on Diag would deadlock behind a user who has not typed yet.
-	editor *liner.State
-	in     *bufio.Reader
+	// The pump's handle. stopPump joins on pumpDone, so on return nothing
+	// in this process is reading stdin.
+	pumpCancel context.CancelFunc
+	pumpDone   chan struct{}
+
+	// The read half. hist is the session's one recall store; ed is the
+	// editor currently on the terminal, which the pump needs so a resize
+	// can re-wrap it; edDrawn/edRow are where its block is, which is
+	// TERMINAL state and belongs beside the cursor column (see editor.go).
+	// in is the plain path's one buffered reader.
+	hist    *history
+	ed      *editor
+	edDrawn bool
+	edRow   int
+	in      *bufio.Reader
 }
 
 // Open captures the terminal, selects a backend, installs the session
@@ -254,21 +293,21 @@ type Terminal struct {
 // be observed, adopted, or left stale by anything, so bug 3's category
 // stops existing rather than being disciplined.
 //
-// # W1 installs no mode at all, and that is deliberate
+// # A session that does NOT get a mode
 //
-// The paragraph above describes the END state, from W3. In W1 liner still
-// owns the terminal mode and applies it at ITS construction; a mode
-// installed here would fight it, which is bug 3 with the parties
-// reversed. So W1 captures the entry mode (a read — it is also the
-// is-this-a-terminal test) and installs nothing:
-// [StateSnapshot.ModeInstalls] stays 0 and [StateSnapshot.Mode] reports
-// [ModeEntry] for the whole session. W3 takes the mode over, and the
-// count becomes the hard number described at [StateSnapshot.ModeInstalls].
+// The arithmetic above holds for a session where [Terminal.owns] is true:
+// a terminal on both ends that can also erase. A pipe, a redirected end,
+// or TERM=dumb installs NOTHING and runs no pump —
+// [StateSnapshot.ModeInstalls] stays 0 for the whole session — because
+// cbreak without an editor to interpret the bytes would take the kernel's
+// line discipline away and put nothing in its place. See the field.
 //
-// Signal handling — SIGWINCH, SIGTERM/SIGHUP (U4), SIGTSTP/SIGCONT, and
-// the single SIGINT dispatcher described at [Handler.Interrupt] — lands
-// with the pump in W3/W4 for the same reason: a handler that restores a
-// mode term never installed would restore the wrong thing.
+// Signal handling arrives here with the mode, for one reason: a handler
+// that restored a mode term never installed would be putting back somebody
+// else's guess. SIGWINCH feeds [Device.Resized]; SIGTERM/SIGHUP restore
+// the entry mode before the process dies (U4 — today they leave the
+// terminal in no-echo mode, because only os.Interrupt is registered);
+// SIGTSTP is raised, never caught.
 //
 // # Ctrl-C is not one of those signals while term holds the fd
 //
@@ -314,29 +353,50 @@ func Open(opts Options) (*Terminal, error) {
 	}
 
 	plat, interactive := selectBackend(opts)
+	ansi := interactive && ansiCapable(opts.TermEnv)
 
 	t := &Terminal{
 		plat:        plat,
 		diag:        opts.Stderr,
 		stdin:       opts.Stdin,
 		interactive: interactive,
-		// A session drives a REAL terminal only when term selected the unix
-		// backend itself. An injected platform is interactive and is not
-		// one; see the field.
-		realTTY:  interactive && opts.Platform == nil,
-		histFile: opts.HistoryFile,
-		ansi:     interactive && ansiCapable(opts.TermEnv),
+		ansi:        ansi,
+		owns:        ansi,
+		histFile:    opts.HistoryFile,
+		rowCapOpt:   opts.InputRowCap,
+		raiseTSTP:   raiseTSTP,
+		eofCh:       make(chan struct{}),
+		wake:        make(chan struct{}, 1),
 		// The cursor starts at column 0: nothing has been written yet.
 		// ColumnUnknown is the ZERO value of CursorColumn and means "a
 		// child owned the fd", so it must be assigned away here rather
 		// than left to the zero value.
-		column: ColumnStart,
-		mode:   ModeEntry,
+		column:  ColumnStart,
+		mode:    ModeEntry,
+		reading: true,
 	}
 	t.outW = &channelWriter{t: t, ch: chanOut}
 	t.diagW = &channelWriter{t: t, ch: chanDiag}
 	t.reasonW = &channelWriter{t: t, ch: chanReasoning}
 	t.status = &Status{t: t}
+
+	if !t.owns {
+		return t, nil
+	}
+	if err := plat.InstallMode(ModeSession); err != nil {
+		// U12's rule applied to the mode: the degradation is decided ONCE
+		// and for the whole session. A retry per prompt would mean the read
+		// path could change underneath a running turn.
+		fmt.Fprintf(t.Diag(), "warn: %v; line editing disabled for this session\n", err)
+		t.owns = false
+		return t, nil
+	}
+	t.mode, t.modeInstalls = ModeSession, 1
+	if t.histFile != "" {
+		t.hist = loadHistory(t.histFile)
+	}
+	t.watchExitSignals()
+	t.startPump()
 	return t, nil
 }
 
@@ -383,21 +443,19 @@ func charDevice(v any) (*os.File, bool) {
 	return f, true
 }
 
-// Close restores the entry mode, flushes history, joins the pump, and
+// Close joins the pump, restores the entry mode, flushes history and
 // removes the signal handlers. Idempotent, and safe from a forced-exit
-// path where no deferred cleanup runs.
+// path where no deferred cleanup runs — which is why the decoration is
+// retired first and unconditionally: a half-drawn status frame or an
+// unterminated dim run must not be the last thing on the user's terminal.
 //
-// Through W2 there is no pump and no mode of term's own to restore — the
-// editor's Close is what hands liner's mode back (see [Open]). What there
-// is: history to flush, and decoration that must not outlive the session,
-// since a half-drawn status frame or an unterminated dim run would
-// otherwise be the last thing on the user's terminal. All of it is
-// unconditional and idempotent, so the forced-exit path gets it too.
+// The ORDER is the contract. The pump is joined BEFORE the mode is put
+// back, so no read can straddle a mode change; and the entry mode goes
+// back before the device is released, because the device is where the
+// captured entry termios lives.
 //
-// The editor is DETACHED under the lock before it is closed, so a read
-// racing a forced exit cannot revive a closed editor, and the close itself
-// happens outside the lock — liner's Close touches the terminal, and
-// holding the serialization point across it would block every writer.
+// It must not be called from a [Handler] — see [Handler.Key]. The pump
+// cannot join itself.
 func (t *Terminal) Close() error {
 	t.mu.Lock()
 	if t.closed {
@@ -407,11 +465,17 @@ func (t *Terminal) Close() error {
 	t.closed = true
 	t.retireStatusLocked()
 	t.endReasoningLocked()
-	ls := t.editor
-	t.editor = nil
+	hist := t.hist
 	t.mu.Unlock()
 
-	err := closeEditor(ls, t.histFile)
+	t.stopPump()
+	t.stopExitSignals()
+	t.installMode(ModeEntry)
+
+	var err error
+	if hist != nil {
+		err = hist.flush()
+	}
 	if perr := t.plat.Close(); err == nil {
 		err = perr
 	}
@@ -489,11 +553,11 @@ const (
 // Handler is what an activity supplies when it registers. Every field is
 // optional; a nil field declines by construction.
 //
-// W1 records handlers and never calls them: key dispatch arrives with the
-// decoder in W3 and interrupt dispatch with the offer chain in W4. What
-// W1 does keep is the BOOKKEEPING they imply — stack order and the abort
-// window — because that is the half that emits no bytes and is therefore
-// the half that shipped green (see [StateSnapshot]).
+// Key and Abort are dispatched; Interrupt is recorded and waits for W4's
+// offer chain. What was always kept, from W1, is the BOOKKEEPING they
+// imply — stack order and the abort window — because that is the half
+// that emits no bytes and is therefore the half that shipped green (see
+// [StateSnapshot]).
 type Handler struct {
 	// Key is offered each decoded keystroke while this registration is
 	// the TOP of the stack. A declined key falls to the next handler
@@ -505,9 +569,21 @@ type Handler struct {
 	// defect, reimplemented in our own code — are not an option.
 	//
 	// Window resize is not offered here: it is term's own business (it
-	// repaints the status slot and re-wraps the editor).
+	// repaints the status slot and re-wraps the editor). Ctrl-Z is not
+	// offered either — term consumes it (see [Open]).
 	//
-	// Dispatched from W3.
+	// TWO RULES, both consequences of dispatch running ON the pump
+	// goroutine (pump.go says why it does):
+	//
+	//   - A handler MUST NOT BLOCK. While it runs nothing is reading the
+	//     terminal, so a handler that waits on a turn is a handler that
+	//     has stopped the next keystroke from being decoded.
+	//   - A handler MUST NOT call [Terminal.Close] or [Terminal.Handoff].
+	//     Both JOIN the pump, and the pump cannot join itself. A handler
+	//     that wants the session to end says so to its own owner and
+	//     returns — internal/chat routes an in-band Ctrl-C onto the same
+	//     channel a delivered SIGINT arrives on, which is both
+	//     deadlock-free and the honest description of what the key means.
 	Key func(Key) Disposition
 
 	// Interrupt is offered SIGINT. Read this before implementing it.
@@ -558,12 +634,14 @@ type Handler struct {
 	// (axiom §4.3) — the turn's input is declared a mistake and nothing
 	// from it enters memory.
 	//
-	// While the window is open the abort key is claimed here and is not
-	// offered to Key. [Registration.RevokeAbort] closes it.
+	// While the window is open a BARE Esc is claimed here, at this level
+	// of the offer chain, before Key sees it — which is what makes "Esc
+	// aborts the turn" a property of the registration rather than of every
+	// consumer's switch statement. Alt-Esc is not Esc.
+	// [Registration.RevokeAbort] closes the window.
 	//
-	// Dispatched from W3 (Esc is a decoded key). The WINDOW itself —
-	// opened here, closed by RevokeAbort, observable in
-	// [StateSnapshot.AbortWindow] — is bookkeeping and is live in W1.
+	// It runs on the pump goroutine and [Handler.Key]'s two rules apply to
+	// it unchanged.
 	Abort func()
 }
 
@@ -573,11 +651,17 @@ type Handler struct {
 func (t *Terminal) Push(a Activity, h Handler) *Registration {
 	r := &Registration{t: t, activity: a, handler: h, abort: h.Abort != nil}
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	if r.abort {
 		t.abortWindows++
 	}
 	t.stack = append(t.stack, r)
+	t.mu.Unlock()
+	// Wake the pump: it may be holding type-ahead for the first consumer
+	// to appear, with no read left to return and tell it so.
+	select {
+	case t.wake <- struct{}{}:
+	default:
+	}
 	return r
 }
 
@@ -667,6 +751,23 @@ func plural(n int) string {
 	return "ies"
 }
 
+// retire stops this registration consuming keys WITHOUT releasing it.
+//
+// It exists for one instant: an editor that has just completed a line is
+// still on the stack — its reading goroutine has not returned, let alone
+// popped — and a key arriving in that sliver must fall past it into the
+// pump's reservoir, to be offered to whoever registers next. A consumer
+// that has stopped consuming but still claims is exactly how type-ahead
+// disappears at a handover, which is the defect being removed.
+//
+// Unexported: it is an internal step of one read, not a thing a client may
+// do to its own registration halfway through.
+func (r *Registration) retire() {
+	r.t.mu.Lock()
+	defer r.t.mu.Unlock()
+	r.handler.Key = nil
+}
+
 // RevokeAbort closes the abort window opened by [Handler.Abort].
 //
 // This is C12 form (i): a SINGLE, UNCONDITIONAL, IDEMPOTENT,
@@ -711,7 +812,40 @@ func (r *Registration) RevokeAbort() {
 // the child's interrupt handler on the offer chain. Errors from fn pass
 // through unchanged; a failure to restore or reinstall the mode is
 // reported on [Terminal.Diag] and does not mask fn's result.
-func (t *Terminal) Handoff(fn func() error) error { panic(notImplementedW3) }
+//
+// # ISIG comes back, and that is the point
+//
+// Restoring the ENTRY mode restores ISIG with it, because the entry mode
+// is whatever the user's shell had and shells leave ISIG on. That is not
+// incidental — it is the ruled §4.4 amendment's other half. The child runs
+// in its OWN process group, so the kernel must still generate SIGINT for
+// personant for shell.Runner.Interrupt() to have anything to forward. This
+// is therefore the one mid-session window where a Ctrl-C is a real signal
+// rather than a decoded key, and it is exactly bug 4's territory.
+//
+// # The cursor column is NOT invalidated here
+//
+// [ColumnUnknown] is documented as "after a child owned the fd". A child
+// spawned through this window does not own the fd for OUTPUT: its stdout
+// is a pipe back into [Terminal.Out], so every byte it writes goes through
+// the same serialization point as everything else and term's belief stays
+// current. What it owns is the terminal MODE and the right to read stdin.
+// Forcing ColumnUnknown here would have term assert it does not know
+// something it does. A caller that hands a child the real fd is outside
+// this contract and must say so.
+func (t *Terminal) Handoff(fn func() error) error {
+	reg := t.Push(ActivityChild, Handler{})
+	defer reg.Pop()
+
+	// Joined BEFORE the child starts: nothing in personant may read while
+	// a child — or a pager it spawns — is competing for the same bytes.
+	t.stopPump()
+	t.installMode(ModeEntry)
+	err := fn()
+	t.installMode(ModeSession)
+	t.startPump()
+	return err
+}
 
 // --- Observable state ------------------------------------------------
 
@@ -750,19 +884,18 @@ type StateSnapshot struct {
 	// top. Values, not handlers, deliberately.
 	Stack []Activity
 
-	// Mode is the mode currently installed. [ModeEntry] for the whole of
-	// W1 — see [Open] for why term installs nothing while liner owns the
-	// mode.
+	// Mode is the mode currently installed.
 	Mode ModeIntent
 
 	// ModeInstalls counts installations since Open. The expected value
-	// is a hard number, not a range: 1 at Open, +2 per Handoff, +1 at
-	// Close. Any other value means someone transitioned the mode, which
-	// is bug 3.
+	// is a hard number, not a range: 1 at Open, +2 per [Terminal.Handoff],
+	// +2 per in-band Ctrl-Z, +1 at [Terminal.Close]. Any other value means
+	// someone transitioned the mode, which is bug 3.
 	//
-	// In W1 the expected value is 0 — for the whole session, on both
-	// backends. liner owns the mode until W3; a nonzero here before W3
-	// means term started fighting it.
+	// On a session where term does NOT own the terminal — a pipe, a
+	// redirected end, TERM=dumb — the expected value is 0 for the whole
+	// session, because there is no mode to install and the kernel's line
+	// discipline is doing the editing. See [Open].
 	ModeInstalls int
 
 	// AbortWindow reports whether an abort window is open. Its being
@@ -770,11 +903,16 @@ type StateSnapshot struct {
 	// [Registration.RevokeAbort].
 	AbortWindow bool
 
-	// PumpReading reports whether the input pump is running. It is false
-	// exactly inside a [Terminal.Handoff] window and at no other time.
+	// PumpReading reports whether TERM HOLDS THE READ PATH. It is false
+	// exactly inside a [Terminal.Handoff] window, and after
+	// [Terminal.Close], and at no other time.
 	//
-	// W1 has no pump, so it is false for the whole session. W3 lands it
-	// with the pump.
+	// "The read path" rather than "the pump goroutine" is deliberate, and
+	// it is the parity rule: on a terminal term owns, the read path IS the
+	// pump; off one it is the buffered line reader, which is equally term's
+	// and equally suspended while a child runs. One flag for one fact means
+	// the off-TTY suite can sense an unbalanced Handoff on behalf of a
+	// backend it cannot run.
 	PumpReading bool
 
 	// Column is term's cursor-column belief. See [CursorColumn].
@@ -803,7 +941,7 @@ func (t *Terminal) State() StateSnapshot {
 		Mode:         t.mode,
 		ModeInstalls: t.modeInstalls,
 		AbortWindow:  t.abortWindows > 0,
-		PumpReading:  false, // W3 lands the pump.
+		PumpReading:  t.reading,
 		Column:       t.column,
 		Status:       t.statusText,
 		Violations:   t.violations,
@@ -819,3 +957,9 @@ func (t *Terminal) State() StateSnapshot {
 // window geometry to report. It is a fallback trigger for
 // [Terminal.Size], never a session-level failure (U12).
 var errNotTerminal = errors.New("term: not a terminal")
+
+// errNoEventStream is what the plain backend's [Platform.NextEvent]
+// returns. Off a terminal there are lines, not keystrokes, and the read
+// path is the buffered line reader — so a pump started there stops at once
+// instead of quietly consuming the stream that reader owns.
+var errNoEventStream = errors.New("term: backend produces no key events")
