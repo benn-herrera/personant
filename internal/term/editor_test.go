@@ -531,11 +531,50 @@ func TestReadLine_ContextCancellationReachesAReadInProgress(t *testing.T) {
 
 // --- resize ------------------------------------------------------------
 
+// editorFramePrefixes returns, for each repaint in an emitted stream, the
+// bytes the editor wrote to REACH the block's first row. That prefix is the
+// whole of the resize question, and every frame has exactly one eraseDown
+// and nothing else does, so the erase is where each one ends.
+//
+// A prefix of "\r" (optionally with a cursor-up) is an IN-PLACE repaint. A
+// prefix of "\n" is a FRESH block on a new row — correct after a committed
+// write or a suspend, and the duplicate-input bug when it happens on a
+// resize. "" is the first frame of a session, on a line already at column 0.
+//
+// It reads BACKWARDS from each erase, over a prefix grammar of at most one
+// cursor-up preceded by one "\r". Bounding it is what makes it exact: the
+// previous frame's body also ends in a "\r" and a cursor motion, and a
+// greedy scan would eat them.
+func editorFramePrefixes(t *testing.T, stream string) []string {
+	t.Helper()
+	var out []string
+	for i, end := 0, 0; ; {
+		j := strings.Index(stream[end:], eraseDown)
+		if j < 0 {
+			return out
+		}
+		j += end
+		end = j + len(eraseDown)
+		head := stream[i:j]
+		i = end
+		if k := strings.LastIndex(head, "\x1b["); k >= 0 && strings.HasSuffix(head, "A") &&
+			strings.IndexFunc(head[k+2:len(head)-1], func(r rune) bool { return r < '0' || r > '9' }) < 0 &&
+			k > 0 && head[k-1] == '\r' {
+			out = append(out, head[k-1:])
+			continue
+		}
+		if n := len(head); n > 0 && (head[n-1] == '\r' || head[n-1] == '\n') {
+			out = append(out, head[n-1:])
+			continue
+		}
+		out = append(out, "")
+	}
+}
+
 // A resize mid-edit re-wraps the line at the new width. term consumes the
 // event itself — it is never offered to a handler — and the block is
-// invalidated first, because the terminal re-wrapped every row underneath
-// us and a repaint that moved up by the recorded count would erase
-// somebody else's output.
+// re-wrapped IN PLACE rather than abandoned; see
+// TestEditor_ResizeErasesInPlaceInsteadOfCommittingACopy.
 func TestEditor_ResizeMidEditReWraps(t *testing.T) {
 	const narrow = 20
 	f := newEditorFixture(t, Size{Cols: 80, Rows: editorRows}, nil, []scriptStep{
@@ -558,6 +597,230 @@ func TestEditor_ResizeMidEditReWraps(t *testing.T) {
 	}
 	if row, _ := s.Cursor(); row < 2 {
 		t.Errorf("42 cells at %d columns should occupy 3 rows; cursor is on row %d\n%s", narrow, row, s)
+	}
+}
+
+// THE BUG: a resize used to invalidate the block, so every SIGWINCH painted
+// a FRESH one on a new row and left the old one committed to scrollback. A
+// macOS window drag delivers a burst of them, so one drag produced a stack
+// of stale copies of the line being typed, each wrapped at a different
+// width.
+//
+// The fix is asserted at the BYTE level because it is arithmetic the screen
+// model cannot honestly check: screentest's grid does not reflow, and
+// faking a reflow would make the model agree with whatever the editor did.
+// So the claim here is exactly the claim the editor makes — the resize
+// frame walks UP by a count computed at the NEW width and erases in place —
+// and the reflow itself is the terminal's documented behaviour, stated at
+// [editor.blockTop].
+func TestEditor_ResizeErasesInPlaceInsteadOfCommittingACopy(t *testing.T) {
+	const wide, narrow = 80, 40
+	// 100 runes + "> " = 102 cells: two rows at 80, the cursor on the
+	// second at column 22. Re-wrapped at 40 the first of those rows becomes
+	// two, and the cursor's own 22 columns still fit one — so the block's
+	// first row is 2 rows up, NOT the 1 that was recorded at width 80.
+	recalled := strings.Repeat("x", 100)
+	f := newEditorFixture(t, Size{Cols: wide, Rows: editorRows}, []string{recalled}, []scriptStep{
+		typed("\x1b[A"), // recall it: one frame
+		resized(narrow, editorRows),
+		typed("\r"),
+	})
+	ans, err := readOne(t, f, Question{Prompt: "> "})
+	if err != nil {
+		t.Fatalf("ReadLine: %v", err)
+	}
+	if ans.Text != recalled {
+		t.Fatalf("the resize changed the buffer: %d runes", len(ans.Text))
+	}
+
+	frames := editorFramePrefixes(t, f.screen())
+	// start, the recall, the resize, the final frame.
+	if len(frames) != 4 {
+		t.Fatalf("got %d frames, want 4 (start, recall, resize, finish): %q", len(frames), f.screen())
+	}
+	if want := "\r\x1b[2A"; frames[2] != want {
+		t.Errorf("resize frame = %q, want %q — the walk-up must be computed at the NEW width",
+			frames[2], want)
+	}
+	// The general form of the same claim, and the one that fails loudest on
+	// a regression: only the FIRST frame may open a row of its own.
+	for i, fr := range frames[1:] {
+		if strings.Contains(fr, "\n") {
+			t.Errorf("frame %d starts a fresh block (%q) — that commits a copy of the input",
+				i+1, fr)
+		}
+	}
+}
+
+// The same property through the screen model, at the one width change
+// screentest CAN model honestly: none. A resize burst that does not change
+// the geometry involves no reflow, so the grid is a faithful witness — and
+// it is the burst, not the width change, that multiplied the copies.
+func TestEditor_ResizeBurstAddsNoCommittedRows(t *testing.T) {
+	const width = 40
+	size := Size{Cols: width, Rows: editorRows}
+	recalled := strings.Repeat("y", 60) // 62 cells: two rows at 40
+
+	read := func(script []scriptStep) *screentest.Screen {
+		t.Helper()
+		f := newEditorFixture(t, size, []string{recalled}, script)
+		if _, err := readOne(t, f, Question{Prompt: "> "}); err != nil {
+			t.Fatalf("ReadLine: %v", err)
+		}
+		return replay(t, f, size, f.screen())
+	}
+
+	quiet := read([]scriptStep{typed("\x1b[A\r")})
+	burst := read([]scriptStep{
+		typed("\x1b[A"),
+		resized(width, editorRows),
+		resized(width, editorRows),
+		resized(width, editorRows),
+		typed("\r"),
+	})
+
+	if got, want := burst.TotalRows(), quiet.TotalRows(); got != want {
+		t.Errorf("a 3-resize burst occupied %d rows, want the %d the same edit takes without one\n%s",
+			got, want, burst)
+	}
+	head := "> " + recalled[:width-2]
+	copies := 0
+	for _, row := range burst.All() {
+		if row == head {
+			copies++
+		}
+	}
+	if copies != 1 {
+		t.Errorf("the line's first row appears %d times, want 1 — the burst left stale copies\n%s",
+			copies, burst)
+	}
+}
+
+// The re-wrap arithmetic, pinned at the unit. Each row is one independently
+// verifiable claim: lay the buffer out at the OLD width, then ask how many
+// rows above the cursor the block's first row lands once the terminal has
+// re-wrapped each of those rows — separately, because render emits a '\n'
+// between them and hard-separated lines do not rejoin.
+func TestEditor_BlockTopReWrapArithmetic(t *testing.T) {
+	tests := []struct {
+		name    string
+		line    string
+		cur     int // rune index into line; -1 is the end
+		hint    string
+		rowCap  int
+		edRow   int // what the frame at oldCols recorded
+		oldCols int
+		newCols int
+		want    int
+	}{
+		{
+			// edRow is DELIBERATELY not the row this buffer lays out to:
+			// at an unchanged width the recorded value is returned verbatim,
+			// and nothing is recomputed. That is what keeps the common
+			// repaint — every keystroke — byte-identical to before.
+			name: "unchanged width uses the recorded row and recomputes nothing",
+			line: strings.Repeat("x", 100), cur: -1, rowCap: 10,
+			edRow: 7, oldCols: 80, newCols: 80, want: 7,
+		},
+		{
+			name: "cursor at the end, one full row above it, halved",
+			// 102 cells: rows of 80 and 22, cursor on row 1 col 22.
+			// The 80 becomes two rows; 22 still fits one.
+			line: strings.Repeat("x", 100), cur: -1, rowCap: 10,
+			edRow: 1, oldCols: 80, newCols: 40, want: 2,
+		},
+		{
+			name: "cursor mid-line moves down within its own row",
+			// target 52 on a single row at 80; at 30 that is sub-row 1.
+			line: strings.Repeat("x", 100), cur: 50, rowCap: 10,
+			edRow: 0, oldCols: 80, newCols: 30, want: 1,
+		},
+		{
+			name: "the pending-wrap edge: the row exactly fills the width",
+			// 80 cells at 80 is ONE row plus layout's trailing row for the
+			// cursor. At 40 the full row is two, the cursor's is at col 0.
+			line: strings.Repeat("x", 78), cur: -1, rowCap: 10,
+			edRow: 1, oldCols: 80, newCols: 40, want: 2,
+		},
+		{
+			name: "the cursor lands exactly on a new row boundary",
+			// cursor at col 40 of a single 80-wide row; at 40 that is the
+			// first cell of the second sub-row.
+			line: strings.Repeat("x", 78), cur: 38, rowCap: 10,
+			edRow: 0, oldCols: 80, newCols: 40, want: 1,
+		},
+		{
+			name: "widening never changes the count: rows do not rejoin",
+			// 102 cells at 40 is three rows; at 80 each is still one row.
+			line: strings.Repeat("x", 100), cur: -1, rowCap: 10,
+			edRow: 2, oldCols: 40, newCols: 80, want: 2,
+		},
+		{
+			name: "the row-cap placeholder is a row like any other",
+			// 202 cells at 40, cap 4: [placeholder(33), 40, 40, tail(2)],
+			// cursor on the last. At 20 that is 2 + 2 + 2 rows above it.
+			line: strings.Repeat("x", 200), cur: -1, rowCap: 4,
+			edRow: 3, oldCols: 40, newCols: 20, want: 6,
+		},
+		{
+			name: "the hint row sits BELOW the cursor and does not count",
+			line: "hi", cur: -1, hint: ctrlCHint, rowCap: 10,
+			edRow: 0, oldCols: 40, newCols: 20, want: 0,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &editor{
+				t:       &Terminal{edDrawn: true, edRow: tc.edRow, edCols: tc.oldCols},
+				prompt:  "> ",
+				promptW: 2,
+				line:    []rune(tc.line),
+				hint:    tc.hint,
+				rowCap:  tc.rowCap,
+			}
+			e.cur = tc.cur
+			if tc.cur < 0 {
+				e.cur = len(e.line)
+			}
+			// On the re-wrap path the recorded row must be the one the old
+			// frame really left, or the hand-computed want below rests on a
+			// layout term never draws.
+			if _, curRow, _ := e.layout(tc.oldCols); tc.oldCols != tc.newCols && curRow != tc.edRow {
+				t.Fatalf("fixture: layout at %d cols puts the cursor on row %d, not the recorded %d",
+					tc.oldCols, curRow, tc.edRow)
+			}
+			if got := e.blockTop(tc.newCols); got != tc.want {
+				t.Errorf("blockTop(%d) = %d, want %d", tc.newCols, got, tc.want)
+			}
+		})
+	}
+}
+
+// A return from suspend is the case a resize is NOT: a shell owned the
+// screen and drew whatever it liked over the block, so the rows above the
+// cursor are not known to be the editor's. That path still paints a FRESH
+// block on a new row, and must keep doing so.
+func TestEditor_SuspendStillPaintsAFreshBlock(t *testing.T) {
+	f := newEditorFixture(t, Size{Cols: 80, Rows: editorRows}, nil, []scriptStep{
+		typed("abc"),
+		typed("\x1a"), // Ctrl-Z: consumed by the pump, never offered to a handler
+		typed("\r"),
+	})
+	ans, err := readOne(t, f, Question{Prompt: "> "})
+	if err != nil {
+		t.Fatalf("ReadLine: %v", err)
+	}
+	if ans.Text != "abc" {
+		t.Fatalf("line = %q, want %q — Ctrl-Z reached the buffer", ans.Text, "abc")
+	}
+	frames := editorFramePrefixes(t, f.screen())
+	// start, a, b, c, the resume repaint, finish.
+	if len(frames) != 6 {
+		t.Fatalf("got %d frames, want 6: %q", len(frames), f.screen())
+	}
+	if frames[4] != "\n" {
+		t.Errorf("resume frame = %q, want %q — post-fg the screen is the shell's, not ours",
+			frames[4], "\n")
 	}
 }
 

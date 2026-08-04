@@ -192,7 +192,7 @@ func (t *Terminal) write(ch channel, b []byte) (int, error) {
 	// Committed content ends the editor's claim on its block, whichever
 	// channel carried it: on a terminal both fds are the same tty, and a
 	// Diag line pushes the editor's rows up exactly as an Out line does.
-	t.edDrawn, t.edRow = false, 0
+	t.forgetEditorBlockLocked()
 
 	if ch == chanReasoning {
 		if !t.interactive {

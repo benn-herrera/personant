@@ -278,6 +278,10 @@ func (t *Terminal) suspend() {
 	raise()
 	t.installMode(ModeSession)
 	// The shell drew its own prompt over ours and wrote whatever it liked.
+	// This is the case a resize is NOT: the block's rows are genuinely gone
+	// rather than re-wrapped, nothing above the cursor is known to be ours,
+	// and a fresh paint below is the only honest answer. See
+	// [Terminal.invalidateEditorBlock].
 	t.mu.Lock()
 	t.column = ColumnUnknown
 	ed := t.ed

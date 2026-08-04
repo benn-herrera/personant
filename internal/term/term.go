@@ -270,13 +270,17 @@ type Terminal struct {
 
 	// The read half. hist is the session's one recall store; ed is the
 	// editor currently on the terminal, which the pump needs so a resize
-	// can re-wrap it; edDrawn/edRow are where its block is, which is
+	// can re-wrap it; edDrawn/edRow/edCols are where its block is, which is
 	// TERMINAL state and belongs beside the cursor column (see editor.go).
+	// edCols is the WIDTH the block was laid out at: after a resize it is
+	// what lets the editor find the block's first row again instead of
+	// abandoning it and committing a copy — see [editor.blockTop].
 	// in is the plain path's one buffered reader.
 	hist    *history
 	ed      *editor
 	edDrawn bool
 	edRow   int
+	edCols  int
 	in      *bufio.Reader
 }
 

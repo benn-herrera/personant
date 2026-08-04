@@ -343,17 +343,21 @@ func (e *editor) abandon() {
 	e.t.closeEditorLine()
 }
 
-// refresh repaints after a window resize. The block is invalidated first:
-// the terminal re-wrapped every row underneath us, so the row the cursor
-// is on is no longer the row term recorded, and moving up by a stale count
-// would erase somebody else's output.
+// refresh repaints after a window resize.
+//
+// It deliberately does NOT invalidate the block. Invalidating means "paint
+// a fresh one wherever the cursor now stands", and a fresh paint per
+// SIGWINCH is a COMMITTED COPY of the input per SIGWINCH — a window drag on
+// macOS delivers a burst of them, so a single drag left a stack of stale
+// half-width copies in scrollback. The block is still the editor's after a
+// resize; only its geometry moved, and [editor.blockTop] recomputes where
+// its first row went.
 func (e *editor) refresh() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.finished {
 		return
 	}
-	e.t.invalidateEditorBlock()
 	e.render()
 }
 
@@ -384,14 +388,14 @@ func (e *editor) render() {
 	t.retireStatusLocked()
 	t.endReasoningLocked()
 
-	cols := t.sizeLocked().Cols
+	cols := effectiveCols(t.sizeLocked().Cols)
 	rows, curRow, curCol := e.layout(cols)
 
 	var b strings.Builder
 	if t.edDrawn {
 		b.WriteString("\r")
-		if t.edRow > 0 {
-			fmt.Fprintf(&b, cursorUp, t.edRow)
+		if up := e.blockTop(cols); up > 0 {
+			fmt.Fprintf(&b, cursorUp, up)
 		}
 	} else if t.column != ColumnStart {
 		// Committed content did not end its line (or a child owned the fd
@@ -414,8 +418,73 @@ func (e *editor) render() {
 		fmt.Fprintf(&b, cursorRight, curCol)
 	}
 	t.emitControlLocked(b.String())
-	t.edDrawn, t.edRow = true, curRow
+	t.edDrawn, t.edRow, t.edCols = true, curRow, cols
 	t.column = ColumnMid
+}
+
+// blockTop reports how many rows above the cursor the drawn block's first
+// row sits. Callers hold e.mu and t.mu.
+//
+// While the width is unchanged that is just t.edRow — the row the previous
+// frame left the cursor on, recorded rather than derived. After a RESIZE it
+// is not: the terminal re-wrapped the rows underneath us.
+//
+// # The arithmetic follows what render EMITS, not what it lays out
+//
+// [editor.render] writes a '\n' BETWEEN rows, and [ModeSession] leaves
+// OPOST on, so each of those is a CR/LF and every row of the block is its
+// own logical line as far as the terminal is concerned. A reflowing
+// terminal therefore re-wraps each row INDEPENDENTLY and never rejoins two
+// of them: the block's new height is the SUM of the per-row heights, not
+// one line's worth of wrap arithmetic over prompt+cursor. Widening cannot
+// change the count at all (every row was already at most one screen row
+// wide, and hard-separated rows do not merge); only narrowing does.
+//
+// # Two things it relies on, both stated rather than assumed
+//
+// The editor's buffer cannot have moved since the frame drawn at t.edCols:
+// every mutation ends in a render, and the key path and the resize path are
+// the same (pump) goroutine. Laying the buffer out again at the OLD width
+// therefore reproduces the rows that are on the screen.
+//
+// And the terminal reflows. Every terminal personant targets on darwin and
+// linux does (Terminal.app, iTerm2, kitty, ghostty, wezterm, Zed). One that
+// does NOT — tmux is the notable case — leaves the rows where they were, so
+// on a NARROWING resize this walks up too far and erases a row above the
+// block. That is the trade taken deliberately: the alternative is the stale
+// copy per SIGWINCH that this replaces, which every terminal got.
+func (e *editor) blockTop(cols int) int {
+	t := e.t
+	if t.edCols == cols {
+		return t.edRow
+	}
+	rows, curRow, curCol := e.layout(t.edCols)
+	up := curCol / cols
+	for _, r := range rows[:curRow] {
+		up += wrapRows(cellWidth(r), cols)
+	}
+	return up
+}
+
+// wrapRows is how many screen rows a logical line of n cells occupies at
+// width w. n == w is ONE row, not two: writing the final column leaves the
+// terminal in pending wrap, where the wrap has not happened yet — the same
+// edge [editor.layout]'s trailing row exists for.
+func wrapRows(n, w int) int {
+	if n <= w {
+		return 1
+	}
+	return (n + w - 1) / w
+}
+
+// effectiveCols is the width to lay out at — the ONE place the missing
+// geometry falls back, so a block's recorded width and the width it was
+// wrapped at cannot disagree.
+func effectiveCols(cols int) int {
+	if cols < 1 {
+		return DefaultCols
+	}
+	return cols
 }
 
 // layout wraps prompt+line into rendered rows and reports which cell of
@@ -427,9 +496,7 @@ func (e *editor) render() {
 // cursor somewhere to be. Every other line editor that gets this right
 // does the same thing.
 func (e *editor) layout(cols int) (rows []string, curRow, curCol int) {
-	if cols < 1 {
-		cols = DefaultCols
-	}
+	cols = effectiveCols(cols)
 	cells := make([]rune, 0, e.promptW+len(e.line))
 	cells = append(cells, []rune(e.prompt)...)
 	cells = append(cells, e.line...)
@@ -474,19 +541,27 @@ func (t *Terminal) closeEditorLine() {
 		t.emitControlLocked("\n")
 	}
 	t.column = ColumnStart
-	t.edDrawn, t.edRow = false, 0
+	t.forgetEditorBlockLocked()
 }
 
 // invalidateEditorBlock forgets where the block is, so the next render
-// starts a new one wherever the cursor now stands. It is called by every
-// COMMITTED write (see [Terminal.write]) and by a resize: both mean the
-// rows the editor drew are no longer the rows above the cursor, and a
-// repaint that moved up by the recorded count would erase content that is
-// not the editor's to take back.
+// starts a new one wherever the cursor now stands. Two callers, and both
+// mean the rows the editor drew are genuinely no longer the rows above the
+// cursor: every COMMITTED write (see [Terminal.write]), which scrolled them
+// away, and a return from suspend, after a shell owned the screen.
+//
+// A RESIZE is deliberately NOT one of them. The rows moved, but they are
+// still the editor's and it can still find them — see [editor.blockTop].
+// Invalidating there committed a stale copy of the input on every SIGWINCH.
 func (t *Terminal) invalidateEditorBlock() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.edDrawn, t.edRow = false, 0
+	t.forgetEditorBlockLocked()
+}
+
+// forgetEditorBlockLocked drops the block's position. Callers hold t.mu.
+func (t *Terminal) forgetEditorBlockLocked() {
+	t.edDrawn, t.edRow, t.edCols = false, 0, 0
 }
 
 // inputRowCap resolves [Options.InputRowCap] against the current geometry.
