@@ -399,8 +399,9 @@ In progress:
   `boundToolResultDeltas` is now **`boundTaskResultDeltas`** and covers
   `user.shell-capture` too, deliberately NOT the task-class `fs.*` deltas
   whose content is the stored file body.
-  **Wave 3 landed the two real tools** (`internal/tools/web`), the first
-  entries the registry ever ships with:
+  **Wave 3 landed the first real tools** (`internal/tools/web`), the first
+  entries the registry ever ships with — `web.fetch` and `web.search`,
+  joined later by `web.wikipedia`:
   - **`web.fetch`** — plain GET → readability extraction → Markdown, with
     NO headless browser. Scheme allowlist is `http`/`https` only, on the
     initial URL and every redirect hop: it blocks `file://`, `data:`,
@@ -426,7 +427,20 @@ In progress:
     existing `tool.error` event for logging. Counters are in-process: the
     per-turn cap is exact (keyed on the turn number the loop puts on the
     tool context), the per-day cap resets on restart.
-  - Tier ruling for both (SPEC §6.2.7, closing a real spec gap): **tier 0
+  - **`web.wikipedia`** (added 2026-08-05, SPEC §6.1.5) — a search tool
+    scoped to one encyclopedia, over the Wikimedia REST
+    `search/page` endpoint. Deliberately a SEPARATE tool rather than a
+    `SearchProvider` backend: encyclopedia-vs-open-web is the MODEL's
+    per-call judgement, and a config pin would make it ours, once, at
+    startup. Needs no credential, so it registers unconditionally like
+    `web.fetch`. It reuses the local-cap mechanism on its OWN counter with
+    the same 5/100 defaults (unmetered kills the *cost* argument for a
+    cap, not the *loop* argument), holds to `web.search`'s
+    failed-vs-empty trichotomy, strips the endpoint's
+    `<span class="searchmatch">` markup and entities in one tokenizer
+    pass, and concatenates the returned `key` into
+    `https://en.wikipedia.org/wiki/<key>` WITHOUT re-encoding it.
+  - Tier ruling for the three (SPEC §6.2.7, closing a real spec gap): **tier 0
     (silent), with the scheme allowlist as the boundary instead of an
     ack** — a user cannot meaningfully adjudicate whether a URL is an
     internal-network probe, and a prompt they learn to clear is worse
@@ -908,3 +922,24 @@ here — it is fast unit-grade and runs in the default suite.
   5. **Prefer in-process contention.** `go test -cpu 8,8,...` and
      `-count` create scheduler pressure inside the test process and leak
      nothing; external burners are a last resort, and carry rules 1–4.
+- **Free-API citizenship is a HARD REQUIREMENT (user ruling, 2026-08-05).**
+  Personant complies with ALL etiquette and required behaviors of every
+  free/volunteer/donor-funded API it consumes — we will not abuse the
+  generosity of volunteer and donor offerings. Binding consequences for
+  any tool that talks to such a service:
+  1. **Read the service's published policy before coding against it**,
+     and record the specific obligations in the tool's doc comment
+     (e.g. Wikimedia's User-Agent policy REQUIRES contact information
+     and is enforced; Crossref's `mailto` routes to the polite pool;
+     arXiv asks ~3s between requests).
+  2. **Descriptive User-Agent with contact info**, sourced from config —
+     never compiled-in personal data. Tools whose service REQUIRES
+     contact info REFUSE to run without it configured, with a message
+     naming the config key; silent non-compliance is not a fallback.
+  3. **Serial requests per host as a stated guarantee**, plus any
+     service-specific minimum spacing, honored via a shared per-host
+     politeness table — one mechanism, not per-tool re-implementations.
+  4. **Honor `429`/`503` `Retry-After`**: one honest retry after the
+     stated delay, then a clean tool error. Never hammer through.
+  5. **Local per-tool query caps** so an agent loop cannot convert one
+     user request into unbounded upstream load.
