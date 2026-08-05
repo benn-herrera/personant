@@ -319,6 +319,79 @@ func TestHistoryFileRoundTrip(t *testing.T) {
 	}
 }
 
+// A MULTI-LINE entry round-trips without corrupting the file or the
+// entries around it. The file is a positional list of lines, so an
+// unescaped newline would not merely mangle the new entry — it would split
+// it into two and shift every older entry's meaning.
+//
+// The content here is deliberately adversarial to the encoding: a newline,
+// a literal backslash, and the two-character sequence backslash-'n' that
+// the escaped newline is spelled with.
+func TestHistoryFile_MultiLineEntriesRoundTrip(t *testing.T) {
+	hp := filepath.Join(t.TempDir(), "history")
+	entries := []string{
+		"before",
+		"summarise:\nalpha\nbeta",
+		`a windows path C:\temp and a literal \n typed by hand`,
+		"after",
+	}
+
+	h1 := loadHistory(hp)
+	for _, e := range entries {
+		h1.add(e)
+	}
+	if err := h1.flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	// One line of the FILE per entry: that is the format, and it is what an
+	// embedded newline would break.
+	if got, want := strings.Count(readFile(t, hp), "\n"), len(entries); got != want {
+		t.Errorf("file has %d lines, want %d — an entry split itself\n%q", got, want, readFile(t, hp))
+	}
+
+	h2 := loadHistory(hp)
+	if len(h2.entries) != len(entries) {
+		t.Fatalf("reloaded %d entries, want %d: %q", len(h2.entries), len(entries), h2.entries)
+	}
+	for i, want := range entries {
+		if h2.entries[i] != want {
+			t.Errorf("entry %d = %q, want %q", i, h2.entries[i], want)
+		}
+	}
+
+	// And the encoded form is STABLE: a second write of the same store
+	// produces the same bytes, so backslashes cannot accumulate across
+	// sessions.
+	first := readFile(t, hp)
+	if err := h2.flush(); err != nil {
+		t.Fatalf("reflush: %v", err)
+	}
+	if second := readFile(t, hp); second != first {
+		t.Errorf("re-encoding changed the file:\n first  %q\n second %q", first, second)
+	}
+}
+
+// Dedup and the blank-line drop operate on the DECODED entry, which is the
+// only form that means anything: two identical multi-line drafts are one
+// entry, and two that differ only past their first newline are two.
+func TestHistory_DedupOnDecodedMultiLineEntries(t *testing.T) {
+	h := &history{}
+	h.add("draft:\nalpha")
+	h.add("draft:\nalpha") // consecutive duplicate — dropped
+	h.add("draft:\nbeta")  // differs only after the newline — kept
+	h.add("\n  \n")        // whitespace and newlines only — dropped
+	want := []string{"draft:\nalpha", "draft:\nbeta"}
+	if len(h.entries) != len(want) {
+		t.Fatalf("entries = %q, want %q", h.entries, want)
+	}
+	for i := range want {
+		if h.entries[i] != want[i] {
+			t.Errorf("entry %d = %q, want %q", i, h.entries[i], want[i])
+		}
+	}
+}
+
 // The §4.3.1 cap, asserted at its own boundary rather than by writing a
 // thousand lines through an editor: the store drops the OLDEST, so what a
 // user can still recall is the most recent HistoryLimit lines.

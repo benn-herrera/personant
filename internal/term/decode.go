@@ -139,9 +139,24 @@ func decodeCSI(p []byte, expired bool) (Key, int, decodeStatus) {
 	return k, i + 1, decodeEmit
 }
 
-// csiKey maps a final byte (and, for "~", its leading parameter) to this
-// package's minimal vocabulary. Modifier parameters are ignored rather
-// than encoded: [Key] carries no modifier field but Alt, deliberately.
+// The kitty CSI-u modifier parameter is 1 + a bitmask, so an unmodified
+// key is 1, Shift is 2 and Alt is 3. Only these two bits are read; Ctrl,
+// Super and the rest fall through to the unmodified key, which is what
+// this vocabulary would have reported for them anyway.
+const (
+	csiModShift = 1 << 0
+	csiModAlt   = 1 << 1
+
+	// csiCodeEnter is CR, the only CSI-u keycode this package interprets.
+	// See [KeyShiftEnter] for why Shift+Enter is the one modifier
+	// combination that earns a name.
+	csiCodeEnter = 13
+)
+
+// csiKey maps a final byte (and, for "~" and "u", its parameters) to this
+// package's minimal vocabulary. Modifier parameters are otherwise ignored
+// rather than encoded: [Key] carries no modifier field but Alt,
+// deliberately.
 func csiKey(params []byte, final byte) (Key, bool) {
 	switch final {
 	case 'A':
@@ -157,7 +172,7 @@ func csiKey(params []byte, final byte) (Key, bool) {
 	case 'F':
 		return Key{Name: KeyEnd}, true
 	case '~':
-		switch leadingParam(params) {
+		switch csiParam(params, 0) {
 		case 1, 7:
 			return Key{Name: KeyHome}, true
 		case 3:
@@ -165,20 +180,47 @@ func csiKey(params []byte, final byte) (Key, bool) {
 		case 4, 8:
 			return Key{Name: KeyEnd}, true
 		}
+	case 'u':
+		// The enhanced-keyboard (kitty CSI-u) form, for the one keycode
+		// that changes what personant does with it. A terminal that has the
+		// protocol enabled sends Alt+Enter this way too, so decoding the
+		// Alt bit here is not extra vocabulary — it is what keeps the
+		// universal line-break key working on the very terminals that can
+		// also send Shift+Enter.
+		if csiParam(params, 0) != csiCodeEnter {
+			break
+		}
+		mods := max(csiParam(params, 1)-1, 0)
+		if mods&csiModShift != 0 {
+			return Key{Name: KeyShiftEnter}, true
+		}
+		return Key{Name: KeyEnter, Alt: mods&csiModAlt != 0}, true
 	}
 	return Key{}, false
 }
 
-// leadingParam reads the first numeric parameter, or 0 when there is none.
-func leadingParam(params []byte) int {
-	n := 0
+// csiParam reads the i-th semicolon-separated numeric parameter, or 0 when
+// there is none. Sub-parameters (the ':' form) are not in this vocabulary
+// and read as absent.
+func csiParam(params []byte, i int) int {
+	n, field := 0, 0
 	for _, c := range params {
-		if c < '0' || c > '9' {
-			break
+		switch {
+		case c == ';':
+			if field == i {
+				return n
+			}
+			field, n = field+1, 0
+		case c >= '0' && c <= '9':
+			n = n*10 + int(c-'0')
+		default:
+			return 0
 		}
-		n = n*10 + int(c-'0')
 	}
-	return n
+	if field == i {
+		return n
+	}
+	return 0
 }
 
 // decodeSS3 interprets "ESC O <final>" — the application-cursor-key form

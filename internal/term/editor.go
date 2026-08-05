@@ -33,6 +33,30 @@ import (
 // write invalidates the block (it scrolled the editor's rows out from
 // under it), and the write path must be able to say so without reaching
 // into the editor and inverting the lock order.
+//
+// # Multi-line input, and the terminal reality behind its keys
+//
+// The buffer takes '\n' as an ordinary rune and [editor.layout] treats it
+// as a hard row break — a SECOND cause of a row break beside width
+// wrapping, over the same rendering machinery. Everything else follows
+// from that: ←/→ cross a newline like any other rune, Backspace and Delete
+// remove it as one rune, the row cap and the placeholder are unchanged,
+// and submitting returns the whole buffer with its newlines intact.
+//
+// TWO keys insert one, and the reason there are two is not preference:
+//
+//   - Alt/Option+Enter, {KeyEnter, Alt: true}. The UNIVERSAL one. Every
+//     terminal encodes it as ESC CR and the decoder has always told it
+//     apart from a bare Enter.
+//   - Shift+Enter, [KeyShiftEnter], which a terminal can only report under
+//     an enhanced keyboard protocol — legacy input gives Enter and
+//     Shift+Enter the same byte, 0x0D, and personant deliberately does not
+//     request a protocol that would change that (see [KeyShiftEnter]). It
+//     therefore works only where the user has configured their terminal to
+//     send a distinguishable sequence; SPEC §4.3.1 carries the recipe.
+//
+// Bare Enter submits, always. That asymmetry is the whole point: the key
+// that ends the read must be the one every terminal agrees about.
 
 const (
 	// ctrlCHint is the transient line a Ctrl-C at an EMPTY prompt draws
@@ -157,13 +181,17 @@ func (e *editor) key(k Key) Disposition {
 
 	switch k.Name {
 	case KeyEnter:
-		e.finish(string(e.line), 0, nil)
-		return Claimed
+		if !k.Alt {
+			e.finish(string(e.line), 0, nil)
+			return Claimed
+		}
+		e.insert('\n') // Alt+Enter: the universal line break
+	case KeyShiftEnter:
+		e.insert('\n')
 	case KeyCtrl:
 		return e.control(k.Rune)
 	case KeyRune:
-		e.line = slices.Insert(e.line, e.cur, k.Rune)
-		e.cur++
+		e.insert(k.Rune)
 	case KeyBackspace:
 		if e.cur > 0 {
 			e.line = slices.Delete(e.line, e.cur-1, e.cur)
@@ -176,9 +204,9 @@ func (e *editor) key(k Key) Disposition {
 	case KeyRight:
 		e.moveBy(1)
 	case KeyHome:
-		e.cur = 0
+		e.cur = e.lineStart()
 	case KeyEnd:
-		e.cur = len(e.line)
+		e.cur = e.lineEnd()
 	case KeyUp:
 		e.walkHistory(-1)
 	case KeyDown:
@@ -207,14 +235,19 @@ func (e *editor) control(r rune) Disposition {
 		}
 		e.deleteForward()
 	case 'a':
-		e.cur = 0
+		e.cur = e.lineStart()
 	case 'e':
-		e.cur = len(e.line)
+		e.cur = e.lineEnd()
 	case 'b':
 		e.moveBy(-1)
 	case 'f':
 		e.moveBy(1)
 	case 'k':
+		// The two kills stay BUFFER-scoped where Home/End are line-scoped,
+		// and the asymmetry is deliberate: motion is about where you are
+		// typing, but a kill is how a recalled multi-line entry gets cleared,
+		// and a Ctrl-U that emptied one segment of six would make clearing a
+		// block a repeated keystroke.
 		e.line = e.line[:e.cur]
 	case 'u':
 		e.line = slices.Delete(e.line, 0, e.cur)
@@ -256,10 +289,48 @@ func (e *editor) interrupt() Disposition {
 	return Claimed
 }
 
+// insert puts one rune at the cursor. '\n' goes in like any other: the
+// buffer is a flat rune slice and the row break is a rendering fact, not a
+// data-structure one — which is what keeps every motion, kill and deletion
+// below unaware that multi-line input exists.
+func (e *editor) insert(r rune) {
+	e.line = slices.Insert(e.line, e.cur, r)
+	e.cur++
+}
+
+// moveBy is rune motion, so ←/→ cross an embedded newline exactly as they
+// cross any other rune — the cursor passes from the end of one logical
+// line to the start of the next in one press, with nothing to special-case.
 func (e *editor) moveBy(d int) {
 	if n := e.cur + d; n >= 0 && n <= len(e.line) {
 		e.cur = n
 	}
+}
+
+// lineStart and lineEnd bound the LOGICAL LINE the cursor is on: the run
+// between two embedded newlines, or between one and an end of the buffer.
+//
+// That is the choice Home/End and Ctrl-A/Ctrl-E make, and it is the
+// readline one: in a multi-line buffer "the line" is the segment you are
+// typing on, not the whole draft. Buffer ends stay reachable — they are
+// the segment ends of the first and last segments — and the kills are
+// deliberately not scoped this way; see [editor.control].
+func (e *editor) lineStart() int {
+	for i := e.cur; i > 0; i-- {
+		if e.line[i-1] == '\n' {
+			return i
+		}
+	}
+	return 0
+}
+
+func (e *editor) lineEnd() int {
+	for i := e.cur; i < len(e.line); i++ {
+		if e.line[i] == '\n' {
+			return i
+		}
+	}
+	return len(e.line)
 }
 
 func (e *editor) deleteForward() {
@@ -490,25 +561,49 @@ func effectiveCols(cols int) int {
 // layout wraps prompt+line into rendered rows and reports which cell of
 // which row the cursor occupies.
 //
-// The row count is len/cols + 1, ALWAYS: a line that exactly fills its
-// last row leaves the terminal in pending wrap, where the cursor has no
-// addressable cell, so the trailing (often empty) row is what gives the
-// cursor somewhere to be. Every other line editor that gets this right
-// does the same thing.
+// # Two causes of a row break, one row list
+//
+// A row ends either because the text ran out of columns (a soft wrap) or
+// because the buffer holds a '\n' (a hard break). They produce the same
+// thing — one more entry in rows — because [editor.render] emits a '\n'
+// BETWEEN every pair of rows regardless, so the terminal already treats
+// each rendered row as its own logical line. That is also why
+// [editor.blockTop]'s re-wrap arithmetic needs no change: it sums per-row
+// heights, and a hard-broken row was already a row that cannot rejoin its
+// neighbour.
+//
+// # The trailing row, and where it is NOT
+//
+// The LAST logical line lays out to len/cols + 1 rows, ALWAYS: a line that
+// exactly fills its final row leaves the terminal in pending wrap, where
+// the cursor has no addressable cell, so the trailing (often empty) row is
+// what gives it somewhere to be. Every other line editor that gets this
+// right does the same thing.
+//
+// A logical line with a hard break after it gets NO such row: the break
+// itself moves the cursor off the filled row, and an extra row there would
+// draw a blank line the user never typed. The one consequence is at the
+// pending-wrap edge — a cursor sitting at the end of a hard-broken line
+// that exactly fills the width renders at column 0 of the row below, which
+// is where a terminal would put the next glyph anyway.
 func (e *editor) layout(cols int) (rows []string, curRow, curCol int) {
 	cols = effectiveCols(cols)
-	cells := make([]rune, 0, e.promptW+len(e.line))
-	cells = append(cells, []rune(e.prompt)...)
-	cells = append(cells, e.line...)
+	lines, curLine, curCell := e.logicalLines()
 
-	n := len(cells)/cols + 1
-	rows = make([]string, 0, n+1)
-	for i := range n {
-		lo := min(i*cols, len(cells))
-		rows = append(rows, string(cells[lo:min(lo+cols, len(cells))]))
+	rows = make([]string, 0, len(lines)+1)
+	for i, l := range lines {
+		n := wrapRows(len(l), cols)
+		if i == len(lines)-1 {
+			n = len(l)/cols + 1 // the trailing row, on the last line only
+		}
+		if i == curLine {
+			curRow, curCol = len(rows)+curCell/cols, curCell%cols
+		}
+		for r := range n {
+			lo := min(r*cols, len(l))
+			rows = append(rows, string(l[lo:min(lo+cols, len(l))]))
+		}
 	}
-	target := e.promptW + e.cur
-	curRow, curCol = target/cols, target%cols
 
 	// The row cap (arbitration item 6). Without it a 5000-rune line
 	// recalled with ↑ at width 40 is 125 rows repainted on EVERY keystroke,
@@ -527,6 +622,33 @@ func (e *editor) layout(cols int) (rows []string, curRow, curCol int) {
 		rows = append(rows, truncateCells(e.hint, cols-StatusColumnInset))
 	}
 	return rows, curRow, curCol
+}
+
+// logicalLines splits prompt+buffer at every embedded newline, and reports
+// which of those lines the cursor is on and how many cells into it.
+//
+// The prompt belongs to the FIRST line and to no other: it is drawn once,
+// and a continuation row of a multi-line entry starts at column 0. That is
+// the one asymmetry the cursor arithmetic above has to carry.
+func (e *editor) logicalLines() (lines [][]rune, curLine, curCell int) {
+	first := make([]rune, 0, e.promptW+len(e.line))
+	lines = [][]rune{append(first, []rune(e.prompt)...)}
+	curLine, curCell = 0, len(lines[0])
+	for i, r := range e.line {
+		last := len(lines) - 1
+		if i == e.cur {
+			curLine, curCell = last, len(lines[last])
+		}
+		if r == '\n' {
+			lines = append(lines, nil)
+			continue
+		}
+		lines[last] = append(lines[last], r)
+	}
+	if e.cur >= len(e.line) {
+		curLine, curCell = len(lines)-1, len(lines[len(lines)-1])
+	}
+	return lines, curLine, curCell
 }
 
 // --- the Terminal half of the editor's state ---------------------------

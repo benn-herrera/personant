@@ -3,6 +3,7 @@ package term
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -37,7 +38,10 @@ func newEditorFixture(t *testing.T, size Size, hist []string, script []scriptSte
 		path := filepath.Join(t.TempDir(), "history")
 		body := ""
 		for _, h := range hist {
-			body += h + "\n"
+			// Through the file's own encoding: one entry is one LINE, so a
+			// seeded multi-line entry must be escaped exactly as a flush
+			// would write it. See history.go.
+			body += encodeEntry(h) + "\n"
 		}
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatalf("seed history: %v", err)
@@ -195,7 +199,6 @@ func TestEditor_EditingKeys(t *testing.T) {
 		{"ctrl-w skips trailing spaces first", "one two   \x17\r", "one "},
 		{"ctrl-d with text deletes forward", "abc\x01\x04\r", "bc"},
 		{"tab does nothing — there is no completion", "ab\tc\r", "abc"},
-		{"esc at a prompt is not an abort and not a glyph", "ab\x1b\r", "ab"},
 		{"an unbound control key is swallowed", "ab\x0ec\r", "abc"},
 	}
 	for _, tc := range tests {
@@ -219,6 +222,201 @@ func TestEditor_EditingKeys(t *testing.T) {
 				t.Errorf("the line on screen = %q, want %q\n%s", got, want, s)
 			}
 		})
+	}
+}
+
+// Esc at a prompt is NOT an abort and NOT a glyph: retraction is a
+// property of a turn in flight, and a line being typed has nothing to
+// retract.
+//
+// It needs its own test rather than a row in the table above because it
+// needs an EXPIRY: a bare Esc is proven by silence, and "\x1b\r" in one
+// read is not Esc-then-Enter at all — it is ESC CR, which is how every
+// terminal encodes Alt+Enter and which now inserts a line break.
+func TestEditor_BareEscAtThePromptIsNeitherAbortNorGlyph(t *testing.T) {
+	size := Size{Cols: 80, Rows: editorRows}
+	f := newEditorFixture(t, size, nil, []scriptStep{typed("ab\x1b"), idle(), typed("\r")})
+	ans, err := readOne(t, f, Question{Prompt: "> "})
+	if err != nil {
+		t.Fatalf("ReadLine: %v", err)
+	}
+	if ans.Text != "ab" {
+		t.Errorf("line = %q, want %q", ans.Text, "ab")
+	}
+}
+
+// --- multi-line input (§4.3.1) -----------------------------------------
+
+// The two keys that insert a line break, each driven as the BYTES its
+// terminal sends. Alt+Enter is the universal one (ESC CR, every terminal);
+// the CSI-u form arrives only from a terminal configured to distinguish
+// Shift+Enter, which is the whole reason the universal one exists.
+//
+// The screen assertion is the half that matters: a '\n' in the buffer must
+// come out as a ROW BREAK in the rendered block, never as a raw byte in
+// the stream — and screentest fails closed on a raw one.
+func TestEditor_LineBreakKeysInsertARowBreak(t *testing.T) {
+	const width = 40
+	size := Size{Cols: width, Rows: editorRows}
+	tests := []struct {
+		name   string
+		script string
+	}{
+		{"alt+enter, the universal ESC CR form", "abc\x1b\rdef\r"},
+		{"shift+enter, the CSI-u form", "abc\x1b[13;2udef\r"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newEditorFixture(t, size, nil, []scriptStep{typed(tc.script), idle()})
+			ans, err := readOne(t, f, Question{Prompt: "> "})
+			if err != nil {
+				t.Fatalf("ReadLine: %v", err)
+			}
+			if ans.Text != "abc\ndef" {
+				t.Fatalf("line = %q, want %q", ans.Text, "abc\ndef")
+			}
+			s := liveScreen(t, f, size)
+			if got := s.Row(0); got != "> abc" {
+				t.Errorf("row 0 = %q, want %q\n%s", got, "> abc", s)
+			}
+			// The continuation row starts at column 0: the prompt is drawn
+			// once and belongs to the first logical line only.
+			if got := s.Row(1); got != "def" {
+				t.Errorf("row 1 = %q, want %q\n%s", got, "def", s)
+			}
+			if row, col := s.Cursor(); row != 1 || col != 3 {
+				t.Errorf("cursor at (%d,%d), want (1,3) — after the last rune of row 1\n%s", row, col, s)
+			}
+		})
+	}
+}
+
+// Bare Enter SUBMITS, and it submits the whole buffer with its newlines
+// intact. The asymmetry with Alt/Shift+Enter is the point: the key that
+// ends the read is the one every terminal agrees about.
+func TestEditor_BareEnterSubmitsTheWholeMultiLineBuffer(t *testing.T) {
+	size := Size{Cols: 40, Rows: editorRows}
+	f := newEditorFixture(t, size, nil, []scriptStep{typed("one\x1b\rtwo\x1b\rthree\r"), idle()})
+	ans, err := readOne(t, f, Question{Prompt: "> "})
+	if err != nil {
+		t.Fatalf("ReadLine: %v", err)
+	}
+	if want := "one\ntwo\nthree"; ans.Text != want {
+		t.Errorf("line = %q, want %q", ans.Text, want)
+	}
+}
+
+// Motion and deletion over an embedded newline. Each row is one claim
+// about the buffer, which is what the user would notice being wrong.
+//
+// ←/→ cross a newline like any other rune, Backspace removes it as ONE
+// rune, and Home/End bound the LOGICAL LINE the cursor is on rather than
+// the whole buffer — while Ctrl-U, deliberately, does not.
+func TestEditor_MultiLineMotionAndDeletion(t *testing.T) {
+	tests := []struct {
+		name   string
+		script string
+		want   string
+	}{
+		{"← crosses the newline backwards", "ab\x1b\rc\x1b[D\x1b[Dx\r", "abx\nc"},
+		{"→ crosses the newline forwards", "ab\x1b\rc\x1b[H\x1b[D\x1b[Cx\r", "ab\nxc"},
+		{"backspace deletes the newline as one rune", "ab\x1b\rc\x1b[D\x7f\r", "abc"},
+		{"delete forward removes the newline", "ab\x1b\rc\x1b[D\x1b[D\x1b[3~\r", "abc"},
+		{"home goes to the start of the CURRENT line", "ab\x1b\rcd\x1b[Hx\r", "ab\nxcd"},
+		{"end goes to the end of the CURRENT line", "ab\x1b\rcd\x1b[H\x1b[Fy\r", "ab\ncdy"},
+		{"ctrl-a and ctrl-e are line-scoped too", "ab\x1b\rcd\x01x\x05y\r", "ab\nxcdy"},
+		{"home on the first line still reaches the buffer start", "ab\x1b[Hx\r", "xab"},
+		{"ctrl-u is buffer-scoped: it clears the whole draft", "ab\x1b\rcd\x15\r", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newEditorFixture(t, Size{Cols: 40, Rows: editorRows}, nil,
+				[]scriptStep{typed(tc.script), idle()})
+			ans, err := readOne(t, f, Question{Prompt: "> "})
+			if err != nil {
+				t.Fatalf("ReadLine: %v", err)
+			}
+			if ans.Text != tc.want {
+				t.Errorf("line = %q, want %q", ans.Text, tc.want)
+			}
+		})
+	}
+}
+
+// ↑ recall of a multi-line entry renders the WHOLE block — every logical
+// line on its own row, no truncation marker — and returns it unchanged.
+// This is bug 2's rendering claim over the second row-break cause.
+func TestEditor_RecalledMultiLineEntryRendersEveryRow(t *testing.T) {
+	const width = 40
+	size := Size{Cols: width, Rows: editorRows}
+	recalled := "summarise the following:\nalpha beta gamma\ndelta epsilon"
+
+	f := newEditorFixture(t, size, []string{recalled}, []scriptStep{typed("\x1b[A\r")})
+	ans, err := readOne(t, f, Question{Prompt: "> "})
+	if err != nil {
+		t.Fatalf("ReadLine: %v", err)
+	}
+	if ans.Text != recalled {
+		t.Fatalf("recalled %q, want %q", ans.Text, recalled)
+	}
+
+	s := liveScreen(t, f, size)
+	if strings.Contains(strings.Join(s.All(), ""), "{") {
+		t.Errorf("a truncation marker reached the screen — bug 2's rendering\n%s", s)
+	}
+	for i, want := range []string{"> summarise the following:", "alpha beta gamma", "delta epsilon"} {
+		if got := s.Row(i); got != want {
+			t.Errorf("row %d = %q, want %q\n%s", i, got, want, s)
+		}
+	}
+	if row, col := s.Cursor(); row != 2 || col != len("delta epsilon") {
+		t.Errorf("cursor at (%d,%d), want (2,%d)\n%s", row, col, len("delta epsilon"), s)
+	}
+	if s.Scrolls() != 0 {
+		t.Errorf("a 3-row entry scrolled a 24-row screen %d time(s)\n%s", s.Scrolls(), s)
+	}
+}
+
+// The row cap counts HARD-BROKEN rows exactly like wrapped ones: a tall
+// multi-line entry collapses to the placeholder plus the cursor's own
+// rows, and the buffer is returned whole. The cap bounds what is RENDERED
+// — content taller than the terminal cannot be erased — never what the
+// user gets back.
+func TestEditor_InputRowCapCountsHardBreaks(t *testing.T) {
+	size := Size{Cols: 40, Rows: 8} // cap = min(10, Rows-2) = 6
+	lines := make([]string, 20)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %02d", i)
+	}
+	tall := strings.Join(lines, "\n")
+
+	f := newEditorFixture(t, size, []string{tall}, []scriptStep{typed("\x1b[A\r")})
+	ans, err := readOne(t, f, Question{Prompt: "> "})
+	if err != nil {
+		t.Fatalf("ReadLine: %v", err)
+	}
+	if ans.Text != tall {
+		t.Fatalf("the cap truncated the ANSWER: %d runes, want %d", len(ans.Text), len(tall))
+	}
+
+	s := liveScreen(t, f, size)
+	drawn := 0
+	for _, r := range s.Rows() {
+		if r != "" {
+			drawn++
+		}
+	}
+	if cap := f.t.inputRowCap(); drawn > cap {
+		t.Errorf("rendered %d rows, want at most the cap of %d\n%s", drawn, cap, s)
+	}
+	if !strings.Contains(strings.Join(s.All(), "\n"), "row(s) above") {
+		t.Errorf("the collapsed rows left no placeholder\n%s", s)
+	}
+	if !s.Contains("line 19") {
+		t.Errorf("the cursor's own row was the one collapsed\n%s", s)
+	}
+	if s.Scrolls() != 0 {
+		t.Errorf("a capped block still scrolled %d time(s)\n%s", s.Scrolls(), s)
 	}
 }
 

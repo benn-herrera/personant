@@ -135,6 +135,43 @@ func TestDecoder_TerminalByteSequences(t *testing.T) {
 			[]Event{key(KeyUp, 0)},
 		},
 		{
+			// The enhanced-keyboard form. Legacy input cannot express it at
+			// all — Enter and Shift+Enter are both 0x0D — so this sequence is
+			// the ONLY way the modifier reaches personant, and it arrives
+			// only from a terminal configured to send it.
+			"CSI-u Shift+Enter",
+			[]scriptStep{typed("\x1b[13;2u")},
+			[]Event{key(KeyShiftEnter, 0)},
+		},
+		{
+			"CSI-u Enter with no modifier is a plain Enter",
+			[]scriptStep{typed("\x1b[13u")},
+			[]Event{key(KeyEnter, 0)},
+		},
+		{
+			// A terminal with the protocol enabled sends Alt+Enter this way
+			// instead of ESC CR, so the universal line-break key has to
+			// survive the very configuration that enables the other one.
+			"CSI-u Alt+Enter keeps the Alt form",
+			[]scriptStep{typed("\x1b[13;3u")},
+			[]Event{{Kind: EventKey, Key: Key{Name: KeyEnter, Alt: true}}},
+		},
+		{
+			"CSI-u Ctrl+Enter falls back to the unmodified key",
+			[]scriptStep{typed("\x1b[13;5u")},
+			[]Event{key(KeyEnter, 0)},
+		},
+		{
+			"a CSI-u sequence SPLIT across reads is still one key",
+			[]scriptStep{typed("\x1b[13"), typed(";2u")},
+			[]Event{key(KeyShiftEnter, 0)},
+		},
+		{
+			"a CSI-u keycode outside the vocabulary is dropped, not guessed",
+			[]scriptStep{typed("\x1b[97;2ua")},
+			[]Event{key(KeyRune, 'a')},
+		},
+		{
 			"Ctrl-C and Ctrl-Z are KEYS, because ModeSession clears ISIG",
 			[]scriptStep{typed("\x03\x1a")},
 			[]Event{key(KeyCtrl, 'c'), key(KeyCtrl, 'z')},

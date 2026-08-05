@@ -1840,6 +1840,43 @@ The behavior required, unchanged in substance:
   placeholder and the **whole buffer retained**: content taller than the
   terminal cannot be erased, so unbounded wrapping is not a nicety
   question. Submitting sends the full buffer regardless of what is drawn.
+- **Multi-line input (amendment, 2026-08-05).** The buffer may hold line
+  breaks. **Alt/Option+Enter inserts one** and is the universal key;
+  **Shift+Enter inserts one where the terminal can say so** (see the
+  terminal-reality note below); **bare Enter submits**, and the whole buffer
+  is returned with its newlines intact. An embedded newline is a **hard row
+  break** in the rendered block — the second cause of a row break beside
+  width wrapping — and the row cap counts those rows like any other. `←`/`→`
+  cross a newline as one rune and Backspace/Delete remove it as one rune.
+  **Home / End / Ctrl-A / Ctrl-E operate on the logical line the cursor is
+  on** (the run between two newlines); the kills (Ctrl-U / Ctrl-K) stay
+  **buffer-scoped**, because clearing a recalled multi-line draft must not be
+  a repeated keystroke. History carries multi-line entries: the on-disk file
+  is one entry per LINE, so a newline inside an entry is written `\n` and a
+  literal backslash `\\` — escaping the escape makes the encoding injective,
+  so it cannot collide with content — and `↑` recall renders the whole block.
+
+  **Terminal reality — why there are two keys.** Legacy terminal input
+  encodes Enter and Shift+Enter as the SAME byte (`0x0D`); the modifier is
+  visible only under an enhanced keyboard protocol (kitty CSI-u:
+  `ESC [ 13 ; 2 u`). Personant DECODES that sequence but does not REQUEST
+  the protocol — a protocol push/pop is new terminal-mode-ownership surface,
+  and holding mode ownership in one place is what this section's arbiter is
+  for; requesting it under that one owner is a possible future item, not a
+  gap. Shift+Enter therefore works only in a terminal configured to send a
+  distinguishable sequence, which is a one-line keybinding — the same method
+  Claude Code's `/terminal-setup` uses:
+
+  - **iTerm2** — Settings → Profiles → Keys → Key Mappings → `+`, press
+    Shift+Enter, action **Send Escape Sequence**, escape `[13;2u`.
+    (Equivalently, action **Send Text with "vim" Special Chars** with text
+    `\e\r`, which sends the universal Alt+Enter form.)
+  - **Zed** — in `keymap.json`:
+    `{"context": "Terminal", "bindings": {"shift-enter": ["terminal::SendText", "\u001b\r"]}}`
+    — that is `ESC CR`, the universal Alt+Enter form, in JSON escapes.
+  - **Anything else** — Alt/Option+Enter already works unconfigured. On
+    macOS, Terminal.app needs *Use Option as Meta key* for the Option form.
+
 - **Editable pre-filled default.** A question may open with text already in
   the buffer, cursor at end — the §4.3.3 retraction re-offer and the
   `/done` summary edit both use it.

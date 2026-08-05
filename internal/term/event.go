@@ -71,6 +71,33 @@ const (
 	KeyCtrl
 
 	KeyEnter
+
+	// KeyShiftEnter is Shift+Enter, and it exists only where the terminal
+	// can SAY so.
+	//
+	// Legacy terminal input encodes Shift+Enter and Enter as the SAME byte
+	// (0x0D). The modifier is visible only under an enhanced keyboard
+	// protocol, and the one decoded here is the kitty CSI-u form,
+	// "ESC [ 13 ; 2 u". Personant does not REQUEST that protocol: a
+	// protocol push/pop is a new piece of mode-ownership surface, and this
+	// package exists because mode ownership was scattered. (Requesting it —
+	// under the same single owner as every other mode change — is a
+	// plausible future item, not a gap.) So this key arrives only from a
+	// terminal already configured to send it, and the UNIVERSAL way to type
+	// a line break is Alt/Option+Enter, which every terminal encodes as
+	// ESC CR and which arrives here as {Name: KeyEnter, Alt: true}.
+	//
+	// It is a NAME rather than a Shift field on [Key], and the choice is
+	// the same one Alt's doc argues from the other side. Alt is a field
+	// because the terminal reports it as a PREFIX on any key. Shift is not
+	// reported at all in this vocabulary — csiKey discards the modifier
+	// parameter on the arrows and on Home/End deliberately — so a Shift
+	// bool would be a dimension that is false for every key ever
+	// constructed but one, while advertising a capability the decoder does
+	// not have. One more name costs each consumer an ignorable case; one
+	// more field costs every consumer a question to answer for every key.
+	KeyShiftEnter
+
 	KeyEsc
 	KeyTab
 	KeyBackspace
