@@ -2223,11 +2223,14 @@ the child is in its own process group, so the kernel must still generate
 #### 4.4.3 Interactive applications
 
 Interactive terminal applications (`vim`, `nano`, `less`, `top`, etc.) are
-**not supported**. Owning an interactive shell process is not the same
-as wiring the user's terminal to that shell's PTY for arbitrary
-sub-applications, which requires terminal-mode handoff (raw mode +
-signal forwarding + state restoration). If the user wants `vim`, they
-suspend personant or open another terminal.
+**not supported**. Terminal-mode handoff itself is no longer the obstacle —
+`term.Handoff` restores the entry mode, joins the reader, and puts the
+session mode back afterwards, which is exactly what a `$`/`#` child gets.
+What is missing is the other half: wiring the user's terminal to the child's
+PTY, so an application that draws a full screen has one to draw on and a
+reader to take its keystrokes. Under §4.4 the child gets the terminal's
+*mode*, not its *input*. If the user wants `vim`, they suspend personant or
+open another terminal.
 
 The child's **stdin is the null device**. That is the enforcement, not a
 detail: an interactive program reads EOF and exits with its own complaint

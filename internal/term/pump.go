@@ -317,11 +317,12 @@ func (t *Terminal) installMode(m ModeIntent) {
 
 // watchExitSignals installs the SIGTERM/SIGHUP handlers.
 //
-// U4: today the terminal is left in no-echo mode when either arrives,
-// because signal.Notify registers os.Interrupt and nothing else. Mode
-// ownership arrives with the pump, so exit-restore does too — and it has
-// to be here rather than in a client, because a handler that restored a
-// mode term never installed would be putting back somebody else's guess.
+// U4: the terminal USED to be left in no-echo mode when either arrived,
+// because signal.Notify registered os.Interrupt and nothing else. This is
+// the fix. Mode ownership arrives with the pump, so exit-restore does too
+// — and it has to be here rather than in a client, because a handler that
+// restored a mode term never installed would be putting back somebody
+// else's guess.
 //
 // The process still dies: catching these and returning to the REPL would
 // turn `kill` into a no-op, which is a worse bug than the one being fixed.

@@ -35,7 +35,9 @@
 // (the `$`/`#` child runner and the session respectively), so internal/chat
 // consults the two in a fixed order, which is LIFO by construction. A
 // registration stack over a set of size two would be a mechanism with no
-// second case to serve. See [Handler.Interrupt].
+// second case to serve. The one rule that outlived the wave, because the
+// shipped consult obeys it too, is [Disposition]'s; internal/chat's
+// onSignal is the consult.
 //
 // # The five bugs and the structural answer to each
 //
@@ -53,7 +55,7 @@
 //     owns the mode, always, with ZERO prompt/turn transitions (§3).
 //  4. Ctrl-C during a `$`/`#` child killed the session. Answer: an
 //     interrupt is OFFERED to claimants that may decline, never looked
-//     up from ownership state (§4, and [Handler.Interrupt]) — and it
+//     up from ownership state (§4, and [Disposition]) — and it
 //     is only a signal at all inside [Terminal.Handoff], because
 //     everywhere else term decodes it as a key.
 //  5. menu prompts erased by the first keystroke — seven sites print a
@@ -318,8 +320,9 @@ type Terminal struct {
 // Signal handling arrives here with the mode, for one reason: a handler
 // that restored a mode term never installed would be putting back somebody
 // else's guess. SIGWINCH feeds [Device.Resized]; SIGTERM/SIGHUP restore
-// the entry mode before the process dies (U4 — today they leave the
-// terminal in no-echo mode, because only os.Interrupt is registered);
+// the entry mode before the process dies (U4 — they USED to leave the
+// terminal in no-echo mode, back when os.Interrupt was the only signal
+// anything registered; that is fixed, and this is the fix);
 // SIGTSTP is raised, never caught.
 //
 // # Ctrl-C is not one of those signals while term holds the fd
@@ -331,9 +334,9 @@ type Terminal struct {
 // included — is restored for the child) and any SIGINT originating outside
 // the terminal, such as `kill -INT` — and it lives in internal/chat, as
 // two fixed claimants rather than a registration chain. See [ModeSession]
-// for why in-band is the point rather than a side effect, and
-// [Handler.Interrupt] for the division of labour and for why the chain was
-// dissolved.
+// for why in-band is the point rather than a side effect, the Migration
+// state section of the package doc for why the offer chain was dissolved,
+// and [Disposition] for the rule the surviving consult still obeys.
 //
 // # Ctrl-Z is term's, and has no exported API
 //
@@ -529,7 +532,7 @@ func (t *Terminal) Size() Size {
 
 // Activity names a kind of input consumer. It is a label for
 // bookkeeping and for [StateSnapshot], NOT a dispatch key — see
-// [Handler.Interrupt] for why switching on it would reintroduce bug 4.
+// [Disposition] for why switching on it would reintroduce bug 4.
 type Activity string
 
 const (
@@ -553,6 +556,28 @@ const (
 )
 
 // Disposition is what a handler did with an offer.
+//
+// # The rule: selection may read the stack, the disposition may not
+//
+// Handler SELECTION may be a function of stack position. The DISPOSITION
+// may not: nothing consults the stack — or [StateSnapshot] — to decide
+// whether an offer was taken. The handler decides, under its own state,
+// and is free to decline.
+//
+// That is not a style preference, it is bug 4. The `$`/`#` child's
+// terminal window ([ActivityChild], opened by [Terminal.Handoff]) strictly
+// CONTAINS shell.Runner's claim window, so a literal "disposition =
+// f(stack top)" routes an interrupt arriving in that sliver to a handler
+// with nothing to claim, and silently drops it. internal/chat's
+// `if sh.Interrupt()` is the shipped form of the rule: shell.Runner
+// decides under its own mutex and DECLINES when it has nothing in flight.
+//
+// The handler signatures are what enforce it. A handler is told the event
+// and nothing else — never its own position, and it cannot see the stack.
+// [StateSnapshot] exposes the stack as []Activity — VALUES, not handlers —
+// so even a client that reads it cannot get from there to a disposition
+// without writing a switch on [Activity], which is visibly the wrong thing
+// next to this comment.
 type Disposition int
 
 const (
@@ -568,11 +593,13 @@ const (
 // Handler is what an activity supplies when it registers. Every field is
 // optional; a nil field declines by construction.
 //
-// Key and Abort are dispatched. Interrupt is NOT — see its own comment for
-// why the wave that would have dispatched it was dissolved. What was always
-// kept, from W1, is the BOOKKEEPING they imply — stack order and the abort
-// window — because that is the half that emits no bytes and is therefore
-// the half that shipped green (see [StateSnapshot]).
+// Key and Abort are the whole of dispatch. There is deliberately no SIGINT
+// hook: the wave that would have offered a signal down this stack (W4) was
+// dissolved, and the two claimants that survive are consulted directly by
+// internal/chat — see the Migration state section of the package doc. What
+// was always kept, from W1, is the BOOKKEEPING these imply — stack order
+// and the abort window — because that is the half that emits no bytes and
+// is therefore the half that shipped green (see [StateSnapshot]).
 type Handler struct {
 	// Key is offered each decoded keystroke while this registration is
 	// the TOP of the stack. A declined key falls to the next handler
@@ -600,64 +627,6 @@ type Handler struct {
 	//     channel a delivered SIGINT arrives on, which is both
 	//     deadlock-free and the honest description of what the key means.
 	Key func(Key) Disposition
-
-	// Interrupt would be offered SIGINT. NOTHING DISPATCHES IT, and
-	// nothing is scheduled to: the wave that would have (W4, a LIFO
-	// offer chain down this stack) was DISSOLVED on 2026-08-04. Read the
-	// rest of this comment before wiring anything to it — the reasoning
-	// is why the design ships TWO chains rather than one.
-	//
-	// SIGINT was to enter ONE dispatcher offering it down the
-	// registration stack in LIFO ORDER, each handler returning claimed or
-	// declined, a decline falling through (§4), and nothing consulting
-	// the stack to decide the OUTCOME. What shipped instead is the KEY
-	// chain in-band (see [Handler.Key]) plus a signal path with two fixed
-	// claimants, consulted in a fixed order by internal/chat — which is
-	// LIFO by construction over a set of size two.
-	//
-	// WHAT WOULD REACH IT is narrower than "Ctrl-C", and that narrowing
-	// is what dissolved the wave. [ModeSession] clears
-	// ISIG, so whenever term owns the fd a Ctrl-C is a decoded KEY and
-	// arrives at [Handler.Key] instead — that is the point of clearing
-	// it, because the dispositions this design must keep available are
-	// keyed on the EDITOR'S BUFFER (reference behaviour O2, clear the
-	// line), and an async signal handler cannot read that buffer without
-	// racing the editor.
-	//
-	// So a real SIGINT survives in exactly two populations: the
-	// [Terminal.Handoff] window, where the entry mode is restored, the
-	// child runs in its OWN process group, and the kernel must generate
-	// SIGINT for personant for shell.Runner.Interrupt() to have anything
-	// to forward; and any SIGINT raised from outside the terminal, such
-	// as `kill -INT`. Each has exactly ONE plausible claimant — the
-	// `$`/`#` runner and the session — so internal/chat's servicing
-	// goroutine consults the runner and falls through to session exit.
-	// Two fixed handlers in a fixed order ARE the LIFO chain; the stack
-	// would add a registration protocol and no second case.
-	//
-	// The one rule that outlives the wave, because the shipped consult
-	// obeys it too: handler SELECTION may be a function of stack
-	// position, the DISPOSITION may not. That is not a style preference
-	// — it is bug 4. The child's terminal window strictly CONTAINS
-	// shell.Runner's claim window, so a literal "disposition =
-	// f(stack top)" routes a Ctrl-C arriving in that sliver to a handler
-	// with nothing to claim, and silently drops it. The `child` handler
-	// is shell.Runner.Interrupt() verbatim, deciding under its own
-	// mutex, and DECLINING when it has nothing in flight — which is
-	// exactly what internal/chat's `if sh.Interrupt()` reads.
-	//
-	// The signature is argument-free on purpose: a handler cannot be
-	// told its own position, cannot see the stack, and has nothing to
-	// branch on except its own state. [StateSnapshot] exposes the stack
-	// as []Activity — VALUES, not handlers — so even a client that reads
-	// it cannot get from there to a disposition without writing a switch
-	// on Activity, which is visibly the wrong thing next to this
-	// comment.
-	//
-	// The field is kept as the DOCUMENTED SEAM: if a third signal
-	// claimant ever appears, this is where the chain goes, and this
-	// comment is the argument it has to answer first.
-	Interrupt func() Disposition
 
 	// Abort, when non-nil, OPENS the abort window for this registration:
 	// a bare Esc calls it. Esc is retraction, not stop-generating
@@ -841,8 +810,10 @@ func (r *Registration) RevokeAbort() {
 // Handoff pushes [ActivityChild] for its duration with an EMPTY handler:
 // the registration is bookkeeping — it is what makes the window visible in
 // [StateSnapshot] — not a dispatch target. The child's interrupt claim is
-// shell.Runner's own, consulted directly by internal/chat; see
-// [Handler.Interrupt] for why that is the shipped shape. Errors from fn
+// shell.Runner's own, consulted directly by internal/chat rather than
+// dispatched here; [Disposition] says why a claim has to be the claimant's
+// own decision, and this window is the containment that makes it so.
+// Errors from fn
 // pass through unchanged; a failure to restore or reinstall the mode is
 // reported on [Terminal.Diag] and does not mask fn's result.
 //
@@ -911,7 +882,7 @@ const (
 // off-TTY suites assert against this for free.
 //
 // Read it for assertions and diagnostics. NEVER consult it to decide the
-// disposition of a signal — see [Handler.Interrupt].
+// disposition of a signal — see [Disposition].
 type StateSnapshot struct {
 	// Stack is the activity stack, bottom first; the last element is the
 	// top. Values, not handlers, deliberately.

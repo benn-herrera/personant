@@ -64,7 +64,7 @@ const plainDefaultPrompt = "> "
 // handed the fd away entirely.
 //
 // The activity is an EXPLICIT ARGUMENT rather than something term infers
-// from stack state, and the rule is [Handler.Interrupt]'s rule. Inferring
+// from stack state, and the rule is [Disposition]'s rule. Inferring
 // it — "a read while a turn is on the stack must be an ask" — would make
 // the stack consult itself to decide what the caller meant, which §4
 // forbids for dispositions and forbids here for the same mechanical

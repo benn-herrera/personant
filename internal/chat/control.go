@@ -373,14 +373,21 @@ func (c *control) exit(announce bool) {
 // the first one.
 //
 // THE TWO-STEP CONSULT IS THE FINAL FORM. W4 was to generalise it into a
-// LIFO offer chain at term.Handler.Interrupt; that wave was DISSOLVED
-// (2026-08-04). The ISIG ruling (2026-07-31, arbitration item 2) made
+// LIFO offer chain over term's activity stack; that wave was DISSOLVED
+// (2026-08-04), and no SIGINT hook was left behind on term.Handler. The
+// ISIG ruling (2026-07-31, arbitration item 2) made
 // Ctrl-C a decoded KEY wherever term owns the fd, which left a real SIGINT
 // only two sources: the Handoff window — whose sole plausible claimant is
 // the child runner, consulted first below — and a kill from outside the
 // terminal, which nothing but the session can claim. Two fixed handlers in
 // a fixed order are LIFO by construction, and a registration stack over a
 // set of size two is a mechanism with no second case to serve.
+//
+// The step below ASKS the runner rather than inferring from state anyone
+// else can see, and that is term.Disposition's rule rather than a local
+// choice: the child's terminal window strictly CONTAINS the runner's claim
+// window, so a consult that read ownership state would drop a Ctrl-C
+// arriving in that sliver — which is bug 4.
 //
 // The wording is honest by construction: it announces only when a turn was
 // actually in flight.

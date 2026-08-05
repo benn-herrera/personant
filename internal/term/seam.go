@@ -114,7 +114,9 @@ const (
 	//     outside the terminal — NOT from an in-band Ctrl-C. Those two
 	//     populations have one claimant each, which is why the signal
 	//     path is a fixed two-step consult in internal/chat rather than
-	//     a chain over this stack; see [Handler.Interrupt].
+	//     a chain over this stack. Two fixed claimants in a fixed order
+	//     are LIFO by construction; a registration stack over a set of
+	//     size two would be a mechanism with no second case to serve.
 	//
 	// The INTENT does not change either way, which is the point of naming
 	// intents instead of flags; what changes is what the pump sees.

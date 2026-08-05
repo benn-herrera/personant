@@ -462,8 +462,10 @@ In progress:
   DISSOLVED 2026-08-04:** the ISIG ruling made Ctrl-C a decoded key
   wherever term owns the fd, leaving a real SIGINT only in the Handoff
   window and from outside the terminal, one claimant each, so the two-step
-  consult in `internal/chat` IS the final form and `term.Handler.Interrupt`
-  is a documented, undispatched seam. Verification is the screentest
+  consult in `internal/chat` IS the final form and `term.Handler` carries no
+  SIGINT hook at all (the undispatched seam field was deleted 2026-08-04;
+  the rule it documented — selection may read the stack, the disposition may
+  not — now lives on `term.Disposition`). Verification is the screentest
   model + plain-backend bookkeeping parity + two mechanical gates in
   `internal/term/gate_test.go` (no direct terminal access outside term; no
   `time.Sleep` in terminal tests), each with a must-not-grow allowlist —
