@@ -107,11 +107,14 @@ const (
 	//     it is what lets a disposition depend on what is in the editor's
 	//     buffer. Ctrl-Z arrives in band for the same reason, and term
 	//     handles it itself — see [Open].
-	//   - The SIGINT dispatcher at [Handler.Interrupt] consequently
-	//     serves the Handoff window (entry mode restored, child in its
-	//     own process group, kernel generating SIGINT for personant so
-	//     shell.Runner.Interrupt() has something to forward) and any
-	//     signal raised from outside the terminal — NOT in-band Ctrl-C.
+	//   - A real SIGINT consequently reaches personant only from the
+	//     Handoff window (entry mode restored, child in its own process
+	//     group, kernel generating SIGINT for personant so
+	//     shell.Runner.Interrupt() has something to forward) or from
+	//     outside the terminal — NOT from an in-band Ctrl-C. Those two
+	//     populations have one claimant each, which is why the signal
+	//     path is a fixed two-step consult in internal/chat rather than
+	//     a chain over this stack; see [Handler.Interrupt].
 	//
 	// The INTENT does not change either way, which is the point of naming
 	// intents instead of flags; what changes is what the pump sees.

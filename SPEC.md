@@ -1801,20 +1801,60 @@ deliberately favors reasons that yield useful recall-tuning signal
 suppress-offers; the latter return when the recall accrual loop is
 actually built. The enum is expected to be tuned then.
 
-### 4.3.1 REPL line editing and history
+### 4.3.1 REPL line editing and history (AMENDED)
 
-The chat REPL must support:
+**Original specification (superseded).** The requirement list below,
+satisfied by a readline-class library over the process's stdin.
+
+**As built (amendment, terminal-layer design 2026-08-04).** The editor is
+**personant's own**, inside the terminal arbiter, and it is not a
+requirement list any more — it is a consequence of who owns the file
+descriptor. A library that hardcodes the process fds applies its own
+terminal mode, installs its own signal handlers, and holds its own byte
+reservoirs, which makes it a second owner of stdin: type-ahead stranded in
+those reservoirs is invisible to anyone else reading the same fd, and no
+test can drive the editing path at all. Both are disqualifying under §4.3.3
+(a mid-turn key must be observable) and §9 (a behavior only a human at a
+terminal can check is not verifiable). The arbiter therefore reads stdin
+itself, decodes keys, and renders the line; see the ARCHITECTURE.md
+"Terminal ownership" mechanism for the shape.
+
+The behavior required, unchanged in substance:
 
 - `←` / `→` cursor movement within the current line.
 - `↑` / `↓` command history; persistent across sessions in
-  `<Home>/history` (operational, not git-tracked).
+  `<Home>/history` (operational, not git-tracked). Newline-delimited text.
 - Standard readline shortcuts: Ctrl-A / Ctrl-E (line start/end),
-  Ctrl-W (kill word), Ctrl-U (kill line), Ctrl-K (kill to end),
-  Alt-B / Alt-F (word-back / word-forward).
+  Ctrl-B / Ctrl-F (char back/forward), Ctrl-W (kill word), Ctrl-U (kill
+  line), Ctrl-K (kill to end), Home / End, Delete.
+  **Alt-B / Alt-F (word-back / word-forward) are specified but NOT
+  IMPLEMENTED** — the decoder reports the Meta form, the editor does not
+  yet bind it, and an Alt-modified rune is currently inserted as its base
+  character. Open item, not a ruling.
 - History deduplication (no consecutive duplicate entries).
 - History size cap (configurable; default 1000 entries).
+- **Multi-row rendering.** A line longer than the terminal width wraps and
+  stays editable, repainted as a block rather than scrolled horizontally.
+  Rendered rows are **capped** (default `min(10, rows−2)`, user ruling
+  2026-07-31 — arbitration item 6) with the excess collapsed to a
+  placeholder and the **whole buffer retained**: content taller than the
+  terminal cannot be erased, so unbounded wrapping is not a nicety
+  question. Submitting sends the full buffer regardless of what is drawn.
+- **Editable pre-filled default.** A question may open with text already in
+  the buffer, cursor at end — the §4.3.3 retraction re-offer and the
+  `/done` summary edit both use it.
+- **A question is part of the read, never a write before it.** There is one
+  read path and it takes the prompt (and any single-keystroke answer set)
+  as an argument, so no call site can print a question that the editor's
+  first repaint then erases. A single-key answer returns without Enter; a
+  first keystroke outside the set becomes the first character of a normally
+  edited line.
+- **Non-interactive sessions** (piped stdin, the harness, tests) install no
+  mode, run no reader loop, and read lines from the buffered stream —
+  byte-identical output to the pre-arbiter runtime, which is what the
+  committed piped-session golden asserts.
 
-### 4.3.2 Turn progress indicator
+### 4.3.2 Turn progress indicator (AMENDED)
 
 A turn has two windows in which the user gets no output: between pressing
 enter and the model's first token, and between the last token and the next
@@ -1849,34 +1889,87 @@ Requirements:
 - The turn pipeline **announces** phases through an optional hook; it does
   not render. Phases are a presentation signal only — never journaled,
   logged, or committed, and nothing branches on them.
-- Rendering is **terminal-gated**. On a non-terminal stdout (piped runs,
-  the scenario harness, tests) the indicator emits zero bytes. On a
-  no-ANSI terminal (`TERM=dumb` or unset) it degrades to one static line
-  per phase.
-- Nothing is drawn until the wait passes a short reveal threshold, so
-  ordinary short turns stay visually silent.
+- The indicator is a **formatter, not a writer**. It decides what the wait
+  line says and hands the finished string to the terminal arbiter's single
+  **ephemeral slot** — a token-less, one-line region, replaced whole. It
+  keeps no belief about the cursor or about who owns the current line;
+  those are the arbiter's, held once. Two projections of "is this line
+  mine?" is the defect this split removes.
+- Rendering is **terminal-gated**, on the arbiter's single TTY predicate
+  rather than a second opinion. On a non-terminal stdout (piped runs, the
+  scenario harness, tests) the indicator emits zero bytes. On a no-ANSI
+  terminal (`TERM=dumb` or unset) an erasable region cannot exist, so it
+  degrades to **one committed line per occupancy**: the first draw after a
+  release prints, further draws are dropped until the slot is released
+  again. **Accepted degradation:** that line carries the animation glyph,
+  and the heartbeat keeps ticking where it used to be suppressed —
+  suppressing it would require the formatter to know whether the terminal
+  can erase, which is exactly the knowledge that moved to the arbiter.
+- **Deferred reveal (amendment, 2026-08-04).** *Original rule: nothing is
+  drawn until the wait passes a short reveal threshold, so ordinary short
+  turns stay visually silent.* That rule alone made a **single-phase wait
+  invisible for its whole duration**: the phase is announced at t≈0, inside
+  the delay, and every later tick is a heartbeat — which may not claim an
+  unoccupied slot (next bullet). The two rules deadlocked. As built, the
+  threshold **defers** an announcement rather than discarding it: a
+  swallowed announcement stays owed and the first heartbeat past the
+  threshold delivers it, once, only onto a line nothing else has taken.
+  After that, heartbeats are redraw-only again.
+- **A heartbeat may only redraw a frame that is still on screen.** An
+  announcement (new phase, or the abort hint appearing) claims the slot
+  unconditionally; the animation tick must not. Otherwise a frame lands in
+  the middle of a streaming response — the arbiter's own record of what
+  occupies the line is what tells the two cases apart.
 - Content always wins the terminal: the first response byte — and any
   interactive offer prompt (§3.4 recall, §3.5 closure) — retires the
   indicator and clears its line before writing. The indicator is restored
-  for the close window afterwards.
+  for the close window afterwards, which is why turn close re-announces its
+  phase. While a **read** is in flight the slot is suspended outright: it
+  writes nothing and records nothing, so the heartbeat rule keeps the
+  indicator quiet without the formatter knowing a prompt is up.
 - The line is cleared on every exit: normal completion, per-turn error,
-  and both interrupt paths (§4 clean shutdown and the forced quit).
+  and both interrupt paths (§4.3.3 clean shutdown and the forced quit).
+  The forced path runs no deferred cleanup, so the clear happens first.
 - While the turn is still abortable (§4.3.3) the label advertises the
-  abort key. The rendered line must stay short enough not to wrap: a
-  wrapped line turns the in-place redraw into a scroll.
+  abort key, appearing and disappearing **with** the abort window rather
+  than one frame later: the hint and the arbiter's abort-window state are
+  set by the same two calls and are one fact, not two. The arbiter
+  truncates the rendered line to the terminal width less one column — a
+  wrapped line turns the in-place redraw into a scroll, and writing the
+  final column puts xterm-family terminals in pending-wrap.
 
-### 4.3.3 Interrupt and abort keys
+### 4.3.3 Interrupt and abort keys (AMENDED)
 
 Two keys, two meanings. Conflating them is the U/X defect this section
 exists to prevent — the user needs a way to abandon a turn that does
 **not** cost them the session.
 
-| Key | At the prompt | During a turn |
-|---|---|---|
-| `Ctrl-C` | ends the session — identical to `/exit`, and silent | abandons the turn, then the same clean shutdown, with a one-line notice |
-| `Ctrl-D` | ends the session (end of input) | n/a — nothing is reading the line editor |
-| `Esc` | n/a — the line editor owns the key | aborts the turn and returns to the prompt; the session continues |
+**Original specification (superseded).** A single `Ctrl-C` at the prompt
+ended the session, identical to `/exit` and silent. `Esc` was the line
+editor's key at the prompt. `Ctrl-Z` was unspecified.
 
+**As built (amendment, user rulings 2026-07-31 — arbitration items 2–6).**
+The table below. The hinge is item 2: the session terminal mode clears
+`ISIG`, so wherever the arbiter owns the file descriptor a `Ctrl-C` is a
+**decoded key, not a signal**. That is not a side effect — it is the only
+way a disposition can be keyed on what is in the editor's buffer, which an
+async signal handler cannot read without racing the editor. Single-press
+exit was reversed on the grounds that it is destructive on a typo (item 3).
+
+| Key | At the prompt, line non-empty | At the prompt, line empty | During a turn |
+|---|---|---|---|
+| `Ctrl-C` | **clears the line**; the session survives and the cleared text does not enter history — it was never submitted | first press **hints**; a second CONSECUTIVE press ends the session, cleanly and silently | abandons the turn, then the same clean shutdown, with a one-line notice (item 4) |
+| `Ctrl-D` | delete-forward | ends the session (end of input) | n/a — nothing is reading the line editor |
+| `Esc` | nothing — swallowed | nothing — swallowed | aborts the turn and returns to the prompt; the session continues |
+| `Ctrl-Z` | suspends cleanly; `fg` returns with the typed line intact | as at left | suspends cleanly; `fg` returns to the still-streaming turn (item 5) |
+
+- **The `Ctrl-C` double press must be consecutive.** Any other key spends
+  the pending press and takes the hint back down, and a press that cleared
+  a line resets the count. Two presses far apart, with typing between them,
+  must NOT exit: the second press is a first press.
+- **`Esc` at the prompt is deliberately inert.** Retraction is a property
+  of a turn in flight; a line being typed has nothing to retract, and the
+  editor already has `Ctrl-C` for "discard this line".
 - A **second `Ctrl-C` during shutdown** forces an immediate exit. This is
   the safety valve for a shutdown that itself wedges, and it restores the
   terminal before exiting.
@@ -1938,19 +2031,62 @@ not in memory and never was.
   entirely between model streams and writes nothing canonical, and a slow
   fetch is exactly the wait a user reaches for Esc during. Cancelling the
   turn cancels the running tool — handlers receive the turn's context.
-- **Terminal mode.** Observing a keypress mid-turn requires `ICANON` and
-  `ECHO` off with a bounded read window (`VMIN`/`VTIME`), which is
-  **cbreak** — deliberately not raw mode. Raw clears `OPOST` (bare `\n`
-  would stop implying a carriage return, staircasing the response body and
-  the indicator) and `ISIG` (`Ctrl-C` would arrive as a byte instead of a
-  signal, forcing a reimplementation of the semantics above). Both stay on.
-- The mode is entered only between prompts and restored before the next
-  one, byte-for-byte as the line editor left it; and the reader watching
-  for the key must be retired before any mid-turn prompt (§3.4 recall,
-  §3.5 closure) asks the user a question.
-- **Non-terminal sessions** (piped stdin, the harness, tests) change no
-  terminal state, start no reader, and behave exactly as before. Platforms
-  with no cbreak implementation lose `Esc` only; everything else stands.
+**Terminal mode and the single reader (AMENDED).**
+
+*Original specification (superseded): the mid-turn cbreak mode is entered
+only between prompts and restored before the next one, byte-for-byte as the
+line editor left it; `OPOST` and `ISIG` both stay on; the reader watching
+for the key is retired before any mid-turn prompt asks a question.*
+
+*As built:* the arbiter installs **one mode for the whole session** and
+runs **one reader** from open to close.
+
+- **Two mode installations per session** — capture the entry mode, install
+  the session mode; restore at exit — plus one restore/re-install pair per
+  child window (§4.4.2). **Zero prompt/turn transitions.** The only thing
+  that ever varied between prompt and turn was the read-blocking strategy
+  (`VMIN`/`VTIME`); with the arbiter owning the reader, readiness comes
+  from `poll(2)` as a **call argument** instead. A parameter cannot be
+  observed, adopted, or left stale, so the "mode went stale" defect class
+  ceases to exist rather than being disciplined.
+- **The session mode clears `ICANON`, `ECHO`, `IEXTEN`, `IXON` and
+  `ISIG`.** `OPOST` is untouched — clearing it would stop a bare `\n`
+  implying a carriage return and staircase both the response body and the
+  indicator. Clearing `ISIG` is the item-2 ruling: `Ctrl-C`, `Ctrl-Z` and
+  `Ctrl-\` arrive as bytes, which is what makes the buffer-keyed
+  dispositions above expressible. It does not *add* a reimplementation
+  burden — the runtime already hand-rolled these semantics.
+- **`Ctrl-Z` is handled in band and by the arbiter alone**, because only
+  the owner of the file descriptor can suspend correctly: restore the entry
+  mode, raise `SIGTSTP` at its default disposition, re-install the session
+  mode on `SIGCONT`. There is no exported API and no client veto. The prior
+  behavior — suspending with the mode still installed, so the shell
+  inherited a terminal nobody re-established — was a latent defect.
+- **`SIGTERM`/`SIGHUP` restore the entry mode** before the process dies,
+  with the conventional 128+signal status. They are not caught and returned
+  from: that would turn `kill` into a no-op, a worse bug than the one being
+  fixed. Mode ownership and exit-restore are the same responsibility, so
+  they live together.
+- **One reader, always** — except inside the §4.4.2 child window, where the
+  reader is joined **before** the child starts and restarted after it is
+  reaped, so nothing in-process competes for bytes with the child or with a
+  pager it spawns. Consumers register on a **LIFO stack** and receive
+  **decoded events**; they never name the file descriptor. This is not
+  tidiness: disambiguating a bare `Esc` from an `Esc`-prefixed sequence
+  requires holding bytes read-but-not-yet-interpreted **across a timeout**,
+  and a lookahead that straddles a handover is silently lost. A mid-turn
+  prompt (§3.4 recall, §3.5 closure) therefore does not retire the reader —
+  it pushes a nested entry **over** the turn, which is why the stack is LIFO
+  rather than a single owner slot.
+- **Type-ahead survives every boundary.** An `Esc` typed in the gap after
+  Enter, or buried in a burst mid-turn, reaches the abort window; text typed
+  in the gap lands in the next prompt. Under the previous multi-reader
+  arrangement those bytes could be stranded in a private buffer and never
+  seen.
+- **Non-terminal sessions** (piped stdin, the harness, tests) install no
+  mode, run no reader loop, and behave exactly as before — byte-identical,
+  asserted by the committed piped-session golden. `Esc` is unavailable
+  there; everything else stands.
 
 ### 4.4 Shell escape (`$` and `#`)
 
@@ -2067,12 +2203,22 @@ re-asserts `setpgid` after `fork` so the group provably exists before it
 is published, closing the fork/exec race in which `kill(-pid)` would find
 no group.
 
-**Terminal state.** `liner` applies its terminal mode once for the whole
-session (`ICANON`/`ECHO` off from the first prompt until close, §4.3.1/§4.3.3),
-so a naively-spawned child would inherit a terminal with no echo and no line
-discipline. The mode personant found at startup is captured before `liner`
-takes the terminal and restored around every child; the pre-handoff mode is
-put back after the child exits.
+**Terminal state — the handoff window.** The session mode has `ICANON` and
+`ECHO` off for the whole session (§4.3.1/§4.3.3), so a naively-spawned child
+would inherit a terminal with no echo and no line discipline. The mode
+personant found at startup is captured at open and **restored for the
+duration of every child**, then put back after the child exits. The
+in-process reader is joined before the child starts and restarted after it
+is reaped, so neither personant nor a pager the child spawns competes for
+stdin. Spawning a child and handing over the terminal compose in exactly one
+function, so the window cannot be leaked.
+
+Restoring the entry mode restores **`ISIG`** with it — shells leave it on —
+and that is the other half of the §4.3.3 ruling rather than an accident.
+This is the one mid-session window in which a `Ctrl-C` is a real signal
+instead of a decoded key, which is precisely what the invariant above needs:
+the child is in its own process group, so the kernel must still generate
+`SIGINT` for personant for the runner to have anything to forward.
 
 #### 4.4.3 Interactive applications
 

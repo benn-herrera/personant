@@ -16,19 +16,26 @@
 //
 // # Migration state
 //
-// The package lands in waves (SOLUTION.md §8, IMPLEMENTATION-PLAN.md §2).
-// W1 landed the OUTPUT half plus the bookkeeping: backend selection, the
-// four channels, the activity stack, the abort window, the cursor column.
-// W2 landed the SINGLE READ PATH, [Terminal.ReadLine], with liner
-// underneath it. W3 — this one — takes the fd: the terminal mode
-// (device_unix.go), the single reader (pump.go), the decoder (decode.go)
-// and a hand-written editor (editor.go). liner is gone, and with it the
-// three byte reservoirs and the second owner of the mode.
+// The package landed in waves (SOLUTION.md §8, IMPLEMENTATION-PLAN.md §2)
+// and the migration is COMPLETE. W1 landed the OUTPUT half plus the
+// bookkeeping: backend selection, the four channels, the activity stack,
+// the abort window, the cursor column. W2 landed the SINGLE READ PATH,
+// [Terminal.ReadLine], with liner underneath it. W3 took the fd: the
+// terminal mode (device_unix.go), the single reader (pump.go), the decoder
+// (decode.go) and a hand-written editor (editor.go). liner is gone, and
+// with it the three byte reservoirs and the second owner of the mode. W5
+// dropped it from go.mod and closed the docs.
 //
-// What is left for W4 is the SIGINT offer chain at [Handler.Interrupt] —
-// which serves the [Terminal.Handoff] window and signals raised from
-// outside the terminal, because everything typed while term holds the fd
-// is now a decoded key.
+// W4 — a LIFO SIGINT offer chain over the activity stack — was DISSOLVED
+// (2026-08-04). The ISIG ruling (2026-07-31, arbitration item 2) is what
+// dissolved it: whenever term owns the fd a Ctrl-C is a decoded KEY on the
+// [Handler.Key] chain, so a real SIGINT survives in exactly two places —
+// the [Terminal.Handoff] window, where the entry mode is restored, and a
+// kill raised from outside the terminal. Each has ONE plausible claimant
+// (the `$`/`#` child runner and the session respectively), so internal/chat
+// consults the two in a fixed order, which is LIFO by construction. A
+// registration stack over a set of size two would be a mechanism with no
+// second case to serve. See [Handler.Interrupt].
 //
 // # The five bugs and the structural answer to each
 //
@@ -41,12 +48,14 @@
 //  2. long recalled input lines rendered mid-token. Answer: one
 //     editor, inside term, behind [Terminal.ReadLine]; wrapping is
 //     term's business and the terminal width is term's to know.
-//  3. Esc was unobservable mid-turn because liner applies its mode for
-//     the whole session and re-adopts whatever it finds. Answer: term
+//  3. Esc was unobservable mid-turn because liner applied its mode for
+//     the whole session and re-adopted whatever it found. Answer: term
 //     owns the mode, always, with ZERO prompt/turn transitions (§3).
-//  4. Ctrl-C during a `$`/`#` child killed the session. Answer: SIGINT
-//     is an offer chain down the activity stack, never a lookup (§4,
-//     and [Handler.Interrupt]).
+//  4. Ctrl-C during a `$`/`#` child killed the session. Answer: an
+//     interrupt is OFFERED to claimants that may decline, never looked
+//     up from ownership state (§4, and [Handler.Interrupt]) — and it
+//     is only a signal at all inside [Terminal.Handoff], because
+//     everywhere else term decodes it as a key.
 //  5. menu prompts erased by the first keystroke — seven sites print a
 //     question and then call a reader that repaints from column 0.
 //     Answer: there is exactly one read path and it takes the question
@@ -316,13 +325,15 @@ type Terminal struct {
 // # Ctrl-C is not one of those signals while term holds the fd
 //
 // [ModeSession] clears ISIG, so Ctrl-C is decoded IN BAND as an ordinary
-// key event and offered down the activity stack like any other key. The
-// SIGINT dispatcher still exists, and still matters, but it serves a
-// narrower population: the [Terminal.Handoff] window (where the entry
-// mode — ISIG included — is restored for the child) and any SIGINT
-// originating outside the terminal, such as `kill -INT`. See
-// [ModeSession] for why in-band is the point rather than a side effect,
-// and [Handler.Interrupt] for the division of labour.
+// key event and offered down the activity stack like any other key. A
+// SIGINT path still exists, and still matters, but it serves a narrower
+// population — the [Terminal.Handoff] window (where the entry mode — ISIG
+// included — is restored for the child) and any SIGINT originating outside
+// the terminal, such as `kill -INT` — and it lives in internal/chat, as
+// two fixed claimants rather than a registration chain. See [ModeSession]
+// for why in-band is the point rather than a side effect, and
+// [Handler.Interrupt] for the division of labour and for why the chain was
+// dissolved.
 //
 // # Ctrl-Z is term's, and has no exported API
 //
@@ -557,11 +568,11 @@ const (
 // Handler is what an activity supplies when it registers. Every field is
 // optional; a nil field declines by construction.
 //
-// Key and Abort are dispatched; Interrupt is recorded and waits for W4's
-// offer chain. What was always kept, from W1, is the BOOKKEEPING they
-// imply — stack order and the abort window — because that is the half
-// that emits no bytes and is therefore the half that shipped green (see
-// [StateSnapshot]).
+// Key and Abort are dispatched. Interrupt is NOT — see its own comment for
+// why the wave that would have dispatched it was dissolved. What was always
+// kept, from W1, is the BOOKKEEPING they imply — stack order and the abort
+// window — because that is the half that emits no bytes and is therefore
+// the half that shipped green (see [StateSnapshot]).
 type Handler struct {
 	// Key is offered each decoded keystroke while this registration is
 	// the TOP of the stack. A declined key falls to the next handler
@@ -590,14 +601,22 @@ type Handler struct {
 	//     deadlock-free and the honest description of what the key means.
 	Key func(Key) Disposition
 
-	// Interrupt is offered SIGINT. Read this before implementing it.
+	// Interrupt would be offered SIGINT. NOTHING DISPATCHES IT, and
+	// nothing is scheduled to: the wave that would have (W4, a LIFO
+	// offer chain down this stack) was DISSOLVED on 2026-08-04. Read the
+	// rest of this comment before wiring anything to it — the reasoning
+	// is why the design ships TWO chains rather than one.
 	//
-	// SIGINT enters ONE dispatcher, which offers it down the
-	// registration stack in LIFO ORDER; each handler returns claimed or
-	// declined; a decline falls through (§4). Nothing consults the stack
-	// to decide the OUTCOME.
+	// SIGINT was to enter ONE dispatcher offering it down the
+	// registration stack in LIFO ORDER, each handler returning claimed or
+	// declined, a decline falling through (§4), and nothing consulting
+	// the stack to decide the OUTCOME. What shipped instead is the KEY
+	// chain in-band (see [Handler.Key]) plus a signal path with two fixed
+	// claimants, consulted in a fixed order by internal/chat — which is
+	// LIFO by construction over a set of size two.
 	//
-	// WHAT REACHES IT is narrower than "Ctrl-C". [ModeSession] clears
+	// WHAT WOULD REACH IT is narrower than "Ctrl-C", and that narrowing
+	// is what dissolved the wave. [ModeSession] clears
 	// ISIG, so whenever term owns the fd a Ctrl-C is a decoded KEY and
 	// arrives at [Handler.Key] instead — that is the point of clearing
 	// it, because the dispositions this design must keep available are
@@ -605,22 +624,27 @@ type Handler struct {
 	// line), and an async signal handler cannot read that buffer without
 	// racing the editor.
 	//
-	// What is left for this hook is exactly two populations: the
+	// So a real SIGINT survives in exactly two populations: the
 	// [Terminal.Handoff] window, where the entry mode is restored, the
 	// child runs in its OWN process group, and the kernel must generate
 	// SIGINT for personant for shell.Runner.Interrupt() to have anything
 	// to forward; and any SIGINT raised from outside the terminal, such
-	// as `kill -INT`. That is not a demotion — the first of the two is
-	// the whole of bug 4's territory.
+	// as `kill -INT`. Each has exactly ONE plausible claimant — the
+	// `$`/`#` runner and the session — so internal/chat's servicing
+	// goroutine consults the runner and falls through to session exit.
+	// Two fixed handlers in a fixed order ARE the LIFO chain; the stack
+	// would add a registration protocol and no second case.
 	//
-	// Handler SELECTION may be a function of stack position. The
-	// DISPOSITION may not, and this is not a style preference — it is
-	// bug 4. The child's terminal window strictly CONTAINS
+	// The one rule that outlives the wave, because the shipped consult
+	// obeys it too: handler SELECTION may be a function of stack
+	// position, the DISPOSITION may not. That is not a style preference
+	// — it is bug 4. The child's terminal window strictly CONTAINS
 	// shell.Runner's claim window, so a literal "disposition =
 	// f(stack top)" routes a Ctrl-C arriving in that sliver to a handler
 	// with nothing to claim, and silently drops it. The `child` handler
 	// is shell.Runner.Interrupt() verbatim, deciding under its own
-	// mutex, and it declines when it has nothing in flight.
+	// mutex, and DECLINING when it has nothing in flight — which is
+	// exactly what internal/chat's `if sh.Interrupt()` reads.
 	//
 	// The signature is argument-free on purpose: a handler cannot be
 	// told its own position, cannot see the stack, and has nothing to
@@ -630,7 +654,9 @@ type Handler struct {
 	// on Activity, which is visibly the wrong thing next to this
 	// comment.
 	//
-	// Dispatched from W4.
+	// The field is kept as the DOCUMENTED SEAM: if a third signal
+	// claimant ever appears, this is where the chain goes, and this
+	// comment is the argument it has to answer first.
 	Interrupt func() Disposition
 
 	// Abort, when non-nil, OPENS the abort window for this registration:
@@ -812,9 +838,12 @@ func (r *Registration) RevokeAbort() {
 // ICANON and ECHO off, so a naively spawned child inherits a terminal
 // where typed characters do not appear.
 //
-// Handoff pushes [ActivityChild] for its duration, which is what puts
-// the child's interrupt handler on the offer chain. Errors from fn pass
-// through unchanged; a failure to restore or reinstall the mode is
+// Handoff pushes [ActivityChild] for its duration with an EMPTY handler:
+// the registration is bookkeeping — it is what makes the window visible in
+// [StateSnapshot] — not a dispatch target. The child's interrupt claim is
+// shell.Runner's own, consulted directly by internal/chat; see
+// [Handler.Interrupt] for why that is the shipped shape. Errors from fn
+// pass through unchanged; a failure to restore or reinstall the mode is
 // reported on [Terminal.Diag] and does not mask fn's result.
 //
 // # ISIG comes back, and that is the point

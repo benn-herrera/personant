@@ -45,12 +45,28 @@ indexing, verification, and provider-connectivity smoke tests.`,
 		if err != nil {
 			return err
 		}
-		return chat.Run(chat.Options{
+		return chat.Run(withStdStreams(chat.Options{
 			Ops:         ops,
 			HistoryFile: historyPath(paths),
-		})
+		}))
 	},
 	SilenceUsage: true,
+}
+
+// withStdStreams points a session's options at the process's real file
+// descriptors. It lives here, in the composition root, because naming
+// os.Stdin/Stdout/Stderr is a WIRING decision: internal/chat holds terminal
+// policy and internal/term holds the fds, and neither has any business
+// deciding which three streams a session runs on. Tests supply their own.
+//
+// One helper for both chat entry points (`personant` bare and `personant
+// chat`) rather than the same three assignments twice — and it is the only
+// place in cmd/ that names the session's streams.
+func withStdStreams(o chat.Options) chat.Options {
+	o.Stdin = os.Stdin
+	o.Stdout = os.Stdout
+	o.Stderr = os.Stderr
+	return o
 }
 
 // historyPath is the REPL line-edit history file (§2.1 <home>/history,

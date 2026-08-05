@@ -372,12 +372,18 @@ func (c *control) exit(announce bool) {
 // deliberately left untouched, so a later Ctrl-C at the prompt is still
 // the first one.
 //
-// W4 formalises this consult into the offer chain at term.Handler.Interrupt.
-// It is left as a direct call here on purpose: the chain is that wave's
-// deliverable, and building half of it now would leave two mechanisms.
+// THE TWO-STEP CONSULT IS THE FINAL FORM. W4 was to generalise it into a
+// LIFO offer chain at term.Handler.Interrupt; that wave was DISSOLVED
+// (2026-08-04). The ISIG ruling (2026-07-31, arbitration item 2) made
+// Ctrl-C a decoded KEY wherever term owns the fd, which left a real SIGINT
+// only two sources: the Handoff window — whose sole plausible claimant is
+// the child runner, consulted first below — and a kill from outside the
+// terminal, which nothing but the session can claim. Two fixed handlers in
+// a fixed order are LIFO by construction, and a registration stack over a
+// set of size two is a mechanism with no second case to serve.
 //
-// Otherwise the wording is honest by construction: it announces only when
-// a turn was actually in flight.
+// The wording is honest by construction: it announces only when a turn was
+// actually in flight.
 func (c *control) onSignal() {
 	if c.sh != nil && c.sh.Interrupt() {
 		return

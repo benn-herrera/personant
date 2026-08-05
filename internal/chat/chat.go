@@ -45,15 +45,20 @@ type Options struct {
 	ProviderName    string // optional override of the default provider name
 	Model           string // optional override of the provider's default model
 
-	// The session's three streams. They are handed to internal/term at
-	// Open and are the ONLY place this package names them: every byte the
-	// REPL emits afterwards goes out through term's four channels, which
-	// share one serialization point. Reaching for Stdout or Stderr below
-	// this line would put a second writer on the terminal, which is the
-	// defect class term exists to remove.
-	Stdin  io.Reader // default os.Stdin
-	Stdout io.Writer // default os.Stdout
-	Stderr io.Writer // default os.Stderr
+	// The session's three streams. Required, and supplied by the caller:
+	// cmd/ names the process's real fds (composition root), tests supply
+	// buffers. This package never names os.Stdin/Stdout/Stderr itself —
+	// deciding WHICH fds a session runs on is a wiring question, not a
+	// policy one, and the W5 gate-1 burn-down is exactly that entry.
+	//
+	// They are handed straight to internal/term at Open and go no further:
+	// every byte the REPL emits afterwards goes out through term's four
+	// channels, which share one serialization point. Reaching for a stream
+	// below that line would put a second writer on the terminal, which is
+	// the defect class term exists to remove.
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
 
 	// Client overrides the default HTTP client. Tests use this to inject a
 	// mock; production callers leave it nil.
@@ -89,15 +94,6 @@ const (
 // unrecoverable mid-session condition. Per-turn errors are surfaced
 // to stderr but do not terminate the session.
 func Run(opts Options) error {
-	if opts.Stdin == nil {
-		opts.Stdin = os.Stdin
-	}
-	if opts.Stdout == nil {
-		opts.Stdout = os.Stdout
-	}
-	if opts.Stderr == nil {
-		opts.Stderr = os.Stderr
-	}
 	if opts.Ops == nil {
 		return errors.New("chat: Options.Ops is required")
 	}

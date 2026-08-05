@@ -26,13 +26,13 @@ turn-handler chain.`,
 		if err != nil {
 			return err
 		}
-		return chat.Run(chat.Options{
+		return chat.Run(withStdStreams(chat.Options{
 			Ops:             ops,
 			ExplicitProject: chatFlagProject,
 			ProviderName:    chatFlagProvider,
 			Model:           chatFlagModel,
 			HistoryFile:     historyPath(paths),
-		})
+		}))
 	},
 	SilenceUsage: true,
 }

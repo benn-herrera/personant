@@ -35,8 +35,8 @@ import (
 // EXPLICIT allowlist whose every entry names the wave that removes it,
 // plus an assertion that the list HAS NOT GROWN — the gate's job being to
 // stop NEW violations while the known ones are burned down on schedule.
-// W3 burned four of them down; what remains is one W5 item and the
-// permanent composition-root entries.
+// W3 burned four of them down and W5 burned the last one; what remains is
+// the permanent composition-root entries.
 //
 // The ceiling is `<=`, not `==`, on purpose: burning an entry down must
 // not break the build of the commit that burns it, while adding one must.
@@ -86,24 +86,19 @@ type exemption struct {
 // started talking to the terminal on its own, which is the defect class
 // this whole design removes.
 //
-// # W3 burned the termios entries down, and the liner rule now has no
-// # subject at all
+// # The liner rule now has no subject at all
 //
-// internal/chat/term_unix.go, termios_bsd.go and termios_linux.go are
-// DELETED: term owns the mode and the single reader, so chat has no ioctl
-// to make. liner is gone from the tree entirely — the rule stays because
-// the rule is about the CLASS ("a dependency can mutate termios where no
-// compiler rule of ours reaches"), and a rule that is retired the moment
-// its one known offender leaves is a rule that has to be rediscovered by
-// the next one.
+// internal/chat/term_unix.go, termios_bsd.go and termios_linux.go were
+// DELETED in W3: term owns the mode and the single reader, so chat has no
+// ioctl to make. liner left the tree in the same wave and left go.mod in
+// W5 — the rule stays because the rule is about the CLASS ("a dependency
+// can mutate termios where no compiler rule of ours reaches"), and a rule
+// that is retired the moment its one known offender leaves is a rule that
+// has to be rediscovered by the next one.
 var terminalAccessAllowlist = []exemption{
-	// --- W5: the defaulting moves to the composition root ---
-	{"internal/chat/chat.go", ruleStdFD,
-		"W5 — Options.Std* defaulting; the process fds are named once here and handed straight to term.Open, and cmd/ is where that belongs"},
-
 	// --- permanent, and stated rather than left implicit ---
 	{"cmd/main.go", ruleStdFD,
-		"permanent — cmd/ is the composition root: naming the process's real fds is precisely its job, and these writes happen before any session terminal exists"},
+		"permanent — cmd/ is the composition root: naming the process's real fds is precisely its job, whether for a pre-session diagnostic write or for handing a session its three streams (withStdStreams)"},
 	{"cmd/models.go", ruleStdFD,
 		"permanent — composition root, as cmd/main.go"},
 	{"cmd/ping.go", ruleStdFD,
@@ -114,9 +109,11 @@ var terminalAccessAllowlist = []exemption{
 
 // maxTerminalAccessExemptions is the ratchet. W1 set it at 9; W2 burned
 // chat's liner entry down to 8; W3 burned the three termios entries down
-// to 5. What is left is one W5 item and four permanent ones. Lower it as
-// waves burn further entries down.
-const maxTerminalAccessExemptions = 5
+// to 5; W5 burned chat.go's std-fd defaulting down to 4 by moving it to
+// cmd/. What is left is the four PERMANENT entries, so the burn-down is
+// complete: any future growth is a genuine new violation, never a wave
+// that has not landed yet.
+const maxTerminalAccessExemptions = 4
 
 // sleepBanAllowlist is the burn-down list for gate 2.
 //

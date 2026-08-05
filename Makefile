@@ -356,10 +356,10 @@ test-run: build recall-madlibs
 # accesses it actually observes from two goroutines. That is the whole scoping
 # rule; the members:
 #
-#   internal/chat            §4.3.2 progress ticker + its mutex, the escwatch
-#                            reader goroutine, the chat.go signal handler —
-#                            three producers writing one terminal. The reason
-#                            this target exists.
+#   internal/chat            §4.3.2 progress ticker + its mutex, the control.go
+#                            signal-servicing goroutine, and the key handlers
+#                            term's pump calls in-line — three goroutines over
+#                            one session's state. The reason this target exists.
 #   internal/term            the terminal arbiter: ONE mutex serializing every
 #                            emitted byte and the whole ownership state, read
 #                            and written from the same three producers above

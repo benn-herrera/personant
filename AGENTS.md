@@ -110,11 +110,19 @@ a second definition that goes stale on the next bump. `personant version`
 
 - **substrate** (`version.Substrate`) — this runtime + the `MemoryOps` API.
 - **front end** (`version.FrontEnd`) — U/X + feature logic. REPL-closed
-  with the dogfood-minimum interactive set now in place (slash commands,
-  `liner` line editing + history, the §4.3.3 interrupt/abort keys, the
-  §4.3.2 phase-labeled turn progress indicator). Dogfooding is now driving
-  it — the progress indicator and the Esc-abort key both landed from
-  direct human use.
+  with the dogfood-minimum interactive set now in place: slash commands;
+  **term-owned line editing + history** (`internal/term`'s own editor —
+  emacs keys, `↑`/`↓` history over `~/.personant/history`, wrapped
+  multi-row rendering under a row cap, editable pre-filled defaults, and
+  the question folded INTO the read so no prompt can be erased by the
+  first keystroke); the §4.3.3 interrupt/abort keys (`Ctrl-C` clears a
+  non-empty line, hints then exits on a consecutive second press at an
+  empty one, and ends the session mid-turn; `Esc` retracts the in-flight
+  turn; `Ctrl-Z` suspends cleanly and `fg` comes back to a sane terminal);
+  and the §4.3.2 phase-labeled turn progress indicator. Dogfooding is now
+  driving it — the progress indicator and the Esc-abort key both landed
+  from direct human use, and the terminal-layer redesign came out of five
+  bugs shipped in one dogfooding week.
 - **home on-disk `format`** (`version.CurrentHomeFormat`) — a plain
   integer in `<home>/version.toml`, deliberately NOT semver: a layout is
   either readable by a binary or it is not. A home written by a NEWER
@@ -316,14 +324,13 @@ In progress:
   landed the **dogfood-minimum chat REPL**: the
   `/topic /done /pause /resume /back-to /project rename|switch /thinking`
   slash set, always-log `retire.ack` closure edit-ack with `edited=` logging,
-  `liner`-backed line editing + `~/.personant/history`, and the §4.3.3
-  interrupt/abort keys: **Ctrl-C ends the session** (at the prompt it is
-  `/exit`, silent; mid-turn it abandons the turn first, and a second
-  Ctrl-C during shutdown forces immediate exit), while **Esc aborts the
-  in-flight turn** and returns to the prompt. Esc runs the terminal in
-  **cbreak** (`ICANON`/`ECHO` off, `VMIN`/`VTIME` set; `OPOST` and `ISIG`
-  deliberately left ON — raw mode would staircase output and turn Ctrl-C
-  into a byte), entered between prompts and restored before the next one.
+  line editing + `~/.personant/history`, and the §4.3.3
+  interrupt/abort keys: **Ctrl-C ends the session**, while **Esc aborts
+  the in-flight turn** and returns to the prompt. *(The terminal
+  MECHANICS of this bullet — a library line editor, a per-turn cbreak
+  mode entered between prompts, `ISIG` left on, and the single-press
+  Ctrl-C exit — were superseded wholesale by the terminal-layer
+  migration below. The abort SEMANTICS survived unchanged.)*
   The abort window is gated on an allow-list of PRE-CANONICAL turn phases
   so an aborted turn releases its §4.5.8 recovery scope and the next open
   stays quiet. Esc is **retraction, not stop-generating**: the §4.3.3
@@ -356,9 +363,12 @@ In progress:
   but a rendezvous rather than a panic (and deliberately NOT registered
   there, since crashpoint's registry feeds the R4 coverage gate). The child
   gets its **own process group** so Ctrl-C kills the command rather than the
-  session; the **startup terminal mode** is restored around the child
-  (liner holds `ICANON`/`ECHO` off for the whole session, so a naively
-  spawned child inherits a terminal with no echo); **stdin is the null
+  session; the **startup terminal mode** is restored around the child by
+  `term.Handoff` (the session mode holds `ICANON`/`ECHO` off, so a naively
+  spawned child inherits a terminal with no echo — and restoring the entry
+  mode restores `ISIG`, which is what makes the SIGINT above exist at all);
+  the in-process reader is **joined before the child starts** and restarted
+  after it is reaped; **stdin is the null
   device** so a §4.4.3 interactive app fails fast instead of wedging, and a
   non-zero exit is announced. A `#` capture rides the existing `preEvents`
   slot into the next turn — buffered, in order, non-durable by design — and
@@ -436,6 +446,29 @@ In progress:
     when the configured model is unavailable). The chat model now comes
     from `config.toml [chat]` or `--model`, verified once at session open
     against the one provider's `/models`.
+- **Terminal layer** (`internal/term`, SPEC §4.3.1–§4.3.3, design in
+  `mad-design/terminal-layer/`). Five bugs shipped in one dogfooding week
+  were one defect — multiple independent owners of one terminal — so the
+  fds, the mode, the single reader, every emitted byte and the ownership
+  state moved into ONE arbiter. `internal/chat` keeps policy; the read
+  path is `ReadLine(Question)` and there is no API that writes text then
+  separately reads a line; output is a 2×2 with the `(always, ephemeral)`
+  cell FORBIDDEN and stderr inside the arbiter. Migration ran in waves
+  (W1 output channels + bookkeeping; W1.5 fail-closed `screentest` model
+  + committed piped-session golden; W2 `Question` and the seven menu
+  sites; W3 pump + decoder + hand-written editor, `liner` removed, ONE
+  session mode with zero prompt/turn transitions; W5 deletions + docs).
+  **W4 — a LIFO SIGINT offer chain over the activity stack — was
+  DISSOLVED 2026-08-04:** the ISIG ruling made Ctrl-C a decoded key
+  wherever term owns the fd, leaving a real SIGINT only in the Handoff
+  window and from outside the terminal, one claimant each, so the two-step
+  consult in `internal/chat` IS the final form and `term.Handler.Interrupt`
+  is a documented, undispatched seam. Verification is the screentest
+  model + plain-backend bookkeeping parity + two mechanical gates in
+  `internal/term/gate_test.go` (no direct terminal access outside term; no
+  `time.Sleep` in terminal tests), each with a must-not-grow allowlist —
+  the access allowlist is now down to its four permanent
+  composition-root entries.
 
 Implemented and wired into the turn loop (pending full acceptance-validation):
 - Thread closure / retirement (§3.5): curator-drafted summary + ack flow;
@@ -777,15 +810,26 @@ here — it is fast unit-grade and runs in the default suite.
   - **Permanently out** (architectural conflict with the substrate
     non-negotiables): `langchaingo/memory`, `langchaingo/chains`,
     `mattn/go-sqlite3`. Do not reintroduce.
+  - **REMOVED, and the reason generalizes**: `github.com/peterh/liner`
+    (was `internal/chat`'s §4.3.1 line editor; dropped from `go.mod` with
+    `mattn/go-runewidth`, its only transitive dep). It was not removed for
+    weight — it was removed because a readline-class library **owns the
+    process's terminal**: hardcoded `os.Stdin`/`os.Stdout` with no
+    injection point, its own termios applied at construction, its own
+    `SIGWINCH` handler, and three private byte reservoirs over the same
+    fd. That makes it a second owner of stdin (type-ahead stranded in
+    those reservoirs is invisible to any other reader) and makes the
+    editing path untestable in-process. **Before proposing any dependency
+    that reads a terminal, a file descriptor, or a signal, check whether
+    it can be given the fds and the mode rather than taking them.** If it
+    cannot, it conflicts with `internal/term` and is out on the same
+    grounds. Do not reintroduce liner.
   - **Approved-when-earned** (compatible; pull in *with their consumer*,
     not before): `github.com/BurntSushi/toml` (consumer: `providers.toml`
     loader); `gopkg.in/yaml.v3` (consumer: thread frontmatter writes);
     `github.com/go-git/go-git/v5` (consumer: `internal/autogit/` for
     autonomic git operations on `~/.personant/.git/`; landed during the
     gitops/policy refactor);
-    `github.com/peterh/liner` (consumer: `internal/chat/` for the §4.3.1
-    REPL line editing + persistent history; lightest well-trodden
-    readline-class dep, one transitive dep `mattn/go-runewidth`);
     `codeberg.org/readeck/go-readability/v2` v2.1.2 +
     `github.com/JohannesKaufmann/html-to-markdown/v2` v2.5.2 (**LANDED**
     with their consumer, `web.fetch`, §6.1.1 — boilerplate-stripped article
