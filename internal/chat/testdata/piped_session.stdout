@@ -13,13 +13,13 @@ active: alpha (prj_1)
   /project rename <new-name>   rename the active project
   /project switch <name-or-id> switch to a known project
   /thinking [on|off]           show/hide the model's live reasoning (dimmed)
+  /model [id|provider/id]      switch the session's model (bare form reports it)
   /stats                       print session and spine statistics
   /version                     print version identity and home format
 
 stubbed (later phase):
   /no-revisit                  tighten recall threshold (recall accrual)
   /cd-project <path>           set active project root
-  /model <id>                  switch active model
 
 shell escape (§4.4 — your shell, your privileges; interactive apps
 such as vim/less/top are not supported):

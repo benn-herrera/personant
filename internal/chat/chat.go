@@ -281,11 +281,18 @@ func Run(opts Options) error {
 		return nil
 	}
 
-	// Build the model client.
-	client := opts.Client
-	if client == nil {
-		client = model.NewHTTPClient(provider)
+	// Build the model client — through a factory, so that a mid-session
+	// /model provider switch and session open construct a client the one
+	// same way rather than two that can drift. An INJECTED client is
+	// returned for every provider — production never injects, and a test
+	// that switches providers keeps its mock rather than acquiring a real
+	// HTTP client aimed at a scaffolded base URL.
+	newClient := func(p memops.Provider) model.Client { return model.NewHTTPClient(p) }
+	if opts.Client != nil {
+		injected := opts.Client
+		newClient = func(memops.Provider) model.Client { return injected }
 	}
+	client := newClient(provider)
 
 	// Resolve the chat model against the provider's /models endpoint.
 	// config.toml's [chat] defaultModel (and --model) name a chat model
@@ -371,6 +378,16 @@ func Run(opts Options) error {
 	// chat client and resolved chat model. resolveChatModel guarantees a
 	// non-empty model or an error, so there is nothing to fall back to.
 	state.Curator = curator.NewHTTPCurator(client, effectiveModel)
+	// /model owns the session's endpoint+model answer from here on — the
+	// state fields above plus the curator that pins them. Built after
+	// them so it has exactly what bootstrap resolved.
+	sel := &modelSelector{
+		pool:      providers,
+		inference: inference,
+		provider:  providerName,
+		state:     state,
+		newClient: newClient,
+	}
 	state.ClosureResolver = interactiveClosureResolver(tm)
 	state.ClosureAckMode = closureAckMode(ctx, ops, project.ID, tm.Diag())
 	state.OnAutoClosed = func(n turn.ClosureNotice) {
@@ -426,7 +443,7 @@ func Run(opts Options) error {
 	// user a question retires any in-flight indicator first.
 	state.OnPhase = ctl.onPhase
 
-	if err := loop(runCtx, ops, state, ctl, th, sh, redactor); err != nil {
+	if err := loop(runCtx, ops, state, ctl, th, sel, sh, redactor); err != nil {
 		return err
 	}
 
@@ -627,7 +644,7 @@ func promptLine(ctx context.Context, tm *term.Terminal, retracted string) (strin
 // loop is the core REPL. Returns nil on a clean exit; non-nil on an
 // unrecoverable I/O error (e.g. the input reader failing, not a
 // per-turn LLM error which is logged and tolerated).
-func loop(ctx context.Context, ops memops.MemoryOps, state *turn.State, ctl *control, th *thinking, sh *shell.Runner, red *shell.Redactor) error {
+func loop(ctx context.Context, ops memops.MemoryOps, state *turn.State, ctl *control, th *thinking, sel *modelSelector, sh *shell.Runner, red *shell.Redactor) error {
 	tm := ctl.t
 	// retracted carries an Esc-aborted input to the next prompt, where it
 	// is re-offered as an editable default. It is deliberately a local:
@@ -691,7 +708,7 @@ func loop(ctx context.Context, ops memops.MemoryOps, state *turn.State, ctl *con
 
 		switch {
 		case strings.HasPrefix(trimmed, "/"):
-			done, derr := dispatchSlash(ctx, tm, ops, state, th, trimmed)
+			done, derr := dispatchSlash(ctx, tm, ops, state, th, sel, trimmed)
 			if derr != nil {
 				fmt.Fprintf(tm.Diag(), "command error: %v\n", derr)
 				continue
@@ -821,7 +838,7 @@ func realign(tm *term.Terminal) {
 // dispatchSlash returns done=true to signal the loop should exit. A
 // returned error is per-command and non-fatal — the loop prints it and
 // continues. Stubs and unknown commands write to stderr and return nil.
-func dispatchSlash(ctx context.Context, tm *term.Terminal, ops memops.MemoryOps, state *turn.State, th *thinking, line string) (bool, error) {
+func dispatchSlash(ctx context.Context, tm *term.Terminal, ops memops.MemoryOps, state *turn.State, th *thinking, sel *modelSelector, line string) (bool, error) {
 	out, diag := tm.Out(), tm.Diag()
 	cmd, rest := splitCommand(line)
 	switch cmd {
@@ -849,9 +866,11 @@ func dispatchSlash(ctx context.Context, tm *term.Terminal, ops memops.MemoryOps,
 		return false, cmdProject(ctx, tm, ops, state, rest)
 	case "/thinking":
 		return false, cmdThinking(out, th, rest)
+	case "/model":
+		return false, cmdModel(ctx, tm, ops, sel, rest)
 	case "/no-revisit":
 		fmt.Fprintln(diag, "/no-revisit is not yet implemented (recall accrual loop, §3.4)")
-	case "/cd-project", "/model":
+	case "/cd-project":
 		fmt.Fprintf(diag, "%s is not yet implemented (later phase)\n", cmd)
 	default:
 		fmt.Fprintf(diag, "unknown command: %s; type /help for available commands\n", cmd)
@@ -1089,13 +1108,13 @@ func helpText() string {
   /project rename <new-name>   rename the active project
   /project switch <name-or-id> switch to a known project
   /thinking [on|off]           show/hide the model's live reasoning (dimmed)
+  /model [id|provider/id]      switch the session's model (bare form reports it)
   /stats                       print session and spine statistics
   /version                     print version identity and home format
 
 stubbed (later phase):
   /no-revisit                  tighten recall threshold (recall accrual)
   /cd-project <path>           set active project root
-  /model <id>                  switch active model
 
 shell escape (§4.4 — your shell, your privileges; interactive apps
 such as vim/less/top are not supported):

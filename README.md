@@ -37,11 +37,12 @@ On first run, `bin/personant` initializes `~/.personant/` as a git repository. O
 | `/project rename <new-name>` | rename the active project |
 | `/project switch <name-or-id>` | switch to a known project |
 | `/thinking [on\|off]` | show/hide the model's live reasoning (dimmed); bare form reports the state |
+| `/model [<model-id>\|<provider>/<model-id>]` | switch the session's model (and provider); bare form reports the active one. Session-scoped — `config.toml` is never rewritten |
 | `/stats` | session and spine statistics |
 | `/version` | version identity + this home's on-disk format |
 | `/quit`, `/exit` | end the session |
 
-`/no-revisit`, `/cd-project`, and `/model` are recognized but stubbed for a later phase.
+`/no-revisit` and `/cd-project` are recognized but stubbed for a later phase.
 
 While a turn is working — before the first token, and again while it closes out — a one-line indicator names the phase the runtime is in (composing context, waiting on the model, searching memory, closing turn) with an elapsed counter, and advertises `esc to abort` while the turn can still be abandoned. It appears only after a couple of seconds, only on a real terminal, and it clears itself the instant the response starts arriving; a piped or redirected run gets no decoration at all.
 
