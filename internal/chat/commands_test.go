@@ -345,3 +345,72 @@ func mustReadFile(t *testing.T, path string) []byte {
 	}
 	return data
 }
+
+// TestSlashClosuresEmptyQueue: /closures on a session with nothing queued
+// says so rather than staying silent — an empty queue is an answer.
+func TestSlashClosuresEmptyQueue(t *testing.T) {
+	paths := scaffoldHome(t)
+	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
+
+	out, _ := runChat(t, paths, model.NewScriptedMock(nil, nil), "prj_1", "/closures\n/quit\n")
+	if !strings.Contains(out, "no closures pending review") {
+		t.Errorf("missing empty-queue reply: %q", out)
+	}
+}
+
+// TestClosureAckModeDirective: the §2.6.1 closure.ack-mode directive
+// selects the session policy, and every failure mode keeps the auto
+// default rather than refusing the session.
+func TestClosureAckModeDirective(t *testing.T) {
+	tests := []struct {
+		name      string
+		userMD    string
+		want      turn.ClosureAckMode
+		wantWarn  string
+		writeFile bool
+	}{
+		{name: "unset falls back to auto", want: turn.AckModeAuto},
+		{
+			name: "always is honored", writeFile: true,
+			userMD: "---\nparameters:\n  closure.ack-mode: always\n---\n",
+			want:   turn.AckModeAlways,
+		},
+		{
+			name: "unrecognized value warns and keeps auto", writeFile: true,
+			userMD:   "---\nparameters:\n  closure.ack-mode: sometimes\n---\n",
+			want:     turn.AckModeAuto,
+			wantWarn: "is not auto|always",
+		},
+		{
+			name: "malformed directive warns and keeps auto", writeFile: true,
+			userMD:   "---\nparameters:\n  closure.ack-mode: [unclosed\n---\n",
+			want:     turn.AckModeAuto,
+			wantWarn: "warn: read closure.ack-mode",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			paths := scaffoldHome(t)
+			if tt.writeFile {
+				if err := os.MkdirAll(paths.DirectivesDir, 0o755); err != nil {
+					t.Fatalf("mkdir directives: %v", err)
+				}
+				path := filepath.Join(paths.DirectivesDir, store.DirectiveUserFile)
+				if err := os.WriteFile(path, []byte(tt.userMD), 0o644); err != nil {
+					t.Fatalf("write user.md: %v", err)
+				}
+			}
+			var diag bytes.Buffer
+			got := closureAckMode(context.Background(), newOps(paths), "prj_1", &diag)
+			if got != tt.want {
+				t.Errorf("closureAckMode = %q, want %q", got, tt.want)
+			}
+			if tt.wantWarn != "" && !strings.Contains(diag.String(), tt.wantWarn) {
+				t.Errorf("diag = %q, want a warning containing %q", diag.String(), tt.wantWarn)
+			}
+			if tt.wantWarn == "" && diag.Len() > 0 {
+				t.Errorf("unexpected diag output: %q", diag.String())
+			}
+		})
+	}
+}

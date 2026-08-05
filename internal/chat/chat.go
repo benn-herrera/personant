@@ -376,6 +376,10 @@ func Run(opts Options) error {
 	// non-empty model or an error, so there is nothing to fall back to.
 	state.Curator = curator.NewHTTPCurator(client, effectiveModel)
 	state.ClosureResolver = interactiveClosureResolver(tm)
+	state.ClosureAckMode = closureAckMode(ctx, ops, project.ID, tm.Diag())
+	state.OnAutoClosed = func(n turn.ClosureNotice) {
+		fmt.Fprintf(tm.Out(), "closed: %s — %s\n", n.Display, n.Summary)
+	}
 
 	banner := opts.Banner
 	if banner == "" {
@@ -383,6 +387,15 @@ func Run(opts Options) error {
 	}
 	fmt.Fprintln(tm.Out(), banner)
 	fmt.Fprintf(tm.Out(), "active: %s (%s)\n", project.Name, project.ID)
+
+	// §3.5: a pending exception queue is ANNOUNCED at session start, never
+	// prompted. The user opened a session to work, not to clear a backlog;
+	// the drain is theirs to start with /closures (or it runs at exit).
+	if pending, perr := turn.PendingClosures(ctx, state); perr != nil {
+		fmt.Fprintf(tm.Diag(), "warn: pending closures: %v\n", perr)
+	} else if n := len(pending); n > 0 {
+		fmt.Fprintf(tm.Out(), "%d closure(s) pending review — /closures\n", n)
+	}
 
 	// Terminal control (§4 clean shutdown + Esc-to-abort). Ctrl-C ends the
 	// session: the first interrupt cancels the session context so an
@@ -419,6 +432,19 @@ func Run(opts Options) error {
 
 	if err := loop(runCtx, ops, state, ctl, th, sh, redactor); err != nil {
 		return err
+	}
+
+	// §3.5 boundary drain: the queued exception closures get their
+	// interactive ack here, on the way out, where an interruption costs
+	// nothing. Skipped when the session is already cancelled (a Ctrl-C
+	// exit) — the user asked to leave, and putting questions to them on
+	// the way out is the interruption this flow exists to remove.
+	if runCtx.Err() == nil {
+		if n, derr := turn.DrainClosures(runCtx, state); derr != nil {
+			fmt.Fprintf(tm.Diag(), "warn: closure drain: %v\n", derr)
+		} else if n > 0 {
+			fmt.Fprintf(tm.Out(), "closed %d thread(s)\n", n)
+		}
 	}
 
 	// Stop the recaller's indexer goroutine (no-op on the symbolic-only
@@ -815,6 +841,8 @@ func dispatchSlash(ctx context.Context, tm *term.Terminal, ops memops.MemoryOps,
 		return false, cmdTopic(ctx, out, state, rest)
 	case "/done":
 		return false, cmdDone(ctx, state, rest)
+	case "/closures":
+		return false, cmdClosures(ctx, out, state)
 	case "/pause":
 		return false, cmdPause(ctx, out, state, rest)
 	case "/resume":
@@ -856,6 +884,45 @@ func cmdTopic(ctx context.Context, out io.Writer, state *turn.State, name string
 // dogfooding convenience for closing a specific thread.
 func cmdDone(ctx context.Context, state *turn.State, rest string) error {
 	return turn.ManualClosure(ctx, state, rest)
+}
+
+// cmdClosures implements /closures — drain the §3.5 pending-review queue
+// on demand (§4.2). The same drain runs at clean session exit; this is
+// the user choosing the moment instead.
+func cmdClosures(ctx context.Context, out io.Writer, state *turn.State) error {
+	n, err := turn.DrainClosures(ctx, state)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		fmt.Fprintln(out, "no closures pending review")
+		return nil
+	}
+	fmt.Fprintf(out, "closed %d thread(s)\n", n)
+	return nil
+}
+
+// closureAckMode resolves the §2.6.1 closure.ack-mode directive into the
+// session's policy. Absent → the auto default. An unreadable directive
+// file or an unrecognized value warns and keeps the default: an ack
+// policy is not worth refusing a session over, and the default is the
+// non-interrupting one either way.
+func closureAckMode(ctx context.Context, ops memops.MemoryOps, projectID string, diag io.Writer) turn.ClosureAckMode {
+	raw, ok, err := ops.DirectiveParam(ctx, projectID, turn.DirectiveClosureAckMode)
+	if err != nil {
+		fmt.Fprintf(diag, "warn: read %s: %v\n", turn.DirectiveClosureAckMode, err)
+		return turn.AckModeAuto
+	}
+	if !ok {
+		return turn.AckModeAuto
+	}
+	mode, valid := turn.ParseClosureAckMode(raw)
+	if !valid {
+		fmt.Fprintf(diag, "warn: %s=%q is not auto|always; using auto\n",
+			turn.DirectiveClosureAckMode, raw)
+		return turn.AckModeAuto
+	}
+	return mode
 }
 
 // cmdPause implements /pause [thr_id|name] (§2.2.1).
@@ -1018,6 +1085,7 @@ func helpText() string {
   /quit, /exit                 exit the session
   /topic <name>                start a new thread and engage it
   /done [thr_id|name]          close the active (or named) thread (§3.5)
+  /closures                    review the closures queued for your ack (§3.5)
   /pause [thr_id|name]         pause the active (or named) thread
   /resume [thr_id|name]        resume a paused thread
   /back-to <thr_id|name>       re-engage a thread into the working set

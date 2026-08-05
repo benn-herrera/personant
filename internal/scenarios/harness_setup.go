@@ -172,11 +172,9 @@ api          = "openai"
 	restore := clock.SetTimeline(func() time.Time { return h.pinnedClock })
 	t.Cleanup(restore)
 
-	// Install a deterministic scripted curator so closure scenarios
-	// never need a live model. The closure scan only runs when both a
-	// curator and a ClosureResolver are installed; the resolver is
-	// installed per-step from Step.ClosureAck.
-	state.Curator = scriptedCurator{}
+	// §3.5 closure policy — see installClosurePolicy. A simulated relaunch
+	// (restartSession) re-applies it to the rebuilt State.
+	installClosurePolicy(state)
 
 	// Install the scenario's custom recaller (embedding-in-loop seam, #98)
 	// and prime its index. A no-op when the scenario kept the default
@@ -184,6 +182,32 @@ api          = "openai"
 	h.installRecaller(t, state)
 
 	return h
+}
+
+// installClosurePolicy applies the harness's §3.5 closure configuration
+// to a State — at construction AND after a simulated relaunch, since
+// turn.LoadSession builds a stock State that carries neither.
+//
+// The curator is a deterministic script, so closure scenarios never need
+// a live model. The closure scan only runs when both a curator and a
+// ClosureResolver are installed; the resolver is installed per-step from
+// Step.ClosureAck.
+//
+// The §2.6.1 ack mode is pinned to `always` — the pre-2026-08-04 per-decay
+// interactive flow. A Step.ClosureAck IS a scripted HUMAN ack, so `always`
+// is what the scenarios actually encode, and pinning it keeps every
+// scripted outcome (wip / defer / abandoned) reachable. Under the front
+// end's `auto` default a scripted non-resolved outcome would be
+// unreachable for routine threads, and every anchor-rich thread would
+// queue for a boundary drain the harness does not run — leaving the sim's
+// BD-4 runtime-mirror (which models decay closure as an unconditional
+// eviction) diverging from a runtime that no longer retires. That is not
+// hypothetical: the first run that missed this on the relaunch path failed
+// TestDayOffThroughHarness with exactly that divergence. Auto-accept is
+// covered by internal/turn's unit tests.
+func installClosurePolicy(state *turn.State) {
+	state.Curator = scriptedCurator{}
+	state.ClosureAckMode = turn.AckModeAlways
 }
 
 // scriptedCurator is the harness's deterministic Curator: it returns a

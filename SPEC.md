@@ -366,8 +366,17 @@ When a parameter is read, the runtime walks the precedence chain and returns the
 #### 2.6.1 Recognized parameters
 
 ```yaml
-engagement.decay-turns: 8           # turns of non-engagement before closure prompt fires
+engagement.decay-turns: 8           # turns of non-engagement before closure fires
 engagement.decay-time: 7d           # wall-clock equivalent (Go duration string)
+closure.ack-mode: auto              # auto | always (AMENDED 2026-08-04, §3.5).
+                                    # auto (default): routine decay closures are
+                                    # auto-accepted with the curator summary and
+                                    # exceptions queue for a boundary drain.
+                                    # always: every decayed thread prompts
+                                    # interactively in-session (the superseded flow).
+                                    # The FIRST parameter served by the directive
+                                    # layer at runtime — the rest of this namespace
+                                    # is still compiled-in constants.
 recall.symbolic-threshold: 0.4      # Jaccard threshold for opportunistic recall surfacing
 recall.cross-project-threshold: 0.5 # higher bar for cross-project surface
 layer.b-top-k: 3                    # max active threads in Layer B
@@ -509,7 +518,7 @@ Actions ending in `-error` (and `warning`) are forensic diagnostics, not measure
 | `thread` | `engaged`, `engaged-non-owner`, `engaged-cross-project`, `engaged-miss`, `created`, `created-meta-only`, `state-change`, `fetch-miss`, `fetch-cross-project`, `anchor-projection-overflow`, `tag-defaulted` (with `thr=` — the bound owner, `cause=missing-tag\|empty-response`, `reprompted=yes\|no`; §3.3 owner-default) |
 | `spine` | `match-fire`, `embed-match-fire`, `intra-match-fire`; *(vocabulary)* `match-miss`, `entry-updated` |
 | `recall` | `offer` (with `count=N`), `accept` (with `thr=`, `layers=`), `decline` (with `thr=`, `reason=not-relevant\|wrong-project\|already-known`), `net-cap-hit`, `flush-backlog`, `W1-diag`, `fire-error`, `error`, `index-error`, `embed-error`, `debt-window-error`, `tree-error`; *(vocabulary)* `cross-project-fire` |
-| `retire` | `prompt` (with `thr=` and `inactivity=`\|`trigger=manual`), `ack` (EVERY acked closure — retire or WIP — with `resolution=` and `edited=yes\|no`, §3.5), `defer`, `complete` (with `resolution=`), `curator-error`, `load-error`, `resolver-error`, `apply-error`, `error` |
+| `retire` | `prompt` (with `thr=` and `inactivity=`\|`trigger=manual`\|`trigger=queued` — the last for a §3.5 boundary drain), `ack` (EVERY applied closure — retire or WIP — with `resolution=`, `edited=yes\|no`, and **`ack=human\|auto`** (AMENDED 2026-08-04, §3.5): `auto` is a routine closure the runtime applied without asking, and the ack-edit-rate canary is a rate over `ack=human` lines ONLY, since an auto-accept is unedited by construction and would dilute the rate to zero), `pending` (a decayed thread classified as an EXCEPTION and queued for the boundary drain rather than auto-accepted — `thr=`, `inactivity=`, `reason=anchors=N\|turns=N`; emitted ONCE per idle episode, not on every scan the thread keeps waiting — the queue is derived, so a per-scan line would be a heartbeat rather than a decision event), `defer`, `complete` (with `resolution=`), `curator-error`, `load-error`, `resolver-error`, `apply-error`, `error` |
 | `archive` | `archived`, `recovered`, `recovered-record`, `skip`, `under-drain`, `error` |
 | `recovery` | (§4.5.8 startup reconciliation; forensic) `begin`, `complete` (with `cells=`, `reset=`, `stamped=`, `unrepairable=`), `pending` (with `op=`, `day=` — a barrier/archival completion was typed to the adapter), `rollback` (torn-turn reset — `turn=`, `reverted=`, `debris=`), `journal-recovered` (preserved in-flight bytes — `turn=`, `records=`), `morning-init` (`baseline=`, `rebuilt=`), `adopt` (cell-12 greenfield/legacy), `stamp-repaired` (cell-9), `unrepairable` (archive entry stays refused — `thr=`, `reason=`), `quarantined` (byte-exact preserved path), `log-tail-repaired` |
 | `barrier` | (§4.5.8 day barrier B0–B6; forensic) `begin` (`day=`), `archived` (B1 — `day=`, `count=`), `day-committed` (B2 — `day=`, optional `repaired=true`), `reborn` (B5 daily re-init — `day=`, `baseline=`), `complete` (`day=`), `re-mint` (defensive B2 re-mint on a non-day-shape HEAD — currently unreachable), `quarantined` (§4.5.8 quarantine-and-proceed — `paths=`, `dir=`, `restored=`), `tag-error` (forensic; a lifecycle-tag derivation read/parse/tag fault — never fatal to the seal) |
@@ -1117,32 +1126,103 @@ threads abandoned premise X" in O(1) per query symbol without loading
 every thread's frontmatter; the candidate-filter rework that consumes it
 is a tracked follow-on, not part of the scorer.
 
-### 3.5 Closure flow
+### 3.5 Closure flow (AMENDED)
 
 Trigger detection (engagement decay or `/done`) → curator-drafted summary
-→ user ack with resolution choice → frontmatter + spine update → Layer
-B/C eviction. Deep cold archival (§3.8) is the next stage past closure
-when spine cardinality pressure builds.
+→ resolution → frontmatter + spine update → Layer B/C eviction. Deep cold
+archival (§3.8) is the next stage past closure when spine cardinality
+pressure builds.
 
 Engagement decay fires when `last_engaged` exceeds `engagement.decay-turns` OR `engagement.decay-time` (§2.6.1). OR semantics is deliberate: `decay-time` catches extended user absence (no turns at all); `decay-turns` catches low-frequency engagement in a busy session. AND semantics would let threads outlive their usefulness in either pattern.
 
 The curator-drafted summary targets 100–150 chars. This balances two constraints: summary + anchors must fit within the Layer A1 budget at realistic spine cardinality (~400 threads × ~200 chars ≈ 80 KB, within the 8% A1 share at 64 KB context); the gist must also be sufficient for the model to recognize prior engagement without fetching the thread body.
 
+**Original specification (superseded).** Every decayed thread prompts the
+user interactively, in-session, at the turn close that detects the decay.
+
+**As built (amendment, user ruling 2026-08-04): auto-accept routine
+closures, batch the exceptions at boundaries.** Living-with found the
+per-thread interactive ack an unreasonable burden. At the default
+`engagement.decay-turns: 8` every side topic decays mid-session, so the
+`[r/d/a/w/e/s]` resolver interrupts several times an hour — which is
+exactly the rubber-stamp failure the ack-quality paragraph below
+predicted, arriving through frequency rather than through inattention.
+
+At the decay-detection scan each candidate is classified:
+
+- **EXCEPTION** — the curator draft is empty or failed, OR the thread is
+  anchor-rich (≥ 6 anchors), OR long-engaged (≥ 15 engaged turns,
+  `SpineRecord.turn_count`). These are the closures whose summary is worth
+  a human's eyes. The v1 criteria are deliberately simple (two integers
+  read straight off the spine record, no new persistent field, no scoring
+  model) and are a calibration window pending living-with data.
+- **ROUTINE** — everything else.
+
+A **routine** closure is applied without asking: the curator's summary,
+`resolution=resolved`, the same frontmatter + spine write and Layer B/C
+eviction an accepted ack performs, and ONE committed line to the terminal
+(`closed: <thread> — <summary>`). It rides the turn transaction already
+open around turn close (§4.5.8) — auto-accept adds no commit path of its
+own. `resolved` is the auto-accept resolution because it is where a
+decayed-and-answered side topic lands when a human picks. **The revision
+path for a wrongly-summarized routine closure is `/back-to`**: re-engaging
+the thread returns it to `active`, and its next close re-drafts the
+summary. v1 adds no new command for this.
+
+An **exception** closure is **queued**, silently: no curator call, no
+prompt, one `retire.pending` event. The queue is **derived, never stored**
+— a pending closure is just a decay-eligible thread that classified as an
+exception and so was not auto-accepted, which makes it crash-safe by
+construction (no queue file to tear or reconcile) and correct across
+restarts. It is drained with the full interactive resolver at
+**boundaries only**: at clean session exit (before the session-close
+checkpoint), and on demand via `/closures` (§4.2). At session **start** a
+non-empty queue is ANNOUNCED in one committed line
+(`N closure(s) pending review — /closures`) and never prompted.
+
+Two flows are unchanged by the amendment. **`/done` is always fully
+interactive** in both modes — the user typed the command, so they have
+opted into the conversation. And a draft that **fails or comes back empty
+is never auto-accepted**: it logs `retire.curator-error` and is retried at
+the next scan, because a blank gist is precisely the case a human has to
+see. (Consequence, stated honestly: a persistently failing curator leaves
+its thread un-closed rather than queued — the derived queue is keyed on
+the two spine-readable signals, and a draft failure is not visible to it.)
+
+**Escape hatch.** `closure.ack-mode: auto | always` (§2.6.1), default
+`auto` — the behavior above. `always` restores the superseded per-decay
+interactive flow verbatim; nothing queues under it, because every decayed
+thread is offered in-session.
+
 **Ack-quality instrumentation (front-end v0.1 requirement, spec'd
 2026-07-13; instrumentation landed 2026-07-13, rate-evaluation still
-front-end-phase).** The closure ack is a load-bearing integrity gate only
-while the human actually reads the draft; a rubber-stamped ack is worse
-than none, because it launders an unread summary as human-verified. The
-canary is **ack-edit-rate**: the REPL ack UI now offers an `[e]dit` choice
-(§4.2 `/done`, §3.5 decay flow), and the `retire.ack` event detail (§2.8)
-records `edited=yes|no` for EVERY acked outcome (retire and wip) —
-`yes` only when the user submits a summary that differs from the curator
-draft, so a rubber-stamp resubmission stays `edited=no`. What remains a
-front-end-phase deliverable is the *evaluation* of the rate — a user who
-edits 0% of drafts over months is either being served perfection or has
-stopped reading, and the distinction must be probed, not assumed. That
-evaluation needs a real human, so it is a §9.1 category-3 known-unknown
-until then.
+front-end-phase; AMENDED 2026-08-04).** The closure ack is a load-bearing
+integrity gate only while the human actually reads the draft; a
+rubber-stamped ack is worse than none, because it launders an unread
+summary as human-verified. The canary is **ack-edit-rate**: the REPL ack
+UI offers an `[e]dit` choice (§4.2 `/done`, the `/closures` drain), and the
+`retire.ack` event detail (§2.8) records `edited=yes|no` for EVERY acked
+outcome (retire and wip) — `yes` only when the user submits a summary that
+differs from the curator draft, so a rubber-stamp resubmission stays
+`edited=no`.
+
+**The canary now reads HUMAN acks only.** `retire.ack` additionally
+carries `ack=human|auto`, and the rate is computed over `ack=human` lines.
+This is not bookkeeping tidiness: an auto-accept is unedited by
+construction, so folding the two populations together would drive the
+measured rate toward zero as auto-accepts came to dominate, and the canary
+would read "the user stopped reading" about closures nobody was shown —
+retiring itself silently at exactly the moment it mattered. Auto-accepts
+are still fully recorded (`retire.ack ... ack=auto` plus
+`retire.complete`); they are simply not part of this denominator. What
+remains a front-end-phase deliverable is the *evaluation* of the rate — a
+user who edits 0% of the drafts they ARE shown is either being served
+perfection or has stopped reading, and the distinction must be probed, not
+assumed. That evaluation needs a real human, so it is a §9.1 category-3
+known-unknown until then. The auto/exception SPLIT is itself now part of
+what that evaluation must judge: if the exception criteria are miscalibrated,
+the symptom is a human ack-edit-rate that stays at zero while auto-accepts
+are being corrected by hand with `/back-to`.
 
 ### 3.6 Fallback dissection
 
@@ -1697,7 +1777,8 @@ surface entirely.
 | Command | Purpose |
 |---|---|
 | `/topic <name>` | force a new thread with the given working name |
-| `/done` | request closure ack on the active thread (§3.5) |
+| `/done` | request closure ack on the active thread (§3.5); always fully interactive |
+| `/closures` | drain the §3.5 pending-review queue now — the exception closures awaiting an ack (AMENDED 2026-08-04). The same drain runs at clean session exit; this is the user choosing the moment. An empty queue says so |
 | `/pause` | mark active thread as `paused` (§2.2.1) |
 | `/resume` | resume a paused thread |
 | `/back-to <thr_id>` | re-engage a retired thread |

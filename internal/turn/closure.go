@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"personant/internal/clock"
@@ -28,6 +29,94 @@ const (
 	// decayTime is the wall-clock equivalent of DecayTurns.
 	decayTime = 7 * 24 * time.Hour
 )
+
+// §3.5 routine/exception split (user ruling 2026-08-04). At
+// engagement.decay-turns=8 every side topic decays mid-session, so a
+// per-thread interactive ack interrupts the session several times an hour
+// — the rubber-stamp failure §3.5 predicted. Routine closures are now
+// applied without asking; the exceptions are queued and drained at a
+// session boundary.
+//
+// A decayed thread is an EXCEPTION when it is anchor-rich or long-engaged
+// — the two cheap signals, readable straight off the spine record, that a
+// thread carried enough substance for its closing summary to be worth a
+// human's eyes. Both thresholds are v1 best-guesses awaiting living-with
+// data, deliberately simple: no new persistent field, no scoring model.
+// TurnCount (§2.2 turn_count, "total turns this thread has been engaged
+// in") is the long-engagement counter — it already rides every spine
+// record, so nothing new is stored to support this.
+const (
+	// exceptionAnchors is the anchor count at or above which a decayed
+	// thread is queued for human review rather than auto-accepted.
+	exceptionAnchors = 6
+	// exceptionTurns is the engaged-turn count (SpineRecord.TurnCount) at
+	// or above which a decayed thread is queued for human review.
+	exceptionTurns = 15
+)
+
+// ClosureAckMode is the §2.6.1 closure.ack-mode directive: the policy
+// governing who acks a decay-triggered closure.
+type ClosureAckMode string
+
+const (
+	// AckModeAuto is the default: routine closures are applied with the
+	// curator's summary and no prompt; exceptions queue for a boundary
+	// drain (session exit or /closures).
+	AckModeAuto ClosureAckMode = "auto"
+	// AckModeAlways restores the pre-2026-08-04 flow: every decayed
+	// thread prompts interactively, in-session, at turn close.
+	AckModeAlways ClosureAckMode = "always"
+)
+
+// DirectiveClosureAckMode is the §2.6.1 parameter name the front end
+// reads to select a ClosureAckMode. Named here, beside the modes, so the
+// key and its meaning cannot drift apart.
+const DirectiveClosureAckMode = "closure.ack-mode"
+
+// ParseClosureAckMode maps a directive value to a mode. An unrecognized
+// value yields ok=false; the caller keeps the default rather than
+// refusing the session over a display-adjacent preference.
+func ParseClosureAckMode(s string) (ClosureAckMode, bool) {
+	switch ClosureAckMode(strings.ToLower(strings.TrimSpace(s))) {
+	case AckModeAuto:
+		return AckModeAuto, true
+	case AckModeAlways:
+		return AckModeAlways, true
+	default:
+		return "", false
+	}
+}
+
+// ackMode resolves the session's effective mode. The zero value is auto,
+// so a State built without setting the field gets the ruling's default.
+func ackMode(state *State) ClosureAckMode {
+	if state.ClosureAckMode == AckModeAlways {
+		return AckModeAlways
+	}
+	return AckModeAuto
+}
+
+// ackKind distinguishes a human ack from an auto-accept in the §2.8
+// retire.ack event. It is load-bearing measurement, not decoration: the
+// §3.5 ack-edit-rate canary reads edited=yes|no over HUMAN acks only, and
+// counting auto-accepts (which can never be edited) would drive the rate
+// to zero and retire the canary silently.
+type ackKind string
+
+const (
+	ackHuman ackKind = "human"
+	ackAuto  ackKind = "auto"
+)
+
+// ClosureNotice is the one-line record of a closure the runtime applied
+// without asking (§3.5 auto-accept), handed to the optional
+// State.OnAutoClosed presentation hook. The runtime renders nothing
+// itself — the front end owns the wording.
+type ClosureNotice struct {
+	ThreadID string // thr_<n>
+	Display  string // the thread's working name (description), or its id
+	Summary  string // the curator summary that was applied
+}
 
 // ClosureOutcome is the verdict a ClosureResolver returns for a §3.5
 // closure offer.
@@ -180,51 +269,34 @@ func systemReference(recs []memops.SpineRecord, now time.Time) time.Time {
 	return ref
 }
 
-// surfaceClosureCandidates runs the §3.5 decay-triggered closure scan
-// for this turn. It is a no-op unless BOTH state.Curator and
-// state.ClosureResolver are installed: closure detection is fully
-// disabled — no decay scan, no log line — unless both are present.
-// This is a deliberate divergence from recall, which keeps a log-only
-// mode when its resolver is nil. Closure has no log-only mode: decay
-// detection with no curator and no resolver would emit only a marginal
-// retire.prompt line, and drafting the closure summary requires the
-// curator regardless.
-//
-// It lists the active project's threads, filters to decay-eligible
-// active threads, and for each (in deterministic thread-ID order)
-// drafts a closure summary via the curator and resolves it into a
-// retire / wip / defer outcome. A curator error or a resolver error for
-// one thread is logged and swallowed — closure is opportunistic and
-// must never abort the turn.
-//
-// The scan runs after closeTurnAndUpdateEngagement has committed this
-// turn's engagement, so a thread engaged this turn cannot mis-decay
-// (see decayEligible).
-func surfaceClosureCandidates(ctx context.Context, state *State) error {
-	if state.Curator == nil || state.ClosureResolver == nil {
-		return nil
-	}
+// closureCandidate is one decay-eligible thread plus the signal that
+// fired, for the retire.prompt / retire.pending log line.
+type closureCandidate struct {
+	rec    memops.SpineRecord
+	detail string
+}
 
+// decayCandidates lists the active project's decay-eligible threads in
+// deterministic thread-ID order, skipping any under an unexpired
+// defer-suppression grace. It is the ONE derivation of the candidate set:
+// the per-turn scan, the pending-review queue, and the boundary drain all
+// read it, so there is no second predicate to drift.
+func decayCandidates(ctx context.Context, state *State) ([]closureCandidate, error) {
 	// Closure is active-project-scoped: an empty ThreadFilter returns
 	// threads across every project, which would retire threads in
 	// sibling projects. Scoping to the active project matches the
 	// project discipline updateExistingThread enforces.
 	recs, err := state.Ops.ListThreads(ctx, memops.ThreadFilter{Project: state.ActiveProject.ID})
 	if err != nil {
-		return fmt.Errorf("closure: list threads: %w", err)
+		return nil, fmt.Errorf("closure: list threads: %w", err)
 	}
 
-	now := clock.Timeline()
 	// Wall-clock decay measures neglect relative to the system's most
 	// recent activity, not raw calendar time, so a whole-system absence
 	// (vacation) does not make every active thread decay-eligible at once.
 	// See decayEligible / systemReference (B5 / PRT3-F3).
-	sysRef := systemReference(recs, now)
-	type candidate struct {
-		rec    memops.SpineRecord
-		detail string
-	}
-	var eligible []candidate
+	sysRef := systemReference(recs, clock.Timeline())
+	var eligible []closureCandidate
 	for _, rec := range recs {
 		// Honor an unexpired defer-suppression grace.
 		if until, deferred := state.closureDeferUntil[rec.ID]; deferred && state.TurnNumber < until {
@@ -234,11 +306,183 @@ func surfaceClosureCandidates(ctx context.Context, state *State) error {
 		if !ok {
 			continue
 		}
-		eligible = append(eligible, candidate{rec: rec, detail: detail})
+		eligible = append(eligible, closureCandidate{rec: rec, detail: detail})
 	}
 	sort.Slice(eligible, func(i, j int) bool {
 		return eligible[i].rec.ID < eligible[j].rec.ID
 	})
+	return eligible, nil
+}
+
+// closureException reports whether a decayed thread must be acked by a
+// human rather than auto-accepted, and why (for the retire.pending line).
+// See the exceptionAnchors / exceptionTurns constants for the rationale.
+func closureException(rec memops.SpineRecord) (string, bool) {
+	if len(rec.Anchors) >= exceptionAnchors {
+		return fmt.Sprintf("anchors=%d", len(rec.Anchors)), true
+	}
+	if rec.TurnCount >= exceptionTurns {
+		return fmt.Sprintf("turns=%d", rec.TurnCount), true
+	}
+	return "", false
+}
+
+// PendingClosures returns the thread ids awaiting a human closure ack —
+// the §3.5 exception queue. The queue is DERIVED, never stored: a pending
+// closure is just a decay-eligible thread that classifies as an exception
+// and so was not auto-accepted at turn close. That makes it crash-safe by
+// construction (there is no queue file to lose, tear, or reconcile) and
+// correct after any restart.
+//
+// Under AckModeAlways nothing queues — every decayed thread is offered
+// in-session — so the queue is empty by definition.
+func PendingClosures(ctx context.Context, state *State) ([]string, error) {
+	if state.Curator == nil || state.ClosureResolver == nil || ackMode(state) == AckModeAlways {
+		return nil, nil
+	}
+	eligible, err := decayCandidates(ctx, state)
+	if err != nil {
+		return nil, err
+	}
+	var pending []string
+	for _, c := range eligible {
+		if _, isException := closureException(c.rec); isException {
+			pending = append(pending, c.rec.ID)
+		}
+	}
+	return pending, nil
+}
+
+// DrainClosures resolves the pending-review queue interactively — the
+// §3.5 boundary drain, run at clean session exit and on demand from
+// /closures. It is the ONLY place an exception closure prompts, so a
+// mid-session decay never interrupts.
+//
+// Returns the number of threads whose state it changed (retire or WIP);
+// a defer/skip changes nothing and is not counted. Like the per-turn
+// scan it degrades per thread: a load, curator, resolver, or apply
+// failure is logged and the drain moves on.
+//
+// It runs BETWEEN turns, so — like the /done path in commands.go — it
+// owns its own persistence: the working set is saved and a §3.11
+// structural checkpoint taken when it actually closed something. It adds
+// no new commit path; applyClosureResolution is the same write an
+// interactive ack performs today.
+func DrainClosures(ctx context.Context, state *State) (int, error) {
+	pending, err := PendingClosures(ctx, state)
+	if err != nil {
+		return 0, err
+	}
+	if len(pending) == 0 {
+		return 0, nil
+	}
+	before := state.structuralRetires + state.structuralWIPs
+	for _, id := range pending {
+		rec, found, err := state.Ops.FindThread(ctx, id)
+		if err != nil || !found {
+			continue
+		}
+		if err := state.Ops.Log(ctx, memops.LogCategoryRetire, "prompt",
+			"thr="+id+" trigger=queued"); err != nil {
+			continue
+		}
+		offerClosure(ctx, state, rec)
+	}
+	changed := state.structuralRetires + state.structuralWIPs - before
+	if changed > 0 {
+		persistWorkingSet(ctx, state)
+		checkpointCommand(ctx, state, "structural: closure queue drain")
+	}
+	return changed, nil
+}
+
+// offerClosure drafts a closure for rec and puts it to the installed
+// resolver, applying whatever comes back. Per-step failures are logged
+// under their own §2.8 action and swallowed — closure is opportunistic
+// and must never abort the turn (or the drain) that hosts it.
+func offerClosure(ctx context.Context, state *State, rec memops.SpineRecord) {
+	draft, ok := draftClosure(ctx, state, rec.ID)
+	if !ok {
+		return
+	}
+	resolution, err := state.ClosureResolver(ctx, ClosureOffer{
+		ThreadID: rec.ID,
+		Summary:  draft.Summary,
+		Anchors:  draft.Anchors,
+		State:    rec.State,
+	})
+	if err != nil {
+		_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "resolver-error",
+			"thr="+rec.ID+" err="+memops.SanitizeDetail(err.Error()))
+		return
+	}
+	if err := applyClosureResolution(ctx, state, rec.ID, draft, resolution, ackHuman); err != nil {
+		_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "apply-error",
+			"thr="+rec.ID+" err="+memops.SanitizeDetail(err.Error()))
+	}
+}
+
+// draftClosure loads a thread and asks the curator for its closing
+// summary, logging the two distinct failure modes (substrate load vs.
+// curator) under their own §2.8 actions. ok=false means the caller must
+// skip this thread.
+func draftClosure(ctx context.Context, state *State, threadID string) (curator.ClosureDraft, bool) {
+	thr, err := state.Ops.LoadThread(ctx, threadID)
+	if err != nil {
+		// Distinct from curator-error: the curator was never consulted;
+		// the substrate load failed before it.
+		_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "load-error",
+			"thr="+threadID+" err="+memops.SanitizeDetail(err.Error()))
+		return curator.ClosureDraft{}, false
+	}
+	draft, err := state.Curator.DraftClosure(ctx, thr)
+	if err != nil {
+		_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "curator-error",
+			"thr="+threadID+" err="+memops.SanitizeDetail(err.Error()))
+		return curator.ClosureDraft{}, false
+	}
+	return draft, true
+}
+
+// surfaceClosureCandidates runs the §3.5 decay-triggered closure scan
+// for this turn. It is a no-op unless BOTH state.Curator and
+// state.ClosureResolver are installed: closure detection is fully
+// disabled — no decay scan, no log line — unless both are present.
+// This is a deliberate divergence from recall, which keeps a log-only
+// mode when its resolver is nil. Closure has no log-only mode: decay
+// detection with no curator and no resolver would emit only a marginal
+// retire.prompt line, and drafting the closure summary requires the
+// curator regardless. The resolver is required under AckModeAuto too —
+// it is what the boundary drain puts the queued exceptions to, so a
+// session with no way to ack must not start retiring threads.
+//
+// Per decayed thread, in deterministic thread-ID order:
+//
+//   - AckModeAlways — draft, offer interactively, apply (the flow as it
+//     stood before the 2026-08-04 ruling).
+//   - AckModeAuto, EXCEPTION (anchor-rich / long-engaged) — queue it:
+//     one retire.pending line, no curator call, no prompt. It stays
+//     decay-eligible, which IS the queue (see PendingClosures).
+//   - AckModeAuto, ROUTINE — draft and auto-accept as resolved with the
+//     curator's summary, logging retire.ack ack=auto. A draft that fails
+//     or comes back empty is NOT auto-accepted: it logs its error and is
+//     retried at the next scan, because an empty summary is precisely the
+//     case a human has to see.
+//
+// The scan runs after closeTurnAndUpdateEngagement has committed this
+// turn's engagement, so a thread engaged this turn cannot mis-decay
+// (see decayEligible). Every write rides the turn transaction already
+// open around turn close — the auto-accept path invents no commit of its
+// own (§4.5.8).
+func surfaceClosureCandidates(ctx context.Context, state *State) error {
+	if state.Curator == nil || state.ClosureResolver == nil {
+		return nil
+	}
+	eligible, err := decayCandidates(ctx, state)
+	if err != nil {
+		return err
+	}
+	auto := ackMode(state) == AckModeAuto
 
 	// A retire.prompt log-write failure must not starve the remaining
 	// closure offers this turn. The former return-on-error aborted the whole
@@ -251,51 +495,72 @@ func surfaceClosureCandidates(ctx context.Context, state *State) error {
 	// already degrade-and-continue; this aligns the log with that contract.
 	var logFailures int
 	for _, c := range eligible {
+		if auto {
+			if reason, isException := closureException(c.rec); isException {
+				// Queued for the boundary drain — announced ONCE per idle
+				// episode (see State.closurePendingQueued), not on every scan
+				// the thread keeps waiting.
+				if !state.closurePendingQueued[c.rec.ID] {
+					if err := state.Ops.Log(ctx, memops.LogCategoryRetire, "pending",
+						"thr="+c.rec.ID+" inactivity="+c.detail+" reason="+reason); err != nil {
+						logFailures++
+						continue
+					}
+					state.closurePendingQueued[c.rec.ID] = true
+				}
+				continue
+			}
+		}
 		if err := state.Ops.Log(ctx, memops.LogCategoryRetire, "prompt",
 			"thr="+c.rec.ID+" inactivity="+c.detail); err != nil {
 			logFailures++
 			continue
 		}
-
-		thr, err := state.Ops.LoadThread(ctx, c.rec.ID)
-		if err != nil {
-			// Distinct from curator-error: the curator was never
-			// consulted; the substrate load failed before it.
-			_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "load-error",
-				"thr="+c.rec.ID+" err="+memops.SanitizeDetail(err.Error()))
+		if auto {
+			autoAcceptClosure(ctx, state, c.rec)
 			continue
 		}
-
-		draft, err := state.Curator.DraftClosure(ctx, thr)
-		if err != nil {
-			_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "curator-error",
-				"thr="+c.rec.ID+" err="+memops.SanitizeDetail(err.Error()))
-			continue
-		}
-
-		offer := ClosureOffer{
-			ThreadID: c.rec.ID,
-			Summary:  draft.Summary,
-			Anchors:  draft.Anchors,
-			State:    c.rec.State,
-		}
-		resolution, err := state.ClosureResolver(ctx, offer)
-		if err != nil {
-			_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "resolver-error",
-				"thr="+c.rec.ID+" err="+memops.SanitizeDetail(err.Error()))
-			continue
-		}
-
-		if err := applyClosureResolution(ctx, state, c.rec.ID, draft, resolution); err != nil {
-			_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "apply-error",
-				"thr="+c.rec.ID+" err="+memops.SanitizeDetail(err.Error()))
-			continue
-		}
+		offerClosure(ctx, state, c.rec)
 	}
 	if logFailures > 0 {
-		return fmt.Errorf("closure: %d retire.prompt log write(s) failed; offers skipped", logFailures)
+		return fmt.Errorf("closure: %d retire log write(s) failed; offers skipped", logFailures)
 	}
 	return nil
+}
+
+// autoAcceptClosure applies a routine closure without asking: the
+// curator's summary, retired as resolved, through the same write an
+// accepted ack performs. An empty draft summary is refused — that is the
+// one case the human must see, so it falls through to the next scan
+// rather than storing a blank gist as if it had been reviewed.
+//
+// `resolved` is the auto-accept resolution because it is the state a
+// decayed-and-answered side topic lands in when a human picks; the
+// revision path for a wrong one is /back-to (re-engage, then close
+// again with a fresh draft), which is why v1 adds no new command.
+func autoAcceptClosure(ctx context.Context, state *State, rec memops.SpineRecord) {
+	draft, ok := draftClosure(ctx, state, rec.ID)
+	if !ok {
+		return
+	}
+	if strings.TrimSpace(draft.Summary) == "" {
+		_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "curator-error",
+			"thr="+rec.ID+" err=empty draft summary; not auto-accepted")
+		return
+	}
+	res := ClosureResolution{Outcome: ClosureResolved}
+	if err := applyClosureResolution(ctx, state, rec.ID, draft, res, ackAuto); err != nil {
+		_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "apply-error",
+			"thr="+rec.ID+" err="+memops.SanitizeDetail(err.Error()))
+		return
+	}
+	if state.OnAutoClosed != nil {
+		display := rec.Description
+		if display == "" {
+			display = rec.ID
+		}
+		state.OnAutoClosed(ClosureNotice{ThreadID: rec.ID, Display: display, Summary: draft.Summary})
+	}
 }
 
 // applyClosureResolution applies one §3.5 closure verdict to a thread.
@@ -308,7 +573,13 @@ func surfaceClosureCandidates(ctx context.Context, state *State) error {
 //     but stays a known thread at the head of DormantThreads.
 //   - Defer: no state write; arms the defer-suppression grace so the
 //     thread does not re-prompt every turn.
-func applyClosureResolution(ctx context.Context, state *State, threadID string, draft curator.ClosureDraft, res ClosureResolution) error {
+//
+// ack records WHO acked (§2.8 retire.ack ack=human|auto). It is a
+// parameter rather than a ClosureResolution field because an auto-accept
+// is synthesized by the runtime, not returned by a resolver: keeping it
+// off the resolution type means no experience layer can claim a human
+// ack the human never gave.
+func applyClosureResolution(ctx context.Context, state *State, threadID string, draft curator.ClosureDraft, res ClosureResolution, ack ackKind) error {
 	if res.Outcome == ClosureDefer {
 		state.closureDeferUntil[threadID] = state.TurnNumber + DecayTurns
 		return state.Ops.Log(ctx, memops.LogCategoryRetire, "defer", "thr="+threadID)
@@ -410,9 +681,10 @@ func applyClosureResolution(ctx context.Context, state *State, threadID string, 
 		state.structuralRetires++
 	}
 
-	// The defer grace, if any, is now moot — the thread has been
-	// resolved or demoted out of the active set.
+	// The defer grace and the queued-announcement mark, if any, are now
+	// moot — the thread has been resolved or demoted out of the active set.
 	delete(state.closureDeferUntil, threadID)
+	delete(state.closurePendingQueued, threadID)
 
 	state.ActiveThreads = removeString(state.ActiveThreads, threadID)
 	state.DormantThreads = removeString(state.DormantThreads, threadID)
@@ -426,13 +698,17 @@ func applyClosureResolution(ctx context.Context, state *State, threadID string, 
 
 	// §3.5 ack-quality instrumentation (§2.8 vocabulary): EVERY acked
 	// closure outcome — retire (resolved/decided/abandoned) or WIP — logs
-	// retire.ack with the resolution and the edited=yes|no ack-edit-rate
-	// canary. Retirements ALSO log the separate retire.complete event
-	// (kept from the §2.8 vocabulary); WIP's ack is its terminal event.
-	// The defer outcome returned early above (retire.defer) — a defer is
-	// not an ack, so it carries no edited= flag.
+	// retire.ack with the resolution, the edited=yes|no ack-edit-rate
+	// canary, and ack=human|auto. The canary is a rate over HUMAN acks
+	// only: an auto-accept is unedited by construction, so folding the two
+	// populations together would push the rate toward zero and read as
+	// "the user stopped reading" when nobody was asked. Retirements ALSO
+	// log the separate retire.complete event (kept from the §2.8
+	// vocabulary); WIP's ack is its terminal event. The defer outcome
+	// returned early above (retire.defer) — a defer is not an ack, so it
+	// carries no edited= flag.
 	if err := state.Ops.Log(ctx, memops.LogCategoryRetire, "ack",
-		"thr="+threadID+" resolution="+string(newState)+" edited="+edited); err != nil {
+		"thr="+threadID+" resolution="+string(newState)+" edited="+edited+" ack="+string(ack)); err != nil {
 		return err
 	}
 	if res.Outcome == ClosureWIP {

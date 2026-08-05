@@ -440,6 +440,25 @@ In progress:
 Implemented and wired into the turn loop (pending full acceptance-validation):
 - Thread closure / retirement (§3.5): curator-drafted summary + ack flow;
   `internal/turn/closure.go` decay-triggered scan fires at turn close.
+  **AMENDED 2026-08-04 (user ruling): routine closures auto-accept, the
+  exceptions batch at boundaries.** A decayed thread is an EXCEPTION when
+  it is anchor-rich (≥6) or long-engaged (≥15 `turn_count`), or its draft
+  failed/came back empty; everything else is ROUTINE and is retired as
+  `resolved` with the curator summary, no prompt, one committed line. The
+  exception QUEUE IS DERIVED, never stored (a decay-eligible thread that
+  classified as an exception) — crash-safe by construction — and is
+  drained with the interactive resolver at clean session exit and on
+  `/closures`; session start only ANNOUNCES the count. `retire.ack` now
+  carries `ack=human|auto` and the ack-edit-rate canary reads human acks
+  only. `/done` stays fully interactive. Escape hatch: the §2.6.1
+  `closure.ack-mode: auto|always` directive — the FIRST parameter the
+  directive layer actually serves at runtime (`store.ReadParameter` +
+  `MemoryOps.DirectiveParam`; the rest of §2.6.1 is still compiled-in
+  constants, and `internal/verify`'s line-grep for `spine.entry-max-chars`
+  has NOT been folded into it yet). The scenario harness pins
+  `AckModeAlways`: a scripted `Step.ClosureAck` IS a human ack, and the
+  sim's BD-4 runtime mirror models decay closure as an unconditional
+  eviction.
 - Recoverable deep-cold archival (§3.8): `internal/turn/archival.go` +
   `internal/memops/fileadapter/fileadapter_archive.go`; cardinality-pressure
   scan fires at turn close.

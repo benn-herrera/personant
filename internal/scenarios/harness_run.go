@@ -712,11 +712,13 @@ func restartSession(t *testing.T, h *Harness, idx int, label string) {
 	if h.liveClient != nil {
 		rebuilt.Model = h.liveModel
 	}
-	// Re-install the deterministic scripted curator — newHarness installs
-	// it on the original State, and a relaunched runtime would re-install
-	// its curator too. The per-step RecallResolver/ClosureResolver are
-	// installed by runStep below, so they need no handling here.
-	rebuilt.Curator = scriptedCurator{}
+	// Re-install the §3.5 closure policy — the scripted curator and the
+	// pinned ack mode. newHarness installs both on the original State, and
+	// turn.LoadSession carries neither, so a relaunch that skipped this
+	// would silently run the rest of the scenario under a different closure
+	// regime. The per-step RecallResolver/ClosureResolver are installed by
+	// runStep below, so they need no handling here.
+	installClosurePolicy(rebuilt)
 
 	// Re-install the scenario's custom recaller — turn.LoadSession built
 	// rebuilt with turn.NewState's nil-embedder default, so without this an

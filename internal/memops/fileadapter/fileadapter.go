@@ -1018,3 +1018,16 @@ func (a *FileAdapter) LoadConfig(ctx context.Context) (memops.Config, error) {
 	}
 	return cfg, nil
 }
+
+// DirectiveParam implements the port's §2.6.1 parameter read: walk the
+// directive precedence chain and return the first value set for key.
+func (a *FileAdapter) DirectiveParam(ctx context.Context, projectID, key string) (string, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
+	value, ok, err := store.ReadParameter(a.paths, projectID, key)
+	if err != nil {
+		return "", false, fmt.Errorf("fileadapter: directive param %q: %w", key, err)
+	}
+	return value, ok, nil
+}

@@ -127,7 +127,26 @@ type State struct {
 	// REPL installs an interactive resolver; the scenario harness
 	// installs a scripted one. Both Curator and ClosureResolver must be
 	// non-nil for closure detection to run.
+	//
+	// Under the default AckModeAuto the resolver handles the EXCEPTION
+	// queue only (drained at a session boundary), never a routine decay.
 	ClosureResolver ClosureResolver
+
+	// ClosureAckMode is the §2.6.1 closure.ack-mode policy. The zero
+	// value is AckModeAuto — routine decay closures auto-accept and
+	// exceptions queue for a boundary drain. AckModeAlways restores the
+	// per-decay interactive prompt. The chat REPL reads the directive;
+	// the scenario harness pins AckModeAlways (its scripted ClosureAck
+	// IS a human ack).
+	ClosureAckMode ClosureAckMode
+
+	// OnAutoClosed receives one ClosureNotice per §3.5 routine closure the
+	// runtime applied without asking. nil → the closure is silent (the
+	// scenario harness and every non-interactive caller). Presentation
+	// seam only, with the same contract as OnPhase: it must not block and
+	// must not mutate State, and nothing in the pipeline observes it. The
+	// durable record is the retire.ack / retire.complete pair, not this.
+	OnAutoClosed func(ClosureNotice)
 
 	// OnPhase receives a Phase each time the pipeline enters a stage a
 	// user could be left waiting on. nil → no progress signal is emitted
@@ -256,6 +275,18 @@ type State struct {
 	// defers a closure offer; not persisted (session-scoped).
 	closureDeferUntil map[string]int
 
+	// closurePendingQueued marks the threads already announced as queued
+	// for §3.5 review this session, so retire.pending stays a decision
+	// event instead of becoming a per-turn heartbeat: the queue is
+	// derived, so without this every scan would re-log the same fact for
+	// as long as the thread waits. Cleared when the thread is closed or
+	// re-engaged, so a second idle episode announces itself again.
+	//
+	// Deliberately NOT part of the §4.3.3 rollback snapshot: the closure
+	// scan runs post-canonical (turn close), so a retracted turn never
+	// reaches it and there is nothing to restore.
+	closurePendingQueued map[string]bool
+
 	// recallSurfaced marks thread IDs that arrived in context via recall
 	// (§2.7.3 origin-provenance attribution source) — as opposed to direct
 	// engagement or switch. Both recall paths mark here through their shared
@@ -382,6 +413,8 @@ func NewState(ops memops.MemoryOps, project memops.ProjectMeta, provider memops.
 		coalesce:          newCoalesceBuffer(),
 		staging:           newStagingBuffer(),
 		closureDeferUntil: make(map[string]int),
+
+		closurePendingQueued: make(map[string]bool),
 		// Default to symbolic-only recall; callers with an embedding
 		// provider replace this with an embedding-enabled Service.
 		Recaller: measure.NewService(ops, nil),

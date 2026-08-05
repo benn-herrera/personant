@@ -298,6 +298,9 @@ func updateLayerLRU(state *State, engaged []string) {
 		// now meaningless, so prune it to avoid wrongly suppressing a
 		// future legitimate re-prompt.
 		delete(state.closureDeferUntil, id)
+		// Same reasoning for the §3.5 queued-announcement mark: this is a
+		// fresh idle episode, so a later decay announces itself again.
+		delete(state.closurePendingQueued, id)
 		touchActiveLRU(state, id)
 	}
 }

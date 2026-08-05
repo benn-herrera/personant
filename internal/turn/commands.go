@@ -190,6 +190,11 @@ func reEngage(ctx context.Context, state *State, ref, via string) (string, error
 // the thread id/name, or "" for the current owner. Requires a Curator and
 // ClosureResolver to be installed (as the decay scan does).
 //
+// /done is ALWAYS fully interactive, in both §2.6.1 ack modes: the user
+// typed the command, so they have opted into the conversation. The
+// 2026-08-04 auto-accept ruling is about closures the runtime raises on
+// its own, not ones the user asks for.
+//
 // A retire or WIP outcome is a §3.11 structural change: this takes a
 // checkpoint when applyClosureResolution advanced the structural counters.
 func ManualClosure(ctx context.Context, state *State, ref string) error {
@@ -231,7 +236,7 @@ func ManualClosure(ctx context.Context, state *State, ref string) error {
 	}
 
 	before := state.structuralRetires + state.structuralWIPs
-	if err := applyClosureResolution(ctx, state, id, draft, res); err != nil {
+	if err := applyClosureResolution(ctx, state, id, draft, res, ackHuman); err != nil {
 		return fmt.Errorf("done: apply closure for %s: %w", id, err)
 	}
 	// applyClosureResolution evicts a retired/WIP thread from the working

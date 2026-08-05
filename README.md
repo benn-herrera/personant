@@ -29,6 +29,7 @@ On first run, `bin/personant` initializes `~/.personant/` as a git repository. O
 | `/help` | list commands |
 | `/topic <name>` | start a new thread and engage it |
 | `/done [thr_id\|name]` | close the active (or named) thread |
+| `/closures` | review the closures queued for your ack (§3.5) |
 | `/pause [thr_id\|name]` | pause the active (or named) thread |
 | `/resume [thr_id\|name]` | resume a paused thread |
 | `/back-to <thr_id\|name>` | re-engage a thread into the working set |
@@ -206,7 +207,7 @@ A third, separate integer versions the home's on-disk layout (`~/.personant/vers
 
 **Implemented and wired into the turn loop (pending full acceptance-validation):**
 
-- Thread closure / retirement (§3.5): curator-drafted summary + human-ack flow; the decay-triggered closure scan fires at turn close.
+- Thread closure / retirement (§3.5): curator-drafted summary; the decay-triggered closure scan fires at turn close. Routine closures are auto-accepted with one committed line (user ruling 2026-08-04 — a per-thread ack every time a side topic decays was an unreasonable interruption); the exceptions (anchor-rich or long-engaged threads) queue and are acked at a boundary — session exit or `/closures`. `closure.ack-mode: always` restores the per-decay prompt.
 - Recoverable deep-cold archival (§3.8): `internal/turn/archival.go` + `internal/memops/fileadapter/fileadapter_archive.go`; the cardinality-pressure archival scan fires at turn close.
 - Working-set content dedup / git minimization (§3.9): `internal/dedup` + `AgeFileChains`, applied per engaged thread.
 - Startup crash recovery (§4.5.8, #94): dual-repo git substrate (disposable per-turn `.git-daily/` + permanent day-grain `.git/`), ≤1-turn durability journal, deterministic cold-start reconciliation, and a crash-injection matrix with a mechanical coverage gate.

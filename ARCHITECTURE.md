@@ -277,7 +277,7 @@ The anchor set is what makes recall possible. The summary is what makes recognit
 
 1. **Deterministic** (every turn) — regex/parser scan over turn content extracts identifiers (file paths, URLs, code symbols, project-configured patterns, user `#tags`). Free, reliable, narrow.
 2. **Model-emitted** (every turn) — the topic tag's anchor list provides named-entity coverage the deterministic pass can't reach.
-3. **Curator** (at retirement) — LLM drafts the closure summary (§3.5); the user ack gates it. Anchors are **not** curator-picked: they are the deterministic projection of active `history_symbols` (below), re-derived every owner turn with no LLM involved.
+3. **Curator** (at retirement) — LLM drafts the closure summary (§3.5). A human ack gates it for the closures that warrant one — anchor-rich or long-engaged threads, queued and acked at a session boundary; a routine decayed side topic is auto-accepted with the draft (user ruling 2026-08-04, §3.5 AMENDED). Anchors are **not** curator-picked: they are the deterministic projection of active `history_symbols` (below), re-derived every owner turn with no LLM involved.
 
 **Anchors vs. history (the evolving-anchor model, §2.7.4):** `history_symbols` is the canonical, accreting, weighted per-thread set (soft-capped ~40) and the recall match surface. `anchors` is **not** a separate storage tier — it is the deterministic top-`AnchorProjectionMax` (8) **projection** of the thread's *active* history symbols, re-derived each owner turn. A symbol that falls out of the projection flips to **superseded** but is **retained, not evicted** — an abandoned premise stays a findable recall handle, protected from capacity eviction by its `ever_central` latch. 0 anchors is legal (a vague-start thread that hasn't accreted a headline yet). The earlier frozen-at-creation / 4-minimum-anchor model is gone. (Spec §2.2, §2.7.4, §3.4.)
 
@@ -710,7 +710,7 @@ If you see one of these proposed (or are about to write it), stop and surface th
 | Anti-pattern | Why it's wrong | Reach for instead |
 |---|---|---|
 | "Let the LLM decide where to put state" | Pushes canonical state into the LLM | Deterministic code holds state; LLM proposes via tmp + ack |
-| "Skip the ack at closure to make it faster" | Removes the integrity gate at its highest-leverage moment | Friction at high-leverage moments is a feature |
+| "Ack every closure, however routine" | An ack the user clears reflexively launders an unread summary as human-verified — the §3.5 rubber-stamp failure, reached through frequency (AMENDED 2026-08-04) | Keep the ack where the leverage is (anchor-rich / long-engaged threads), batched at a session boundary; auto-accept the routine ones. Removing the ack from the high-leverage moments entirely is still the anti-pattern |
 | "Use SQLite for the spine" | Substrate violation; loses inspectability + git-diffability | Text + git; SQLite stays in reserve as a *derived* index if scale forces it |
 | "Have the LLM run `git commit`" | Mixes LLM-controlled with autonomic git | Runtime commits autonomically; LLM has no git tool |
 | "Add this dep speculatively" | Approved-when-earned violation | Wait until consumer is real; bring dep in *with* consumer |

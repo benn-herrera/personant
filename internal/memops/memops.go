@@ -691,4 +691,22 @@ type MemoryOps interface {
 	// draw from the providers.toml pool. Folds in store.LoadConfig. A
 	// nonexistent file yields a zero Config and no error.
 	LoadConfig(ctx context.Context) (Config, error)
+
+	// DirectiveParam resolves one §2.6.1 directive parameter, walking the
+	// precedence chain project → user → defaults and returning the first
+	// value set. ok is false when no level of the chain sets the key, in
+	// which case the caller applies its own compiled-in default — the
+	// directive layer overrides a default, it does not define one.
+	//
+	// projectID may be empty (no active project), which skips the
+	// project-scoped level. A missing directive file at any level is not
+	// an error; a present but malformed one is, because falling silently
+	// through a hand-edited file with a typo would apply a default the
+	// user believes they overrode.
+	//
+	// This is the FIRST parameter the directive layer serves; the rest of
+	// the §2.6.1 namespace is still compiled-in constants (see the
+	// per-parameter notes in the spec). Values are returned as text and
+	// parsed by the caller that owns the parameter's meaning.
+	DirectiveParam(ctx context.Context, projectID, key string) (value string, ok bool, err error)
 }

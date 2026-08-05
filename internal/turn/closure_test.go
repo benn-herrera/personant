@@ -45,9 +45,20 @@ func fixedOutcomeResolver(o ClosureOutcome) ClosureResolver {
 
 // seedClosureThread writes a thread + spine record with explicit
 // state / last-engaged-turn / last-engaged-timestamp, for decay tests.
+// The seeded shape is deliberately ROUTINE under the §3.5 auto-accept
+// criteria (4 anchors, 1 engaged turn — both under the exception
+// thresholds); seedClosureThreadShape is the variant for exception cases.
 func seedClosureThread(t *testing.T, paths store.PersonantPaths, project, thrID string, state memops.ThreadState, lastEngagedTurn int, lastEngaged string) {
 	t.Helper()
-	anchors := []string{"alpha", "beta", "gamma", "delta"}
+	seedClosureThreadShape(t, paths, project, thrID, state, lastEngagedTurn, lastEngaged,
+		[]string{"alpha", "beta", "gamma", "delta"}, 1)
+}
+
+// seedClosureThreadShape is seedClosureThread with the two §3.5
+// classification inputs — the anchor set and the engaged-turn count —
+// under the test's control.
+func seedClosureThreadShape(t *testing.T, paths store.PersonantPaths, project, thrID string, state memops.ThreadState, lastEngagedTurn int, lastEngaged string, anchors []string, turnCount int) {
+	t.Helper()
 	rec := memops.SpineRecord{
 		ID:              thrID,
 		Project:         project,
@@ -57,7 +68,7 @@ func seedClosureThread(t *testing.T, paths store.PersonantPaths, project, thrID 
 		Created:         "2026-04-01T00:00:00Z",
 		LastEngaged:     lastEngaged,
 		StateChanged:    "2026-04-01T00:00:00Z",
-		TurnCount:       1,
+		TurnCount:       turnCount,
 		LastEngagedTurn: lastEngagedTurn,
 	}
 	if err := store.AppendSpineRecord(paths, rec); err != nil {
@@ -189,6 +200,9 @@ func TestSurfaceClosure_RetireWritesStateAndEvicts(t *testing.T) {
 	state.DormantThreads = []string{"thr_1"}
 	state.Curator = stubCurator{summary: "the thread's gist", anchors: []string{"x", "y", "z", "w"}}
 	state.ClosureResolver = fixedOutcomeResolver(ClosureResolved)
+	// Pinned to the pre-2026-08-04 interactive flow: this test is about
+	// what the RESOLVER's verdict does. Auto-accept has its own tests.
+	state.ClosureAckMode = AckModeAlways
 
 	if err := surfaceClosureCandidates(context.Background(), state); err != nil {
 		t.Fatalf("surfaceClosureCandidates: %v", err)
@@ -239,6 +253,9 @@ func TestSurfaceClosure_WIPDemotes(t *testing.T) {
 	state.ActiveThreads = []string{"thr_1"}
 	state.Curator = stubCurator{}
 	state.ClosureResolver = fixedOutcomeResolver(ClosureWIP)
+	// Pinned to the pre-2026-08-04 interactive flow: this test is about
+	// what the RESOLVER's verdict does. Auto-accept has its own tests.
+	state.ClosureAckMode = AckModeAlways
 
 	if err := surfaceClosureCandidates(context.Background(), state); err != nil {
 		t.Fatalf("surfaceClosureCandidates: %v", err)
@@ -276,6 +293,9 @@ func TestSurfaceClosure_DeferReArms(t *testing.T) {
 		prompts++
 		return ClosureResolution{Outcome: ClosureDefer}, nil
 	}
+	// Defer is a verdict only a human gives, so this is the always-mode
+	// flow. The grace it arms is honored by BOTH modes (decayCandidates).
+	state.ClosureAckMode = AckModeAlways
 
 	// Turn N: defer.
 	if err := surfaceClosureCandidates(context.Background(), state); err != nil {
@@ -371,7 +391,7 @@ func TestClosureDeferPrunedOnEngage(t *testing.T) {
 	// Defer thr_1: applyClosureResolution with ClosureDefer arms the
 	// suppression grace.
 	if err := applyClosureResolution(context.Background(), state, "thr_1",
-		curator.ClosureDraft{}, ClosureResolution{Outcome: ClosureDefer}); err != nil {
+		curator.ClosureDraft{}, ClosureResolution{Outcome: ClosureDefer}, ackHuman); err != nil {
 		t.Fatalf("applyClosureResolution defer: %v", err)
 	}
 	if _, deferred := state.closureDeferUntil["thr_1"]; !deferred {
@@ -557,7 +577,7 @@ func TestApplyClosureResolution_EditedSummaryPropagates(t *testing.T) {
 
 	draft := curator.ClosureDraft{Summary: "curator draft gist", Anchors: []string{"a"}}
 	res := ClosureResolution{Outcome: ClosureResolved, EditedSummary: "human edited gist"}
-	if err := applyClosureResolution(context.Background(), state, "thr_1", draft, res); err != nil {
+	if err := applyClosureResolution(context.Background(), state, "thr_1", draft, res, ackHuman); err != nil {
 		t.Fatalf("applyClosureResolution: %v", err)
 	}
 
@@ -588,7 +608,7 @@ func TestApplyClosureResolution_UneditedLogsAckNo(t *testing.T) {
 
 	draft := curator.ClosureDraft{Summary: "curator draft gist"}
 	res := ClosureResolution{Outcome: ClosureDecided}
-	if err := applyClosureResolution(context.Background(), state, "thr_1", draft, res); err != nil {
+	if err := applyClosureResolution(context.Background(), state, "thr_1", draft, res, ackHuman); err != nil {
 		t.Fatalf("applyClosureResolution: %v", err)
 	}
 
@@ -599,4 +619,308 @@ func TestApplyClosureResolution_UneditedLogsAckNo(t *testing.T) {
 	if !strings.Contains(readDayLog(t, paths), "retire.ack thr=thr_1 resolution=decided edited=no") {
 		t.Errorf("missing retire.ack edited=no\n%s", readDayLog(t, paths))
 	}
+}
+
+// ---------------------------------------------------------------------
+// §3.5 routine/exception split (user ruling 2026-08-04)
+// ---------------------------------------------------------------------
+
+// failingResolver fails the test if the closure resolver is consulted at
+// all — the auto-accept path must never reach the user.
+func failingResolver(t *testing.T) ClosureResolver {
+	t.Helper()
+	return func(_ context.Context, offer ClosureOffer) (ClosureResolution, error) {
+		t.Errorf("closure resolver was consulted for %s; auto mode must not prompt", offer.ThreadID)
+		return ClosureResolution{Outcome: ClosureDefer}, nil
+	}
+}
+
+// TestClosureException covers the classification predicate directly: the
+// two exception signals at and either side of their thresholds.
+func TestClosureException(t *testing.T) {
+	anchors := func(n int) []string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = "a"
+		}
+		return out
+	}
+	tests := []struct {
+		name      string
+		anchors   int
+		turnCount int
+		want      bool
+	}{
+		{"thin thread is routine", 3, 2, false},
+		{"one anchor short of the bar is routine", exceptionAnchors - 1, 1, false},
+		{"anchor-rich is an exception", exceptionAnchors, 1, true},
+		{"one turn short of the bar is routine", 1, exceptionTurns - 1, false},
+		{"long-engaged is an exception", 1, exceptionTurns, true},
+		{"zero-anchor vague thread is routine", 0, 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, got := closureException(memops.SpineRecord{
+				Anchors:   anchors(tt.anchors),
+				TurnCount: tt.turnCount,
+			})
+			if got != tt.want {
+				t.Errorf("closureException() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestParseClosureAckMode: the directive value maps to a mode, and an
+// unrecognized value is refused rather than guessed at.
+func TestParseClosureAckMode(t *testing.T) {
+	tests := []struct {
+		in   string
+		want ClosureAckMode
+		ok   bool
+	}{
+		{"auto", AckModeAuto, true},
+		{"always", AckModeAlways, true},
+		{" ALWAYS ", AckModeAlways, true},
+		{"", "", false},
+		{"never", "", false},
+	}
+	for _, tt := range tests {
+		got, ok := ParseClosureAckMode(tt.in)
+		if got != tt.want || ok != tt.ok {
+			t.Errorf("ParseClosureAckMode(%q) = (%q, %v), want (%q, %v)", tt.in, got, ok, tt.want, tt.ok)
+		}
+	}
+}
+
+// TestSurfaceClosure_AutoAcceptsRoutine — the default mode retires a
+// routine decayed thread with the curator's summary, without consulting
+// the resolver, logs ack=auto, and reports it through OnAutoClosed.
+func TestSurfaceClosure_AutoAcceptsRoutine(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
+
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
+	state.TurnNumber = 1 + DecayTurns
+	state.ActiveThreads = []string{"thr_1"}
+	state.DormantThreads = []string{"thr_1"}
+	state.Curator = stubCurator{summary: "the thread's gist"}
+	state.ClosureResolver = failingResolver(t)
+
+	var notices []ClosureNotice
+	state.OnAutoClosed = func(n ClosureNotice) { notices = append(notices, n) }
+
+	if err := surfaceClosureCandidates(context.Background(), state); err != nil {
+		t.Fatalf("surfaceClosureCandidates: %v", err)
+	}
+
+	rec, found, err := state.Ops.FindThread(context.Background(), "thr_1")
+	if err != nil || !found {
+		t.Fatalf("FindThread thr_1: found=%v err=%v", found, err)
+	}
+	if rec.State != memops.ThreadResolved {
+		t.Errorf("spine state = %q, want resolved", rec.State)
+	}
+	if rec.Summary != "the thread's gist" {
+		t.Errorf("spine summary = %q, want the curator draft", rec.Summary)
+	}
+	if containsString(state.ActiveThreads, "thr_1") || containsString(state.DormantThreads, "thr_1") {
+		t.Errorf("auto-closed thread still in the working set: B=%v C=%v",
+			state.ActiveThreads, state.DormantThreads)
+	}
+	if len(notices) != 1 || notices[0].ThreadID != "thr_1" || notices[0].Summary != "the thread's gist" {
+		t.Errorf("OnAutoClosed notices = %+v, want one for thr_1 carrying the summary", notices)
+	}
+
+	log := readDayLog(t, paths)
+	for _, want := range []string{
+		"retire.ack thr=thr_1 resolution=resolved edited=no ack=auto",
+		"retire.complete thr=thr_1 resolution=resolved",
+	} {
+		if !strings.Contains(log, want) {
+			t.Errorf("log missing %q\n%s", want, log)
+		}
+	}
+}
+
+// TestSurfaceClosure_QueuesExceptions — an anchor-rich or long-engaged
+// decayed thread is left untouched and queued: no curator call, no
+// prompt, one retire.pending line, and it shows up in PendingClosures.
+func TestSurfaceClosure_QueuesExceptions(t *testing.T) {
+	tests := []struct {
+		name       string
+		anchors    []string
+		turnCount  int
+		wantReason string
+	}{
+		{"anchor-rich", []string{"a", "b", "c", "d", "e", "f"}, 1, "reason=anchors=6"},
+		{"long-engaged", []string{"a", "b"}, exceptionTurns, "reason=turns=15"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			paths, meta := newTestHome(t)
+			seedClosureThreadShape(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "",
+				tt.anchors, tt.turnCount)
+
+			state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+			pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
+			state.TurnNumber = 1 + DecayTurns
+			state.ActiveThreads = []string{"thr_1"}
+			state.Curator = stubCurator{}
+			state.ClosureResolver = failingResolver(t)
+			state.OnAutoClosed = func(n ClosureNotice) {
+				t.Errorf("queued closure was auto-accepted: %+v", n)
+			}
+
+			if err := surfaceClosureCandidates(context.Background(), state); err != nil {
+				t.Fatalf("surfaceClosureCandidates: %v", err)
+			}
+
+			rec, _, _ := state.Ops.FindThread(context.Background(), "thr_1")
+			if rec.State != memops.ThreadActive {
+				t.Errorf("queued thread state = %q, want unchanged active", rec.State)
+			}
+			if !containsString(state.ActiveThreads, "thr_1") {
+				t.Errorf("queued thread was evicted from Layer B: %v", state.ActiveThreads)
+			}
+			// A second scan while the thread is still queued must NOT
+			// re-announce it: retire.pending is a decision event, not a
+			// per-turn heartbeat.
+			state.TurnNumber++
+			if err := surfaceClosureCandidates(context.Background(), state); err != nil {
+				t.Fatalf("surfaceClosureCandidates (second scan): %v", err)
+			}
+
+			log := readDayLog(t, paths)
+			if !strings.Contains(log, tt.wantReason) {
+				t.Errorf("log missing retire.pending with %s\n%s", tt.wantReason, log)
+			}
+			if n := strings.Count(log, "retire.pending thr=thr_1"); n != 1 {
+				t.Errorf("retire.pending logged %d times over two scans, want 1\n%s", n, log)
+			}
+			if strings.Contains(log, "retire.ack") {
+				t.Errorf("queued thread was acked\n%s", log)
+			}
+
+			pending, err := PendingClosures(context.Background(), state)
+			if err != nil {
+				t.Fatalf("PendingClosures: %v", err)
+			}
+			if len(pending) != 1 || pending[0] != "thr_1" {
+				t.Errorf("PendingClosures = %v, want [thr_1]", pending)
+			}
+		})
+	}
+}
+
+// TestPendingClosures_EmptyUnderAlwaysMode — always mode offers every
+// decayed thread in-session, so nothing can be queued for a drain.
+func TestPendingClosures_EmptyUnderAlwaysMode(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedClosureThreadShape(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "",
+		[]string{"a", "b", "c", "d", "e", "f"}, 1)
+
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
+	state.TurnNumber = 1 + DecayTurns
+	state.Curator = stubCurator{}
+	state.ClosureResolver = fixedOutcomeResolver(ClosureResolved)
+	state.ClosureAckMode = AckModeAlways
+
+	pending, err := PendingClosures(context.Background(), state)
+	if err != nil {
+		t.Fatalf("PendingClosures: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Errorf("PendingClosures under always mode = %v, want none", pending)
+	}
+}
+
+// TestDrainClosures_ResolvesQueueInteractively — the boundary drain puts
+// each queued thread to the resolver and applies the verdict as a HUMAN
+// ack (ack=human), leaving the queue empty.
+func TestDrainClosures_ResolvesQueueInteractively(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedClosureThreadShape(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "",
+		[]string{"a", "b", "c", "d", "e", "f"}, 1)
+
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
+	state.TurnNumber = 1 + DecayTurns
+	state.ActiveThreads = []string{"thr_1"}
+	state.Curator = stubCurator{summary: "queued gist"}
+	state.ClosureResolver = fixedOutcomeResolver(ClosureDecided)
+
+	n, err := DrainClosures(context.Background(), state)
+	if err != nil {
+		t.Fatalf("DrainClosures: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("DrainClosures closed %d, want 1", n)
+	}
+
+	rec, _, _ := state.Ops.FindThread(context.Background(), "thr_1")
+	if rec.State != memops.ThreadDecided {
+		t.Errorf("drained thread state = %q, want decided", rec.State)
+	}
+	if containsString(state.ActiveThreads, "thr_1") {
+		t.Errorf("drained thread still in Layer B: %v", state.ActiveThreads)
+	}
+	log := readDayLog(t, paths)
+	for _, want := range []string{
+		"retire.prompt thr=thr_1 trigger=queued",
+		"retire.ack thr=thr_1 resolution=decided edited=no ack=human",
+	} {
+		if !strings.Contains(log, want) {
+			t.Errorf("log missing %q\n%s", want, log)
+		}
+	}
+
+	pending, err := PendingClosures(context.Background(), state)
+	if err != nil {
+		t.Fatalf("PendingClosures after drain: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Errorf("queue not empty after drain: %v", pending)
+	}
+}
+
+// TestAutoAccept_EmptyDraftIsNotAccepted — an empty curator summary is
+// the one case a human must see: nothing is written, and the thread stays
+// decay-eligible for the next scan.
+func TestAutoAccept_EmptyDraftIsNotAccepted(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
+
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
+	state.TurnNumber = 1 + DecayTurns
+	state.ActiveThreads = []string{"thr_1"}
+	state.Curator = emptyDraftCurator{}
+	state.ClosureResolver = failingResolver(t)
+
+	if err := surfaceClosureCandidates(context.Background(), state); err != nil {
+		t.Fatalf("surfaceClosureCandidates: %v", err)
+	}
+
+	rec, _, _ := state.Ops.FindThread(context.Background(), "thr_1")
+	if rec.State != memops.ThreadActive {
+		t.Errorf("thread state = %q, want unchanged active", rec.State)
+	}
+	log := readDayLog(t, paths)
+	if !strings.Contains(log, "retire.curator-error thr=thr_1") {
+		t.Errorf("log missing retire.curator-error\n%s", log)
+	}
+	if strings.Contains(log, "retire.ack") {
+		t.Errorf("empty draft was acked\n%s", log)
+	}
+}
+
+// emptyDraftCurator drafts a blank summary — the model returned nothing
+// usable, without erroring.
+type emptyDraftCurator struct{}
+
+func (emptyDraftCurator) DraftClosure(_ context.Context, _ memops.Thread) (curator.ClosureDraft, error) {
+	return curator.ClosureDraft{Summary: "   "}, nil
 }

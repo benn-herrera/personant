@@ -474,6 +474,7 @@ project: null
 parameters:
   engagement.decay-turns: 8
   engagement.decay-time: 7d
+  closure.ack-mode: auto
   recall.symbolic-threshold: 0.4
   recall.cross-project-threshold: 0.5
   layer.b-top-k: 3
