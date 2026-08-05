@@ -49,6 +49,19 @@ type fakeDevice struct {
 	// Closing it releases the read. It is what lets a test assert on a read
 	// that is genuinely IN PROGRESS.
 	hold chan struct{}
+
+	// term and ready are the ORDERING BARRIER; see [fakeDevice.awaitConsumer]
+	// for what it is for. ready nil means no barrier: this script has no
+	// out-of-band step to order, so it keeps the read-ahead. When it is
+	// non-nil it is CLOSED once term has been published, and term is read
+	// only after that receive.
+	term  *Terminal
+	ready chan struct{}
+
+	// stop releases a parked read at teardown, so a fixture whose consumer
+	// never registers ends the test instead of hanging it. Closed by the
+	// fixture's cleanup BEFORE Terminal.Close, which joins the pump.
+	stop chan struct{}
 }
 
 // scriptStep is one read's worth of terminal.
@@ -71,7 +84,93 @@ func resized(cols, rows int) scriptStep {
 	return scriptStep{resize: &Size{Cols: cols, Rows: rows}}
 }
 
+// awaitConsumer is the ORDERING BARRIER, and it exists because the pump
+// consumes some things ITSELF rather than offering them down the activity
+// stack — see [pumpConsumed]. Both cases are correct: SIGWINCH is a signal
+// and never a byte, so [Device.Resized] is the only seam that can carry a
+// resize, and only the fd's owner can suspend correctly on Ctrl-Z.
+//
+// That correctness is also why a script interleaving such a step between
+// typed() steps has, on its own, NO ordering guarantee. The pump READS
+// AHEAD of the consumer: keys read before an editor registers wait in its
+// reservoir, but a pump-consumed step is not held — it is acted on
+// immediately. Under parallel-package load the pump wins that race, the
+// geometry changes (or the block is invalidated) before the keystroke the
+// step was scripted to follow is ever dispatched, and the frames come out
+// wrong.
+//
+// The barrier is in the FIXTURE, not the pump. For such a script the fake
+// serves no step until the terminal has a registered consumer. With no
+// read-ahead the reservoir is empty by construction, and dispatch then runs
+// synchronously ON the pump goroutine between one Read and the next — so
+// the script's order IS the delivery order.
+//
+// It is a happens-before, not a sleep and not a poll: [Terminal.Push]
+// publishes the stack entry under t.mu and then nudges t.wake, and this
+// blocks on that nudge. The nudge is put BACK, because it is the pump's own
+// signal (drainThenEOF waits on it) and peeking must not consume it.
+//
+// Scripts WITHOUT a resize keep the read-ahead on purpose: the reservoir is
+// the subject of TestPump_EscSurvivesTypeAheadAcrossThePromptTurnBoundary
+// and TestPump_TypeAheadBetweenTwoReadsLandsInTheNextLine, and serializing
+// every fixture would make those tests vacuous rather than green.
+func (d *fakeDevice) awaitConsumer() {
+	if d.ready == nil {
+		return
+	}
+	select {
+	case <-d.ready:
+	case <-d.stop:
+		return
+	}
+	consumed := false
+	for !d.term.hasConsumer() {
+		select {
+		case <-d.term.wake:
+			consumed = true
+		case <-d.stop:
+			return
+		}
+	}
+	if consumed {
+		select {
+		case d.term.wake <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// ctrlZByte is Ctrl-Z in band. ISIG is cleared in [ModeSession], so it
+// arrives as a byte and the pump suspends on it itself.
+const ctrlZByte = 0x1a
+
+// pumpConsumed reports whether a step carries something the PUMP consumes
+// ITSELF instead of offering it down the activity stack. There are exactly
+// two such things, both named in pump.go: a RESIZE ("never offered to a
+// handler") and CTRL-Z ("consumed HERE and never delivered").
+//
+// They are the same hazard for the same reason, which is why one predicate
+// covers both. An ordinary key read before a consumer exists is HELD in the
+// pump's reservoir and delivered in order once one appears; a pump-consumed
+// step is acted on immediately and cannot queue behind the reservoir. So a
+// script that mixes the two has an unspecified delivery order, and it is
+// exactly those scripts that need [fakeDevice.awaitConsumer].
+func pumpConsumed(s scriptStep) bool {
+	return s.resize != nil || bytes.IndexByte(s.in, ctrlZByte) >= 0
+}
+
 func (d *fakeDevice) Read(p []byte) (int, error) {
+	// Outside the lock, and only while a step is left to serve: the barrier
+	// waits on the terminal, whose render path writes to this device, and an
+	// EXHAUSTED script must still reach its EOF (or its hold) after the last
+	// consumer has retired.
+	d.mu.Lock()
+	pending := len(d.script) > 0
+	d.mu.Unlock()
+	if pending {
+		d.awaitConsumer()
+	}
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if len(d.script) == 0 {
@@ -154,7 +253,17 @@ func newTTY(t *testing.T, termEnv string, cols int) *fixture {
 // editor do; opt tunes the Options a particular test is about.
 func newScripted(t *testing.T, termEnv string, size Size, script []scriptStep, opt ...func(*Options)) *fixture {
 	t.Helper()
-	f := &fixture{dev: &fakeDevice{size: size, script: script, resized: make(chan struct{}, 1)}}
+	f := &fixture{dev: &fakeDevice{
+		size:    size,
+		script:  script,
+		resized: make(chan struct{}, 1),
+		stop:    make(chan struct{}),
+	}}
+	// The barrier is armed by the SCRIPT, not by the test. See
+	// [fakeDevice.awaitConsumer].
+	if slices.ContainsFunc(script, pumpConsumed) {
+		f.dev.ready = make(chan struct{})
+	}
 	opts := Options{
 		Platform: NewUnixPlatform(f.dev),
 		Stderr:   &f.diag,
@@ -174,8 +283,19 @@ func newScripted(t *testing.T, termEnv string, size Size, script []scriptStep, o
 	tm.mu.Lock()
 	tm.raiseTSTP = func() {}
 	tm.mu.Unlock()
-	t.Cleanup(func() { _ = tm.Close() })
+	t.Cleanup(func() {
+		// stop first: Close joins the pump, and a pump parked at the barrier
+		// would be joining a read nobody is going to release.
+		close(f.dev.stop)
+		_ = tm.Close()
+	})
 	f.t = tm
+	// Published LAST, so nothing the pump can already be holding — the mode,
+	// raiseTSTP, the cleanup — is still being written when the barrier lifts.
+	if f.dev.ready != nil {
+		f.dev.term = tm
+		close(f.dev.ready)
+	}
 	return f
 }
 
