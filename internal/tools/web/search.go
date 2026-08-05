@@ -102,7 +102,7 @@ func NewSearchTool(cfg SearchConfig) (tools.Tool, error) {
 	s := &searcher{
 		provider:   cfg.Provider,
 		maxResults: cfg.MaxResults,
-		quota:      newQuota(cfg.MaxPerTurn, cfg.MaxPerDay),
+		quota:      newQuota(ToolNameSearch, cfg.MaxPerTurn, cfg.MaxPerDay),
 	}
 	if s.maxResults <= 0 {
 		s.maxResults = DefaultSearchResults

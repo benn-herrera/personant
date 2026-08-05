@@ -1,7 +1,8 @@
-// Package web implements the two §6.1.1 network tools: `web.fetch`
-// (retrieve a URL as readable Markdown) and `web.search` (query → ranked
-// results). Both are read-only, both register at tools.TierSilent, and
-// neither touches the substrate — they take their configuration as plain
+// Package web implements the §6.1.1 network tools: `web.fetch` (retrieve
+// a URL as readable Markdown), `web.search` (query → ranked results from
+// the open web) and `web.wikipedia` (query → ranked encyclopedia
+// articles). All are read-only, all register at tools.TierSilent, and
+// none touches the substrate — they take their configuration as plain
 // values and hand back a tools.Tool the caller registers.
 //
 // # Tier ruling (SPEC §6.2 gap, closed here)
@@ -70,11 +71,18 @@ const (
 	DefaultFetchMaxRedirects = 5
 )
 
-// DefaultUserAgent identifies personant to the servers it fetches from.
-// A descriptive agent string is the minimum courtesy owed to an operator
-// reading their access log, and an anonymous Go-default UA gets blocked
-// by exactly the sites worth reading.
-const DefaultUserAgent = "personant/" + version.FrontEnd + " (personal knowledge agent; web.fetch)"
+// The User-Agent identity this package presents, shared by every tool in
+// it. A descriptive agent string is the minimum courtesy owed to an
+// operator reading their access log, an anonymous Go-default UA gets
+// blocked by exactly the sites worth reading, and Wikimedia's API
+// etiquette asks for one explicitly. One identity, one version, with only
+// the trailing tool name differing — so a server operator sees the same
+// client whichever tool reached them.
+const (
+	userAgentIdentity  = "personant/" + version.FrontEnd + " (personal knowledge agent; "
+	DefaultUserAgent   = userAgentIdentity + ToolNameFetch + ")"
+	wikipediaUserAgent = userAgentIdentity + ToolNameWikipedia + ")"
+)
 
 // fetchParams is the model-facing JSON Schema. One required string. The
 // scheme constraint is stated in the description because a model that

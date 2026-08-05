@@ -2,10 +2,14 @@ package chat
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"personant/internal/memops"
+	"personant/internal/model"
+	"personant/internal/tools"
 	"personant/internal/tools/web"
 )
 
@@ -49,10 +53,43 @@ func TestToolRegistryWithoutSearchProvider(t *testing.T) {
 		t.Errorf("an unconfigured search backend must be SILENT, not warned about; got: %q", warn)
 	}
 
-	// web.fetch needs no credential and must be there regardless.
-	hasFetch, _ := hasTool(t, memops.Config{}, providers, web.ToolNameFetch)
-	if !hasFetch {
-		t.Error("web.fetch must register regardless of search configuration")
+	// web.fetch and web.wikipedia need no credential and must be there
+	// regardless.
+	for _, name := range []string{web.ToolNameFetch, web.ToolNameWikipedia} {
+		if has, _ := hasTool(t, memops.Config{}, providers, name); !has {
+			t.Errorf("%s must register regardless of search configuration", name)
+		}
+	}
+}
+
+// TestToolRegistryDispatchesWikipedia — registration is only half of it;
+// the registered entry must be dispatchable under the name the model is
+// told, with the tier and mutation policy §6.1.4 requires.
+func TestToolRegistryDispatchesWikipedia(t *testing.T) {
+	var warn bytes.Buffer
+	reg, err := buildToolRegistry(memops.Config{}, memops.Providers{"reaper": inferenceProvider("reaper")}, &warn)
+	if err != nil {
+		t.Fatalf("buildToolRegistry: %v", err)
+	}
+	tool, ok := reg.Lookup(web.ToolNameWikipedia)
+	if !ok {
+		t.Fatal("web.wikipedia is not in the registry")
+	}
+	if tool.Tier != tools.TierSilent || tool.Mutates {
+		t.Errorf("web.wikipedia: tier=%d mutates=%v, want tier 0 / non-mutating", tool.Tier, tool.Mutates)
+	}
+
+	// A bad-argument call still comes back as a result the model can read
+	// — Dispatch never fails.
+	res := reg.Dispatch(context.Background(), model.ToolCall{ID: "c1", Function: web.ToolNameWikipedia, Args: json.RawMessage(`{}`)})
+	if res.Aborted {
+		t.Fatal("dispatch reported an abort on a live context")
+	}
+	if res.Err == nil {
+		t.Error("a call with no search term succeeded")
+	}
+	if !strings.Contains(res.Content, "ERROR") {
+		t.Errorf("the model-facing content does not report the failure: %q", res.Content)
 	}
 }
 

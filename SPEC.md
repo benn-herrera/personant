@@ -3096,13 +3096,14 @@ See ARCHITECTURE.md §"Tool surface (bounded, role-shaped)" for the design ratio
 
 ### 6.1 External tool surface
 
-The LLM's external tool inventory is bounded at twelve tools, split between
-read/think and draft/mutate. *Internal* tools (operations on personant's own
+The LLM's external tool inventory is bounded at thirteen tools, split
+between read/think and draft/mutate (**AMENDED 2026-08-05**: twelve → thirteen,
+`web.wikipedia`, §6.1.5). *Internal* tools (operations on personant's own
 state — `personant search`, mid-turn thread fetch, `/topic`, `/done`, etc.)
 are out of scope for this section; see §4 (user surface) and §5.5 (model
 invocation protocol).
 
-#### 6.1.1 Read/think tools (6)
+#### 6.1.1 Read/think tools (7)
 
 | Tool | Signature (informal) | Purpose |
 |---|---|---|
@@ -3111,12 +3112,14 @@ invocation protocol).
 | `fs.grep` | `(pattern, path, opts) → matches[]` | regex/literal search across a tree |
 | `web.fetch` | `(url) → bytes + meta` | retrieve a URL — **BUILT** (wave 3) |
 | `web.search` | `(query) → results[]` | search query → URLs — **BUILT** (wave 3) |
+| `web.wikipedia` | `(q, limit?) → articles[]` | search Wikipedia → articles — **BUILT** (§6.1.5, AMENDED 2026-08-05) |
 | `model.consult` | `(prompt, model_id) → response` | ask a guest model |
 
-**Status:** the `web.*` pair is built and registered; the `fs.*` tools are
-not yet. Both web tools are tier 0 / non-mutating (§6.2), and both are
-described below at the level of the behaviour that is load-bearing rather
-than as an API listing.
+**Status:** the `web.*` trio is built and registered; the `fs.*` tools are
+not yet. All three web tools are tier 0 / non-mutating (§6.2), and each is
+described at the level of the behaviour that is load-bearing rather than
+as an API listing — `web.fetch` and `web.search` below, `web.wikipedia` in
+§6.1.5.
 
 **`web.fetch`** is a plain HTTP GET → readability extraction → Markdown.
 **There is no headless browser and no JavaScript execution**, which is a
@@ -3241,9 +3244,10 @@ handler is `(context, raw JSON args) → (bytes, error)`.
   configured backend is simply absent from the inventory, so there is no
   "configured but broken" state for the model to trip over.
 - **Registration is per-session and config-driven.** The registry is
-  built once at session open and immutable thereafter. `web.fetch`
-  registers unconditionally (it needs no credential); `web.search`
-  registers only when the pool holds a usable `type = "search"` provider.
+  built once at session open and immutable thereafter. `web.fetch` and
+  `web.wikipedia` register unconditionally (neither needs a credential);
+  `web.search` registers only when the pool holds a usable
+  `type = "search"` provider.
   Everything that can go wrong with the optional half degrades to a
   warning and a smaller registry — never to a refused session.
 - **Spec order is deterministic** (sorted by name). Map order would make
@@ -3298,6 +3302,59 @@ point of their own. Re-running a **read-only** tool is harmless, and every
 **This decision must be revisited before any mutating tool lands** — the
 trip-wire is mechanical: `tools.Registry.Register` REFUSES a tool
 declaring `Mutates`, citing this decision.
+
+#### 6.1.5 `web.wikipedia` (AMENDED 2026-08-05)
+
+A search tool scoped to one encyclopedia: `GET
+https://en.wikipedia.org/w/rest.php/v1/search/page?q=<term>&limit=<n>` →
+ranked articles, each with its title, short description, a matching
+excerpt and its canonical URL. Tier 0 / non-mutating, like the rest of
+§6.1.1. No credential, no configuration, no pool entry — it registers on
+every session, as `web.fetch` does and `web.search` does not.
+
+**It is a SEPARATE tool, not a `web.search` backend.** Folding Wikipedia
+in behind `SearchProvider` would make the encyclopedia-vs-open-web choice
+*ours* — a config pin, decided once, at startup — when it is properly the
+model's, decided per call. "Is an encyclopedic source what I want here?"
+is a judgement about the question being asked, and the model is the only
+participant holding it. The cost is one extra spec block in the request
+prefix; the purchase is an actual choice.
+
+Load-bearing properties:
+
+- **Arguments: `q` (required) and `limit` (optional, default 5, maximum
+  10).** An out-of-range `limit` is **CLAMPED SILENTLY, never refused** —
+  a limit is a preference, and erroring on one spends a tool round to
+  learn what the clamp already decided. A non-positive `limit` reads as
+  "unspecified" (JSON omission and an explicit `0` are indistinguishable,
+  and the surrounding code already reads a non-positive bound as "use the
+  default").
+- **The trichotomy of §6.1.1 `web.search` holds unchanged.** A transport
+  or non-200 failure is an ERROR stating that NO search happened; an
+  empty `pages` array is a SUCCESS stating that the search ran and matched
+  nothing. The reason is the same one and it is the whole point: a model
+  told the topic does not exist says so confidently.
+- **A local per-turn / per-day cap, on its OWN counter**, using the same
+  mechanism and the same defaults (5 / 100) as `web.search`. Wikipedia is
+  unmetered, so the *cost* argument for a cap does not apply — but the
+  *loop* argument does, unchanged, and an unbounded tool invites the
+  retry loop. Separate counters, so a Wikipedia loop cannot silently
+  spend the metered backend's allowance.
+- **Excerpts are stripped of the API's markup.** The endpoint wraps
+  matched terms in `<span class="searchmatch">…</span>` and escapes the
+  prose around them; tags are removed and entities resolved in ONE
+  tokenizer pass, because doing it in two steps in the wrong order turns
+  an escaped `&lt;script&gt;` back into a tag. Each rendered field is
+  clipped to the §6.5 shortlist bound, and the response read is capped.
+- **The canonical URL is `https://en.wikipedia.org/wiki/<key>`, with the
+  `key` concatenated and NOT re-encoded.** The API returns it already
+  URL-safe (`Go_(programming_language)`); escaping it again yields a URL
+  that still resolves but no longer matches what a human — or a follow-up
+  `web.fetch` — would write. The tool's model-facing description states
+  that `web.fetch` retrieves any result's full article.
+- **English is a host swap, not a design.** The REST path, the response
+  shape and the `/wiki/<key>` article form are identical on every language
+  edition, so a language choice, when one is wanted, is one host string.
 
 ### 6.2 Permission tiers and accrual
 

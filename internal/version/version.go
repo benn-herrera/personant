@@ -29,7 +29,7 @@ import (
 )
 
 // Substrate is the version of the runtime + MemoryOps port.
-const Substrate = "0.2.0"
+const Substrate = "0.2.1"
 
 // FrontEnd is the version of the U/X + feature-logic line.
 const FrontEnd = "0.0.18"

@@ -23,8 +23,9 @@ import (
 // already handle correctly. The model is never told about a tool that
 // cannot be serviced, so it never calls one.
 //
-// The mandatory half is `web.fetch`: it needs no credential, so it
-// registers on every session regardless of configuration.
+// The mandatory half is `web.fetch` and `web.wikipedia`: neither needs a
+// credential, so both register on every session regardless of
+// configuration.
 
 // buildToolRegistry assembles the §6.1.1 inventory.
 //
@@ -39,6 +40,9 @@ func buildToolRegistry(cfg memops.Config, providers memops.Providers, warn io.Wr
 
 	if err := reg.Register(web.NewFetchTool(web.FetchConfig{})); err != nil {
 		return nil, fmt.Errorf("chat: register %s: %w", web.ToolNameFetch, err)
+	}
+	if err := reg.Register(web.NewWikipediaTool(web.WikipediaConfig{})); err != nil {
+		return nil, fmt.Errorf("chat: register %s: %w", web.ToolNameWikipedia, err)
 	}
 
 	provider, err := selectSearchProvider(cfg.Search, providers)

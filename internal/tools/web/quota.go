@@ -9,7 +9,10 @@ import (
 	"personant/internal/tools"
 )
 
-// The LOCAL query cap.
+// The LOCAL query cap, shared by every querying tool in this package
+// (`web.search`, `web.wikipedia`) — one mechanism, one counter EACH, so a
+// runaway loop on one tool cannot spend another's allowance and neither
+// can be bounded by accident.
 //
 // It is enforced HERE, in our code, and not by trusting a provider
 // dashboard to be watched. A metered API plus a model in a retry loop is
@@ -39,11 +42,19 @@ const (
 	DefaultMaxSearchesPerDay = 100
 )
 
+// An UNMETERED backend takes the same defaults. `web.wikipedia` needs no
+// key and costs nothing per query, so the cost argument above does not
+// apply to it — but the LOOP argument does, unchanged, and the cheapest
+// honest answer to "what should an unmetered tool's cap be?" is the one
+// already reasoned about rather than a second number nobody calibrated.
+// A tool that needs a different allowance says so in its own config.
+
 // quota is the per-turn / per-day counter pair. It is safe for
 // concurrent use: tool rounds run sequentially today, but a quota that
 // silently miscounts under a future concurrent dispatch is a bug nobody
 // would look for.
 type quota struct {
+	tool    string // the tool this counter bounds; named in the refusal
 	perTurn int
 	perDay  int
 
@@ -54,14 +65,14 @@ type quota struct {
 	dayUsed  int
 }
 
-func newQuota(perTurn, perDay int) *quota {
+func newQuota(tool string, perTurn, perDay int) *quota {
 	if perTurn <= 0 {
 		perTurn = DefaultMaxSearchesPerTurn
 	}
 	if perDay <= 0 {
 		perDay = DefaultMaxSearchesPerDay
 	}
-	return &quota{perTurn: perTurn, perDay: perDay}
+	return &quota{tool: tool, perTurn: perTurn, perDay: perDay}
 }
 
 // take consumes one unit or returns the refusal to hand back to the
@@ -83,19 +94,19 @@ func (q *quota) take(ctx context.Context) error {
 		q.turn, q.turnUsed = turn, 0
 	}
 	if q.dayUsed >= q.perDay {
-		return capError("day", q.perDay, "the daily allowance resets at 00:00 UTC")
+		return capError(q.tool, "day", q.perDay, "the daily allowance resets at 00:00 UTC")
 	}
 	if q.turnUsed >= q.perTurn {
-		return capError("turn", q.perTurn, "the per-turn allowance resets on your next turn")
+		return capError(q.tool, "turn", q.perTurn, "the per-turn allowance resets on your next turn")
 	}
 	q.turnUsed++
 	q.dayUsed++
 	return nil
 }
 
-func capError(window string, limit int, resets string) error {
+func capError(tool, window string, limit int, resets string) error {
 	return fmt.Errorf("local query cap reached: personant allows %d %s searches per %s and the search was NOT performed. "+
 		"This is personant's own limit, not the search provider's, and it says nothing about whether results exist. "+
 		"Do not retry the search — %s. Answer from what you have and say so",
-		limit, ToolNameSearch, window, resets)
+		limit, tool, window, resets)
 }
