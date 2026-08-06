@@ -405,7 +405,7 @@ func Run(opts Options) error {
 	state.ClosureResolver = interactiveClosureResolver(tm)
 	state.ClosureAckMode = closureAckMode(ctx, ops, project.ID, tm.Diag())
 	state.OnAutoClosed = func(n turn.ClosureNotice) {
-		fmt.Fprintf(tm.Out(), "closed: %s — %s\n", n.Display, n.Summary)
+		fmt.Fprintln(tm.Out(), autoClosedLine(n))
 	}
 
 	banner := opts.Banner
@@ -1558,6 +1558,33 @@ func interactiveRecallResolver(tm *term.Terminal, mode turn.RecallAckMode) turn.
 	}
 }
 
+// closureOfferLines renders the §3.5 closure offer's two context lines —
+// the question's preamble, above the outcome prompt:
+//
+//	idle topic: <display name> (thr_N) — <gist>
+//	  summary: <curator draft>
+//
+// The first line is the roster's topicLabel shape (a name, its id, what it
+// is about); the second is the draft the user is being asked to ack, which
+// is a different thing from the gist and stays on its own line. The
+// superseded form named only `topic thr_3`, which asked the user to close
+// something they could not identify — the defect the recall offer's
+// redesign fixed for its own prompt (user ruling 2026-08-06).
+func closureOfferLines(offer turn.ClosureOffer) []string {
+	return []string{
+		"idle topic: " + topicLabel(offer.Display, offer.ThreadID, offer.Gist),
+		fmt.Sprintf("  summary: %s", offer.Summary),
+	}
+}
+
+// autoClosedLine renders the ONE committed line a §3.5 routine closure
+// prints (SPEC §3.5). It carries the id because the documented revision
+// path for a wrongly-summarized auto-closure is `/back-to <thr_id>`, and a
+// line that omits the argument the fix needs is not actionable.
+func autoClosedLine(n turn.ClosureNotice) string {
+	return "closed: " + topicLabel(n.Display, n.ThreadID, n.Summary)
+}
+
 // interactiveClosureResolver returns a turn.ClosureResolver that surfaces
 // the §3.5 closure offer at the prompt and reads the user's retire / wip /
 // edit / defer decision. The [e]dit choice lets the user revise the
@@ -1579,10 +1606,7 @@ func interactiveClosureResolver(tm *term.Terminal) turn.ClosureResolver {
 		return strings.ToLower(strings.TrimSpace(answer.Text)), err
 	}
 	return func(ctx context.Context, offer turn.ClosureOffer) (turn.ClosureResolution, error) {
-		choice, err := askOutcome(ctx, []string{
-			fmt.Sprintf("topic %s has gone idle — closure suggested.", offer.ThreadID),
-			fmt.Sprintf("  summary: %s", offer.Summary),
-		})
+		choice, err := askOutcome(ctx, closureOfferLines(offer))
 		if term.IsEndOrAbort(err) {
 			return turn.ClosureResolution{Outcome: turn.ClosureDefer}, nil
 		}

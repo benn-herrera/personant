@@ -1252,7 +1252,10 @@ At the decay-detection scan each candidate is classified:
 A **routine** closure is applied without asking: the curator's summary,
 `resolution=resolved`, the same frontmatter + spine write and Layer B/C
 eviction an accepted ack performs, and ONE committed line to the terminal
-(`closed: <thread> — <summary>`). It rides the turn transaction already
+(`closed: <display name> (thr_N) — <summary>`; the id is on the line
+because `/back-to <thr_id>` is the documented revision path below, and a
+notice that omits the argument the fix takes is not actionable). It rides
+the turn transaction already
 open around turn close (§4.5.8) — auto-accept adds no commit path of its
 own. `resolved` is the auto-accept resolution because it is where a
 decayed-and-answered side topic lands when a human picks. **The revision
@@ -1270,6 +1273,17 @@ restarts. It is drained with the full interactive resolver at
 checkpoint), and on demand via `/closures` (§4.2). At session **start** a
 non-empty queue is ANNOUNCED in one committed line
 (`N closure(s) pending review — /closures`) and never prompted.
+
+**The offer names the topic, not just its id (user ruling 2026-08-06).**
+Wherever the interactive resolver runs — the boundary drain, `/done`, or
+`always` mode — `ClosureOffer` carries the thread's §2.2.2 display name
+and gist beside its id, resolved by the runtime from the spine record
+through the SAME fallback chain the §3.4 recall offer uses (description →
+summary → projected anchors). It renders as
+`idle topic: <display name> (thr_N) — <gist>` above the curator's draft
+summary. The superseded form named only `thr_3`: the illegibility
+argument §3.4 makes above, applied to closure's own prompt, which the
+recall redesign had left standing.
 
 Two flows are unchanged by the amendment. **`/done` is always fully
 interactive** in both modes — the user typed the command, so they have

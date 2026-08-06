@@ -41,25 +41,25 @@ func CurrentOwnerThread(state *State) string {
 func ResolveThreadRef(ctx context.Context, state *State, ref string) (string, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return "", errors.New("command: empty thread reference")
+		return "", errors.New("command: empty topic reference")
 	}
 	if memops.ThreadIDPattern.MatchString(ref) {
 		rec, found, err := state.Ops.FindThread(ctx, ref)
 		if err != nil {
-			return "", fmt.Errorf("command: find thread %s: %w", ref, err)
+			return "", fmt.Errorf("command: find topic %s: %w", ref, err)
 		}
 		if !found {
-			return "", fmt.Errorf("command: no such thread %s", ref)
+			return "", fmt.Errorf("command: no such topic %s", ref)
 		}
 		if rec.Project != "" && rec.Project != state.ActiveProject.ID {
-			return "", fmt.Errorf("command: thread %s belongs to another project", ref)
+			return "", fmt.Errorf("command: topic %s belongs to another project", ref)
 		}
 		return ref, nil
 	}
 
 	recs, err := state.Ops.ListThreads(ctx, memops.ThreadFilter{Project: state.ActiveProject.ID})
 	if err != nil {
-		return "", fmt.Errorf("command: list threads: %w", err)
+		return "", fmt.Errorf("command: list topics: %w", err)
 	}
 	lref := strings.ToLower(ref)
 	var exact, partial []string
@@ -78,11 +78,11 @@ func ResolveThreadRef(ctx context.Context, state *State, ref string) (string, er
 	}
 	switch len(matches) {
 	case 0:
-		return "", fmt.Errorf("command: no thread matching %q", ref)
+		return "", fmt.Errorf("command: no topic matching %q", ref)
 	case 1:
 		return matches[0], nil
 	default:
-		return "", fmt.Errorf("command: %q matches multiple threads (%s); use a thr_ id",
+		return "", fmt.Errorf("command: %q matches multiple topics (%s); use a thr_ id",
 			ref, strings.Join(matches, ", "))
 	}
 }
@@ -121,7 +121,7 @@ func CreateTopic(ctx context.Context, state *State, name string) (string, error)
 	}
 	fm := frontmatterFromSpine(rec)
 	if err := state.Ops.CreateThread(ctx, memops.ThreadWrite{Spine: rec, Meta: fm}); err != nil {
-		return "", fmt.Errorf("topic: create thread %s: %w", newID, err)
+		return "", fmt.Errorf("topic: create %s: %w", newID, err)
 	}
 	if err := state.Ops.Log(ctx, memops.LogCategoryThread, "created",
 		newID+" via=slash-topic project="+state.ActiveProject.ID); err != nil {
@@ -207,14 +207,14 @@ func ManualClosure(ctx context.Context, state *State, ref string) error {
 	}
 	rec, found, err := state.Ops.FindThread(ctx, id)
 	if err != nil {
-		return fmt.Errorf("done: find thread %s: %w", id, err)
+		return fmt.Errorf("done: find topic %s: %w", id, err)
 	}
 	if !found {
-		return fmt.Errorf("done: thread %s not in spine", id)
+		return fmt.Errorf("done: topic %s not in spine", id)
 	}
 	thr, err := state.Ops.LoadThread(ctx, id)
 	if err != nil {
-		return fmt.Errorf("done: load thread %s: %w", id, err)
+		return fmt.Errorf("done: load topic %s: %w", id, err)
 	}
 	draft, err := state.Curator.DraftClosure(ctx, thr)
 	if err != nil {
@@ -226,6 +226,8 @@ func ManualClosure(ctx context.Context, state *State, ref string) error {
 	}
 	offer := ClosureOffer{
 		ThreadID: id,
+		Display:  threadDisplay(rec),
+		Gist:     threadGist(rec),
 		Summary:  draft.Summary,
 		Anchors:  draft.Anchors,
 		State:    rec.State,
@@ -274,7 +276,7 @@ func targetThread(ctx context.Context, state *State, ref string) (string, error)
 	if id := CurrentOwnerThread(state); id != "" {
 		return id, nil
 	}
-	return "", errors.New("command: no active thread; specify a thread id or name")
+	return "", errors.New("command: no active topic; specify a topic id or name")
 }
 
 // writeThreadState mirrors a thread's spine record + frontmatter with a new
@@ -288,17 +290,17 @@ func targetThread(ctx context.Context, state *State, ref string) (string, error)
 func writeThreadState(ctx context.Context, state *State, threadID string, newState memops.ThreadState, via string) (memops.SpineRecord, error) {
 	rec, found, err := state.Ops.FindThread(ctx, threadID)
 	if err != nil {
-		return memops.SpineRecord{}, fmt.Errorf("command: find thread %s: %w", threadID, err)
+		return memops.SpineRecord{}, fmt.Errorf("command: find topic %s: %w", threadID, err)
 	}
 	if !found {
-		return memops.SpineRecord{}, fmt.Errorf("command: thread %s not in spine", threadID)
+		return memops.SpineRecord{}, fmt.Errorf("command: topic %s not in spine", threadID)
 	}
 	if rec.Project != "" && rec.Project != state.ActiveProject.ID {
-		return memops.SpineRecord{}, fmt.Errorf("command: thread %s belongs to another project", threadID)
+		return memops.SpineRecord{}, fmt.Errorf("command: topic %s belongs to another project", threadID)
 	}
 	fm, err := state.Ops.LoadThreadMeta(ctx, threadID)
 	if err != nil && !errors.Is(err, memops.ErrThreadFileNotFound) {
-		return memops.SpineRecord{}, fmt.Errorf("command: load thread %s: %w", threadID, err)
+		return memops.SpineRecord{}, fmt.Errorf("command: load topic %s: %w", threadID, err)
 	}
 	if errors.Is(err, memops.ErrThreadFileNotFound) {
 		fm = frontmatterFromSpine(rec)
@@ -324,7 +326,7 @@ func writeThreadState(ctx context.Context, state *State, threadID string, newSta
 	fm.RecallFires = rec.RecallFires
 
 	if err := state.Ops.EngageThread(ctx, memops.ThreadWrite{Spine: rec, Meta: fm}); err != nil {
-		return memops.SpineRecord{}, fmt.Errorf("command: write thread %s: %w", threadID, err)
+		return memops.SpineRecord{}, fmt.Errorf("command: write topic %s: %w", threadID, err)
 	}
 	if err := state.Ops.Log(ctx, memops.LogCategoryThread, "state-change",
 		"thr="+threadID+" state="+string(newState)+" via="+via); err != nil {

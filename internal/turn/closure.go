@@ -134,8 +134,18 @@ const (
 // decayed thread. Summary and Anchors are the curator's draft; State is
 // the thread's current state (always active — only active threads
 // decay-prompt).
+//
+// Display and Gist are the §2.2.2 human-legible pair, resolved by the
+// runtime from the spine record exactly as RecallCandidate's are
+// (threadDisplay / threadGist). They exist for the same reason: an offer
+// that names only thr_3 asks a question the user cannot answer without a
+// lookup — the defect the 2026-08-05 recall ruling struck down, which this
+// offer had kept. Gist may be empty (a thread with neither summary nor
+// anchor); the front end decides what to render in its place.
 type ClosureOffer struct {
 	ThreadID string
+	Display  string
+	Gist     string
 	Summary  string
 	Anchors  []string
 	State    memops.ThreadState
@@ -288,7 +298,7 @@ func decayCandidates(ctx context.Context, state *State) ([]closureCandidate, err
 	// project discipline updateExistingThread enforces.
 	recs, err := state.Ops.ListThreads(ctx, memops.ThreadFilter{Project: state.ActiveProject.ID})
 	if err != nil {
-		return nil, fmt.Errorf("closure: list threads: %w", err)
+		return nil, fmt.Errorf("closure: list topics: %w", err)
 	}
 
 	// Wall-clock decay measures neglect relative to the system's most
@@ -407,6 +417,8 @@ func offerClosure(ctx context.Context, state *State, rec memops.SpineRecord) {
 	}
 	resolution, err := state.ClosureResolver(ctx, ClosureOffer{
 		ThreadID: rec.ID,
+		Display:  threadDisplay(rec),
+		Gist:     threadGist(rec),
 		Summary:  draft.Summary,
 		Anchors:  draft.Anchors,
 		State:    rec.State,
@@ -555,11 +567,11 @@ func autoAcceptClosure(ctx context.Context, state *State, rec memops.SpineRecord
 		return
 	}
 	if state.OnAutoClosed != nil {
-		display := rec.Description
-		if display == "" {
-			display = rec.ID
-		}
-		state.OnAutoClosed(ClosureNotice{ThreadID: rec.ID, Display: display, Summary: draft.Summary})
+		state.OnAutoClosed(ClosureNotice{
+			ThreadID: rec.ID,
+			Display:  threadDisplay(rec),
+			Summary:  draft.Summary,
+		})
 	}
 }
 
@@ -587,14 +599,14 @@ func applyClosureResolution(ctx context.Context, state *State, threadID string, 
 
 	rec, found, err := state.Ops.FindThread(ctx, threadID)
 	if err != nil {
-		return fmt.Errorf("closure: find thread %s: %w", threadID, err)
+		return fmt.Errorf("closure: find topic %s: %w", threadID, err)
 	}
 	if !found {
-		return fmt.Errorf("closure: thread %s not in spine", threadID)
+		return fmt.Errorf("closure: topic %s not in spine", threadID)
 	}
 	fm, err := state.Ops.LoadThreadMeta(ctx, threadID)
 	if err != nil {
-		return fmt.Errorf("closure: load thread %s: %w", threadID, err)
+		return fmt.Errorf("closure: load topic %s: %w", threadID, err)
 	}
 
 	now := clock.Timeline().Format(time.RFC3339)
@@ -666,7 +678,7 @@ func applyClosureResolution(ctx context.Context, state *State, threadID string, 
 		Spine: rec,
 		Meta:  fm,
 	}); err != nil {
-		return fmt.Errorf("closure: write thread %s: %w", threadID, err)
+		return fmt.Errorf("closure: write topic %s: %w", threadID, err)
 	}
 	// §3.11: a §3.5 closure write (retire or WIP — both transition the
 	// thread's persisted state out of the active window) is a structural

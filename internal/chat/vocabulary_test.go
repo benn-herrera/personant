@@ -80,17 +80,42 @@ func TestUserFacingStringsVocabulary(t *testing.T) {
 		}
 	})
 
+	// The closure offer carries Display + Gist since 2026-08-06, so the
+	// enriched shape is what has to be swept — including the degraded form
+	// a resolver still sees when the runtime could resolve neither (an
+	// offer built by an older caller, or a thread with no spine record).
 	t.Run("closure offer", func(t *testing.T) {
-		var out bytes.Buffer
-		tm := openTestTerm(t, strings.NewReader("s\n"), &out, &out)
-		resolve := interactiveClosureResolver(tm)
-		_, err := resolve(context.Background(), turn.ClosureOffer{
-			ThreadID: "thr_3", Summary: "thickener pinned at 0.4",
-		})
-		if err != nil {
-			t.Fatalf("resolve: %v", err)
+		for _, offer := range []turn.ClosureOffer{{
+			ThreadID: "thr_3",
+			Display:  "why is the emulsion separating",
+			Gist:     "emulsion, thickener, shear",
+			Summary:  "thickener pinned at 0.4",
+		}, {
+			ThreadID: "thr_3",
+			Summary:  "thickener pinned at 0.4",
+		}} {
+			var out bytes.Buffer
+			tm := openTestTerm(t, strings.NewReader("s\n"), &out, &out)
+			resolve := interactiveClosureResolver(tm)
+			if _, err := resolve(context.Background(), offer); err != nil {
+				t.Fatalf("resolve: %v", err)
+			}
+			assertNoThread(t, "closure offer", out.String())
 		}
-		assertNoThread(t, "closure offer", out.String())
+	})
+
+	// The one committed line a §3.5 routine closure prints. Rendered by a
+	// named function precisely so the gate can reach it — the hook it is
+	// installed on runs only inside a live session.
+	t.Run("auto-closure line", func(t *testing.T) {
+		assertNoThread(t, "autoClosedLine", autoClosedLine(turn.ClosureNotice{
+			ThreadID: "thr_7",
+			Display:  "supplier shortlist",
+			Summary:  "settled on the two-source split",
+		}))
+		assertNoThread(t, "autoClosedLine (bare id)", autoClosedLine(turn.ClosureNotice{
+			ThreadID: "thr_7", Summary: "settled on the two-source split",
+		}))
 	})
 
 	t.Run("topics roster", func(t *testing.T) {

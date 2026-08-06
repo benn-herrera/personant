@@ -131,8 +131,8 @@ func TestSlashPauseNoThreadIsError(t *testing.T) {
 	_, errb := runChat(t, paths, model.NewScriptedMock(nil, []model.ModelInfo{{ID: "test-model"}}),
 		"prj_1", "/pause\n/quit\n")
 
-	if !strings.Contains(errb, "no active thread") {
-		t.Errorf("expected no-active-thread error, got stderr: %q", errb)
+	if !strings.Contains(errb, "no active topic") {
+		t.Errorf("expected no-active-topic error, got stderr: %q", errb)
 	}
 }
 
@@ -234,6 +234,63 @@ func TestSlashDoneClosesThread(t *testing.T) {
 	}
 	if !strings.Contains(logs, "retire.complete thr=thr_1 resolution=resolved") {
 		t.Errorf("missing retire.complete: %s", logs)
+	}
+}
+
+// TestClosureOfferRendering: the §3.5 offer names the topic the way the
+// roster and the recall offer do — display name, id, gist — and degrades
+// to the bare id rather than "thr_1 (thr_1)" when the runtime resolved
+// neither field (user ruling 2026-08-06; the superseded form showed only
+// the id, which is the illegibility the recall redesign already fixed).
+func TestClosureOfferRendering(t *testing.T) {
+	tests := []struct {
+		name  string
+		offer turn.ClosureOffer
+		want  string
+	}{
+		{
+			name: "display and gist",
+			offer: turn.ClosureOffer{
+				ThreadID: "thr_3",
+				Display:  "why is the emulsion separating",
+				Gist:     "emulsion, thickener, shear",
+				Summary:  "thickener pinned at 0.4",
+			},
+			want: "idle topic: why is the emulsion separating (thr_3) — emulsion, thickener, shear",
+		},
+		{
+			name:  "no gist",
+			offer: turn.ClosureOffer{ThreadID: "thr_3", Display: "surfactant sourcing"},
+			want:  "idle topic: surfactant sourcing (thr_3)",
+		},
+		{
+			name:  "nothing resolved",
+			offer: turn.ClosureOffer{ThreadID: "thr_3"},
+			want:  "idle topic: thr_3",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := closureOfferLines(tt.offer)
+			if len(lines) != 2 {
+				t.Fatalf("closureOfferLines = %q, want 2 lines", lines)
+			}
+			if lines[0] != tt.want {
+				t.Errorf("head line = %q, want %q", lines[0], tt.want)
+			}
+			if want := "  summary: " + tt.offer.Summary; lines[1] != want {
+				t.Errorf("summary line = %q, want %q", lines[1], want)
+			}
+		})
+	}
+
+	// The auto-closure one-liner carries the id for the same reason: the
+	// documented revision path is /back-to <thr_id>.
+	got := autoClosedLine(turn.ClosureNotice{
+		ThreadID: "thr_7", Display: "supplier shortlist", Summary: "two-source split",
+	})
+	if want := "closed: supplier shortlist (thr_7) — two-source split"; got != want {
+		t.Errorf("autoClosedLine = %q, want %q", got, want)
 	}
 }
 

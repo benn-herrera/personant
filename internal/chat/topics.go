@@ -201,8 +201,31 @@ func topicLine(rec memops.SpineRecord, now time.Time, isClosed bool) string {
 	if isClosed {
 		stamp = rec.StateChanged
 	}
-	return fmt.Sprintf("  %s (%s) — %s · %s",
-		topicDisplay(rec), rec.ID, topicGist(rec), relativeAge(now, stamp))
+	return fmt.Sprintf("  %s · %s",
+		topicLabel(topicDisplay(rec), rec.ID, topicGist(rec)), relativeAge(now, stamp))
+}
+
+// topicLabel renders the ONE shape the front end names a topic in:
+//
+//	<display name> (thr_N) — <tail>
+//
+// The roster, the §3.5 closure offer and the auto-closure one-liner all
+// print it, so a user reads the same three parts in the same order
+// wherever a topic is named — and the id, which /back-to and /done take as
+// an argument, is always on the line.
+//
+// Both trailing parts degrade rather than render an empty fragment: a
+// display name that is only the id collapses to the id (never
+// "thr_3 (thr_3)"), and an empty tail drops the em-dash with it.
+func topicLabel(display, id, tail string) string {
+	label := id
+	if display != "" && display != id {
+		label = display + " (" + id + ")"
+	}
+	if tail != "" {
+		label += " — " + tail
+	}
+	return label
 }
 
 // topicDisplay is the topic's working name — the §2.2.2 display form's

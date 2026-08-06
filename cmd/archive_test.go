@@ -110,7 +110,7 @@ func TestArchiveListEmpty(t *testing.T) {
 		t.Fatalf("store.Init: %v", err)
 	}
 	out := runCLI(t, home, "archive", "list")
-	if !strings.Contains(out, "no archived threads") {
+	if !strings.Contains(out, "no archived topics") {
 		t.Errorf("empty index did not print the friendly line:\n%s", out)
 	}
 }

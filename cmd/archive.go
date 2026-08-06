@@ -16,18 +16,18 @@ const archiveSummaryWidth = 48
 
 var archiveCmd = &cobra.Command{
 	Use:   "archive",
-	Short: "inspect and recover deep-cold archived threads",
+	Short: "inspect and recover deep-cold archived topics",
 	Long: `Operate on personant's recoverable git-based archive (§3.8).
-Retired threads drained from the active spine are preserved as git
+Retired topics drained from the active spine are preserved as git
 deletion commits with a lookup entry in archive/index.jsonl. 'list'
-shows the index; 'recover' restores a thread to the spine as wip.`,
+shows the index; 'recover' restores a topic to the spine as wip.`,
 }
 
 var archiveListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "list archived threads from the index",
-	Long: `Print every archived thread's lookup entry, sorted by thr_id.
-Recovered threads RETAIN their entry and are marked RECOVERED.
+	Short: "list archived topics from the index",
+	Long: `Print every archived topic's lookup entry, sorted by thr_id.
+Recovered topics RETAIN their entry and are marked RECOVERED.
 Read-only — never writes a file.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Reconcile-first (#94): the index may hold an unstamped entry a
@@ -50,8 +50,8 @@ Read-only — never writes a file.`,
 
 var archiveRecoverCmd = &cobra.Command{
 	Use:   "recover <thr_id>",
-	Short: "restore an archived thread to the spine",
-	Long: `Restore an archived thread from its git deletion commit, verify
+	Short: "restore an archived topic to the spine",
+	Long: `Restore an archived topic from its git deletion commit, verify
 it against the stored tree hash, and re-add it to the spine as wip.
 The archive-index entry is retained as a breadcrumb (RecoveredAt
 stamped). Fails without recovering if the integrity check does not
@@ -72,9 +72,9 @@ match.`,
 		if err != nil {
 			switch {
 			case errors.Is(err, memops.ErrArchiveEntryNotFound):
-				return fmt.Errorf("no archived thread %s", thrID)
+				return fmt.Errorf("no archived topic %s", thrID)
 			case errors.Is(err, memops.ErrArchiveIntegrity):
-				return fmt.Errorf("integrity check failed, thread %s NOT recovered", thrID)
+				return fmt.Errorf("integrity check failed, topic %s NOT recovered", thrID)
 			default:
 				return fmt.Errorf("recover %s failed", thrID)
 			}
@@ -88,7 +88,7 @@ match.`,
 // index prints a friendly line, not an error.
 func printArchiveList(entries []memops.ArchiveEntry) {
 	if len(entries) == 0 {
-		fmt.Println("no archived threads")
+		fmt.Println("no archived topics")
 		return
 	}
 	fmt.Printf("%-10s  %-8s  %-20s  %-9s  %s\n", "THR_ID", "PROJECT", "ARCHIVED_AT", "STATE", "SUMMARY")

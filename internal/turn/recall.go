@@ -402,23 +402,16 @@ func describeCandidates(ctx context.Context, state *State, results []measure.Res
 		if !found {
 			continue
 		}
-		if rec.Description != "" {
-			out[i].Display = rec.Description
-		}
-		switch {
-		case rec.Summary != "":
-			out[i].Gist = rec.Summary
-		case len(rec.Anchors) > 0:
-			out[i].Gist = strings.Join(rec.Anchors[:min(len(rec.Anchors), gistAnchors)], ", ")
+		out[i].Display = threadDisplay(rec)
+		// threadGist yields "" when the record carries neither a summary nor
+		// an anchor; the id preset above stands in, keeping the documented
+		// "never blank" contract on RecallCandidate.Gist.
+		if gist := threadGist(rec); gist != "" {
+			out[i].Gist = gist
 		}
 	}
 	return out
 }
-
-// gistAnchors bounds the anchor fallback in a candidate's gist. Enough to
-// identify the thread, short enough to stay one readable line beside a
-// display name.
-const gistAnchors = 4
 
 // acceptRecallCandidate pulls one candidate into Layer B and records the
 // verdict. It is the ONE accept path — the human ask band and the auto
