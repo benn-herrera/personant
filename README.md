@@ -40,9 +40,12 @@ On first run, `bin/personant` initializes `~/.personant/` as a git repository. O
 | `/model [<model-id>\|<provider>/<model-id>]` | switch the session's model (and provider); bare form reports the active one. Session-scoped — `config.toml` is never rewritten |
 | `/stats` | session and spine statistics |
 | `/version` | version identity + this home's on-disk format |
+| `/terminal-setup` | set the hosting terminal up so Shift+Enter inserts a line break |
 | `/quit`, `/exit` | end the session |
 
 `/no-revisit` and `/cd-project` are recognized but stubbed for a later phase.
+
+**Multi-line input.** Alt/Option+Enter inserts a line break with no setup at all; bare Enter submits the whole buffer. Shift+Enter additionally needs the terminal to send something distinguishable from Enter, which `/terminal-setup` arranges: it detects the terminal and prints the one-line recipe, or — for Zed, where the recipe is a file write — offers to install the keybinding into `~/.config/zed/keymap.json`. That is the only file personant ever writes outside `~/.personant`, so it asks first every time, backs the previous file up alongside, leaves an already-configured keymap untouched, and refuses rather than risk mangling a file it cannot edit byte-safely.
 
 While a turn is working — before the first token, and again while it closes out — a one-line indicator names the phase the runtime is in (composing context, waiting on the model, searching memory, closing turn) with an elapsed counter, and advertises `esc to abort` while the turn can still be abandoned. It appears only after a couple of seconds, only on a real terminal, and it clears itself the instant the response starts arriving; a piped or redirected run gets no decoration at all.
 

@@ -16,6 +16,7 @@ active: alpha (prj_1)
   /model [id|provider/id]      switch the session's model (bare form reports it)
   /stats                       print session and spine statistics
   /version                     print version identity and home format
+  /terminal-setup              set this terminal up for Shift+Enter (§4.3.1)
 
 stubbed (later phase):
   /no-revisit                  tighten recall threshold (recall accrual)

@@ -882,6 +882,8 @@ func dispatchSlash(ctx context.Context, tm *term.Terminal, ops memops.MemoryOps,
 		return false, cmdThinking(out, th, rest)
 	case "/model":
 		return false, cmdModel(ctx, tm, ops, sel, rest)
+	case "/terminal-setup":
+		return false, cmdTerminalSetup(ctx, tm)
 	case "/no-revisit":
 		fmt.Fprintln(diag, "/no-revisit is not yet implemented (recall accrual loop, §3.4)")
 	case "/cd-project":
@@ -1147,6 +1149,7 @@ func helpText() string {
   /model [id|provider/id]      switch the session's model (bare form reports it)
   /stats                       print session and spine statistics
   /version                     print version identity and home format
+  /terminal-setup              set this terminal up for Shift+Enter (§4.3.1)
 
 stubbed (later phase):
   /no-revisit                  tighten recall threshold (recall accrual)

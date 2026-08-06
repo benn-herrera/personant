@@ -1880,6 +1880,7 @@ surface entirely.
 | `/cd-project <path>` | set active project root to `<path>` (see §4.5) |
 | `/model [<model-id>\|<provider>/<model-id>]` | switch the session's LLM (AMENDED 2026-08-05 — IMPLEMENTED, and the argument form is wider than the original `<id>`). The **bare form reports** the active `provider/model` plus a usage hint and mutates nothing (the `/thinking` convention). A bare `<model-id>` switches model within the current provider; a `<provider>/<model-id>` reference switches provider AND model, and the named provider must be an `inference` entry in the pool — a `search` entry is refused by kind, exactly as at session open. **Ambiguity rule** (model ids may themselves contain `/`, e.g. a HuggingFace-style `org/name` on a local server): the text before the FIRST `/` is read as a provider name **only when it names a provider in `providers.toml`**; otherwise the whole argument is a model id on the current provider. The decision is a pool lookup, not a heuristic, and it agrees with §8.2.2's split-on-first-`/` convention wherever a provider is genuinely named. **Verification mirrors session open** (same probe, same messages): a model absent from a non-empty `/models` list **REFUSES** the switch, naming what the provider does offer, and leaves model, provider and client untouched; an unreachable or model-less `/models` warns and switches **UNVERIFIED**. **Session-scoped and deliberately never serialized:** `[chat] defaultModel` remains the startup default, and no home state records a "last model used" — the printed confirmation says so. Takes effect on the next turn (commands and turns are alternating branches of one loop, so no in-flight turn exists to touch), and is recorded as `model.switched` (§2.8) |
 | `/thinking [on\|off]` | show/hide the model's live reasoning, dimmed; bare form reports the state. Session-scoped override of `[chat] showThinking` (§8.2.2) — never written back to `config.toml` |
+| `/terminal-setup` | configure the hosting terminal for Shift+Enter multi-line input (AMENDED 2026-08-05 — user ruling; the automated path for the §4.3.1 recipes, after Claude Code's command of the same name). Detects the host from `$TERM_PROGRAM`, falling back to `$LC_TERMINAL` (ssh forwards it), reports what it found, and acts: **Zed** is the one recipe that is a file write, and it is offered — `~/.config/zed/keymap.json` gains the `shift-enter` entry, textually, never by parse-and-rewrite. Every other known terminal PRINTS its recipe and writes nothing; an unrecognized terminal gets the whole list. **The write is the exception in this runtime — it lands outside `$PERSONANT_HOME`** — so it is confirmed EVERY time (never `ack=auto`), the prior bytes are copied to `keymap.json.personant-bak-<timestamp>` first, a keymap that already binds `shift-enter` in a `Terminal` context is left untouched (idempotent), a file whose structure defeats byte-safe insertion is REFUSED with the snippet printed for manual paste, and a non-interactive session prints and never writes at all |
 | `/stats` | runtime stats (active threads, layer fill, recent recall events, etc.) |
 | `/version` | version identity plus the on-disk format of the home this session opened (§9.1) |
 
@@ -1968,15 +1969,32 @@ The behavior required, unchanged in substance:
   for; requesting it under that one owner is a possible future item, not a
   gap. Shift+Enter therefore works only in a terminal configured to send a
   distinguishable sequence, which is a one-line keybinding — the same method
-  Claude Code's `/terminal-setup` uses:
+  Claude Code's `/terminal-setup` uses. **Personant has that command too**
+  (AMENDED 2026-08-05, §4.2 `/terminal-setup`): it detects the host and
+  either performs the recipe below that is a file write — Zed's — or prints
+  the one that is not. The recipes stay written out here because an
+  unrecognized terminal is exactly the case the command cannot automate,
+  and it prints this list verbatim.
 
-  - **iTerm2** — Settings → Profiles → Keys → Key Mappings → `+`, press
-    Shift+Enter, action **Send Escape Sequence**, escape `[13;2u`.
-    (Equivalently, action **Send Text with "vim" Special Chars** with text
-    `\e\r`, which sends the universal Alt+Enter form.)
+  - **iTerm2** — nothing to configure: **3.5 and newer sends `ESC[13;2u`
+    natively** (verified 2026-08-05), which is the sequence personant
+    decodes. On an older build, map it by hand — Settings → Profiles →
+    Keys → Key Mappings → `+`, press Shift+Enter, action **Send Escape
+    Sequence**, escape `[13;2u`. (Equivalently, action **Send Text with
+    "vim" Special Chars** with text `\e\r`, which sends the universal
+    Alt+Enter form.)
   - **Zed** — in `keymap.json`:
     `{"context": "Terminal", "bindings": {"shift-enter": ["terminal::SendText", "\u001b\r"]}}`
     — that is `ESC CR`, the universal Alt+Enter form, in JSON escapes.
+    `/terminal-setup` installs exactly this entry, with a backup and a
+    confirmation.
+  - **VS Code** — in `keybindings.json`:
+    `{"key": "shift+enter", "command": "workbench.action.terminal.sendSequence", "args": {"text": "\u001b\r"}, "when": "terminalFocus"}`
+  - **WezTerm** — in `~/.wezterm.lua`, inside the keys table:
+    `{key="Enter", mods="SHIFT", action=wezterm.action.SendString("\x1b\r")}`
+    (WezTerm speaks the kitty protocol, but only when the application
+    REQUESTS it, and personant deliberately does not — so the binding is
+    needed there like anywhere else.)
   - **Anything else** — Alt/Option+Enter already works unconfigured. On
     macOS, Terminal.app needs *Use Option as Meta key* for the Option form.
 
