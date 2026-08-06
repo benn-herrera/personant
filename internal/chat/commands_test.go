@@ -294,6 +294,47 @@ func TestClosureOfferRendering(t *testing.T) {
 	}
 }
 
+// TestAutoRecalledLineRendering: the §3.4 auto-band one-liner is the same
+// topicLabel shape as the roster and the closure lines — name, id, gist —
+// so a topic reference reads identically wherever it appears and the
+// fetch the runtime made without asking can be verified against /topics
+// (user ruling 2026-08-06). It degrades the same way, too: no gist drops
+// the em-dash, nothing resolved collapses to the bare id.
+func TestAutoRecalledLineRendering(t *testing.T) {
+	tests := []struct {
+		name   string
+		notice turn.RecallNotice
+		want   string
+	}{
+		{
+			name: "display and gist",
+			notice: turn.RecallNotice{
+				ThreadID: "thr_3",
+				Display:  "why is the emulsion separating",
+				Gist:     "thickener ratio pinned at 0.4",
+			},
+			want: "recalled: why is the emulsion separating (thr_3) — thickener ratio pinned at 0.4",
+		},
+		{
+			name:   "no gist",
+			notice: turn.RecallNotice{ThreadID: "thr_3", Display: "surfactant sourcing"},
+			want:   "recalled: surfactant sourcing (thr_3)",
+		},
+		{
+			name:   "nothing resolved",
+			notice: turn.RecallNotice{ThreadID: "thr_3"},
+			want:   "recalled: thr_3",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := autoRecalledLine(tt.notice); got != tt.want {
+				t.Errorf("autoRecalledLine = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestClosureResolverEditPath unit-tests the [e]dit branch of the
 // interactive closure resolver: choosing edit, revising the draft, then
 // acking resolved yields EditedSummary set to the revision.

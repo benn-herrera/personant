@@ -382,7 +382,7 @@ func Run(opts Options) error {
 	state.RecallAckMode = recallAckMode(ctx, ops, project.ID, tm.Diag())
 	state.RecallResolver = interactiveRecallResolver(tm, state.RecallAckMode)
 	state.OnAutoRecalled = func(n turn.RecallNotice) {
-		fmt.Fprintf(tm.Out(), "recalled: %s — %s\n", n.Display, n.Gist)
+		fmt.Fprintln(tm.Out(), autoRecalledLine(n))
 	}
 
 	// §3.5 decay-triggered closure flow: a model-backed curator drafts
@@ -1583,6 +1583,18 @@ func closureOfferLines(offer turn.ClosureOffer) []string {
 // line that omits the argument the fix needs is not actionable.
 func autoClosedLine(n turn.ClosureNotice) string {
 	return "closed: " + topicLabel(n.Display, n.ThreadID, n.Summary)
+}
+
+// autoRecalledLine renders the ONE committed line a §3.4 auto-band recall
+// prints (SPEC §3.4). Sibling of autoClosedLine, through the same
+// topicLabel shape: a topic reference always renders as
+// `<name> (thr_N)` (user ruling 2026-08-06), so the id the user needs to
+// act on the fetch — /topics to see it, /back-to to steer it — is on the
+// line, and the fetch the runtime made without asking is verifiable
+// rather than merely announced. The hand-formatted form it replaces named
+// the topic but not the id.
+func autoRecalledLine(n turn.RecallNotice) string {
+	return "recalled: " + topicLabel(n.Display, n.ThreadID, n.Gist)
 }
 
 // interactiveClosureResolver returns a turn.ClosureResolver that surfaces

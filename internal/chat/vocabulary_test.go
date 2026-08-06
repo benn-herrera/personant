@@ -118,6 +118,20 @@ func TestUserFacingStringsVocabulary(t *testing.T) {
 		}))
 	})
 
+	// The one committed line a §3.4 auto-band recall prints, reachable by
+	// the gate for the same reason autoClosedLine is: the hook it is
+	// installed on runs only inside a live session.
+	t.Run("auto-recall line", func(t *testing.T) {
+		assertNoThread(t, "autoRecalledLine", autoRecalledLine(turn.RecallNotice{
+			ThreadID: "thr_4",
+			Display:  "shear model choice",
+			Gist:     "shear-thinning model selection",
+		}))
+		assertNoThread(t, "autoRecalledLine (bare id)", autoRecalledLine(turn.RecallNotice{
+			ThreadID: "thr_4",
+		}))
+	})
+
 	t.Run("topics roster", func(t *testing.T) {
 		recs := []memops.SpineRecord{
 			topicRec("thr_1", "emulsion separating", "thickener pinned", memops.ThreadActive, time.Hour, time.Hour),

@@ -565,7 +565,8 @@ Implemented and wired into the turn loop (pending full acceptance-validation):
   (`recall.symbolic-auto-threshold` 0.65 for Jaccard,
   `recall.cosine-auto-threshold` 0.75 for embedding AND intra-thread —
   one bar, one scale) is fetched through the ordinary chokepoint with no
-  prompt, one committed line (`recalled: <display> — <gist>`) and
+  prompt, one committed line (`recalled: <display> (thr_N) — <gist>`, the
+  standing topic-reference shape — user ruling 2026-08-06) and
   `recall.accept ack=auto`; the band between the surface and auto
   thresholds is asked ONCE per turn with a legible offer (display name,
   gist, matched symbols or matched turn numbers, short tier + score);

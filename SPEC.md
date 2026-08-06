@@ -1149,7 +1149,10 @@ overlap, layers 2/3 are cosines):
   symbolic-scored candidate, or ≥ `recall.cosine-auto-threshold` (0.75)
   for an embedding- or intra-thread-scored one. The thread is promoted
   through the SAME fetch chokepoint an accepted candidate takes, with no
-  prompt and ONE committed line (`recalled: <display name> — <gist>`).
+  prompt and ONE committed line (`recalled: <display name> (thr_N) —
+  <gist>`; the id is on the line because a topic reference always renders
+  as `<name> (thr_N)` — user ruling 2026-08-06 — so an unasked fetch is
+  verifiable against `/topics` rather than merely announced).
   Logged `recall.accept ... ack=auto`; the §2.2 `RecallFires` bump applies
   exactly as for a human accept. Embedding and intra-thread share one bar
   because they are the same cosine over the same space; split them only if
