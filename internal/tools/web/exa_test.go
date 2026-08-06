@@ -34,7 +34,7 @@ func TestExaSearchRequestAndResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := NewExaProvider(exaTestKey, srv.URL+"/search", srv.Client())
+	p, err := NewExaProvider(exaTestKey, srv.URL+"/search", testContact, srv.Client())
 	if err != nil {
 		t.Fatalf("NewExaProvider: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestExaZeroResultsIsNotAnError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := NewExaProvider(exaTestKey, srv.URL, srv.Client())
+	p, err := NewExaProvider(exaTestKey, srv.URL, testContact, srv.Client())
 	if err != nil {
 		t.Fatalf("NewExaProvider: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestExaFailuresAreErrors(t *testing.T) {
 			srv := httptest.NewServer(tc.handler)
 			defer srv.Close()
 
-			p, err := NewExaProvider(exaTestKey, srv.URL, srv.Client())
+			p, err := NewExaProvider(exaTestKey, srv.URL, testContact, srv.Client())
 			if err != nil {
 				t.Fatalf("NewExaProvider: %v", err)
 			}
@@ -135,7 +135,7 @@ func TestExaFailuresAreErrors(t *testing.T) {
 }
 
 func TestExaRequiresKey(t *testing.T) {
-	if _, err := NewExaProvider("   ", "", nil); err == nil {
+	if _, err := NewExaProvider("   ", "", testContact, nil); err == nil {
 		t.Error("a keyless exa provider was built; the correct handling of no key is no tool")
 	}
 }

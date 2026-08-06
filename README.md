@@ -133,7 +133,14 @@ internal/recall/measure/    application-side recall stack (Service, Recaller);
                             .recall-cache sidecars (.vec, .tree); sleep-cycle
                             tree builder; W1 divergence probe
 internal/curator/           closure-summary drafting (§3.5/§5.2)
-internal/chat/              REPL, slash dispatch, bootstrap UX
+internal/chat/              REPL, slash dispatch, bootstrap UX, §6.1 tool-registry
+                            construction
+internal/tools/             §6.1 tool registry + dispatch
+internal/tools/web/         the web tools — fetch, search (Exa), wikipedia,
+                            wikidata, arxiv, crossref — plus the shared
+                            free-API citizenship layer (contact-bearing
+                            User-Agent, per-host serial gate + spacing,
+                            Retry-After, local query caps)
 internal/workset/           layered context composition (E/A1/A2/B/C)
 internal/prompt/            template + topic-tag parser + stream filter
 internal/model/             OpenAI-compatible HTTP client + scripted/generated mock
@@ -167,7 +174,7 @@ Personant stores all state under `~/.personant/` (override with `$PERSONANT_HOME
   logs/                YYYY-MM-DD.log, plain text, append-only; archive/ for old months
   history              REPL line-edit history (deduplicated, capped)
   providers.toml       endpoint pool: inference + search connectivity catalog
-  config.toml          active chat / embedding / search choices
+  config.toml          your identity ([user] contact) + active chat / embedding / search choices
   version.toml         on-disk layout revision (`format = N`)
   api_keys/            secret-bearing key files — never read by agents
   archive/             deep cold archive index (recoverable git-based archival)

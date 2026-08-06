@@ -16,9 +16,24 @@ import (
 // one HTTP POST behind the interface, so a different backend is a new
 // file rather than a change to web.search.
 
+// # Published obligations (AGENTS.md free-API citizenship, consequence 1)
+//
+// Exa is a COMMERCIAL, metered API, not a free/volunteer/donor-funded
+// one, so the citizenship rule does not bind here on its own terms. It
+// routes through the same politeness layer regardless — one mechanism,
+// not a per-tool judgement about who deserves good manners — which gets
+// it the identifying User-Agent, the serial-per-host guarantee and the
+// Retry-After honour for free. Its real bound is the local query cap: a
+// runaway loop against a metered backend spends money.
+
 const (
+	// ExaHost is the host the provider talks to; the politeness table's
+	// key. Declared separately from ExaEndpoint so the table can be
+	// checked against it mechanically.
+	ExaHost = "api.exa.ai"
+
 	// ExaEndpoint is Exa's search API.
-	ExaEndpoint = "https://api.exa.ai/search"
+	ExaEndpoint = "https://" + ExaHost + "/search"
 
 	// exaTimeout bounds one query. Under DefaultFetchTimeout and well
 	// under tools.DefaultTimeout, so a slow backend surfaces as this
@@ -44,7 +59,7 @@ const (
 type ExaProvider struct {
 	key      string
 	endpoint string
-	client   *http.Client
+	polite   *politeness
 }
 
 // NewExaProvider builds the provider. endpoint may be empty for
@@ -53,7 +68,11 @@ type ExaProvider struct {
 // missing key is an error — a keyless Exa provider can only produce
 // 401s, and the correct handling of "no key" is to not register the tool
 // at all.
-func NewExaProvider(apiKey, endpoint string, client *http.Client) (*ExaProvider, error) {
+//
+// contact may be empty: Exa is metered and identifies the caller by API
+// key, so it neither requires nor benefits from a mail address. It is
+// accepted so that ONE User-Agent construction serves the package.
+func NewExaProvider(apiKey, endpoint string, contact Contact, client *http.Client) (*ExaProvider, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, errors.New("web: exa provider needs an API key")
 	}
@@ -63,7 +82,11 @@ func NewExaProvider(apiKey, endpoint string, client *http.Client) (*ExaProvider,
 	if client == nil {
 		client = &http.Client{Timeout: exaTimeout}
 	}
-	return &ExaProvider{key: strings.TrimSpace(apiKey), endpoint: endpoint, client: client}, nil
+	return &ExaProvider{
+		key:      strings.TrimSpace(apiKey),
+		endpoint: endpoint,
+		polite:   newPoliteness(ToolNameSearch, contact, client),
+	}, nil
 }
 
 type exaRequest struct {
@@ -118,7 +141,7 @@ func (p *ExaProvider) Search(ctx context.Context, query string, limit int) ([]Se
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("x-api-key", p.key)
 
-	resp, err := p.client.Do(req)
+	resp, err := p.polite.do(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("exa: request failed: %w", err)
 	}

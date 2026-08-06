@@ -454,9 +454,39 @@ func (p Providers) OfKind(kind string) Providers {
 // available; config.toml says which to use. config.toml is the home
 // for all future personant-level configuration.
 type Config struct {
+	User      UserConfig      `toml:"user"`
 	Chat      ChatConfig      `toml:"chat"`
 	Embedding EmbeddingConfig `toml:"embedding"`
 	Search    SearchConfig    `toml:"search"`
+}
+
+// UserConfig is the [user] section — who personant says it is acting for
+// when it reaches a third party.
+//
+// It exists for the §6.1 free-API citizenship rule (AGENTS.md house rule,
+// user ruling 2026-08-05): the tools that talk to free, volunteer and
+// donor-funded services must send a User-Agent carrying CONTACT
+// INFORMATION, and the Wikimedia family REQUIRES it. Compiling a personal
+// address into the binary is not an option and neither is sending
+// anonymous traffic, so the identity is configuration.
+//
+// `personant init` populates the section from the installed git binary's
+// global user.name / user.email, which is where a developer's identity
+// already lives. Nothing here is secret: a name and a mail address that
+// personant is about to put in a public HTTP header are, by definition,
+// not credentials, so [user] sits in config.toml with the other choices
+// rather than in a key file.
+//
+// It is DELIBERATELY unvalidated, for the same reason [search] is: an
+// empty or half-filled section must cost the tools that need contact and
+// nothing else — never the session.
+type UserConfig struct {
+	// Name is the human personant is acting for. Sent in the User-Agent.
+	Name string `toml:"name"`
+
+	// Email is the contact address a service operator would write to.
+	// Sent in the User-Agent as `mailto:<email>`.
+	Email string `toml:"email"`
 }
 
 // ChatConfig is the [chat] section.

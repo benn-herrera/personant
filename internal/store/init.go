@@ -2,8 +2,10 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,11 +24,18 @@ import (
 // InitOptions controls the behavior of Init.
 //
 // Logger receives one log line per scaffold step, formatted printf-style.
-// A nil Logger is silent. Quiet, when true, suppresses logger calls
-// regardless of whether Logger is set.
+// A nil Logger is silent. Quiet, when true, suppresses logger and Out
+// writes regardless of whether either is set.
+//
+// Out receives the small subset of the report the user must see even with
+// logging turned down — today, the [user] identity step, whose absence
+// disables the Wikimedia-backed §6.1 tools. nil → no echo, which is what
+// every embedded caller (tests, the chat bootstrap's idempotent re-init)
+// wants; `personant init` passes os.Stdout.
 type InitOptions struct {
 	Quiet  bool
 	Logger func(format string, args ...any)
+	Out    io.Writer
 }
 
 // Init scaffolds $PERSONANT_HOME according to spec §2.1.
@@ -61,6 +70,15 @@ func Init(paths PersonantPaths, opts InitOptions) error {
 			return
 		}
 		opts.Logger(format, args...)
+	}
+	// reportf goes to BOTH the log and stdout: a step the user must act on
+	// cannot be conditional on their log level.
+	reportf := func(format string, args ...any) {
+		logf(format, args...)
+		if opts.Quiet || opts.Out == nil {
+			return
+		}
+		fmt.Fprintf(opts.Out, format+"\n", args...)
 	}
 
 	if paths.Home == "" {
@@ -172,6 +190,14 @@ func Init(paths PersonantPaths, opts InitOptions) error {
 		}
 	}
 
+	// [user] identity (§8.2.2). Runs AFTER config.toml exists and BEFORE
+	// the initial commit, so a greenfield home commits a populated
+	// section. Field-level and textual, so a hand-edited config keeps its
+	// comments and ordering.
+	if err := ensureUserIdentity(paths.Config, reportf); err != nil {
+		return err
+	}
+
 	createdPrimary, err := initGit(paths.Home, logf)
 	if err != nil {
 		return err
@@ -196,6 +222,56 @@ func Init(paths PersonantPaths, opts InitOptions) error {
 
 	logf("init: ok")
 	return nil
+}
+
+// ensureUserIdentity is Init's [user] step: add whatever the section is
+// missing, seeded from the git global identity, and say what happened.
+//
+// The report is not decoration. An empty [user] means the Wikimedia-
+// backed tools will REFUSE to run (they may not send anonymous requests
+// to a donor-funded service), and a user who is never told that
+// experiences it later as an unexplained tool failure — so the message
+// names the consequence and both fixes.
+func ensureUserIdentity(configPath string, reportf func(string, ...any)) error {
+	git, gitFound := GitGlobalIdentity(context.Background())
+	res, err := EnsureUserSection(configPath, git, gitFound)
+	if err != nil {
+		return fmt.Errorf("init: config.toml [user]: %w", err)
+	}
+
+	switch {
+	case len(res.Added) == 0:
+		reportf("init: existing [user] name=%q email=%q", res.Identity.Name, res.Identity.Email)
+	case res.Identity.Complete():
+		reportf("init: created [user] name=%q email=%q (from git config)",
+			res.Identity.Name, res.Identity.Email)
+	default:
+		reportf("init: created [user] name=%q email=%q — %s",
+			res.Identity.Name, res.Identity.Email, missingIdentityCause(res, gitFound))
+		reportf("init: until [user] name and email are set, web.wikipedia and every other Wikimedia-backed " +
+			"tool WILL BE UNAVAILABLE (Wikimedia's User-Agent policy requires contact information, and " +
+			"personant does not send anonymous requests to donor-funded services)")
+		reportf("init: two fixes — edit %s directly, or run `git config --global user.name \"…\"` and "+
+			"`git config --global user.email \"…\"` and re-run `personant init`", configPath)
+	}
+	return nil
+}
+
+// missingIdentityCause names WHICH half of the identity was unavailable
+// and why, so the fixes that follow are read as applicable rather than
+// generic.
+func missingIdentityCause(res UserSectionResult, gitFound bool) string {
+	if !gitFound {
+		return "no git binary on PATH to read defaults from"
+	}
+	var unset []string
+	if res.Identity.Name == "" {
+		unset = append(unset, "user.name")
+	}
+	if res.Identity.Email == "" {
+		unset = append(unset, "user.email")
+	}
+	return "git global " + strings.Join(unset, " and ") + " unset"
 }
 
 // mkdirIfMissing returns (true, nil) if it created the directory, (false, nil)
@@ -571,6 +647,14 @@ const seedConfigTOML = `# personant configuration — the CHOICES.
 #
 # These select from the endpoint POOL in providers.toml. Model
 # references are "<provider>/<model>". See spec §8.2.
+#
+# [user] is who personant says it is acting for when it reaches a third
+# party. ` + "`personant init`" + ` writes it below, seeded from your global git
+# user.name / user.email; edit it here freely. It is NOT secret — the
+# values go out in an HTTP User-Agent header. Free-API citizenship (spec
+# §6.1) depends on it: Wikimedia REQUIRES contact information and
+# web.wikipedia / web.wikidata refuse to run without it, while Crossref
+# and arXiv strongly prefer it.
 #
 # Example:
 #

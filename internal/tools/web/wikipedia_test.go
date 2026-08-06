@@ -104,7 +104,7 @@ func wikiCall(t *testing.T, h tools.Handler, args map[string]any) (string, error
 func TestWikipediaHappyPath(t *testing.T) {
 	pinDay(t, "2026-08-05")
 	ws := newWikiServer(t, http.StatusOK, wikiPayload)
-	h := wikiHandler(t, WikipediaConfig{Endpoint: ws.URL})
+	h := wikiHandler(t, WikipediaConfig{Contact: testContact, Endpoint: ws.URL})
 
 	out, err := wikiCall(t, h, map[string]any{"q": "go language"})
 	if err != nil {
@@ -114,11 +114,14 @@ func TestWikipediaHappyPath(t *testing.T) {
 	if ws.gotQuery != "go language" {
 		t.Errorf("endpoint saw q=%q, want %q (the term must be URL-encoded, not mangled)", ws.gotQuery, "go language")
 	}
-	if ws.gotUserAgent != wikipediaUserAgent {
-		t.Errorf("User-Agent = %q, want %q — Wikimedia etiquette asks for a descriptive one", ws.gotUserAgent, wikipediaUserAgent)
-	}
-	if !strings.Contains(ws.gotUserAgent, "personant/") {
-		t.Errorf("User-Agent %q does not identify the client", ws.gotUserAgent)
+	// Wikimedia's User-Agent policy REQUIRES contact information; the
+	// exact string is pinned by TestUserAgentShape, so this asserts the
+	// obligation rather than the formatting.
+	for _, want := range []string{"personant/", testContact.Name, "mailto:" + testContact.Email, ToolNameWikipedia} {
+		if !strings.Contains(ws.gotUserAgent, want) {
+			t.Errorf("User-Agent %q is missing %q — Wikimedia's policy requires an identifying agent with contact",
+				ws.gotUserAgent, want)
+		}
 	}
 
 	for _, want := range []string{
@@ -148,7 +151,7 @@ func TestWikipediaHappyPath(t *testing.T) {
 func TestWikipediaExcerptStripping(t *testing.T) {
 	pinDay(t, "2026-08-05")
 	ws := newWikiServer(t, http.StatusOK, wikiPayload)
-	h := wikiHandler(t, WikipediaConfig{Endpoint: ws.URL})
+	h := wikiHandler(t, WikipediaConfig{Contact: testContact, Endpoint: ws.URL})
 
 	out, err := wikiCall(t, h, map[string]any{"q": "go"})
 	if err != nil {
@@ -201,7 +204,7 @@ func TestWikipediaLimit(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ws := newWikiServer(t, http.StatusOK, wikiPayload)
-			h := wikiHandler(t, WikipediaConfig{Endpoint: ws.URL})
+			h := wikiHandler(t, WikipediaConfig{Contact: testContact, Endpoint: ws.URL})
 			if _, err := wikiCall(t, h, tc.args); err != nil {
 				t.Fatalf("args %v were rejected rather than clamped: %v", tc.args, err)
 			}
@@ -219,7 +222,7 @@ func TestWikipediaLimit(t *testing.T) {
 func TestWikipediaEmptyResults(t *testing.T) {
 	pinDay(t, "2026-08-05")
 	ws := newWikiServer(t, http.StatusOK, `{"pages":[]}`)
-	h := wikiHandler(t, WikipediaConfig{Endpoint: ws.URL})
+	h := wikiHandler(t, WikipediaConfig{Contact: testContact, Endpoint: ws.URL})
 
 	out, err := wikiCall(t, h, map[string]any{"q": "qwertyuiop asdf"})
 	if err != nil {
@@ -241,7 +244,7 @@ func TestWikipediaNonOK(t *testing.T) {
 	pinDay(t, "2026-08-05")
 	body := "{\n  \"httpCode\": 400,\n  \"messageTranslations\": { \"en\": \"limit must be an integer\" }\n}"
 	ws := newWikiServer(t, http.StatusBadRequest, body)
-	h := wikiHandler(t, WikipediaConfig{Endpoint: ws.URL})
+	h := wikiHandler(t, WikipediaConfig{Contact: testContact, Endpoint: ws.URL})
 
 	out, err := wikiCall(t, h, map[string]any{"q": "go"})
 	if err == nil {
@@ -263,7 +266,7 @@ func TestWikipediaNonOK(t *testing.T) {
 
 	// A huge error page cannot become the tool result.
 	big := newWikiServer(t, http.StatusInternalServerError, "<html>"+strings.Repeat("boom ", 4000)+"</html>")
-	if _, err := wikiCall(t, wikiHandler(t, WikipediaConfig{Endpoint: big.URL}), map[string]any{"q": "go"}); err == nil {
+	if _, err := wikiCall(t, wikiHandler(t, WikipediaConfig{Contact: testContact, Endpoint: big.URL}), map[string]any{"q": "go"}); err == nil {
 		t.Fatal("a 500 was not reported as an error")
 	} else if len(err.Error()) > 600 {
 		t.Errorf("the error snippet is unbounded (%d bytes)", len(err.Error()))
@@ -277,7 +280,7 @@ func TestWikipediaExcerptByteCap(t *testing.T) {
 	long := strings.Repeat("encyclopedic prose ", 500) // ~9.5 KB, one result
 	payload := fmt.Sprintf(`{"pages":[{"key":"Long","title":"Long","excerpt":%q,"description":%q}]}`, long, long)
 	ws := newWikiServer(t, http.StatusOK, payload)
-	h := wikiHandler(t, WikipediaConfig{Endpoint: ws.URL})
+	h := wikiHandler(t, WikipediaConfig{Contact: testContact, Endpoint: ws.URL})
 
 	out, err := wikiCall(t, h, map[string]any{"q": "long"})
 	if err != nil {
@@ -299,7 +302,7 @@ func TestWikipediaExcerptByteCap(t *testing.T) {
 func TestWikipediaQuota(t *testing.T) {
 	pinDay(t, "2026-08-05")
 	ws := newWikiServer(t, http.StatusOK, wikiPayload)
-	tool := NewWikipediaTool(WikipediaConfig{Endpoint: ws.URL, MaxPerTurn: 2, MaxPerDay: 3})
+	tool := NewWikipediaTool(WikipediaConfig{Contact: testContact, Endpoint: ws.URL, MaxPerTurn: 2, MaxPerDay: 3})
 	h := tool.Handler
 
 	ctx := tools.ContextWithTurn(context.Background(), 1)
@@ -343,7 +346,7 @@ func TestWikipediaQuota(t *testing.T) {
 func TestWikipediaSeparateQuotaFromSearch(t *testing.T) {
 	pinDay(t, "2026-08-05")
 	ws := newWikiServer(t, http.StatusOK, wikiPayload)
-	wiki := NewWikipediaTool(WikipediaConfig{Endpoint: ws.URL, MaxPerTurn: 1}).Handler
+	wiki := NewWikipediaTool(WikipediaConfig{Contact: testContact, Endpoint: ws.URL, MaxPerTurn: 1}).Handler
 	provider := &fakeProvider{results: []SearchResult{{Title: "t", URL: "https://example.com"}}}
 	search := searchHandler(t, SearchConfig{Provider: provider, MaxPerTurn: 1})
 
@@ -361,7 +364,7 @@ func TestWikipediaSeparateQuotaFromSearch(t *testing.T) {
 func TestWikipediaRejectsEmptyTerm(t *testing.T) {
 	pinDay(t, "2026-08-05")
 	ws := newWikiServer(t, http.StatusOK, wikiPayload)
-	h := wikiHandler(t, WikipediaConfig{Endpoint: ws.URL})
+	h := wikiHandler(t, WikipediaConfig{Contact: testContact, Endpoint: ws.URL})
 
 	for _, args := range []string{`{}`, `{"q":"   "}`, `"{}"`} {
 		out, err := h(context.Background(), json.RawMessage(args))

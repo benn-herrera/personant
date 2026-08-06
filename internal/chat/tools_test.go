@@ -53,11 +53,52 @@ func TestToolRegistryWithoutSearchProvider(t *testing.T) {
 		t.Errorf("an unconfigured search backend must be SILENT, not warned about; got: %q", warn)
 	}
 
-	// web.fetch and web.wikipedia need no credential and must be there
-	// regardless.
-	for _, name := range []string{web.ToolNameFetch, web.ToolNameWikipedia} {
+	// The credential-free set needs no configuration and must be there
+	// regardless — including without a [user] identity: a tool whose
+	// service requires contact still REGISTERS and refuses at invocation,
+	// so the model is told why rather than never seeing it.
+	for _, name := range []string{
+		web.ToolNameFetch, web.ToolNameWikipedia, web.ToolNameWikidata,
+		web.ToolNameArxiv, web.ToolNameCrossref,
+	} {
 		if has, _ := hasTool(t, memops.Config{}, providers, name); !has {
-			t.Errorf("%s must register regardless of search configuration", name)
+			t.Errorf("%s must register regardless of search or [user] configuration", name)
+		}
+	}
+}
+
+// TestToolRegistryPassesContact — the §6.1 citizenship contact reaches
+// the tools from config.toml [user]. Measured through BEHAVIOUR rather
+// than by reaching into the tool.
+//
+// Both halves call with an EMPTY search term, which reaches no network:
+// the tools check contact BEFORE arguments, so the empty term is the
+// probe that tells the two configurations apart — no contact answers
+// "REQUIRES contact", a configured one gets as far as complaining about
+// the term.
+func TestToolRegistryPassesContact(t *testing.T) {
+	providers := memops.Providers{"reaper": inferenceProvider("reaper")}
+	call := func(cfg memops.Config, name string) tools.Result {
+		t.Helper()
+		var warn bytes.Buffer
+		reg, err := buildToolRegistry(cfg, providers, &warn)
+		if err != nil {
+			t.Fatalf("buildToolRegistry: %v", err)
+		}
+		return reg.Dispatch(context.Background(), model.ToolCall{
+			ID: "c1", Function: name, Args: json.RawMessage(`{"q":""}`),
+		})
+	}
+
+	configured := memops.Config{User: memops.UserConfig{Name: "Test Person", Email: "test@example.com"}}
+	for _, name := range []string{web.ToolNameWikipedia, web.ToolNameWikidata} {
+		res := call(memops.Config{}, name)
+		if res.Err == nil || !strings.Contains(res.Err.Error(), "REQUIRES contact") {
+			t.Errorf("%s with no [user]: got %v, want the contact refusal", name, res.Err)
+		}
+		res = call(configured, name)
+		if res.Err != nil && strings.Contains(res.Err.Error(), "REQUIRES contact") {
+			t.Errorf("%s: a configured [user] did not reach the tool: %v", name, res.Err)
 		}
 	}
 }

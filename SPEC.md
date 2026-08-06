@@ -3133,14 +3133,41 @@ See ARCHITECTURE.md §"Tool surface (bounded, role-shaped)" for the design ratio
 
 ### 6.1 External tool surface
 
-The LLM's external tool inventory is bounded at thirteen tools, split
-between read/think and draft/mutate (**AMENDED 2026-08-05**: twelve → thirteen,
-`web.wikipedia`, §6.1.5). *Internal* tools (operations on personant's own
-state — `personant search`, mid-turn thread fetch, `/topic`, `/done`, etc.)
-are out of scope for this section; see §4 (user surface) and §5.5 (model
-invocation protocol).
+The LLM's external tool inventory is bounded at sixteen tools, split
+between read/think and draft/mutate (**AMENDED 2026-08-05**: twelve →
+thirteen, `web.wikipedia`, §6.1.5; then thirteen → sixteen, the receipt
+trio `web.arxiv` / `web.crossref` / `web.wikidata`, §6.1.6–§6.1.8).
+*Internal* tools (operations on personant's own state — `personant
+search`, mid-turn thread fetch, `/topic`, `/done`, etc.) are out of scope
+for this section; see §4 (user surface) and §5.5 (model invocation
+protocol).
 
-#### 6.1.1 Read/think tools (7)
+**Free-API citizenship is a HARD REQUIREMENT** (user ruling 2026-08-05;
+the binding statement and its five consequences are the AGENTS.md house
+rule, which this section implements). Personant complies with all
+etiquette and required behaviours of every free, volunteer or
+donor-funded API it consumes. Concretely, for every `web.*` tool:
+
+- The service's published policy is read before coding against it, and
+  its specific obligations are recorded in the tool's doc comment.
+- Requests carry a **descriptive User-Agent with contact information**,
+  sourced from `config.toml [user]` (§8.2.2) — never compiled-in
+  personal data. A tool whose service REQUIRES contact **refuses at
+  invocation** without it, naming the config key; it still registers, so
+  the model is told why rather than never seeing the tool. Silent
+  anonymous fallback is not an option.
+- **Serial requests per host** are a stated guarantee, with any
+  service-specific minimum spacing applied from ONE shared per-host
+  table (`internal/tools/web/politeness.go`) rather than per-tool
+  re-implementations. Today's only non-zero entry is arXiv's ~3s.
+- A `429`/`503` carrying `Retry-After` gets **one honest retry** after
+  the stated delay (capped at 30s, so a service cannot park a user's
+  turn indefinitely), then a clean tool error. No header → no retry.
+- Every query tool carries a **local per-turn / per-day cap** on its own
+  counter, so an agent loop cannot convert one user request into
+  unbounded upstream load.
+
+#### 6.1.1 Read/think tools (10)
 
 | Tool | Signature (informal) | Purpose |
 |---|---|---|
@@ -3150,13 +3177,24 @@ invocation protocol).
 | `web.fetch` | `(url) → bytes + meta` | retrieve a URL — **BUILT** (wave 3) |
 | `web.search` | `(query) → results[]` | search query → URLs — **BUILT** (wave 3) |
 | `web.wikipedia` | `(q, limit?) → articles[]` | search Wikipedia → articles — **BUILT** (§6.1.5, AMENDED 2026-08-05) |
+| `web.wikidata` | `(q, limit?) → entities[]` | search Wikidata → entities — **BUILT** (§6.1.8, AMENDED 2026-08-05) |
+| `web.arxiv` | `(q, limit?) → papers[]` | search arXiv → preprints — **BUILT** (§6.1.6, AMENDED 2026-08-05) |
+| `web.crossref` | `(q, limit?) → works[]` | search Crossref → DOIs — **BUILT** (§6.1.7, AMENDED 2026-08-05) |
 | `model.consult` | `(prompt, model_id) → response` | ask a guest model |
 
-**Status:** the `web.*` trio is built and registered; the `fs.*` tools are
-not yet. All three web tools are tier 0 / non-mutating (§6.2), and each is
+**Status:** the six `web.*` tools are built and registered; the `fs.*`
+tools are not yet. All six are tier 0 / non-mutating (§6.2), and each is
 described at the level of the behaviour that is load-bearing rather than
-as an API listing — `web.fetch` and `web.search` below, `web.wikipedia` in
-§6.1.5.
+as an API listing — `web.fetch` and `web.search` below, the rest in
+§6.1.5–§6.1.8.
+
+**The query tools are DISJOINT BY TERRITORY, not by exclusivity.** Each
+model-facing description says what that tool WINS FOR and names its
+neighbours' ground, so the model can route a question on the first try.
+It deliberately does NOT say "use only for": fanning one question out
+across several sources and corroborating the answers is a valid and
+expected pattern (user ruling), and a description that forbade it would
+suppress exactly the behaviour a research assistant should have.
 
 **`web.fetch`** is a plain HTTP GET → readability extraction → Markdown.
 **There is no headless browser and no JavaScript execution**, which is a
@@ -3392,6 +3430,118 @@ Load-bearing properties:
 - **English is a host swap, not a design.** The REST path, the response
   shape and the `/wiki/<key>` article form are identical on every language
   edition, so a language choice, when one is wanted, is one host string.
+- **Contact is REQUIRED** (AMENDED 2026-08-05). Wikimedia's User-Agent
+  policy demands contact information and enforces it, and Wikimedia is
+  donor-funded. With `[user]` unset (§8.2.2) the tool REFUSES at
+  invocation with a message naming the policy, stating that no request
+  was made, and giving both fixes. It still registers — a tool the model
+  can be told about and told why it cannot use beats one that silently
+  does not exist.
+
+#### 6.1.6 `web.arxiv` (AMENDED 2026-08-05)
+
+`GET http://export.arxiv.org/api/query?search_query=<q>&max_results=<n>`
+→ an Atom 1.0 feed, parsed with `encoding/xml`, rendered as a shortlist
+of papers: title, arXiv id, submission date, the first three authors with
+an honest "et al.", the abstract, and the `https://arxiv.org/abs/<id>`
+page. Tier 0 / non-mutating, no credential, registers on every session.
+
+**Territory:** preprints and recent scholarship, including work posted in
+the last days that is published nowhere. The description points at
+`web.crossref` for resolving a *published* paper's DOI and venue.
+
+- **Published obligations.** arXiv's API manual asks for no more than one
+  request every **three seconds**, made serially; the terms of use ask
+  for an identifying User-Agent. The 3s is the ONLY non-zero entry in the
+  §6.1 per-host spacing table. Contact is asked for, not required, so an
+  unconfigured `[user]` still runs with the identity-only agent.
+- **`limit` default 5, maximum 10, clamped silently** — the §6.1.5 rule
+  unchanged, and the same for §6.1.7/§6.1.8 below.
+- **The trichotomy of §6.1.1 holds**: transport or non-200 is an ERROR
+  saying NO search happened; an empty feed is a SUCCESS saying the search
+  ran and matched nothing.
+- **An entry whose Atom `id` is not an `/abs/` URL is DROPPED**, not
+  rendered: without a resolvable identifier there is nothing to cite, and
+  a half-parsed citation is worse than one fewer result. The abstract is
+  clipped to a longer bound than a search snippet (an abstract IS the
+  deciding artifact for a paper).
+- **A local per-turn / per-day cap on its OWN counter**, 5 / 100.
+
+#### 6.1.7 `web.crossref` (AMENDED 2026-08-05)
+
+`GET https://api.crossref.org/works?query=<q>&rows=<n>` → the registry of
+scholarly works: title, first authors, container-title (journal/venue),
+year, DOI, and the resolvable `https://doi.org/<DOI>` URL. Tier 0 /
+non-mutating, no credential, registers on every session.
+
+**Territory:** resolving and verifying citations — turning a
+half-remembered reference into a DOI, confirming a work exists and was
+published where it is claimed, finding the published version of a
+preprint. The description points at `web.arxiv` for work too recent or
+too unpublished to be registered.
+
+- **Published obligations.** The API is free and open with no key.
+  Crossref asks callers to identify themselves with a mail address, which
+  routes the request to the **polite pool** (better and more predictable
+  service than the anonymous pool); personant supplies it in the
+  User-Agent. No fixed rate limit is published; Crossref asks that
+  `X-Rate-Limit-*` and `Retry-After` be honoured and that requests be
+  serial. Contact is strongly preferred, not required — with `[user]`
+  unset the tool still runs, in the anonymous pool, which is the honest
+  consequence rather than a fabricated address.
+- **A record with no DOI is DROPPED.** The DOI is the entire product; a
+  `https://doi.org/` URL with nothing after it resolves to nothing.
+- **`title` and `container-title` are ARRAYS in Crossref's schema and are
+  routinely empty**, and `issued.date-parts` can be `[[null]]`. Each
+  absent field yields no line — never a literal `null` or an empty
+  parenthesis.
+
+#### 6.1.8 `web.wikidata` (AMENDED 2026-08-05)
+
+`GET https://www.wikidata.org/w/api.php?action=wbsearchentities&search=<q>&language=en&uselang=en&format=json&limit=<n>`
+→ entity search: each result's `id`, `label` and `description`, rendered
+as label, QID, canonical `https://www.wikidata.org/wiki/<QID>` URL and
+description. Tier 0 / non-mutating, no credential, registers on every
+session.
+
+**Territory:** structured entity identity — pinning down which of several
+same-named people, places or works is meant, and getting the stable QID
+other datasets key on. The description points at `web.wikipedia` for
+prose context.
+
+**Why the Action API and not the §6.1.5 REST path** (the design's one
+contact-with-reality correction). The tool was first built on
+`/w/rest.php/v1/search/page` — same family, same shape, one shared
+decoder — on the assumption that the Wikidata wiki would put a human
+label in `title` the way the encyclopedias do. **A live check disproved
+it:** `q="general relativity"` returns `title` = `"Q11452"` and the label
+appears NOWHERE in the payload (the excerpt carries description text
+instead). A shortlist of bare QIDs is not something a model or a human
+can choose from, which defeats the tool's entire receipts purpose. The
+cost of `wbsearchentities` is that the two Wikimedia tools no longer
+share a decoder; the purchase is a result that says what the entity IS.
+
+- **Contact is REQUIRED**, on exactly the §6.1.5 terms: Wikidata is
+  Wikimedia infrastructure under the same enforced User-Agent policy, and
+  the refusal is the same one implementation.
+- **The Action API's `maxlag` parameter is NOTED AND DELIBERATELY NOT
+  SENT.** It asks the server to refuse a request outright while
+  replication lag is high, and it is the courtesy owed by BOTS running
+  bulk or write traffic. Sending it would convert a lagging cluster into
+  a failed tool call for a human waiting on one read; this tool is
+  read-only, interactive and capped at five queries a turn, so the load
+  `maxlag` exists to shed is not load personant generates.
+- **The Action API reports failure IN BAND, with HTTP 200** — an `error`
+  object and no `search` key. It is decoded and raised as an ERROR: left
+  undecoded it would present as an empty array, and telling the model
+  "the search ran and matched nothing" for a query that never ran is
+  precisely the failed-vs-empty conflation §6.1.1 is built against.
+- **The canonical URL is BUILT from the `id`**, not taken from the
+  response. `url` is protocol-relative (`//www.wikidata.org/wiki/Q42`),
+  which `web.fetch` cannot follow as written, and `concepturi` is the RDF
+  entity IRI (`http://www.wikidata.org/entity/Q42`), which is not the
+  page a human would open. A result with no `id` has no entity URL and is
+  dropped; a result with no label is still rendered, headed by its QID.
 
 ### 6.2 Permission tiers and accrual
 
@@ -3603,6 +3753,26 @@ writes seed `directives/defaults.md`, `README.md`, and template
 `providers.toml` and `config.toml` files, each with a commented-out
 example block.
 
+**The `[user]` step** (**ADDED 2026-08-05**). After `config.toml` exists
+and before the initial commit, init adds whatever `[user]` (§8.2.2) is
+missing, seeded from the git binary's global identity. It reports one
+line, in init's `[INFO] init:` style, **to stdout as well as the log** —
+the outcome can be "these tools are now unavailable", and that must not
+be conditional on the user's log level:
+
+```
+init: created [user] name="Ada Lovelace" email="ada@example.com" (from git config)
+init: existing [user] name="Ada Lovelace" email="ada@example.com"
+```
+
+When git is absent from `$PATH`, or its global identity is unset, the
+section is still created — with empty fields, so the user has an obvious
+place to type — and the report names the cause, states that
+`web.wikipedia` and every other Wikimedia-backed tool WILL BE UNAVAILABLE
+until `name` and `email` are populated, and gives both fixes (edit
+`config.toml` directly, or set the git global config and re-run
+`personant init`).
+
 ### 8.2 Configuration sources and precedence
 
 The runtime reads configuration from four sources, each with distinct purpose and security posture:
@@ -3666,6 +3836,10 @@ The split reflects intent: an agent reaching for secrets is suspicious and warra
 Format:
 
 ```toml
+[user]
+name  = "Ada Lovelace"
+email = "ada@example.com"
+
 [chat]
 defaultModel = "provider/model"
 showThinking = false
@@ -3680,6 +3854,38 @@ maxPerTurn = 5
 maxPerDay  = 100
 ```
 
+- `[user] name` / `[user] email` — who personant says it is acting for
+  when it reaches a third party (**ADDED 2026-08-05**). These are the
+  §6.1 free-API citizenship contact: they are placed in the outbound
+  `User-Agent`, and the Wikimedia-family tools (`web.wikipedia`,
+  `web.wikidata`) REFUSE to run without both. They are **not secret** —
+  values destined for a public HTTP header are not credentials — which
+  is why they live in `config.toml` with the other choices rather than
+  behind an `apiKeyFile`. Like `[search]`, the section is **deliberately
+  unvalidated**: an absent or half-filled `[user]` must cost the tools
+  that need contact and nothing else, never the session.
+  - **`personant init` populates it** (§8.1) from the installed **git
+    binary's** global `user.name` / `user.email`, which is where a
+    developer's identity already lives. The git BINARY and not go-git,
+    by user ruling: go-git's config parser does not resolve
+    `include`/`includeIf`, whose flagship use case is exactly
+    per-context identity, so a developer with a work identity in an
+    included file would silently get the wrong address.
+  - **Insertion is TEXTUAL and FIELD-level**, never a TOML round-trip:
+    `config.toml` is hand-edited and its comments and ordering are the
+    user's. A section with `name` but no `email` gains only `email`; a
+    complete section is not rewritten at all.
+  - *(QUEUED, contract sketched, deliberately NOT built — pending
+    demonstrated need.)* **The `git-auto` sentinel.** `name` or `email`
+    set to the literal string `git-auto` would resolve at INVOCATION via
+    **repo-scoped** `git config user.name` / `user.email` (no
+    `--global`), picking up an `includeIf` per-project identity so a
+    session in a work tree identifies with the work address. Empty
+    resolution is a tool FAILURE, not a fallback to the global value —
+    the sentinel is a statement that the per-project identity is the
+    correct one. It is recorded here rather than built because nobody
+    has yet wanted it; the cost of the sketch is one paragraph and the
+    cost of guessing later is a second, incompatible mechanism.
 - `[chat] defaultModel` — the default chat provider/model.
 - `[chat] showThinking` — optional display preference: stream a thinking model's reasoning deltas to the terminal, dimmed, as they arrive. **Absent → off**; a fresh install does not start showing scratch unasked. Display-only — reasoning is never journaled, never feeds §3.3 symbol extraction, and is never replayed in history — so it is deliberately outside cross-file validation: an absent or unrecognized display preference must never refuse a config. `/thinking` (§4.2) overrides it for the session.
 - `[embedding] model` — the embedding provider/model. This pin is **mandatory for embedding recall** and must be explicit: the embedding model defines the vector space, and an inferred or drifting model would silently invalidate the existing embedding cache.

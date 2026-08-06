@@ -8,6 +8,7 @@ import (
 	"personant/internal/memops"
 	"personant/internal/store"
 	"personant/internal/testsupport"
+	"personant/internal/tools/web"
 )
 
 // ONE live probe for web.search, and it lives here rather than in
@@ -47,7 +48,7 @@ func TestWebSearch_Live(t *testing.T) {
 		t.Skip("no `type = \"search\"` provider configured — web.search is not offered in this home")
 	}
 
-	provider, err := selectSearchProvider(cfg.Search, providers)
+	provider, err := selectSearchProvider(cfg.Search, providers, web.Contact{Name: cfg.User.Name, Email: cfg.User.Email})
 	if err != nil {
 		t.Skipf("search backend not usable in this home: %v", err)
 	}

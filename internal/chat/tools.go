@@ -23,9 +23,17 @@ import (
 // already handle correctly. The model is never told about a tool that
 // cannot be serviced, so it never calls one.
 //
-// The mandatory half is `web.fetch` and `web.wikipedia`: neither needs a
-// credential, so both register on every session regardless of
-// configuration.
+// The mandatory half is the credential-free set — `web.fetch`,
+// `web.wikipedia`, `web.wikidata`, `web.arxiv`, `web.crossref` — which
+// registers on every session regardless of configuration.
+//
+// This is also where the §6.1 free-API citizenship CONTACT reaches the
+// tools. internal/tools/web is config-free by design (it never sees
+// PersonantPaths and reads no file), so the config.toml `[user]` values
+// are passed in at construction, exactly as API keys are. A tool whose
+// service REQUIRES contact still REGISTERS without it and refuses at
+// INVOCATION — the model is told why the encyclopedia is unavailable
+// rather than silently never being offered it.
 
 // buildToolRegistry assembles the §6.1.1 inventory.
 //
@@ -38,14 +46,23 @@ import (
 func buildToolRegistry(cfg memops.Config, providers memops.Providers, warn io.Writer) (*tools.Registry, error) {
 	reg := tools.NewRegistry()
 
-	if err := reg.Register(web.NewFetchTool(web.FetchConfig{})); err != nil {
-		return nil, fmt.Errorf("chat: register %s: %w", web.ToolNameFetch, err)
-	}
-	if err := reg.Register(web.NewWikipediaTool(web.WikipediaConfig{})); err != nil {
-		return nil, fmt.Errorf("chat: register %s: %w", web.ToolNameWikipedia, err)
+	// A SLICE, not a map: registration order is the order the tool specs
+	// reach the model, and a map would make the request prefix differ run
+	// to run for no reason.
+	contact := web.Contact{Name: cfg.User.Name, Email: cfg.User.Email}
+	for _, tool := range []tools.Tool{
+		web.NewFetchTool(web.FetchConfig{Contact: contact}),
+		web.NewWikipediaTool(web.WikipediaConfig{Contact: contact}),
+		web.NewWikidataTool(web.WikidataConfig{Contact: contact}),
+		web.NewArxivTool(web.ArxivConfig{Contact: contact}),
+		web.NewCrossrefTool(web.CrossrefConfig{Contact: contact}),
+	} {
+		if err := reg.Register(tool); err != nil {
+			return nil, fmt.Errorf("chat: register %s: %w", tool.Spec.Name, err)
+		}
 	}
 
-	provider, err := selectSearchProvider(cfg.Search, providers)
+	provider, err := selectSearchProvider(cfg.Search, providers, contact)
 	if err != nil {
 		fmt.Fprintf(warn, "warn: %s unavailable: %v\n", web.ToolNameSearch, err)
 		return reg, nil
@@ -76,7 +93,7 @@ func buildToolRegistry(cfg memops.Config, providers memops.Providers, warn io.Wr
 // error only when the user evidently INTENDED search and something
 // about it is wrong; that distinction is what keeps the warning
 // meaningful rather than a line everyone learns to ignore.
-func selectSearchProvider(cfg memops.SearchConfig, providers memops.Providers) (web.SearchProvider, error) {
+func selectSearchProvider(cfg memops.SearchConfig, providers memops.Providers, contact web.Contact) (web.SearchProvider, error) {
 	pool := providers.OfKind(memops.ProviderTypeSearch)
 	pinned := strings.TrimSpace(cfg.Provider)
 
@@ -109,7 +126,7 @@ func selectSearchProvider(cfg memops.SearchConfig, providers memops.Providers) (
 
 	switch provider.Protocol() {
 	case memops.ProviderAPIExa:
-		return web.NewExaProvider(provider.APIKey, provider.BaseURL, nil)
+		return web.NewExaProvider(provider.APIKey, provider.BaseURL, contact, nil)
 	case "":
 		return nil, fmt.Errorf("search provider %q declares no `api` (known: %s)", name, memops.ProviderAPIExa)
 	default:

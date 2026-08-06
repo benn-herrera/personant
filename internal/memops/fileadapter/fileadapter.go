@@ -956,7 +956,7 @@ func (a *FileAdapter) Init(ctx context.Context, opts memops.InitOptions) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := store.Init(a.paths, store.InitOptions{Quiet: opts.Quiet, Logger: opts.Logger}); err != nil {
+	if err := store.Init(a.paths, store.InitOptions{Quiet: opts.Quiet, Logger: opts.Logger, Out: opts.Out}); err != nil {
 		return fmt.Errorf("fileadapter: init: %w", err)
 	}
 	return nil

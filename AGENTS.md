@@ -440,6 +440,34 @@ In progress:
     `<span class="searchmatch">` markup and entities in one tokenizer
     pass, and concatenates the returned `key` into
     `https://en.wikipedia.org/wiki/<key>` WITHOUT re-encoding it.
+  - **Free-API citizenship wave** (added 2026-08-05, SPEC §6.1
+    citizenship clause + §6.1.6–§6.1.8) — the house rule below, made
+    mechanical. `config.toml [user] name/email` is the contact identity,
+    populated by `personant init` from the **git binary's** global config
+    (textual field-level insertion, so a hand-edited config keeps its
+    comments; go-git was ruled out because its parser cannot resolve
+    `includeIf`, whose flagship use is exactly identity). One shared
+    politeness layer (`internal/tools/web/politeness.go`) now carries
+    EVERY outbound request in the package: contact-bearing User-Agent,
+    a package-level per-host serial gate plus spacing table (arXiv 3s;
+    everything else serial-at-0), and one Retry-After retry capped at
+    30s. `web.wikipedia` and the new `web.wikidata` **refuse at
+    invocation** without contact (Wikimedia's policy requires it and the
+    service is donor-funded); `web.arxiv` and `web.crossref` run
+    anonymously but say so in the UA. Three new receipt tools —
+    **`web.arxiv`** (Atom, preprints), **`web.crossref`** (DOIs and the
+    published record), **`web.wikidata`** (structured entities) — each
+    with its own 5/100 counter and the same trichotomy. **`web.wikidata`
+    uses the ACTION API (`action=wbsearchentities`), NOT the REST
+    `search/page` path the encyclopedia uses:** a live check found the
+    Wikidata wiki answers REST search with `title` = the bare QID and the
+    label nowhere in the payload, so the shared-decoder version returned
+    unusable shortlists. `maxlag` is noted and deliberately not sent (bot
+    courtesy; we are one interactive read), and the Action API's HTTP-200
+    in-band `error` object is decoded so a failed query cannot masquerade
+    as an empty result. Their model-facing descriptions are disjoint BY TERRITORY
+    and name each other's ground, but deliberately do NOT say "use only
+    for": fan-out corroboration is expected (user ruling).
   - Tier ruling for the three (SPEC §6.2.7, closing a real spec gap): **tier 0
     (silent), with the scheme allowlist as the boundary instead of an
     ack** — a user cannot meaningfully adjudicate whether a URL is an
@@ -599,10 +627,14 @@ internal/tools/             §6.1 tool registry + dispatch + the shared
                             arg-decoder and turn-context seam
                             (substrate-free). The turn-side execution loop
                             lives in internal/turn/toolloop.go
-internal/tools/web/         §6.1.1 web.fetch + web.search: readability →
-                            Markdown extraction, empty-shell detection, the
-                            SearchProvider seam + Exa backend, local query
-                            caps
+internal/tools/web/         §6.1.1 web.fetch + web.search + the query tools
+                            (wikipedia, wikidata, arxiv, crossref):
+                            readability → Markdown extraction, empty-shell
+                            detection, the SearchProvider seam + Exa backend,
+                            local query caps, and politeness.go — the ONE
+                            free-API citizenship layer (contact-bearing UA,
+                            per-host serial gate + spacing table,
+                            Retry-After)
 internal/shell/             §4.4 shell escape: per-command `$SHELL -c`,
                             shell-cwd tracking via the fd-3 cwd epilogue,
                             bounded capture, §8.2.1 key redaction

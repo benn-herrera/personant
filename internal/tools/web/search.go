@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"personant/internal/model"
 	"personant/internal/tools"
@@ -19,11 +18,6 @@ const ToolNameSearch = "web.search"
 // Enough to choose from, small enough that the §6.5 byte cap is never
 // the thing doing the choosing.
 const DefaultSearchResults = 6
-
-// snippetMaxChars bounds one result's snippet. The snippet exists to let
-// the model decide WHICH result to fetch; a longer one is the fetch it
-// has not decided to make yet.
-const snippetMaxChars = 400
 
 // SearchResult is one ranked hit. Published is a free-form date string
 // exactly as the backend reported it (formats vary by provider and a
@@ -169,36 +163,21 @@ func noResultsMessage(query string) string {
 }
 
 func renderResults(query string, results []SearchResult) []byte {
-	var b strings.Builder
-	fmt.Fprintf(&b, "%d result(s) for %q, most relevant first:\n", len(results), query)
-	for i, r := range results {
-		fmt.Fprintf(&b, "\n%d. %s\n   %s\n", i+1, tools.OneLine(fallback(r.Title, "(untitled)")), r.URL)
+	entries := make([]resultEntry, 0, len(results))
+	for _, r := range results {
+		published := ""
 		if r.Published != "" {
-			fmt.Fprintf(&b, "   published: %s\n", tools.OneLine(r.Published))
+			published = "published: " + tools.OneLine(r.Published)
 		}
-		if snip := clip(tools.OneLine(r.Snippet), snippetMaxChars); snip != "" {
-			fmt.Fprintf(&b, "   %s\n", snip)
-		}
+		entries = append(entries, resultEntry{
+			Title: r.Title,
+			URL:   r.URL,
+			Lines: []string{published, clip(tools.OneLine(r.Snippet), snippetMaxChars)},
+		})
 	}
-	b.WriteString("\nUse web.fetch on a URL above to read the full page.\n")
-	return []byte(b.String())
-}
-
-func fallback(s, alt string) string {
-	if strings.TrimSpace(s) == "" {
-		return alt
-	}
-	return s
-}
-
-// clip truncates on a rune boundary with an honest ellipsis.
-func clip(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	cut := max
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return strings.TrimSpace(s[:cut]) + "…"
+	return renderList(
+		fmt.Sprintf("%d result(s) for %q, most relevant first:\n", len(results), query),
+		entries,
+		"\nUse web.fetch on a URL above to read the full page.\n",
+	)
 }

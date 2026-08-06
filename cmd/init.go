@@ -37,6 +37,10 @@ initial commit. Re-running over an existing home is a near no-op.`,
 			Logger: func(format string, args ...any) {
 				log.Info(format, args...)
 			},
+			// The [user] step also goes to stdout: it can end with "these
+			// tools will be unavailable", and that must not be conditional
+			// on --log-level.
+			Out: cmd.OutOrStdout(),
 		}
 		return ops.Init(context.Background(), opts)
 	},

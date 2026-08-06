@@ -4,14 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
-
-	"golang.org/x/net/html"
 
 	"personant/internal/model"
 	"personant/internal/tools"
@@ -26,6 +22,17 @@ import (
 // this" is a judgement about the QUESTION, and the model is the only
 // participant holding it. Two tools cost one extra spec block in the
 // request prefix and buy the model an actual choice.
+//
+// # Published obligations (AGENTS.md free-API citizenship, consequence 1)
+//
+// Wikimedia's User-Agent policy REQUIRES every request to carry a
+// descriptive User-Agent WITH contact information (a mail address or a
+// contact page); it is enforced, and anonymous or default agents are
+// rate-limited or refused outright. The REST API asks for serial
+// requests rather than a request burst; it states no minimum interval.
+// The service is donor-funded, which is why the contact requirement is
+// implemented as a REFUSAL rather than a best effort: personant does not
+// send anonymous traffic to a charity's servers.
 
 // ToolNameWikipedia is the registry key for the §6.1.1 Wikipedia search
 // tool.
@@ -40,11 +47,21 @@ const ToolNameWikipedia = "web.wikipedia"
 // string), not in a second endpoint or a second tool.
 const WikipediaHost = "en.wikipedia.org"
 
+// wikimediaPolicy names the obligation in the refusal the model reads.
+// Shared with web.wikidata: one family, one policy, one sentence.
+const wikimediaPolicy = "User-Agent policy"
+
 const (
 	// wikipediaEndpoint is the REST search-page endpoint. Query
-	// parameters (`q`, `limit`) are attached with url.Values, never by
-	// string formatting — a search term is arbitrary user/model text and
-	// hand-built query strings are how it stops being a search term.
+	// parameters are attached with url.Values, never by string formatting
+	// — a search term is arbitrary user/model text and hand-built query
+	// strings are how it stops being a search term.
+	//
+	// The path is identical on every ENCYCLOPEDIA in the family, so a
+	// language change is the host swap described above. It is NOT shared
+	// with web.wikidata: the Wikidata wiki answers this endpoint with bare
+	// QIDs and no labels (see wikidata.go), so that tool uses the Action
+	// API instead.
 	wikipediaEndpoint = "https://" + WikipediaHost + "/w/rest.php/v1/search/page"
 
 	// wikipediaArticleBase + a page's `key` is the canonical article URL.
@@ -63,33 +80,23 @@ const (
 	// shortlist to choose a web.fetch from and starts being the §6.5
 	// budget's problem.
 	MaxWikipediaResults = 10
-
-	// wikipediaTimeout bounds one query, matching exaTimeout: under
-	// DefaultFetchTimeout and well under tools.DefaultTimeout, so a slow
-	// endpoint surfaces as this tool's own message rather than dispatch's
-	// generic one.
-	wikipediaTimeout = 15 * time.Second
-
-	// wikipediaMaxResponseBytes caps the response read. A search API
-	// returning megabytes is a malfunction; buffering it unbounded would
-	// make that malfunction ours.
-	wikipediaMaxResponseBytes = 4 << 20
-
-	// wikipediaErrorSnippetChars bounds the body echoed back on a non-200.
-	// See the comment at wikipediaStatusError for why a snippet is
-	// included here when the Exa provider deliberately includes none.
-	wikipediaErrorSnippetChars = 200
 )
 
 // WikipediaConfig configures the tool. The zero value is valid and yields
-// the live endpoint, http.DefaultClient and the default local caps.
+// the live endpoint, a default client and the default local caps — but
+// NOT a runnable tool: without Contact the handler refuses, per the
+// Wikimedia policy above.
 type WikipediaConfig struct {
+	// Contact is the config.toml `[user]` identity. REQUIRED in practice:
+	// absent, every call fails with contactRequiredError.
+	Contact Contact
+
 	// Endpoint overrides the REST endpoint. "" → wikipediaEndpoint. It is
 	// a field rather than a package variable so a test can point at an
 	// httptest server without mutating global state.
 	Endpoint string
 
-	// Client is the HTTP client. nil → a client with wikipediaTimeout.
+	// Client is the HTTP client. nil → a client with apiQueryTimeout.
 	Client *http.Client
 
 	// MaxPerTurn / MaxPerDay are the LOCAL query caps. <= 0 → the
@@ -118,25 +125,27 @@ var wikipediaParams = json.RawMessage(`{
 }`)
 
 const wikipediaDescription = "Search English Wikipedia for articles matching a term, returning each article's title, " +
-	"short description, a matching excerpt and its canonical URL. Use this when an encyclopedic source is what you " +
-	"want — established topics, definitions, people, places, events — and web.search when you want the open web. " +
+	"short description, a matching excerpt and its canonical URL. This wins for encyclopedic PROSE context — " +
+	"established topics, definitions, people, places, events — where you want an article to read. " +
+	"For structured entity facts (identifiers, dates, relations) see web.wikidata; for the open web see web.search. " +
 	"Use web.fetch on any result URL to read that article in full."
 
-// NewWikipediaTool builds the `web.wikipedia` tool. It never fails: like
-// web.fetch and unlike web.search, it needs no credential and no
-// configured backend, so it registers on every session.
+// NewWikipediaTool builds the `web.wikipedia` tool. It never fails at
+// CONSTRUCTION: like web.fetch and unlike web.search it needs no
+// credential, so it registers on every session. Missing contact
+// information is an INVOCATION-time refusal instead, so the model is told
+// why the encyclopedia is unavailable rather than silently never seeing
+// the tool.
 func NewWikipediaTool(cfg WikipediaConfig) tools.Tool {
 	w := &wikipedian{
 		endpoint: cfg.Endpoint,
-		client:   cfg.Client,
+		contact:  cfg.Contact,
 		quota:    newQuota(ToolNameWikipedia, cfg.MaxPerTurn, cfg.MaxPerDay),
 	}
 	if w.endpoint == "" {
 		w.endpoint = wikipediaEndpoint
 	}
-	if w.client == nil {
-		w.client = &http.Client{Timeout: wikipediaTimeout}
-	}
+	w.polite = newPoliteness(ToolNameWikipedia, cfg.Contact, apiClient(cfg.Client))
 	return tools.Tool{
 		Spec: model.ToolSpec{
 			Name:        ToolNameWikipedia,
@@ -149,9 +158,18 @@ func NewWikipediaTool(cfg WikipediaConfig) tools.Tool {
 	}
 }
 
+// apiClient is the default client for the credential-free query tools.
+func apiClient(client *http.Client) *http.Client {
+	if client != nil {
+		return client
+	}
+	return &http.Client{Timeout: apiQueryTimeout}
+}
+
 type wikipedian struct {
 	endpoint string
-	client   *http.Client
+	contact  Contact
+	polite   *politeness
 	quota    *quota
 }
 
@@ -174,6 +192,9 @@ type wikipediaResponse struct {
 	Pages []wikipediaPage `json:"pages"`
 }
 
+// wikipediaWhat names the operation in every message the model reads.
+const wikipediaWhat = "the Wikipedia search"
+
 func (w *wikipedian) handle(ctx context.Context, args json.RawMessage) ([]byte, error) {
 	var a struct {
 		Q     string `json:"q"`
@@ -181,6 +202,14 @@ func (w *wikipedian) handle(ctx context.Context, args json.RawMessage) ([]byte, 
 	}
 	if err := tools.DecodeArgs(args, &a); err != nil {
 		return nil, err
+	}
+	// The contact gate comes FIRST — before argument validation and before
+	// the quota. An unconfigured contact makes the tool unusable whatever
+	// the arguments are, so reporting an argument problem instead would
+	// send the model off fixing the wrong thing; and spending the turn's
+	// allowance on a permanent configuration condition teaches nothing.
+	if !w.contact.Present() {
+		return nil, contactRequiredError(ToolNameWikipedia, "Wikimedia", wikimediaPolicy)
 	}
 	q := strings.TrimSpace(a.Q)
 	if q == "" {
@@ -193,7 +222,7 @@ func (w *wikipedian) handle(ctx context.Context, args json.RawMessage) ([]byte, 
 		return nil, err
 	}
 
-	pages, err := w.query(ctx, q, wikipediaLimit(a.Limit))
+	pages, err := w.query(ctx, q, clampLimit(a.Limit, DefaultWikipediaResults, MaxWikipediaResults))
 	if err != nil {
 		return nil, err
 	}
@@ -203,63 +232,21 @@ func (w *wikipedian) handle(ctx context.Context, args json.RawMessage) ([]byte, 
 	return renderWikipediaPages(q, pages), nil
 }
 
-// wikipediaLimit resolves the requested count. Out-of-range is CLAMPED,
-// never an error: a limit is a preference, and failing a call over one
-// spends a tool round to learn something the clamp already decided.
-//
-// Non-positive means "unspecified". JSON omission and an explicit `0` are
-// indistinguishable in a plain int, and the rest of this package already
-// reads a non-positive bound as "use the default" — one convention beats
-// a *int that exists only to tell two identical intentions apart.
-func wikipediaLimit(n int) int {
-	if n <= 0 {
-		return DefaultWikipediaResults
-	}
-	return min(n, MaxWikipediaResults)
-}
-
 func (w *wikipedian) query(ctx context.Context, q string, limit int) ([]wikipediaPage, error) {
-	u, err := url.Parse(w.endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("%s: endpoint %q is not parseable: %w", ToolNameWikipedia, w.endpoint, err)
-	}
-	u.RawQuery = url.Values{
+	resp, err := w.polite.getAPI(ctx, w.endpoint, url.Values{
 		"q":     {q},
 		"limit": {strconv.Itoa(limit)},
-	}.Encode()
-
-	ctx, cancel := context.WithTimeout(ctx, wikipediaTimeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	}, "application/json")
 	if err != nil {
-		return nil, fmt.Errorf("%s: build request: %w", ToolNameWikipedia, err)
+		return nil, transportError(wikipediaWhat, err)
 	}
-	// Wikimedia's API etiquette asks for a descriptive User-Agent that
-	// identifies the client; an anonymous or default one is rate-limited
-	// or refused outright.
-	req.Header.Set("User-Agent", wikipediaUserAgent)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := w.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("the Wikipedia search could not be performed (%w) — NO search happened, so this says "+
-			"nothing about whether an article exists. Answer from what you have and say the lookup was unavailable", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, wikipediaMaxResponseBytes))
-	if err != nil {
-		return nil, fmt.Errorf("%s: read response: %w", ToolNameWikipedia, err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, wikipediaStatusError(resp.Status, raw)
+	if !resp.ok() {
+		return nil, apiStatusError(wikipediaWhat, resp.Status, resp.Body)
 	}
 
 	var decoded wikipediaResponse
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return nil, fmt.Errorf("%s: malformed response body (%d bytes) — the search may not have run",
-			ToolNameWikipedia, len(raw))
+	if err := json.Unmarshal(resp.Body, &decoded); err != nil {
+		return nil, malformedError(wikipediaWhat, len(resp.Body))
 	}
 	out := make([]wikipediaPage, 0, len(decoded.Pages))
 	for _, p := range decoded.Pages {
@@ -269,26 +256,6 @@ func (w *wikipedian) query(ctx context.Context, q string, limit int) ([]wikipedi
 		out = append(out, p)
 	}
 	return out, nil
-}
-
-// wikipediaStatusError reports a non-200 with the status AND a bounded
-// snippet of the body.
-//
-// The Exa provider deliberately echoes NO body, and the reason is
-// §8.2.1: its request carries an API key, and an error echo is a
-// documented way for a submitted credential to come back out and land in
-// model context and the event log. This request carries no credential —
-// no key, no cookie, no auth header is ever sent to this endpoint — so
-// that hazard does not exist here, while the body ("invalid limit",
-// "unknown parameter") is genuinely the actionable half of the error. The
-// snippet is collapsed to one line and clipped, so a long HTML error page
-// cannot become the tool result.
-func wikipediaStatusError(status string, body []byte) error {
-	detail := clip(tools.OneLine(string(body)), wikipediaErrorSnippetChars)
-	if detail == "" {
-		return fmt.Errorf("the Wikipedia search returned HTTP %s and NO search happened", status)
-	}
-	return fmt.Errorf("the Wikipedia search returned HTTP %s and NO search happened: %s", status, detail)
 }
 
 // noWikipediaResultsMessage is the EMPTY half of web.search's trichotomy,
@@ -302,46 +269,17 @@ func noWikipediaResultsMessage(q string) string {
 }
 
 func renderWikipediaPages(q string, pages []wikipediaPage) []byte {
-	var b strings.Builder
-	fmt.Fprintf(&b, "%d Wikipedia article(s) for %q, most relevant first:\n", len(pages), q)
-	for i, p := range pages {
-		fmt.Fprintf(&b, "\n%d. %s\n   %s\n", i+1,
-			tools.OneLine(fallback(p.Title, "(untitled)")), wikipediaArticleBase+p.Key)
-		if desc := clip(tools.OneLine(stripHTML(p.Description)), snippetMaxChars); desc != "" {
-			fmt.Fprintf(&b, "   %s\n", desc)
-		}
-		if excerpt := clip(tools.OneLine(stripHTML(p.Excerpt)), snippetMaxChars); excerpt != "" {
-			fmt.Fprintf(&b, "   %s\n", excerpt)
-		}
+	entries := make([]resultEntry, 0, len(pages))
+	for _, p := range pages {
+		entries = append(entries, resultEntry{
+			Title: p.Title,
+			URL:   wikipediaArticleBase + p.Key,
+			Lines: []string{snippetLine(p.Description), snippetLine(p.Excerpt)},
+		})
 	}
-	b.WriteString("\nUse web.fetch on a URL above to read the full article.\n")
-	return []byte(b.String())
-}
-
-// stripHTML reduces an HTML fragment to its text.
-//
-// The REST API wraps matched terms in `<span class="searchmatch">…</span>`
-// and escapes the surrounding text, so an excerpt reaches us as markup
-// even though it is prose. Tokenizing is the boring correct way to undo
-// both at once: the tokenizer's text tokens are already entity-decoded,
-// so tag removal and unescaping are one pass rather than a regex plus a
-// separate html.UnescapeString (which, run in the wrong order, happily
-// turns `&lt;script&gt;` back into a tag).
-func stripHTML(s string) string {
-	if !strings.ContainsAny(s, "<&") {
-		return s
-	}
-	var b strings.Builder
-	z := html.NewTokenizer(strings.NewReader(s))
-	for {
-		switch z.Next() {
-		case html.ErrorToken:
-			// The only terminal token: io.EOF for a complete fragment, and
-			// for a malformed one the text seen so far is still the best
-			// answer available.
-			return b.String()
-		case html.TextToken:
-			b.Write(z.Text())
-		}
-	}
+	return renderList(
+		fmt.Sprintf("%d Wikipedia article(s) for %q, most relevant first:\n", len(pages), q),
+		entries,
+		"\nUse web.fetch on a URL above to read the full article.\n",
+	)
 }

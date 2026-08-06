@@ -1,9 +1,18 @@
 // Package web implements the §6.1.1 network tools: `web.fetch` (retrieve
 // a URL as readable Markdown), `web.search` (query → ranked results from
-// the open web) and `web.wikipedia` (query → ranked encyclopedia
-// articles). All are read-only, all register at tools.TierSilent, and
-// none touches the substrate — they take their configuration as plain
-// values and hand back a tools.Tool the caller registers.
+// the open web), and the receipt-bearing query tools `web.wikipedia`,
+// `web.wikidata`, `web.arxiv` and `web.crossref`. All are read-only, all
+// register at tools.TierSilent, and none touches the substrate — they
+// take their configuration as plain values and hand back a tools.Tool the
+// caller registers.
+//
+// # Free-API citizenship
+//
+// Every outbound request in this package goes through politeness.go: the
+// contact-bearing User-Agent, the per-host serial gate and spacing table,
+// and the one-retry Retry-After rule. That file documents the mechanism;
+// each tool's own doc comment records the SPECIFIC published obligations
+// of the service it talks to, per the AGENTS.md house rule.
 //
 // # Tier ruling (SPEC §6.2 gap, closed here)
 //
@@ -43,7 +52,6 @@ import (
 
 	"personant/internal/model"
 	"personant/internal/tools"
-	"personant/internal/version"
 )
 
 // ToolNameFetch is the registry key and the name the model calls back
@@ -71,19 +79,6 @@ const (
 	DefaultFetchMaxRedirects = 5
 )
 
-// The User-Agent identity this package presents, shared by every tool in
-// it. A descriptive agent string is the minimum courtesy owed to an
-// operator reading their access log, an anonymous Go-default UA gets
-// blocked by exactly the sites worth reading, and Wikimedia's API
-// etiquette asks for one explicitly. One identity, one version, with only
-// the trailing tool name differing — so a server operator sees the same
-// client whichever tool reached them.
-const (
-	userAgentIdentity  = "personant/" + version.FrontEnd + " (personal knowledge agent; "
-	DefaultUserAgent   = userAgentIdentity + ToolNameFetch + ")"
-	wikipediaUserAgent = userAgentIdentity + ToolNameWikipedia + ")"
-)
-
 // fetchParams is the model-facing JSON Schema. One required string. The
 // scheme constraint is stated in the description because a model that
 // reads it before calling saves a wasted round.
@@ -107,7 +102,21 @@ const fetchDescription = "Retrieve a web page over plain HTTP and return its mai
 
 // FetchConfig configures the fetch tool. The zero value is valid and
 // yields the Default* constants above.
+//
+// # Published obligations (AGENTS.md free-API citizenship, consequence 1)
+//
+// web.fetch has no single service and therefore no single policy: it
+// retrieves whatever URL the model names. What it owes every operator it
+// reaches is the generic courtesy — an identifying User-Agent with
+// contact information when configured, one request at a time per host,
+// and Retry-After honoured. A site with a stated crawl-delay is not
+// covered here; this is a user-directed single-page retrieval, not a
+// crawler, and a per-site policy fetch is out of scope.
 type FetchConfig struct {
+	// Contact is the config.toml `[user]` identity, injected into the
+	// User-Agent. Optional: an ordinary web server requires nothing.
+	Contact Contact
+
 	// Client is the HTTP client. nil → http.DefaultClient. The client is
 	// COPIED before use, so installing the redirect policy never mutates
 	// a client the caller shares with anything else.
@@ -127,9 +136,6 @@ type FetchConfig struct {
 	// silently break the http→https and trailing-slash hops that most of
 	// the real web performs.
 	MaxRedirects int
-
-	// UserAgent is the User-Agent header. "" → DefaultUserAgent.
-	UserAgent string
 }
 
 // NewFetchTool builds the `web.fetch` tool. It never fails: the tool
@@ -150,11 +156,10 @@ func NewFetchTool(cfg FetchConfig) tools.Tool {
 }
 
 type fetcher struct {
-	client       *http.Client
+	polite       *politeness
 	timeout      time.Duration
 	maxBytes     int64
 	maxRedirects int
-	userAgent    string
 }
 
 func newFetcher(cfg FetchConfig) *fetcher {
@@ -162,7 +167,6 @@ func newFetcher(cfg FetchConfig) *fetcher {
 		timeout:      cfg.Timeout,
 		maxBytes:     cfg.MaxBytes,
 		maxRedirects: cfg.MaxRedirects,
-		userAgent:    cfg.UserAgent,
 	}
 	if f.timeout <= 0 {
 		f.timeout = DefaultFetchTimeout
@@ -173,9 +177,6 @@ func newFetcher(cfg FetchConfig) *fetcher {
 	if f.maxRedirects <= 0 {
 		f.maxRedirects = DefaultFetchMaxRedirects
 	}
-	if f.userAgent == "" {
-		f.userAgent = DefaultUserAgent
-	}
 
 	base := cfg.Client
 	if base == nil {
@@ -185,7 +186,7 @@ func newFetcher(cfg FetchConfig) *fetcher {
 	// http.DefaultClient) must not acquire it as a side effect.
 	client := *base
 	client.CheckRedirect = f.checkRedirect
-	f.client = &client
+	f.polite = newPoliteness(ToolNameFetch, cfg.Contact, &client)
 	return f
 }
 
@@ -244,10 +245,14 @@ func (f *fetcher) fetch(ctx context.Context, rawURL string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build request for %s: %w", u.Redacted(), err)
 	}
-	req.Header.Set("User-Agent", f.userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/markdown,text/plain;q=0.9,*/*;q=0.1")
 
-	resp, err := f.client.Do(req)
+	// The per-host gate keys on the INITIAL host. A redirect chain that
+	// crosses hosts is followed by the transport inside this one call, so
+	// the destination host's gate is not consulted — accepted: a single
+	// user-directed fetch of one page is not load worth shaping, and the
+	// alternative is reimplementing redirect following by hand.
+	resp, err := f.polite.do(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("could not fetch %s: %w", u.Redacted(), err)
 	}
