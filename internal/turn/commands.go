@@ -133,6 +133,51 @@ func CreateTopic(ctx context.Context, state *State, name string) (string, error)
 	return newID, nil
 }
 
+// RenameTopic implements /topic rename <new-name>: it changes the ACTIVE
+// topic's §2.2.2 display name, mirroring /project rename's contract one
+// level down. It returns the thread's id and the name it had.
+//
+// The rename is DISPLAY-COSMETIC by design, and that is the whole of its
+// scope: anchors, history_symbols, the §2.8 `thr=` details, recall matching
+// and every stored turn excerpt are untouched, so a topic renamed mid-life
+// keeps firing on exactly the symbols it fired on before. Old names are
+// NOT aliases — `/back-to <old-name>` stops resolving, which is the point:
+// a name the roster no longer shows is a name the user cannot see to type.
+//
+// Which fields move. Description is the display name (§2.2.2), so it is
+// always rewritten. Summary follows ONLY when it is a duplicate of
+// Description — the shape CreateTopic leaves behind, where the "summary"
+// is just the given name a second time and leaving it would resurface the
+// old name as the gist. A curator's Summary is content, not a name, and
+// survives the rename intact.
+//
+// Not a §3.11 structural change (nothing created or retired), so it rides
+// the session-close commit exactly as /pause and /resume do.
+func RenameTopic(ctx context.Context, state *State, name string) (id, old string, err error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", "", errors.New("topic: empty topic name")
+	}
+	id = CurrentOwnerThread(state)
+	if id == "" {
+		return "", "", errors.New("topic: no active topic to rename")
+	}
+	if _, err = writeThreadRecord(ctx, state, id, func(rec *memops.SpineRecord) {
+		old = threadDisplay(*rec)
+		if rec.Summary == rec.Description {
+			rec.Summary = name
+		}
+		rec.Description = name
+	}); err != nil {
+		return "", "", err
+	}
+	if err = state.Ops.Log(ctx, memops.LogCategoryThread, "renamed",
+		"thr="+id+" old="+memops.SanitizeDetail(old)+" new="+memops.SanitizeDetail(name)); err != nil {
+		return "", "", err
+	}
+	return id, old, nil
+}
+
 // PauseThread implements /pause: it transitions the thread to paused
 // (§2.2.1) and removes it from the working set. ref may be a thr_<n> id, a
 // working name, or "" (the current owner thread).
@@ -279,15 +324,39 @@ func targetThread(ctx context.Context, state *State, ref string) (string, error)
 	return "", errors.New("command: no active topic; specify a topic id or name")
 }
 
-// writeThreadState mirrors a thread's spine record + frontmatter with a new
-// state and a fresh state_changed, using the updateExistingThread /
-// applyClosureResolution write pattern (EngageThread with an empty
-// TurnExcerpt — a meta-only update that leaves turns/ untouched). It does
-// NOT re-project anchors or touch history_symbols: a state transition is
-// not an engagement. The adapter recreates a missing thread dir on write,
-// so a missing on-disk file is synthesized from the spine rather than
-// failing.
+// writeThreadState transitions a thread to a new state with a fresh
+// state_changed, mirroring spine + frontmatter through writeThreadRecord.
 func writeThreadState(ctx context.Context, state *State, threadID string, newState memops.ThreadState, via string) (memops.SpineRecord, error) {
+	rec, err := writeThreadRecord(ctx, state, threadID, func(rec *memops.SpineRecord) {
+		rec.State = newState
+		rec.StateChanged = clock.Timeline().Format(time.RFC3339)
+	})
+	if err != nil {
+		return memops.SpineRecord{}, err
+	}
+	if err := state.Ops.Log(ctx, memops.LogCategoryThread, "state-change",
+		"thr="+threadID+" state="+string(newState)+" via="+via); err != nil {
+		return memops.SpineRecord{}, err
+	}
+	return rec, nil
+}
+
+// writeThreadRecord is the ONE canonical+derived write a between-turns slash
+// command takes: load the spine record, let mutate revise it, mirror the
+// result into the thread's frontmatter, and write both through the
+// updateExistingThread / applyClosureResolution pattern (EngageThread with
+// an empty TurnExcerpt — a meta-only update that leaves turns/ untouched).
+//
+// The mirror is total rather than field-by-field per caller, which is what
+// keeps §2.3's canonical frontmatter and the derived spine from drifting:
+// a mutator that touches a new field gets it persisted to both sides for
+// free, and cannot half-write one of them.
+//
+// It does NOT re-project anchors or touch history_symbols — neither a state
+// transition nor a rename is an engagement. The adapter recreates a missing
+// thread dir on write, so a missing on-disk file is synthesized from the
+// spine rather than failing.
+func writeThreadRecord(ctx context.Context, state *State, threadID string, mutate func(*memops.SpineRecord)) (memops.SpineRecord, error) {
 	rec, found, err := state.Ops.FindThread(ctx, threadID)
 	if err != nil {
 		return memops.SpineRecord{}, fmt.Errorf("command: find topic %s: %w", threadID, err)
@@ -306,14 +375,12 @@ func writeThreadState(ctx context.Context, state *State, threadID string, newSta
 		fm = frontmatterFromSpine(rec)
 	}
 
-	now := clock.Timeline().Format(time.RFC3339)
-	rec.State = newState
-	rec.StateChanged = now
+	mutate(&rec)
 
 	fm.ID = rec.ID
 	fm.Project = rec.Project
-	fm.State = newState
-	fm.StateChanged = now
+	fm.State = rec.State
+	fm.StateChanged = rec.StateChanged
 	fm.Summary = rec.Summary
 	fm.Description = rec.Description
 	fm.Anchors = append([]string(nil), rec.Anchors...)
@@ -327,10 +394,6 @@ func writeThreadState(ctx context.Context, state *State, threadID string, newSta
 
 	if err := state.Ops.EngageThread(ctx, memops.ThreadWrite{Spine: rec, Meta: fm}); err != nil {
 		return memops.SpineRecord{}, fmt.Errorf("command: write topic %s: %w", threadID, err)
-	}
-	if err := state.Ops.Log(ctx, memops.LogCategoryThread, "state-change",
-		"thr="+threadID+" state="+string(newState)+" via="+via); err != nil {
-		return memops.SpineRecord{}, err
 	}
 	return rec, nil
 }

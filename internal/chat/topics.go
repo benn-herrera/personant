@@ -195,7 +195,7 @@ func sortByStamp(recs []memops.SpineRecord, key func(memops.SpineRecord) string)
 
 // topicLine renders one roster entry:
 //
-//	<display name> (thr_N) — <gist> · <relative age>
+//	thr_N: <display name> — <gist> · <relative age>
 func topicLine(rec memops.SpineRecord, now time.Time, isClosed bool) string {
 	stamp := rec.LastEngaged
 	if isClosed {
@@ -207,20 +207,26 @@ func topicLine(rec memops.SpineRecord, now time.Time, isClosed bool) string {
 
 // topicLabel renders the ONE shape the front end names a topic in:
 //
-//	<display name> (thr_N) — <tail>
+//	thr_N: <display name> — <tail>
 //
-// The roster, the §3.5 closure offer and the auto-closure one-liner all
-// print it, so a user reads the same three parts in the same order
-// wherever a topic is named — and the id, which /back-to and /done take as
-// an argument, is always on the line.
+// The roster, the §3.5 closure offer/notice and the §3.4 auto-recall
+// one-liner all print it, so a user reads the same three parts in the same
+// order wherever a topic is named — and the id, which /back-to and /done
+// take as an argument, is always on the line.
+//
+// ID-FIRST (user ruling 2026-08-06). The superseded `display (thr_N)` form
+// buried the id in a parenthetical at a column that moved with every name,
+// so a roster could not be scanned for the one thing on the line the user
+// types back. Leading with it makes the ids a column; the name reads as
+// what the id resolves to, which is what a reference IS.
 //
 // Both trailing parts degrade rather than render an empty fragment: a
-// display name that is only the id collapses to the id (never
-// "thr_3 (thr_3)"), and an empty tail drops the em-dash with it.
+// display name that is only the id collapses to the bare id (never a
+// dangling "thr_3: "), and an empty tail drops the em-dash with it.
 func topicLabel(display, id, tail string) string {
 	label := id
 	if display != "" && display != id {
-		label = display + " (" + id + ")"
+		label = id + ": " + display
 	}
 	if tail != "" {
 		label += " — " + tail

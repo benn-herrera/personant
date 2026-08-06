@@ -7,6 +7,7 @@ available commands:
   /help                        show this help
   /quit, /exit                 exit the session
   /topic <name>                start a new topic and engage it
+  /topic rename <new-name>     rename the active topic (display name only)
   /topics [all]                list this project's topics (all = include old closed)
   /done [thr_id|name]          close the active (or named) topic (§3.5)
   /closures                    review the closures queued for your ack (§3.5)

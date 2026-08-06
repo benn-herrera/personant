@@ -163,6 +163,8 @@ thr_88 [trefoil, unknot, body-topology, electron-shape] — electron body-topolo
 
 The display form is what the LLM sees in working context; it is generated from the JSONL record, not stored.
 
+The **human half** of a thread's display — the working NAME a user reads and types back — is its `description`, falling back to `summary`, falling back to the id. `/topic rename` (§4.2) rewrites that name and nothing else: the id, the anchors, `history_symbols` and everything recall matches on are untouched, so renaming is safe at any point in a thread's life. The user-facing rendering of the pair is the front end's, and it is one shape everywhere — `thr_N: display — gist` (§3.4, user ruling 2026-08-06).
+
 ### 2.3 Thread file format (`threads/thr_<id>/`)
 
 A thread is a **directory**, `threads/thr_<id>/`, holding three things:
@@ -534,7 +536,7 @@ Actions ending in `-error` (and `warning`) are forensic diagnostics, not measure
 | Category | Events |
 |---|---|
 | `system` | `bootstrap` (the VERSION/IDENTITY line — one per process open, emitted at the process boundary after the §9.1 format gate resolves: `version=` substrate, `frontend=`, `home-format=` the EFFECTIVE on-disk revision this session ran against, `commit=` (`unknown` on an unstamped binary), `home=`. It is not the session/project event — that is `session.started`), `home-format-override` (a `--allow-newer-home` open waved a newer home through the §9.1 refusal — `on-disk=`, `binary=`; knowingly-unsafe, always paired with a stderr warning), `context-ceiling-breach`, `context-ceiling-unenforceable` (the post-flight token-ceiling gate could not be EVALUATED — the provider reported no `usage.prompt_tokens` for a streamed turn while a ceiling was configured, with `reason=usage-unavailable ceiling= turn=`. A guard that cannot read its input must say so rather than passing silently; the count is deliberately never estimated, since a guessed number would make the ceiling look enforced when it is not. One line per affected turn — the count of unenforced turns is the measurement), `empty-response` (forensic; the final drained response carried zero visible content — with `reprompted=yes\|no`, `turn=`; §3.3 empty-response recovery), `turn-aborted` (the user retracted a turn with Esc — `turn=` the #94 transaction id, `phase=` the labelled stage they gave up in, `bytes=` the retracted input's size; §4.3.3. **Never the text**: an event line is single-line free-form and a multi-line prompt would break the format — and the text is deliberately not durable anywhere, per the retraction rule), `turn-abort-release-error` (forensic; releasing an aborted turn's recovery scope failed); *(vocabulary; not yet emitted)* `shutdown`, `error`, `config-reload` |
-| `thread` | `engaged`, `engaged-non-owner`, `engaged-cross-project`, `engaged-miss`, `created`, `created-meta-only`, `state-change`, `fetch-miss`, `fetch-cross-project`, `anchor-projection-overflow`, `tag-defaulted` (with `thr=` — the bound owner, `cause=missing-tag\|empty-response`, `reprompted=yes\|no`; §3.3 owner-default) |
+| `thread` | `engaged`, `engaged-non-owner`, `engaged-cross-project`, `engaged-miss`, `created`, `created-meta-only`, `state-change`, `renamed` (ADDED 2026-08-06; `/topic rename` changed a topic's §2.2.2 display name — `thr=`, `old=`, `new=`. The `project.renamed` line one level up, and the same shape. Purely a display change, so nothing measured reads it; it is here because a name the user typed must be reconstructable from the log — a spine record silently carrying a name no event explains is unauditable), `fetch-miss`, `fetch-cross-project`, `anchor-projection-overflow`, `tag-defaulted` (with `thr=` — the bound owner, `cause=missing-tag\|empty-response`, `reprompted=yes\|no`; §3.3 owner-default) |
 | `spine` | `match-fire`, `embed-match-fire`, `intra-match-fire`; *(vocabulary)* `match-miss`, `entry-updated` |
 | `recall` | `offer` (with `count=N`), `accept` (with `thr=`, `layers=`, and **`ack=human\|auto`** (AMENDED 2026-08-05, §3.4): `auto` is an auto-band candidate the runtime fetched without asking. As with `retire.ack`, the two populations must stay separable — any future accept-rate quality measure is a rate over `ack=human` lines only), `decline` (with `thr=`, `reason=not-relevant\|wrong-project\|already-known` — `already-known` is also the runtime's OWN verdict on a candidate already resident in Layer B under `recall.ack-mode: banded`), `net-cap-hit`, `flush-backlog`, `W1-diag`, `fire-error`, `error`, `index-error`, `embed-error`, `debt-window-error`, `tree-error`; *(vocabulary)* `cross-project-fire` |
 | `retire` | `prompt` (with `thr=` and `inactivity=`\|`trigger=manual`\|`trigger=queued` — the last for a §3.5 boundary drain), `ack` (EVERY applied closure — retire or WIP — with `resolution=`, `edited=yes\|no`, and **`ack=human\|auto`** (AMENDED 2026-08-04, §3.5): `auto` is a routine closure the runtime applied without asking, and the ack-edit-rate canary is a rate over `ack=human` lines ONLY, since an auto-accept is unedited by construction and would dilute the rate to zero), `pending` (a decayed thread classified as an EXCEPTION and queued for the boundary drain rather than auto-accepted — `thr=`, `inactivity=`, `reason=anchors=N\|turns=N`; emitted ONCE per idle episode, not on every scan the thread keeps waiting — the queue is derived, so a per-scan line would be a heartbeat rather than a decision event), `defer`, `complete` (with `resolution=`), `curator-error`, `load-error`, `resolver-error`, `apply-error`, `error` |
@@ -1149,10 +1151,14 @@ overlap, layers 2/3 are cosines):
   symbolic-scored candidate, or ≥ `recall.cosine-auto-threshold` (0.75)
   for an embedding- or intra-thread-scored one. The thread is promoted
   through the SAME fetch chokepoint an accepted candidate takes, with no
-  prompt and ONE committed line (`recalled: <display name> (thr_N) —
-  <gist>`; the id is on the line because a topic reference always renders
-  as `<name> (thr_N)` — user ruling 2026-08-06 — so an unasked fetch is
-  verifiable against `/topics` rather than merely announced).
+  prompt and ONE committed line (`recalled thr_N: <display name> —
+  <gist>`; the id LEADS the line because **a committed topic reference
+  renders as `thr_N: display — gist`** — user ruling 2026-08-06 — so an
+  unasked fetch is verifiable against `/topics` rather than merely
+  announced. The superseded `display (thr_N)` form buried the id in a
+  parenthetical at a column that moved with every name, which is
+  unscannable; the notice verb sheds its trailing colon because the shape
+  supplies one).
   Logged `recall.accept ... ack=auto`; the §2.2 `RecallFires` bump applies
   exactly as for a human accept. Embedding and intra-thread share one bar
   because they are the same cosine over the same space; split them only if
@@ -1255,9 +1261,10 @@ At the decay-detection scan each candidate is classified:
 A **routine** closure is applied without asking: the curator's summary,
 `resolution=resolved`, the same frontmatter + spine write and Layer B/C
 eviction an accepted ack performs, and ONE committed line to the terminal
-(`closed: <display name> (thr_N) — <summary>`; the id is on the line
-because `/back-to <thr_id>` is the documented revision path below, and a
-notice that omits the argument the fix takes is not actionable). It rides
+(`closed thr_N: <display name> — <summary>`, the standing
+topic-reference shape; the id leads the line because `/back-to <thr_id>`
+is the documented revision path below, and a notice that omits the
+argument the fix takes is not actionable). It rides
 the turn transaction already
 open around turn close (§4.5.8) — auto-accept adds no commit path of its
 own. `resolved` is the auto-accept resolution because it is where a
@@ -1283,10 +1290,11 @@ Wherever the interactive resolver runs — the boundary drain, `/done`, or
 and gist beside its id, resolved by the runtime from the spine record
 through the SAME fallback chain the §3.4 recall offer uses (description →
 summary → projected anchors). It renders as
-`idle topic: <display name> (thr_N) — <gist>` above the curator's draft
-summary. The superseded form named only `thr_3`: the illegibility
-argument §3.4 makes above, applied to closure's own prompt, which the
-recall redesign had left standing.
+`idle topic thr_N: <display name> — <gist>` above the curator's draft
+summary — §3.4's standing topic-reference shape, unchanged. The
+superseded form named only `thr_3`: the illegibility argument §3.4 makes
+above, applied to closure's own prompt, which the recall redesign had
+left standing.
 
 Two flows are unchanged by the amendment. **`/done` is always fully
 interactive** in both modes — the user typed the command, so they have
@@ -1893,8 +1901,9 @@ per concept is the point of the ruling.
 
 | Command | Purpose |
 |---|---|
-| `/topic <name>` | force a new topic with the given working name |
-| `/topics [all]` | list the active project's topics (AMENDED 2026-08-05 — `/back-to` is unusable without a way to see what exists). Grouped ENGAGED / PAUSED / DORMANT / RECENTLY CLOSED, recency-sorted within each group, one line per topic: display name, `thr_N`, gist, relative age. **Recently-closed topics are in the default view deliberately** — an auto-accepted §3.5 closure is the runtime's judgment and `/back-to` is the user's revision path for it, so the list carries that hint. The default view is bounded (20 topics, then a count of what it withheld); `all` lifts the bound and the closed-window cutoff |
+| `/topic <name>` | force a new topic with the given working name. The first word is read as a subcommand (see `/topic rename`), mirroring `/project`'s parse; the accepted corner is that a topic cannot be CREATED with a name whose first word is `rename` |
+| `/topic rename <new-name>` | rename the ACTIVE topic's §2.2.2 display name (ADDED 2026-08-06 — user ruling; `/project rename`'s contract one level down). **Display-cosmetic**: the id, the anchors, `history_symbols`, the §2.8 `thr=` details, recall matching and every stored turn excerpt are unchanged, so a renamed topic keeps firing on exactly the symbols it fired on before. Writes `description` (and `summary` when it is a duplicate of `description` — the shape `/topic` creation leaves, where the old name would otherwise resurface as the gist) to both the canonical §2.3 frontmatter and the derived spine record. Old names are NOT aliases: `/back-to <old-name>` stops resolving. Duplicate display names are permitted, because creation permits them — the ambiguity surfaces in the name resolver, as it already does. Not a §3.11 structural change, so it rides the session-close commit; logged `thread.renamed` |
+| `/topics [all]` | list the active project's topics (AMENDED 2026-08-05 — `/back-to` is unusable without a way to see what exists). Grouped ENGAGED / PAUSED / DORMANT / RECENTLY CLOSED, recency-sorted within each group, one line per topic in the standing §3.4 topic-reference shape: `thr_N`, display name, gist, relative age. **Recently-closed topics are in the default view deliberately** — an auto-accepted §3.5 closure is the runtime's judgment and `/back-to` is the user's revision path for it, so the list carries that hint. The default view is bounded (20 topics, then a count of what it withheld); `all` lifts the bound and the closed-window cutoff |
 | `/done` | request closure ack on the active topic (§3.5); always fully interactive |
 | `/closures` | drain the §3.5 pending-review queue now — the exception closures awaiting an ack (AMENDED 2026-08-04). The same drain runs at clean session exit; this is the user choosing the moment. An empty queue says so |
 | `/pause` | mark active topic as `paused` (§2.2.1) |

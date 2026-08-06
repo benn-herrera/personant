@@ -28,6 +28,7 @@ On first run, `bin/personant` initializes `~/.personant/` as a git repository. O
 |---|---|
 | `/help` | list commands |
 | `/topic <name>` | start a new topic and engage it |
+| `/topic rename <new-name>` | rename the active topic — its display name only; nothing the runtime matches on moves, and the old name stops resolving |
 | `/topics [all]` | list this project's topics, grouped and recency-sorted (`all` includes old closed ones) |
 | `/done [thr_id\|name]` | close the active (or named) topic |
 | `/closures` | review the closures queued for your ack (§3.5) |
@@ -224,7 +225,7 @@ A third, separate integer versions the home's on-disk layout (`~/.personant/vers
 **Implemented and wired into the turn loop (pending full acceptance-validation):**
 
 - Thread closure / retirement (§3.5): curator-drafted summary; the decay-triggered closure scan fires at turn close. Routine closures are auto-accepted with one committed line (user ruling 2026-08-04 — a per-thread ack every time a side topic decays was an unreasonable interruption); the exceptions (anchor-rich or long-engaged threads) queue and are acked at a boundary — session exit or `/closures`. `closure.ack-mode: always` restores the per-decay prompt.
-- Banded recall surface (§3.4): a candidate whose score clears its tier's auto threshold is pulled into context with one committed line (`recalled: <topic> (thr_N) — <gist>`) and no prompt; the middle band is asked once per turn with a legible offer — thread name, gist, why it matched, score — and nothing else surfaces (user ruling 2026-08-05 — a cryptic `[1] thr_3 score=0.56` question asked routinely is answered by reflex, not judgment). `recall.ack-mode: always` restores the per-candidate prompt.
+- Banded recall surface (§3.4): a candidate whose score clears its tier's auto threshold is pulled into context with one committed line (`recalled thr_N: <topic> — <gist>` — a committed topic reference is always id-first, so the id you would type back leads the line) and no prompt; the middle band is asked once per turn with a legible offer — thread name, gist, why it matched, score — and nothing else surfaces (user ruling 2026-08-05 — a cryptic `[1] thr_3 score=0.56` question asked routinely is answered by reflex, not judgment). `recall.ack-mode: always` restores the per-candidate prompt.
 - Recoverable deep-cold archival (§3.8): `internal/turn/archival.go` + `internal/memops/fileadapter/fileadapter_archive.go`; the cardinality-pressure archival scan fires at turn close.
 - Working-set content dedup / git minimization (§3.9): `internal/dedup` + `AgeFileChains`, applied per engaged thread.
 - Startup crash recovery (§4.5.8, #94): dual-repo git substrate (disposable per-turn `.git-daily/` + permanent day-grain `.git/`), ≤1-turn durability journal, deterministic cold-start reconciliation, and a crash-injection matrix with a mechanical coverage gate.

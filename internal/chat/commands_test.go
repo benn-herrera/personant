@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -84,7 +85,7 @@ func TestSlashTopicCreatesThread(t *testing.T) {
 	out, _ := runChat(t, paths, model.NewScriptedMock(nil, []model.ModelInfo{{ID: "test-model"}}),
 		"prj_1", "/topic knot theory\n/quit\n")
 
-	if !strings.Contains(out, `started topic "knot theory"`) {
+	if !strings.Contains(out, "started thr_1: knot theory") {
 		t.Errorf("missing topic confirmation: %q", out)
 	}
 	rec := findThread(t, paths, "thr_1")
@@ -102,6 +103,69 @@ func TestSlashTopicEmptyIsError(t *testing.T) {
 
 	if !strings.Contains(errb, "usage: /topic") {
 		t.Errorf("expected usage error, got stderr: %q", errb)
+	}
+}
+
+// TestSlashTopicRename drives /topic rename end to end and holds it to the
+// contract that makes the rename SAFE: the display name moves everywhere
+// the user reads it (the confirmation, the spine, the canonical §2.3
+// frontmatter, the roster) and nothing else moves at all.
+func TestSlashTopicRename(t *testing.T) {
+	paths := scaffoldHome(t)
+	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
+
+	// A model turn, so the topic carries real anchors to check are untouched.
+	out, _ := runChat(t, paths, topicTagMock(), "prj_1",
+		"work on it\n/topic rename braid groups\n/topics\n/quit\n")
+
+	if !strings.Contains(out, `renamed thr_1: `) || !strings.Contains(out, `→ "braid groups"`) {
+		t.Errorf("missing rename confirmation: %q", out)
+	}
+	if !strings.Contains(out, "thr_1: braid groups") {
+		t.Errorf("/topics does not show the new name:\n%s", out)
+	}
+
+	rec := findThread(t, paths, "thr_1")
+	if rec.Description != "braid groups" {
+		t.Errorf("spine description = %q, want %q", rec.Description, "braid groups")
+	}
+	// Display-cosmetic: the anchors recall matches on are untouched. Compared
+	// as a SET — the turn's §2.7 projection sorts them, and that ordering is
+	// the projection's business, not the rename's.
+	if got := strings.Join(slices.Sorted(slices.Values(rec.Anchors)), ","); got != "alpha,beta,delta,gamma" {
+		t.Errorf("rename moved the anchors: %q", got)
+	}
+	// §2.3 canonical frontmatter agrees with the derived spine record.
+	fm, err := newOps(paths).LoadThreadMeta(context.Background(), "thr_1")
+	if err != nil {
+		t.Fatalf("load thread meta: %v", err)
+	}
+	if fm.Description != "braid groups" {
+		t.Errorf("frontmatter description = %q, want %q — canonical and derived disagree",
+			fm.Description, "braid groups")
+	}
+	if strings.Join(fm.Anchors, ",") != strings.Join(rec.Anchors, ",") {
+		t.Errorf("frontmatter anchors %q != spine anchors %q", fm.Anchors, rec.Anchors)
+	}
+	if !strings.Contains(readAllLogs(t, paths), "thread.renamed thr=thr_1 old=") {
+		t.Errorf("missing thread.renamed event")
+	}
+}
+
+// TestSlashTopicRenameNoActiveTopic: nothing engaged → the "no active
+// topic" error family, not a silent no-op.
+func TestSlashTopicRenameNoActiveTopic(t *testing.T) {
+	paths := scaffoldHome(t)
+	writeMeta(t, paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: paths.Home})
+
+	_, errb := runChat(t, paths, model.NewScriptedMock(nil, []model.ModelInfo{{ID: "test-model"}}),
+		"prj_1", "/topic rename braid groups\n/topic rename\n/quit\n")
+
+	if !strings.Contains(errb, "no active topic") {
+		t.Errorf("expected no-active-topic error, got stderr: %q", errb)
+	}
+	if !strings.Contains(errb, "usage: /topic rename <new-name>") {
+		t.Errorf("expected usage error for the empty name, got stderr: %q", errb)
 	}
 }
 
@@ -238,10 +302,10 @@ func TestSlashDoneClosesThread(t *testing.T) {
 }
 
 // TestClosureOfferRendering: the §3.5 offer names the topic the way the
-// roster and the recall offer do — display name, id, gist — and degrades
-// to the bare id rather than "thr_1 (thr_1)" when the runtime resolved
-// neither field (user ruling 2026-08-06; the superseded form showed only
-// the id, which is the illegibility the recall redesign already fixed).
+// roster and the recall offer do — id, display name, gist, in that order
+// (user ruling 2026-08-06) — and degrades to the bare id, with no dangling
+// colon, when the runtime resolved neither field. The verb sheds its
+// trailing colon so the line punctuates the id/name break exactly once.
 func TestClosureOfferRendering(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -256,17 +320,17 @@ func TestClosureOfferRendering(t *testing.T) {
 				Gist:     "emulsion, thickener, shear",
 				Summary:  "thickener pinned at 0.4",
 			},
-			want: "idle topic: why is the emulsion separating (thr_3) — emulsion, thickener, shear",
+			want: "idle topic thr_3: why is the emulsion separating — emulsion, thickener, shear",
 		},
 		{
 			name:  "no gist",
 			offer: turn.ClosureOffer{ThreadID: "thr_3", Display: "surfactant sourcing"},
-			want:  "idle topic: surfactant sourcing (thr_3)",
+			want:  "idle topic thr_3: surfactant sourcing",
 		},
 		{
 			name:  "nothing resolved",
 			offer: turn.ClosureOffer{ThreadID: "thr_3"},
-			want:  "idle topic: thr_3",
+			want:  "idle topic thr_3",
 		},
 	}
 	for _, tt := range tests {
@@ -289,13 +353,13 @@ func TestClosureOfferRendering(t *testing.T) {
 	got := autoClosedLine(turn.ClosureNotice{
 		ThreadID: "thr_7", Display: "supplier shortlist", Summary: "two-source split",
 	})
-	if want := "closed: supplier shortlist (thr_7) — two-source split"; got != want {
+	if want := "closed thr_7: supplier shortlist — two-source split"; got != want {
 		t.Errorf("autoClosedLine = %q, want %q", got, want)
 	}
 }
 
 // TestAutoRecalledLineRendering: the §3.4 auto-band one-liner is the same
-// topicLabel shape as the roster and the closure lines — name, id, gist —
+// topicLabel shape as the roster and the closure lines — id, name, gist —
 // so a topic reference reads identically wherever it appears and the
 // fetch the runtime made without asking can be verified against /topics
 // (user ruling 2026-08-06). It degrades the same way, too: no gist drops
@@ -313,17 +377,17 @@ func TestAutoRecalledLineRendering(t *testing.T) {
 				Display:  "why is the emulsion separating",
 				Gist:     "thickener ratio pinned at 0.4",
 			},
-			want: "recalled: why is the emulsion separating (thr_3) — thickener ratio pinned at 0.4",
+			want: "recalled thr_3: why is the emulsion separating — thickener ratio pinned at 0.4",
 		},
 		{
 			name:   "no gist",
 			notice: turn.RecallNotice{ThreadID: "thr_3", Display: "surfactant sourcing"},
-			want:   "recalled: surfactant sourcing (thr_3)",
+			want:   "recalled thr_3: surfactant sourcing",
 		},
 		{
 			name:   "nothing resolved",
 			notice: turn.RecallNotice{ThreadID: "thr_3"},
-			want:   "recalled: thr_3",
+			want:   "recalled thr_3",
 		},
 	}
 	for _, tt := range tests {

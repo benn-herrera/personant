@@ -896,18 +896,53 @@ func dispatchSlash(ctx context.Context, tm *term.Terminal, ops memops.MemoryOps,
 	return false, nil
 }
 
-// cmdTopic implements /topic <name> — force a new thread engaged for the
-// next turn (§4.2).
-func cmdTopic(ctx context.Context, out io.Writer, state *turn.State, name string) error {
-	name = strings.TrimSpace(name)
+// cmdTopic dispatches the /topic family: `rename <new-name>` (§4.2), and
+// otherwise `<name>` — force a new thread engaged for the next turn.
+//
+// PARSE CONVENTION, matched from /project (cmdProject): the first word of
+// the argument is read as a subcommand. /project can do that without
+// ambiguity because its bare form takes no operand; /topic's operand is
+// free text, so the split has one accepted corner — `/topic rename widget
+// sizing` renames the active topic and there is no way to CREATE a topic
+// literally named "rename widget sizing". That is the trade the ruling
+// accepts (2026-08-06): the collision is vanishingly rare, and matching
+// /project's shape is worth more than reserving it. The topic is
+// renameable afterwards regardless, which is the escape hatch.
+func cmdTopic(ctx context.Context, out io.Writer, state *turn.State, rest string) error {
+	if sub, arg := splitCommand(rest); sub == "rename" {
+		return cmdTopicRename(ctx, out, state, arg)
+	}
+	name := strings.TrimSpace(rest)
 	if name == "" {
-		return errors.New("usage: /topic <name>")
+		return errors.New("usage: /topic <name> | /topic rename <new-name>")
 	}
 	id, err := turn.CreateTopic(ctx, state, name)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "started topic %q (%s)\n", name, id)
+	fmt.Fprintf(out, "started %s\n", topicLabel(name, id, ""))
+	return nil
+}
+
+// cmdTopicRename implements /topic rename <new-name> (§4.2): change the
+// active topic's display name. The sibling of /project rename one level
+// down, and cosmetic in the same way — the id, the anchors, the symbol
+// history and everything recall matches on are unchanged (turn.RenameTopic).
+//
+// Duplicate names are permitted, because topic CREATION permits them: two
+// topics may share a display name, and the existing ambiguity error from
+// the /back-to name resolver is what a user who then types the shared name
+// gets. Rename does not impose a uniqueness rule creation does not have.
+func cmdTopicRename(ctx context.Context, out io.Writer, state *turn.State, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("usage: /topic rename <new-name>")
+	}
+	id, old, err := turn.RenameTopic(ctx, state, name)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "renamed %s: %q → %q\n", id, old, name)
 	return nil
 }
 
@@ -1149,6 +1184,7 @@ available commands:
   /help                        show this help
   /quit, /exit                 exit the session
   /topic <name>                start a new topic and engage it
+  /topic rename <new-name>     rename the active topic (display name only)
   /topics [all]                list this project's topics (all = include old closed)
   /done [thr_id|name]          close the active (or named) topic (§3.5)
   /closures                    review the closures queued for your ack (§3.5)
@@ -1561,18 +1597,21 @@ func interactiveRecallResolver(tm *term.Terminal, mode turn.RecallAckMode) turn.
 // closureOfferLines renders the §3.5 closure offer's two context lines —
 // the question's preamble, above the outcome prompt:
 //
-//	idle topic: <display name> (thr_N) — <gist>
+//	idle topic thr_N: <display name> — <gist>
 //	  summary: <curator draft>
 //
-// The first line is the roster's topicLabel shape (a name, its id, what it
-// is about); the second is the draft the user is being asked to ack, which
-// is a different thing from the gist and stays on its own line. The
-// superseded form named only `topic thr_3`, which asked the user to close
-// something they could not identify — the defect the recall offer's
-// redesign fixed for its own prompt (user ruling 2026-08-06).
+// The first line is the roster's topicLabel shape (an id, the name it
+// resolves to, what it is about); the second is the draft the user is being
+// asked to ack, which is a different thing from the gist and stays on its
+// own line. The superseded form named only `topic thr_3`, which asked the
+// user to close something they could not identify — the defect the recall
+// offer's redesign fixed for its own prompt (user ruling 2026-08-06).
+//
+// The verb carries NO trailing colon: topicLabel's id-first shape supplies
+// one, and `idle topic: thr_3: name` double-punctuates the same break.
 func closureOfferLines(offer turn.ClosureOffer) []string {
 	return []string{
-		"idle topic: " + topicLabel(offer.Display, offer.ThreadID, offer.Gist),
+		"idle topic " + topicLabel(offer.Display, offer.ThreadID, offer.Gist),
 		fmt.Sprintf("  summary: %s", offer.Summary),
 	}
 }
@@ -1582,19 +1621,19 @@ func closureOfferLines(offer turn.ClosureOffer) []string {
 // path for a wrongly-summarized auto-closure is `/back-to <thr_id>`, and a
 // line that omits the argument the fix needs is not actionable.
 func autoClosedLine(n turn.ClosureNotice) string {
-	return "closed: " + topicLabel(n.Display, n.ThreadID, n.Summary)
+	return "closed " + topicLabel(n.Display, n.ThreadID, n.Summary)
 }
 
 // autoRecalledLine renders the ONE committed line a §3.4 auto-band recall
 // prints (SPEC §3.4). Sibling of autoClosedLine, through the same
-// topicLabel shape: a topic reference always renders as
-// `<name> (thr_N)` (user ruling 2026-08-06), so the id the user needs to
-// act on the fetch — /topics to see it, /back-to to steer it — is on the
-// line, and the fetch the runtime made without asking is verifiable
-// rather than merely announced. The hand-formatted form it replaces named
-// the topic but not the id.
+// topicLabel shape: a committed topic reference always renders as
+// `thr_N: <display> — <gist>` (user ruling 2026-08-06), so the id the user
+// needs to act on the fetch — /topics to see it, /back-to to steer it —
+// leads the line, and the fetch the runtime made without asking is
+// verifiable rather than merely announced. The hand-formatted form it
+// replaces named the topic but not the id.
 func autoRecalledLine(n turn.RecallNotice) string {
-	return "recalled: " + topicLabel(n.Display, n.ThreadID, n.Gist)
+	return "recalled " + topicLabel(n.Display, n.ThreadID, n.Gist)
 }
 
 // interactiveClosureResolver returns a turn.ClosureResolver that surfaces

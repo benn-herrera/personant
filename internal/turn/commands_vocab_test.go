@@ -80,6 +80,16 @@ func TestCommandErrorVocabulary(t *testing.T) {
 			_, err := CreateTopic(ctx, s, "  ")
 			return err
 		}},
+		{"rename with nothing engaged", func(s *State) error {
+			s.ActiveThreads = nil
+			_, _, err := RenameTopic(ctx, s, "braid groups")
+			return err
+		}},
+		{"rename to an empty name", func(s *State) error {
+			s.ActiveThreads = []string{"thr_1"}
+			_, _, err := RenameTopic(ctx, s, "  ")
+			return err
+		}},
 		{"done without curator", func(s *State) error {
 			return ManualClosure(ctx, s, "thr_1")
 		}},

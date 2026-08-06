@@ -65,6 +65,44 @@ func TestRenderTopicsGrouping(t *testing.T) {
 	}
 }
 
+// TestTopicLineShape pins the whole roster entry, id-first (user ruling
+// 2026-08-06) — the one shape topicLabel renders and every other topic
+// reference inherits. The roster's own degradation is here too: a topic
+// whose display resolves to nothing but the id renders the bare id with NO
+// dangling colon. (The roster never reaches topicLabel's empty-tail branch
+// — topicGist always yields a last resort — so the em-dash drop is pinned
+// where it IS reachable, in TestClosureOfferRendering.)
+func TestTopicLineShape(t *testing.T) {
+	tests := []struct {
+		name string
+		rec  memops.SpineRecord
+		want string
+	}{
+		{
+			name: "id, display, gist, age",
+			rec:  topicRec("thr_3", "terminal-layer design", "the term migration", memops.ThreadActive, 2*time.Hour, 2*time.Hour),
+			want: "  thr_3: terminal-layer design — the term migration · 2h ago",
+		},
+		{
+			name: "no summary yet",
+			rec:  topicRec("thr_3", "terminal-layer design", "", memops.ThreadActive, 2*time.Hour, 2*time.Hour),
+			want: "  thr_3: terminal-layer design — no summary yet · 2h ago",
+		},
+		{
+			name: "unresolved display is the bare id",
+			rec:  memops.SpineRecord{ID: "thr_3", State: memops.ThreadActive, LastEngaged: ago(2 * time.Hour)},
+			want: "  thr_3 — no summary yet · 2h ago",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := topicLine(tt.rec, rosterNow, false); got != tt.want {
+				t.Errorf("topicLine = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestRenderTopicsRecencyOrder: newest first within a group, on the stamp
 // that group's recency MEANS — last-engaged for open topics, closed-at for
 // closed ones.
@@ -234,7 +272,7 @@ func TestSlashTopicsSession(t *testing.T) {
 	if !strings.Contains(out, topicsEmpty) {
 		t.Errorf("/topics on an empty project did not say so:\n%s", out)
 	}
-	if !strings.Contains(out, "ENGAGED") || !strings.Contains(out, "knot theory (thr_1)") {
+	if !strings.Contains(out, "ENGAGED") || !strings.Contains(out, "thr_1: knot theory") {
 		t.Errorf("/topics did not list the new topic as engaged:\n%s", out)
 	}
 	if !strings.Contains(errb, "usage: /topics [all]") {
@@ -242,7 +280,7 @@ func TestSlashTopicsSession(t *testing.T) {
 	}
 }
 
-// countTopicLines counts roster entries — the indented `name (thr_N) — …`
+// countTopicLines counts roster entries — the indented `thr_N: name — …`
 // lines — ignoring group headers and trailing hints.
 func countTopicLines(lines []string) int {
 	n := 0
