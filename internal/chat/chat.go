@@ -470,7 +470,7 @@ func Run(opts Options) error {
 		if n, derr := turn.DrainClosures(runCtx, state); derr != nil {
 			fmt.Fprintf(tm.Diag(), "warn: closure drain: %v\n", derr)
 		} else if n > 0 {
-			fmt.Fprintf(tm.Out(), "closed %d thread(s)\n", n)
+			fmt.Fprintf(tm.Out(), "closed %d topic(s)\n", n)
 		}
 	}
 
@@ -866,6 +866,8 @@ func dispatchSlash(ctx context.Context, tm *term.Terminal, ops memops.MemoryOps,
 		printVersion(ctx, out, ops)
 	case "/topic":
 		return false, cmdTopic(ctx, out, state, rest)
+	case "/topics":
+		return false, cmdTopics(ctx, out, ops, state, rest)
 	case "/done":
 		return false, cmdDone(ctx, state, rest)
 	case "/closures":
@@ -929,7 +931,7 @@ func cmdClosures(ctx context.Context, out io.Writer, state *turn.State) error {
 		fmt.Fprintln(out, "no closures pending review")
 		return nil
 	}
-	fmt.Fprintf(out, "closed %d thread(s)\n", n)
+	fmt.Fprintf(out, "closed %d topic(s)\n", n)
 	return nil
 }
 
@@ -1132,16 +1134,27 @@ func splitCommand(line string) (cmd, rest string) {
 	return line, ""
 }
 
+// helpText is the /help body. It opens with the two-line hierarchy
+// orientation (user ruling 2026-08-05): the command list names both
+// containers, and a user who has not been told how they nest reads
+// "project" and "topic" as synonyms. The second line is the ONE place the
+// user surface says "thread" — it is the bridge to the storage vocabulary
+// the ids, the spec and the event log use, and saying it once here is what
+// lets every other string say "topic".
 func helpText() string {
-	return `available commands:
+	return `project  — top-level container for an endeavor (one active at a time)
+topic    — a conversation strand within the project (stored as thread thr_N)
+
+available commands:
   /help                        show this help
   /quit, /exit                 exit the session
-  /topic <name>                start a new thread and engage it
-  /done [thr_id|name]          close the active (or named) thread (§3.5)
+  /topic <name>                start a new topic and engage it
+  /topics [all]                list this project's topics (all = include old closed)
+  /done [thr_id|name]          close the active (or named) topic (§3.5)
   /closures                    review the closures queued for your ack (§3.5)
-  /pause [thr_id|name]         pause the active (or named) thread
-  /resume [thr_id|name]        resume a paused thread
-  /back-to <thr_id|name>       re-engage a thread into the working set
+  /pause [thr_id|name]         pause the active (or named) topic
+  /resume [thr_id|name]        resume a paused topic
+  /back-to <thr_id|name>       re-engage a topic into the working set — see /topics
   /project                     print active project info
   /project rename <new-name>   rename the active project
   /project switch <name-or-id> switch to a known project
@@ -1435,7 +1448,7 @@ func recallOfferLines(n int, c turn.RecallCandidate) []string {
 	}
 	tier := "related"
 	if c.IntraThread != nil {
-		tier = "earlier in this thread"
+		tier = "earlier in this topic"
 	} else if c.Embedding == nil && c.Symbolic != nil {
 		tier = "shared topics"
 	}
@@ -1477,10 +1490,10 @@ func interactiveRecallResolver(tm *term.Terminal, mode turn.RecallAckMode) turn.
 		single := len(offer.Candidates) == 1
 		preamble := make([]string, 0, 2*len(offer.Candidates)+1)
 		if single {
-			preamble = append(preamble, "related thread:")
+			preamble = append(preamble, "related topic:")
 			preamble = append(preamble, recallOfferLines(1, offer.Candidates[0])...)
 		} else {
-			preamble = append(preamble, "related threads:")
+			preamble = append(preamble, "related topics:")
 			for i, c := range offer.Candidates {
 				preamble = append(preamble, recallOfferLines(i+1, c)...)
 			}
@@ -1567,7 +1580,7 @@ func interactiveClosureResolver(tm *term.Terminal) turn.ClosureResolver {
 	}
 	return func(ctx context.Context, offer turn.ClosureOffer) (turn.ClosureResolution, error) {
 		choice, err := askOutcome(ctx, []string{
-			fmt.Sprintf("thread %s has gone idle — closure suggested.", offer.ThreadID),
+			fmt.Sprintf("topic %s has gone idle — closure suggested.", offer.ThreadID),
 			fmt.Sprintf("  summary: %s", offer.Summary),
 		})
 		if term.IsEndOrAbort(err) {

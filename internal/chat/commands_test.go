@@ -496,7 +496,10 @@ func TestRecallOfferLines(t *testing.T) {
 				},
 				Display: "the long-running rheology thread", Gist: "shear-thinning model selection",
 			},
-			want: []string{"earlier here, turn 12, 40, 103, …", "earlier in this thread 0.81"},
+			// The tier label follows the topic ruling (2026-08-05); the Display
+			// above deliberately still says "thread" — it is user-authored
+			// content, which the vocabulary gate does not and must not rewrite.
+			want: []string{"earlier here, turn 12, 40, 103, …", "earlier in this topic 0.81"},
 		},
 		{
 			name: "embedding-only says the similarity is the evidence",

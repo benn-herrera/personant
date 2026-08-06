@@ -1865,14 +1865,24 @@ Slash commands begin with `/` and are intercepted by the runtime before any
 prompt construction. They are user-initiated and bypass the LLM's tool
 surface entirely.
 
+**Vocabulary bridge (user ruling 2026-08-05).** User-facing surfaces say
+**topic**; a topic is stored as a **thread** (`thr_N`). "Thread" remains the
+term of art everywhere below the user surface — this spec's data-model and
+algorithm sections, the §2.8 event log (machine-read), the port types, and
+the id scheme, which is rendered to the user unchanged because it is what
+they type back. `/help` opens with the one sentence that names both, so the
+two vocabularies meet exactly once. There is no `/threads` alias: one name
+per concept is the point of the ruling.
+
 | Command | Purpose |
 |---|---|
-| `/topic <name>` | force a new thread with the given working name |
-| `/done` | request closure ack on the active thread (§3.5); always fully interactive |
+| `/topic <name>` | force a new topic with the given working name |
+| `/topics [all]` | list the active project's topics (AMENDED 2026-08-05 — `/back-to` is unusable without a way to see what exists). Grouped ENGAGED / PAUSED / DORMANT / RECENTLY CLOSED, recency-sorted within each group, one line per topic: display name, `thr_N`, gist, relative age. **Recently-closed topics are in the default view deliberately** — an auto-accepted §3.5 closure is the runtime's judgment and `/back-to` is the user's revision path for it, so the list carries that hint. The default view is bounded (20 topics, then a count of what it withheld); `all` lifts the bound and the closed-window cutoff |
+| `/done` | request closure ack on the active topic (§3.5); always fully interactive |
 | `/closures` | drain the §3.5 pending-review queue now — the exception closures awaiting an ack (AMENDED 2026-08-04). The same drain runs at clean session exit; this is the user choosing the moment. An empty queue says so |
-| `/pause` | mark active thread as `paused` (§2.2.1) |
-| `/resume` | resume a paused thread |
-| `/back-to <thr_id>` | re-engage a retired thread |
+| `/pause` | mark active topic as `paused` (§2.2.1) |
+| `/resume` | resume a paused topic |
+| `/back-to <thr_id>` | re-engage a closed topic — the revision path for an auto-accepted closure; see `/topics` |
 | `/no-revisit` | tighten threshold on the most recent recall surface (§3.4) |
 | `/project` | print active project (id, name, root path, remote URL if any) |
 | `/project switch <name-or-id>` | switch active project to a known one |
@@ -1881,7 +1891,7 @@ surface entirely.
 | `/model [<model-id>\|<provider>/<model-id>]` | switch the session's LLM (AMENDED 2026-08-05 — IMPLEMENTED, and the argument form is wider than the original `<id>`). The **bare form reports** the active `provider/model` plus a usage hint and mutates nothing (the `/thinking` convention). A bare `<model-id>` switches model within the current provider; a `<provider>/<model-id>` reference switches provider AND model, and the named provider must be an `inference` entry in the pool — a `search` entry is refused by kind, exactly as at session open. **Ambiguity rule** (model ids may themselves contain `/`, e.g. a HuggingFace-style `org/name` on a local server): the text before the FIRST `/` is read as a provider name **only when it names a provider in `providers.toml`**; otherwise the whole argument is a model id on the current provider. The decision is a pool lookup, not a heuristic, and it agrees with §8.2.2's split-on-first-`/` convention wherever a provider is genuinely named. **Verification mirrors session open** (same probe, same messages): a model absent from a non-empty `/models` list **REFUSES** the switch, naming what the provider does offer, and leaves model, provider and client untouched; an unreachable or model-less `/models` warns and switches **UNVERIFIED**. **Session-scoped and deliberately never serialized:** `[chat] defaultModel` remains the startup default, and no home state records a "last model used" — the printed confirmation says so. Takes effect on the next turn (commands and turns are alternating branches of one loop, so no in-flight turn exists to touch), and is recorded as `model.switched` (§2.8) |
 | `/thinking [on\|off]` | show/hide the model's live reasoning, dimmed; bare form reports the state. Session-scoped override of `[chat] showThinking` (§8.2.2) — never written back to `config.toml` |
 | `/terminal-setup` | configure the hosting terminal for Shift+Enter multi-line input (AMENDED 2026-08-05 — user ruling; the automated path for the §4.3.1 recipes, after Claude Code's command of the same name). Detects the host from `$TERM_PROGRAM`, falling back to `$LC_TERMINAL` (ssh forwards it), reports what it found, and acts: **Zed** is the one recipe that is a file write, and it is offered — `~/.config/zed/keymap.json` gains the `shift-enter` entry, textually, never by parse-and-rewrite. Every other known terminal PRINTS its recipe and writes nothing; an unrecognized terminal gets the whole list. **The write is the exception in this runtime — it lands outside `$PERSONANT_HOME`** — so it is confirmed EVERY time (never `ack=auto`), the prior bytes are copied to `keymap.json.personant-bak-<timestamp>` first, a keymap that already binds `shift-enter` in a `Terminal` context is left untouched (idempotent), a file whose structure defeats byte-safe insertion is REFUSED with the snippet printed for manual paste, and a non-interactive session prints and never writes at all |
-| `/stats` | runtime stats (active threads, layer fill, recent recall events, etc.) |
+| `/stats` | runtime stats (active topics, layer fill, recent recall events, etc.) |
 | `/version` | version identity plus the on-disk format of the home this session opened (§9.1) |
 
 ### 4.3 Decline categorization UI (AMENDED)

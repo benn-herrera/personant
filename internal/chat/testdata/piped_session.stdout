@@ -1,14 +1,18 @@
 personant — type /help for commands; Ctrl-D to exit
 active: alpha (prj_1)
-> available commands:
+> project  — top-level container for an endeavor (one active at a time)
+topic    — a conversation strand within the project (stored as thread thr_N)
+
+available commands:
   /help                        show this help
   /quit, /exit                 exit the session
-  /topic <name>                start a new thread and engage it
-  /done [thr_id|name]          close the active (or named) thread (§3.5)
+  /topic <name>                start a new topic and engage it
+  /topics [all]                list this project's topics (all = include old closed)
+  /done [thr_id|name]          close the active (or named) topic (§3.5)
   /closures                    review the closures queued for your ack (§3.5)
-  /pause [thr_id|name]         pause the active (or named) thread
-  /resume [thr_id|name]        resume a paused thread
-  /back-to <thr_id|name>       re-engage a thread into the working set
+  /pause [thr_id|name]         pause the active (or named) topic
+  /resume [thr_id|name]        resume a paused topic
+  /back-to <thr_id|name>       re-engage a topic into the working set — see /topics
   /project                     print active project info
   /project rename <new-name>   rename the active project
   /project switch <name-or-id> switch to a known project

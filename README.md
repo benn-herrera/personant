@@ -22,17 +22,18 @@ On first run, `bin/personant` initializes `~/.personant/` as a git repository. O
 
 ## Using the Chat REPL
 
-`bin/personant` (equivalently `personant chat`) opens an interactive REPL. Type a message and press Enter to take a turn; the assistant streams its reply. Lines beginning with `/` are commands:
+`bin/personant` (equivalently `personant chat`) opens an interactive REPL. Type a message and press Enter to take a turn; the assistant streams its reply. Work is organized as **projects** — one active at a time — each holding **topics**, the conversation strands the runtime tracks, engages and closes. A topic is stored as a *thread* (`thr_N`), which is the term the rest of this document, the spec and the event log use; the id is what you type back at `/back-to` and friends. Lines beginning with `/` are commands:
 
 | Command | Effect |
 |---|---|
 | `/help` | list commands |
-| `/topic <name>` | start a new thread and engage it |
-| `/done [thr_id\|name]` | close the active (or named) thread |
+| `/topic <name>` | start a new topic and engage it |
+| `/topics [all]` | list this project's topics, grouped and recency-sorted (`all` includes old closed ones) |
+| `/done [thr_id\|name]` | close the active (or named) topic |
 | `/closures` | review the closures queued for your ack (§3.5) |
-| `/pause [thr_id\|name]` | pause the active (or named) thread |
-| `/resume [thr_id\|name]` | resume a paused thread |
-| `/back-to <thr_id\|name>` | re-engage a thread into the working set |
+| `/pause [thr_id\|name]` | pause the active (or named) topic |
+| `/resume [thr_id\|name]` | resume a paused topic |
+| `/back-to <thr_id\|name>` | re-engage a topic into the working set — see `/topics` |
 | `/project` | print active project info |
 | `/project rename <new-name>` | rename the active project |
 | `/project switch <name-or-id>` | switch to a known project |
