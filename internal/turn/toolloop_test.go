@@ -17,6 +17,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
@@ -546,6 +547,196 @@ func TestToolRoundDoesNotBurnTheMissingTagReprompt(t *testing.T) {
 	}
 	if logBody := readDayLog(t, paths); strings.Contains(logBody, "cause=missing-tag") {
 		t.Errorf("a tool round burned the missing-tag re-prompt:\n%s", logBody)
+	}
+}
+
+// --- §6.1 tool receipts (user ruling 2026-08-05) ---------------------
+
+// TestToolReceiptFiresPerCall — one receipt per executed call, carrying
+// the name, the decoded arguments and an outcome, for BOTH a tool that
+// succeeds and one that fails. The failing half is the load-bearing one:
+// a refusal invisible on screen is what this mechanism exists to fix.
+func TestToolReceiptFiresPerCall(t *testing.T) {
+	reg := tools.NewRegistry()
+	fakeTool(t, reg, "web.wikipedia", "1. General relativity\n   https://en.wikipedia.org/wiki/General_relativity\n")
+	if err := reg.Register(tools.Tool{
+		Spec: model.ToolSpec{Name: "web.wikidata"},
+		Handler: func(context.Context, json.RawMessage) ([]byte, error) {
+			return nil, errors.New("web.wikidata did not run: Wikimedia's policy REQUIRES contact information")
+		},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	state, _, _ := toolStateWith(t, reg,
+		toolCallResponse(
+			call("c1", "web.wikipedia", `"{\"q\":\"general relativity\"}"`),
+			call("c2", "web.wikidata", `"{\"q\":\"relativity\",\"limit\":3}"`),
+		),
+		model.Response{Content: "*topic: *new-topic* [relativity, physics]*\nHere is what I found."},
+	)
+	var got []ToolReceipt
+	state.OnToolReceipt = func(r ToolReceipt) { got = append(got, r) }
+
+	if _, err := Run(context.Background(), state, "look it up", io.Discard); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("receipts = %d (%+v); want one per call", len(got), got)
+	}
+
+	ok, refused := got[0], got[1]
+	if ok.Name != "web.wikipedia" || ok.Err {
+		t.Errorf("success receipt = %+v; want web.wikipedia with Err=false", ok)
+	}
+	if ok.ArgsGist != `q="general relativity"` {
+		t.Errorf("gist = %q; want the decoded primary argument", ok.ArgsGist)
+	}
+	if !strings.HasPrefix(ok.Outcome, "ok, ") {
+		t.Errorf("outcome = %q; want an ok with the result size", ok.Outcome)
+	}
+
+	if refused.Name != "web.wikidata" || !refused.Err {
+		t.Errorf("failure receipt = %+v; want web.wikidata with Err=true", refused)
+	}
+	// TEXT first, then the scalar option: the query is what the user needs
+	// to read, and alphabetical order would spend the budget on `limit`.
+	if refused.ArgsGist != `q="relativity" limit=3` {
+		t.Errorf("gist = %q; want the query before the option", refused.ArgsGist)
+	}
+	if !strings.Contains(refused.Outcome, "REQUIRES contact information") {
+		t.Errorf("outcome = %q; a refusal must be legible in the receipt", refused.Outcome)
+	}
+	if strings.Contains(refused.Outcome, `tool "web.wikidata"`) {
+		t.Errorf("outcome = %q; Dispatch's tool-name prefix duplicates Name", refused.Outcome)
+	}
+}
+
+// A receipt for an unknown tool still names what the model asked for —
+// that call ran nothing at all, and the user must be able to see that.
+func TestToolReceiptForUnknownTool(t *testing.T) {
+	reg := tools.NewRegistry()
+	fakeTool(t, reg, "web.fetch", "FETCHED")
+	state, _, _ := toolStateWith(t, reg,
+		toolCallResponse(call("c1", "bash.run", `"{\"cmd\":\"rm -rf /\"}"`)),
+		model.Response{Content: "*topic: *new-topic* [alpha, beta]*\nI cannot."},
+	)
+	var got []ToolReceipt
+	state.OnToolReceipt = func(r ToolReceipt) { got = append(got, r) }
+
+	if _, err := Run(context.Background(), state, "delete everything", io.Discard); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("receipts = %+v; want exactly one", got)
+	}
+	if got[0].Name != "bash.run" || !got[0].Err {
+		t.Errorf("receipt = %+v; want bash.run flagged as a failure", got[0])
+	}
+	if !strings.Contains(got[0].Outcome, "unknown tool") {
+		t.Errorf("outcome = %q; want the unknown-tool cause", got[0].Outcome)
+	}
+}
+
+// A nil hook is the default and must cost nothing — the scenario harness
+// and every non-interactive caller run this path on every tool turn.
+func TestToolReceiptHookIsOptional(t *testing.T) {
+	reg := tools.NewRegistry()
+	fakeTool(t, reg, "web.fetch", "FETCHED")
+	state, _, _ := toolStateWith(t, reg,
+		toolCallResponse(call("c1", "web.fetch", `"{}"`)),
+		model.Response{Content: "*topic: *new-topic* [alpha, beta]*\nDone."},
+	)
+	if state.OnToolReceipt != nil {
+		t.Fatal("OnToolReceipt is not nil by default")
+	}
+	if _, err := Run(context.Background(), state, "go", io.Discard); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
+// TestArgsGist — the bounded rendering, at its edges. A gist that grows
+// with its input is a line that wraps, and the one thing §4.3.2 will not
+// have on a terminal is an unbounded line.
+func TestArgsGist(t *testing.T) {
+	long := strings.Repeat("supercalifragilistic ", 10)
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"single string arg", `{"q":"topology"}`, `q="topology"`},
+		{"double-encoded", `"{\"q\":\"topology\"}"`, `q="topology"`},
+		{"url", `{"url":"https://example.com/a"}`, `url="https://example.com/a"`},
+		{"text before scalars", `{"limit":5,"q":"knots"}`, `q="knots" limit=5`},
+		{"two strings, alphabetical", `{"b":"two","a":"one"}`, `a="one" b="two"`},
+		{"bool", `{"raw":true}`, `raw=true`},
+		{"no args", `{}`, ""},
+		{"empty blob", ``, ""},
+		{"malformed", `"{not json"`, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := argsGist(json.RawMessage(tc.raw)); got != tc.want {
+				t.Errorf("argsGist(%s) = %q; want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+
+	t.Run("truncated with an ellipsis", func(t *testing.T) {
+		got := argsGist(json.RawMessage(`{"q":"` + long + `"}`))
+		if n := utf8.RuneCountInString(got); n > argsGistMaxRunes {
+			t.Errorf("gist is %d runes (%q); the bound is %d", n, got, argsGistMaxRunes)
+		}
+		if !strings.HasPrefix(got, `q="supercalifragilistic`) || !strings.HasSuffix(got, `…"`) {
+			t.Errorf("gist = %q; want a clipped, still-quoted value", got)
+		}
+	})
+
+	t.Run("a long value does not starve the later keys of a bound", func(t *testing.T) {
+		got := argsGist(json.RawMessage(`{"q":"` + long + `","limit":5}`))
+		if n := utf8.RuneCountInString(got); n > argsGistMaxRunes+2 { // +2: the " …" elision
+			t.Errorf("gist is %d runes (%q); the bound is %d", n, got, argsGistMaxRunes)
+		}
+		if !strings.HasSuffix(got, "…") {
+			t.Errorf("gist = %q; the elided remainder must be marked", got)
+		}
+	})
+
+	t.Run("a multibyte value is cut on a rune boundary", func(t *testing.T) {
+		got := argsGist(json.RawMessage(`{"q":"` + strings.Repeat("θέμα ", 30) + `"}`))
+		if !utf8.ValidString(got) {
+			t.Errorf("gist %q is not valid UTF-8 — a rune was cut in half", got)
+		}
+	})
+}
+
+// TestReceiptOutcomeSizes — the size summary, which is what stands in for
+// a per-tool item count (see receiptOutcome for why counting is not on).
+func TestReceiptOutcomeSizes(t *testing.T) {
+	tests := []struct {
+		n    int
+		want string
+	}{
+		{0, "ok, 0B"},
+		{512, "ok, 512B"},
+		{1024, "ok, 1.0kB"},
+		{4200, "ok, 4.1kB"},
+		{2 << 20, "ok, 2.0MB"},
+	}
+	for _, tc := range tests {
+		got := receiptOutcome(tools.Result{Name: "web.fetch", Content: strings.Repeat("x", tc.n)})
+		if got != tc.want {
+			t.Errorf("receiptOutcome(%d bytes) = %q; want %q", tc.n, got, tc.want)
+		}
+	}
+	long := receiptOutcome(tools.Result{Name: "web.fetch", Err: errors.New(strings.Repeat("why ", 100))})
+	if n := utf8.RuneCountInString(long); n > receiptErrorMaxRunes {
+		t.Errorf("error outcome is %d runes; the bound is %d", n, receiptErrorMaxRunes)
+	}
+	firstLine := receiptOutcome(tools.Result{Name: "web.fetch", Err: errors.New("it broke\nstack frame 1\nstack frame 2")})
+	if firstLine != "it broke" {
+		t.Errorf("error outcome = %q; want the first line only", firstLine)
 	}
 }
 

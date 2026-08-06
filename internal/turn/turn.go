@@ -189,6 +189,19 @@ type State struct {
 	// mutate State, and nothing in the pipeline observes it.
 	OnReasoning func(string)
 
+	// OnToolReceipt receives one ToolReceipt per §6.1 tool call the moment
+	// that call returns. nil → tool execution leaves no on-screen trace
+	// (the scenario harness and every non-interactive caller); the chat
+	// REPL installs a dimmed one-line renderer.
+	//
+	// Presentation seam only, with the same contract as OnPhase and
+	// OnReasoning: it must not block and must not mutate State, and
+	// nothing in the pipeline observes it. The durable record is the
+	// tool.call / tool.result / tool.error triple in §2.8, not this — but
+	// unlike a phase label, what this hook emits is meant to PERSIST where
+	// the user can see it. See ToolReceipt for why.
+	OnToolReceipt func(ToolReceipt)
+
 	// Model overrides the provider's DefaultModel when non-empty.
 	Model string
 

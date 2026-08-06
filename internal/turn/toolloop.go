@@ -2,10 +2,15 @@ package turn
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
+	"unicode/utf8"
 
+	"personant/internal/clock"
 	"personant/internal/memops"
 	"personant/internal/model"
 	"personant/internal/tools"
@@ -109,6 +114,192 @@ func PhaseRunningTool(names ...string) Phase {
 // the whole family: an Esc during a slow fetch must cancel it.
 func IsToolPhase(p Phase) bool { return strings.HasPrefix(string(p), toolPhasePrefix) }
 
+// ToolReceipt is the record of ONE executed tool call, handed to the
+// optional State.OnToolReceipt presentation hook the moment the call
+// returns (user ruling 2026-08-05). Sibling of RecallNotice and
+// ClosureNotice: the runtime supplies the facts, the front end owns the
+// wording.
+//
+// WHY it exists. Tool activity had no durable trace on screen. The §4.3.2
+// phase label (`running <tool>`) lives in the ephemeral slot and is erased
+// by the next thing that writes, and it is suppressed outright for a call
+// that finishes inside the indicator's reveal window — so a sub-second
+// call left NOTHING behind. That made "did you actually search?" a
+// question only the model could answer, and the model's post-hoc account
+// of its own tool use is exactly the thing that must never be the
+// evidence. One committed line per call makes it a matter of eyes.
+//
+// A REFUSAL is the load-bearing case. `web.wikipedia` without a configured
+// contact refuses at invocation; that is an ordinary model-recoverable
+// result, invisible everywhere except the event log. Err + Outcome put it
+// on screen.
+type ToolReceipt struct {
+	// Name is the tool as called ("?" when the model named none).
+	Name string
+
+	// ArgsGist is a compact rendering of the DECODED arguments —
+	// `q="general relativity"`, `url="https://…"` — bounded to
+	// argsGistMaxRunes. Empty for a zero-argument call, or when the
+	// arguments did not decode (a malformed blob is the handler's error to
+	// report, not the receipt's).
+	ArgsGist string
+
+	// Outcome is the short result. On success: `ok, 4.1kB` — the size of
+	// what the handler produced, measured BEFORE the §6.5 delta cap, so it
+	// reports the tool's output rather than the budget's slice of it. On
+	// failure (Err): the error's first line, bounded to
+	// receiptErrorMaxRunes, with no "error:" prefix — labelling the
+	// failure is the front end's job, which is what Err is for.
+	Outcome string
+
+	// Err reports that the call did not succeed. A DISPLAY discriminator,
+	// not a control signal: nothing in the pipeline observes it, and the
+	// model has already been handed a result it can recover from either
+	// way.
+	Err bool
+
+	// Elapsed is the measured wall-clock cost of the call (clock.Profiling
+	// — real time, never the simulated Timeline).
+	Elapsed time.Duration
+}
+
+// emitToolReceipt reports one executed call to the optional
+// State.OnToolReceipt hook. Same discipline as emitPhase and
+// emitReasoning: the nil check lives here and nowhere else.
+func emitToolReceipt(state *State, r ToolReceipt) {
+	if state.OnToolReceipt != nil {
+		state.OnToolReceipt(r)
+	}
+}
+
+// Receipt bounds. The gist has to fit beside the tool name, the outcome
+// and the elapsed time on one terminal line, so it is the tight one; an
+// error gets more room because a refusal the user cannot read is the
+// failure this whole mechanism exists to fix.
+const (
+	argsGistMaxRunes     = 60
+	receiptErrorMaxRunes = 80
+
+	// minGistPairRunes is the smallest budget worth starting another
+	// `k="v"` pair on. Below it the remainder is elided rather than
+	// rendered as a key with nothing legible after it.
+	minGistPairRunes = 6
+)
+
+// argsGist renders a call's decoded arguments for the receipt.
+//
+// It decodes into a plain map rather than any tool's argument struct:
+// internal/turn knows no tool's schema and must not learn one, and the
+// wire blob is DOUBLE-ENCODED, which tools.DecodeArgs already unwraps for
+// every handler. A blob that does not decode yields the empty gist — the
+// receipt reports what the call was, and a malformed one is a failure the
+// Outcome already carries.
+func argsGist(raw json.RawMessage) string {
+	var args map[string]any
+	if err := tools.DecodeArgs(raw, &args); err != nil || len(args) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	budget := argsGistMaxRunes
+	for _, k := range gistKeys(args) {
+		if budget < minGistPairRunes {
+			b.WriteString(" …")
+			break
+		}
+		if b.Len() > 0 {
+			b.WriteString(" ")
+			budget--
+		}
+		pair := k + "=" + gistValue(args[k], budget-utf8.RuneCountInString(k)-1)
+		b.WriteString(pair)
+		budget -= utf8.RuneCountInString(pair)
+	}
+	return b.String()
+}
+
+// gistKeys orders a call's arguments: TEXTUAL arguments first, then the
+// rest, each group alphabetical.
+//
+// The primary argument of a read tool is its text — the query, the URL —
+// and the scalars beside it (`limit`) are options. Alphabetical order
+// alone would put `limit=5` in front of the query it bounds and then spend
+// the budget truncating the part the user actually wants to see. Map
+// iteration order is not an option at all: a receipt that reshuffles
+// between two identical calls is not a record of anything.
+func gistKeys(args map[string]any) []string {
+	text := make([]string, 0, len(args))
+	rest := make([]string, 0, len(args))
+	for k, v := range args {
+		if _, isText := v.(string); isText {
+			text = append(text, k)
+		} else {
+			rest = append(rest, k)
+		}
+	}
+	slices.Sort(text)
+	slices.Sort(rest)
+	return append(text, rest...)
+}
+
+// gistValue renders one argument value within max runes. Strings are
+// quoted (a query with spaces has to read as one value); everything else
+// — numbers, bools, a nested object — is rendered bare.
+func gistValue(v any, max int) string {
+	s, isText := v.(string)
+	if !isText {
+		return clipRunes(fmt.Sprint(v), max)
+	}
+	return `"` + clipRunes(s, max-2) + `"`
+}
+
+// receiptOutcome summarizes a dispatched call for its receipt.
+//
+// Success reports SIZE rather than a per-tool item count: the count is
+// available only by parsing the rendered shortlist, and a receipt that
+// re-reads another package's output format is a checksum of that format.
+// Size is exact, uniform across every tool, and answers the question the
+// receipt is for — the tool ran and produced this much.
+func receiptOutcome(res tools.Result) string {
+	if res.Err == nil {
+		return "ok, " + formatBytes(len(res.Content))
+	}
+	first, _, _ := strings.Cut(res.Err.Error(), "\n")
+	// Dispatch prefixes a handler error with the tool name, which the
+	// receipt has already said. Dropping it buys back the budget for the
+	// part that is news. A wording change there costs the receipt the
+	// tidiness and nothing else.
+	first = strings.TrimPrefix(strings.TrimSpace(first), fmt.Sprintf("tool %q: ", res.Name))
+	return clipRunes(first, receiptErrorMaxRunes)
+}
+
+// formatBytes renders a byte count for a human reading one line.
+func formatBytes(n int) string {
+	switch {
+	case n < 1<<10:
+		return strconv.Itoa(n) + "B"
+	case n < 1<<20:
+		return fmt.Sprintf("%.1fkB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%.1fMB", float64(n)/(1<<20))
+	}
+}
+
+// clipRunes bounds s to max RUNES, marking a cut with an ellipsis.
+//
+// Deliberately not truncateRunes (livebudget.go), which bounds by BYTES
+// for a byte budget and marks nothing: this one is display width for a
+// single line, where a count of characters is the unit and a silent cut
+// would read as the real argument.
+func clipRunes(s string, max int) string {
+	if max <= 1 {
+		return "…"
+	}
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	return string([]rune(s)[:max-1]) + "…"
+}
+
 // toolRoundOutcome is what one executed tool round hands back to the turn
 // loop: the messages to append to the next request, and the deltas to fire
 // through the §3.0 chain. Both are built from the SAME bounded content, so
@@ -157,10 +348,25 @@ func runToolRound(ctx context.Context, state *State, round int, calls []model.To
 		_ = state.Ops.Log(ctx, memops.LogCategoryTool, "call",
 			fmt.Sprintf("name=%s id=%s round=%d", call.Function, call.ID, round))
 
+		started := clock.Profiling()
 		res := state.Tools.Dispatch(ctx, call)
+		elapsed := clock.Since(started)
 		if res.Aborted {
+			// No receipt: the turn is going away, and a line committed to
+			// scrollback about a call the user just abandoned is noise
+			// under the retraction notice.
 			return toolRoundOutcome{}, fmt.Errorf("turn: tool %q: %w", call.Function, res.Err)
 		}
+		// The durable trace (user ruling 2026-08-05), fired the moment the
+		// result is in hand — before the model's continuation streams, so
+		// receipts interleave with the answer in the order things happened.
+		emitToolReceipt(state, ToolReceipt{
+			Name:     toolCallName(call),
+			ArgsGist: argsGist(call.Args),
+			Outcome:  receiptOutcome(res),
+			Err:      res.Err != nil,
+			Elapsed:  elapsed,
+		})
 		if res.Err != nil {
 			_ = state.Ops.Log(ctx, memops.LogCategoryTool, "error",
 				fmt.Sprintf("name=%s id=%s round=%d detail=%s",
@@ -221,15 +427,22 @@ func joinRoundBodies(parts []string) string {
 	return strings.Join(kept, "\n\n")
 }
 
+// toolCallName is the display name of one call — the model's name for it,
+// or "?" when it named none (Dispatch turns that into an error result).
+// Shared by the phase label and the receipt so the two cannot disagree
+// about what an unnamed call is called.
+func toolCallName(c model.ToolCall) string {
+	if c.Function == "" {
+		return "?"
+	}
+	return c.Function
+}
+
 // toolCallNames lists the tool names in a round, for the phase label.
 func toolCallNames(calls []model.ToolCall) []string {
 	out := make([]string, 0, len(calls))
 	for _, c := range calls {
-		name := c.Function
-		if name == "" {
-			name = "?"
-		}
-		out = append(out, name)
+		out = append(out, toolCallName(c))
 	}
 	return out
 }

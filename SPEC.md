@@ -2228,6 +2228,49 @@ runs **one reader** from open to close.
   asserted by the committed piped-session golden. `Esc` is unavailable
   there; everything else stands.
 
+### 4.3.4 Tool receipts (AMENDED 2026-08-05)
+
+**Every §6.1 tool call leaves ONE committed line in scrollback.** Tool
+activity is verified by EYES, never by asking the model.
+
+The occasion for the ruling: the model claimed, after the fact, to have
+consulted `web.wikipedia`, and there was no visible evidence either way.
+There could not have been — the §4.3.2 `running <tool>` label lives in the
+ephemeral slot, so the next write erases it, and the reveal threshold
+suppresses it entirely for a call that finishes quickly, which is most of
+them. A model's account of its own tool use is precisely what must not be
+the evidence for it.
+
+- The runtime **announces**, the front end renders — the same hook shape as
+  §4.3.2 phases and the §3.4/§3.5 auto notices. One announcement per call,
+  fired the moment the result returns, so receipts interleave with the
+  answer in the order things happened rather than being batched at the end.
+  A call the user ABORTED (§4.3.3) produces no receipt: the turn is going
+  away.
+- The line carries the tool NAME, a bounded **gist of the decoded
+  arguments** (`q="general relativity"`), the OUTCOME, and the elapsed
+  time. The gist is bounded in runes and renders textual arguments before
+  scalar options — the query is what the reader needs, and the option
+  beside it must not crowd it out.
+- **Success reports SIZE, not an item count.** A count exists only inside
+  each tool's rendered shortlist, and a receipt that parses another
+  package's output format is a checksum of that format. Size is exact and
+  uniform across the inventory.
+- **A refusal must be legible.** An error receipt carries the error's first
+  line. `web.wikipedia` refusing for want of a §6.1 contact is an ordinary
+  model-recoverable result and was invisible outside the event log; that
+  failure mode being unreadable is what the ruling is about.
+- It is the (tty-only, scrollback) channel — **dimmed, persistent, and zero
+  bytes off a terminal**, so a piped run, the harness and the committed
+  goldens are untouched by construction. On a no-ANSI terminal it degrades
+  with the channel (words instead of dimming) rather than disappearing.
+- It is **NOT gated by `/thinking`**. That setting gates the model's
+  scratch; a receipt is the runtime's record of what it did. A user who
+  hid reasoning did not ask to stop being told what ran.
+- **No new §2.8 event.** `tool.call` / `tool.result` / `tool.error` already
+  record every call durably. This is the on-screen half of a fact the log
+  already holds.
+
 ### 4.4 Shell escape (`$` and `#`)
 
 The user can run arbitrary shell commands without leaving the personant
@@ -3467,6 +3510,14 @@ message per result, fire each result through the §3.0 chain as a
   tool calls only, a spent round budget, a persistently empty reply —
   emits one bracketed runtime notice, so a working system is never
   indistinguishable from a broken one.
+- **Every executed call is OBSERVABLE (AMENDED 2026-08-05).** The loop
+  announces one receipt per call — name, decoded-argument gist, outcome,
+  elapsed — the moment the result is in hand, and the front end commits it
+  to scrollback as one dimmed line (§4.3.4). The announcement is a
+  presentation seam like the phase hook: nothing in the pipeline observes
+  it, an absent hook costs a nil check, and the durable record remains the
+  `tool.call` / `tool.result` / `tool.error` triple. What it adds is that
+  tool use can be CHECKED rather than taken on the model's word.
 
 **Crash stability (§4.5.8): tool calls and results are NOT journaled, and
 execution is AT-LEAST-ONCE.** The turn journal holds the (prompt,

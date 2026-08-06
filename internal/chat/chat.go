@@ -367,6 +367,14 @@ func Run(opts Options) error {
 	th := newThinking(tm, cfg.Chat.ShowThinking)
 	state.OnReasoning = th.reasoning
 
+	// §6.1 tool receipts (user ruling 2026-08-05): one committed dimmed
+	// line per executed tool call, so tool activity is verified by eyes
+	// rather than by asking the model. A second, independent client of the
+	// same reasoning channel — deliberately NOT gated by /thinking, which
+	// is a policy about the model's scratch, not about what the runtime
+	// did. See receipts.go.
+	state.OnToolReceipt = toolReceipts(tm)
+
 	// §3.4 recall UI surface: the §2.6.1 ack-mode policy, an interactive
 	// resolver for the ASK band, and the one committed line the AUTO band
 	// prints (AMENDED 2026-08-05 — the runtime decides the bands, the front
