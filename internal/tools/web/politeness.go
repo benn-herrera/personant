@@ -67,8 +67,8 @@ const (
 	retryDrainBytes = 4 << 10
 
 	// apiQueryTimeout bounds one query against a credential-free JSON/XML
-	// API. Shared by web.wikipedia, web.wikidata, web.arxiv and
-	// web.crossref: one number, calibrated once — under
+	// API. Shared by web.wikipedia, web.wiktionary, web.wikidata,
+	// web.arxiv and web.crossref: one number, calibrated once — under
 	// DefaultFetchTimeout and well under tools.DefaultTimeout, so a slow
 	// endpoint surfaces as the tool's own message rather than dispatch's
 	// generic one.
@@ -149,11 +149,12 @@ func contactRequiredError(tool, service, policy string) error {
 // applies to every host, listed or not (an unlisted host gets a gate with
 // zero spacing).
 var hostSpacing = map[string]time.Duration{
-	ArxivHost:     arxivMinSpacing, // arXiv's API manual asks ~3s between requests
-	WikipediaHost: 0,               // Wikimedia: serial + contact, no stated spacing
-	WikidataHost:  0,               // same family, same policy
-	CrossrefHost:  0,               // polite pool: mailto in the UA, no stated spacing
-	ExaHost:       0,               // commercial + metered; the local cap is the real bound
+	ArxivHost:      arxivMinSpacing, // arXiv's API manual asks ~3s between requests
+	WikipediaHost:  0,               // Wikimedia: serial + contact, no stated spacing
+	WiktionaryHost: 0,               // same family, same policy, its own host
+	WikidataHost:   0,               // same family, same policy
+	CrossrefHost:   0,               // polite pool: mailto in the UA, no stated spacing
+	ExaHost:        0,               // commercial + metered; the local cap is the real bound
 }
 
 var (
@@ -377,9 +378,9 @@ func (b *gateBody) Close() error {
 
 // ---------- the shared credential-free API GET ----------
 
-// apiResponse is a fully-read, bounded reply. The four credential-free
-// query tools (wikipedia, wikidata, arxiv, crossref) all want exactly
-// this: a status to branch on and a capped body to parse.
+// apiResponse is a fully-read, bounded reply. The five credential-free
+// query tools (wikipedia, wiktionary, wikidata, arxiv, crossref) all want
+// exactly this: a status to branch on and a capped body to parse.
 type apiResponse struct {
 	Status     string
 	StatusCode int

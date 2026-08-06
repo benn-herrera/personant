@@ -410,7 +410,7 @@ In progress:
   whose content is the stored file body.
   **Wave 3 landed the first real tools** (`internal/tools/web`), the first
   entries the registry ever ships with — `web.fetch` and `web.search`,
-  joined later by `web.wikipedia`:
+  joined later by `web.wikipedia` and `web.wiktionary`:
   - **`web.fetch`** — plain GET → readability extraction → Markdown, with
     NO headless browser. Scheme allowlist is `http`/`https` only, on the
     initial URL and every redirect hop: it blocks `file://`, `data:`,
@@ -449,6 +449,20 @@ In progress:
     `<span class="searchmatch">` markup and entities in one tokenizer
     pass, and concatenates the returned `key` into
     `https://en.wikipedia.org/wiki/<key>` WITHOUT re-encoding it.
+  - **`web.wiktionary`** (added 2026-08-05, SPEC §6.1.9) — the DICTIONARY
+    tool, and the SECOND caller of the REST `search/page` path, which is
+    why that path, the page type, the query and the shortlist renderer are
+    now one shared implementation (`wikimedia.go`) rather than a copy. A
+    live check that day confirmed `en.wiktionary.org` answers it with the
+    encyclopedia's payload shape and with real dictionary payload in the
+    excerpts (the `emulsion` hit carries its etymology inline) — so unlike
+    `web.wikidata`, the family endpoint is the RIGHT one here. Same
+    Wikimedia contact REFUSAL, its own host entry in the spacing table
+    (serial, no spacing), its own 5/100 counter. Its model-facing
+    description LEADS with the literal selection anchors — *"Dictionary
+    search (Wiktionary)"*, `define`, `look up` — because a model cannot be
+    assumed to know from the name that Wiktionary is a dictionary, and the
+    description is the only thing routing *"define X"* here.
   - **Free-API citizenship wave** (added 2026-08-05, SPEC §6.1
     citizenship clause + §6.1.6–§6.1.8) — the house rule below, made
     mechanical. `config.toml [user] name/email` is the contact identity,
@@ -664,7 +678,9 @@ internal/tools/             §6.1 tool registry + dispatch + the shared
                             (substrate-free). The turn-side execution loop
                             lives in internal/turn/toolloop.go
 internal/tools/web/         §6.1.1 web.fetch + web.search + the query tools
-                            (wikipedia, wikidata, arxiv, crossref):
+                            (wikipedia, wiktionary, wikidata, arxiv, crossref;
+                            wikimedia.go holds the REST family's shared path,
+                            decoder and renderer):
                             readability → Markdown extraction, empty-shell
                             detection, the SearchProvider seam + Exa backend,
                             local query caps, and politeness.go — the ONE

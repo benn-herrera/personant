@@ -24,8 +24,9 @@ import (
 // cannot be serviced, so it never calls one.
 //
 // The mandatory half is the credential-free set — `web.fetch`,
-// `web.wikipedia`, `web.wikidata`, `web.arxiv`, `web.crossref` — which
-// registers on every session regardless of configuration.
+// `web.wikipedia`, `web.wiktionary`, `web.wikidata`, `web.arxiv`,
+// `web.crossref` — which registers on every session regardless of
+// configuration.
 //
 // This is also where the §6.1 free-API citizenship CONTACT reaches the
 // tools. internal/tools/web is config-free by design (it never sees
@@ -53,6 +54,7 @@ func buildToolRegistry(cfg memops.Config, providers memops.Providers, warn io.Wr
 	for _, tool := range []tools.Tool{
 		web.NewFetchTool(web.FetchConfig{Contact: contact}),
 		web.NewWikipediaTool(web.WikipediaConfig{Contact: contact}),
+		web.NewWiktionaryTool(web.WiktionaryConfig{Contact: contact}),
 		web.NewWikidataTool(web.WikidataConfig{Contact: contact}),
 		web.NewArxivTool(web.ArxivConfig{Contact: contact}),
 		web.NewCrossrefTool(web.CrossrefConfig{Contact: contact}),

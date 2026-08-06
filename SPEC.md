@@ -3279,10 +3279,11 @@ See ARCHITECTURE.md §"Tool surface (bounded, role-shaped)" for the design ratio
 
 ### 6.1 External tool surface
 
-The LLM's external tool inventory is bounded at sixteen tools, split
+The LLM's external tool inventory is bounded at seventeen tools, split
 between read/think and draft/mutate (**AMENDED 2026-08-05**: twelve →
 thirteen, `web.wikipedia`, §6.1.5; then thirteen → sixteen, the receipt
-trio `web.arxiv` / `web.crossref` / `web.wikidata`, §6.1.6–§6.1.8).
+trio `web.arxiv` / `web.crossref` / `web.wikidata`, §6.1.6–§6.1.8; then
+sixteen → seventeen, `web.wiktionary`, §6.1.9).
 *Internal* tools (operations on personant's own state — `personant
 search`, mid-turn thread fetch, `/topic`, `/done`, etc.) are out of scope
 for this section; see §4 (user surface) and §5.5 (model invocation
@@ -3313,7 +3314,7 @@ donor-funded API it consumes. Concretely, for every `web.*` tool:
   counter, so an agent loop cannot convert one user request into
   unbounded upstream load.
 
-#### 6.1.1 Read/think tools (10)
+#### 6.1.1 Read/think tools (11)
 
 | Tool | Signature (informal) | Purpose |
 |---|---|---|
@@ -3323,16 +3324,17 @@ donor-funded API it consumes. Concretely, for every `web.*` tool:
 | `web.fetch` | `(url) → bytes + meta` | retrieve a URL — **BUILT** (wave 3) |
 | `web.search` | `(query) → results[]` | search query → URLs — **BUILT** (wave 3) |
 | `web.wikipedia` | `(q, limit?) → articles[]` | search Wikipedia → articles — **BUILT** (§6.1.5, AMENDED 2026-08-05) |
+| `web.wiktionary` | `(q, limit?) → entries[]` | dictionary search Wiktionary → entries — **BUILT** (§6.1.9, AMENDED 2026-08-05) |
 | `web.wikidata` | `(q, limit?) → entities[]` | search Wikidata → entities — **BUILT** (§6.1.8, AMENDED 2026-08-05) |
 | `web.arxiv` | `(q, limit?) → papers[]` | search arXiv → preprints — **BUILT** (§6.1.6, AMENDED 2026-08-05) |
 | `web.crossref` | `(q, limit?) → works[]` | search Crossref → DOIs — **BUILT** (§6.1.7, AMENDED 2026-08-05) |
 | `model.consult` | `(prompt, model_id) → response` | ask a guest model |
 
-**Status:** the six `web.*` tools are built and registered; the `fs.*`
-tools are not yet. All six are tier 0 / non-mutating (§6.2), and each is
+**Status:** the seven `web.*` tools are built and registered; the `fs.*`
+tools are not yet. All seven are tier 0 / non-mutating (§6.2), and each is
 described at the level of the behaviour that is load-bearing rather than
 as an API listing — `web.fetch` and `web.search` below, the rest in
-§6.1.5–§6.1.8.
+§6.1.5–§6.1.9.
 
 **The query tools are DISJOINT BY TERRITORY, not by exclusivity.** Each
 model-facing description says what that tool WINS FOR and names its
@@ -3696,6 +3698,51 @@ share a decoder; the purchase is a result that says what the entity IS.
   entity IRI (`http://www.wikidata.org/entity/Q42`), which is not the
   page a human would open. A result with no `id` has no entity URL and is
   dropped; a result with no label is still rendered, headed by its QID.
+
+#### 6.1.9 `web.wiktionary` (AMENDED 2026-08-05)
+
+A dictionary search over the second wiki of the REST family: `GET
+https://en.wiktionary.org/w/rest.php/v1/search/page?q=<term>&limit=<n>` →
+ranked entries, each with its headword, a matching excerpt and its
+canonical `https://en.wiktionary.org/wiki/<key>` URL. Tier 0 /
+non-mutating, no credential, registers on every session.
+
+**Territory:** the WORD itself — definitions, etymology, usage,
+pronunciation, translations — across every language Wiktionary covers.
+The description points at `web.wikipedia` for encyclopedic or conceptual
+context about a topic.
+
+**The shared REST path is the correct endpoint here** — the point worth
+recording, because §6.1.8 is the case where it was not. A live check on
+2026-08-05 confirmed that `en.wiktionary.org` answers this path with a
+payload IDENTICAL in shape to the encyclopedia's
+(`pages[].{id,key,title,excerpt,…}`, matched terms wrapped in
+`<span class="searchmatch">`, the surrounding prose escaped) and that the
+excerpts carry real dictionary payload — the `emulsion` hit returns its
+etymology inline. So where the Wikidata wiki forced the Action API by
+answering with bare QIDs, this wiki shares the family decoder, and the
+path, page type, query and shortlist renderer are ONE implementation
+(`internal/tools/web/wikimedia.go`) with two callers.
+
+- **The model-facing description LEADS with the literal anchors** (user
+  ruling 2026-08-05): *"Dictionary search (Wiktionary)"*, and the words
+  `define`, `look up`, `dictionary`. A model cannot be assumed to know
+  that Wiktionary IS a dictionary from the name, and the description is
+  the only thing routing *"define X"* / *"do a dictionary search"* to this
+  tool. Territory disjointness still holds — it names `web.wikipedia`'s
+  ground and does not say "use only for".
+- **Contact is REQUIRED**, on exactly the §6.1.5 terms: same family, same
+  enforced Wikimedia User-Agent policy, same one refusal implementation.
+- **Its OWN host entry in the per-host table** (`en.wiktionary.org`,
+  serial, no fixed spacing). The gate keys on the host a request actually
+  reaches, so two wikis are two hosts — sharing Wikipedia's entry would be
+  a claim the mechanism does not make.
+- **Its OWN per-turn / per-day counter**, 5 / 100, so a dictionary loop
+  cannot spend the encyclopedia's allowance.
+- **`limit` default 5, maximum 10, clamped silently**; searchmatch markup
+  and entities resolved in one tokenizer pass; the `key` concatenated and
+  not re-encoded; the §6.1.1 trichotomy unchanged, with an empty `pages`
+  array rendered by the package's SHARED no-results message.
 
 ### 6.2 Permission tiers and accrual
 

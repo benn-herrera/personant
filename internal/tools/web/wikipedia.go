@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
 
 	"personant/internal/model"
@@ -47,29 +45,12 @@ const ToolNameWikipedia = "web.wikipedia"
 // string), not in a second endpoint or a second tool.
 const WikipediaHost = "en.wikipedia.org"
 
-// wikimediaPolicy names the obligation in the refusal the model reads.
-// Shared with web.wikidata: one family, one policy, one sentence.
-const wikimediaPolicy = "User-Agent policy"
-
 const (
-	// wikipediaEndpoint is the REST search-page endpoint. Query
-	// parameters are attached with url.Values, never by string formatting
-	// — a search term is arbitrary user/model text and hand-built query
-	// strings are how it stops being a search term.
-	//
-	// The path is identical on every ENCYCLOPEDIA in the family, so a
-	// language change is the host swap described above. It is NOT shared
-	// with web.wikidata: the Wikidata wiki answers this endpoint with bare
-	// QIDs and no labels (see wikidata.go), so that tool uses the Action
-	// API instead.
-	wikipediaEndpoint = "https://" + WikipediaHost + "/w/rest.php/v1/search/page"
+	// wikipediaEndpoint is this wiki's REST search-page endpoint. The path
+	// itself is the family's (wikimedia.go), shared with web.wiktionary.
+	wikipediaEndpoint = "https://" + WikipediaHost + wikimediaSearchPagePath
 
 	// wikipediaArticleBase + a page's `key` is the canonical article URL.
-	// The key arrives already URL-safe (`Go_(programming_language)`), so
-	// it is concatenated, NOT re-encoded — escaping it again would turn
-	// every parenthesis and apostrophe into a percent triple and produce
-	// a URL that still resolves but no longer matches what a human, or a
-	// later `web.fetch`, would write.
 	wikipediaArticleBase = "https://" + WikipediaHost + "/wiki/"
 
 	// DefaultWikipediaResults is the `limit` used when the model asks for
@@ -126,8 +107,9 @@ var wikipediaParams = json.RawMessage(`{
 
 const wikipediaDescription = "Search English Wikipedia for articles matching a term, returning each article's title, " +
 	"short description, a matching excerpt and its canonical URL. This wins for encyclopedic PROSE context — " +
-	"established topics, definitions, people, places, events — where you want an article to read. " +
-	"For structured entity facts (identifiers, dates, relations) see web.wikidata; for the open web see web.search. " +
+	"established topics, concepts, people, places, events — where you want an article to read. " +
+	"For a WORD itself — its dictionary definition, etymology or pronunciation — see web.wiktionary; " +
+	"for structured entity facts (identifiers, dates, relations) see web.wikidata; for the open web see web.search. " +
 	"Use web.fetch on any result URL to read that article in full."
 
 // NewWikipediaTool builds the `web.wikipedia` tool. It never fails at
@@ -173,25 +155,6 @@ type wikipedian struct {
 	quota    *quota
 }
 
-// wikipediaPage is one entry of the REST response's `pages` array. The
-// fields not read here (`id`, `matched_title`, `thumbnail`) are omitted
-// deliberately: an unused field is a field a reader has to check the
-// purpose of.
-//
-// `description` and `excerpt` are nullable in the API. A JSON `null`
-// unmarshals into a string field as a no-op, leaving "", which is exactly
-// the rendering decision ("skip the line") already wanted.
-type wikipediaPage struct {
-	Key         string `json:"key"`
-	Title       string `json:"title"`
-	Excerpt     string `json:"excerpt"`
-	Description string `json:"description"`
-}
-
-type wikipediaResponse struct {
-	Pages []wikipediaPage `json:"pages"`
-}
-
 // wikipediaWhat names the operation in every message the model reads.
 const wikipediaWhat = "the Wikipedia search"
 
@@ -222,40 +185,17 @@ func (w *wikipedian) handle(ctx context.Context, args json.RawMessage) ([]byte, 
 		return nil, err
 	}
 
-	pages, err := w.query(ctx, q, clampLimit(a.Limit, DefaultWikipediaResults, MaxWikipediaResults))
+	pages, err := searchPages(ctx, w.polite, w.endpoint, wikipediaWhat, q,
+		clampLimit(a.Limit, DefaultWikipediaResults, MaxWikipediaResults))
 	if err != nil {
 		return nil, err
 	}
 	if len(pages) == 0 {
 		return []byte(noWikipediaResultsMessage(q)), nil
 	}
-	return renderWikipediaPages(q, pages), nil
-}
-
-func (w *wikipedian) query(ctx context.Context, q string, limit int) ([]wikipediaPage, error) {
-	resp, err := w.polite.getAPI(ctx, w.endpoint, url.Values{
-		"q":     {q},
-		"limit": {strconv.Itoa(limit)},
-	}, "application/json")
-	if err != nil {
-		return nil, transportError(wikipediaWhat, err)
-	}
-	if !resp.ok() {
-		return nil, apiStatusError(wikipediaWhat, resp.Status, resp.Body)
-	}
-
-	var decoded wikipediaResponse
-	if err := json.Unmarshal(resp.Body, &decoded); err != nil {
-		return nil, malformedError(wikipediaWhat, len(resp.Body))
-	}
-	out := make([]wikipediaPage, 0, len(decoded.Pages))
-	for _, p := range decoded.Pages {
-		if strings.TrimSpace(p.Key) == "" {
-			continue // no key means no article URL, which means not actionable
-		}
-		out = append(out, p)
-	}
-	return out, nil
+	return renderPages(pages, wikipediaArticleBase,
+		fmt.Sprintf("%d Wikipedia article(s) for %q, most relevant first:\n", len(pages), q),
+		"\nUse web.fetch on a URL above to read the full article.\n"), nil
 }
 
 // noWikipediaResultsMessage is the EMPTY half of web.search's trichotomy,
@@ -266,20 +206,4 @@ func noWikipediaResultsMessage(q string) string {
 	return fmt.Sprintf("The Wikipedia search ran successfully and matched 0 articles for %q.\n\n"+
 		"This is an EMPTY RESULT, not a failure: the query reached Wikipedia and its index returned nothing. "+
 		"Try the topic's common name or a broader term, or use web.search for non-encyclopedic sources.\n", q)
-}
-
-func renderWikipediaPages(q string, pages []wikipediaPage) []byte {
-	entries := make([]resultEntry, 0, len(pages))
-	for _, p := range pages {
-		entries = append(entries, resultEntry{
-			Title: p.Title,
-			URL:   wikipediaArticleBase + p.Key,
-			Lines: []string{snippetLine(p.Description), snippetLine(p.Excerpt)},
-		})
-	}
-	return renderList(
-		fmt.Sprintf("%d Wikipedia article(s) for %q, most relevant first:\n", len(pages), q),
-		entries,
-		"\nUse web.fetch on a URL above to read the full article.\n",
-	)
 }

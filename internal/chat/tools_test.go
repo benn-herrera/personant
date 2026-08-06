@@ -58,8 +58,8 @@ func TestToolRegistryWithoutSearchProvider(t *testing.T) {
 	// service requires contact still REGISTERS and refuses at invocation,
 	// so the model is told why rather than never seeing it.
 	for _, name := range []string{
-		web.ToolNameFetch, web.ToolNameWikipedia, web.ToolNameWikidata,
-		web.ToolNameArxiv, web.ToolNameCrossref,
+		web.ToolNameFetch, web.ToolNameWikipedia, web.ToolNameWiktionary,
+		web.ToolNameWikidata, web.ToolNameArxiv, web.ToolNameCrossref,
 	} {
 		if has, _ := hasTool(t, memops.Config{}, providers, name); !has {
 			t.Errorf("%s must register regardless of search or [user] configuration", name)
@@ -91,7 +91,7 @@ func TestToolRegistryPassesContact(t *testing.T) {
 	}
 
 	configured := memops.Config{User: memops.UserConfig{Name: "Test Person", Email: "test@example.com"}}
-	for _, name := range []string{web.ToolNameWikipedia, web.ToolNameWikidata} {
+	for _, name := range []string{web.ToolNameWikipedia, web.ToolNameWiktionary, web.ToolNameWikidata} {
 		res := call(memops.Config{}, name)
 		if res.Err == nil || !strings.Contains(res.Err.Error(), "REQUIRES contact") {
 			t.Errorf("%s with no [user]: got %v, want the contact refusal", name, res.Err)

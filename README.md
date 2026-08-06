@@ -139,7 +139,7 @@ internal/chat/              REPL, slash dispatch, bootstrap UX, §6.1 tool-regis
                             construction
 internal/tools/             §6.1 tool registry + dispatch
 internal/tools/web/         the web tools — fetch, search (Exa), wikipedia,
-                            wikidata, arxiv, crossref — plus the shared
+                            wiktionary, wikidata, arxiv, crossref — plus the shared
                             free-API citizenship layer (contact-bearing
                             User-Agent, per-host serial gate + spacing,
                             Retry-After, local query caps)

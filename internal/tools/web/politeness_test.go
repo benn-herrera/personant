@@ -122,7 +122,7 @@ func assertToolShape(t *testing.T, tool tools.Tool, name string) tools.Handler {
 	return tool.Handler
 }
 
-// TestWikimediaContactRequired — consequence 2, on the two tools whose
+// TestWikimediaContactRequired — consequence 2, on the tools whose
 // service REQUIRES contact. The refusal must name the policy, say no
 // request was made, and name the fix; and the endpoint must see nothing.
 func TestWikimediaContactRequired(t *testing.T) {
@@ -135,6 +135,9 @@ func TestWikimediaContactRequired(t *testing.T) {
 		{"wikipedia", func(e string, c Contact) tools.Tool {
 			return NewWikipediaTool(WikipediaConfig{Contact: c, Endpoint: e})
 		}, ToolNameWikipedia},
+		{"wiktionary", func(e string, c Contact) tools.Tool {
+			return NewWiktionaryTool(WiktionaryConfig{Contact: c, Endpoint: e})
+		}, ToolNameWiktionary},
 		{"wikidata", func(e string, c Contact) tools.Tool {
 			return NewWikidataTool(WikidataConfig{Contact: c, Endpoint: e})
 		}, ToolNameWikidata},
@@ -213,7 +216,7 @@ func TestUserAgentShape(t *testing.T) {
 // spacing ruling. An entry of 0 is a legitimate ruling (serial-only); an
 // ABSENT entry is an oversight.
 func TestHostSpacingTableCoversEveryHost(t *testing.T) {
-	for _, host := range []string{WikipediaHost, WikidataHost, ArxivHost, CrossrefHost, ExaHost} {
+	for _, host := range []string{WikipediaHost, WiktionaryHost, WikidataHost, ArxivHost, CrossrefHost, ExaHost} {
 		if _, ok := hostSpacing[host]; !ok {
 			t.Errorf("host %q has no entry in hostSpacing — every host this package reaches needs a ruling, "+
 				"even if the ruling is 0 (serial-only)", host)
@@ -227,6 +230,7 @@ func TestHostSpacingTableCoversEveryHost(t *testing.T) {
 	// or the gate silently applies to nothing.
 	for _, tc := range []struct{ endpoint, host string }{
 		{wikipediaEndpoint, WikipediaHost},
+		{wiktionaryEndpoint, WiktionaryHost},
 		{wikidataEndpoint, WikidataHost},
 		{arxivEndpoint, ArxivHost},
 		{crossrefEndpoint, CrossrefHost},
