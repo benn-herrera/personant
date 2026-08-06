@@ -152,6 +152,48 @@ func TestService_EngagedBypassBelowCoarse(t *testing.T) {
 	}
 }
 
+// TestService_EngagedInWindowDropsMatchedTurns — Request.EngagedInWindow
+// removes turn-excerpts the caller has already pulled into the working
+// window from the intra-thread hit (the accept-suppression contract, user
+// ruling 2026-08-05). Filtering the ONLY matching chunk drops the hit
+// entirely; the rest of the thread stays reachable.
+func TestService_EngagedInWindowDropsMatchedTurns(t *testing.T) {
+	paths, ops := newRecallHome(t)
+	body := "## Turn 1\ntrefoil knot topology invariant chirality\n\n" +
+		"## Turn 2\nmonsoon humidity precipitation tropics\n\n" +
+		"## Turn 3\nledger reconciliation accrual depreciation\n"
+	seedThreadTurns(t, paths, "thr_1", []string{"thr_1"}, body)
+
+	svc := measure.NewService(ops, model.NewMockEmbedder())
+	if err := svc.Prepare(context.Background()); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
+
+	const query = "trefoil knot topology invariant chirality"
+	hit := flushAndWait(t, svc, "thr_1", 3, query)
+	if hit.IntraThread == nil || len(hit.IntraThread.Turns) == 0 {
+		t.Fatalf("baseline intra hit missing: %+v", hit)
+	}
+
+	inWindow := make(map[int]struct{}, len(hit.IntraThread.Turns))
+	for _, n := range hit.IntraThread.Turns {
+		inWindow[n] = struct{}{}
+	}
+	results, err := svc.Recall(context.Background(), measure.Request{
+		QueryText:       query,
+		Engaged:         "thr_1",
+		Exclude:         map[string]struct{}{"thr_1": {}},
+		EngagedInWindow: inWindow,
+	})
+	if err != nil {
+		t.Fatalf("Recall: %v", err)
+	}
+	if r, ok := findResult(results, "thr_1"); ok && r.IntraThread != nil {
+		t.Errorf("in-window turns %v were re-proposed: %+v", hit.IntraThread.Turns, r.IntraThread)
+	}
+}
+
 func containsLayer(layers []string, want string) bool {
 	for _, l := range layers {
 		if l == want {

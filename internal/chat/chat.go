@@ -367,9 +367,15 @@ func Run(opts Options) error {
 	th := newThinking(tm, cfg.Chat.ShowThinking)
 	state.OnReasoning = th.reasoning
 
-	// §3.4 recall UI surface (Part B): install an interactive resolver
-	// so recalled threads can be pulled into Layer B at turn close.
-	state.RecallResolver = interactiveRecallResolver(tm)
+	// §3.4 recall UI surface: the §2.6.1 ack-mode policy, an interactive
+	// resolver for the ASK band, and the one committed line the AUTO band
+	// prints (AMENDED 2026-08-05 — the runtime decides the bands, the front
+	// end owns the wording, mirroring §3.5's OnAutoClosed).
+	state.RecallAckMode = recallAckMode(ctx, ops, project.ID, tm.Diag())
+	state.RecallResolver = interactiveRecallResolver(tm, state.RecallAckMode)
+	state.OnAutoRecalled = func(n turn.RecallNotice) {
+		fmt.Fprintf(tm.Out(), "recalled: %s — %s\n", n.Display, n.Gist)
+	}
 
 	// §3.5 decay-triggered closure flow: a model-backed curator drafts
 	// the closure summary, and an interactive resolver lets the user
@@ -940,6 +946,28 @@ func closureAckMode(ctx context.Context, ops memops.MemoryOps, projectID string,
 	return mode
 }
 
+// recallAckMode resolves the §2.6.1 recall.ack-mode directive into the
+// session's policy. Same contract as closureAckMode: absent, unreadable
+// or unrecognized keeps the banded default rather than refusing a session
+// over an ack preference.
+func recallAckMode(ctx context.Context, ops memops.MemoryOps, projectID string, diag io.Writer) turn.RecallAckMode {
+	raw, ok, err := ops.DirectiveParam(ctx, projectID, turn.DirectiveRecallAckMode)
+	if err != nil {
+		fmt.Fprintf(diag, "warn: read %s: %v\n", turn.DirectiveRecallAckMode, err)
+		return turn.RecallAckBanded
+	}
+	if !ok {
+		return turn.RecallAckBanded
+	}
+	mode, valid := turn.ParseRecallAckMode(raw)
+	if !valid {
+		fmt.Fprintf(diag, "warn: %s=%q is not banded|always; using banded\n",
+			turn.DirectiveRecallAckMode, raw)
+		return turn.RecallAckBanded
+	}
+	return mode
+}
+
 // cmdPause implements /pause [thr_id|name] (§2.2.1).
 func cmdPause(ctx context.Context, out io.Writer, state *turn.State, rest string) error {
 	id, err := turn.PauseThread(ctx, state, rest)
@@ -1373,24 +1401,89 @@ func pickExistingProject(tm *term.Terminal, ops memops.MemoryOps) (memops.Projec
 	return memops.ProjectMeta{}, false, nil
 }
 
+// recallOfferLines renders one offered candidate as the two lines a user
+// can act on without a lookup (user ruling 2026-08-05 — the superseded
+// form was `[1] thr_3 score=0.56 (intra-thread)`, which named nothing the
+// user could recognize and asked nothing they could weigh):
+//
+//	[1] <display name>
+//	    <gist> · <why> · <tier> <score>
+//
+// "why" is the evidence the match actually rests on: the matched symbols
+// for a symbolic hit, the matched turn numbers for an intra-thread hit
+// (there are no symbols there — the evidence is WHERE in this thread),
+// and for an embedding-only hit the honest answer, which is that the
+// similarity IS the evidence.
+func recallOfferLines(n int, c turn.RecallCandidate) []string {
+	why := "similar wording"
+	switch {
+	case c.Symbolic != nil && len(c.Symbolic.MatchedSymbols) > 0:
+		why = "matched " + strings.Join(c.Symbolic.MatchedSymbols, ", ")
+	case c.IntraThread != nil && len(c.IntraThread.Turns) > 0:
+		why = "earlier here, turn " + joinTurns(c.IntraThread.Turns)
+	}
+	tier := "related"
+	if c.IntraThread != nil {
+		tier = "earlier in this thread"
+	} else if c.Embedding == nil && c.Symbolic != nil {
+		tier = "shared topics"
+	}
+	return []string{
+		fmt.Sprintf("  [%d] %s", n, c.Display),
+		fmt.Sprintf("      %s · %s · %s %.2f", c.Gist, why, tier, c.Score),
+	}
+}
+
+// joinTurns renders turn numbers for the offer line, capped so a wide
+// intra-thread hit cannot run the line off the screen.
+func joinTurns(ns []int) string {
+	const showMax = 3
+	parts := make([]string, 0, showMax+1)
+	for _, n := range ns[:min(len(ns), showMax)] {
+		parts = append(parts, strconv.Itoa(n))
+	}
+	if len(ns) > showMax {
+		parts = append(parts, "…")
+	}
+	return strings.Join(parts, ", ")
+}
+
 // interactiveRecallResolver returns a turn.RecallResolver that surfaces
-// the §3.4 recall offer at the prompt and reads the user's accept /
-// decline decision. Kept deliberately small — U/X polish is deferred.
-func interactiveRecallResolver(tm *term.Terminal) turn.RecallResolver {
+// the §3.4 ASK-band recall offer and reads the user's decision. One
+// question per turn, and the question states what accepting does: a
+// single candidate is a yes/no, several are a pick-list.
+//
+// There is no follow-up decline-reason question under the banded default.
+// A second prompt classifying a decline the user has already made is the
+// same reflex-clearing surface the ruling struck down, and nothing reads
+// the categorization yet (§4.3 feeds Phase-5 directive accrual, which is
+// unbuilt). Under recall.ack-mode: always the superseded flow is restored
+// verbatim, reason prompt included — that is what the escape hatch is
+// for.
+func interactiveRecallResolver(tm *term.Terminal, mode turn.RecallAckMode) turn.RecallResolver {
 	out := tm.Out()
 	return func(ctx context.Context, offer turn.RecallOffer) (turn.RecallResolution, error) {
-		preamble := make([]string, 0, len(offer.Candidates)+1)
-		preamble = append(preamble, "recalled threads related to this turn:")
-		for i, c := range offer.Candidates {
-			preamble = append(preamble, fmt.Sprintf("  [%d] %s  score=%.2f  (%s)",
-				i+1, c.ThreadID, c.Score, strings.Join(c.Layers(), "+")))
+		single := len(offer.Candidates) == 1
+		preamble := make([]string, 0, 2*len(offer.Candidates)+1)
+		if single {
+			preamble = append(preamble, "related thread:")
+			preamble = append(preamble, recallOfferLines(1, offer.Candidates[0])...)
+		} else {
+			preamble = append(preamble, "related threads:")
+			for i, c := range offer.Candidates {
+				preamble = append(preamble, recallOfferLines(i+1, c)...)
+			}
+		}
+		prompt, keys := "accept which? [numbers / a=all / n=none]: ", "an"
+		if single {
+			prompt, keys = "pull into context? [y]es / [n]o: ", "yn"
 		}
 		// ActivityAsk, not Editor: this prompts from INSIDE turn close, over
 		// the turn that is still the outer owner of the terminal.
 		answer, err := tm.ReadLine(ctx, term.ActivityAsk, term.Question{
 			Preamble: preamble,
-			Prompt:   "accept which? [numbers / a=all / n=none]: ",
-			Keys:     "an",
+			Prompt:   prompt,
+			Keys:     keys,
 		})
 		if term.IsEndOrAbort(err) {
 			// Session is ending / interrupted — decline all, no error.
@@ -1401,10 +1494,15 @@ func interactiveRecallResolver(tm *term.Terminal) turn.RecallResolver {
 		}
 
 		var accept []int
-		switch trimmed := strings.ToLower(strings.TrimSpace(answer.Text)); trimmed {
-		case "", "n":
+		trimmed := strings.ToLower(strings.TrimSpace(answer.Text))
+		switch {
+		case trimmed == "" || trimmed == "n":
 			// accept nothing
-		case "a":
+		case single:
+			if trimmed == "y" {
+				accept = []int{0}
+			}
+		case trimmed == "a":
 			for i := range offer.Candidates {
 				accept = append(accept, i)
 			}
@@ -1420,7 +1518,7 @@ func interactiveRecallResolver(tm *term.Terminal) turn.RecallResolver {
 		}
 
 		reason := turn.DeclineNotRelevant
-		if len(accept) < len(offer.Candidates) {
+		if mode == turn.RecallAckAlways && len(accept) < len(offer.Candidates) {
 			// No Keys: the answers are words matched by prefix, so every
 			// first rune is the start of a longer legal answer.
 			rans, rerr := tm.ReadLine(ctx, term.ActivityAsk, term.Question{

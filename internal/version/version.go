@@ -29,10 +29,10 @@ import (
 )
 
 // Substrate is the version of the runtime + MemoryOps port.
-const Substrate = "0.2.2"
+const Substrate = "0.2.3"
 
 // FrontEnd is the version of the U/X + feature-logic line.
-const FrontEnd = "0.0.19"
+const FrontEnd = "0.0.20"
 
 // CurrentHomeFormat is the home on-disk format revision this binary
 // writes and understands.

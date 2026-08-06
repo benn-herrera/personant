@@ -379,6 +379,25 @@ closure.ack-mode: auto              # auto | always (AMENDED 2026-08-04, §3.5).
                                     # is still compiled-in constants.
 recall.symbolic-threshold: 0.4      # Jaccard threshold for opportunistic recall surfacing
 recall.cross-project-threshold: 0.5 # higher bar for cross-project surface
+recall.ack-mode: banded             # banded | always (AMENDED 2026-08-05, §3.4).
+                                    # banded (default): a candidate at or above its
+                                    # tier's auto threshold is fetched with one
+                                    # committed line and no prompt; the band between
+                                    # the surface and auto thresholds is asked;
+                                    # nothing else surfaces.
+                                    # always: every surfaced candidate is asked (the
+                                    # superseded flow, decline-reason prompt included).
+recall.symbolic-auto-threshold: 0.65  # Jaccard score at or above which a candidate is
+                                    # fetched without asking (§3.4 auto band). C.6:
+                                    # symbolic precision is 1.000 at T >= 0.5 at every
+                                    # drift depth; this sits inside that plateau, one
+                                    # step above the highest measured point.
+recall.cosine-auto-threshold: 0.75  # cosine (embedding AND intra-thread — one bar, one
+                                    # scale) at or above which a candidate is fetched
+                                    # without asking. C.6: cosine precision 0.58 @0.55,
+                                    # 0.76-0.82 @0.60, 0.89-0.95 @0.65, monotone; 0.75
+                                    # is one step further and coincides with the #111
+                                    # live "clearly related" cosine.
 layer.b-top-k: 3                    # max active threads in Layer B
 layer.budget.percentages: {E: 12, A1: 10, A2: variable, B: 55, C: 15, live_turn: 15}
                                     # live_turn is carved from the byte total first;
@@ -517,7 +536,7 @@ Actions ending in `-error` (and `warning`) are forensic diagnostics, not measure
 | `system` | `bootstrap` (the VERSION/IDENTITY line — one per process open, emitted at the process boundary after the §9.1 format gate resolves: `version=` substrate, `frontend=`, `home-format=` the EFFECTIVE on-disk revision this session ran against, `commit=` (`unknown` on an unstamped binary), `home=`. It is not the session/project event — that is `session.started`), `home-format-override` (a `--allow-newer-home` open waved a newer home through the §9.1 refusal — `on-disk=`, `binary=`; knowingly-unsafe, always paired with a stderr warning), `context-ceiling-breach`, `context-ceiling-unenforceable` (the post-flight token-ceiling gate could not be EVALUATED — the provider reported no `usage.prompt_tokens` for a streamed turn while a ceiling was configured, with `reason=usage-unavailable ceiling= turn=`. A guard that cannot read its input must say so rather than passing silently; the count is deliberately never estimated, since a guessed number would make the ceiling look enforced when it is not. One line per affected turn — the count of unenforced turns is the measurement), `empty-response` (forensic; the final drained response carried zero visible content — with `reprompted=yes\|no`, `turn=`; §3.3 empty-response recovery), `turn-aborted` (the user retracted a turn with Esc — `turn=` the #94 transaction id, `phase=` the labelled stage they gave up in, `bytes=` the retracted input's size; §4.3.3. **Never the text**: an event line is single-line free-form and a multi-line prompt would break the format — and the text is deliberately not durable anywhere, per the retraction rule), `turn-abort-release-error` (forensic; releasing an aborted turn's recovery scope failed); *(vocabulary; not yet emitted)* `shutdown`, `error`, `config-reload` |
 | `thread` | `engaged`, `engaged-non-owner`, `engaged-cross-project`, `engaged-miss`, `created`, `created-meta-only`, `state-change`, `fetch-miss`, `fetch-cross-project`, `anchor-projection-overflow`, `tag-defaulted` (with `thr=` — the bound owner, `cause=missing-tag\|empty-response`, `reprompted=yes\|no`; §3.3 owner-default) |
 | `spine` | `match-fire`, `embed-match-fire`, `intra-match-fire`; *(vocabulary)* `match-miss`, `entry-updated` |
-| `recall` | `offer` (with `count=N`), `accept` (with `thr=`, `layers=`), `decline` (with `thr=`, `reason=not-relevant\|wrong-project\|already-known`), `net-cap-hit`, `flush-backlog`, `W1-diag`, `fire-error`, `error`, `index-error`, `embed-error`, `debt-window-error`, `tree-error`; *(vocabulary)* `cross-project-fire` |
+| `recall` | `offer` (with `count=N`), `accept` (with `thr=`, `layers=`, and **`ack=human\|auto`** (AMENDED 2026-08-05, §3.4): `auto` is an auto-band candidate the runtime fetched without asking. As with `retire.ack`, the two populations must stay separable — any future accept-rate quality measure is a rate over `ack=human` lines only), `decline` (with `thr=`, `reason=not-relevant\|wrong-project\|already-known` — `already-known` is also the runtime's OWN verdict on a candidate already resident in Layer B under `recall.ack-mode: banded`), `net-cap-hit`, `flush-backlog`, `W1-diag`, `fire-error`, `error`, `index-error`, `embed-error`, `debt-window-error`, `tree-error`; *(vocabulary)* `cross-project-fire` |
 | `retire` | `prompt` (with `thr=` and `inactivity=`\|`trigger=manual`\|`trigger=queued` — the last for a §3.5 boundary drain), `ack` (EVERY applied closure — retire or WIP — with `resolution=`, `edited=yes\|no`, and **`ack=human\|auto`** (AMENDED 2026-08-04, §3.5): `auto` is a routine closure the runtime applied without asking, and the ack-edit-rate canary is a rate over `ack=human` lines ONLY, since an auto-accept is unedited by construction and would dilute the rate to zero), `pending` (a decayed thread classified as an EXCEPTION and queued for the boundary drain rather than auto-accepted — `thr=`, `inactivity=`, `reason=anchors=N\|turns=N`; emitted ONCE per idle episode, not on every scan the thread keeps waiting — the queue is derived, so a per-scan line would be a heartbeat rather than a decision event), `defer`, `complete` (with `resolution=`), `curator-error`, `load-error`, `resolver-error`, `apply-error`, `error` |
 | `archive` | `archived`, `recovered`, `recovered-record`, `skip`, `under-drain`, `error` |
 | `recovery` | (§4.5.8 startup reconciliation; forensic) `begin`, `complete` (with `cells=`, `reset=`, `stamped=`, `unrepairable=`), `pending` (with `op=`, `day=` — a barrier/archival completion was typed to the adapter), `rollback` (torn-turn reset — `turn=`, `reverted=`, `debris=`), `journal-recovered` (preserved in-flight bytes — `turn=`, `records=`), `morning-init` (`baseline=`, `rebuilt=`), `adopt` (cell-12 greenfield/legacy), `stamp-repaired` (cell-9), `unrepairable` (archive entry stays refused — `thr=`, `reason=`), `quarantined` (byte-exact preserved path), `log-tail-repaired` |
@@ -1092,18 +1111,90 @@ gate→measure reframe.) Algorithm detail and acceptance criteria are in
 `design/within-thread-summary-hierarchy.md` and
 `design/intra-thread-recall-design.md`.
 
-**Recall surface.** At turn close the merged candidates are logged
-per-layer (`spine.match-fire` / `spine.embed-match-fire`) and, when an
-experience-layer resolver is installed, the top 3 are surfaced as an
-*offer*. C.6 measured top-1 recall ~73% vs. top-3 ~92%; surfacing
-three and letting the user pick beats forcing a single-candidate
-guess. The resolver is the seam between the recall stack and the
-experience layer — the chat REPL resolves it interactively, the
-scenario harness from a scripted decision — so recall internals stay
-insulated from caller code. Accepted candidates are promoted into
-Layer B; every offered candidate is logged `recall.accept` or
-`recall.decline` (the latter with a §4.3 reason). With no resolver
-installed, recall stays log-only.
+**Recall surface (AMENDED 2026-08-05).** At turn close the merged
+candidates are logged per-layer (`spine.match-fire` /
+`spine.embed-match-fire` / `spine.intra-match-fire`) and, when an
+experience-layer resolver is installed, the top 3 are taken forward. C.6
+measured top-1 recall ~73% vs. top-3 ~92%; three is the surfaced cap, and
+it bounds the auto and ask bands TOGETHER — the banded flow never touches
+more threads per turn than the superseded flow offered. The resolver is
+the seam between the recall stack and the experience layer — the chat REPL
+resolves it interactively, the scenario harness from a scripted decision —
+so recall internals stay insulated from caller code. With no resolver
+installed recall stays log-only, and that now includes the auto band: the
+resolver is the "an experience layer is attached" signal, and a session
+with no way to ack must not start fetching on its own (the §3.5
+precedent).
+
+**Original specification (superseded).** Every surfaced candidate is put
+to the user as one offer — `[1] thr_3 score=0.56 (intra-thread)` and
+`accept which? [numbers / a=all / n=none]` — followed by a
+decline-reason question.
+
+**As built (amendment, user ruling 2026-08-05): band the candidates, ask
+only where judgment matters, and make the question legible.** Living-with
+found the surface useless in both halves. It fired routinely rather than
+rarely, and *what* the user was being asked to vet was unreadable: a bare
+`thr_N`, a bare score, and four cryptic options produce the reflex answer
+that clears the prompt fastest. That is the §3.5 ack-quality argument
+verbatim — an ack cleared reflexively launders an unvetted fetch as a
+human decision — reached, as closure's was, through frequency and
+illegibility rather than inattention.
+
+Each surfaced candidate falls in exactly one band, by its score against
+its OWN tier's threshold (the scales differ: layer 1 is a Jaccard set
+overlap, layers 2/3 are cosines):
+
+- **AUTO** — score ≥ `recall.symbolic-auto-threshold` (0.65) for a
+  symbolic-scored candidate, or ≥ `recall.cosine-auto-threshold` (0.75)
+  for an embedding- or intra-thread-scored one. The thread is promoted
+  through the SAME fetch chokepoint an accepted candidate takes, with no
+  prompt and ONE committed line (`recalled: <display name> — <gist>`).
+  Logged `recall.accept ... ack=auto`; the §2.2 `RecallFires` bump applies
+  exactly as for a human accept. Embedding and intra-thread share one bar
+  because they are the same cosine over the same space; split them only if
+  evidence separates them.
+- **ASK** — surfaced but below the auto bar. ONE offer block per turn,
+  rendered so it passes the two-second test: per candidate the thread's
+  §2.2.2 display name (never a bare `thr_N`), a gist (the spine summary,
+  else the projected anchors — never blank, never a raw id), WHY it
+  matched (the matched symbols, or for an intra hit the matched turn
+  numbers), and a short tier label with the score. The question states
+  what accepting does: one candidate → `pull into context? [y]es / [n]o`,
+  several → the numbers/all/none pick-list over the enriched lines. There
+  is no separate decline-reason question in this mode — a second prompt
+  classifying a decision already made is the same reflex surface, and
+  nothing consumes the categorization until Phase-5 directive accrual.
+- **Below the surface threshold** — unchanged: never surfaces.
+
+A candidate already resident in Layer B is already in the context the
+offer proposes to pull it into, so under `banded` the runtime answers it
+itself: `recall.decline reason=already-known`, no prompt, no line. Without
+this the auto band would re-fetch and re-announce the same resident thread
+on every turn a topic continued. An intra-thread hit is exempt — its
+subject is the engaged thread's early content, about which residency says
+nothing.
+
+**Accept suppression (the intra-thread re-fire).** An accepted intra
+candidate must not be offered again. The intra pass targets the ENGAGED
+thread BY ID, so the thread-level exclusion set cannot express it, and
+before this fix the identical offer returned on every following turn while
+the topic continued. The runtime records the accepted turn-excerpts as
+in-window for the engaged thread and passes them to the recall stack,
+which drops them from BOTH the fine tier and the #123 lexical completeness
+floor. This is not a completeness exception: the excluded content is in
+the working window, the one place §3.4 says recall need not reach it, and
+the mark is dropped the moment the thread is demoted out of Layer B —
+residency ends it, not a timer. Session-scoped; nothing is persisted.
+
+**Escape hatch.** `recall.ack-mode: banded | always` (§2.6.1), default
+`banded` — the behavior above. `always` restores the superseded flow
+verbatim: every surfaced candidate is asked, decline-reason prompt
+included, and nothing is fetched without an ack. The scenario harness
+pins `always` (a scripted `Step.RecallAck` IS a human ack).
+
+Every candidate the runtime touches is logged: `recall.accept` (with
+`ack=human|auto`, §2.8) or `recall.decline` (with a §4.3 reason).
 
 **Lifecycle-aware symbolic scorer.** The match target is unchanged —
 `T(thr) = anchors ∪ {h.normalized}` — so a `superseded` symbol, which
@@ -1792,14 +1883,26 @@ surface entirely.
 | `/stats` | runtime stats (active threads, layer fill, recent recall events, etc.) |
 | `/version` | version identity plus the on-disk format of the home this session opened (§9.1) |
 
-### 4.3 Decline categorization UI
+### 4.3 Decline categorization UI (AMENDED)
 
-When a recall offer is declined, the user picks a reason from a fixed
-enum: `not-relevant` / `wrong-project` / `already-known`. v0.1
-deliberately favors reasons that yield useful recall-tuning signal
-(why a candidate missed) over U/X-oriented actions like defer or
-suppress-offers; the latter return when the recall accrual loop is
-actually built. The enum is expected to be tuned then.
+Every decline is recorded with a reason from a fixed enum:
+`not-relevant` / `wrong-project` / `already-known`. v0.1 deliberately
+favors reasons that yield useful recall-tuning signal (why a candidate
+missed) over U/X-oriented actions like defer or suppress-offers; the
+latter return when the recall accrual loop is actually built. The enum is
+expected to be tuned then.
+
+**Who supplies the reason (AMENDED 2026-08-05, §3.4 banding).** Under the
+default `recall.ack-mode: banded` the user is NOT asked to categorize a
+decline: a second prompt classifying a decision they have already made is
+the same reflex-clearing surface the recall ruling struck down, and
+nothing consumes the categorization until the Phase-5 accrual loop exists
+— at which point this is the first thing to revisit, since that loop is
+what the enum was for. A banded decline therefore logs `not-relevant`,
+except where the RUNTIME knows better: a candidate already resident in
+Layer B is declined `already-known` by the runtime itself. Under
+`recall.ack-mode: always` the reason prompt is restored verbatim with the
+rest of the superseded flow.
 
 ### 4.3.1 REPL line editing and history (AMENDED)
 

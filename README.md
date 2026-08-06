@@ -218,6 +218,7 @@ A third, separate integer versions the home's on-disk layout (`~/.personant/vers
 **Implemented and wired into the turn loop (pending full acceptance-validation):**
 
 - Thread closure / retirement (§3.5): curator-drafted summary; the decay-triggered closure scan fires at turn close. Routine closures are auto-accepted with one committed line (user ruling 2026-08-04 — a per-thread ack every time a side topic decays was an unreasonable interruption); the exceptions (anchor-rich or long-engaged threads) queue and are acked at a boundary — session exit or `/closures`. `closure.ack-mode: always` restores the per-decay prompt.
+- Banded recall surface (§3.4): a candidate whose score clears its tier's auto threshold is pulled into context with one committed line (`recalled: <thread> — <gist>`) and no prompt; the middle band is asked once per turn with a legible offer — thread name, gist, why it matched, score — and nothing else surfaces (user ruling 2026-08-05 — a cryptic `[1] thr_3 score=0.56` question asked routinely is answered by reflex, not judgment). `recall.ack-mode: always` restores the per-candidate prompt.
 - Recoverable deep-cold archival (§3.8): `internal/turn/archival.go` + `internal/memops/fileadapter/fileadapter_archive.go`; the cardinality-pressure archival scan fires at turn close.
 - Working-set content dedup / git minimization (§3.9): `internal/dedup` + `AgeFileChains`, applied per engaged thread.
 - Startup crash recovery (§4.5.8, #94): dual-repo git substrate (disposable per-turn `.git-daily/` + permanent day-grain `.git/`), ≤1-turn durability journal, deterministic cold-start reconciliation, and a crash-injection matrix with a mechanical coverage gate.
@@ -230,7 +231,7 @@ A third, separate integer versions the home's on-disk layout (`~/.personant/vers
 
 ## Design Principles
 
-Personant bets that **deterministic state as canonical, the LLM in narrow judgment roles, and human acknowledgement at high-leverage moments only** scales further than agent-figures-it-all-out alternatives. Concretely: deterministic Go code owns canonical state, integrity, and all mechanical operations; the LLM handles topic tagging, summary drafting, anchor selection, and recognition; the human acks at three load-bearing moments (thread closure, recall surface, fallback dissection). The substrate is plain text in git — inspectability, recoverability, and history come for free.
+Personant bets that **deterministic state as canonical, the LLM in narrow judgment roles, and human acknowledgement at high-leverage moments only** scales further than agent-figures-it-all-out alternatives. Concretely: deterministic Go code owns canonical state, integrity, and all mechanical operations; the LLM handles topic tagging, summary drafting, anchor selection, and recognition; the human acks at three load-bearing moments (thread closure, recall surface, fallback dissection) — with the first two amended by living-with rulings so the ack stays on the judgment calls and the routine cases apply themselves with a committed one-liner. The substrate is plain text in git — inspectability, recoverability, and history come for free.
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full architectural orientation. [`SPEC.md`](SPEC.md) has field-level schemas and algorithms.
 

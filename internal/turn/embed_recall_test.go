@@ -146,6 +146,92 @@ func TestSurfaceRecall_IntraThreadFires(t *testing.T) {
 	}
 }
 
+// TestSurfaceRecall_AcceptedIntraHitDoesNotReOffer is the accept-
+// suppression regression (user ruling 2026-08-05). The intra-thread pass
+// targets the ENGAGED thread by id, so the thread-level exclusion set
+// cannot suppress it: before the fix, accepting an intra candidate left no
+// mark and the identical offer re-appeared on the next turn for as long as
+// the topic continued — the user answered, and was asked again.
+//
+// It drives the real stack twice with the same query: the first pass must
+// offer the early chunk and accept it; the second must not offer it at all.
+func TestSurfaceRecall_AcceptedIntraHitDoesNotReOffer(t *testing.T) {
+	paths, meta := newTestHome(t)
+	body := "## Turn 1\ntrefoil knot topology invariant chirality\n\n" +
+		"## Turn 2\nmonsoon humidity precipitation tropics\n\n" +
+		"## Turn 3\nledger reconciliation accrual depreciation\n"
+	seedThreadWithBody(t, paths, meta.ID, "thr_1", body)
+
+	ops := fileadapter.NewFileAdapter(paths)
+	svc := measure.NewService(ops, model.NewMockEmbedder())
+	if err := svc.Prepare(context.Background()); err != nil {
+		t.Fatalf("Recaller.Prepare: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
+	state := NewState(ops, meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state.Recaller = svc
+
+	const query = "trefoil knot topology invariant chirality"
+	// Publish the fine tier and wait for the async indexer, as the other
+	// intra tests do — a stuck indexer is a defect, not flakiness.
+	svc.EnqueueFlush("thr_1", 3)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		results, err := svc.Recall(context.Background(), measure.Request{
+			QueryText: query, Engaged: "thr_1",
+			Exclude: map[string]struct{}{"thr_1": {}},
+		})
+		if err != nil {
+			t.Fatalf("Recall: %v", err)
+		}
+		if r, ok := findResultByID(results, "thr_1"); ok && r.IntraThread != nil {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Count SURFACINGS, not prompts: an exact-text mock-embedder match
+	// clears the cosine auto bar, so the same hit that would be asked about
+	// in the ask band is auto-accepted here. The suppression contract is the
+	// same either way — an accept, by whichever band, ends the re-offer.
+	var offers int
+	state.RecallResolver = func(_ context.Context, offer RecallOffer) (RecallResolution, error) {
+		offers++
+		accept := make([]int, len(offer.Candidates))
+		for i := range offer.Candidates {
+			accept[i] = i
+		}
+		return RecallResolution{Accept: accept}, nil
+	}
+	state.OnAutoRecalled = func(RecallNotice) { offers++ }
+	engaged := map[string]struct{}{"thr_1": {}}
+	if err := surfaceRecallCandidates(context.Background(), state, query, engaged, "thr_1"); err != nil {
+		t.Fatalf("surfaceRecallCandidates (turn 1): %v", err)
+	}
+	if offers != 1 {
+		t.Fatalf("turn 1: want the intra hit surfaced once, got %d", offers)
+	}
+
+	// Turn 2: same query, same engaged thread. The accepted excerpts are in
+	// the window now, so there is nothing left to propose.
+	if err := surfaceRecallCandidates(context.Background(), state, query, engaged, "thr_1"); err != nil {
+		t.Fatalf("surfaceRecallCandidates (turn 2): %v", err)
+	}
+	if offers != 1 {
+		t.Errorf("accepted intra hit was surfaced again on the next turn (%d total)", offers)
+	}
+
+	// And the suppression is scoped to the accepted turns, not to the
+	// thread: a query for a DIFFERENT early chunk still surfaces.
+	if err := surfaceRecallCandidates(context.Background(), state,
+		"monsoon humidity precipitation tropics", engaged, "thr_1"); err != nil {
+		t.Fatalf("surfaceRecallCandidates (turn 3): %v", err)
+	}
+	if offers != 2 {
+		t.Errorf("a different early chunk must still surface; total=%d", offers)
+	}
+}
+
 // findResultByID returns the result for threadID among results.
 func findResultByID(results []measure.Result, threadID string) (measure.Result, bool) {
 	for _, r := range results {

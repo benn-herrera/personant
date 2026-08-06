@@ -267,6 +267,10 @@ func touchActiveLRU(state *State, thrID string) {
 		state.ActiveThreads = state.ActiveThreads[:len(state.ActiveThreads)-1]
 		state.DormantThreads = append([]string{demoted}, state.DormantThreads...)
 		flushOnDormancy(state, demoted)
+		// The thread has left the working window, so the §3.4 accept marks
+		// that said "these excerpts are already in it" no longer hold: drop
+		// them, and its early content can legitimately surface again.
+		delete(state.recallWindowTurns, demoted)
 	}
 	// DormantThreads is not count-capped (#127): Layer C's byte budget
 	// truncates the rendered dormant set at workset.Compose time, which is

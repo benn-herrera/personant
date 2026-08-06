@@ -69,6 +69,15 @@ layer; treat any change that would invert it as a red flag.
 | LLM                | topic tagging, summary drafting, anchor selection, …   |
 | Human              | ack at three moments: closure, recall surface, dissect |
 
+Two of the three have been AMENDED by user ruling — closure 2026-08-04,
+recall surface 2026-08-05 — in the same shape: the ack is KEPT where the
+leverage is (the closure exception queue, the middle-confidence recall
+band, and every explicit act such as `/done`) and DROPPED for the routine
+case, which the runtime applies itself with one committed line and an
+`ack=auto` event. Removing the ack from the high-leverage moments is still
+the red flag; making a user clear a prompt they cannot read, or cannot act
+on, was found to be the same failure by another route.
+
 Two warning signs that a proposed change is wrong:
 
 - It pushes canonical state into the LLM.
@@ -530,12 +539,39 @@ Implemented and wired into the turn loop (pending full acceptance-validation):
   only. `/done` stays fully interactive. Escape hatch: the §2.6.1
   `closure.ack-mode: auto|always` directive — the FIRST parameter the
   directive layer actually serves at runtime (`store.ReadParameter` +
-  `MemoryOps.DirectiveParam`; the rest of §2.6.1 is still compiled-in
-  constants, and `internal/verify`'s line-grep for `spine.entry-max-chars`
-  has NOT been folded into it yet). The scenario harness pins
+  `MemoryOps.DirectiveParam`; `recall.ack-mode` joined it 2026-08-05 and
+  the rest of §2.6.1 is still compiled-in constants, `internal/verify`'s
+  line-grep for `spine.entry-max-chars` included). The scenario harness pins
   `AckModeAlways`: a scripted `Step.ClosureAck` IS a human ack, and the
   sim's BD-4 runtime mirror models decay closure as an unconditional
   eviction.
+- **§3.4 recall surface — BANDED (user ruling 2026-08-05).** The same
+  medicine as the closure amendment above, for the same diagnosis. A
+  surfaced candidate at or above its TIER's auto threshold
+  (`recall.symbolic-auto-threshold` 0.65 for Jaccard,
+  `recall.cosine-auto-threshold` 0.75 for embedding AND intra-thread —
+  one bar, one scale) is fetched through the ordinary chokepoint with no
+  prompt, one committed line (`recalled: <display> — <gist>`) and
+  `recall.accept ack=auto`; the band between the surface and auto
+  thresholds is asked ONCE per turn with a legible offer (display name,
+  gist, matched symbols or matched turn numbers, short tier + score);
+  below the surface threshold is unchanged. Both defaults are grounded in
+  the C.6 corpus sweep re-measured 2026-08-05 (symbolic precision 1.000 at
+  T ≥ 0.5 at every drift depth; cosine precision 0.58/0.76-0.82/0.89-0.95
+  at 0.55/0.60/0.65, monotone), and the cosine bar coincides with the #111
+  live `ClearlyRelated` cosine — deliberately NOT aliased to it, since a
+  relevance-net knob and an ack policy must be free to move apart. A
+  candidate already resident in Layer B is declined `already-known` by the
+  runtime rather than asked. Escape hatch: `recall.ack-mode: banded |
+  always` — the SECOND parameter the directive layer serves at runtime.
+  The scenario harness pins `always` (`installAckPolicy`, which now covers
+  both ack modes and is re-applied on the simulated relaunch); the auto
+  path is unit-covered, NOT sim-covered, and joins the named
+  banded/auto-mode sim rung the closure amendment already owes. Shipped
+  with the accept-suppression fix: an accepted intra-thread hit records
+  its turn-excerpts as in-window (`State.recallWindowTurns` →
+  `measure.Request.EngagedInWindow`), so it stops re-firing every turn;
+  the mark is dropped when the thread is demoted out of Layer B.
 - Recoverable deep-cold archival (§3.8): `internal/turn/archival.go` +
   `internal/memops/fileadapter/fileadapter_archive.go`; cardinality-pressure
   scan fires at turn close.

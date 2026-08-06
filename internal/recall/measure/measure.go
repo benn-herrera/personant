@@ -253,6 +253,23 @@ type Request struct {
 	// excerpts, de-duped in the union). 0 → no debt pass (byte-identical prior
 	// behaviour). Sourced from the runtime's own debt-cap constant.
 	EngagedDebtWindow int
+
+	// EngagedInWindow is the set of the engaged thread's turn-excerpt numbers
+	// the CALLER considers already in the working window — content the user
+	// has in front of them, which the intra-thread pass must therefore not
+	// propose again. The runtime populates it from accepted intra-thread
+	// recalls (turn.State.recallWindowTurns): the engaged thread is admitted
+	// to the fine pass BY ID, so the thread-level Exclude set cannot express
+	// "the user already took this", and without it an accepted hit re-fires
+	// identically every following turn.
+	//
+	// It filters the intra-thread pass ONLY (fine tier + the #123 lexical
+	// completeness floor), and only for the engaged thread. It is not a
+	// recall-completeness exception: the excluded content is in the window,
+	// which is the one place §3.4 says recall need not reach it, and the
+	// caller drops the set the moment the thread leaves that window. nil/empty
+	// → byte-identical prior behaviour.
+	EngagedInWindow map[int]struct{}
 }
 
 // SymbolicHit is the layer-1 detail for a recalled thread.
@@ -1062,7 +1079,7 @@ func (s *Service) Recall(ctx context.Context, req Request) ([]Result, error) {
 		// related candidate, the scorer bumps this and we log it once so the
 		// degenerate tail is VISIBLE (it is never the normal path).
 		netCapHits := 0
-		if hit := s.intraThread(q, snap, req.Engaged, counter, &netCapHits); hit != nil {
+		if hit := s.intraThread(q, snap, req.Engaged, req.EngagedInWindow, counter, &netCapHits); hit != nil {
 			r := merged[req.Engaged]
 			if r == nil {
 				r = &Result{ThreadID: req.Engaged}
@@ -1095,7 +1112,7 @@ func (s *Service) Recall(ctx context.Context, req Request) ([]Result, error) {
 	// outside the q != nil block on purpose: completeness must not depend on a
 	// query embedding being produced. No-op unless there is an engaged thread,
 	// known debt, and query symbols to match against.
-	if turns := s.debtWindowTurns(ctx, req.Engaged, debtWindow, req.QuerySymbols); len(turns) > 0 {
+	if turns := dropInWindow(s.debtWindowTurns(ctx, req.Engaged, debtWindow, req.QuerySymbols), req.EngagedInWindow); len(turns) > 0 {
 		r := merged[req.Engaged]
 		if r == nil {
 			r = &Result{ThreadID: req.Engaged}
@@ -1261,19 +1278,34 @@ func exhaustiveIntraScan(q []float64, snap *indexSnapshot, threadID string, thre
 // descent when a usable tree is present, else the flat O(C_main)
 // ProposeChunks scan over all of snap.fine[engaged]. See intraChunks for
 // the path-selection rule.
-func (s *Service) intraThread(q []float64, snap *indexSnapshot, engaged string, counter *scoring.CosineCounter, netCapHits *int) *IntraThreadHit {
+//
+// inWindow (Request.EngagedInWindow) drops chunks the caller has already
+// pulled into the working window. The filter runs on the RESULT rather
+// than on the leaves: the descent path reads a prebuilt tree whose leaves
+// cannot be filtered without rebuilding it, and the set is tiny, so
+// dropping matched turns after the rank is both cheaper and identical in
+// outcome for the top hit. A hit whose every chunk is in the window
+// returns nil — the whole point is that there is nothing left to offer.
+func (s *Service) intraThread(q []float64, snap *indexSnapshot, engaged string, inWindow map[int]struct{}, counter *scoring.CosineCounter, netCapHits *int) *IntraThreadHit {
 	if engaged == "" {
 		return nil
 	}
 	chunks := s.intraChunks(q, snap, engaged, counter, netCapHits)
-	if len(chunks) == 0 {
+	turns := make([]int, 0, len(chunks))
+	best := 0.0
+	for _, c := range chunks {
+		if _, skip := inWindow[c.TurnNumber]; skip {
+			continue
+		}
+		if len(turns) == 0 {
+			best = c.Score // chunks are score-ordered; the first survivor is the best
+		}
+		turns = append(turns, c.TurnNumber)
+	}
+	if len(turns) == 0 {
 		return nil
 	}
-	turns := make([]int, len(chunks))
-	for i, c := range chunks {
-		turns[i] = c.TurnNumber
-	}
-	return &IntraThreadHit{Turns: turns, Score: chunks[0].Score}
+	return &IntraThreadHit{Turns: turns, Score: best}
 }
 
 // debtWindowTurns is the §3.4 recall-completeness floor (#123): a BOUNDED
@@ -1335,6 +1367,25 @@ func (s *Service) debtWindowTurns(ctx context.Context, engaged string, window in
 		return nil
 	}
 	return exact.MatchExcerptsBySymbols(excerpts, symbols)
+}
+
+// dropInWindow removes turn numbers the caller has already pulled into the
+// working window (Request.EngagedInWindow) from a lexical debt-window result.
+// The completeness floor and the fine tier answer the same question about the
+// same thread, so they honour the same filter — otherwise an accepted excerpt
+// would keep re-surfacing through the lexical path alone. An empty filter
+// returns the input unchanged (no allocation).
+func dropInWindow(turns []int, inWindow map[int]struct{}) []int {
+	if len(turns) == 0 || len(inWindow) == 0 {
+		return turns
+	}
+	out := turns[:0:0]
+	for _, n := range turns {
+		if _, skip := inWindow[n]; !skip {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // unionIntraTurns merges the lexical debt-window turns into the (possibly nil)

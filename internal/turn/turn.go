@@ -111,9 +111,27 @@ type State struct {
 
 	// RecallResolver resolves the §3.4 recall offer surfaced at turn
 	// close into accept/decline decisions. nil → recall stays log-only
-	// (no offer surfaced). The chat REPL installs an interactive
+	// (no offer surfaced, and no auto-accept either — see
+	// surfaceRecallCandidates). The chat REPL installs an interactive
 	// resolver; the scenario harness installs a scripted one.
 	RecallResolver RecallResolver
+
+	// RecallAckMode is the §2.6.1 recall.ack-mode policy. The zero value
+	// is RecallAckBanded — a high-confidence candidate is fetched without
+	// asking and only the middle band is put to the resolver.
+	// RecallAckAlways restores the pre-2026-08-05 every-candidate prompt.
+	// The chat REPL reads the directive; the scenario harness pins
+	// RecallAckAlways (its scripted RecallAck IS a human ack).
+	RecallAckMode RecallAckMode
+
+	// OnAutoRecalled receives one RecallNotice per §3.4 auto-band recall
+	// the runtime fetched without asking. nil → the fetch is silent (the
+	// scenario harness and every non-interactive caller). Presentation
+	// seam only, with the same contract as OnPhase and OnAutoClosed: it
+	// must not block and must not mutate State, and nothing in the
+	// pipeline observes it. The durable record is recall.accept ack=auto,
+	// not this.
+	OnAutoRecalled func(RecallNotice)
 
 	// Curator drafts the §3.5 closure summary + anchors for a thread
 	// that has decayed into idleness. NewState leaves it nil (closure
@@ -321,6 +339,43 @@ type State struct {
 	// eligibility — which origins can be NEWLY added — is residency-gated.
 	// nil is the well-formed empty case (no recall ever accepted).
 	recallSurfaced map[string]struct{}
+
+	// recallWindowTurns maps a thread ID to the turn-excerpt numbers an
+	// ACCEPTED §3.4 intra-thread recall has pulled into the working window
+	// (user ruling 2026-08-05, the accept-suppression fix). The §4.1 step-3
+	// intra pass targets the ENGAGED thread by id, so the thread-level
+	// Exclude set cannot suppress it: before this, an accepted intra hit
+	// re-fired identically on every following turn while the topic
+	// continued — the user accepted, and was asked the same question again.
+	//
+	// The fix is at the state level rather than a cooldown timer because
+	// the intra pass's subject is "content not already in the window":
+	// accepting says those excerpts have been dealt with, so recording that
+	// is what makes the re-offer stop, and it stops for exactly as long as
+	// the thread is in the window. Residency ends the mark: touchActiveLRU
+	// drops a thread's entry when the thread is demoted out of Layer B, so a
+	// thread that has decayed back out of the working set can legitimately
+	// surface its early content again.
+	//
+	// HONEST LIMIT (pre-existing, NOT introduced here). An accept promotes
+	// the THREAD — fetchThroughChain fires a thread.fetched delta and lifts
+	// it to the front of Layer B — and Layer B renders each thread's body
+	// newest-first under a per-thread byte budget (workset.PerThreadBudget).
+	// So accepting an intra hit on an OLD excerpt does not put that excerpt's
+	// text in front of the model; there is no excerpt-level promotion in the
+	// working set today. What this mark records is therefore the USER'S
+	// DECISION, not a proof of residency. It is the right suppression either
+	// way — re-asking a question already answered is the defect — but the
+	// missing half (promote the matched excerpts, not just the thread) is a
+	// real gap in what an intra accept delivers, and it is worth closing
+	// before intra-thread recall is called done.
+	//
+	// Session-scoped and deliberately NOT persisted (it is a statement
+	// about THIS session's window, which a relaunch rebuilds) and NOT part
+	// of the §4.3.3 rollback snapshot: recall runs post-canonical at turn
+	// close, so a retracted turn never reaches it — the same reasoning that
+	// keeps closurePendingQueued out. nil is the well-formed empty case.
+	recallWindowTurns map[string]map[int]struct{}
 
 	// embeddingDebt accrues per thread the count of turn-excerpts that have
 	// scrolled out of the *assembly* window (ThreadTurnWindow) but are not

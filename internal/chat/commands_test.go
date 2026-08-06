@@ -11,6 +11,7 @@ import (
 
 	"personant/internal/memops"
 	"personant/internal/model"
+	"personant/internal/recall/measure"
 	"personant/internal/store"
 	"personant/internal/turn"
 	"personant/internal/version"
@@ -410,6 +411,115 @@ func TestClosureAckModeDirective(t *testing.T) {
 			}
 			if tt.wantWarn == "" && diag.Len() > 0 {
 				t.Errorf("unexpected diag output: %q", diag.String())
+			}
+		})
+	}
+}
+
+// TestRecallAckModeDirective: the §2.6.1 recall.ack-mode directive selects
+// the session policy, and every failure mode keeps the banded default
+// rather than refusing the session (the closure.ack-mode contract).
+func TestRecallAckModeDirective(t *testing.T) {
+	tests := []struct {
+		name      string
+		userMD    string
+		want      turn.RecallAckMode
+		wantWarn  string
+		writeFile bool
+	}{
+		{name: "unset falls back to banded", want: turn.RecallAckBanded},
+		{
+			name: "always is honored", writeFile: true,
+			userMD: "---\nparameters:\n  recall.ack-mode: always\n---\n",
+			want:   turn.RecallAckAlways,
+		},
+		{
+			name: "unrecognized value warns and keeps banded", writeFile: true,
+			userMD:   "---\nparameters:\n  recall.ack-mode: auto\n---\n",
+			want:     turn.RecallAckBanded,
+			wantWarn: "is not banded|always",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			paths := scaffoldHome(t)
+			if tt.writeFile {
+				if err := os.MkdirAll(paths.DirectivesDir, 0o755); err != nil {
+					t.Fatalf("mkdir directives: %v", err)
+				}
+				path := filepath.Join(paths.DirectivesDir, store.DirectiveUserFile)
+				if err := os.WriteFile(path, []byte(tt.userMD), 0o644); err != nil {
+					t.Fatalf("write user.md: %v", err)
+				}
+			}
+			var diag bytes.Buffer
+			got := recallAckMode(context.Background(), newOps(paths), "prj_1", &diag)
+			if got != tt.want {
+				t.Errorf("recallAckMode = %q, want %q", got, tt.want)
+			}
+			if tt.wantWarn != "" && !strings.Contains(diag.String(), tt.wantWarn) {
+				t.Errorf("diag = %q, want a warning containing %q", diag.String(), tt.wantWarn)
+			}
+			if tt.wantWarn == "" && diag.Len() > 0 {
+				t.Errorf("unexpected diag output: %q", diag.String())
+			}
+		})
+	}
+}
+
+// TestRecallOfferLines: the redesigned §3.4 offer line (user ruling
+// 2026-08-05) must name the thread and say WHY it matched — never a bare
+// thr_N and a bare score. One case per evidence kind.
+func TestRecallOfferLines(t *testing.T) {
+	tests := []struct {
+		name string
+		cand turn.RecallCandidate
+		want []string
+	}{
+		{
+			name: "symbolic names the matched symbols",
+			cand: turn.RecallCandidate{
+				Result: measure.Result{
+					ThreadID: "thr_3", Score: 0.56,
+					Symbolic: &measure.SymbolicHit{Score: 0.56, MatchedSymbols: []string{"emulsion", "viscosity"}},
+				},
+				Display: "why is the emulsion separating", Gist: "thickener ratio pinned at 0.4",
+			},
+			want: []string{"why is the emulsion separating", "matched emulsion, viscosity", "shared topics 0.56"},
+		},
+		{
+			name: "intra-thread names the turns",
+			cand: turn.RecallCandidate{
+				Result: measure.Result{
+					ThreadID: "thr_3", Score: 0.81,
+					IntraThread: &measure.IntraThreadHit{Score: 0.81, Turns: []int{12, 40, 103, 210}},
+				},
+				Display: "the long-running rheology thread", Gist: "shear-thinning model selection",
+			},
+			want: []string{"earlier here, turn 12, 40, 103, …", "earlier in this thread 0.81"},
+		},
+		{
+			name: "embedding-only says the similarity is the evidence",
+			cand: turn.RecallCandidate{
+				Result: measure.Result{
+					ThreadID: "thr_9", Score: 0.62,
+					Embedding: &measure.EmbeddingHit{Score: 0.62},
+				},
+				Display: "surfactant sourcing", Gist: "supplier shortlist",
+			},
+			want: []string{"similar wording", "related 0.62"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := strings.Join(recallOfferLines(1, tt.cand), "\n")
+			if strings.Contains(got, "thr_") {
+				t.Errorf("offer line leaks a raw thread id: %q", got)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("offer line missing %q:\n%s", want, got)
+				}
 			}
 		})
 	}

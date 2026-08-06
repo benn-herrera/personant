@@ -37,7 +37,7 @@ This thesis recurs at every layer. When making a design decision, ask:
 |---|---|
 | Deterministic (Go runtime) | canonical state holder; integrity enforcer; build/query/index operations; autonomic git management of `~/.personant/` |
 | LLM | narrow generative/judgment roles: topic tagging, summary drafting, anchor selection, recognition, dissection clustering |
-| Human | final ack at three load-bearing moments: closure (retirement), opportunistic recall surface, fallback dissection trigger |
+| Human | final ack at three load-bearing moments: closure (retirement), opportunistic recall surface, fallback dissection trigger — the first two AMENDED by user ruling (closure 2026-08-04, recall 2026-08-05): the ack is kept where the leverage is (the exception queue; the middle-confidence recall band; every explicit act like `/done`) and dropped for the routine case, which is applied automatically with one committed line and an `ack=auto` event |
 
 **Two warning signs that a proposed change is wrong:**
 
@@ -56,7 +56,7 @@ The LLM never directly mutates state that matters. It *proposes*; deterministic 
 
 - **Closure:** curator drafts retirement summary → user acks → deterministic code writes thread file + spine entry.
 - **Workspace writes:** LLM writes to `.personant/tmp/foo.md` via `fs.tmp_write` → emits `fs.propose_promote(tmp_id, target_path)` → user acks → deterministic code moves the file.
-- **Recall surfacing:** deterministic match fires → user acks → explicit fetch into Layer B.
+- **Recall surfacing:** deterministic match fires → the middle-confidence band is acked → explicit fetch into Layer B. A match above its tier's auto threshold is fetched without asking, with one committed line (user ruling 2026-08-05, §3.4 AMENDED): a candidate the matcher is confident about is not a judgment call, and a prompt the user clears reflexively is worse than no prompt.
 
 The ack is the **integrity gate** at the moment its accuracy matters most.
 
@@ -715,6 +715,7 @@ If you see one of these proposed (or are about to write it), stop and surface th
 |---|---|---|
 | "Let the LLM decide where to put state" | Pushes canonical state into the LLM | Deterministic code holds state; LLM proposes via tmp + ack |
 | "Ack every closure, however routine" | An ack the user clears reflexively launders an unread summary as human-verified — the §3.5 rubber-stamp failure, reached through frequency (AMENDED 2026-08-04) | Keep the ack where the leverage is (anchor-rich / long-engaged threads), batched at a session boundary; auto-accept the routine ones. Removing the ack from the high-leverage moments entirely is still the anti-pattern |
+| "Ack every recall candidate, however confident" | Same failure in its recall form (AMENDED 2026-08-05): a routine, cryptic four-option question — `[1] thr_3 score=0.56 (intra-thread)` — is answered by whatever clears it fastest, which launders an unvetted fetch as a human decision | Band it: auto-fetch above the tier's auto threshold with one committed line, ask the middle band with a question a user can answer in two seconds (display name, gist, why it matched), surface nothing below. And if an ack recurs after the user answered it, the defect is the missing state, not the user |
 | "Use SQLite for the spine" | Substrate violation; loses inspectability + git-diffability | Text + git; SQLite stays in reserve as a *derived* index if scale forces it |
 | "Have the LLM run `git commit`" | Mixes LLM-controlled with autonomic git | Runtime commits autonomically; LLM has no git tool |
 | "Add this dep speculatively" | Approved-when-earned violation | Wait until consumer is real; bring dep in *with* consumer |

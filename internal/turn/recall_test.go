@@ -401,6 +401,167 @@ func TestSurfaceRecall_DeclineAllLogsReason(t *testing.T) {
 	}
 }
 
+// bandedState builds a recall state with a resolver that records whether
+// it was consulted, for the §3.4 band tests. Query symbols are alpha+beta.
+func bandedState(t *testing.T, paths store.PersonantPaths, meta memops.ProjectMeta, asked *[]string) *State {
+	t.Helper()
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state.coalesce.addSymbol("alpha", "alpha", memops.SourceUser)
+	state.coalesce.addSymbol("beta", "beta", memops.SourceUser)
+	state.RecallResolver = func(_ context.Context, offer RecallOffer) (RecallResolution, error) {
+		for _, c := range offer.Candidates {
+			*asked = append(*asked, c.ThreadID)
+		}
+		return RecallResolution{}, nil
+	}
+	return state
+}
+
+// TestSurfaceRecall_AutoBandFetchesWithoutAsking — a candidate at or above
+// its tier's auto bar (symbolic 1.0 ≥ 0.65) is fetched with no prompt: the
+// resolver is never consulted, the thread lands in Layer B, the notice hook
+// fires once, and the accept is logged ack=auto (§3.4 AMENDED 2026-08-05).
+func TestSurfaceRecall_AutoBandFetchesWithoutAsking(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta"})
+
+	var asked []string
+	state := bandedState(t, paths, meta, &asked)
+	var notices []RecallNotice
+	state.OnAutoRecalled = func(n RecallNotice) { notices = append(notices, n) }
+
+	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
+		t.Fatalf("surfaceRecallCandidates: %v", err)
+	}
+
+	if len(asked) != 0 {
+		t.Errorf("auto-band candidate was put to the resolver: %v", asked)
+	}
+	if !slices.Contains(state.ActiveThreads, "thr_1") {
+		t.Errorf("auto-accepted thr_1 not promoted to Layer B: %v", state.ActiveThreads)
+	}
+	if len(notices) != 1 || notices[0].ThreadID != "thr_1" {
+		t.Fatalf("want one auto-recall notice for thr_1, got %+v", notices)
+	}
+	if notices[0].Display == "" || notices[0].Gist == "" {
+		t.Errorf("notice must carry a display name and a gist, got %+v", notices[0])
+	}
+
+	logBody := readDayLog(t, paths)
+	if !strings.Contains(logBody, "recall.accept thr=thr_1 layers=symbolic ack=auto") {
+		t.Errorf("want recall.accept ... ack=auto; log:\n%s", logBody)
+	}
+	if strings.Contains(logBody, "recall.offer") {
+		t.Errorf("auto band must surface no offer:\n%s", logBody)
+	}
+}
+
+// TestSurfaceRecall_AskBandPromptsAndLogsHuman — a candidate below the
+// auto bar (symbolic 0.5 < 0.65) is put to the resolver, and its accept is
+// logged ack=human. The two ack kinds are the §3.5 canary discipline
+// applied to recall: an auto fetch must never read as a human decision.
+func TestSurfaceRecall_AskBandPromptsAndLogsHuman(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
+
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state.coalesce.addSymbol("alpha", "alpha", memops.SourceUser)
+	state.coalesce.addSymbol("beta", "beta", memops.SourceUser)
+	var offered []RecallCandidate
+	state.RecallResolver = func(_ context.Context, offer RecallOffer) (RecallResolution, error) {
+		offered = offer.Candidates
+		return RecallResolution{Accept: []int{0}}, nil
+	}
+
+	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
+		t.Fatalf("surfaceRecallCandidates: %v", err)
+	}
+
+	if len(offered) != 1 || offered[0].ThreadID != "thr_1" {
+		t.Fatalf("want thr_1 offered, got %+v", offered)
+	}
+	// The offer carries the legible fields the redesigned prompt renders.
+	if offered[0].Display == "" || offered[0].Gist == "" {
+		t.Errorf("offered candidate missing display/gist: %+v", offered[0])
+	}
+	logBody := readDayLog(t, paths)
+	if !strings.Contains(logBody, "recall.accept thr=thr_1 layers=symbolic ack=human") {
+		t.Errorf("want recall.accept ... ack=human; log:\n%s", logBody)
+	}
+}
+
+// TestSurfaceRecall_AlwaysModeAsksEverything — the §2.6.1 escape hatch:
+// under recall.ack-mode: always even a top-scoring candidate goes to the
+// resolver, and nothing is fetched on its own.
+func TestSurfaceRecall_AlwaysModeAsksEverything(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta"})
+
+	var asked []string
+	state := bandedState(t, paths, meta, &asked)
+	state.RecallAckMode = RecallAckAlways
+
+	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
+		t.Fatalf("surfaceRecallCandidates: %v", err)
+	}
+
+	if len(asked) != 1 || asked[0] != "thr_1" {
+		t.Errorf("always-mode must ask about every candidate, asked=%v", asked)
+	}
+	if slices.Contains(state.ActiveThreads, "thr_1") {
+		t.Errorf("always-mode declined candidate was promoted anyway: %v", state.ActiveThreads)
+	}
+}
+
+// TestSurfaceRecall_ResidentCandidateIsNotAsked — a thread already in
+// Layer B is already in the context the offer proposes to pull it into, so
+// the banded path answers it itself (already-known) instead of asking. This
+// is what keeps the auto band from re-fetching and re-announcing the same
+// resident thread every turn a topic continues.
+func TestSurfaceRecall_ResidentCandidateIsNotAsked(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
+
+	var asked []string
+	state := bandedState(t, paths, meta, &asked)
+	state.ActiveThreads = []string{"thr_1"}
+
+	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
+		t.Fatalf("surfaceRecallCandidates: %v", err)
+	}
+
+	if len(asked) != 0 {
+		t.Errorf("resident thread was put to the resolver: %v", asked)
+	}
+	logBody := readDayLog(t, paths)
+	if !strings.Contains(logBody, "recall.decline thr=thr_1 reason=already-known") {
+		t.Errorf("want an already-known decline for the resident thread; log:\n%s", logBody)
+	}
+}
+
+// TestParseRecallAckMode — the §2.6.1 directive parser, including the
+// unrecognized-value contract (ok=false, caller keeps the default).
+func TestParseRecallAckMode(t *testing.T) {
+	for _, tc := range []struct {
+		in    string
+		want  RecallAckMode
+		valid bool
+	}{
+		{"banded", RecallAckBanded, true},
+		{" ALWAYS ", RecallAckAlways, true},
+		{"always", RecallAckAlways, true},
+		{"auto", "", false},
+		{"", "", false},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			got, ok := ParseRecallAckMode(tc.in)
+			if ok != tc.valid || got != tc.want {
+				t.Errorf("ParseRecallAckMode(%q) = (%q, %v), want (%q, %v)", tc.in, got, ok, tc.want, tc.valid)
+			}
+		})
+	}
+}
+
 // TestSurfaceRecall_NoResolverStaysLogOnly — with no RecallResolver
 // installed, recall still runs and logs its per-layer matches, but no
 // offer is surfaced and no accept/decline verdict is recorded. Proves
