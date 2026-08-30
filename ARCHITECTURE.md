@@ -11,7 +11,7 @@
 
 Read this file first. Descend into `SPEC.md` for execution detail; `AGENTS.md` for the contract on agent behavior.
 
-**Reading time:** ~12 minutes.
+**Reading time:** ~35–40 minutes.
 
 ---
 
@@ -114,9 +114,9 @@ When pressure builds to "just add X," ask: is this constraint load-bearing, or a
 
 ### Port-and-adapter at the substrate boundary
 
-Application code (`internal/turn`, `internal/chat`, `internal/recall`, `internal/workset`, cmd/*, scenarios harness) depends on `memops.MemoryOps` — the conceptual operations port — not on the substrate directly. One adapter ships today (`internal/memops/fileadapter`: JSONL + markdown + YAML frontmatter + TOML + go-git on `~/.personant/`); future adapters (a derived KV index, a SQLite-backed simulation accelerator, anything substrate-shifting that future data demands) implement the same interface without rewriting callers or tests.
+Application code (`internal/turn`, `internal/chat`, `internal/recall/measure`, cmd/*, scenarios harness) depends on `memops.MemoryOps` — the conceptual operations port — not on the substrate directly. One adapter ships today (`internal/memops/fileadapter`: JSONL + markdown + YAML frontmatter + TOML + go-git on `~/.personant/`); future adapters (a derived KV index, a SQLite-backed simulation accelerator, anything substrate-shifting that future data demands) implement the same interface without rewriting callers or tests.
 
-What stays direct from `internal/store`: pure helpers (`Normalize`, `DominantSource`), data-type aliases (`SpineRecord`, `ThreadFrontmatter`, ...), and substrate inspection in test invariants (where `h.Paths` access is the *correct* pattern — invariants are validators of the substrate, not application code).
+Pure renderers (`internal/workset.Compose`, `internal/recall/scoring`) are **substrate-free**: they import `memops`'s plain domain types (`SpineRecord`, `Budget`, `ThreadMeta`, ...) but never the `MemoryOps` port itself, operating only on data the caller already fetched. What stays direct from `internal/store` for the same reason: pure helpers (`Normalize`, `DominantSource`) and data-type aliases (`ThreadFrontmatter`, ...). Tests inspect the substrate directly via `h.Paths` in invariants — that's the test-side substrate validator pattern, not an application-code exception.
 
 The asymmetric-cost discipline drove the boundary: by the time simulation data reveals an adapter-layer change is needed, the work is local to one new adapter package rather than codebase-wide refactoring.
 
@@ -187,7 +187,7 @@ Every event also carries a **retention class** (`task` vs `decision`) assigned b
 
 1. **Symbol extraction** (§3.3) — deterministic regex pass + parse model emissions; routing by retention class.
 2. **Engagement signal** (§3.2) — coalesced per-turn (multi-tool-call turns don't multiply `turn_count`).
-3. **Dedup decision** (§3.9) — content-addressed identifier replacement (v0.2).
+3. **Dedup decision** (§3.9) — content-addressed identifier replacement.
 4. **Budget check** (§3.1) — bump-eviction so the budget is honored before the next event lands.
 5. **Logging** (§2.8).
 
@@ -257,7 +257,7 @@ A thread's life moves through five stages:
 2. **Active** in Layer B while engaged (model tags it in per-turn topic list).
 3. **Dormant** in Layer C as engagement decays (no longer in the model's recent topic tags).
 4. **Retired** to Layer A (spine only) on closure, with full content preserved in `threads/thr_<n>.md`.
-5. **Archived** off-spine (deep cold; v0.2) only if spine cardinality pressure builds — recoverable by explicit fetch through git.
+5. **Archived** off-spine (deep cold) only if spine cardinality pressure builds — recoverable by explicit fetch through git.
 
 The natural retirement boundary is "thread reached a resting point," not "context window pressure." Resting points are recognized at retirement-prompt time; the user's ack is what makes the call. (Spec §3.5.)
 
@@ -321,7 +321,7 @@ Triggers:
 
 Flow: curator drafts retirement summary + anchor symbol set → user acks (single keystroke), edits, or defers → on ack, thread file written, spine entry generated, Layer B/C eviction follows. (Spec §3.5.)
 
-Deep cold archival is the next stage past retirement (v0.2): when spine cardinality pressure builds, the runtime archives oldest retired threads off-spine via `git rm` + `git commit` + an `archive/index.jsonl` entry. Recovery via `git show <commit>:<path>` is one command — no bespoke archive format. (Spec §3.8.)
+Deep cold archival is the next stage past retirement — **implemented and wired** (`internal/turn/archival.go`, `cmd/archive.go` `archive list`/`archive recover`): when spine cardinality pressure builds, the runtime archives oldest retired threads off-spine via `git rm` + `git commit` + an `archive/index.jsonl` entry. Recovery via `git show <commit>:<path>` is one command — no bespoke archive format. (Spec §3.8.)
 
 ### Fallback dissection (worst-case path)
 
@@ -397,15 +397,16 @@ recreate).
 
 Personant is a CLI product, so the terminal *is* the surface — and it was never designed; it accreted around a line-reader built for one job, until five bugs shipped in one week of dogfooding. They were one defect: **multiple independent owners of one terminal**. `internal/term` is the sole owner of the file descriptors, the terminal mode, the single reader, every emitted byte, and the ownership state that says who holds what at each instant. `internal/chat` keeps POLICY (what to ask, what a key means); `internal/shell` keeps process execution and signal delivery; everything else becomes a client that requests an effect and can never name the fd. Output is a **2×2 — {always, tty-only} × {scrollback, ephemeral}** — with one cell **forbidden** (a pipe has no erasure, so "always + ephemeral" cannot exist) and stderr *inside* the arbiter as a committed channel through the same serialization point; naming the missing (tty-only, scrollback) cell is what dissolved the catch-all writer that had absorbed every other one. Input is a **single read path**, `ReadLine(Question)`: there is no API that writes text and then separately reads a line, so the shape that erased seven menu prompts cannot be spelled. The platform boundary is **two seams, not one** — S1 device (bytes, termios, winsize; the scripted byte-level fake plugs in here, keeping exact emitted output assertable) and S2 platform (decoded events, mode intent, size; a Windows `ReadConsoleInput` backend would plug in here) — because `read(p []byte)` cannot receive an `INPUT_RECORD`, and a resize is a signal rather than bytes on unix either. Verification is deliberately three-part and none of it is a live terminal: a **fail-closed screen model** that reconstructs what the user would see and errors on any sequence it does not model (so writer and model share one finite alphabet and cannot drift), **plain-backend bookkeeping parity** — the non-TTY backend keeps the same books as the TTY one, which is the only sensor for the byte-invisible defect class of stale mode and mis-routed interrupts, the two that shipped green — and **two mechanical grep-class gates**, one banning direct terminal access outside the package and one banning `time.Sleep` in terminal tests, each with an explicit allowlist that must not grow. See SPEC §4.3.1–§4.3.3 for the behavior and `mad-design/terminal-layer/` for the debate that produced it.
 
-### Memory consolidation — the "sleep" cycle (future consideration)
+### Memory consolidation — the "sleep" cycle
 
-Personant's memory layering is deliberately analogous to organic memory: **working short-term** (the live working set), **consolidated long-term** (the spine + thread bodies, mostly read), **archival deep memory** (off-spine, rarely touched), and a **metadata layer** for operating on active context fast — tapping long-term memory read-only, *activating* it read/write, or unpacking archival entries.
-
-Under sustained working use this organization fragments unavoidably: threads close out of order, the spine accretes, derived structures and archival boundaries drift from their ideal packing. In-turn maintenance keeps the substrate *correct* but not *orderly*.
-
-The intended remedy is an offline **consolidation cycle** — the system's equivalent of organic sleep. During idle time (the day off, or any unused window) the runtime would run larger-scale reorganization it cannot afford mid-turn: re-packing fragmented structures into orderly arrangements, compacting the spine, advancing archival, **running `git gc`/repack on the substrate** (the per-turn daily cadence of SPEC §3.11 accumulates loose objects; packing is a sleep-cycle job, not a working-hours one — complementing the in-flight **count-triggered** gc that fires when daily loose objects cross a threshold, and the day barrier that nukes/reborns the daily DB), making the final keep/toss calls on data the faster in-turn transient-data lifecycle (§3.0) left questionable, and **building/reconciling the within-thread summary trees** (`measure.RebuildTrees`, #111 — the sleep pass summarizes dirtied subtrees of the per-thread chunk hierarchy so the next session's intra-thread recall can descend in O(log n) instead of scanning all of a multi-year thread's chunks). Working hours stay responsive; the heavy reorganization happens when nothing is waiting on it.
-
-This is a future consideration, not v0.1 — but the v0.1 acceptance simulation already supplies the hook: the day-off is a real idle window in the workload model, and closure (§3.5) / archival (§3.8) are exactly the mechanisms a consolidation pass would tidy.
+Designed, partially built. The day-off idle window already fires
+`MemoryOps.Consolidate` (git gc/repack on both git DBs, SPEC §3.11) and the
+within-thread summary-tree rebuild (`measure.RebuildTrees`, #111). The
+fuller offline-reorganization vision — re-packing fragmented structures,
+compacting the spine, advancing archival, and the SPEC §3.10.8
+content-retention keep/toss precision layer, which cites this section by
+name — is designed, not built. Full design capture: **ROADMAP.md →
+Far-horizon, "Memory consolidation."**
 
 ### Weight-baked instinct from outcome history
 
@@ -416,37 +417,19 @@ horizon; not v0.1, not v1.0, not v2.0). Left here as a pointer because the
 "sleep cycle" section above and the model-family-as-platform section below
 both reference it.
 
-### Submind via clone — isolated exploration and frontier-model collaboration (future consideration)
+### Submind via clone
 
-Personant's substrate is a git tree already; a **submind** is a subdirectory clone of that tree, with the primary's home as the submind's `origin`. The submind operates as a full personant on a named branch in its local clone — its own spine, its own threads, its own working-set discipline — and integrates back via standard git push + merge. Branch isolation means the submind never collides with the primary until merge; the existing substrate machinery handles the rest.
-
-**Why subminds earn their architectural slot:**
-
-- **Speculative exploration with a commit boundary.** Try a thought experiment in a submind; decide whether the result is worth integrating. The primary's belief state isn't disturbed by the exploration.
-- **Specialization without context-switch cost.** A submind focused on one task continues while the primary continues with the broader context.
-- **Parallel triangulation.** Two submind subdirectories pursuing variant hypotheses of the same problem are just two subdirectories; the user (or the primary) decides at merge time which to integrate.
-- **Naming discipline via universal mind_id suffix.** Every personant has a `mind_id`; every autonomically-generated identifier in that personant is suffixed. Suffixes are flat (`<generation>-<timestamp>`), not chained; immediate-parent provenance is held in metadata. Cross-submind name collisions are impossible by construction; the merge is git-trivial on the namespaced substrate.
-
-**Submind as the natural home for frontier-model collaboration.** A submind can run a *two-model* configuration: a local **liaison model** (gemma family — E4B for swarm-cheap, 26B-A4B for default judgment quality) handling all family-stable infrastructural prompts (topic-tagging, symbol extraction, recall scoring, closure summaries), and a **guest model** (a frontier model — Claude / GPT / Gemini / etc.) providing the actual reasoning content. Inside the submind:
-
-- The liaison model handles every surface where family-stable consistency matters (substrate metadata, recall behavior, closure decisions).
-- The guest model produces the conversational content — what goes into threads, turn excerpts, hot state.
-- Substrate stays gemma-shaped (infrastructural); content is guest-shaped.
-- The submind's branch identity carries the provenance — no per-symbol provenance tags, no per-turn guest-engagement aggregator needed. Which submind contained the work *is* the provenance.
-
-This isolation is what makes frontier-model collaboration architecturally safe rather than a cross-family contamination risk. The main personant's substrate stays family-stable (per the [model-family-as-platform](#model-family-as-platform-v10-platform-coupling) principle below — every infrastructural prompt belongs to one family); the submind container bounds the foreign model's behavioral influence to where its capability is wanted (the content surface) and away from where family-stability is load-bearing (the infrastructural surface). Eval-by-comparison falls out for free: spawn a submind with `guest=Claude`, another with `guest=gemma-31B-local`, compare at merge time — same task, same substrate format, two perspectives.
-
-**Distinguished from concurrent sessions (below).** Subminds are *isolated clones with a merge integration point*. Concurrent sessions are *interleaved multitasking on shared canonical state*. They answer different questions: subminds give you a commit boundary ("explore divergent hypotheses without bleeding belief state"); concurrent sessions give you simultaneous live attention on the same memory ("two coordinated tasks at once"). They can coexist; they are not substitutes.
-
-**Merge semantics.** The viable spectrum, captured for design completeness:
-
-- **Archive-only minimal path:** submind archives its own active work before merge; primary git-merges only the append-only archive. Eliminates running-state conflicts by construction; primary never reconciles a hot thread, only absorbs frozen archive entries. Tradeoff: belief-state from divergent thought doesn't silently flow back; combining a submind's version of a topic with the primary's is a manual review-and-incorporate operation. Most conservative.
-- **Structural merge:** once names are globally unique (suffix scheme above), the submind's live spine entries, thread directories, and working-set membership can travel back as-is. `git merge` handles the append-only files via union driver; suffix-disjoint namespaces avoid conflict. Pre-clone threads are read-only inside the submind; continuations create a new namespaced thread (`thr_42-S1` with `derived_from: thr_42` frontmatter) — the same topic now has two threads in the merged primary, and both surface naturally on the same recall query.
-- **Communication channel during life.** Pub/sub IPC between subminds and primary while the submind is active — status events, queries, results — *not* substrate read/write across the boundary. Merge is by definition a *termination*; there is no continuing submind activity after merge.
-
-**Nested subminds.** The architecture is naturally recursive — a submind IS a personant; by symmetry it can spawn its own submind. Suffix composition (`thr_42-S1-S2`) gives unambiguous provenance at any depth. Merge propagates one level at a time. No structural depth limit; the real bound is the user's review-budget at each merge gate.
-
-Future consideration, post-v0.1; plausibly v2.0. The frontier-collaboration use case may end up being the primary motivator for prioritizing submind work — it turns submind from "speculative isolation mechanism" into "the natural home for inviting frontier reasoning without sacrificing family-stable substrate."
+Designed, not built. A submind is a subdirectory git clone of the home
+tree, operating as a full personant on a named branch and merging back via
+git push + merge — the architecture's answer to isolated exploration and
+frontier-model collaboration without cross-family substrate contamination
+(see "Model-family as platform" below). Today's archive-index schema
+already carries the load-bearing fact this design needs: `parent_commit_hash`
+is stored explicitly (SPEC §3.8 entry format) rather than derived by a
+first-parent walk, because a future submind merge commit has multiple
+parents. Full design capture (naming discipline, merge semantics, nested
+subminds, the liaison/guest two-model split): **ROADMAP.md → Far-horizon,
+"Submind via clone."**
 
 ### Model-family as platform (v1.0 platform coupling) {#model-family-as-platform-v10-platform-coupling}
 
@@ -499,19 +482,18 @@ Where the LLM legitimately earns its place (inherently fuzzy, no deterministic s
 
 The corollary: **even within LLM tasks, keep prompts narrow.** Constrain the input space; constrain the output space; validate output deterministically before trusting it. A broadened prompt expands both the family-tuning surface and the silent-drift surface.
 
-### Concurrent sessions — multitasking one career (future consideration)
+### Concurrent sessions
 
-A user routinely interleaves work — two tasks open at once, attention alternating. CWD-scoped agents (Claude Code, opencode, …) get this for free: each working directory is its own isolated context. Personant cannot take that shortcut — its premise is a **single unified awareness and career**, so a separate context per directory would fragment the very thing the system exists to keep whole. Personant must instead genuinely **multitask**: multiple live conversations open against one shared memory.
-
-Consequences, in rough order of when they bite:
-
-- **Thread safety.** Concurrent sessions read and mutate shared canonical state (spine, thread files, the §3.0 chain). The runtime is currently single-session; concurrent sessions need real synchronization at the substrate boundary.
-- **Per-session working set.** Each session carries its own active threads (its own Layer B) and must track which is which — "the active thread" becomes session-scoped, not global.
-- **Cross-reference vs. isolation.** Two concurrently-active threads may legitimately want to cross-reference — often desirable. But the user must be able to declare two lines of work **unrelated**: an explicit "do not conflate these; neither thread's context bleeds into the other." Recall and working-set composition would have to honor that boundary.
-
-Concurrency is also a fragmentation *source*: interleaved multitasking touches threads out of order and lets per-session working sets drift apart. That makes the results of concurrent sessions prime material for the **"sleep" cycle** above — the two future mechanisms are coupled, concurrency creates the tangle and offline consolidation clears it.
-
-Future consideration, not v0.1 — and distinct from multi-*user* (v2.0): this is one user, one career, many concurrent conversations.
+Designed, not built: multiple live conversations open against one shared
+memory — multitasking one career, since Personant's single-unified-awareness
+premise rules out the CWD-scoped-context shortcut other agent tools use.
+Distinguished from a submind (isolated clone + merge point, above) and from
+multi-user (v2.0, locked): concurrent sessions interleave on *shared*
+canonical state, a submind isolates on a branch. Raises thread safety,
+per-session working-set scoping, and explicit cross-reference-vs-isolation
+declarations; also a fragmentation source the "sleep" cycle above would need
+to clear. Full design capture: **ROADMAP.md → Far-horizon, "Concurrent
+sessions."**
 
 ---
 
@@ -670,11 +652,11 @@ These are not "v0.2 / v0.3" — they are role-bounded.
 ### Deferred (real future work)
 
 Moved to **ROADMAP.md** (near-term / mid-term / far-horizon tiers), which
-now owns this catalog. Not migrated: the "sleep cycle," submind-via-clone,
-and concurrent-sessions design capture in the Mechanisms section above
-stays in place — ROADMAP.md tracks them as prioritizable items but points
-back here for the reasoning, since the full designs are cross-referenced
-from elsewhere in this document.
+now owns this catalog, including the full design capture for the "sleep"
+cycle, submind-via-clone, and concurrent sessions — the Mechanisms section
+above keeps only a short now-stub for each (designed-not-built status plus
+the interface fact other docs cite), since SPEC §3.10.8 and the archive-index
+schema still need a live anchor.
 
 ---
 
@@ -708,7 +690,7 @@ If you see one of these proposed (or are about to write it), stop and surface th
 | House rules for AI agents | `AGENTS.md` |
 | Field-level schemas + algorithms + APIs | `SPEC.md` |
 | User-facing description, getting started | `README.md` |
-| Substrate-level decision history | `ARCHITECTURE.md` §"Substrate non-negotiables" + `AGENTS.md` §"Substrate non-negotiables" |
+| Substrate-level decision history | `ARCHITECTURE.md` §"Substrate non-negotiables" |
 | v0.1 acceptance criteria | `SPEC.md` §9.1 |
 
 ---

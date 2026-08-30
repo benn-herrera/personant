@@ -1,34 +1,8 @@
 GH_ROOT := $(shell dirname $$(git remote -v | awk '{print $$2; exit 0;}'))
 
-.PHONY: all build fmt fmt-check add-dependency test test-nocache test-be test-fe fe-scope-check test-run test-race test-changed cover sim sim-completeness-rung sim-tokenceiling-rung sim-shadow-slow-test integration-test update-dependencies update-agents-dependency clean agents recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
+.PHONY: all build fmt fmt-check add-dependency test test-nocache test-be test-fe fe-scope-check test-run test-race test-changed cover sim sim-completeness-rung sim-tokenceiling-rung sim-shadow-slow-test integration-test update-dependencies clean recall-madlibs recall-corpus-fetch recall-corpus-test recall-corpus-sweep-data recall-embed-data
 
 all: build
-
-# DO NOT MANUALLY EDIT vvv - use make update-dependencies
-AGENTS_VERSION := v0.6.22
-AGENTS_REPO := $(GH_ROOT)/agents.git
-AGENTS_DIR := .claude/agents
-AGENTS_MARKER := $(AGENTS_DIR)/.git/HEAD
-agents: $(AGENTS_MARKER)
-
-$(AGENTS_MARKER):
-	@mkdir -p $(dir $(AGENTS_DIR))
-	@[[ ! -f $(@) ]] || git -C $(dir $(AGENTS_DIR)) fetch --tags $(AGENTS_REPO)
-	@[[ -f $(@) ]] || git -C $(dir $(AGENTS_DIR)) clone $(AGENTS_REPO)
-	@git -c advice.detachedHead=false -C $(AGENTS_DIR) checkout $(AGENTS_VERSION)
-	@(cd $(dir $(AGENTS_DIR)); [[ -d commands/. ]] || ln -sv agents/commands .)
-
-update-agents-dependency: agents
-	# update to the latest tagged version
-	@git -C $(AGENTS_DIR) fetch --tags
-	@git -C $(AGENTS_DIR) tag --sort=committerdate  | tail -1 | xargs git -C $(AGENTS_DIR) -c advice.detachedHead=false checkout
-	# update Makefile with the new version tag.
-	@(\
-	  VTAG=$$(git -C $(AGENTS_DIR) describe --tag) && \
-		sed "s/^AGENTS_VERSION := $(AGENTS_VERSION)/AGENTS_VERSION := $$VTAG/" Makefile > Makefile.tmp && \
-		mv -f Makefile.tmp Makefile && \
-		echo "AGENTS_VERSION: $(AGENTS_VERSION) -> $$VTAG" \
-	)
 
 BINDIR := bin
 
@@ -86,7 +60,7 @@ fmt-check:
 	  exit 1; \
 	fi
 
-update-dependencies: update-agents-dependency
+update-dependencies:
 	go mod tidy
 	go get -u ./...
 	go mod tidy
