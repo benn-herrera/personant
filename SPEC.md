@@ -1489,11 +1489,10 @@ a recall candidate. The `archive/index.jsonl` anchors/summary are a
 forensic + `personant archive list/recover` surface, **not** a live
 recall match surface — deep cold is recoverable by **explicit fetch**,
 not ambient surfacing. (Re-surfacing the coldest threads ambiently would
-re-introduce the cardinality pressure archival exists to relieve.) A
-future "archive recall" — matching the index anchors and offering a
-recovery-fetch — is a clean v0.2 addendum the index schema already
-supports (it carries `anchors` + `spine_summary`); it is out of scope
-for v0.1.
+re-introduce the cardinality pressure archival exists to relieve.) This
+is out of scope for v0.1; a future "archive recall" addendum is tracked
+in ROADMAP.md, and the index schema already carries what it would need
+(`anchors` + `spine_summary`).
 
 **Measurement consequence (§9).** Because archived threads are off the
 live recall surface, the §9 recall-fidelity metrics exclude an
@@ -1966,11 +1965,10 @@ The behavior required, unchanged in substance:
   `<Home>/history` (operational, not git-tracked). Newline-delimited text.
 - Standard readline shortcuts: Ctrl-A / Ctrl-E (line start/end),
   Ctrl-B / Ctrl-F (char back/forward), Ctrl-W (kill word), Ctrl-U (kill
-  line), Ctrl-K (kill to end), Home / End, Delete.
-  **Alt-B / Alt-F (word-back / word-forward) are specified but NOT
-  IMPLEMENTED** — the decoder reports the Meta form, the editor does not
-  yet bind it, and an Alt-modified rune is currently inserted as its base
-  character. Open item, not a ruling.
+  line), Ctrl-K (kill to end), Home / End, Delete. The decoder reports
+  the Meta form for an Alt-modified key, but the editor does not yet bind
+  one to word-back/word-forward — an Alt-modified rune is inserted as its
+  base character today. (Binding Alt-B/Alt-F is tracked in ROADMAP.md.)
 - History deduplication (no consecutive duplicate entries).
 - History size cap (configurable; default 1000 entries).
 - **Multi-row rendering.** A line longer than the terminal width wraps and
@@ -2953,7 +2951,7 @@ daily at a commit boundary when daily loose objects cross a threshold,
 under `op=rebaseline` (never touches primary, never advances the day).
 Recovery routes an `op=rebaseline` crash straight to morning-init. In
 v0.1 the recovery-side handling and marker plumbing are present; the
-mid-day *arming* trigger is not yet wired (see §6.2 carry-forward).
+mid-day *arming* trigger is not yet wired (see ROADMAP.md).
 
 ##### (6) Archival: barrier-only + roll-forward completion
 
@@ -3001,7 +2999,7 @@ archival (primary) never races a turn.
   (B3 rebuild + B6 assert). Between barriers, derived tracks daily
   per-turn state via the watermark; a markerless hand-edit stays
   deferred (cell 3) until the next full sweep. This is intentional, not
-  a gap (see §6.2 carry-forward for the revisit question).
+  a gap (the revisit question is tracked in ROADMAP.md).
 
 ##### (8) Greenfield / legacy compatibility
 
@@ -3052,14 +3050,14 @@ archival (primary) never races a turn.
   30-min checkpoint budget); a 2-day barrier-crossing sim rung
   (`TestSimBarrier2Day`) runs in the default suite.
 
-### 4.6 Math rendering (deferred; non-optional)
+### 4.6 Math rendering (binding constraints; delivery deferred)
 
-**Requirement (recorded 2026-08-01).** As a research assistant, personant
-must eventually render mathematics in a conveniently visible form —
-inline images in image-capable terminals, not raw LaTeX or lossy unicode
-approximation. Deferred, but **non-optional**: it shapes several nearer
-decisions, recorded here so they are honored cheaply now rather than
-retrofitted.
+Personant does not render mathematics today — no inline images in
+image-capable terminals, no LaTeX handling. Two findings shape any future
+work here and are binding now, since retrofitting them later is more
+expensive than honoring them from the start; the delivery plan itself
+(the rung ladder, the far-horizon Rust front end, and the open
+model-output posture question) is in **ROADMAP.md**.
 
 **Ecosystem finding (empirical, decides the shape).** The well-trodden
 third-party path for LaTeX→terminal-image rendering (renderer, kitty /
@@ -3067,24 +3065,8 @@ OSC 1337 / sixel emission, Windows parity) exists in **Rust** and not in
 Go — measured directly during the `laterm` project's development, where
 Go was explored first and rejected on this ground. Consequently the
 rendering and protocol-encoding work stays on the Rust side in every
-option below; personant does not grow Go rendering or sixel-encoding
+future option; personant does not grow Go rendering or sixel-encoding
 dependencies.
-
-**Delivery ladder** (each rung independently shippable):
-
-1. **Sidecar** — personant pushes committed turns to `laterm`'s local
-   socket (the hook shape laterm already ingests from Claude Code).
-   Math renders in a second window; no personant architecture change.
-2. **Inline, Rust renders / Go splices** — a laterm-derived tool takes
-   LaTeX + a target protocol and emits finished protocol bytes;
-   `internal/term` splices them as an opaque committed block in the
-   `(tty-only, scrollback)` cell, with LaTeX source text on the piped
-   path. Cost on our side: term's cursor/erase bookkeeping and the
-   `screentest` model must learn N-row committed blocks.
-3. **Rust front end** — the far-horizon front/back split (two
-   executables; Go substrate, Rust terminal front end) unifying laterm's
-   renderer with the `internal/term` architecture, which is
-   language-portable by design.
 
 **Protocol principle, binding now:** any future backend↔frontend
 boundary carries *semantic* content — markdown with LaTeX source — never
@@ -3092,10 +3074,6 @@ pre-rendered bytes. Rendering decisions (protocol choice, styling,
 wrapping) belong wholly to the front end. Corollary: nothing on the Go
 side may bake rendered output into stored or transmitted turn content;
 memory and the piped path always see source text.
-
-**Model-output posture (open):** rendering requires the model to emit
-LaTeX; the prompt/template stance (LaTeX vs unicode math in responses)
-is decided when the first rung ships.
 
 ---
 
@@ -3236,9 +3214,9 @@ and `**new-topic` remain invalid), and a mixed thread list
 
 The system prompt instructs the model to emit a topic tag at response
 start. The template lives in `internal/prompt/template.go` as a compiled
-constant (`TopicTagDirective`, exposed with a stable identifier). Runtime
-hot-reload for empirical tuning is deferred (future work) — v0.1 requires
-a rebuild to change the template.
+constant (`TopicTagDirective`, exposed with a stable identifier); v0.1
+requires a rebuild to change the template (runtime hot-reload is tracked
+in ROADMAP.md).
 
 The directive carries an **ambiguity clause** (evidence-directed, probe
 round 3 signature (a): clarify-question-without-tag on uncertain routing):
@@ -4130,24 +4108,18 @@ maxPerDay  = 100
     `config.toml` is hand-edited and its comments and ordering are the
     user's. A section with `name` but no `email` gains only `email`; a
     complete section is not rewritten at all.
-  - *(QUEUED, contract sketched, deliberately NOT built — pending
-    demonstrated need.)* **The `git-auto` sentinel.** `name` or `email`
-    set to the literal string `git-auto` would resolve at INVOCATION via
-    **repo-scoped** `git config user.name` / `user.email` (no
-    `--global`), picking up an `includeIf` per-project identity so a
-    session in a work tree identifies with the work address. Empty
-    resolution is a tool FAILURE, not a fallback to the global value —
-    the sentinel is a statement that the per-project identity is the
-    correct one. It is recorded here rather than built because nobody
-    has yet wanted it; the cost of the sketch is one paragraph and the
-    cost of guessing later is a second, incompatible mechanism.
+  - A queued `git-auto` sentinel value for `name`/`email` (repo-scoped
+    identity resolution at invocation) is sketched in **ROADMAP.md**;
+    not built, and `[user]` today recognizes no such literal.
 - `[chat] defaultModel` — the default chat provider/model.
 - `[chat] showThinking` — optional display preference: stream a thinking model's reasoning deltas to the terminal, dimmed, as they arrive. **Absent → off**; a fresh install does not start showing scratch unasked. Display-only — reasoning is never journaled, never feeds §3.3 symbol extraction, and is never replayed in history — so it is deliberately outside cross-file validation: an absent or unrecognized display preference must never refuse a config. `/thinking` (§4.2) overrides it for the session.
 - `[embedding] model` — the embedding provider/model. This pin is **mandatory for embedding recall** and must be explicit: the embedding model defines the vector space, and an inferred or drifting model would silently invalidate the existing embedding cache.
 - `[embedding] vectorLength` — optional; for matryoshka-capable embedding models, requests this truncated dimensionality (passed as the `dimensions` parameter on the embeddings call).
 - `[search] provider` — which `type = "search"` pool entry backs §6.1.1 `web.search`. Needed only to disambiguate a pool holding more than one; with exactly one, that one is used. The section is optional in full: with no search provider in the pool, `web.search` is simply not registered and the model is never offered it. **No key appears here** — the backend's `apiKeyFile` lives on its pool entry, so `config.toml` stays a choices-only, non-secret-bearing file.
 - `[search] maxPerTurn` / `[search] maxPerDay` — the LOCAL query caps (§6.1.1), enforced by personant itself rather than by watching a provider dashboard. Defaults 5 and 100.
-- `[recall] model` — (future, not yet built) the recall layer-3 judge model (`provider/model`). A separate reference from `[chat]` so the judge's **context ceiling can be tuned independently** of the main chat model's large window; a small dedicated window (~8K) is intentional (the judge's input is: a query + N ≤150-char candidate summaries). Default: a small-tier model (E2B). The empirical discipline: measure E2B → E4B → 26B against the embedding-only precision baseline; pick the smallest passing tier. See ARCHITECTURE.md §"Minimize infrastructural prompts" and §"Recall mechanisms" (layer-3 judgment).
+`config.toml` recognizes no `[recall]` section today; a future
+`[recall] model` key for the recall layer-3 judge model is sketched in
+**ROADMAP.md** ("Recall layer-3 model judgment").
 
 Model references are `"provider/model"`, split on the **first** `/` (the model portion may itself contain slashes, e.g. `openrouter/google/gemma-4-31b-it`).
 

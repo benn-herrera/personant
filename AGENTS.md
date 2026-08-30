@@ -207,9 +207,8 @@ Complete:
   restored to k=8 (45bae9c — k=4 fails W1 at zero cost savings).
   `.tree` sidecar persisted (treecache.go, Inc C). Sleep-cycle
   `RebuildTrees` builds/reconciles the summary trees offline (Inc D).
-  Still open: cost-minimization (re-verify W1==0 at narrower beam after
-  exemplar fix confirms the keys carry recall); brute-force O(n) backstop
-  for user-asserted-confidence fallback.
+  Further cost-minimization and a brute-force O(n) confidence-fallback
+  backstop are tracked in ROADMAP.md.
 - Crash stability / startup recovery (#94, SPEC §4.5.8). Waves **R1–R4
   landed**, **R5 docs** (this pass). The substrate is now a **dual-repo**
   git scheme: a disposable **daily** DB (`.git-daily/`, scoped per-turn
@@ -233,9 +232,7 @@ Complete:
   No new `make` target — the crash-injection matrix is unit-grade in
   `internal/scenarios` (runs under `make test`, gated by
   `TestCrashPointCoverageGate`); a 2-day barrier-crossing rung
-  (`TestSimBarrier2Day`) runs in the default sim suite. Carry-forward:
-  §6.2 mid-day re-baseline **arming** trigger not yet wired (recovery
-  side is); intra-day derived-watermark revisit is parked by design.
+  (`TestSimBarrier2Day`) runs in the default sim suite.
 
 In progress:
 - Phase C: recall-fidelity test infrastructure. Six-step plan in the
@@ -292,10 +289,10 @@ In progress:
     Findings: M=1 (zero-drift) recall 1.0 at every threshold; recall
     collapses with drift and threshold (M=4/T=0.4 → 0.098);
     thresholds 0.3 and 0.4 are equivalent operating points (discrete
-    Jaccard score gaps); precision stays ≥0.98 for T ≥ 0.3.
-    Still open, deferred until the data demands it: enriching the
-    stored-thread symbol set beyond 5 anchors, and moving recall off
-    symmetric Jaccard to an asymmetric overlap coefficient.
+    Jaccard score gaps); precision stays ≥0.98 for T ≥ 0.3. Further
+    tuning (enriching the stored-thread symbol set beyond 5 anchors;
+    an asymmetric overlap coefficient in place of symmetric Jaccard) is
+    tracked in ROADMAP.md, deferred until the data demands it.
   - **C.6 embedding head-to-head (done):** `nomicai-embed` (via the
     `reaper` provider, non-metered) embedding-recall measured against
     the same corpus. `test/tools/embed_corpus.py` →
@@ -582,8 +579,8 @@ Implemented and wired into the turn loop (pending full acceptance-validation):
   always` — the SECOND parameter the directive layer serves at runtime.
   The scenario harness pins `always` (`installAckPolicy`, which now covers
   both ack modes and is re-applied on the simulated relaunch); the auto
-  path is unit-covered, NOT sim-covered, and joins the named
-  banded/auto-mode sim rung the closure amendment already owes. Shipped
+  path is unit-covered, NOT sim-covered (a banded/auto-mode sim rung is
+  tracked in ROADMAP.md). Shipped
   with the accept-suppression fix: an accepted intra-thread hit records
   its turn-excerpts as in-window (`State.recallWindowTurns` →
   `measure.Request.EngagedInWindow`), so it stops re-firing every turn;
@@ -594,30 +591,9 @@ Implemented and wired into the turn loop (pending full acceptance-validation):
 - Working-set content dedup / git minimization (§3.9): `internal/dedup` +
   `AgeFileChains`, applied per engaged thread.
 
-Queued:
-- Phase 5: cross-project digest, fallback dissection, directive
-  accrual.
-- Startup recovery after unclean shutdown (v0.1 substrate requirement,
-  SPEC §4.5.8): reconcile/rebuild stale derived state on open after a
-  crash; exercise the normal shutdown→resume cycle. Distinct from
-  §3.8 archival recovery.
-- Realism-convergence backlog (SPEC §9.1): the open list of realism
-  elements gating substrate v0.5.0 — within-thread topic interleaving
-  (non-monotonic threads; in progress), thread-as-synthesis, the Lens-B
-  gaps, transient-data fidelity, and inference-/embedding-in-loop
-  coverage (see below).
-- Inference-/embedding-in-loop simulation (SPEC §9.1): wire real
-  `reaper.local` inference (gemma-4 family) and embedding
-  (`nomicai-modernbert-embed-base-bf16`) into the acceptance sim,
-  individually configurable, to close the coverage gap left by the
-  mock LLM / nil-embedder regime (notably embedding-primary §3.4 recall,
-  which the symbolic-only sim cannot exercise). Transitional + needs an
-  empirical sweet-spot hunt: per-turn cost rises from ~10s of ms to
-  single-digit seconds, trading away the ~20-min/4-month iteration
-  budget, so the goal is max coverage/rigor per unit per-turn overhead.
-- v0.2: deep cold archival via git; working-set content dedup;
-  transient-data event-log compaction + class-aware tool-output budget.
-- v1.0: Python computational workflow (math/physics simulation).
+Queued work (Phase 5; the realism-convergence backlog and
+inference-/embedding-in-loop simulation gating substrate v0.5.0 — full
+detail in SPEC §9.1; v0.2 and v1.0 targets) moved to **ROADMAP.md**.
 
 Current top-level shape:
 
@@ -704,9 +680,14 @@ ARCHITECTURE.md             orientation (read first)
 SPEC.md                     operational spec
 README.md                   user-facing
 AGENTS.md                   this file
-Makefile                    build + agents-submodule pinning +
-                            serve-local-api
+ROADMAP.md                  future intent, outside the precedence chain
+Makefile                    build + test + dependency-vetting targets
 ```
+
+`.claude/agents` is a symlink to a cross-project agents repository (the
+former Makefile `agents`/`update-agents-dependency` submodule-pinning
+mechanism was retired in its favor); restoring pull/maintenance machinery
+for that shared source is tracked in ROADMAP.md.
 
 ## Build / test
 
@@ -904,7 +885,7 @@ here — it is fast unit-grade and runs in the default suite.
 
 **W1 recall-preservation QUALITY MEASURE (#111 §7.1; reframed from gate→measure in #119):** `recall_intra_descent_divergence` is a reported approximation-drift canary, **not a build-blocking gate**. The within-thread summary tree is an approximate O(log n) recall heuristic that trades exactness for speed; a nonzero divergence means the heuristic substituted a within-top-Kf leaf, NOT necessarily that recall was lost (a `strict_miss` is a real ranking defect worth raising the beam for; a `tie`/`tree_mismatch` is a sub-perceptible boundary effect — see the classification counters). Exact/exhaustive recall is the job of the separate **exact tiers (#117 grep + flat-scan)**, where it is guaranteed; holding the approximate tree to exact descent-vs-flat set-equality was stricter than its own purpose (recall-correctness). The value is still LOGGED on every rung as a drift canary. There is NO runtime rebalance trigger: tree re-clustering is a sleep-time operation only (the #108 consolidation cycle's `RebuildTrees`, on staleness), so the measure informs nothing at runtime — it is purely observed.
 
-**Ensure Docs Stay Up To Date** - AGENTS.md, README.md, ARCHITECTURE.md, SPEC.md must be brought up to date when committing checkpoints.
+**Ensure Docs Stay Up To Date** - AGENTS.md, README.md, ARCHITECTURE.md, SPEC.md must be brought up to date when committing checkpoints. ROADMAP.md tracks future intent and is not a contract document, but keep it current when an item ships or gets superseded.
 
 ## House rules for agents
 

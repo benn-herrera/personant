@@ -407,30 +407,14 @@ The intended remedy is an offline **consolidation cycle** — the system's equiv
 
 This is a future consideration, not v0.1 — but the v0.1 acceptance simulation already supplies the hook: the day-off is a real idle window in the workload model, and closure (§3.5) / archival (§3.8) are exactly the mechanisms a consolidation pass would tidy.
 
-### Weight-baked instinct from outcome history (far-future consideration)
+### Weight-baked instinct from outcome history
 
-A second, longer-horizon kind of consolidation: once local fine-tuning is mature and stable, the system's *outcome record* — not its content — becomes a training signal for a personal alignment adapter on the underlying model. **Substrate stays recall; weights become instinct.**
-
-The premise is that a transformer has finite parameter capacity, and "baking memories" by tuning a model on raw substrate content is a bad trade: it displaces pretrained factual capacity for narrow recall the substrate already holds verifiably. The smarter move is to *not* train on facts at all. Train on the *shape of what worked and what failed* — the latent outcome distribution across long substrate history.
-
-**Signal sources, all already latent in a mature substrate:**
-
-- **Decision durability.** Threads that closed cleanly accomplishing what they set out to do vs. threads abandoned. Architectural calls that survived in later commits vs. ones reversed. Cited decisions (load-bearing) vs. uncited (noise) — adjacent to the §3.0 transient-data lifecycle's decision-vs-task classification.
-- **Estimate calibration.** Where estimates exist alongside actuals, the delta is signal.
-- **External durability.** For project repos the personant assisted on: code that survived refactors vs. code that got deleted. Git history of the workspace, not just the substrate.
-- **User correction patterns.** Repeat pushback on the same shape of suggestion — the model's prior is misaligned for this user in a recoverable, low-rank way.
-
-**The training shape is not SFT on substrate content.** It's preference-pair learning (DPO/IPO-style) over `(situation, approach_taken, observed_outcome)` triples, with outcomes drawn from the signal sources above. The product is a small, low-rank LoRA targeting later layers and alignment-relevant attention heads — empirically the locus where "style and instruction-following" already live in current models.
-
-**What the consolidated model contributes is taste, not knowledge.** The base model already knows the best-practice patterns; what it doesn't have is the *shape of when patterns apply and when they fail in this user's domain* — the prior that distinguishes a senior partner from a junior reciter. That kind of contribution ("this architectural move tends to ossify under load; I've seen that fail three ways") is the kind of partnership the founding tenet — AI with humans, not by humans alone — actually cashes out to at the cognition-shape level rather than the conversation-shape level.
-
-**Hard constraints carried over from the substrate-as-canonical thesis:**
-
-- Substrate remains source of truth. Weights are an optimization on instinct, never a replacement for recall. Lose the substrate and you must still have an auditable, correctable record of what happened.
-- Each training pass is gated, reviewed, and reversible. Pre-tuned model preserved; new LoRA tagged with the substrate snapshot hash it was trained from; eval pass (recall-fidelity + general-capability probes) gates promotion; failed evals roll back.
-- Substrate items used in a training pass get annotated (`consolidated_at:`) — don't bake the same thing twice; supports later forensic queries on what shaped the model.
-
-**Not v0.1, not v1.0, not v2.0** — depends on mature local fine-tuning infrastructure, accumulated outcome-labeled substrate at scale, and a tested eval methodology. Captured here because the architecture has a clean place to land it and because the framing — *substrate-as-canonical, weights-as-instinct, outcome-history-as-signal* — is the kind of design call that's much easier to commit to early than to retrofit later. Adjacent to the "sleep cycle" above: same offline-consolidation framing, different consolidation target (model weights instead of substrate organization).
+Full design capture — the substrate-stays-recall/weights-become-instinct
+framing, signal sources, training shape, and hard constraints carried over
+from the substrate-as-canonical thesis — moved to **ROADMAP.md** (far
+horizon; not v0.1, not v1.0, not v2.0). Left here as a pointer because the
+"sleep cycle" section above and the model-family-as-platform section below
+both reference it.
 
 ### Submind via clone — isolated exploration and frontier-model collaboration (future consideration)
 
@@ -489,7 +473,7 @@ Size tiering maps onto Personant's role split:
 
 **256K context is the sim/working-set design target.** This affects Layer B byte budgets, closure pressure, recall query depth, and the mock-client's need to simulate token counts for budget-exhaustion testing.
 
-A queued project will produce domain-specialized retrained variants of gemma-4-E4B (PoC) and gemma-4-31B (real target) on a physics + math knowledge base, served on `reaper` alongside the stock tiers. Same architecture, additional training overlay. This deepens the single-family commitment to the weights level and pre-validates the local fine-tuning workflow needed for the [weight-baked instinct](#weight-baked-instinct-from-outcome-history-far-future-consideration) roadmap item.
+A queued gemma-4 domain-retraining project (physics + math knowledge-base overlay, deepening the single-family commitment to the weights level and pre-validating the local fine-tuning workflow the weight-baked-instinct item needs) is tracked in **ROADMAP.md**.
 
 ### Minimize infrastructural prompts
 
@@ -683,27 +667,14 @@ The LLM has no tool for any of these:
 
 These are not "v0.2 / v0.3" — they are role-bounded.
 
-### Deferred (real future work; on the roadmap)
+### Deferred (real future work)
 
-- Multi-user (v2.0; locked)
-- Configuration migration on system upgrade (v1.0+)
-- Encrypted at-rest storage (back-of-mind)
-- Synonym cluster resolution (v0.2+ if empirical pressure)
-- Sub-agent runtime extension (when use case demands)
-- Phrasal-concept symbol extraction (v0.2)
-- Computational research workflow — Python only (v1.0; *not* polyglot). Tools: `python.run`, `python.format`, `python.lint`. Sandboxed subprocess; stdout/stderr into thread body subject to §6.5 budget; resource caps (wall-clock, memory, output bytes). The shell-execution exclusion in §6.1.3 lifts *only* for these targeted Python tools. Open: Python environment policy (`$PATH` python vs per-project venv vs `uv`). Held until v0.1 acceptance passes — orthogonal to the memory architecture.
-- Gemma-4 domain retraining (queued, post-v0.1): physics+math knowledge-base overlay on gemma-4-E4B (PoC) and gemma-4-31B (real target), served on `reaper` alongside stock tiers. Pre-validates the workflow for [weight-baked instinct](#weight-baked-instinct-from-outcome-history-far-future-consideration) consolidation.
-- Recall layer-3 model judgment (design direction captured; build after #98 inference-in-loop — see Recall mechanisms above)
-- Git tags for **project open/close** lifecycle navigation (still deferred): autonomic tags marking project *opened*/*closed*/*switched* points. Deferred because those semantics are ambiguous in the current wave (a project is never explicitly "closed"; open/switch/cd overlap) — resolve the vocabulary before minting tags for it. The thread create/retire/archive and project *created* tags **shipped** — derived once/day at the day barrier from that day's §2.8 event log; namespace `<kind>/<id>/<event>_<stamp>` (e.g. `thread/thr_42/created_2026-05-08T03-12-00Z`, `thread/thr_42/archived_...`, `project/prj_3/created_...`); stamp = UTC-normalized RFC3339 with time colons hyphenated, lexically = chronologically sortable. Turns O(1) archive-recovery lookups (`git show thread/thr_42/archived_...:spine.jsonl`) into forensic wins without a bespoke index. See SPEC §4.5.8.
-- Prompt/response timestamp index (queued, 2026-05-18): a dedicated metadata index recording when every user prompt was sent and every model response was received. Kept **out-of-band** — never injected into LLM context (timestamps in context can distort model behavior). The §2.8 event log already carries clock stamps on delta events; the purpose-built index is for efficient temporal queries ("when did we discuss X?"). A recalled thread/turn must carry a retrievable timestamp to answer the "when" question — the index is the primary query path, the event log a fallback.
-- Inter-agent data-sharing security (forward-looking, not queued): deterministic containment boundaries for sharing Personant's memory with a client's agent system under NDA-class restrictions. Core principle: **exclusion, not redaction** — the secret bytes never enter the model's context. Architecture: (1) prepare a redacted base dataset offline (allow-list, default-deny hides existence); (2) rebuild all derived structures (embedding index, `derived_from` edges, A2 digests) from the clean set only — metadata spans the partition and is the primary leak vector if not regenerated; (3) `chown` the prepared tree to an unprivileged guest OS user; (4) run the liaison inside OS-level containment (mount-namespace/jail — makes the disallowed tree unaddressable, not just application-forbidden; FAIL-CLOSED: a hook bug that tries to reach across hits ENOENT/EACCES and refuses to serve, never discloses). Reuses the #44 rebuild-on-open primitive and the submind clone mechanism — three roadmap items collapse onto one. Irreducible limit: prose cross-references inside allowed content (an allowed turn can mention disallowed work in free text) require human verification at prep time; the deterministic layer guarantees structural containment only.
-- Deep cold archival via git (v0.2)
-- Offline memory-consolidation cycle — the "sleep" cycle (future; see Mechanisms)
-- Weight-baked instinct from outcome history — personal alignment LoRA from substrate's outcome record (far-future; see Mechanisms)
-- Submind via clone — isolated exploration and frontier-model collaboration (future; see Mechanisms)
-- Concurrent sessions — one user multitasking across multiple live conversations (future; see Mechanisms)
-- REPL line editing + history (v0.1 polish)
-- ~~Shell escape (`$`/`#`) implementation~~ **landed** (front end 0.0.7, `internal/shell`) — as **per-command `$SHELL -c`**, not the long-lived `$SHELL -i` subprocess SPEC §4.4.2 originally specified. The persistent shell mainly buys cwd/env/alias persistence, but §4.4.3 already excludes the interactive apps a persistent PTY would serve, and a long-lived shell on pipes needs a sentinel protocol with timeout and hang recovery. Per-command execution gets exit codes for free, cannot hang the session, and recovers the load-bearing part — the §4.5.1 shell cwd — via a **cwd-reporting epilogue on a dedicated fd**, never by parsing `cd`. Accepted loss: mid-session aliases/functions/exports do not persist. PTY mode-handoff for nested apps remains held until empirical pressure.
+Moved to **ROADMAP.md** (near-term / mid-term / far-horizon tiers), which
+now owns this catalog. Not migrated: the "sleep cycle," submind-via-clone,
+and concurrent-sessions design capture in the Mechanisms section above
+stays in place — ROADMAP.md tracks them as prioritizable items but points
+back here for the reasoning, since the full designs are cross-referenced
+from elsewhere in this document.
 
 ---
 
