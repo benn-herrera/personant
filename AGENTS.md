@@ -220,88 +220,28 @@ SPEC.md                     operational spec
 README.md                   user-facing
 AGENTS.md                   this file
 ROADMAP.md                  future intent, outside the precedence chain
-Makefile                    build + test + dependency-vetting targets
+justfile                    build + test + dependency-vetting recipes
 ```
 
 ## Build / test
 
-```sh
-make build            # bin/personant (compile only — the cheapest edit check)
-make add-dependency MOD=<module>@<version>   # pin ONE vetted dep into go.mod/go.sum
-                      #   (the AGENTS.md vetting checklist is a PRECONDITION, not
-                      #   something the target can check; `update-dependencies` is
-                      #   the wrong tool — its `go get -u ./...` churns the whole graph)
-make fmt              # gofmt -w the Go source roots (cmd/, internal/) — fix formatting drift
-make test             # CHECKPOINT GATE (substrate): fmt-check (drift fails the gate) + go vet + go test $(GOPKGS) (full suite, incl. multi-day sim rungs; Go's test cache is ON — unchanged packages return instantly)
-make test-nocache     # `make test` with the cache DEFEATED (--count=1) — the forced-clean full run: pre-push, suspected cache artifact, post-toolchain change
-make test-be          # alias of `make test` — the same full suite, named for symmetry with test-fe
-make test-fe          # CHECKPOINT GATE (front-end-only change): scoped ~15s suite; mechanically REFUSES if the diff leaves cmd/ + internal/chat/ + internal/version/ + internal/shell/ + internal/term/
-make test-run PKG=<pkg> RUN=<regexp>  # EDIT GATE: run only the touched test(s) — seconds, not minutes
-make test-race        # DIAGNOSTIC (not a gate): -race over $(RACEPKGS), the packages with real concurrency; ~70s
-make test-changed     # DIAGNOSTIC (not a gate): runs only the packages the working tree changed, plus their reverse-dependency closure. LIST=1 prints the selection without running it
-make integration-test # live reaper embedder/recall tests (opt-in)
-make sim              # acceptance rung-walk (mock); LIVE_EMBEDDING=true / LIVE_INFERENCE=true for live-mode
-                      # DURATION=<span>  override sim span (default 1w for mock; e.g. 1d, 14d, 30d or <N>d / Go duration 168h)
-                      #   named rungs: 1d|1w  bare-day form: <N>d (e.g. 30d, 120d)  Go duration: 168h
-make recall-corpus-test # corpus recall-fidelity measurement (opt-in)
-make clean
-```
+Go 1.26.1+. Run `just` (default recipe `info`) for the current recipe list
+with docstrings — the target inventory lives in the justfile, not here.
 
-Go 1.26.1+.
-
-**Two gates — do not conflate them.** `make test` (full `go vet` + `go test`
-across `$(GOPKGS)`, *including* the sim package's multi-day mock rungs — minutes
+**Two gates — do not conflate them.** `just test` (full `go vet` + `go test`
+across GOPKGS, *including* the sim package's multi-day mock rungs — minutes
 of wall-clock) is the **CHECKPOINT GATE**: run it **once, before committing a
 checkpoint**, to catch cross-package regressions. It is **not** an edit gate.
 Re-running the whole suite between edits while iterating is the failure mode that
 turns a one-line fix into an hour of mostly-irrelevant testing — don't. To verify
-a specific edit landed, use the **EDIT GATE**: `make build` (compile) plus
-`make test-run PKG=<pkg> RUN=<regexp>` to run only the touched test(s). Breaking
+a specific edit landed, use the **EDIT GATE**: `just build` (compile) plus
+`just test-run <pkg> <regexp>` to run only the touched test(s). Breaking
 the compound suite down to the relevant test is the correct tactic during
 iteration; the full suite is the final pre-commit checkpoint, not a per-edit
 reflex. **Commit at meaningful checkpoints** — a complete, self-consistent change
-— not per-edit, and run the checkpoint gate once at that point. (`make test` is
-still NEVER substituted by a raw `go test`; the slow/live opt-in tests below stay
+— not per-edit, and run the checkpoint gate once at that point. (`just test` is
+still NEVER substituted by a raw `go test`; the slow/live opt-in tests stay
 gated either way.)
-
-**Gate reference** — command, then when/why in one sentence:
-
-- `make test-fe` — front-end-only diffs (`cmd/`, `internal/chat/`,
-  `internal/version/`, `internal/shell/`, `internal/term/`); sound
-  because that set is a dependency leaf nothing else imports, so it
-  cannot regress the substrate.
-- `make test` (alias `make test-be`) — anything else touching
-  `internal/`, no exception, since the front end imports the substrate
-  and the reverse can't be assumed; `test-be` is a pure alias, not a
-  separate faster path.
-- `fe-scope-check` (the mechanical gate behind `test-fe`) — computes the
-  changed-file set from the diff and refuses, naming the offending
-  paths, if any fall outside the front-end prefixes, so scope is a
-  property of the diff, not judgment.
-- Mechanical-diff exception — a gofmt/comment/docs-only diff
-  (semantics-preserving by construction) commits on the edit gate
-  (`make build` + `make fmt-check` + touched tests) instead of the full
-  checkpoint suite; any executable-code, `go.mod`, or test-assertion
-  change pays the full gate regardless of size.
-- `make test-race` — diagnostic, not a gate; run deliberately when you
-  touch concurrent code (new goroutine, shared field, lock, channel,
-  ticker), scoped to `$(RACEPKGS)` (`chat`, `recall/measure`, `model`,
-  `eventlog`, `metrics`, `log`, `scenarios`) since `-race` finds nothing
-  in a single-goroutine suite.
-- `make test-changed` — diagnostic fast-iteration aid; computes the
-  changed-package + reverse-dependency closure from the working tree,
-  but does **not** satisfy the checkpoint gate (the rule above still
-  governs) and carries no mechanical refusal.
-- Test caching — `test`/`test-be`/`test-fe`/`test-changed` cache by
-  default (content-addressed over source + deps + testdata + env, so a
-  cached PASS is a real PASS); `make test-nocache` forces a fresh run
-  when that's specifically the point (pre-push, suspected cache
-  artifact, toolchain change).
-- Slow/live tests — always compile (so a refactor that breaks them still
-  fails `make test`) but execute only under a runtime opt-in
-  (`PERSONANT_LIVE_TESTS`, `PERSONANT_CORPUS_TESTS`,
-  `PERSONANT_SLOW_SIM_TESTS`, `-sim.live-embedding`/`-sim.live-inference`),
-  never a build tag.
 
 **Intra-thread recall metrics (#109/#111).** The sim emits the following at every rung; the W1 divergence is a reported quality measure (not build-blocking, #119):
 

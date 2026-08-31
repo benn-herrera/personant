@@ -13,8 +13,8 @@ A single-user, single-agent runtime that gives an AI assistant persistent workin
 ```sh
 git clone <repo>
 cd personant
-make build          # produces bin/personant
-make test           # go vet + go test (compiles everything; skips live tests)
+just build          # produces bin/personant
+just test           # go vet + go test (compiles everything; skips live tests)
 ./bin/personant     # defaults to chat REPL
 ```
 
@@ -66,40 +66,42 @@ Two keys, two meanings. **Ctrl-C** clears the line you are typing — the sessio
 ## Build Targets
 
 ```sh
-make build                # compile bin/personant
-make test                 # go vet + go test ./... (standard gate; alias: make test-be)
-make test-fe              # fast scoped gate for a front-end-only change (cmd/, chat/, version/);
+just build                # compile bin/personant
+just test                 # go vet + go test ./... (standard gate; alias: test-be)
+just test-fe              # fast scoped gate for a front-end-only change (cmd/, chat/, version/);
                           #   refuses if the diff touches the substrate — see AGENTS.md "Two gates"
-make cover                # test coverage report across all packages
-make bench                # recall hot-path benchmarks (see Makefile for PKG/BENCH knobs)
-make sim                  # acceptance simulation (see Sim Knobs below)
-make integration-test     # live reaper endpoint tests (opt-in; see below)
-make recall-corpus-test   # Wikipedia corpus recall-fidelity measurement (opt-in)
-make recall-madlibs       # regenerate derived query fixtures from committed templates
-make clean                # remove bin/personant
+just cover                # test coverage report across all packages
+just bench                # recall hot-path benchmarks (see justfile for pkg/bench_re knobs)
+just sim                  # acceptance simulation (see Sim Knobs below)
+just integration-test     # live reaper endpoint tests (opt-in; see below)
+just recall-corpus-test   # Wikipedia corpus recall-fidelity measurement (opt-in)
+just recall-madlibs       # regenerate derived query fixtures from committed templates
+just clean                # remove bin/personant
 ```
+
+Run `just` (default recipe `info`) for the full, current recipe list with docstrings.
 
 ### Sim Knobs
 
-`make sim` runs `TestSim` in `internal/scenarios/sim/`. By default it is the **mock, deterministic acceptance gate**: symbolic-only recall with scripted mock responses.
+`just sim` runs `TestSim` in `internal/scenarios/sim/`. By default it is the **mock, deterministic acceptance gate**: symbolic-only recall with scripted mock responses.
 
-> **Recall-completeness is symbolic-only until the embedder-enabled rung is green (B1).** The default `make sim` / `make test` gate runs with a nil embedder, so the §3.4 embedding fine tier and its bounded lexical completeness floor (#123) do **not** execute there. The recall-completeness claim (no dead zones) is proven for the embedding-flush-lag case only by the **`make sim-completeness-rung`** rung below; until it is wired and green, treat that claim as symbolic-only-validated.
+> **Recall-completeness is symbolic-only until the embedder-enabled rung is green (B1).** The default `just sim` / `just test` gate runs with a nil embedder, so the §3.4 embedding fine tier and its bounded lexical completeness floor (#123) do **not** execute there. The recall-completeness claim (no dead zones) is proven for the embedding-flush-lag case only by the **`just sim-completeness-rung`** rung below; until it is wired and green, treat that claim as symbolic-only-validated.
 
 ```sh
-make sim                                          # mock gate, default span (1w)
-make sim DURATION=1d                              # named span
-make sim DURATION=30d                             # bare-day form
-make sim DURATION=168h                            # Go duration form
-make sim LIVE_EMBEDDING=true                      # real §3.4 embedder (reaper required)
-make sim LIVE_INFERENCE=true DURATION=1d          # real inference, capped at 1 sim-day
-make sim LIVE_EMBEDDING=true LIVE_INFERENCE=true DURATION=1d
-make sim-completeness-rung                        # B1: §3.4 completeness floor (live embedder, several sim-days)
-make sim-tokenceiling-rung                        # X4: whole-request token ceiling (live inference, 1 sim-day)
+just sim                                          # mock gate, default span (1w)
+just sim DURATION=1d                              # named span
+just sim DURATION=30d                             # bare-day form
+just sim DURATION=168h                            # Go duration form
+just sim LIVE_EMBEDDING=true                      # real §3.4 embedder (reaper required)
+just sim LIVE_INFERENCE=true DURATION=1d          # real inference, capped at 1 sim-day
+just sim LIVE_EMBEDDING=true LIVE_INFERENCE=true DURATION=1d
+just sim-completeness-rung                        # B1: §3.4 completeness floor (live embedder, several sim-days)
+just sim-tokenceiling-rung                        # X4: whole-request token ceiling (live inference, 1 sim-day)
 ```
 
 **`DURATION`** accepts: named rungs `1d|1w`, bare-day form `<N>d` (e.g. `30d`, `120d`), or a Go duration (e.g. `168h`). Defaults to `1w` for mock runs.
 
-**B1+X4 embedder-enabled rung.** `make sim-completeness-rung` (live embedder + mock inference) drives the main thread past the assembly window so a probe target lands in the flush-lag dead zone, then asserts the §3.4 lexical completeness floor surfaced it (with a non-vacuity guard that at least one dead-zone probe was observed). `make sim-tokenceiling-rung` (live inference, capped at 1 sim-day) injects large verbose tool-result payloads and asserts the fully-assembled request's `usage.prompt_tokens` stays within the configured ceiling. Both are bounded and **not** part of `make test`. They MEASURE the X4-PROD violation; the production token bound is #127's work.
+**B1+X4 embedder-enabled rung.** `just sim-completeness-rung` (live embedder + mock inference) drives the main thread past the assembly window so a probe target lands in the flush-lag dead zone, then asserts the §3.4 lexical completeness floor surfaced it (with a non-vacuity guard that at least one dead-zone probe was observed). `just sim-tokenceiling-rung` (live inference, capped at 1 sim-day) injects large verbose tool-result payloads and asserts the fully-assembled request's `usage.prompt_tokens` stays within the configured ceiling. Both are bounded and **not** part of `just test`. They MEASURE the X4-PROD violation; the production token bound is #127's work.
 
 **`LIVE_EMBEDDING=true` / `LIVE_INFERENCE=true`** opt in real inference/embedding independently. Both require `test/rundata/test.{providers,config}.toml` (user-provided, gitignored) and a reachable `reaper.local` endpoint. A missing or unreachable endpoint is a hard failure, not a skip. `LIVE_INFERENCE=true` is refused past 1 sim-day — always pair it with `DURATION=1d`.
 
@@ -107,13 +109,13 @@ On Darwin, long sim runs are automatically wrapped with `caffeinate` + `taskpoli
 
 ### Live and slow test opt-ins
 
-Slow and live tests always compile (a refactor that breaks them fails `make test`) but gate execution at runtime via environment variables. `//go:build` tags are not used — tagged tests are excluded from the normal compile and bit-rot silently.
+Slow and live tests always compile (a refactor that breaks them fails `just test`) but gate execution at runtime via environment variables. `//go:build` tags are not used — tagged tests are excluded from the normal compile and bit-rot silently.
 
 | Opt-in | Set by | Effect |
 |---|---|---|
-| `PERSONANT_LIVE_TESTS=1` | `make integration-test` | live reaper endpoint tests; unreachable = failure |
-| `PERSONANT_CORPUS_TESTS=1` | `make recall-corpus-test` | slow Wikipedia corpus measurement |
-| `-sim.live-embedding` / `-sim.live-inference` | `make sim LIVE_*=true` | live sim elements |
+| `PERSONANT_LIVE_TESTS=1` | `just integration-test` | live reaper endpoint tests; unreachable = failure |
+| `PERSONANT_CORPUS_TESTS=1` | `just recall-corpus-test` | slow Wikipedia corpus measurement |
+| `-sim.live-embedding` / `-sim.live-inference` | `just sim LIVE_*=true` | live sim elements |
 
 ## Project Anatomy
 

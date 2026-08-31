@@ -964,11 +964,11 @@ hidden reasoning and returns `finish=stop` with empty content. Recovery:
 > unstated; its absence let the embedding-flush debt window become an unflagged
 > recall dead zone the sim oracle accommodated instead of catching.)
 >
-> **Interim claim caveat (B1).** The default acceptance gate (`make test` / `make
+> **Interim claim caveat (B1).** The default acceptance gate (`just test` / `just
 > sim`) runs with a **nil embedder**, so the §3.4 fine tier and its bounded
 > lexical completeness floor (#123) **do not execute** there — the floor's effect
 > is unobserved on the mock gate. Until the **embedder-enabled completeness rung**
-> (`make sim-completeness-rung`: live embedder + mock inference over several
+> (`just sim-completeness-rung`: live embedder + mock inference over several
 > sim-days, asserting that every flush-lag dead-zone probe is surfaced and at
 > least one was observed) is wired and **green**, the recall-completeness claim
 > above is proven only for the **symbolic** path; the embedding-flush-lag half is
@@ -4246,7 +4246,7 @@ increasing *simulated calendar span*, expressed in **days** (not hours)
 on purpose: a span like `30d` is 30 days of calendar time — most of it
 *not* spent working — which is the realistic, harder case; "hours" would
 invite the wrong reading of active-use time. Two tiers:
-- **Smoke rungs — `1d` / `7d`.** Fast regression catch; `make test` runs
+- **Smoke rungs — `1d` / `7d`.** Fast regression catch; `just test` runs
   the default `1d` rung. Too short to distinguish steady-state from
   drift, so they are not analysis rungs.
 - **Real ladder — `15d → 30d → 60d → 120d`.** Exact ×2 doublings
@@ -4523,7 +4523,7 @@ The measurement regime drives four test layers — scenario, churn, calibration,
 
 **Named scenario set** (initial): single-thread lifecycle, multi-thread interleaving, project switching, heavy retirement (50 threads), same-anchor collision, transient shell-capture content, cross-boundary recovery. Churn sequences are randomized-but-seeded (80% engage / 10% create / 5% retire / 5% switch); failures dump operation log + seed for replay. Calibration sweeps a directive parameter across a range and emit a metrics matrix — this is how §2.6.1 bootstrap defaults earn their numbers.
 
-**Acceptance simulation harness** (`internal/scenarios/sim/`, `TestSim`): a deterministic seeded workload generator (the recall-madlibs corpus-slot model, §9.4) with logical-clock acceleration, steady-state assertions, and per-operation cost profiling. Run at a chosen span via `make sim DURATION=<N>d` (calendar days; named aliases `1d|1w` and Go-duration forms like `168h` also accepted). The acceptance ladder (§9.1) is `1d`/`7d` smoke + `15d→30d→60d→120d` real; `make test` runs the default `1d` rung. Output: metrics JSON + human-readable summary. Pass/fail per §9.1 criteria.
+**Acceptance simulation harness** (`internal/scenarios/sim/`, `TestSim`): a deterministic seeded workload generator (the recall-madlibs corpus-slot model, §9.4) with logical-clock acceleration, steady-state assertions, and per-operation cost profiling. Run at a chosen span via `just sim DURATION=<N>d` (calendar days; named aliases `1d|1w` and Go-duration forms like `168h` also accepted). The acceptance ladder (§9.1) is `1d`/`7d` smoke + `15d→30d→60d→120d` real; `just test` runs the default `1d` rung. Output: metrics JSON + human-readable summary. Pass/fail per §9.1 criteria.
 
 #### 9.4.1 Workload cadence model
 

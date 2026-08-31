@@ -23,17 +23,7 @@ store.
 
 ---
 
-## 1. Port from GNU make to just
-
-- [ ] Top priority. No source citation — this is new intent, not a
-  migrated item.
-- [ ] At port time, delete AGENTS.md's Build/test target list and gate
-  reference in favor of one line advising the default `just` invocation
-  (which lists recipes and their docstrings) as the target reference —
-  the target inventory then lives in the justfile itself, not duplicated
-  in prose.
-
-## 2. Restore agents-dependency pull/maintenance machinery
+## 1. Restore agents-dependency pull/maintenance machinery
 
 - [ ] The old Makefile `agents`/`update-agents-dependency` targets
   (submodule pinning for the shared agent-definition set) were retired in
@@ -41,7 +31,7 @@ store.
   repository. The pull/maintenance machinery — a mechanism to update that
   shared source on demand rather than relying on the symlink target being
   current by hand — is planned but not yet rebuilt. `AGENTS.md`'s
-  repo-tree comment describing the Makefile reflects the current state
+  repo-tree comment describing the justfile reflects the current state
   (no agents-submodule pinning, no serve-local-api).
 
 ---
@@ -458,9 +448,9 @@ automatically by this migration.
 - [x] Phase C: recall-fidelity test infrastructure — complete (madlibs
   query generator, adversarial templates, Wikipedia corpus pipeline,
   LLM-authored corpus templates, calibration sweep). Harness lives in
-  `internal/scenarios/testdata/`, driven by `make recall-madlibs` /
-  `make recall-corpus-test` (opt-in execution; always compiles under
-  `make test`). Headline finding informing the recall thresholds below:
+  `internal/scenarios/testdata/`, driven by `just recall-madlibs` /
+  `just recall-corpus-test` (opt-in execution; always compiles under
+  `just test`). Headline finding informing the recall thresholds below:
   symbolic Jaccard collapses under vocabulary drift (M=4/T=0.4 → 0.098
   recall) while embedding recall stays robust (~0.97) but precision-poor
   (~0.21 at cos 0.45) — validates the layered §3.4 design. Full six-step

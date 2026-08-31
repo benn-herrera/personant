@@ -22,5 +22,5 @@ If > 0 describe validation
 [ ] AI coding usage declared
 [ ] Changes have test coverage
 [ ] AGENTS.md and ARCHITECTURE.md updated
-[ ] ```make test``` passes
-[ ] ```make integration-test``` passes
+[ ] ```just test``` passes
+[ ] ```just integration-test``` passes
