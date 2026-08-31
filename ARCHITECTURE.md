@@ -1,4 +1,4 @@
-# Personant — Architecture
+# ARCHITECTURE – Personant: Math and Science Development Assistant
 
 **Audience:** AI agents (and new contributors) who need to orient quickly. Companions:
 

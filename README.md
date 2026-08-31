@@ -1,4 +1,4 @@
-# Personant
+# README – Personant: Math and Science Development Assistant
 
 A single-user, single-agent runtime that gives an AI assistant persistent working memory across arbitrary projects. The agent has one continuous career: unified memory, no session boundaries, no compaction-driven information loss, and cross-project recognition.
 

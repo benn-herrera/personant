@@ -1,4 +1,4 @@
-# Personant — Roadmap
+#  ROADMAP – Personant: Math and Science Development Assistant
 
 This file owns **future intent**. It sits **outside** the contract-document
 precedence chain (`SPEC.md` > `ARCHITECTURE.md` > `AGENTS.md` > code):
@@ -204,7 +204,40 @@ Concrete, mostly single-package items; several unblock other queued work.
   the weight-baked-instinct far-horizon item (below) will need.
   (`ARCHITECTURE.md` "Model-family as platform" section.)
 - [ ] **Synonym cluster resolution** (v0.2+, if empirical pressure).
-- [ ] **Sub-agent runtime extension** (when use case demands).
+- [ ] **Sub-agent runtime extension.** Design settled 2026-08-30; use
+  case: kbase-class domain work wanting model routing and focused
+  contexts. The shape:
+  - *Definition files*: markdown with a frontmatter subset —
+    `name`, `description`, `tools`, `model`. Body becomes the agent's
+    system charter over a thin runtime base. Load-time validation:
+    unknown tool names fail loudly; `model` validates against the
+    provider pool (refuse-or-warn-unverified, the startup convention);
+    omission semantics defined explicitly. Descriptions written under
+    the selection-anchor discipline — an orchestrating model chooses
+    agents by description text.
+  - *Context*: fresh per run — stable base (charter + task brief) plus
+    a budgeted rolling volatile window. Overflow demotes
+    deterministically (budget math, oldest block first, no model
+    judgment) to serially numbered plain-markdown scratch files,
+    replaced in-context by filename + a ≤8-word topic tag written for
+    the future grep that will search for it. Recovery is grep + read;
+    a re-read is a tool call, never permanent re-inflation. Serial
+    numbering doubles as chronology.
+  - *Memory*: session memory readable at need via recall-as-a-tool —
+    no working-set dump, no writes. The single-writer invariant is
+    untouched: agents hold scratch space (disposal = deletion, no
+    lifecycle management) and a report channel; they may *propose*
+    that a finding be cached, and promotion into career memory is the
+    main session's write, human-acked — the propose-then-ack pattern
+    applied to memory itself.
+  - *Output*: cached to a file; the main session pulls sections via
+    seek/read/tail tools rather than swallowing a dump. Dispatch and
+    completion surface as receipts and event-log entries; runs carry
+    lifecycle guards (turn caps, timeouts — self-limiting or verified
+    dead).
+  - *Routing*: frontmatter `model` is the per-task-class routing
+    mechanism (navigate cheap, derive big) over the existing provider
+    pool.
 - [ ] **Phrasal-concept symbol extraction** (v0.2).
 
 ---

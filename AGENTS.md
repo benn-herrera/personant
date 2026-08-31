@@ -1,4 +1,4 @@
-# AGENTS.md — House Rules
+# AGENTS – Personant: Math and Science Development Assistant
 
 This file is for AI agents (Claude Code, etc.) working in this repository.
 Read it before making non-trivial changes. Human-facing project info is in

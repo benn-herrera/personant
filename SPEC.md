@@ -1,4 +1,4 @@
-# Personant — v0.1 Specification
+# SPEC – Personant: Math and Science Development Assistant
 
 **Audience:** implementation work. Specifies field-level schemas, algorithms, and surface APIs.
 **Companion docs:**
@@ -4557,5 +4557,3 @@ These strings are pinned by contract tests so a rename in the runtime's log emis
 **`StepFeedback.RuntimeLayerB` cross-check contract.** After each turn the harness captures the runtime's authoritative `ActiveThreads` slice and populates `RuntimeLayerB`. The generator's shadow Layer-B LRU is cross-checked against it with a hard divergence gate (==0 difference required). A divergence means the generator's recall oracle — which computes expected-match sets from the shadow LRU — has drifted from the runtime's actual working set; any tolerated divergence would silently produce wrong expected-sets and corrupt recall metrics.
 
 **Archival-forgiveness contract.** An expected-match thread that the runtime has archived off the spine (present in `archivedThreadIDs`) can never produce a `spine.match-fire`; counting it as a miss would penalise the oracle for naming a correctly-archived thread. The forgiveness predicate (`TargetRecoverable`) and the forgiven count (`RecallExpectedForgiven`) are carried in `StepFeedback` so the generator's per-step scoring uses the same forgiveness logic the harness's `recordRecallFidelity` applies. The `recall_unexplained_absence` counter tracks threads that are off-spine AND absent from the archive index — a non-zero value is always a substrate integrity failure, never an expected archival outcome (see ARCHITECTURE.md §"Unexplained-absence = zero tolerance").
-
-
