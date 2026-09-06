@@ -1,4 +1,4 @@
-# README – Personant: Math and Science Development Assistant
+# README – Personant
 
 A single-user, single-agent runtime that gives an AI assistant persistent working memory across arbitrary projects. The agent has one continuous career: unified memory, no session boundaries, no compaction-driven information loss, and cross-project recognition.
 
@@ -69,7 +69,7 @@ Two keys, two meanings. **Ctrl-C** clears the line you are typing — the sessio
 just build                # compile bin/personant
 just test                 # go vet + go test ./... (standard gate; alias: test-be)
 just test-fe              # fast scoped gate for a front-end-only change (cmd/, chat/, version/);
-                          #   refuses if the diff touches the substrate — see AGENTS.md "Two gates"
+                          #   refuses if the diff touches the substrate — see CONVENTIONS.md "Two gates"
 just cover                # test coverage report across all packages
 just bench                # recall hot-path benchmarks (see justfile for pkg/bench_re knobs)
 just sim                  # acceptance simulation (see Sim Knobs below)
@@ -166,7 +166,7 @@ test/rundata/               user-provided, gitignored: test.providers.toml,
                             test.config.toml (live test credentials)
 ARCHITECTURE.md             orientation for contributors and agents — read first
 SPEC.md                     field-level schemas, algorithms, surface APIs
-AGENTS.md                   house rules for AI agents working in this repo
+CONVENTIONS.md                   house rules for AI agents working in this repo
 ```
 
 ## Storage Layout

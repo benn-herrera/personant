@@ -1,7 +1,7 @@
-#  ROADMAP – Personant: Math and Science Development Assistant
+#  ROADMAP – Personant
 
 This file owns **future intent**. It sits **outside** the contract-document
-precedence chain (`SPEC.md` > `ARCHITECTURE.md` > `AGENTS.md` > code):
+precedence chain (`SPEC.md` > `ARCHITECTURE.md` > `CONVENTIONS.md` > code):
 those three state only the *now* — current behavior, current constraints,
 current scope boundaries — and cross-reference here for anything not yet
 built. Read this file for planning. Do not hand it to a coding agent as a
@@ -30,7 +30,7 @@ store.
   favor of a plain symlink from `.claude/agents` to a cross-project agents
   repository. The pull/maintenance machinery — a mechanism to update that
   shared source on demand rather than relying on the symlink target being
-  current by hand — is planned but not yet rebuilt. `AGENTS.md`'s
+  current by hand — is planned but not yet rebuilt. `CONVENTIONS.md`'s
   repo-tree comment describing the justfile reflects the current state
   (no agents-submodule pinning, no serve-local-api).
 
@@ -473,7 +473,7 @@ automatically by this migration.
   async single-indexer + `atomic.Pointer` snapshot; persisted
   `.vec`/`.tree` sidecars; sleep-cycle `RebuildTrees` builds/reconciles
   summary trees offline. Beam width k=8 (current). W1 divergence is a
-  reported quality measure, not a gate (#119) — see `AGENTS.md`
+  reported quality measure, not a gate (#119) — see `CONVENTIONS.md`
   "Intra-thread recall metrics." Tuning history (exemplar-set fix,
   beam-width oscillation): git log d8e32b3, 9c9493d, 45bae9c. Further
   cost-minimization and a brute-force O(n) confidence-fallback backstop:
@@ -552,7 +552,7 @@ automatically by this migration.
   client-rendered page; `web.search` keeps "search failed" and "search
   found nothing" distinguishable. Tier ruling (SPEC §6.2.7): tier 0
   (silent), scheme allowlist as the boundary instead of an ack. Free-API
-  citizenship (`AGENTS.md` house rules) is the shared politeness layer
+  citizenship (`CONVENTIONS.md` house rules) is the shared politeness layer
   all seven ride.
 
 ### Terminal layer (`internal/term`)

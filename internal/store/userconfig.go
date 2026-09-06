@@ -13,7 +13,7 @@ import (
 // The `[user]` section of config.toml — who personant says it is acting
 // for when it reaches a third party.
 //
-// It exists for the §6.1 free-API citizenship rule (AGENTS.md house rule,
+// It exists for the §6.1 free-API citizenship rule (CONVENTIONS.md house rule,
 // user ruling 2026-08-05): the Wikimedia-family tools REQUIRE contact
 // information in their User-Agent and refuse to run without it, and
 // Crossref and arXiv strongly prefer it. `personant init` fills the

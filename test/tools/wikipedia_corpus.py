@@ -20,7 +20,7 @@ a unit of stored thread content with a deterministic ground-truth
 label. The drifty *query* side is authored separately (C.5, the
 LLM-assisted mad-libs templates).
 
-Stdlib only (AGENTS.md auxiliary-script constraint): urllib for HTTP,
+Stdlib only (CONVENTIONS.md auxiliary-script constraint): urllib for HTTP,
 no requests, no venv. Polite by construction — descriptive User-Agent,
 inter-request delay, redirect following, missing-page skip.
 

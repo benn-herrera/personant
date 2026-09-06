@@ -10,7 +10,7 @@
 // test ever calls Arm — At and Armed cost a single atomic.Bool load and
 // return immediately. There is no map lookup, no lock, no allocation on
 // the hot path. This is why the seam is a *runtime* opt-in rather than a
-// build-tagged one: per AGENTS.md, //go:build-gated code is excluded from
+// build-tagged one: per CONVENTIONS.md, //go:build-gated code is excluded from
 // the normal compile and bit-rots silently. Keeping the hooks in the
 // always-compiled path means a refactor that breaks a call site fails the
 // build immediately, and the negligible unarmed cost buys that safety.

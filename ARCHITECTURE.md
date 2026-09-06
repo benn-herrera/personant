@@ -1,15 +1,15 @@
-# ARCHITECTURE – Personant: Math and Science Development Assistant
+# ARCHITECTURE – Personant
 
 **Audience:** AI agents (and new contributors) who need to orient quickly. Companions:
 
 | Document | Purpose |
 |---|---|
 | `ARCHITECTURE.md` (you are here) | principles, patterns, mechanisms, mental models — read first |
-| `AGENTS.md` | house rules for AI agents working in this repo |
+| `CONVENTIONS.md` | house rules for AI agents working in this repo |
 | `SPEC.md` | operational *specification* — field-level schemas, algorithms, APIs |
 | `README.md` | user-facing description; getting started |
 
-Read this file first. Descend into `SPEC.md` for execution detail; `AGENTS.md` for the contract on agent behavior.
+Read this file first. Descend into `SPEC.md` for execution detail; `CONVENTIONS.md` for the contract on agent behavior.
 
 **Reading time:** ~35–40 minutes.
 
@@ -687,7 +687,7 @@ If you see one of these proposed (or are about to write it), stop and surface th
 | You want | Look here |
 |---|---|
 | Architecture orientation | `ARCHITECTURE.md` (this file) |
-| House rules for AI agents | `AGENTS.md` |
+| House rules for AI agents | `CONVENTIONS.md` |
 | Field-level schemas + algorithms + APIs | `SPEC.md` |
 | User-facing description, getting started | `README.md` |
 | Substrate-level decision history | `ARCHITECTURE.md` §"Substrate non-negotiables" |

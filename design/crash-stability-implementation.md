@@ -181,7 +181,7 @@ journal→commit window, marker/watermark/trailer contracts, cell-12
 sentence + expected-empty note per the arbitration ruling); §2.1 layout
 entries; §2.8 `recovery.*` event rows; §3.11 cadence update (per-turn
 commit supersedes; structural commits absorbed); ARCHITECTURE mechanisms
-entry + anti-pattern note (never gate reset on dirtiness); AGENTS.md
+entry + anti-pattern note (never gate reset on dirtiness); CONVENTIONS.md
 repo-state. Docs-only ⇒ commits under the mechanical-diff exception
 (edit gate). *Opus coder.*
 

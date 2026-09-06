@@ -16,7 +16,7 @@ import (
 // `web.crossref` — the published-record half of the scholarly receipt
 // trio.
 //
-// # Published obligations (AGENTS.md free-API citizenship, consequence 1)
+// # Published obligations (CONVENTIONS.md free-API citizenship, consequence 1)
 //
 // Crossref's REST API is free and open with no key. Its etiquette asks
 // callers to identify themselves with a mail address — either as the

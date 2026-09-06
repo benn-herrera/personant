@@ -32,7 +32,7 @@ import (
 // tools no longer share a decoder; the purchase is a result that says
 // what the entity IS.
 //
-// # Published obligations (AGENTS.md free-API citizenship, consequence 1)
+// # Published obligations (CONVENTIONS.md free-API citizenship, consequence 1)
 //
 // Wikidata is Wikimedia infrastructure and falls under the SAME
 // User-Agent policy as Wikipedia: every request must carry a descriptive

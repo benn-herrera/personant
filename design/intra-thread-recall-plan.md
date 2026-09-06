@@ -7,7 +7,7 @@ validated, separately-committed increments — the same discipline used for #47/
 
 ## Execution rules (every increment)
 
-- Go work goes to **go-coder** agents, given AGENTS.md + the design doc. Never
+- Go work goes to **go-coder** agents, given CONVENTIONS.md + the design doc. Never
   `go build`/`go test` directly — `make build` / `make test` / `make sim`.
   `internal/log` only; DRY; named constants.
 - Each increment: implement → `make test` green → **commit a checkpoint** →

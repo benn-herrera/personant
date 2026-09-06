@@ -98,7 +98,7 @@ func TestLayerERendersDirectivesAndConventions(t *testing.T) {
 			{Header: "project: alpha", Body: "PROJECT_BODY\n"},
 		},
 		Conventions: []ConventionFile{
-			{Path: "/ws/AGENTS.md", Content: "CONVENTIONS_BODY\n"},
+			{Path: "/ws/CONVENTIONS.md", Content: "CONVENTIONS_BODY\n"},
 		},
 	}
 	params, err := Compose(in, ComposeOptions{})
@@ -114,7 +114,7 @@ func TestLayerERendersDirectivesAndConventions(t *testing.T) {
 		"=== defaults ===",
 		"=== user ===",
 		"=== project: alpha ===",
-		"=== conventions: /ws/AGENTS.md ===",
+		"=== conventions: /ws/CONVENTIONS.md ===",
 	} {
 		if !strings.Contains(params.LayerE, header) {
 			t.Errorf("LayerE missing header %q\ngot: %s", header, params.LayerE)
@@ -427,7 +427,7 @@ func TestComposeFullIntegration(t *testing.T) {
 			{Header: "defaults", Body: "DEFAULTS\n"},
 		},
 		Conventions: []ConventionFile{
-			{Path: "/ws/AGENTS.md", Content: "WORKSPACE_AGENTS\n"},
+			{Path: "/ws/CONVENTIONS.md", Content: "WORKSPACE_AGENTS\n"},
 		},
 		ActiveProjectSpine: spineRecs,
 		OtherProjects: []ProjectDigestEntry{{

@@ -18,7 +18,7 @@ import (
 
 // Free-API citizenship — ONE mechanism for the whole package.
 //
-// AGENTS.md carries this as a HARD REQUIREMENT (user ruling, 2026-08-05):
+// CONVENTIONS.md carries this as a HARD REQUIREMENT (user ruling, 2026-08-05):
 // personant complies with all etiquette and required behaviours of every
 // free / volunteer / donor-funded API it consumes. The five binding
 // consequences land here rather than in each tool, because five

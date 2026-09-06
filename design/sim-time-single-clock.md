@@ -236,7 +236,7 @@ must remain the *only* per-day RNG draw and must occur at the same point in the 
 - **`SPEC.md` §9.4.1 (resolves review m6):** rewrite bullet 1 (Monday-midnight anchor + 8am work-start
   offset), bullet 4 (`Weekday()==Sunday` day-off, replacing "every 7th day / index 6"), and DELETE
   bullet 5's `is_day_off ? 24h : 0` hand-formulation (now automatic from `Weekday()`); keep the
-  determinism bullet. Checkpoint requirement per AGENTS.md "Ensure Docs Stay Up To Date."
+  determinism bullet. Checkpoint requirement per CONVENTIONS.md "Ensure Docs Stay Up To Date."
 
 ## 7. Review dispositions (RESOLVED — folded above)
 The adversarial seam review returned **SOUND-WITH-NOTED-FIXES**; all open questions are now decided

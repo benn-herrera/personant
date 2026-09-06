@@ -12,7 +12,7 @@
 // contact-bearing User-Agent, the per-host serial gate and spacing table,
 // and the one-retry Retry-After rule. That file documents the mechanism;
 // each tool's own doc comment records the SPECIFIC published obligations
-// of the service it talks to, per the AGENTS.md house rule.
+// of the service it talks to, per the CONVENTIONS.md house rule.
 //
 // # Tier ruling (SPEC §6.2 gap, closed here)
 //
@@ -103,7 +103,7 @@ const fetchDescription = "Retrieve a web page over plain HTTP and return its mai
 // FetchConfig configures the fetch tool. The zero value is valid and
 // yields the Default* constants above.
 //
-// # Published obligations (AGENTS.md free-API citizenship, consequence 1)
+// # Published obligations (CONVENTIONS.md free-API citizenship, consequence 1)
 //
 // web.fetch has no single service and therefore no single policy: it
 // retrieves whatever URL the model names. What it owes every operator it

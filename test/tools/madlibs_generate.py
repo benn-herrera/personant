@@ -25,7 +25,7 @@ Output is a DERIVED artifact: ``.gitignore``-d, regenerated via
 ``make recall-madlibs``. Canonical sources are this script and the
 template JSON files.
 
-Stdlib only (AGENTS.md auxiliary-script constraint). Determinism: a
+Stdlib only (CONVENTIONS.md auxiliary-script constraint). Determinism: a
 seeded ``random.Random`` (Mersenne Twister, stable across CPython
 releases) shuffles the enumerated query space; the same seed always
 yields the same ``queries.json`` byte-for-byte.

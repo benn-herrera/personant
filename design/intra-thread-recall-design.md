@@ -160,7 +160,7 @@ One query embedding `q` per turn (the existing single embed call). Then:
 - **Kc (coarse top-K threads): start at 10.** Rationale: the C.6 ranking finding
   is the calibration anchor — true topic is the #1 cosine match ~73% of the time,
   top-3 ~92%, and the curve is flat by ~top-10 (the "precision problem" there was
-  the *top-10-above-cutoff candidate policy*, AGENTS.md C.6 note). `Kc = 10`
+  the *top-10-above-cutoff candidate policy*, CONVENTIONS.md C.6 note). `Kc = 10`
   captures essentially all genuine thread matches while bounding the fine-pass
   fan-out. The final user-facing offer is still capped at 3 (`recallOfferK`), so
   `Kc = 10` is generous headroom for the merge/rank/judgment stages, not the

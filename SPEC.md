@@ -1,9 +1,9 @@
-# SPEC – Personant: Math and Science Development Assistant
+# SPEC – Personant
 
 **Audience:** implementation work. Specifies field-level schemas, algorithms, and surface APIs.
 **Companion docs:**
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — orientation, principles, patterns, mechanisms, anti-patterns. **Read first.**
-- [`AGENTS.md`](AGENTS.md) — house rules for agents in this repo.
+- [`CONVENTIONS.md`](CONVENTIONS.md) — house rules for agents in this repo.
 - [`README.md`](README.md) — user-facing description; getting started.
 
 This spec is the *what and how*: schemas, algorithms, surface APIs. Tables and diagrams that already live in `ARCHITECTURE.md` are not reproduced here unless the spec needs them at higher resolution.
@@ -294,7 +294,7 @@ interface ProjectMeta {
   thread_count: number;             // [derived] count of threads with project == id
 
   // project-scoped configuration
-  conventions_paths: string[];      // absolute paths to convention files (CLAUDE.md, AGENTS.md, etc.) loaded into Layer E
+  conventions_paths: string[];      // absolute paths to convention files (CLAUDE.md, CONVENTIONS.md, etc.) loaded into Layer E
   symbol_patterns: ProjectPattern[]; // project-specific deterministic-pass regex patterns
   ignore_symbols: string[];         // project-scoped stopword additions
 }
@@ -3322,7 +3322,7 @@ for this section; see §4 (user surface) and §5.5 (model invocation
 protocol).
 
 **Free-API citizenship is a HARD REQUIREMENT** (user ruling 2026-08-05;
-the binding statement and its five consequences are the AGENTS.md house
+the binding statement and its five consequences are the CONVENTIONS.md house
 rule, which this section implements). Personant complies with all
 etiquette and required behaviours of every free, volunteer or
 donor-funded API it consumes. Concretely, for every `web.*` tool:

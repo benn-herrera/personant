@@ -27,7 +27,7 @@ import (
 //
 // Every other write personant makes lands under $PERSONANT_HOME. This one
 // lands in the user's editor config, which is new territory, so the
-// AGENTS.md "ack at high-leverage moments only" rule does not apply to it:
+// CONVENTIONS.md "ack at high-leverage moments only" rule does not apply to it:
 // the write is confirmed EVERY time, the previous bytes are backed up
 // first, and off a terminal — where there is nobody to ask — it never
 // happens at all. A file whose structure defeats byte-safe insertion is

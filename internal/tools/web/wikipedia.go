@@ -21,7 +21,7 @@ import (
 // participant holding it. Two tools cost one extra spec block in the
 // request prefix and buy the model an actual choice.
 //
-// # Published obligations (AGENTS.md free-API citizenship, consequence 1)
+// # Published obligations (CONVENTIONS.md free-API citizenship, consequence 1)
 //
 // Wikimedia's User-Agent policy REQUIRES every request to carry a
 // descriptive User-Agent WITH contact information (a mail address or a

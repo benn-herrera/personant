@@ -1,4 +1,4 @@
-# AGENTS – Personant: Math and Science Development Assistant
+# CONVENTIONS – Personant
 
 This file is for AI agents (Claude Code, etc.) working in this repository.
 Read it before making non-trivial changes. Human-facing project info is in
@@ -82,7 +82,7 @@ accumulate a pip dependency surface.
 
 ## Repo state
 
-**Anti-reaccretion doctrine.** AGENTS.md is rules and guidance for agents —
+**Anti-reaccretion doctrine.** CONVENTIONS.md is rules and guidance for agents —
 **state has no business in it.** Current and shipped state (what exists,
 what's implemented, what a subsystem currently does) lives in `ROADMAP.md`'s
 **Completed** section; history and wave narrative live in `git log`, not
@@ -218,7 +218,7 @@ internal/{eventlog,metrics,
 ARCHITECTURE.md             orientation (read first)
 SPEC.md                     operational spec
 README.md                   user-facing
-AGENTS.md                   this file
+CONVENTIONS.md                   this file
 ROADMAP.md                  future intent, outside the precedence chain
 justfile                    build + test + dependency-vetting recipes
 ```
@@ -261,7 +261,7 @@ gated either way.)
 
 **W1 recall-preservation QUALITY MEASURE (#111 §7.1; reframed from gate→measure in #119):** `recall_intra_descent_divergence` is a reported approximation-drift canary, **not a build-blocking gate**. The within-thread summary tree is an approximate O(log n) recall heuristic that trades exactness for speed; a nonzero divergence means the heuristic substituted a within-top-Kf leaf, NOT necessarily that recall was lost (a `strict_miss` is a real ranking defect worth raising the beam for; a `tie`/`tree_mismatch` is a sub-perceptible boundary effect — see the classification counters). Exact/exhaustive recall is the job of the separate **exact tiers (#117 grep + flat-scan)**, where it is guaranteed; holding the approximate tree to exact descent-vs-flat set-equality was stricter than its own purpose (recall-correctness). The value is still LOGGED on every rung as a drift canary. There is NO runtime rebalance trigger: tree re-clustering is a sleep-time operation only (the #108 consolidation cycle's `RebuildTrees`, on staleness), so the measure informs nothing at runtime — it is purely observed.
 
-**Ensure Docs Stay Up To Date** - AGENTS.md, README.md, ARCHITECTURE.md, SPEC.md must be brought up to date when committing checkpoints. ROADMAP.md tracks future intent and is not a contract document, but keep it current when an item ships or gets superseded.
+**Ensure Docs Stay Up To Date** - CONVENTIONS.md, README.md, ARCHITECTURE.md, SPEC.md must be brought up to date when committing checkpoints. ROADMAP.md tracks future intent and is not a contract document, but keep it current when an item ships or gets superseded.
 
 ## House rules for agents
 

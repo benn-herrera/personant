@@ -463,7 +463,7 @@ type Config struct {
 // UserConfig is the [user] section — who personant says it is acting for
 // when it reaches a third party.
 //
-// It exists for the §6.1 free-API citizenship rule (AGENTS.md house rule,
+// It exists for the §6.1 free-API citizenship rule (CONVENTIONS.md house rule,
 // user ruling 2026-08-05): the tools that talk to free, volunteer and
 // donor-funded services must send a User-Agent carrying CONTACT
 // INFORMATION, and the Wikimedia family REQUIRES it. Compiling a personal

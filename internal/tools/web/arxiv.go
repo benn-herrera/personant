@@ -17,7 +17,7 @@ import (
 
 // `web.arxiv` — the preprint half of the scholarly receipt trio.
 //
-// # Published obligations (AGENTS.md free-API citizenship, consequence 1)
+// # Published obligations (CONVENTIONS.md free-API citizenship, consequence 1)
 //
 // arXiv's API manual asks callers to make no more than one request every
 // THREE SECONDS and to make requests serially rather than in parallel.

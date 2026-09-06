@@ -21,6 +21,6 @@ If > 0 describe validation
 [ ] Issue linked
 [ ] AI coding usage declared
 [ ] Changes have test coverage
-[ ] AGENTS.md and ARCHITECTURE.md updated
+[ ] CONVENTIONS.md and ARCHITECTURE.md updated
 [ ] ```just test``` passes
 [ ] ```just integration-test``` passes

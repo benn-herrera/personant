@@ -16,7 +16,7 @@ import (
 // one HTTP POST behind the interface, so a different backend is a new
 // file rather than a change to web.search.
 
-// # Published obligations (AGENTS.md free-API citizenship, consequence 1)
+// # Published obligations (CONVENTIONS.md free-API citizenship, consequence 1)
 //
 // Exa is a COMMERCIAL, metered API, not a free/volunteer/donor-funded
 // one, so the citizenship rule does not bind here on its own terms. It

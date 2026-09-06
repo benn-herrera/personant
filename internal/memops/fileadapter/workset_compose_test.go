@@ -49,7 +49,7 @@ func TestComposeWorkingSet_LayerE_DirectivesAndConventions(t *testing.T) {
 	}
 
 	convDir := t.TempDir()
-	convPath := filepath.Join(convDir, "AGENTS.md")
+	convPath := filepath.Join(convDir, "CONVENTIONS.md")
 	if err := os.WriteFile(convPath, []byte("CONVENTIONS_BODY\n"), 0o644); err != nil {
 		t.Fatalf("write conventions: %v", err)
 	}

@@ -103,7 +103,7 @@ update-dependencies:
 #   just add-dependency example.com/mod/v2@v2.1.2
 # update-dependencies is the wrong tool here — its `go get -u ./...` upgrades
 # the whole graph, unrelated churn on a commit whose subject is one import.
-# The AGENTS.md vetting checklist (release date, importers, deprecation
+# The CONVENTIONS.md vetting checklist (release date, importers, deprecation
 # status, transitive dep count, license) is a PRECONDITION of running this,
 # not something it can check.
 #
@@ -190,7 +190,7 @@ _test-body count=GOTESTCOUNT: build fmt-check recall-madlibs
 # CHECKPOINT GATE (substrate): fmt-check (drift fails the gate) + go vet +
 # go test over {{GOPKGS}} (full suite, incl. multi-day sim rungs). Go's test
 # cache is ON by default (GOTESTCOUNT) — an unchanged package returns
-# instantly. Run ONCE before a commit, not between edits; see AGENTS.md
+# instantly. Run ONCE before a commit, not between edits; see CONVENTIONS.md
 # "Two gates."
 #
 # CHECKPOINT GATE (substrate): full go vet + go test.
@@ -212,7 +212,7 @@ test-be: test
 
 # FE_SCOPE_PREFIXES are the path prefixes a front-end-only change may touch.
 # internal/version/ is included because every front-end change bumps
-# version.FrontEnd (AGENTS.md's bump contract), and it is also imported by
+# version.FrontEnd (CONVENTIONS.md's bump contract), and it is also imported by
 # substrate packages — see FE_TESTPKGS. internal/shell/ and internal/term/
 # qualify by the same leaf rule: nothing outside this set imports them.
 # Before adding a further prefix here, verify the leaf property holds:
