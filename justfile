@@ -90,6 +90,13 @@ fmt-check:
       exit 1
     fi
 
+AGENTS_REPO := "https://github.com/ave-veritas-et-enodatio/adjagent.git"
+AGENTS_DIR := ".claude-temp/adjagent"
+agents:
+	@mkdir -p .claude-temp
+	@[[ -d "{{AGENTS_DIR}}" ]] && git -C "{{AGENTS_DIR}}" pull || git -C .claude-temp clone "{{AGENTS_REPO}}"
+	just --justfile "{{AGENTS_DIR}}/justfile" install "$(pwd)"
+
 # NOT the tool for adding one dependency (see add-dependency) — this is
 # deliberate whole-graph churn.
 #
