@@ -90,11 +90,11 @@ fmt-check:
       exit 1
     fi
 
-AGENTS_REPO := "https://github.com/ave-veritas-et-enodatio/adjagent.git"
-AGENTS_DIR := ".claude-temp/adjagent"
+AGENTS_REPO := "https://github.com/benn-herrera/adjagent.git"
+AGENTS_DIR := ".claude" / file_stem(AGENTS_REPO)
 agents:
-	@mkdir -p .claude-temp
-	@[[ -d "{{AGENTS_DIR}}" ]] && git -C "{{AGENTS_DIR}}" pull || git -C .claude-temp clone "{{AGENTS_REPO}}"
+  @mkdir -p "{{parent_directory(AGENTS_DIR)}}"
+	@[[ -d "{{AGENTS_DIR}}" ]] && git -C "{{AGENTS_DIR}}" pull || git -C {{parent_directory(AGENTS_DIR)}} clone "{{AGENTS_REPO}}"
 	just --justfile "{{AGENTS_DIR}}/justfile" install "$(pwd)"
 
 # NOT the tool for adding one dependency (see add-dependency) — this is
