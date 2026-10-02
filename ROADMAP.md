@@ -141,6 +141,15 @@ Concrete, mostly single-package items; several unblock other queued work.
 
 - [ ] **Phase 5.** Cross-project digest, fallback dissection, directive
   accrual.
+- [ ] **Boundary between behavior memory and project-convention career
+  memory.** Define it so that every behavior adjustment learned in a
+  project resolves to exactly one of (a) promotion to universal behavior
+  memory, with human acknowledgement, or (b) reformulation as a project
+  convention rule — never a per-project behavior variant. Marking the two
+  sides: how experimental versus conservative to be on a project is
+  project-related; agent policy such as the no-self-blame rule is not.
+  (`THESIS.md` "What follows";
+  `ARCHITECTURE.md` "Personalization through directive accrual.")
 - [ ] **Math rendering delivery ladder.** Personant must eventually render
   mathematics as inline images in image-capable terminals, not raw LaTeX
   or lossy unicode. Three independently-shippable rungs: (1) **sidecar**

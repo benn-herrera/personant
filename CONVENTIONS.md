@@ -4,69 +4,17 @@ This file is for AI agents (Claude Code, etc.) working in this repository.
 Read it before making non-trivial changes. Human-facing project info is in
 [`README.md`](README.md).
 
-## Founding tenet
+## Thesis (load-bearing)
 
-> **The best use of AI *by* humans is use of AI *with* humans.**
->
-> The human must not abdicate their participation and impose all work
-> upon the AI. The best outcome requires a fully collaborative
-> engagement, with their respective strengths interleaved like the
-> braided strands of a multi-material, high-performance cable.
->
-> Adherence to this principle results in an enhanced and growing
-> symbiotic pair rather than an atrophied parasite clinging to a stunted
-> host.
+THESIS.md is the frame every change here answers to; ARCHITECTURE.md's
+"Applying the thesis" turns it into design questions and warning signs.
+Read both before a non-trivial change. These are red flags — stop and
+surface them rather than proceeding:
 
-This is the highest-level frame personant operates under; the
-architectural thesis below and every design choice that follows
-derive from it. Concretely, this means:
-
-- **Deterministic code** does mechanical work (regex, file I/O,
-  set math, atomic writes). The LLM is the wrong tool for mechanical
-  jobs — expensive, non-deterministic, error-prone where a regex
-  would be reliable.
-- **The LLM** brings what nothing else can: pan-subject-matter
-  expertise, cross-domain pattern recognition, judgment over
-  ambiguity informed by broad knowledge. Not grinding — *expertise*.
-- **The human** contributes direction, judgment under ownership,
-  and personal-experience bridges (the "this emulsion problem
-  reminds me of viscosity work in another project" link no static
-  system can have).
-
-A proposed feature or change that tries to make the agent
-*anticipate* the user (rather than *assist* the user) is suspect.
-The same goes for any change that lets the user offload the
-judgment that's actually theirs. Personant is not building
-agents-gone-wild software with promises of retirement-fund-filling
-products obtained via wishful thinking and inchoate dreams.
-
-## Architectural thesis (load-bearing)
-
-Personant bets that **deterministic state as canonical, LLM in narrow
-judgment roles, and human acks at high-leverage moments only** scales further
-than agent-figures-it-all-out alternatives. This pattern recurs at every
-layer; treat any change that would invert it as a red flag. Full statement
-and the recurring-pattern catalog it drives: ARCHITECTURE.md's "The
-architectural thesis" and "Recurring patterns."
-
-| Tier               | Role                                                   |
-|--------------------|--------------------------------------------------------|
-| Deterministic (Go) | canonical state, integrity, build/query/index          |
-| LLM                | topic tagging, summary drafting, anchor selection, …   |
-| Human              | ack at three moments: closure, recall surface, dissect |
-
-For closure and recall surface, the ack follows a banded model rather than
-an ack-every-instance model: the ack stays where the leverage is (the
-closure exception queue, the middle-confidence recall band, every explicit
-act such as `/done`) and drops for the routine case, applied automatically
-with one committed line and an `ack=auto` event. Removing the ack from a
-high-leverage moment is still the red flag — a user clearing a prompt they
-cannot read or act on is the same failure by another route.
-
-Two warning signs that a proposed change is wrong:
-
-- It pushes canonical state into the LLM.
-- It removes a human ack at one of the three load-bearing moments.
+- a change that inverts the thesis or trips one of those warning signs;
+- a feature that makes the agent *anticipate* the user rather than
+  *assist* the user;
+- a change that lets the user offload judgment that is actually theirs.
 
 ## Language constraints
 
@@ -312,6 +260,21 @@ gated either way.)
   `clock.Since()` for real-time and latency measurement.
 - **Match the spec's data model.** Spine records, thread frontmatter, and the
   symbol index have field-level schemas in §2. Don't invent your own.
+- **Serialization format: legible to whoever is debugging.** A human or
+  agent chasing a problem reads the file raw, so legibility is a
+  requirement. JSON is the format to resist — quote noise, no comments,
+  nesting tracked by brace-counting. A new file, record stream, or
+  command output takes:
+
+  | Shape | Format |
+  |---|---|
+  | flat records, one per line, sorted or append-only | JSONL — the line is the record: `grep` returns whole records, `git diff` isolates the changed one, id order stays stable |
+  | nested, or read as a document (command output, configuration, frontmatter) | YAML when tree-shaped (deep nesting, nulls, top-level lists); TOML when flat, hand-edited configuration |
+
+  Machine-emitted YAML decodes into typed structs and quotes string values
+  on emit, so implicit typing (`no`→bool, `1.10`→float) cannot bite. A
+  format outside this mapping states its reason in the change that
+  introduces it.
 - **Verify with the canonical docs.** Before assuming a behavior, grep
   ARCHITECTURE.md and the spec. If they're silent, surface it as an open
   question rather than guessing.

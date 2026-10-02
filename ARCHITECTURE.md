@@ -4,12 +4,13 @@
 
 | Document | Purpose |
 |---|---|
-| `ARCHITECTURE.md` (you are here) | principles, patterns, mechanisms, mental models — read first |
+| `THESIS.md` | why personant has the shape it has — read first |
+| `ARCHITECTURE.md` (you are here) | principles, patterns, mechanisms, mental models |
 | `CONVENTIONS.md` | house rules for AI agents working in this repo |
 | `SPEC.md` | operational *specification* — field-level schemas, algorithms, APIs |
 | `README.md` | user-facing description; getting started |
 
-Read this file first. Descend into `SPEC.md` for execution detail; `CONVENTIONS.md` for the contract on agent behavior.
+Read `THESIS.md` first, then this file. Descend into `SPEC.md` for execution detail; `CONVENTIONS.md` for the contract on agent behavior.
 
 **Reading time:** ~35–40 minutes.
 
@@ -23,11 +24,13 @@ The role of the agent is **research assistant**, not general-capability. This co
 
 ---
 
-## The architectural thesis (load-bearing)
+## Applying the thesis (load-bearing)
+
+THESIS.md states why personant has this shape. Architecturally it reduces to:
 
 > **Deterministic state as canonical. LLM in narrow judgment roles. Human acknowledgement at high-leverage moments only.**
 
-This thesis recurs at every layer. When making a design decision, ask:
+This recurs at every layer. When making a design decision, ask:
 
 1. Could deterministic code do this without involving the LLM?
 2. If the LLM is involved, is its role narrow and well-bounded?
@@ -37,7 +40,7 @@ This thesis recurs at every layer. When making a design decision, ask:
 |---|---|
 | Deterministic (Go runtime) | canonical state holder; integrity enforcer; build/query/index operations; autonomic git management of `~/.personant/` |
 | LLM | narrow generative/judgment roles: topic tagging, summary drafting, anchor selection, recognition, dissection clustering |
-| Human | final ack at three load-bearing moments: closure (retirement), opportunistic recall surface, fallback dissection trigger — the first two AMENDED by user ruling (closure 2026-08-04, recall 2026-08-05): the ack is kept where the leverage is (the exception queue; the middle-confidence recall band; every explicit act like `/done`) and dropped for the routine case, which is applied automatically with one committed line and an `ack=auto` event |
+| Human | ack at three load-bearing moments: closure (retirement), opportunistic recall surface, fallback dissection trigger. For closure and recall the ack stays where the leverage is (the exception queue; the middle-confidence recall band; every explicit act like `/done`) and drops for the routine case, which is applied automatically with one committed line and an `ack=auto` event |
 
 **Two warning signs that a proposed change is wrong:**
 
@@ -304,7 +307,7 @@ invariant) and that overlapping context *surfaces opportunistically*
 (the layers above). It deliberately does not promise spontaneous
 cross-domain reminiscence: a connection between today's problem and
 years-old work in a different vocabulary surfaces only if anchors or
-embeddings overlap. Per the founding tenet, the serendipitous bridge
+embeddings overlap. Per the founding tenet (THESIS.md), the serendipitous bridge
 ("this reminds me of…") is the *human's* contribution to the braid — a
 feature that tries to make the agent volunteer it is the
 anticipate-the-user anti-pattern. State this boundary when setting user
