@@ -7,8 +7,8 @@ anything not yet built. Read this file for planning. Do not hand it to a coding 
 order; an item graduates into a contract document (with acceptance criteria) before it is built, per
 the project's planning discipline.
 
-Entries carry a source citation (a `file §section` pointer, or a bare `§ Completed` self-reference)
-back to wherever the item is described in more detail, so provenance survives restructuring.
+Entries carry a source citation (a `file §section` pointer) back to wherever the item is described
+in more detail, so provenance survives restructuring.
 
 **Checklist lifecycle.** Every item in this file is a checkbox. An open item is `- [ ]`; it checks
 off to `- [x]` **in place** the moment it ships — it stays visible as long as its list still has
@@ -16,17 +16,6 @@ open siblings, since a done item gives planning context to what's still open aro
 item in a list is checked, the **list is disposed of**: removed from this file, its history already
 in `git log`. This is the file's garbage collection — without it, ROADMAP becomes the next memory
 store.
-
----
-
-## 1. Restore agents-dependency pull/maintenance machinery
-
-- [ ] The old Makefile `agents`/`update-agents-dependency` targets (submodule pinning for the shared
-  agent-definition set) were retired in favor of a plain symlink from `.claude/agents` to a
-  cross-project agents repository. The pull/maintenance machinery — a mechanism to update that
-  shared source on demand rather than relying on the symlink target being current by hand — is
-  planned but not yet rebuilt. `CONVENTIONS.md`'s repo-tree comment describing the justfile reflects
-  the current state (no agents-submodule pinning, no serve-local-api).
 
 ---
 
@@ -50,8 +39,8 @@ Concrete, mostly single-package items; several unblock other queued work.
   `recall.ack-mode` are the only two parameters currently read live via
   `store.ReadParameter`/`MemoryOps.DirectiveParam`; everything else in `SPEC.md` §2.6.1
   (`context.token-budget`, `staging.window-turns`, `history.cap-per-thread`,
-  `anchor.projection-max`, `spine.entry-max-chars`, etc.) is still a compiled-in constant. (§
-  Completed, "Closure & recall ack amendments"; `SPEC.md` §2.6.1, §3.10.3, §3.1.)
+  `anchor.projection-max`, `spine.entry-max-chars`, etc.) is still a compiled-in constant.
+  (`SPEC.md` §2.6.1, §3.10.3, §3.1.)
 - [ ] **Bind Alt-B/Alt-F (word-back/word-forward) in the REPL line editor.** The terminal decoder
   already reports the Meta form; the editor does not yet bind it, so an Alt-modified rune is
   inserted as its base character. (`SPEC.md` §4.3.1.)
@@ -68,11 +57,10 @@ Concrete, mostly single-package items; several unblock other queued work.
   staleness".)
 - [ ] **Banded/auto-mode sim rung.** Both the §3.5 closure ack-mode amendment and the §3.4 recall
   banding amendment are unit-covered but not sim-covered; a named sim rung exercising
-  `banded`/`auto` end-to-end is owed. (§ Completed, "Closure & recall ack amendments.")
+  `banded`/`auto` end-to-end is owed. (`SPEC.md` §3.4, §3.5.)
 - [ ] **W1 recall-preservation follow-ups.** Re-verify `recall_intra_descent_divergence == 0` at a
-  narrower beam now that the exemplar-set propagation fix confirms the keys carry recall (currently
-  beam width k=8); build the brute-force O(n) backstop for the user-asserted-confidence fallback
-  path. (§ Completed, "Recall stack," intra-thread recall entry.)
+  narrower beam (currently beam width k=8); build the brute-force O(n) backstop for the
+  user-asserted-confidence fallback path. (`SPEC.md` §3.4.)
 - [ ] **Runtime hot-reload of the topic-tag prompt template**, for empirical tuning without a
   rebuild. Currently `internal/prompt/template.go`'s `TopicTagDirective` is a compiled constant.
   (`SPEC.md` §5.1.3.)
@@ -92,7 +80,7 @@ Concrete, mostly single-package items; several unblock other queued work.
   the same seam is deferred. (`SPEC.md` §3.4 / recall-measure internals.)
 - [ ] **Recall precision/recall tuning, deferred until data demands it:** enrich the stored-thread
   symbol set beyond the current 5 anchors, and evaluate moving recall off symmetric Jaccard to an
-  asymmetric overlap coefficient. (§ Completed, "Recall stack," Phase C entry.)
+  asymmetric overlap coefficient. (`SPEC.md` §3.4.)
 - [ ] **Inference-/embedding-in-loop simulation.** Wire real `reaper.local` inference (gemma-4
   family) and embedding (`nomicai-modernbert-embed-base-bf16`) into the acceptance sim, individually
   configurable, to close the coverage gap the mock LLM/nil-embedder regime leaves (most importantly,
@@ -103,6 +91,30 @@ Concrete, mostly single-package items; several unblock other queued work.
   topic-tag fidelity under real inference, spine-cardinality/A1-saturation stress, transient-data
   lifecycle fidelity, topic-clustering/Lens-B gaps) live in `SPEC.md` §9.1, which is process
   contract and stays there — this entry exists so the work is prioritizable from one list.
+- [ ] **Non-ASCII symbols in the lexical completeness floor.** `exact.isWordRune`
+  (`internal/recall/exact/exact.go`) admits ASCII letters and digits only, so a symbol containing
+  other letters is invisible to the lexical floor. (`SPEC.md` §3.4.)
+- [ ] **"Six-month" phrasings in Go comments.** Comments in `internal/memops`, `internal/autogit`,
+  `internal/clock`, `internal/store` and `internal/scenarios/sim` still say six-month; the
+  acceptance gate is 120 days. Sweep each file when next touched. (`SPEC.md` §9.1.)
+- [ ] **`store.ThreadTurnWindow` imported directly by `internal/turn/engage.go`**, bypassing the
+  `MemoryOps` port. Accepted while the file adapter is the only one; revisit when a second adapter
+  arrives. (`ARCHITECTURE.md` "Port-and-adapter at the substrate boundary.")
+- [ ] **Flush-job re-enqueue on failure.** A failed embedding flush job is not re-enqueued. Parked
+  until live-run data shows failed embeds. (`internal/recall/measure`.)
+- [ ] **Topic-tag residuals under live inference.** Never-attempted tags remain on roughly 1.5% of
+  live turns and coincide with serving-side loop-detection output bodies; a doubled anchor-list tag
+  shape is not absorbed by the parser. (`internal/prompt/parser.go`.)
+- [ ] **Tag-fidelity instrument limits.** No `topic.tag-parsed` event logs each turn's
+  model-emitted anchor set, so anchor-emission overlap is a run-level figure read from thread
+  frontmatter, and it is unmeasurable on the current workload (identifier vocabulary is disjoint
+  from anchor vocabulary). The re-engagement miss rate is inflated by an unknown amount by spurious
+  `*new-topic*` duplicates splitting cosine mass; decompose it before it drives design.
+  (`internal/scenarios/sim/tagfidelity.go`; `SPEC.md` §9.1 "Topic-tag fidelity.")
+- [ ] **Hop-0 embedding recall below aspiration.** Under live embedding, `wander_current_recall` at
+  hop 0 measured 0.882 against the ~0.95 target on the 14-day rung (report-only). Investigate
+  threshold and query composition if it persists on the next long rung.
+  (`internal/scenarios/sim/wander.go`.)
 
 ---
 
@@ -156,13 +168,8 @@ Concrete, mostly single-package items; several unblock other queued work.
   rebuild-on-open primitive and the submind clone mechanism below. Irreducible limit: prose
   cross-references inside allowed content require human verification at prep time; the deterministic
   layer only guarantees structural containment.
-- [ ] **Gemma-4 domain retraining.** A queued project to produce domain-specialized retrained
-  variants of gemma-4-E4B (PoC) and gemma-4-31B (real target) on a physics + math knowledge base,
-  served on `reaper` alongside the stock tiers. Deepens the single-family commitment to the weights
-  level and pre-validates the local fine-tuning workflow the weight-baked-instinct far-horizon item
-  (below) will need. (`ARCHITECTURE.md` "Model-family as platform" section.)
 - [ ] **Synonym cluster resolution** (v0.2+, if empirical pressure).
-- [ ] **Sub-agent runtime extension.** Design settled 2026-08-30; use case: kbase-class domain work
+- [ ] **Sub-agent runtime extension.** Use case: kbase-class domain work
   wanting model routing and focused contexts. The shape:
   - *Definition files*: markdown with a frontmatter subset — `name`, `description`, `tools`,
     `model`. Body becomes the agent's system charter over a thin runtime base. Load-time validation:
@@ -338,143 +345,3 @@ Concrete, mostly single-package items; several unblock other queued work.
 
   Not v0.1 — and distinct from multi-*user* (v2.0, locked): this is one user, one career, many
   concurrent conversations.
-
----
-
-## Completed
-
-Kept while still relevant — a shipped subsystem an open item above builds on, extends, or was
-deferred pending. Build-wave narrative for each lives in `git log`, not here. The
-checklist-lifecycle doctrine above governs disposal going forward; the groups below are migrated in
-as fully-checked groups and are candidates for disposal at the next review, not removed
-automatically by this migration.
-
-### Core substrate (Phases 1–B)
-
-- [x] Skeleton + storage scaffold (Phase 1).
-- [x] Turn loop, topic-tag parsing, chat REPL, layered working-set composition, scenario harness,
-  mid-turn thread re-prompt (Phase 2, §5.5).
-- [x] Opportunistic recall, symbolic Jaccard (Phase 3) — within-project, log-only surface;
-  cross-project + UI deferred until Phase C's calibration data (Phase C, below, is complete).
-- [x] `MemoryOps` port + `FileAdapter` (Phase A) — application layer (turn/chat/cmd/scenarios)
-  depends on the port; `internal/autogit` (go-git-backed) handles autonomic git on the home tree.
-- [x] Transient-data lifecycle (Phase B) — see `ARCHITECTURE.md` "Transient-data lifecycle."
-
-### Recall stack (§3.4)
-
-- [x] Layer-2 embedding recall — `model.Embedder` + provider `embeddingModel`;
-  `recall.ProposeEmbedding` cosine matcher; opt-in per provider with graceful symbolic-only
-  fallback. Rationale (symbolic Jaccard collapses under vocabulary drift) and calibration data:
-  memory `project_personant_recall_fidelity_design`, git log around the C.6 sweep.
-- [x] Intra-thread recall (#109/#111) — chunk-level hierarchical embedding index, coarse→fine,
-  engaged thread bypasses the coarse gate; async single-indexer + `atomic.Pointer` snapshot;
-  persisted `.vec`/`.tree` sidecars; sleep-cycle `RebuildTrees` builds/reconciles summary trees
-  offline. Beam width k=8 (current). W1 divergence is a reported quality measure, not a gate (#119)
-  — see `CONVENTIONS.md` "Intra-thread recall metrics." Tuning history (exemplar-set fix, beam-width
-  oscillation): git log d8e32b3, 9c9493d, 45bae9c. Further cost-minimization and a brute-force O(n)
-  confidence-fallback backstop: Near-term above.
-- [x] Phase C: recall-fidelity test infrastructure — complete (madlibs query generator, adversarial
-  templates, Wikipedia corpus pipeline, LLM-authored corpus templates, calibration sweep). Harness
-  lives in `internal/scenarios/testdata/`, driven by `just recall-madlibs` / `just
-  recall-corpus-test` (opt-in execution; always compiles under `just test`). Headline finding
-  informing the recall thresholds below: symbolic Jaccard collapses under vocabulary drift
-  (M=4/T=0.4 → 0.098 recall) while embedding recall stays robust (~0.97) but precision-poor (~0.21
-  at cos 0.45) — validates the layered §3.4 design. Full six-step build + sweep data: memory
-  `project_personant_recall_fidelity_design`.
-- [x] Evolving-anchor model (SPEC §2.2/§2.7.4/§3.4/§5.1) — see `ARCHITECTURE.md` "Anchors vs.
-  history." Shipped across five increments; full sequence in git log.
-
-### Crash stability / dual-repo recovery (#94)
-
-- [x] Waves R1–R5 — see `ARCHITECTURE.md` "Crash stability and the dual-repo substrate"; normative
-  spec `SPEC.md` §4.5.8 (states "Implemented"). Reconciles derived state against canonical on
-  startup (Init → Reconcile → day barrier → LoadSession) via the B0–B6 barrier sequence and the
-  journal/marker/watermark detection set. History: git log f499f94 (design) .. 4efe4ea (R5 docs).
-
-### Dogfood-minimum chat REPL (front end)
-
-- [x] Slash set, term-owned line editing + history (`internal/term`'s own editor — emacs keys, ↑/↓
-  history over `~/.personant/history`, wrapped multi-row rendering under a row cap, editable
-  pre-filled defaults, question folded into the read), the §4.3.3 interrupt/abort keys (`Ctrl-C`
-  clears a non-empty line, hints then exits on a consecutive second press at an empty one, and ends
-  the session mid-turn; `Esc` retracts the in-flight turn; `Ctrl-Z` suspends cleanly and `fg` comes
-  back to a sane terminal), and the §4.3.2 phase-labeled turn progress indicator.
-- [x] Esc-retraction invariant — rolls session-volatile runtime state (turn counter, §3.10 staging
-  buffer, Layer B/C, history, recall marks, embedding debt) back to its pre-turn value —
-  `internal/turn/rollback.go`, invariant-tested (`TestPreCanonicalAbort_NoSessionResidue`) — gated
-  to an allow-list of pre-canonical turn phases, so a retracted prompt cannot shape the next turn;
-  the durable trace is one `system.turn-aborted` event line, never the text.
-- [x] Shipped alongside a broader review burn-down (instrument integrity, runtime correctness,
-  concurrency/robustness, DRY/dead-code, docs-accuracy sweep): `design/review-burndown-2026-07.md`,
-  git log 08605bf, 618337f, d5540f3.
-
-### §4.4 shell escape
-
-- [x] `internal/shell` — `$` fire-and-forget and `#` capture-into-next-turn, via per-command `$SHELL
-  -c`, not a persistent shell (SPEC §4.4.2). Ctrl-C during a command is an invariant, not
-  best-effort; the child gets its own process group; stdin is the null device; a `#` capture is
-  redacted against resolved provider keys on the context path only (§8.2.1) — the terminal itself
-  keeps the unredacted bytes. Full mechanics: SPEC §4.4.1–§4.4.4.
-
-### §6.1 tool surface
-
-- [x] Registry (`internal/tools`: name → spec + handler + tier + mutates, substrate-free) +
-  execution loop (`internal/turn`, SPEC §6.1.4). An empty registry sends no `tools` field. Tool
-  execution is at-least-once under #94 crash replay — harmless for read-only tools, NOT for a
-  mutating one, so `tools.Registry.Register` mechanically refuses a tool declaring `Mutates`;
-  revisit that decision before any mutating tool lands.
-- [x] Seven `web.*` query tools (`fetch`, `search`, `wikipedia`, `wiktionary`, `wikidata`, `arxiv`,
-  `crossref`) — each SPEC section (§6.1.1, §6.1.5–§6.1.9) carries its own design rationale (e.g. why
-  `web.wikidata` uses the Action API, not the REST path the other two Wikimedia tools share).
-  `web.fetch` signals "requires JavaScript rendering" explicitly rather than returning a blank body
-  for a client-rendered page; `web.search` keeps "search failed" and "search found nothing"
-  distinguishable. Tier ruling (SPEC §6.2.7): tier 0 (silent), scheme allowlist as the boundary
-  instead of an ack. Free-API citizenship (`CONVENTIONS.md` house rules) is the shared politeness
-  layer all seven ride.
-
-### Terminal layer (`internal/term`)
-
-- [x] Arbiter consolidation, waves W0–W3 — sole owner of fds, mode, the single reader, every emitted
-  byte, and ownership state; `internal/chat` keeps policy only. `ReadLine(Question)` is the only
-  read path.
-- [x] `liner` removed, ONE session mode, waves W3/W5 — git log 07e5ccd..c1ddea2; debate in
-  `mad-design/terminal-layer/`.
-- [x] A planned SIGINT-offer mechanism (wave W4) was dissolved: the ISIG behavior makes Ctrl-C a
-  decoded key wherever term owns the fd, so `term.Handler` carries no SIGINT hook, by design, not
-  omission. See `ARCHITECTURE.md` "Terminal ownership" for the full design rationale.
-
-### Closure & recall ack amendments
-
-- [x] Thread closure / retirement (§3.5) — curator-drafted summary + ack flow
-  (`internal/turn/closure.go`, decay-triggered scan at turn close). Routine closures auto-accept,
-  one committed line, no prompt; a decayed thread is an exception when anchor-rich (≥6) or
-  long-engaged (≥15 `turn_count`), or its draft failed/came back empty — exceptions batch at session
-  boundaries (a derived queue, never stored). `/done` stays fully interactive. Escape hatch:
-  `closure.ack-mode: auto|always` (SPEC §2.6.1).
-- [x] §3.4 recall surface, banded — same medicine as closure: at/above the tier's auto threshold
-  (`recall.symbolic-auto-threshold` 0.65, `recall.cosine-auto-threshold` 0.75 — SPEC §2.6.1) fetched
-  with one committed line and no prompt; the band between surface and auto asks once per turn with a
-  legible offer; below surface, unchanged. A candidate already resident in Layer B is declined
-  `already-known` by the runtime rather than asked. Escape hatch: `recall.ack-mode: banded|always`.
-  Threshold rationale (C.6 corpus sweep): memory `project_personant_recall_fidelity_design`.
-- [x] `closure.ack-mode` and `recall.ack-mode` are the only two `SPEC.md` §2.6.1 parameters
-  currently read live via `store.ReadParameter`/`MemoryOps.DirectiveParam`; the rest of §2.6.1 is
-  still compiled-in constants (tracked in Near-term above).
-
-### Deep-cold archival & dedup (§3.8/§3.9)
-
-- [x] Recoverable deep-cold archival (§3.8) — `cmd/archive.go` (`archive list`/`archive recover`),
-  `internal/turn/archival.go`; cardinality-pressure scan at turn close.
-- [x] Working-set content dedup / git minimization (§3.9) — `internal/dedup` + `AgeFileChains`, per
-  engaged thread, wired into `internal/turn/chain.go` step 3, `internal/workset`,
-  `internal/memops/fileadapter`.
-- [x] `ARCHITECTURE.md`'s stale `(v0.2)` labels on both features have been corrected to match the
-  shipped state above.
-
----
-
-## Judgment calls made during the 2026-08-29 migration
-
-See the migration report for the full list of now/future classification calls (what stayed as
-scope-boundary documentation vs. what moved here), and the doc-accuracy inconsistencies surfaced
-along the way (flagged inline above where they affect an entry's reliability).

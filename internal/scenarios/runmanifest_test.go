@@ -62,8 +62,7 @@ func TestRunManifestStartAndCompletion(t *testing.T) {
 }
 
 // TestRunManifestModeDerivation pins the mode string to what the harness
-// actually installed — the field the burndown-2026-07b false alarm was
-// missing (a mock dir indistinguishable from a live run's).
+// actually installed, so a mock dir cannot pass for a live run's.
 func TestRunManifestModeDerivation(t *testing.T) {
 	fakeClient := model.NewScriptedMock(nil, nil)
 	cases := []struct {

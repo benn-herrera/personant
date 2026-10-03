@@ -4133,7 +4133,7 @@ termination) is **derived** from it, never tracked in parallel. This is the cont
 generator (`workload.go` `runWorkDay`/`runSession`/`runDayOff`) and the harness day-close share; its
 absence — two day-trackers in two coordinate systems (a jittered generator counter vs. a rigid
 harness `nextHeavyAt` grid) — let a day-off's 24h jump skip a day-close, collapsing the weekly
-day-off (#121, and the dual-source defect sim-time-single-clock.md retired). The harness's pinned
+day-off (#121). The harness's pinned
 clock is a **slaved copy** of the generator's emitted `Step.At` (it *sets* `pinnedClock = Step.At`,
 it does not integrate a delta), so there is genuinely one clock.
 

@@ -27,11 +27,11 @@ dependency surface.
 ## Repo state
 
 **Anti-reaccretion doctrine.** CONVENTIONS.md is rules and guidance for agents — **state has no
-business in it.** Current and shipped state (what exists, what's implemented, what a subsystem
-currently does) lives in `ROADMAP.md`'s **Completed** section; history and wave narrative live in
-`git log`, not here. If you're about to add a sentence describing what the system *does* or *now
-has* rather than what an agent *must/must not do*, it belongs in `ROADMAP.md`, not here — move it,
-don't append it. A rule's origin is a commit pointer, not inline prose.
+business in it.** What the system currently does is stated by `SPEC.md` and `ARCHITECTURE.md`;
+history and wave narrative live in `git log`, not here. If you're about to add a sentence describing
+what the system *does* or *now has* rather than what an agent *must/must not do*, it belongs in
+those documents, not here — move it, don't append it. A rule's origin is a commit pointer, not
+inline prose.
 
 **Versioning & acceptance (read before judging "done").** Three version lines, normatively defined
 in **SPEC.md §9.1**; the current **values live in `internal/version`** and are never restated in
@@ -39,8 +39,7 @@ prose — a prose copy is a second definition that goes stale on the next bump. 
 (and `--version`, and the REPL's `/version`) prints the live ones.
 
 - **substrate** (`version.Substrate`) — this runtime + the `MemoryOps` API.
-- **front end** (`version.FrontEnd`) — U/X + feature logic. Current feature set: `ROADMAP.md` §
-  Completed, "Dogfood-minimum chat REPL."
+- **front end** (`version.FrontEnd`) — U/X + feature logic. Current feature set: `SPEC.md` §4.
 - **home on-disk `format`** (`version.CurrentHomeFormat`) — a plain integer in
   `<home>/version.toml`, deliberately NOT semver: a layout is either readable by a binary or it is
   not. A home written by a NEWER binary is **REFUSED** at the process boundary, and the gate runs
@@ -64,8 +63,7 @@ realism element is the failure, a documented deferral is not. Normative definiti
 §9.1**. At substrate v0.5.0, work switches to front-end logic (which then earns its own v0.1.0 via a
 human U/X phase and supplies the empirical data that closes parked substrate known-unknowns).
 
-Current and completed subsystems: `ROADMAP.md` § Completed. Future work: `ROADMAP.md`'s Near-term /
-Mid-term / Far-horizon tiers.
+Future work: `ROADMAP.md`'s Near-term / Mid-term / Far-horizon tiers.
 
 Current top-level shape:
 

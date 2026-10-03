@@ -1928,7 +1928,7 @@ type generator struct {
 	files map[int]*fileState
 
 	// simNow is the absolute simulated instant (a UTC time.Time on the one
-	// clock, sim-time-single-clock.md §3.4) of the most recently emitted
+	// clock) of the most recently emitted
 	// natural turn. Each turn's Step.At is its turnInstant; TimeDelta is
 	// turnInstant − simNow (kept for the intra-day cadence tests). The day
 	// primitives re-anchor against it (dayStart(N) is the next day's absolute

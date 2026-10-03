@@ -1,5 +1,5 @@
 // Live A/B probe for the HISTORY-PRECEDENT hypothesis — follow-up to
-// TestElicitationProbe_Live (design/burndown-2026-07b.md D4 findings).
+// TestElicitationProbe_Live.
 //
 // The prior probe proved single-turn tag compliance is 100% at production
 // settings (V0..V4 all 1.000 strict-start), so the D4 ~34% omission must

@@ -120,7 +120,7 @@ type cosineOpsReporter interface {
 }
 
 // SimClockStart is THE anchor of the simulated clock: a Monday at
-// 00:00 UTC (sim-time-single-clock.md §3.1). It is the single primitive
+// 00:00 UTC. It is the single primitive
 // the whole sim time model derives from — current date is the clock,
 // elapsed is clock−SimClockStart, the day index is the floored quotient
 // (SimDayIndex), and the day-off is the real calendar's Sunday. UTC has
@@ -238,8 +238,7 @@ type Step struct {
 	ClosureAck *ClosureAck
 
 	// At is the absolute simulated instant of this step's turn — the
-	// turn's position on the one simulated clock (sim-time-single-clock.md
-	// §3.4). It is the AUTHORITATIVE wire field: runStep SETS
+	// turn's position on the one simulated clock. It is the AUTHORITATIVE wire field: runStep SETS
 	// pinnedClock = At (a slaved copy of the generator's re-anchored
 	// instant), it does NOT integrate TimeDelta. Stamping the absolute
 	// instant rather than accumulating a delta is the keystone that makes

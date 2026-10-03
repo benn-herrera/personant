@@ -40,7 +40,7 @@ the current turn.`
 //
 // The ambiguity clause ("required even when ... clarifying question or the
 // thread routing is uncertain") is evidence-directed: the 2026-07-15 live
-// elicitation probe (round 3, design burndown-2026-07b "RESOLVED") showed
+// elicitation probe (round 3) showed
 // work-switch turns dropping the tag specifically on
 // clarify-question-without-tag responses (miss signature (a)). Kept to two
 // sentences deliberately — every directive token is paid on every turn.

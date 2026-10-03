@@ -255,7 +255,7 @@ func stepSetup(t *testing.T, h *Harness, idx int, label string, step Step) {
 }
 
 // stepSetClock slaves the pinned clock to the step's simulated instant.
-// sim-time-single-clock.md §3.4 / burndown #3: there is exactly ONE
+// There is exactly ONE
 // clock-advance path — SET pinnedClock = Step.At. pinnedClock becomes a copy
 // of the generator's one re-anchored clock, so the two cannot diverge by
 // construction (there is no independent harness accumulator to drift).
@@ -631,7 +631,7 @@ func linesShowTagMiss(lines []string) bool {
 // stepCaptureTagMiss persists the raw model response body of a live-
 // inference tag-miss turn to test/rundata/<scenario>/tagmiss/<turn>.txt
 // (h.RunHome + tagmiss/, 1-based turn number), for post-run decomposition
-// of the ~34% live tag-omission figure (design burndown-2026-07b).
+// of the live tag-omission rate.
 //
 // Live-only, mirroring the liveClient gating precedent (#98): on the mock
 // path body is a canned plan response, not a real model emission, so
@@ -1073,7 +1073,7 @@ func runRecoveryGauge(t *testing.T, h *Harness) {
 // RunManifestFilename is the self-description file every rundata scenario
 // directory receives (writeRunManifest): the run's provenance, bound to the
 // directory so its numbers can never again be attributed to the wrong kind
-// of run (the burndown-2026-07b false-alarm root cause — a short mock dir
+// of run (a short mock dir
 // indistinguishable from a live one).
 const RunManifestFilename = "manifest.json"
 

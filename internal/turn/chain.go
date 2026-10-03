@@ -223,8 +223,7 @@ func extractSymbols(ctx context.Context, state *State, delta Delta) error {
 				// §5.1.2: missing tag is a warning, not a fatal — log and continue.
 				_ = state.Ops.Log(ctx, memops.LogCategoryTopic, "tag-missing",
 					"source=model.response bytes="+strconv.Itoa(len(delta.Content)))
-				// Forensic decomposition of the tag-omission population (design
-				// burndown-2026-07b "Live rerun"): if this tag-less response still
+				// Forensic decomposition of the tag-omission population: if this tag-less response still
 				// carries a NEAR-MISS candidate — a line that looks like an
 				// attempted §5.1.2 tag but failed strict validation — emit
 				// topic.tag-invalid with the failure reason and a short sanitized

@@ -680,10 +680,6 @@ Size tiering maps onto Personant's role split:
 pressure, recall query depth, and the mock-client's need to simulate token counts for
 budget-exhaustion testing.
 
-A queued gemma-4 domain-retraining project (physics + math knowledge-base overlay, deepening the
-single-family commitment to the weights level and pre-validating the local fine-tuning workflow the
-weight-baked-instinct item needs) is tracked in **ROADMAP.md**.
-
 ### Minimize infrastructural prompts
 
 > **Every infrastructural prompt is a tax paid forever. Every deterministic algorithm is a fixed

@@ -318,8 +318,7 @@ func TestSim(t *testing.T) {
 
 	// Bind the summary numbers to their forensic directory: the rundata path
 	// (whose manifest.json carries mode/seed/duration/start/end/git-head) is
-	// what distinguishes a 74 s mock dir from a live run's — the
-	// burndown-2026-07b false-alarm root cause.
+	// what distinguishes a 74 s mock dir from a live run's.
 	t.Logf("rundata: %s (manifest.json binds mode/seed/duration/git-head)", h.RunHome)
 
 	// Inference-in-loop behavior-validation summary (#98, Inc 3). These are the
@@ -1877,7 +1876,7 @@ func readDailyRecords(t *testing.T, runHome string) []dailyRecord {
 }
 
 // TestDayOffThroughHarness is the harness-level day-off guard — the layer the
-// generator-only cadence tests miss (sim-time-single-clock.md §8). It drives a
+// generator-only cadence tests miss. It drives a
 // ≥9-day MOCK run THROUGH the real harness (runSimRung + the #120 daily series,
 // DRY — no parallel plumbing), then asserts the load-bearing day-off properties
 // against daily.jsonl:

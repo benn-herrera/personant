@@ -35,8 +35,7 @@ var topicTagRE = regexp.MustCompile(`(?m)^\s*\*topic:\s*([^\[]+?)\s*\[([^\]]*)\]
 // as equivalent to `*topic: *new-topic* [<anchor-list>]*` (spec §5.1.2
 // alias). This is a DETERMINISTIC-TIER ABSORPTION of a demonstrably-
 // confusable wire syntax, not a general loosening: the 2026-07-15 live
-// elicitation probe (round 3, `excerptgenre_probe_test.go`; design
-// burndown-2026-07b "RESOLVED") caught the model intermittently
+// elicitation probe (round 3, `excerptgenre_probe_test.go`) caught the model intermittently
 // "unwrapping" the nested-asterisk new-topic form into exactly this shape
 // on work-switch turns. The alias is strict — line-anchored, identical
 // anchor-list grammar (empty-in-brackets valid, per the §5.1.2 contract) —
@@ -316,8 +315,8 @@ func Parse(response string) (ParseResult, error) {
 // Near-miss reasons — the forensic classification of a line that LOOKS
 // like an attempted §5.1.2 topic tag but fails strict validation. These
 // are terse, stable tokens for the topic.tag-invalid event detail; they
-// decompose the tag-omission population (design burndown-2026-07b "Live
-// rerun") into {never-attempted, malformed, misplaced}.
+// decompose the tag-omission population
+// into {never-attempted, malformed, misplaced}.
 const (
 	// NearMissMarkdownMangled: the candidate carries markdown decoration
 	// (bold `**`, or an inline code/backtick wrap) — the dominant real

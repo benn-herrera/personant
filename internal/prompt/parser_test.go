@@ -392,7 +392,7 @@ func TestPreambleScanLineCapExhausted(t *testing.T) {
 
 // --- Bare new-topic alias (§5.1.2 deterministic-tier absorption of the
 // probe-observed unwrapped wire shape — 2026-07-15 elicitation probe
-// round 3, signature (b); design burndown-2026-07b "RESOLVED"). The alias
+// round 3, signature (b)). The alias
 // is strict: line-anchored, bracket pair required, same anchor-list
 // grammar. ---
 
