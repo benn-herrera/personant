@@ -341,7 +341,6 @@ home is missing or unreadable; it is the one command that never gates.
 **Queued:**
 
 - Phase 5: cross-project digest, fallback dissection, directive accrual.
-- Inference-/embedding-in-loop coverage (LIVE_INFERENCE / LIVE_EMBEDDING sim paths).
 - v0.2: transient-data event-log compaction.
 
 ## Design Principles

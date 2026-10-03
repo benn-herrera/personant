@@ -451,18 +451,6 @@ frozen-at-creation / 4-minimum-anchor model is gone. (Spec §2.2, §2.7.4, §3.4
    cap, query-symbol match) and unions the hits — durable content stays findable continuously
    through the flush lag, no per-query embedding, no unbounded scan (#123).
 
-**Recall layer-3 model judgment (design direction, not yet built).** Embedding recall (layer 2)
-delivers high recall but poor precision (~0.10 at the high-recall threshold). Layer 3 is the
-precision-restoration stage: a model judges the top-N embedding candidates against the query and
-filters/reranks before offering at most 3 to the user. Design decisions taken (2026-05-31): a
-separate `[recall]` provider/model reference in `config.toml` (parallel to `[chat]`/`[embedding]`)
-with its own configurable context ceiling (~8K, small — recall judgment is a narrow, cheap task);
-default to a small-tier model (E2B) because recall judgment only needs to beat the embedding
-baseline, and the top-3-offer + human resolver catches residual errors. The empirical discipline is
-measure-don't-assume: sweep E2B → E4B → 26B-A4B against the embedding-only precision baseline
-(already collected from the C.6 head-to-head) and pick the smallest passing tier. See SPEC §8.2.2
-for the config ref shape; build unblocked after #98 (inference-in-loop) lands the live-model seam.
-
 **Decline categorization** matters for accrual:
 
 - *Not relevant* → improve matching, do not tighten threshold.
@@ -619,17 +607,6 @@ training shape, and hard constraints carried over from the substrate-as-canonica
 **ROADMAP.md** (far horizon; not v0.1, not v1.0, not v2.0). Left here as a pointer because the
 "sleep cycle" section above and the model-family-as-platform section below both reference it.
 
-### Submind via clone
-
-Designed, not built. A submind is a subdirectory git clone of the home tree, operating as a full
-personant on a named branch and merging back via git push + merge — the architecture's answer to
-isolated exploration and frontier-model collaboration without cross-family substrate contamination
-(see "Model-family as platform" below). Today's archive-index schema already carries the
-load-bearing fact this design needs: `parent_commit_hash` is stored explicitly (SPEC §3.8 entry
-format) rather than derived by a first-parent walk, because a future submind merge commit has
-multiple parents. Full design capture (naming discipline, merge semantics, nested subminds, the
-liaison/guest two-model split): **ROADMAP.md → Far-horizon, "Submind via clone."**
-
 ### Model-family as platform (v1.0 platform coupling) {#model-family-as-platform-v10-platform-coupling}
 
 Personant v1.0 targets **one LLM model family**. Adding a second family is a per-family engineering
@@ -664,8 +641,8 @@ weeks-of-engineering addition, not a feature flip.
 **v1.0 target: the Gemma family** served locally via the `reaper` provider (unmetered inference on
 the M5 Max hardware). The local setup essentially eliminates the vendor-coupling tradeoff: worst
 case is local infrastructure maintenance, not vendor pricing or API deprecation. It also makes
-roadmap items tractable that were vendor-cost-gated: submind spawning, Python-workflow inference
-steps, and weight-baked consolidation runs are all free at the token level.
+roadmap items tractable that were vendor-cost-gated: Python-workflow inference steps and
+weight-baked consolidation runs are both free at the token level.
 
 Size tiering maps onto Personant's role split:
 
@@ -706,8 +683,6 @@ Where the LLM legitimately earns its place (inherently fuzzy, no deterministic s
 - Topic-tag emission — recognizing what a turn is about from free-form conversation.
 - Chat response content — the actual work the LLM exists to do.
 - Closure summaries — compressing conversation history into key takeaways at retirement.
-- Recall layer-3 judgment — pruning embedding false positives before surfacing a recall offer (see
-  Recall mechanisms below).
 
 The corollary: **even within LLM tasks, keep prompts narrow.** Constrain the input space; constrain
 the output space; validate output deterministically before trusting it. A broadened prompt expands
@@ -717,9 +692,8 @@ both the family-tuning surface and the silent-drift surface.
 
 Designed, not built: multiple live conversations open against one shared memory — multitasking one
 career, since Personant's single-unified-awareness premise rules out the CWD-scoped-context shortcut
-other agent tools use. Distinguished from a submind (isolated clone + merge point, above) and from
-multi-user (v2.0, locked): concurrent sessions interleave on *shared* canonical state, a submind
-isolates on a branch. Raises thread safety, per-session working-set scoping, and explicit
+other agent tools use. Distinguished from multi-user (v2.0, locked): concurrent sessions interleave
+on *shared* canonical state. Raises thread safety, per-session working-set scoping, and explicit
 cross-reference-vs-isolation declarations; also a fragmentation source the "sleep" cycle above would
 need to clear. Full design capture: **ROADMAP.md → Far-horizon, "Concurrent sessions."**
 
@@ -974,7 +948,7 @@ These are not "v0.2 / v0.3" — they are role-bounded.
 ### Deferred (real future work)
 
 Moved to **ROADMAP.md** (near-term / mid-term / far-horizon tiers), which now owns this catalog,
-including the full design capture for the "sleep" cycle, submind-via-clone, and concurrent sessions
+including the full design capture for the "sleep" cycle and concurrent sessions
 — the Mechanisms section above keeps only a short now-stub for each (designed-not-built status plus
 the interface fact other docs cite), since SPEC §3.10.8 and the archive-index schema still need a
 live anchor.

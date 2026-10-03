@@ -29,12 +29,6 @@ Concrete, mostly single-package items; several unblock other queued work.
   (`SPEC.md` §6.1.1–§6.1.2) but not implemented — only the seven `web.*` query tools are built and
   registered (`SPEC.md` §6.1.1 "Status:" line; `ARCHITECTURE.md` "Tool surface" section). This is
   the rest of the bounded 12-tool surface the architecture already commits to.
-- [ ] **Recall layer-3 model judgment.** Design direction captured, build gated on inference-in-loop
-  (#98) landing the live-model seam: a `[recall]` provider/model config (small ~8K context ceiling,
-  default E2B) that judges/reranks top-N embedding candidates before offering at most 3. Empirical
-  discipline: sweep E2B → E4B → 26B-A4B against the embedding-only precision baseline (already
-  collected, C.6 head-to-head) and pick the smallest passing tier. (`ARCHITECTURE.md` "Recall
-  mechanisms"; `SPEC.md` §8.2.2 `[recall] model`.)
 - [ ] **Directive-file plumbing for the remaining §2.6.1 parameters.** `closure.ack-mode` and
   `recall.ack-mode` are the only two parameters currently read live via
   `store.ReadParameter`/`MemoryOps.DirectiveParam`; everything else in `SPEC.md` §2.6.1
@@ -81,16 +75,6 @@ Concrete, mostly single-package items; several unblock other queued work.
 - [ ] **Recall precision/recall tuning, deferred until data demands it:** enrich the stored-thread
   symbol set beyond the current 5 anchors, and evaluate moving recall off symmetric Jaccard to an
   asymmetric overlap coefficient. (`SPEC.md` §3.4.)
-- [ ] **Inference-/embedding-in-loop simulation.** Wire real `reaper.local` inference (gemma-4
-  family) and embedding (`nomicai-modernbert-embed-base-bf16`) into the acceptance sim, individually
-  configurable, to close the coverage gap the mock LLM/nil-embedder regime leaves (most importantly,
-  measuring embedding-primary §3.4 recall under realistic workload rather than inferring it from the
-  separate C.6 head-to-head). Needs an empirical sweet-spot hunt: per-turn cost rises from ~10s of
-  ms to single-digit seconds. This item **gates substrate v0.5.0 convergence** — full detail,
-  honesty-clause obligations, and the "Open realism backlog" checklist (workload interleaving,
-  topic-tag fidelity under real inference, spine-cardinality/A1-saturation stress, transient-data
-  lifecycle fidelity, topic-clustering/Lens-B gaps) live in `SPEC.md` §9.1, which is process
-  contract and stays there — this entry exists so the work is prioritizable from one list.
 - [ ] **Non-ASCII symbols in the lexical completeness floor.** `exact.isWordRune`
   (`internal/recall/exact/exact.go`) admits ASCII letters and digits only, so a symbol containing
   other letters is invisible to the lexical floor. (`SPEC.md` §3.4.)
@@ -165,7 +149,7 @@ Concrete, mostly single-package items; several unblock other queued work.
   structures (embedding index, `derived_from` edges, A2 digests) from the clean set only; (3)
   `chown` the prepared tree to an unprivileged guest OS user; (4) run the liaison inside OS-level
   containment (mount-namespace/jail, fail-closed on any reach-across attempt). Reuses the
-  rebuild-on-open primitive and the submind clone mechanism below. Irreducible limit: prose
+  rebuild-on-open primitive. Irreducible limit: prose
   cross-references inside allowed content require human verification at prep time; the deterministic
   layer only guarantees structural containment.
 - [ ] **Synonym cluster resolution** (v0.2+, if empirical pressure).
@@ -254,71 +238,6 @@ Concrete, mostly single-package items; several unblock other queued work.
   Not v0.1 — but the v0.1 acceptance simulation already supplies the hook: the day-off is a real
   idle window in the workload model, and closure (§3.5) / archival (§3.8) are exactly the mechanisms
   a consolidation pass would tidy.
-- [ ] **Submind via clone.** Full design capture is kept here; `ARCHITECTURE.md` keeps a short
-  now-stub with the interface fact: the archive-index schema already stores `parent_commit_hash`
-  explicitly (SPEC §3.8), anticipating a future multi-parent submind merge commit.
-
-  Personant's substrate is a git tree already; a **submind** is a subdirectory clone of that tree,
-  with the primary's home as the submind's `origin`. The submind operates as a full personant on a
-  named branch in its local clone — its own spine, its own threads, its own working-set discipline —
-  and integrates back via standard git push + merge. Branch isolation means the submind never
-  collides with the primary until merge; the existing substrate machinery handles the rest.
-
-  Why subminds earn their architectural slot: **speculative exploration with a commit boundary**
-  (try a thought experiment in a submind; decide whether the result is worth integrating; the
-  primary's belief state isn't disturbed); **specialization without context-switch cost** (a submind
-  focused on one task continues while the primary continues with the broader context); **parallel
-  triangulation** (two submind subdirectories pursuing variant hypotheses are just two
-  subdirectories; the user or the primary decides at merge time which to integrate); and **naming
-  discipline via a universal `mind_id` suffix** (every personant has a `mind_id`; every
-  autonomically-generated identifier in that personant is suffixed, flat —
-  `<generation>-<timestamp>`, not chained, with immediate-parent provenance held in metadata — so
-  cross-submind name collisions are impossible by construction and the merge is git-trivial on the
-  namespaced substrate).
-
-  **Submind as the natural home for frontier-model collaboration.** A submind can run a *two-model*
-  configuration: a local **liaison model** (gemma family — E4B for swarm-cheap, 26B-A4B for default
-  judgment quality) handling all family-stable infrastructural prompts (topic-tagging, symbol
-  extraction, recall scoring, closure summaries), and a **guest model** (a frontier model — Claude /
-  GPT / Gemini / etc.) providing the actual reasoning content. The liaison model handles every
-  surface where family-stable consistency matters; the guest model produces the conversational
-  content — what goes into threads, turn excerpts, hot state. Substrate stays gemma-shaped
-  (infrastructural); content is guest-shaped. The submind's branch identity carries the provenance —
-  no per-symbol provenance tags, no per-turn guest-engagement aggregator needed; which submind
-  contained the work *is* the provenance. This isolation is what makes frontier-model collaboration
-  architecturally safe rather than a cross-family contamination risk, per `ARCHITECTURE.md`'s
-  "Model-family as platform" principle — the submind container bounds the foreign model's behavioral
-  influence to the content surface, away from the infrastructural surface where family-stability is
-  load-bearing. Eval-by-comparison falls out for free: spawn a submind with `guest=Claude`, another
-  with `guest=gemma-31B-local`, compare at merge time — same task, same substrate format, two
-  perspectives.
-
-  **Distinguished from concurrent sessions (below).** Subminds are *isolated clones with a merge
-  integration point*. Concurrent sessions are *interleaved multitasking on shared canonical state*.
-  Subminds give you a commit boundary ("explore divergent hypotheses without bleeding belief
-  state"); concurrent sessions give you simultaneous live attention on the same memory ("two
-  coordinated tasks at once"). They can coexist; they are not substitutes.
-
-  **Merge semantics** — the viable spectrum, captured for design completeness: **archive-only
-  minimal path** (submind archives its own active work before merge; primary git-merges only the
-  append-only archive; eliminates running-state conflicts by construction, but belief-state from
-  divergent thought doesn't silently flow back — most conservative); **structural merge** (once
-  names are globally unique via the suffix scheme, the submind's live spine entries, thread
-  directories, and working-set membership travel back as-is — `git merge` handles append-only files
-  via union driver; pre-clone threads are read-only inside the submind, continuations create a new
-  namespaced thread `thr_42-S1` with `derived_from: thr_42` frontmatter, so the same topic surfaces
-  as two threads in the merged primary, both recall-reachable); **communication channel during
-  life** (pub/sub IPC between subminds and primary while the submind is active — status, queries,
-  results — never substrate read/write across the boundary; merge is a *termination*, no continuing
-  submind activity after it).
-
-  **Nested subminds.** Naturally recursive — a submind IS a personant; by symmetry it can spawn its
-  own submind. Suffix composition (`thr_42-S1-S2`) gives unambiguous provenance at any depth; merge
-  propagates one level at a time; no structural depth limit — the real bound is the user's
-  review-budget at each merge gate.
-
-  Post-v0.1; plausibly v2.0. The frontier-collaboration use case may end up being the primary
-  motivator for prioritizing submind work.
 - [ ] **Concurrent sessions.** Full design capture is kept here; `ARCHITECTURE.md` keeps a short
   now-stub.
 

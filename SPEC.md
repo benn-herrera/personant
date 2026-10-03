@@ -566,7 +566,7 @@ synthesized symbols, rather than a coarse thread-level edge.
 
 **Recall is provenance-agnostic.** `derived_from` does **not** participate in the §3.4 recall match
 — recall scores on the symbols themselves; origin is honest provenance metadata (load-bearing for
-"where did this come from?" queries and submind merge), not a recall input. Keeping recall
+"where did this come from?" queries), not a recall input. Keeping recall
 provenance-agnostic is deliberate.
 
 **Open (deferred).** Synthesis introduced *without* a recall hit — a human or the model brings
@@ -1406,7 +1406,7 @@ To archive a batch of threads:
    the capture commit whose tree still holds the thread bytes; recovery restores the subtree from it
    directly rather than walking `commit_hash`'s first parent (an older entry written before this
    field existed omits it — `omitempty` — and recovery falls back to the walk-parent path). It is
-   stored explicitly because a future merge commit (v2.0 submind-via-clone) has multiple parents,
+   stored explicitly because a merge commit has multiple parents,
    where a first-parent walk would pick the wrong lineage. `recovered_at` is empty until the thread
    is recovered (§3.8.3).
 
@@ -3735,9 +3735,7 @@ maxPerDay  = 100
   the model is never offered it. **No key appears here** — the backend's `apiKeyFile` lives on its
   pool entry, so `config.toml` stays a choices-only, non-secret-bearing file.
 - `[search] maxPerTurn` / `[search] maxPerDay` — the LOCAL query caps (§6.1.1), enforced by
-  personant itself rather than by watching a provider dashboard. Defaults 5 and 100. `config.toml`
-  recognizes no `[recall]` section today; a future `[recall] model` key for the recall layer-3 judge
-  model is sketched in **ROADMAP.md** ("Recall layer-3 model judgment").
+  personant itself rather than by watching a provider dashboard. Defaults 5 and 100.
 
 Model references are `"provider/model"`, split on the **first** `/` (the model portion may itself
 contain slashes, e.g. `openrouter/google/gemma-4-31b-it`).
