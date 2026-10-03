@@ -1,6 +1,8 @@
 # README – Personant
 
-A single-user, single-agent runtime that gives an AI assistant persistent working memory across arbitrary projects. The agent has one continuous career: unified memory, no session boundaries, no compaction-driven information loss, and cross-project recognition.
+A single-user, single-agent runtime that gives an AI assistant persistent working memory across
+arbitrary projects. The agent has one continuous career: unified memory, no session boundaries, no
+compaction-driven information loss, and cross-project recognition.
 
 ## Requirements and Supported Platforms
 
@@ -18,11 +20,17 @@ just test           # go vet + go test (compiles everything; skips live tests)
 ./bin/personant     # defaults to chat REPL
 ```
 
-On first run, `bin/personant` initializes `~/.personant/` as a git repository. Override the home directory with `$PERSONANT_HOME`.
+On first run, `bin/personant` initializes `~/.personant/` as a git repository. Override the home
+directory with `$PERSONANT_HOME`.
 
 ## Using the Chat REPL
 
-`bin/personant` (equivalently `personant chat`) opens an interactive REPL. Type a message and press Enter to take a turn; the assistant streams its reply. Work is organized as **projects** — one active at a time — each holding **topics**, the conversation strands the runtime tracks, engages and closes. A topic is stored as a *thread* (`thr_N`), which is the term the rest of this document, the spec and the event log use; the id is what you type back at `/back-to` and friends. Lines beginning with `/` are commands:
+`bin/personant` (equivalently `personant chat`) opens an interactive REPL. Type a message and press
+Enter to take a turn; the assistant streams its reply. Work is organized as **projects** — one
+active at a time — each holding **topics**, the conversation strands the runtime tracks, engages and
+closes. A topic is stored as a *thread* (`thr_N`), which is the term the rest of this document, the
+spec and the event log use; the id is what you type back at `/back-to` and friends. Lines beginning
+with `/` are commands:
 
 | Command | Effect |
 |---|---|
@@ -47,21 +55,70 @@ On first run, `bin/personant` initializes `~/.personant/` as a git repository. O
 
 `/no-revisit` and `/cd-project` are recognized but stubbed for a later phase.
 
-**Multi-line input.** Alt/Option+Enter inserts a line break with no setup at all; bare Enter submits the whole buffer. Shift+Enter additionally needs the terminal to send something distinguishable from Enter, which `/terminal-setup` arranges: it detects the terminal and prints the one-line recipe, or — for Zed, where the recipe is a file write — offers to install the keybinding into `~/.config/zed/keymap.json`. That is the only file personant ever writes outside `~/.personant`, so it asks first every time, backs the previous file up alongside, leaves an already-configured keymap untouched, and refuses rather than risk mangling a file it cannot edit byte-safely.
+**Multi-line input.** Alt/Option+Enter inserts a line break with no setup at all; bare Enter submits
+the whole buffer. Shift+Enter additionally needs the terminal to send something distinguishable from
+Enter, which `/terminal-setup` arranges: it detects the terminal and prints the one-line recipe, or
+— for Zed, where the recipe is a file write — offers to install the keybinding into
+`~/.config/zed/keymap.json`. That is the only file personant ever writes outside `~/.personant`, so
+it asks first every time, backs the previous file up alongside, leaves an already-configured keymap
+untouched, and refuses rather than risk mangling a file it cannot edit byte-safely.
 
-While a turn is working — before the first token, and again while it closes out — a one-line indicator names the phase the runtime is in (composing context, waiting on the model, searching memory, closing turn) with an elapsed counter, and advertises `esc to abort` while the turn can still be abandoned. It appears only after a couple of seconds, only on a real terminal, and it clears itself the instant the response starts arriving; a piped or redirected run gets no decoration at all.
+While a turn is working — before the first token, and again while it closes out — a one-line
+indicator names the phase the runtime is in (composing context, waiting on the model, searching
+memory, closing turn) with an elapsed counter, and advertises `esc to abort` while the turn can
+still be abandoned. It appears only after a couple of seconds, only on a real terminal, and it
+clears itself the instant the response starts arriving; a piped or redirected run gets no decoration
+at all.
 
-A thinking model's reasoning is **off by default and never stored**. `config.toml`'s `[chat] showThinking` sets the session default and `/thinking on|off` overrides it for the running session; when on, the reasoning stream is rendered live and dimmed as it arrives, closed off on its own line before the answer begins (on a terminal with no ANSI support it is bracketed `[thinking] … [/thinking]` instead). It is scratch, not an answer: it is never journaled, never feeds symbol extraction, and is never replayed to the model. A piped or redirected run emits none of it regardless of the setting.
+A thinking model's reasoning is **off by default and never stored**. `config.toml`'s `[chat]
+showThinking` sets the session default and `/thinking on|off` overrides it for the running session;
+when on, the reasoning stream is rendered live and dimmed as it arrives, closed off on its own line
+before the answer begins (on a terminal with no ANSI support it is bracketed `[thinking] …
+[/thinking]` instead). It is scratch, not an answer: it is never journaled, never feeds symbol
+extraction, and is never replayed to the model. A piped or redirected run emits none of it
+regardless of the setting.
 
-**Every tool call leaves a receipt.** When the model runs one of the web tools, a single dimmed line lands in your scrollback and stays there — `[tool] web.wikipedia q="general relativity" → ok, 4.1kB (0.4s)` — including when the call failed or refused to run, which is the case worth seeing. It is always on (not tied to `/thinking`), and like the reasoning display it appears only on a real terminal: a piped or redirected run emits none of it. The point is that you never have to ask the model whether it looked something up.
+**Every tool call leaves a receipt.** When the model runs one of the web tools, a single dimmed line
+lands in your scrollback and stays there — `[tool] web.wikipedia q="general relativity" → ok, 4.1kB
+(0.4s)` — including when the call failed or refused to run, which is the case worth seeing. It is
+always on (not tied to `/thinking`), and like the reasoning display it appears only on a real
+terminal: a piped or redirected run emits none of it. The point is that you never have to ask the
+model whether it looked something up.
 
-Line editing and history are personant's own: emacs-style in-line editing (Ctrl-A/E/B/F, Ctrl-W/U/K, Home/End/Delete), Up/Down history recall, and long lines that wrap and stay editable across rows. History persists across sessions in `~/.personant/history` (deduplicated, capped at 1000 entries), multi-line entries included. A menu question is part of the read rather than printed before it, so it survives your first keystroke, and single-key answers take effect without Enter.
+Line editing and history are personant's own: emacs-style in-line editing (Ctrl-A/E/B/F, Ctrl-W/U/K,
+Home/End/Delete), Up/Down history recall, and long lines that wrap and stay editable across rows.
+History persists across sessions in `~/.personant/history` (deduplicated, capped at 1000 entries),
+multi-line entries included. A menu question is part of the read rather than printed before it, so
+it survives your first keystroke, and single-key answers take effect without Enter.
 
-**Multi-line prompts.** **Alt/Option+Enter** inserts a line break; **Enter** submits the whole thing, newlines intact. Home/End move within the line you are on; Ctrl-U still clears the whole draft. **Shift+Enter** also inserts a break, but only if your terminal can say that Shift was held — most terminals send the identical byte for Enter and Shift+Enter, and personant deliberately does not switch the terminal into an enhanced keyboard protocol to find out. One keybinding fixes it: in iTerm2 map Shift+Enter to **Send Escape Sequence** `[13;2u`; in Zed add `{"context": "Terminal", "bindings": {"shift-enter": ["terminal::SendText", "\u001b\r"]}}` to your keymap. Alt/Option+Enter needs no configuration anywhere (on macOS Terminal.app, enable *Use Option as Meta key*). SPEC §4.3.1 has the full contract.
+**Multi-line prompts.** **Alt/Option+Enter** inserts a line break; **Enter** submits the whole
+thing, newlines intact. Home/End move within the line you are on; Ctrl-U still clears the whole
+draft. **Shift+Enter** also inserts a break, but only if your terminal can say that Shift was held —
+most terminals send the identical byte for Enter and Shift+Enter, and personant deliberately does
+not switch the terminal into an enhanced keyboard protocol to find out. One keybinding fixes it: in
+iTerm2 map Shift+Enter to **Send Escape Sequence** `[13;2u`; in Zed add `{"context": "Terminal",
+"bindings": {"shift-enter": ["terminal::SendText", "\u001b\r"]}}` to your keymap. Alt/Option+Enter
+needs no configuration anywhere (on macOS Terminal.app, enable *Use Option as Meta key*). SPEC
+§4.3.1 has the full contract.
 
-Two keys, two meanings. **Ctrl-C** clears the line you are typing — the session survives and the cleared text is not remembered. At an empty prompt the first press hints and a second consecutive press ends the session cleanly (silent; working set checkpointed, session-end logged); typing anything in between makes the next press a first press again. During a turn it abandons the turn and unwinds to that same clean shutdown with a one-line notice, and a second Ctrl-C during shutdown forces an immediate exit. Ctrl-D at an empty prompt ends the session too (with text, it deletes forward). Ctrl-Z suspends cleanly and `fg` brings you back to a working terminal, mid-turn included. **Esc retracts the turn in flight** and drops you back at the prompt with the session intact; at the prompt it does nothing. Esc means "that input was a mistake", not "stop generating" — so nothing from the abandoned turn is kept, including any response text already on screen (a `[cancelled …]` marker says so, since scrolled output cannot be erased). A retracted prompt does not enter memory; it comes back at the next prompt as an editable default (and in `↑` history), and re-submitting it is the only way it ever does. The next launch opens without a recovery banner, because an abort is an ordinary action rather than a crash. Esc is honoured up to the point a turn starts writing; after that the turn finishes. On a piped or redirected run nothing here changes.
+Two keys, two meanings. **Ctrl-C** clears the line you are typing — the session survives and the
+cleared text is not remembered. At an empty prompt the first press hints and a second consecutive
+press ends the session cleanly (silent; working set checkpointed, session-end logged); typing
+anything in between makes the next press a first press again. During a turn it abandons the turn and
+unwinds to that same clean shutdown with a one-line notice, and a second Ctrl-C during shutdown
+forces an immediate exit. Ctrl-D at an empty prompt ends the session too (with text, it deletes
+forward). Ctrl-Z suspends cleanly and `fg` brings you back to a working terminal, mid-turn included.
+**Esc retracts the turn in flight** and drops you back at the prompt with the session intact; at the
+prompt it does nothing. Esc means "that input was a mistake", not "stop generating" — so nothing
+from the abandoned turn is kept, including any response text already on screen (a `[cancelled …]`
+marker says so, since scrolled output cannot be erased). A retracted prompt does not enter memory;
+it comes back at the next prompt as an editable default (and in `↑` history), and re-submitting it
+is the only way it ever does. The next launch opens without a recovery banner, because an abort is
+an ordinary action rather than a crash. Esc is honoured up to the point a turn starts writing; after
+that the turn finishes. On a piped or redirected run nothing here changes.
 
-> The front end is a **dogfood-minimum** REPL: the interactive surface is deliberately small and has not yet been hardened by direct human use.
+> The front end is a **dogfood-minimum** REPL: the interactive surface is deliberately small and has
+> not yet been hardened by direct human use.
 
 ## Build Targets
 
@@ -83,9 +140,15 @@ Run `just` (default recipe `info`) for the full, current recipe list with docstr
 
 ### Sim Knobs
 
-`just sim` runs `TestSim` in `internal/scenarios/sim/`. By default it is the **mock, deterministic acceptance gate**: symbolic-only recall with scripted mock responses.
+`just sim` runs `TestSim` in `internal/scenarios/sim/`. By default it is the **mock, deterministic
+acceptance gate**: symbolic-only recall with scripted mock responses.
 
-> **Recall-completeness is symbolic-only until the embedder-enabled rung is green (B1).** The default `just sim` / `just test` gate runs with a nil embedder, so the §3.4 embedding fine tier and its bounded lexical completeness floor (#123) do **not** execute there. The recall-completeness claim (no dead zones) is proven for the embedding-flush-lag case only by the **`just sim-completeness-rung`** rung below; until it is wired and green, treat that claim as symbolic-only-validated.
+> **Recall-completeness is symbolic-only until the embedder-enabled rung is green (B1).** The
+> default `just sim` / `just test` gate runs with a nil embedder, so the §3.4 embedding fine tier
+> and its bounded lexical completeness floor (#123) do **not** execute there. The
+> recall-completeness claim (no dead zones) is proven for the embedding-flush-lag case only by the
+> **`just sim-completeness-rung`** rung below; until it is wired and green, treat that claim as
+> symbolic-only-validated.
 
 ```sh
 just sim                                          # mock gate, default span (1w)
@@ -99,17 +162,30 @@ just sim-completeness-rung                        # B1: §3.4 completeness floor
 just sim-tokenceiling-rung                        # X4: whole-request token ceiling (live inference, 1 sim-day)
 ```
 
-**`DURATION`** accepts: named rungs `1d|1w`, bare-day form `<N>d` (e.g. `30d`, `120d`), or a Go duration (e.g. `168h`). Defaults to `1w` for mock runs.
+**`DURATION`** accepts: named rungs `1d|1w`, bare-day form `<N>d` (e.g. `30d`, `120d`), or a Go
+duration (e.g. `168h`). Defaults to `1w` for mock runs.
 
-**B1+X4 embedder-enabled rung.** `just sim-completeness-rung` (live embedder + mock inference) drives the main thread past the assembly window so a probe target lands in the flush-lag dead zone, then asserts the §3.4 lexical completeness floor surfaced it (with a non-vacuity guard that at least one dead-zone probe was observed). `just sim-tokenceiling-rung` (live inference, capped at 1 sim-day) injects large verbose tool-result payloads and asserts the fully-assembled request's `usage.prompt_tokens` stays within the configured ceiling. Both are bounded and **not** part of `just test`. They MEASURE the X4-PROD violation; the production token bound is #127's work.
+**B1+X4 embedder-enabled rung.** `just sim-completeness-rung` (live embedder + mock inference)
+drives the main thread past the assembly window so a probe target lands in the flush-lag dead zone,
+then asserts the §3.4 lexical completeness floor surfaced it (with a non-vacuity guard that at least
+one dead-zone probe was observed). `just sim-tokenceiling-rung` (live inference, capped at 1
+sim-day) injects large verbose tool-result payloads and asserts the fully-assembled request's
+`usage.prompt_tokens` stays within the configured ceiling. Both are bounded and **not** part of
+`just test`. They MEASURE the X4-PROD violation; the production token bound is #127's work.
 
-**`LIVE_EMBEDDING=true` / `LIVE_INFERENCE=true`** opt in real inference/embedding independently. Both require `test/rundata/test.{providers,config}.toml` (user-provided, gitignored) and a reachable `reaper.local` endpoint. A missing or unreachable endpoint is a hard failure, not a skip. `LIVE_INFERENCE=true` is refused past 1 sim-day — always pair it with `DURATION=1d`.
+**`LIVE_EMBEDDING=true` / `LIVE_INFERENCE=true`** opt in real inference/embedding independently.
+Both require `test/rundata/test.{providers,config}.toml` (user-provided, gitignored) and a reachable
+`reaper.local` endpoint. A missing or unreachable endpoint is a hard failure, not a skip.
+`LIVE_INFERENCE=true` is refused past 1 sim-day — always pair it with `DURATION=1d`.
 
-On Darwin, long sim runs are automatically wrapped with `caffeinate` + `taskpolicy` to prevent idle-sleep and background-QoS demotion.
+On Darwin, long sim runs are automatically wrapped with `caffeinate` + `taskpolicy` to prevent
+idle-sleep and background-QoS demotion.
 
 ### Live and slow test opt-ins
 
-Slow and live tests always compile (a refactor that breaks them fails `just test`) but gate execution at runtime via environment variables. `//go:build` tags are not used — tagged tests are excluded from the normal compile and bit-rot silently.
+Slow and live tests always compile (a refactor that breaks them fails `just test`) but gate
+execution at runtime via environment variables. `//go:build` tags are not used — tagged tests are
+excluded from the normal compile and bit-rot silently.
 
 | Opt-in | Set by | Effect |
 |---|---|---|
@@ -171,7 +247,8 @@ CONVENTIONS.md                   house rules for AI agents working in this repo
 
 ## Storage Layout
 
-Personant stores all state under `~/.personant/` (override with `$PERSONANT_HOME`). The directory is git-initialized on first run. See [`SPEC.md` §2.1](SPEC.md) for the full schema; a sketch:
+Personant stores all state under `~/.personant/` (override with `$PERSONANT_HOME`). The directory is
+git-initialized on first run. See [`SPEC.md` §2.1](SPEC.md) for the full schema; a sketch:
 
 ```
 ~/.personant/
@@ -193,44 +270,73 @@ Personant stores all state under `~/.personant/` (override with `$PERSONANT_HOME
   .git-daily/          disposable per-turn recovery DB; reborn each day
 ```
 
-**Crash recovery.** Your data survives a hard kill — SIGKILL, a power
-loss, a mid-turn crash. Personant journals each turn's raw prompt and
-response to disk *before* touching canonical state, and commits work to
-a git substrate that treats the on-disk files as the source of truth, so
-on the next launch it reconciles automatically and loses at most the one
-turn that was in flight. Recovered content from an interrupted turn is
-**surfaced to you** in the startup banner (never silently replayed, so
-nothing acts on your behalf without you seeing it). Anything a recovery
-step could not safely restore is **quarantined byte-exact** under
-`recovery/quarantine/` rather than deleted — your bytes are never thrown
-away.
+**Crash recovery.** Your data survives a hard kill — SIGKILL, a power loss, a mid-turn crash.
+Personant journals each turn's raw prompt and response to disk *before* touching canonical state,
+and commits work to a git substrate that treats the on-disk files as the source of truth, so on the
+next launch it reconciles automatically and loses at most the one turn that was in flight. Recovered
+content from an interrupted turn is **surfaced to you** in the startup banner (never silently
+replayed, so nothing acts on your behalf without you seeing it). Anything a recovery step could not
+safely restore is **quarantined byte-exact** under `recovery/quarantine/` rather than deleted — your
+bytes are never thrown away.
 
 ## Status
 
-Two independently-versioned tracks. Run `personant version` for the current values — they live in `internal/version`, not in this document.
+Two independently-versioned tracks. Run `personant version` for the current values — they live in
+`internal/version`, not in this document.
 
-- **Substrate** (runtime + `MemoryOps` API): converging toward **v0.5.0** via a four-month (120-day) realism-convergence acceptance simulation. "Done" means every identified realism element accounted for — simulated, modeled-and-unit-tested, or honestly parked as a known-unknown — converging to a run that surfaces no new gap. See [`SPEC.md` §9.1](SPEC.md) for the normative gate.
-- **Front end** (chat REPL + interactive feature set): the REPL loop is closed but has not been validated by direct human use; the interactive feature set is incomplete. Front-end **v0.1.0** gates on a human U/X phase after substrate v0.5.0 lands.
+- **Substrate** (runtime + `MemoryOps` API): converging toward **v0.5.0** via a four-month (120-day)
+  realism-convergence acceptance simulation. "Done" means every identified realism element accounted
+  for — simulated, modeled-and-unit-tested, or honestly parked as a known-unknown — converging to a
+  run that surfaces no new gap. See [`SPEC.md` §9.1](SPEC.md) for the normative gate.
+- **Front end** (chat REPL + interactive feature set): the REPL loop is closed but has not been
+  validated by direct human use; the interactive feature set is incomplete. Front-end **v0.1.0**
+  gates on a human U/X phase after substrate v0.5.0 lands.
 
-A third, separate integer versions the home's on-disk layout (`~/.personant/version.toml`). A home written by a **newer** personant is refused rather than opened — `--allow-newer-home` overrides that at your own risk, and says so loudly. `personant version` reports the home's stamp even when the home is missing or unreadable; it is the one command that never gates.
+A third, separate integer versions the home's on-disk layout (`~/.personant/version.toml`). A home
+written by a **newer** personant is refused rather than opened — `--allow-newer-home` overrides that
+at your own risk, and says so loudly. `personant version` reports the home's stamp even when the
+home is missing or unreadable; it is the one command that never gates.
 
 **What is shipped and validated:**
 
-- Phase 1–3: storage scaffold, turn loop, topic tagging, REPL, layered working-set composition, scenario harness, opportunistic recall via symbolic Jaccard.
+- Phase 1–3: storage scaffold, turn loop, topic tagging, REPL, layered working-set composition,
+  scenario harness, opportunistic recall via symbolic Jaccard.
 - Phase A: `MemoryOps` port + `FileAdapter`; `internal/autogit` autonomic git wrapper.
 - Phase B: transient-data lifecycle with source-driven retention classification.
-- §3.4 layer-2 embedding recall: `model.Embedder`, `recall.ProposeEmbedding` cosine matcher, session-scoped in-memory thread-embedding index.
-- Intra-thread recall (#109/#111): chunk-level hierarchical embedding index for the engaged long-running thread, coarse→fine descent with exemplar-set keys, persisted `.vec` vector cache and `.tree` sidecar, async single-indexer goroutine + `atomic.Pointer` snapshot, sleep-cycle `RebuildTrees`, sim shadow-chunk oracle and Candidate-A workload metrics.
-- Anchor-lifecycle redesign: `anchors` as a deterministic projection of active `history_symbols`; superseded anchors retained (not evicted); validated across the acceptance ladder.
-- Recall-fidelity test infrastructure (C.1–C.6): mad-libs query generator, adversarial templates, 152-article Wikipedia corpus (~1090 fragments), LLM-assisted template authoring, calibration sweep, embedding head-to-head measurement.
+- §3.4 layer-2 embedding recall: `model.Embedder`, `recall.ProposeEmbedding` cosine matcher,
+  session-scoped in-memory thread-embedding index.
+- Intra-thread recall (#109/#111): chunk-level hierarchical embedding index for the engaged
+  long-running thread, coarse→fine descent with exemplar-set keys, persisted `.vec` vector cache and
+  `.tree` sidecar, async single-indexer goroutine + `atomic.Pointer` snapshot, sleep-cycle
+  `RebuildTrees`, sim shadow-chunk oracle and Candidate-A workload metrics.
+- Anchor-lifecycle redesign: `anchors` as a deterministic projection of active `history_symbols`;
+  superseded anchors retained (not evicted); validated across the acceptance ladder.
+- Recall-fidelity test infrastructure (C.1–C.6): mad-libs query generator, adversarial templates,
+  152-article Wikipedia corpus (~1090 fragments), LLM-assisted template authoring, calibration
+  sweep, embedding head-to-head measurement.
 
 **Implemented and wired into the turn loop (pending full acceptance-validation):**
 
-- Thread closure / retirement (§3.5): curator-drafted summary; the decay-triggered closure scan fires at turn close. Routine closures are auto-accepted with one committed line (user ruling 2026-08-04 — a per-thread ack every time a side topic decays was an unreasonable interruption); the exceptions (anchor-rich or long-engaged threads) queue and are acked at a boundary — session exit or `/closures`. `closure.ack-mode: always` restores the per-decay prompt.
-- Banded recall surface (§3.4): a candidate whose score clears its tier's auto threshold is pulled into context with one committed line (`recalled thr_N: <topic> — <gist>` — a committed topic reference is always id-first, so the id you would type back leads the line) and no prompt; the middle band is asked once per turn with a legible offer — thread name, gist, why it matched, score — and nothing else surfaces (user ruling 2026-08-05 — a cryptic `[1] thr_3 score=0.56` question asked routinely is answered by reflex, not judgment). `recall.ack-mode: always` restores the per-candidate prompt.
-- Recoverable deep-cold archival (§3.8): `internal/turn/archival.go` + `internal/memops/fileadapter/fileadapter_archive.go`; the cardinality-pressure archival scan fires at turn close.
-- Working-set content dedup / git minimization (§3.9): `internal/dedup` + `AgeFileChains`, applied per engaged thread.
-- Startup crash recovery (§4.5.8, #94): dual-repo git substrate (disposable per-turn `.git-daily/` + permanent day-grain `.git/`), ≤1-turn durability journal, deterministic cold-start reconciliation, and a crash-injection matrix with a mechanical coverage gate.
+- Thread closure / retirement (§3.5): curator-drafted summary; the decay-triggered closure scan
+  fires at turn close. Routine closures are auto-accepted with one committed line (user ruling
+  2026-08-04 — a per-thread ack every time a side topic decays was an unreasonable interruption);
+  the exceptions (anchor-rich or long-engaged threads) queue and are acked at a boundary — session
+  exit or `/closures`. `closure.ack-mode: always` restores the per-decay prompt.
+- Banded recall surface (§3.4): a candidate whose score clears its tier's auto threshold is pulled
+  into context with one committed line (`recalled thr_N: <topic> — <gist>` — a committed topic
+  reference is always id-first, so the id you would type back leads the line) and no prompt; the
+  middle band is asked once per turn with a legible offer — thread name, gist, why it matched, score
+  — and nothing else surfaces (user ruling 2026-08-05 — a cryptic `[1] thr_3 score=0.56` question
+  asked routinely is answered by reflex, not judgment). `recall.ack-mode: always` restores the
+  per-candidate prompt.
+- Recoverable deep-cold archival (§3.8): `internal/turn/archival.go` +
+  `internal/memops/fileadapter/fileadapter_archive.go`; the cardinality-pressure archival scan fires
+  at turn close.
+- Working-set content dedup / git minimization (§3.9): `internal/dedup` + `AgeFileChains`, applied
+  per engaged thread.
+- Startup crash recovery (§4.5.8, #94): dual-repo git substrate (disposable per-turn `.git-daily/` +
+  permanent day-grain `.git/`), ≤1-turn durability journal, deterministic cold-start reconciliation,
+  and a crash-injection matrix with a mechanical coverage gate.
 
 **Queued:**
 
@@ -240,9 +346,17 @@ A third, separate integer versions the home's on-disk layout (`~/.personant/vers
 
 ## Design Principles
 
-Personant bets that **deterministic state as canonical, the LLM in narrow judgment roles, and human acknowledgement at high-leverage moments only** scales further than agent-figures-it-all-out alternatives. Concretely: deterministic Go code owns canonical state, integrity, and all mechanical operations; the LLM handles topic tagging, summary drafting, anchor selection, and recognition; the human acks at three load-bearing moments (thread closure, recall surface, fallback dissection) — with the first two amended by living-with rulings so the ack stays on the judgment calls and the routine cases apply themselves with a committed one-liner. The substrate is plain text in git — inspectability, recoverability, and history come for free.
+Personant bets that **deterministic state as canonical, the LLM in narrow judgment roles, and human
+acknowledgement at high-leverage moments only** scales further than agent-figures-it-all-out
+alternatives. Concretely: deterministic Go code owns canonical state, integrity, and all mechanical
+operations; the LLM handles topic tagging, summary drafting, anchor selection, and recognition; the
+human acks at three load-bearing moments (thread closure, recall surface, fallback dissection) —
+with the first two amended by living-with rulings so the ack stays on the judgment calls and the
+routine cases apply themselves with a committed one-liner. The substrate is plain text in git —
+inspectability, recoverability, and history come for free.
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full architectural orientation. [`SPEC.md`](SPEC.md) has field-level schemas and algorithms.
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full architectural orientation.
+[`SPEC.md`](SPEC.md) has field-level schemas and algorithms.
 
 ## Third Party Acknowledgements
 

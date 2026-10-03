@@ -8,7 +8,7 @@
 
 ### Primary Changes
 * change 1
-* change 2 
+* change 2
 
 ### Additional Changes
 * change 1
@@ -18,9 +18,5 @@
 If > 0 describe validation
 
 ## Requirements Checklist
-[ ] Issue linked
-[ ] AI coding usage declared
-[ ] Changes have test coverage
-[ ] CONVENTIONS.md and ARCHITECTURE.md updated
-[ ] ```just test``` passes
-[ ] ```just integration-test``` passes
+[ ] Issue linked [ ] AI coding usage declared [ ] Changes have test coverage [ ] CONVENTIONS.md and
+ARCHITECTURE.md updated [ ] ```just test``` passes [ ] ```just integration-test``` passes
