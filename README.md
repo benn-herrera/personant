@@ -235,7 +235,7 @@ internal/scenarios/         scenario harness, invariants, metrics, recall-fideli
 internal/{eventlog,metrics,
   index,verify,clock,
   ping,modellist,log}/      supporting subsystems
-design/                     design documents (intra-thread recall, archival, etc.)
+ROADMAP_PLANS/              parked plans for pending work (intra-thread recall, archival, etc.)
 test/tools/                 Python stdlib-only tooling (madlibs_generate.py,
                             wikipedia_corpus.py, embed_corpus.py)
 test/rundata/               user-provided, gitignored: test.providers.toml,

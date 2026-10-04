@@ -2,9 +2,9 @@
 
 **Status:** design, pre-implementation — adversarially reviewable, decision-complete. **Supersedes /
 amends:** the single-repo recovery scheme in `mad-design/crash-stability/SOLUTION.md` and
-`design/crash-stability-implementation.md` (R3b amendment block). Consumes the R3-addendum op=turn
-contract (amendment (a): marker folds into journal presence for op=turn; scoped per-turn add; full
-sweep at backstop/barrier; count-triggered gc). **Ruled out permanently (do not reopen):**
+`ROADMAP_PLANS/crash-stability-implementation.md` (R3b amendment block). Consumes the R3-addendum
+op=turn contract (amendment (a): marker folds into journal presence for op=turn; scoped per-turn
+add; full sweep at backstop/barrier; count-triggered gc). **Ruled out permanently (do not reopen):**
 async/deferred per-turn commit; loss-bar extension (commit batching / ≤N-turn windows). ≤1-turn
 structural loss is the bar, full stop. See §9.
 

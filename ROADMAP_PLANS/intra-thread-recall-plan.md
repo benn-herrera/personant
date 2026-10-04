@@ -1,9 +1,9 @@
 # Implementation plan — intra-thread recall / unified embedding index (#109 / #102)
 
-**Companion to** `design/intra-thread-recall-design.md` (the design; authoritative for invariants
-I1–I8, the F1–F6 wrong-path table, the coarse→fine algorithm, the oracle, and acceptance criteria
-AC1–AC6). This plan sequences the build into validated, separately-committed increments — the same
-discipline used for #47/#92.
+**Companion to** `ROADMAP_PLANS/intra-thread-recall-design.md` (the design; authoritative for
+invariants I1–I8, the F1–F6 wrong-path table, the coarse→fine algorithm, the oracle, and acceptance
+criteria AC1–AC6). This plan sequences the build into validated, separately-committed increments —
+the same discipline used for #47/#92.
 
 ## Execution rules (every increment)
 

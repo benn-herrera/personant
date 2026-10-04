@@ -1,8 +1,8 @@
 # Within-thread summary hierarchy — the H1 structural fix (#109)
 
 **Status:** design (a focused design pass preceding build, per SPEC §3.4 / the #109 hazard-H1
-trip-wire). **Companion to** `design/intra-thread-recall-design.md` (authoritative for I1–I8, F1–F6,
-coarse→fine §4, the shadow-chunk oracle §8, and AC1–AC6). This document resolves **only** the
+trip-wire). **Companion to** `ROADMAP_PLANS/intra-thread-recall-design.md` (authoritative for I1–I8,
+F1–F6, coarse→fine §4, the shadow-chunk oracle §8, and AC1–AC6). This document resolves **only** the
 engaged-thread intra-pass: it replaces the O(C_main) flat chunk scan with an O(log n) descent over
 an LLM-summary tree built within one thread by the sleep cycle. Everything else in the #109 design
 is unchanged and not re-litigated.

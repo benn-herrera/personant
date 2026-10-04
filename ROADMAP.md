@@ -27,8 +27,8 @@ Concrete, mostly single-package items; several unblock other queued work.
   `fs.tmp_write`/`fs.tmp_read`/`fs.tmp_list`/
   `fs.propose_promote`/`fs.propose_rename`/`fs.propose_delete` (draft/mutate) are fully specified
   (`SPEC.md` §6.1.1–§6.1.2) but not implemented — only the seven `web.*` query tools are built and
-  registered (`SPEC.md` §6.1.1 "Status:" line; `ARCHITECTURE.md` "Tool surface" section). This is
-  the rest of the bounded 12-tool surface the architecture already commits to.
+  registered (`SPEC.md` §6.1.1; `ARCHITECTURE.md` "Tool surface" section). This is the rest of the
+  bounded tool surface the architecture already commits to.
 - [ ] **Directive-file plumbing for the remaining §2.6.1 parameters.** `closure.ack-mode` and
   `recall.ack-mode` are the only two parameters currently read live via
   `store.ReadParameter`/`MemoryOps.DirectiveParam`; everything else in `SPEC.md` §2.6.1

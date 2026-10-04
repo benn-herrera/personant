@@ -90,9 +90,16 @@ The runtime performs many operations the LLM cannot. Most notably **git**:
   systemic-validation checks (`CheckDerivedFresh`, `CheckSpineIntegrity`) declared as bitflags on
   each call (gating the once-a-day primary writes; daily commits are ungated). No git pre-commit
   hook is installed: validation runs as part of personant's own logic at the event points where it's
-  required. Same lifecycle status as writing to `spine.jsonl`.
+  required. Checks are *systemic*, parameterized only by paths: `CheckDerivedFresh` wraps `personant
+  index check` and `CheckSpineIntegrity` wraps `personant verify`, declared as `GitCheckFlags`
+  bitflags (the `preFlags` and `postFlags` arguments; 64 slots) on each call. Operation-tied
+  verifications (for example, an archive entry resolving after a recovery checkout) live in
+  purpose-specific wrappers that compose `autogit.Checkout`, not in flags. Same lifecycle status as
+  writing to `spine.jsonl`.
 - The runtime issues read-only git queries against the user's *workspace* (`git ls-files`, `git
   status`, `git diff`) for permission-tier classification and ack-prompt diff rendering.
+- `personant init` seeds `[user]` from the installed git binary's global identity, not go-git, whose
+  config parser does not resolve `include`/`includeIf`.
 - The LLM has **no git tool**.
 
 When something feels like it needs to "be done," ask: can the runtime do this autonomically? If yes,
@@ -268,8 +275,10 @@ The principle: **no gaps**.
 
 - `user.prompt`, `user.shell-capture`
 - `model.response`, `tool.result`
-- `thread.fetched`, `digest.refresh`
-- `slash.injected`, `directive.reloaded`
+- `thread.fetched`
+
+Layer A2 digest content, slash-command effects and directive reloads are not chain deltas: they
+change what the composer (`workset.Compose`) assembles.
 
 Every event also carries a **retention class** (`task` vs `decision`) assigned by source.
 `tool.result` and `user.shell-capture` are provisionally `task`; everything else is provisionally
@@ -293,6 +302,12 @@ direct mutation as a bug.
 When you write code that adds new content to the working window: route it through `onContextDelta`.
 Don't invent a side-channel.
 
+Step 4 (budget check) is a documented no-op in v0.1 (`internal/turn/chain.go`,
+`TODO(phase-2-budget)`); `TestBudgetCheckIsExplicitNoOpV01` trips if it is half-enabled without a
+deliberate decision. Step 5 summarizes every task-class source to a metadata line (source, path,
+byte count) instead of logging the body, so a newly added task-class source inherits the
+minimization.
+
 ### Transient-data lifecycle (load-bearing for recall fidelity)
 
 Symbol pollution by one-moment-of-value content (e.g., `# git status` output, search-result noise)
@@ -307,8 +322,9 @@ spurious matches. The lifecycle prevents this at the source:
    coalesce (where source-dominance merge folds it with the citing delta's contribution), removed
    from staging. The citing decision delta is what authored the rescue.
 3. **Window-close GC.** At the top of each turn (after `TurnNumber++`, before any chain step),
-   staged entries older than `stagingWindowTurns` (default 3) evict. Their symbols never reach the
-   persistent symbol index.
+   staged entries older than `stagingWindowTurns` (default 3) evict (`pruneStaging`). Their symbols
+   never reach the persistent symbol index. The window is a compiled-in constant; a staging entry
+   holds the normalized form, raw form, source, and the turn it was staged.
 
 The principle: **raw task-class bytes are always discardable; only the symbols that crossed over
 into a decision delta survive.** The canonical symbol index never sees transient pollution because
@@ -338,8 +354,12 @@ of the total) is partitioned across the memory layers:
 
 The E/A1/A2/B/C percentages are shares of the **memory budget** (total − live_turn), not of the
 total; A1+A2 together form an 18% high tier with A1 fixed and A2 the residue. `context.token-budget`
-is v0.1-read from a const (`memops.DefaultTokenCeiling`) plus a constructor override; directive-file
-plumbing lands later.
+is a const (`memops.DefaultTokenCeiling`) plus a constructor override. Of the §2.6.1 parameters only
+`closure.ack-mode` and `recall.ack-mode` are served by the directive layer (resolved at session
+start); the rest are compiled-in defaults. Static prompt scaffolding (~1.7 KB: preamble, topic-tag
+directive, recovery reminders, headers) is charged to no layer share and rides on top of the byte
+proxy; the A4 acceptance test bounds it (`Total + measured scaffolding`), and a fixed deduction
+would zero out the tiny ceilings the acceptance tests exercise.
 
 **Eviction order under budget pressure:** C-oldest → B-oldest (compressed to summary). A and E are
 sacrosanct. Layer C's dormant set is **not count-capped** (#127): its byte budget truncates the
@@ -349,6 +369,15 @@ v0.1 count cap.
 Layers E and A are the *recognition* surface; Layer B is *active engagement*. The model recognizes
 prior topics from A1 + A2; emits a topic tag → corresponding threads fetched into B → response
 generated against augmented context.
+
+**Names and recency state.** Layer B order and the dormant set are the runtime's `ActiveThreads` and
+`DormantThreads` lists (most-recently-engaged first), persisted each turn to
+`<home>/working-set.json` (gitignored) so recency survives a relaunch. A second excerpt write for
+one turn is refused with `ErrTurnAlreadyOwned`. The phantom-resolution owner fallback ranks tagged
+ids by `last_engaged_turn`, a session-scoped counter that is not in the spine record; it is
+deliberately not used for the no-tag owner-default, which ranks by Layer B order because the counter
+inverts recency across a relaunch. Layer B order cannot rank the fallback's candidates: a tagged id
+may sit outside Layer B, and a same-turn §5.5 fetch reorders the list by fetch order.
 
 ---
 
@@ -421,12 +450,27 @@ the point of the curator-summary ack flow.
 
 **Anchors vs. history (the evolving-anchor model, §2.7.4):** `history_symbols` is the canonical,
 accreting, weighted per-thread set (soft-capped ~40) and the recall match surface. `anchors` is
-**not** a separate storage tier — it is the deterministic top-`AnchorProjectionMax` (8)
-**projection** of the thread's *active* history symbols, re-derived each owner turn. A symbol that
-falls out of the projection flips to **superseded** but is **retained, not evicted** — an abandoned
-premise stays a findable recall handle, protected from capacity eviction by its `ever_central`
-latch. 0 anchors is legal (a vague-start thread that hasn't accreted a headline yet). The earlier
-frozen-at-creation / 4-minimum-anchor model is gone. (Spec §2.2, §2.7.4, §3.4.)
+**not** a separate storage tier — it is the deterministic top-`AnchorProjectionMax` (computed by
+`ProjectAnchors`) **projection** of the thread's *active* history symbols, re-derived each owner
+turn. `memops.AnchorProjectionMax` is a compiled constant (8), not a config key: the SPEC §2.6.1
+`anchor.projection-max` directive is not read. A symbol that falls out of the projection flips to
+**superseded** but is **retained, not evicted** — an abandoned premise stays a findable recall
+handle, protected from capacity eviction by its `ever_central` latch. 0 anchors is legal (a
+vague-start thread that hasn't accreted a headline yet). The earlier frozen-at-creation /
+4-minimum-anchor model is gone. (Spec §2.2, §2.7.4, §3.4.)
+
+### Topic-tag mechanics
+
+The tag prompt is a compiled constant in `internal/prompt/template.go` (`TopicTagDirective`); the
+two recovery reminders (`TopicTagReminder`, `EmptyResponseReminder`) live in the same file, and
+changing any of them is a rebuild. The owner of a multi-existing tag is the lowest `thr_N` because
+the coalesce buffer is a map and does not preserve tag order. The bare `*new-topic* [...]` alias is
+accepted by the bounded preamble scan (so the §5.5 fetch timing, the missing-tag trigger and the
+stream-filter suppression agree) and by the stream filter's Close-time trailing-line fallback; an
+all-whitespace response longer than that scan resolves as tag-less rather than empty, so it fires
+the missing-tag reminder. `fs.read` deltas buffer a write entry like `fs.write`, so a tag-less
+read-only turn pays the full missing-tag recovery; whether such a turn should count as
+conversational is an open calibration question.
 
 ### Recall mechanisms (four, layered by cost)
 
@@ -450,6 +494,18 @@ frozen-at-creation / 4-minimum-anchor model is gone. (Spec §2.2, §2.7.4, §3.4
    that debt window (`exact.MatchExcerptsBySymbols` over `MemoryOps.LoadDebtWindowExcerpts`, ≤ the
    cap, query-symbol match) and unions the hits — durable content stays findable continuously
    through the flush lag, no per-query embedding, no unbounded scan (#123).
+
+   The index is maintained by a single background indexer that swaps an `atomic.Pointer` snapshot,
+   so recall reads never block; a per-thread turn-count watermark stops a stale in-flight embed from
+   overwriting a fresher vector, and a flush arriving at an *equal* watermark (the same-turn
+   cap-flush plus dormancy-flush double enqueue) always publishes. The lexical floor scans `(1 +
+   pending) × cap` excerpts: `cap` is the embedding-debt cap (16) and `pending` counts
+   enqueued-but-unpublished flush jobs — 0 at steady state and at most 258 at the v0.1 queue depth
+   of 256 (queue plus one in process plus one blocked enqueue). Only a genuinely failed flush
+   retires a pending job without publishing. Persisted vectors and summary trees are `.vec`/`.tree`
+   sidecars under `<home>/.recall-cache/` (`internal/recall/measure/veccache.go`, `treecache.go`).
+   Plans: `ROADMAP_PLANS/within-thread-summary-hierarchy.md` and
+   `ROADMAP_PLANS/intra-thread-recall-design.md`.
 
 **Decline categorization** matters for accrual:
 
@@ -489,6 +545,19 @@ Deep cold archival is the next stage past retirement — **implemented and wired
 cardinality pressure builds, the runtime archives oldest retired threads off-spine via `git rm` +
 `git commit` + an `archive/index.jsonl` entry. Recovery via `git show <commit>:<path>` is one
 command — no bespoke archive format. (Spec §3.8.)
+
+A batch meets SPEC §3.8.1's three results as follows: each `threads/thr_<n>/` is confirmed tracked
+at HEAD before its tree hash is taken; the capture commit is `Add(".")` of the full worktree into
+primary and precedes the membership append; removals are staged by `os.RemoveAll` plus
+`autogit.Add(".")`, and `RemoveSpineRecords` performs the single spine rewrite; the deletion commit
+runs `CheckSpineIntegrity` before and `CheckDerivedFresh` after. Recovery (`RecoverThread`,
+`autogit.CheckoutTree`) refuses with `ErrArchiveEntryNotFound` or `ErrArchiveIntegrity` and never
+writes a partial thread. Aged-out file versions come back through `GetFileVersion`, gated by the
+`BlobReachable` predicate; the retention window is `FileChainRetentionTurns` /
+`FileChainRetentionDays` (100 / 2, `internal/store/threadfiles.go`). The SPEC keys
+`dedup.chain-retention-turns` / `dedup.chain-retention-days` are currently these compiled constants,
+not yet read from directives. `RecoverThread` and `ArchiveThreads` remain public port operations; a
+standalone `ArchiveThreads` is crash-recoverable through the same roll-forward.
 
 ### Fallback dissection (worst-case path)
 
@@ -563,6 +632,30 @@ forward** (never resets the worktree, which would destroy up to a day); a broken
 the bar), daily-DB durability guarantees (disposable by construction), and primary auto-recreation
 (a missing primary is refuse-to-open, not a benign recreate).
 
+Mechanism names. A turn is two journal appends (`JournalTurn`, kinds `prompt` and `response`)
+followed by `CommitTurn`, which stages only the recorded write set through `autogit.AddPaths` with
+no integrity flags; `store.JournalOwner` reads the turn id from the journal's first record, and a
+legacy `op=turn` marker file is still read. Core recovery (`internal/recovery`) only detects barrier
+and archival cells and returns a typed `RecoveryReport.Pending` (`PendingCompletion{Kind, Day}`,
+plus `ScopedRestored` for quarantined-and-restored paths); `fileadapter.Reconcile`, which owns
+`ArchiveThreads` and both repo handles, completes them, which keeps `recovery` from importing the
+adapter. `recovery.LocateDeletionCommit` (`internal/recovery/stamp.go`) finds an already-landed
+deletion commit by a
+child-of-`ParentCommitHash` tree test; `store.TruncateJournal` carries the truncate-no-fsync proof
+(`TestCell5_ResurrectedTruncatedJournal`). `store.Init` births `.git-daily` only alongside a fresh
+primary, so a missing daily on an existing home keeps its legacy-upgrade shape. The barrier mints
+its day-commit with `AllowEmptyCommits` after `CheckSpineIntegrity` on the staged tree, asserts
+`CheckDerivedFresh` at B6, and derives lifecycle tags through `autogit.TagStamp` / `ParseTagStamp`
+(the only formatters), reading the sealed day's log with the tolerant `eventlog` reader and
+tolerating `ErrTagExists`. Recovery handles and plumbs the `op=rebaseline` marker, but the mid-day
+arming trigger is not wired (ROADMAP.md). Packing: after every `gcCheckEveryCommits` (64) daily
+commits the adapter reads daily's loose-object count and runs gc at `gcLooseObjectThreshold` (5000);
+`MemoryOps.Consolidate` (go-git `RepackObjects` + `Prune`) packs both repos on the day-off idle
+window. Session checkpoints target daily with a full `Add(".")` sweep. The open sequence runs
+`memops.GateHomeFormat` before Reconcile; `version.UnversionedHomeFormat` is pinned at 1 forever and
+is never an alias of `version.CurrentHomeFormat`, so an unmigrated legacy home keeps resolving to
+format 1.
+
 ### Terminal ownership — one arbiter (`internal/term`)
 
 Personant is a CLI product, so the terminal *is* the surface — and it was never designed; it
@@ -591,6 +684,52 @@ mechanical grep-class gates**, one banning direct terminal access outside the pa
 banning `time.Sleep` in terminal tests, each with an explicit allowlist that must not grow. See SPEC
 §4.3.1–§4.3.3 for the behavior and `mad-design/terminal-layer/` for the debate that produced it.
 
+Mode and reader mechanics. The session mode is installed once — entry mode captured, session mode
+installed, restored at exit, plus one restore/re-install pair per `$`/`#` child window — and clears
+`ICANON`, `ECHO`, `IEXTEN`, `IXON` and `ISIG` while leaving `OPOST` alone. The prompt/turn
+difference in blocking strategy (`VMIN`/`VTIME`) becomes `poll(2)` readiness passed as a call
+argument, so a stale-mode defect cannot exist. Clearing `ISIG` delivers `Ctrl-C`, `Ctrl-Z` and
+`Ctrl-\` as bytes, which lets their dispositions depend on the editor's buffer; an async signal
+handler cannot read it without racing the editor. `Ctrl-Z` is handled in band (restore the entry
+mode, raise `SIGTSTP` at its default disposition, re-install on `SIGCONT`); `SIGTERM`/`SIGHUP`
+restore the entry mode and exit 128+signal instead of being caught and returned. There is one reader
+from open to close; consumers register on a LIFO stack and receive decoded events, never the fd,
+because disambiguating a bare `Esc` from an `Esc`-prefixed sequence needs lookahead held across a
+timeout that a handover would lose, and a mid-turn prompt pushes a nested entry over the turn. The
+reader is joined before a child starts and restarted after the child is reaped; restoring the entry
+mode restores `ISIG`, the one window in which `Ctrl-C` is a real signal. Non-terminal sessions
+install nothing, and the committed piped-session golden asserts byte-identical output. The editor is
+the arbiter's own because a readline-class library owns the fds, mode, signal handlers and byte
+reservoirs (CONVENTIONS, liner). The progress indicator is a formatter, not a writer: it hands the
+finished string to the arbiter's single ephemeral slot and keeps no belief about the cursor. The
+arbiter owns the single TTY predicate, the heartbeat-versus-announcement rule (it knows what
+occupies the line), the pairing of the abort hint with the abort-window state, and truncation to
+terminal width less one column. Phase labels and tool receipts use the same announce-don't-render
+hook; receipts are the (tty-only, scrollback) cell of the 2×2.
+
+### Shell escape (`internal/shell`)
+
+Each `$`/`#` line runs a fresh `$SHELL -c` instead of a persistent shell: a long-lived shell on
+pipes needs a sentinel-marker protocol with a timeout and hang recovery, per-command execution gets
+exit codes for free and cannot hang the session, and SPEC §4.4.3 already excludes the applications a
+persistent PTY would serve. The REPL-facing seam is identical, so a persistent shell could replace
+it later. The cwd comes from an epilogue appended to every command that reports the final directory
+on a dedicated file descriptor (fd 3), never inside stdout, and re-exits with the command's status.
+The REPL asks the runner first and ends the session whenever the runner declines, so any instant in
+which a command runs and the runner says otherwise would let `Ctrl-C` quit personant. The runner
+therefore publishes the child's process group as early as possible, treats having a pgid as having a
+child, tracks interrupt ownership separately from deliverability (an interrupt claimed before the
+group exists is queued), and the parent re-asserts `setpgid` after `fork` so `kill(-pid)` cannot
+find no group. Spawning a child and handing over the terminal (`term.Handoff`) compose in one
+function so the window cannot leak.
+
+### Math rendering
+
+The well-trodden LaTeX→terminal-image path (renderer, kitty / OSC 1337 / sixel emission, Windows
+parity) exists in Rust and not in Go, so rendering and protocol-encoding work stays on the Rust side
+in every future option; personant takes no Go rendering or sixel-encoding dependency. SPEC §4.6
+states the binding protocol principle.
+
 ### Memory consolidation — the "sleep" cycle
 
 Designed, partially built. The day-off idle window already fires `MemoryOps.Consolidate` (git
@@ -606,6 +745,13 @@ Full design capture — the substrate-stays-recall/weights-become-instinct frami
 training shape, and hard constraints carried over from the substrate-as-canonical thesis — moved to
 **ROADMAP.md** (far horizon; not v0.1, not v1.0, not v2.0). Left here as a pointer because the
 "sleep cycle" section above and the model-family-as-platform section below both reference it.
+
+### Serving deployment
+
+The local provider is **oMLX**, connected directly (an OpenAI-compatible endpoint with no proxy in
+between). oMLX sends the extended inference-timing block that `model.inference-telemetry` logs (SPEC
+§2.8: `ttft_ms`, `prefill_ms`, `gen_ms`, `total_ms`, tokens/second and token counts); most other
+providers do not, and the event is then simply absent.
 
 ### Model-family as platform (v1.0 platform coupling) {#model-family-as-platform-v10-platform-coupling}
 
@@ -701,8 +847,8 @@ need to clear. Full design capture: **ROADMAP.md → Far-horizon, "Concurrent se
 
 ## Tool surface (bounded, role-shaped)
 
-**Twelve external tools** total. Read-and-think (6) + draft-and-mutate (6). The LLM never names a
-workspace path on a write call; all mutations go through `fs.propose_*` (ack-gated).
+**Seventeen external tools** (SPEC §6.1): read-and-think (11) + draft-and-mutate (6). The LLM never
+names a workspace path on a write call; all mutations go through `fs.propose_*` (ack-gated).
 
 | Read / think | Draft / mutate |
 |---|---|
@@ -711,7 +857,12 @@ workspace path on a write call; all mutations go through `fs.propose_*` (ack-gat
 | `fs.grep` | `fs.tmp_list` |
 | `web.fetch` | `fs.propose_promote` |
 | `web.search` | `fs.propose_rename` |
-| `model.consult` | `fs.propose_delete` |
+| `web.wikipedia` | `fs.propose_delete` |
+| `web.wiktionary` | |
+| `web.wikidata` | |
+| `web.arxiv` | |
+| `web.crossref` | |
+| `model.consult` | |
 
 **Out of scope (intentional, not deferred):** shell execution, git operations *by the LLM*, package
 management, build, test orchestration, IDE integration, deployment, direct filesystem writes outside
@@ -721,15 +872,14 @@ LLM tool layer.
 **v1.0 will add Python-only computational tools** (`python.run`, `python.format`, `python.lint`) for
 math/physics simulation. Targeted; not a general "agent can run anything."
 
-**Mechanism, as of front end 0.0.9:** the registry (`internal/tools`), the turn-side execution loop,
-and the first two real tools — `web.fetch` and `web.search` (`internal/tools/web`) — are built. The
-inventory and the machinery to run it stay deliberately separate concerns: a registry with nothing
-in it sends no `tools` field, which is also how an *optional* tool is expressed (no search backend
-configured → `web.search` is simply absent, never "present but broken"). Properties worth carrying:
-a dispatch **never fails** (unknown tool, handler error, handler timeout are all results the model
-can recover from, because a provider that saw N calls requires N replies), and tool execution is
-**at-least-once** under crash replay, which is fine for read-only tools and is mechanically refused
-for mutating ones. See SPEC §6.1.4.
+**Mechanism:** the registry (`internal/tools`), the turn-side execution loop, and the web tools
+(`internal/tools/web`). The inventory and the machinery to run it stay deliberately separate
+concerns: a registry with nothing in it sends no `tools` field, which is also how an *optional* tool
+is expressed (no search backend configured → `web.search` is simply absent, never "present but
+broken"). Properties worth carrying: a dispatch **never fails** (unknown tool, handler error,
+handler timeout are all results the model can recover from, because a provider that saw N calls
+requires N replies), and tool execution is **at-least-once** under crash replay, which is fine for
+read-only tools and is mechanically refused for mutating ones. See SPEC §6.1.4.
 
 **The web tools, and what they are shaped against.** `web.fetch` is a plain GET → readability
 extraction → Markdown, with no headless browser. Its two interesting decisions are both about
@@ -739,12 +889,43 @@ concludes the information does not exist, and says so confidently), and a binary
 refused rather than parsed into plausible garbage. `web.search` sits behind a one-method
 `SearchProvider` interface, and its central contract is the same instinct: **"search failed" and
 "search found nothing" are never conflated** — a silent empty on failure teaches the model that the
-web has no answer. Both are tier 0 with a `http`/`https` **scheme allowlist** as the boundary in
-place of an acknowledgement (SPEC §6.2.7): a user cannot adjudicate whether a URL is an
+web has no answer. All web tools are tier 0 with a `http`/`https` **scheme allowlist** as the
+boundary in place of an acknowledgement (SPEC §6.2.7): a user cannot adjudicate whether a URL is an
 internal-network probe, and a prompt they learn to clear is worse than a mechanical bound. A local
 per-turn/per-day query cap on search is enforced in our own code — an LLM in a retry loop against a
 metered API is a real failure mode, and a provider dashboard reports it only after the money is
 gone.
+
+**Registry mechanics.** `internal/tools` maps name → (`model.ToolSpec`, handler, tier, mutates); a
+handler is `(ctx, raw JSON args) → (bytes, error)`. `Registry.Specs()` returns nil when empty, so no
+`tools` field is sent; `Dispatch` derives a per-call deadline from the turn context and reports only
+caller cancellation to the caller; `Register` refuses a tool declaring `Mutates`, the mechanical
+trip-wire for SPEC §6.1.4's at-least-once decision. The execution loop is
+`internal/turn/toolloop.go`, reusing the §5.5/§3.3 re-issue path; the identity-only
+`Chunk.ToolCalls` view separates a tool-call-only response from an empty one and feeds the
+`running <tool>` phase label (`turn.IsToolPhase` is the single membership test the front end's abort
+allow-list uses). Receipts are announced through the same presentation hook as phases.
+
+**Web-tool upstreams.** `web.wikipedia` is a separate tool rather than a `SearchProvider` backend:
+folding it in would turn the encyclopedia-versus-open-web choice into a config pin, at the cost of
+one extra spec block in the request prefix. It queries the REST `GET
+https://en.wikipedia.org/w/rest.php/v1/search/page?q=&limit=` (`pages[].{id,key,title,excerpt}`):
+matched terms arrive wrapped in `<span class="searchmatch">` with the prose escaped, so tags are
+removed and entities resolved in one tokenizer pass (two passes in the wrong order turn an escaped
+`&lt;script&gt;` back into a tag); the returned `key` is already URL-safe and is concatenated, not
+re-encoded; English is a host swap. `web.wiktionary` shares that path, decoder and renderer
+(`internal/tools/web/wikimedia.go`) with its own host entry (`en.wiktionary.org`) in the per-host
+politeness table, since the gate keys on the host a request reaches. `web.arxiv` reads an Atom 1.0
+feed (`GET http://export.arxiv.org/api/query?search_query=&max_results=`, `encoding/xml`) and drops
+an entry whose Atom `id` is not an `/abs/` URL; its ~3 s spacing is the only non-zero entry in
+`politeness.go`. `web.crossref` queries `https://api.crossref.org/works?query=&rows=`; `title` and
+`container-title` are arrays that are routinely empty and `issued.date-parts` can be `[[null]]`; the
+contact address in the User-Agent selects the polite pool. `web.wikidata` uses the Action API
+(`wbsearchentities`) because the REST search returns `title` = `"Q11452"` with no label anywhere in
+the payload; it deliberately does not send `maxlag` (a bot courtesy that would turn a lagging
+cluster into a failed read), decodes the in-band failure that arrives with HTTP 200 (an `error`
+object and no `search` key), and builds the canonical URL from the `id` because `url` is
+protocol-relative and `concepturi` is the RDF IRI.
 
 ---
 
@@ -926,6 +1107,61 @@ harness drive loop. The protocol is:
    metric-key contract** — every counter or histogram key that crosses the seam is in
    `metric_keys.go`; a rename compiles only if every reference is updated.
 
+**Acceptance-run mechanics**
+
+- `internal/scenarios/sim/` holds the acceptance simulation (`TestSim`, the recall-madlibs
+  corpus-slot workload); `just sim DURATION=<N>d` runs a chosen span (aliases `1d`/`1w`, Go duration
+  forms such as `168h`) and `just test` runs the default `1d` rung. Metrics come from
+  `internal/metrics`; scenario steps carry `ExpectedRecallMatches` ground truth scored in
+  `RecallStrict` or `RecallMeasureOnly` mode, with baselines under
+  `testdata/baselines/<scenario>.json`.
+- The mock LLM client lives in `internal/model` beside the production `HTTPClient` and implements
+  the same `Client` interface; only the constructor differs.
+- The default gate (`just test` / `just sim`) runs with a nil embedder, so the fine tier and the
+  lexical completeness floor do not execute there; `just sim-completeness-rung` is the
+  embedder-enabled rung that asserts every flush-lag dead-zone probe is surfaced. The scenario
+  harness pins `recall.ack-mode: always` (a scripted `Step.RecallAck` is a human ack).
+- The per-turn boundary of the log is `context.modified source=user.prompt`: the A2 tag-fidelity
+  grader segments observed turns on it, so suppressing, reordering or duplicating that line must
+  revisit the grader. `recall_unexplained_absence` (an expected thread that is off-spine and absent
+  from the archive index) is always a substrate integrity failure and must stay 0, while an
+  archived-recoverable expected match is forgiven (`TargetRecoverable`, `RecallExpectedForgiven`).
+- Long-rung symbolic precision is bounded by corpus saturation: the ground-truth oracle is
+  `FamilySize`-bounded, so topically legitimate extras from non-sibling threads score as precision
+  misses. Making long rungs measure memory scaling again needs the corpus vocabulary to scale with
+  thread population (per-thread symbol salting), a queued sim improvement.
+- Live rungs use `reaper.local` (gemma-4 family inference, `nomicai-modernbert-embed-base-bf16`
+  embeddings). Service-in-loop raises per-turn cost from tens of milliseconds to single-digit
+  seconds against roughly 20 minutes for a mock 120-day run, so the mock regime stays the default
+  loop; an empirical sweet-spot hunt (service calls on a fraction of turns, or only recall-bearing
+  turns) is how coverage per unit of overhead gets maximized. The evolving-anchor workload variants
+  (`vague-new`, `drift`, `invert`, interleave) report `drift_recall_origin`/`drift_recall_dest`,
+  `abandoned_premise_recall`, `superseded_precision`, `ever_central_count`/`history_len` and
+  `projection_churn` through `metric_keys.go`.
+- Cadence: the generator's day functions (`sim/workload.go` `runWorkDay`/`runSession`/`runDayOff`)
+  and the harness day-close share SPEC §9.4.1's clock contract; the defect it closed was a jittered
+  generator counter beside a rigid `nextHeavyAt` grid, which let a day-off's 24h jump skip a
+  day-close. The day-off emits a `SleepCycle` marker step the harness intercepts to drive
+  consolidation, and a day-close is stamped `simDayCloseDate(d) = SimClockStart + d·SimDayLength`
+  (`internal/scenarios/harness.go`). Tests:
+  `TestCadence_DayStartsNoPrecession` (at least 9 days), `TestCadence_DayOffPreservesPhase` and
+  `TestDayOffThroughHarness`. A simulated-clock read inside one turn (`clock.Timeline()` within
+  `turn.Run`) returns the same instant; closure decay keys off `TurnNumber − LastEngagedTurn`.
+- Crash injection: `internal/crashpoint` provides named hooks (`crashpoint.At(name)`), test-armed
+  and a no-op in production, registered at every kill point; `TestCrashPointCoverageGate` fails the
+  suite when a registered point lacks a scenario in `crashScenarioCoverage`. `RestartWithCrash`
+  (`internal/scenarios/restart.go`) arms a point, drives the turn or operation, discards in-memory
+  state and drives `Reconcile` against the on-disk result. The matrix covers the turn orderings
+  (`turn.postJournalPreCanonical`, `turn.betweenCanonicalRenames`, `fileadapter.CommitTurn.*`,
+  `store.WriteFileAtomic.{preRename,tornWrite}`, `fileadapter.JournalTurn.preAppend`), every barrier
+  step (`barrier.preArchival` through `barrier.postWatermark.preMarkerClear`), every archival
+  sub-window (`archiveBatch.postCapture.preMembership` through `archiveBatch.postStamp`), standalone
+  archival, recovery internals and morning-init. Each fixture asserts the full invariant suite plus
+  `VerifyThreadMetaMatchesSpine`, at most one turn of loss against a pre-crash oracle, exact journal
+  bytes, empty `RevertedPaths` on barrier and archival paths, exactly one day-commit, and an
+  idempotent second `Reconcile`. The matrix is unit-grade (synthetic homes, inside the 30-minute
+  checkpoint budget); `TestSimBarrier2Day` adds a 2-day barrier-crossing rung to the default suite.
+
 ---
 
 ## Out of scope (deliberately)
@@ -948,10 +1184,9 @@ These are not "v0.2 / v0.3" — they are role-bounded.
 ### Deferred (real future work)
 
 Moved to **ROADMAP.md** (near-term / mid-term / far-horizon tiers), which now owns this catalog,
-including the full design capture for the "sleep" cycle and concurrent sessions
-— the Mechanisms section above keeps only a short now-stub for each (designed-not-built status plus
-the interface fact other docs cite), since SPEC §3.10.8 and the archive-index schema still need a
-live anchor.
+including the full design capture for the "sleep" cycle and concurrent sessions — the Mechanisms
+section above keeps only a short now-stub for each (designed-not-built status plus the interface
+fact other docs cite), since SPEC §3.10.8 and the archive-index schema still need a live anchor.
 
 ---
 

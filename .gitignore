@@ -30,6 +30,10 @@ cover.out
 .claude/commands/
 .claude/adjagent/
 
+.opencode/agents/
+.opencode/commands/
+.opencode-temp/
+
 memory/session-state.md
 
 # MAD review and status - this output is primarily for local work.
