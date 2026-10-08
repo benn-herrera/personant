@@ -26,12 +26,8 @@ cover.out
 .claude-temp/
 
 # justfile pulls shared agents from repo
-.claude/agents/
-.claude/commands/
 .claude/adjagent/
 
-.opencode/agents/
-.opencode/commands/
 .opencode-temp/
 
 memory/session-state.md
