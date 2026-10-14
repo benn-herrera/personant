@@ -15,10 +15,11 @@ project was never kept.
 
 Handing memory to the model does not fix this; it relocates the loss. A model rewrites what it
 remembers every time it touches it. The record has to live in deterministic, inspectable state, with
-the model in narrow judgment roles over it and the human acknowledging the calls that matter.
+the model in narrow judgment roles over it and with a process for validating and improving the quality
+of those judgments.
 
-**The best use of AI *by* humans is use of AI *with* humans.** The aim is a research partner with
-one continuous career, not an agent that runs off with the work.
+**The best use of AI *by* humans is use of AI *with* humans.** The aim is a partner with
+one continuous career.
 
 ## What follows
 
@@ -29,6 +30,3 @@ acknowledgement — projects differ in how the work is done, never in who does i
 
 **The work's artifacts are not the memory.** What personant helps produce lives in the user's
 workspace and belongs to the work.
-
-**Personant and kbase are companions.** kbase builds and maintains knowledge bases; personant is how
-one is explored, extended and maintained in use, always through kbase's operations.
