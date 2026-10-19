@@ -1,11 +1,8 @@
 ---
-#
-# !GENERATED! from templates/agents/windows-app-expert.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
-# !BODY-SHA256! 81c50a2db3e13396447d79a8af46bb8a1bb4921cd3e717b2d5053f458c8437dd
-#
+# !GENERATED! from adjagent/definitions/windows_app_expert.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: windows-app-expert
-description: "Windows desktop development: Win32 API, WinUI3/WPF/WinForms, UWP, .NET, COM/WinRT, DirectX, Windows services, installers (MSI/MSIX), registry, P/Invoke, and Windows-specific debugging. Prefer over generalist-coder for any Windows desktop target."
+description: "Windows desktop development: Win32, WinUI3/WPF/WinForms, .NET and COM/WinRT, including services, installers (MSI/MSIX) and P/Invoke. Prefer over generalist-coder for any Windows desktop target."
 model: opus
 color: "#0078D4"
 ---

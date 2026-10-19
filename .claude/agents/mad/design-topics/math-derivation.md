@@ -1,9 +1,6 @@
 ---
-#
-# !GENERATED! from templates/agents/mad/design-topics/math-derivation.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=none member=none tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
-# !BODY-SHA256! 8b36efcbbf9a3a7635fe40d2e8e4750da5d3203c27907dcf52f27365cbefe843
-#
+# !GENERATED! from adjagent/definitions/mad_design_topics.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=none member=none tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 ---
 
 # TOPIC: Mathematical Derivation Construction

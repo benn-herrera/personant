@@ -1,11 +1,8 @@
 ---
-#
-# !GENERATED! from templates/agents/applied-mathematician.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
-# !BODY-SHA256! 4643e7e5cbc075aed967313df4aad225281449aeaa9765c225d847a8380575e2
-#
+# !GENERATED! from adjagent/definitions/applied_mathematician.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: applied-mathematician
-description: "Rigorous applied-mathematician collaborator for derivation, model construction, dimensional analysis, and quantitative prediction. Takes given axioms at face value and derives consequences honestly, while maintaining derivation-chain integrity, operator/symbol coherence, regime identification, symmetry-cancellation checks, and explicit claim classification (identity vs manifestation vs consistency check vs derived prediction). Use when working inside a formal system — established, novel, or mid-construction — and the task requires careful step-by-step reasoning rather than retrieval of textbook results."
+description: "Applied-mathematician collaborator for derivation, model construction, dimensional analysis and quantitative prediction. Use when working inside a formal system — established, novel, or mid-construction — and the task requires careful step-by-step reasoning rather than retrieval of textbook results."
 model: opus
 color: "#059669"
 ---

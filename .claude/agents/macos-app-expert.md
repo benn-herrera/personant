@@ -1,11 +1,8 @@
 ---
-#
-# !GENERATED! from templates/agents/macos-app-expert.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
-# !BODY-SHA256! a2e51143488af911e0c1f04b8b7ad78cd3e54c4460fd14b4cfdfab57f77491be
-#
+# !GENERATED! from adjagent/definitions/macos_app_expert.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: macos-app-expert
-description: "macOS desktop development: AppKit, Swift/Objective-C, Core frameworks, sandboxing, XPC services, system integration, notarization, and native macOS APIs. Prefer over generalist-coder for any macOS desktop target."
+description: "macOS desktop development: AppKit, Swift/Objective-C, including sandboxing, XPC services and notarization. Prefer over generalist-coder for any macOS desktop target."
 model: opus
 color: "#A3AAAE"
 ---

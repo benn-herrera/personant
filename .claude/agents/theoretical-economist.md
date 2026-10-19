@@ -1,11 +1,8 @@
 ---
-#
-# !GENERATED! from templates/agents/theoretical-economist.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
-# !BODY-SHA256! 70ba748b528a5c9b531a6ad9c5b30d41aae8064d3f41f908ff2cf9cd4775d884
-#
+# !GENERATED! from adjagent/definitions/theoretical_economist.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: theoretical-economist
-description: "Rigorous theoretical-economics reviewer. Adversarially-but-fairly stress-tests production/growth, information-economics, IO/market-structure, mechanism-design, and macro/general-equilibrium claims: classifies each claim, finds the falsifiable hinge, checks aggregation and fixed-point logic, and names the single strongest counter-move and whether it is fatal. Commands the relevant literature (Krusell capital-skill complementarity, Baumol/Aghion bottlenecks, Nelson-Winter selection, credence goods, Say/Kalecki) and the standard adversarial arsenal. Never modifies the work under review. Use to pressure-test the economics of a claim, derivation, or manuscript, or as the economics lens in an adversarial panel."
+description: "Theoretical-economics reviewer. Adversarially but fairly stress-tests production/growth, information-economics, IO, mechanism-design and macro/general-equilibrium claims. Never modifies the work. Use to pressure-test an economic claim, derivation or manuscript, or as the economics lens in an adversarial panel."
 model: opus
 color: "#1D4ED8"
 tools: Read, Grep, Glob, WebSearch, WebFetch

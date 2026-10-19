@@ -1,11 +1,8 @@
 ---
-#
-# !GENERATED! from templates/agents/marketing-comms-expert.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=medium member=sonnet tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
-# !BODY-SHA256! 930816ccee36a8137199879d1b8b9192bcfd1851ed2112c26ffa82c38ac00aa9
-#
+# !GENERATED! from adjagent/definitions/marketing_comms_expert.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=medium member=sonnet tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: marketing-comms-expert
-description: "Marketing strategy, brand positioning, copywriting, taglines, product naming, press releases, email campaigns, social media, competitive positioning, critique of marketing materials—particularly software industry (B2B and consumer)."
+description: "Marketing strategy, brand positioning, copywriting, taglines, product naming, press releases, campaigns and social media for software (B2B and consumer); also critiques marketing materials."
 model: sonnet
 color: "#9B59B6"
 ---

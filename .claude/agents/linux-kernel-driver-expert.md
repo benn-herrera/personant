@@ -1,11 +1,8 @@
 ---
-#
-# !GENERATED! from templates/agents/linux-kernel-driver-expert.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=highest member=fable tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
-# !BODY-SHA256! 8f56bde29e755d1bff9c2f9044cbc0fab5b8c079c2920d1e734ef250327031d4
-#
+# !GENERATED! from adjagent/definitions/linux_kernel_driver_expert.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=highest member=fable tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: linux-kernel-driver-expert
-description: "Linux kernel and driver development in any language: the driver model, device binding, interrupts, DMA, kernel-context locking, power management, kbuild and out-of-tree modules. Kernel-side only — it designs the userspace ABI a driver exposes but does not write the userspace that consumes it."
+description: "Linux kernel and driver development in any language: driver model, device binding, interrupts, DMA, kernel-context locking, power management and kbuild. Kernel-side only — designs the userspace ABI a driver exposes but does not write the userspace that consumes it."
 model: fable
 color: "#6B7280"
 ---

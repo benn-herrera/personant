@@ -1,11 +1,8 @@
 ---
-#
-# !GENERATED! from templates/agents/android-app-expert.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
-# !BODY-SHA256! 0933f46275de3dc7c3dced170dedd7821a030598f62f70c0edef806e78e43249
-#
+# !GENERATED! from adjagent/definitions/android_app_expert.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: android-app-expert
-description: "Android app development: Kotlin/Compose, gestures, networking, coroutines, sensors, audio, camera, NDK/JNI integration, Gradle configuration, assets, and device-specific debugging. Prefer over generalist-coder for any Android target."
+description: "Android app development: Kotlin/Compose, including NDK/JNI integration and Gradle configuration. Prefer over generalist-coder for any Android target."
 model: opus
 color: "#FFA500"
 ---

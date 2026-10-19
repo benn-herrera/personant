@@ -1,9 +1,6 @@
 ---
-#
-# !GENERATED! from templates/commands/guest.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=none member=none tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku pin=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=opencode
-# !BODY-SHA256! fd408e2f624cd71cac92ec0becda8599d165fec39d5144fdbf5da2d319b96a68
-#
+# !GENERATED! from adjagent/definitions/guest_session.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=none member=none tier=highest=default,high=default,medium=default,low=default,lowest=default stock=highest,high,medium,low,lowest harness=opencode
 ---
 @.opencode/agents/guest-liaison.md
 

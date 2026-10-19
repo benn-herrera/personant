@@ -1,11 +1,8 @@
 ---
-#
-# !GENERATED! from templates/agents/generalist-coder.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
-# !BODY-SHA256! 36af90e729163d3ab862111c5efeb8587532a01aaa87dcadd3a53ac440b06674
-#
+# !GENERATED! from adjagent/definitions/generalist_coder.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: generalist-coder
-description: "General-purpose implementation agent for coding tasks across any language. Writes, edits, and fixes code with a strong bias toward minimal, correct, idiomatic solutions. Designed to run as one of many parallel instances — stays strictly within assigned scope, declares file boundaries upfront, and stops when the task is done. Use when no language-specific or platform-specific agent matches the task. Prefer go-coder for Go, python-coder for Python, and the relevant platform expert for Android, iOS, Linux, macOS, web, or Windows targets."
+description: "General-purpose implementation agent for coding tasks in any language. Use when no language-specific or platform-specific seat matches the task — where one does, the language specialist or platform expert takes it instead."
 model: opus
 color: "#22C55E"
 ---

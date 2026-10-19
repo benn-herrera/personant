@@ -95,7 +95,8 @@ AGENTS_DIR := ".claude" / file_stem(AGENTS_REPO)
 agents:
   @mkdir -p "{{parent_directory(AGENTS_DIR)}}"
   @[[ -d "{{AGENTS_DIR}}" ]] && git -C "{{AGENTS_DIR}}" pull || git -C {{parent_directory(AGENTS_DIR)}} clone "{{AGENTS_REPO}}"
-  just --justfile "{{AGENTS_DIR}}/justfile" install "$(pwd)"
+  just --justfile "{{AGENTS_DIR}}/justfile" install --harness=claude "$(pwd)"
+  just --justfile "{{AGENTS_DIR}}/justfile" install --harness=opencode --model-tier-map=default "$(pwd)"
 
 # NOT the tool for adding one dependency (see add-dependency) — this is
 # deliberate whole-graph churn.

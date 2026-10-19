@@ -1,9 +1,6 @@
 ---
-#
-# !GENERATED! from templates/commands/mad-debate.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=none member=none tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku pin=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=opencode
-# !BODY-SHA256! 72f634abeb21c3a4c5470db9fcae34232827f031d5e39af16351d3d89de08ef7
-#
+# !GENERATED! from adjagent/definitions/mad_debate.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=none member=none tier=highest=default,high=default,medium=default,low=default,lowest=default stock=highest,high,medium,low,lowest harness=opencode
 ---
 @.opencode/agents/mad-review-referee.md
 @.opencode/agents/mad/participant-contract.md
@@ -22,8 +19,8 @@ If the prerequisite is missing, halt with an error.
 
 Parse the arguments as follows:
 - **Review name**: the first token — a bare slug naming this review (`auth-flow`, `installer-rewrite`). It names the output folder and the documents. Review mode has no topic library: the first token resolves to no file, and the charter carries the whole methodology.
-- **Seat roster** (`SEATS=`): the seats staffing this run — a comma-separated subset of `fable`,
-  `opus`, `sonnet`, `haiku`, `guest`, at most one of each, at least two. **Required.**
+- **Seat roster** (`SEATS=`): the seats staffing this run — a comma-separated subset of `a`,
+  `b`, `c`, `d`, `guest`, at most one of each, at least two. **Required.**
 - **Env file** (`ENV_FILE=`): path to the guest model's env file (containing `API_BASE_URL=`,
   `API_KEY_FILE=`, and `MODEL=`). Required if and only if `SEATS=` includes `guest`.
 - **Constraints doc** (`CONSTRAINTS=`): path to a requirements/invariants/conventions document.
@@ -37,8 +34,8 @@ Parse the arguments as follows:
 ### Seats are the invoker's call
 
 There is no default roster. If the invocation names no seats, do not choose some — ask the user, and
-**suggest `opus` + `sonnet` as a reasonable default for most review jobs**: two strong local
-pins whose blind spots differ. Widen with `fable` or `haiku` when the material rewards more independent looks; add `guest`
+**suggest `b` + `c` as a reasonable default for most review jobs**: two strong local
+pins whose blind spots differ. Widen with `a` or `d` when the material rewards more independent looks; add `guest`
 (with `ENV_FILE=`) to bring in a model from outside this harness.
 
 Settle the roster here, before dispatch. The referee has no default of its own and **will refuse to

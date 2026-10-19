@@ -1,11 +1,8 @@
 ---
-#
-# !GENERATED! from templates/agents/ios-app-expert.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
-# !BODY-SHA256! b0b097f6e7a37e4908a78ef4837f92a5023b81ef2f7ec845c8fc3e7c7ca7992b
-#
+# !GENERATED! from adjagent/definitions/ios_app_expert.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: ios-app-expert
-description: "iOS app development: SwiftUI/UIKit, gestures, URLSession, state persistence, Swift concurrency, sensors, audio, camera, C library integration via SPM, Xcode CLI, and platform gotchas. Prefer over generalist-coder for any iOS target."
+description: "iOS app development: SwiftUI/UIKit and Swift concurrency, including C library integration via SPM and the Xcode CLI. Prefer over generalist-coder for any iOS target."
 model: opus
 color: "#FF69B4"
 ---

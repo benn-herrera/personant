@@ -1,9 +1,6 @@
 ---
-#
-# !GENERATED! from templates/commands/guest-end.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=none member=none tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku pin=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=opencode
-# !BODY-SHA256! 7b3d0aff464ed0f8d6f3478df9fe0f8990ec522c839ac6c029bb1219961519aa
-#
+# !GENERATED! from adjagent/definitions/guest_end.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=none member=none tier=highest=default,high=default,medium=default,low=default,lowest=default stock=highest,high,medium,low,lowest harness=opencode
 ---
 End the active guest-model session pointer.
 

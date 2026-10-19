@@ -1,9 +1,6 @@
 ---
-#
-# !GENERATED! from templates/commands/mad-debate.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=none member=none tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku pin=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=opencode
-# !BODY-SHA256! af19fea9048e602d8acd797e44c27305e1bf35436dff85e493ee5b2acb8dadd8
-#
+# !GENERATED! from adjagent/definitions/mad_debate.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=none member=none tier=highest=default,high=default,medium=default,low=default,lowest=default stock=highest,high,medium,low,lowest harness=opencode
 ---
 @.opencode/agents/mad-design-referee.md
 @.opencode/agents/mad/participant-contract.md
@@ -22,8 +19,8 @@ If the prerequisite is missing, halt with an error.
 
 Parse the arguments as follows:
 - **Topic name**: the first token — matches a file in `.opencode/agents/mad/design-topics/[topic-name].md`. Load that file as the topic. If the file does not exist, list available topics from `.opencode/agents/mad/design-topics/` and halt.
-- **Seat roster** (`SEATS=`): the seats staffing this run — a comma-separated subset of `fable`,
-  `opus`, `sonnet`, `haiku`, `guest`, at most one of each, at least two. **Required.**
+- **Seat roster** (`SEATS=`): the seats staffing this run — a comma-separated subset of `a`,
+  `b`, `c`, `d`, `guest`, at most one of each, at least two. **Required.**
 - **Env file** (`ENV_FILE=`): path to the guest model's env file (containing `API_BASE_URL=`,
   `API_KEY_FILE=`, and `MODEL=`). Required if and only if `SEATS=` includes `guest`.
 - **Constraints doc** (`CONSTRAINTS=`): path to a requirements/invariants/conventions document.
@@ -38,8 +35,8 @@ Parse the arguments as follows:
 ### Seats are the invoker's call
 
 There is no default roster. If the invocation names no seats, do not choose some — ask the user, and
-**suggest `opus` + `sonnet` as a reasonable default for most design jobs**: two strong local
-pins whose blind spots differ. Widen with `fable` or `haiku` when the problem rewards more independent constructions; add `guest`
+**suggest `b` + `c` as a reasonable default for most design jobs**: two strong local
+pins whose blind spots differ. Widen with `a` or `d` when the problem rewards more independent constructions; add `guest`
 (with `ENV_FILE=`) to bring in a model from outside this harness.
 
 Settle the roster here, before dispatch. The referee has no default of its own and **will refuse to

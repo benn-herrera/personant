@@ -1,11 +1,8 @@
 ---
-#
-# !GENERATED! from templates/agents/web-app-expert.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
-# !BODY-SHA256! 73a035f18294358fb41deaea512f3b12d13a1a29bdb1c37529d882f714e24870
-#
+# !GENERATED! from adjagent/definitions/web_app_expert.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: web-app-expert
-description: "Web app development: JS/TS, HTML/CSS, WebSockets, Web Workers, WASM integration, cross-browser compatibility, mobile web, storage strategies, input events, and browser API expertise. Prefer over generalist-coder for any web or browser target."
+description: "Web app development: JS/TS, HTML/CSS, WebSockets, Web Workers, WASM integration, cross-browser compatibility, mobile web and browser APIs. Prefer over generalist-coder for any web or browser target; prefer typescript-coder for TypeScript or JavaScript whose target is not a browser."
 model: opus
 color: "#00FFFF"
 ---

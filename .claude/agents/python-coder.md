@@ -1,11 +1,8 @@
 ---
-#
-# !GENERATED! from templates/agents/python-coder.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
-# !BODY-SHA256! 34f2fbc21b9b415f10869eb436af58e0b1297631c6258f885b17f85f7ad56211
-#
+# !GENERATED! from adjagent/definitions/python_coder.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: python-coder
-description: "Python implementation specialist. Writes idiomatic, readable Python — explicit over implicit, stdlib-first, no over-engineering. Covers type hints, async, testing, packaging, virtual environments, and common ecosystem tooling. Parallel-execution safe. Prefer over generalist-coder for any Python file modification or Python project task."
+description: "Python implementation specialist. Prefer over generalist-coder for any Python file modification or Python project task."
 model: opus
 color: "#3776AB"
 ---

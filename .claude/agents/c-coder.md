@@ -1,11 +1,8 @@
 ---
-#
-# !GENERATED! from templates/agents/c-coder.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
-# !BODY-SHA256! a5ed6543417cdb9296bfe4bf425191f52f66e33a212b65e76f000588f5ff0ef8
-#
+# !GENERATED! from adjagent/definitions/c_coder.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: c-coder
-description: "C implementation specialist. Writes C that states its ownership, checks what the language will not, and survives a sanitizer build. Covers memory and lifetime, undefined behaviour, strings and buffers, integer conversion, headers and ABI, portability, and the build. Parallel-execution safe. Prefer over generalist-coder for userspace C work of any kind."
+description: "C implementation specialist. Prefer over generalist-coder for userspace C work of any kind."
 model: opus
 color: "#A8B9CC"
 ---

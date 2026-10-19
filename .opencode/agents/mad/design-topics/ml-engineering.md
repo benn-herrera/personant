@@ -1,9 +1,8 @@
 ---
-#
-# !GENERATED! from templates/agents/mad/design-topics/ml-engineering.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=none member=none tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku pin=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=opencode
-# !BODY-SHA256! 832b4e32ae46d0f354e33946e71be1c48295d9b3f8b282c347e9599e7de5e8fb
-#
+# !GENERATED! from adjagent/definitions/mad_design_topics.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=none member=none tier=highest=default,high=default,medium=default,low=default,lowest=default stock=highest,high,medium,low,lowest harness=opencode
+mode: subagent
+disable: true
 ---
 
 # TOPIC: ML Engineering
@@ -35,7 +34,8 @@ Mark any step that depends on an empirical outcome the proposal does not yet hav
 
 ### Attack Surface
 
-Identify mechanism descriptions that are too vague to implement, justifications that smuggle the conclusion as a premise, predictions that cannot be measured or that would be true regardless of whether the mechanism worked, baselines that are not actually comparable, missing failure-mode analysis (especially silent ones), cost accounting that ignores ongoing maintenance or omits a cheaper alternative, hidden assumptions about model size / architecture / regime that the problem does not specify, and citations to prior work whose conditions do not transfer to the current problem. Defend your own proposal by sharpening the mechanism, grounding the justification more concretely, tightening the prediction, or proposing a more discriminating measurement.
+Identify mechanism descriptions that are too vague to implement, justifications that smuggle the conclusion as a premise, predictions that cannot be measured or that would be true regardless of whether the mechanism worked, baselines that are not actually comparable, missing failure-mode analysis (especially silent ones), cost accounting that ignores ongoing maintenance or omits a cheaper alternative, hidden assumptions about model size / architecture / regime that the problem does not specify, and citations to prior work whose conditions do not transfer to the current problem. Defend your own proposal by sharpening the mechanism, grounding the
+justification more concretely, tightening the prediction, or proposing a more discriminating measurement.
 
 ## Convergence Criteria
 

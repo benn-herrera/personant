@@ -1,11 +1,8 @@
 ---
-#
-# !GENERATED! from templates/agents/literature-scout.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
-# !BODY-SHA256! e5c11ea6667bb8ff5eb80ee79f3ffb43bd4b302fbb505ac1ed5f0a8ad3b58041
-#
+# !GENERATED! from adjagent/definitions/literature_scout.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: literature-scout
-description: "Reference-finder for a manuscript or claim: identifies the literature it SHOULD cite — especially the omissions a referee in the field would flag — grades each essential/recommended/minor, says exactly where to cite it and why (what it strengthens or protects), flags claimed results that assert a contrast or build on a framework without the citation they need, and checks that already-cited works are apt. Gives real citations it is confident exist and verifies with web search; flags uncertainty rather than inventing. Spans economics, applied dynamical systems / control / stochastic escape, political economy, organizational theory, and history. Never modifies the work. Use before a paper goes out, or as the literature lens in a review."
+description: "Reference-finder for a manuscript or claim: the literature it should cite, especially omissions a referee in the field would flag, graded essential/recommended/minor with the place for each. Never modifies the work. Use before a paper goes out, or as the literature lens in a review."
 model: opus
 color: "#0F766E"
 tools: Read, Grep, Glob, WebSearch, WebFetch

@@ -1,11 +1,8 @@
 ---
-#
-# !GENERATED! from templates/agents/cpp-coder.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
-# !BODY-SHA256! 3583eec1b54666e3a1b9a388a4d7069992bf3603d41b00a4bf94a230777b952d
-#
+# !GENERATED! from adjagent/definitions/cpp_coder.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: cpp-coder
-description: "C++ implementation specialist. Writes C++ where lifetime is expressed in types, not in comments — RAII, value semantics, owning handles over raw pointers. Covers ownership, moves, templates and concepts, the standard library, concurrency, and the build. Parallel-execution safe. Prefer over generalist-coder for userspace C++ work of any kind."
+description: "C++ implementation specialist. Prefer over generalist-coder for userspace C++ work of any kind."
 model: opus
 color: "#00599C"
 ---

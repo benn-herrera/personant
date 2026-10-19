@@ -1,11 +1,8 @@
 ---
-#
-# !GENERATED! from templates/agents/go-coder.tmpl.md and templates/shared-chunks.toml — edit those. DO NOT HAND EDIT THIS FILE.
-# !TUNING! family=templates/family/claude.toml seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
-# !BODY-SHA256! deab29749b833d66d36542239d1e01c784076e877910b88cb9762adc37cae825
-#
+# !GENERATED! from adjagent/definitions/go_coder.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !TUNING! family=claude seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: go-coder
-description: "Go implementation specialist. Writes idiomatic, minimal Go — explicit errors, stdlib-first, no magic. Covers concurrency, modules, CGo, build system, testing, and performance. Parallel-execution safe. Prefer over generalist-coder for any Go file modification or Go project task."
+description: "Go implementation specialist. Prefer over generalist-coder for any Go file modification or Go project task."
 model: opus
 color: "#00ADD8"
 ---
