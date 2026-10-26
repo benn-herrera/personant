@@ -91,12 +91,15 @@ fmt-check:
     fi
 
 AGENTS_REPO := "https://github.com/benn-herrera/adjagent.git"
-AGENTS_DIR := ".claude" / file_stem(AGENTS_REPO)
+AGENTS_DIR := "." + file_stem(AGENTS_REPO)
+AGENTS_VER := "v0.12.1"
+[doc("updates and installs agent set from adjagents public repo")]
 agents:
   @mkdir -p "{{parent_directory(AGENTS_DIR)}}"
-  @[[ -d "{{AGENTS_DIR}}" ]] && git -C "{{AGENTS_DIR}}" pull || git -C {{parent_directory(AGENTS_DIR)}} clone "{{AGENTS_REPO}}"
-  just --justfile "{{AGENTS_DIR}}/justfile" install --harness=claude "$(pwd)"
-  just --justfile "{{AGENTS_DIR}}/justfile" install --harness=opencode --model-tier-map=default "$(pwd)"
+  @[[ -d "{{AGENTS_DIR}}" ]] && git -C "{{AGENTS_DIR}}" fetch --tags || git -C {{parent_directory(AGENTS_DIR)}} clone "{{AGENTS_REPO}}" "{{AGENTS_DIR}}"
+  @git -c "advice.detachedHead=false" -C "{{AGENTS_DIR}}" checkout "{{AGENTS_VER}}"
+  just --justfile "{{AGENTS_DIR}}/justfile" install "$(pwd)" --harness=claude
+  just --justfile "{{AGENTS_DIR}}/justfile" install "$(pwd)" --harness=opencode --model-tier-map=default
 
 # NOT the tool for adding one dependency (see add-dependency) — this is
 # deliberate whole-graph churn.

@@ -20,14 +20,11 @@ bin/
 nohup.out
 cover.out
 .DS_Store
-.claude/settings.local.json
-# agent set might create a temp worktree
-.claude/worktrees/
+
+.claude/
 .claude-temp/
-
-# justfile pulls shared agents from repo
-.claude/adjagent/
-
+.adjagent/
+.opencode/
 .opencode-temp/
 
 memory/session-state.md
