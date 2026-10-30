@@ -13,7 +13,8 @@ The capability analysis behind this shape is [OPENCODE_INTEGRATION_OPTIONS.md](O
 Go port of opencode's server: [ROADMAP_PLANS/OPENCODE_SERVER_REPLACEMENT.md](ROADMAP_PLANS/OPENCODE_SERVER_REPLACEMENT.md).
 
 opencode source citations below are repo-relative paths in opencode at tag v2.2.2
-(commit `098aa7fd6e02b03d6fc410f0b052038c7d4c5e81`).
+(commit `098aa7fd6e02b03d6fc410f0b052038c7d4c5e81`). The target is the installed release, currently v2.2.3; the
+source clone at `../opencode` is kept on the installed release's tag so the code read matches the code run.
 
 ## Theme: Solve only one hard problem
 The memory system is our real work. Everything else uses the solutions other people built. Borrow designs, make
