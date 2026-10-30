@@ -489,7 +489,8 @@ sim-baseline: build recall-madlibs
       -sim.baseline-write={{ SIM_BASELINE }}
 
 # Re-run the mock sim under EXECUTOR and compare against the committed baseline.
-# NB: EXECUTOR defaults to "phases"; P0 accepts only EXECUTOR=runwithinfo.
+# EXECUTOR is runwithinfo or phases. Overrides go before the recipe name:
+#   just EXECUTOR=phases DURATION=1d sim-fidelity
 sim-fidelity: build recall-madlibs
     {{ SIM_WRAP }} go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 \
       -sim.duration={{ DURATION }} -sim.live-embedding=false -sim.live-inference=false \

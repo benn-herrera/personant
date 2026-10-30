@@ -184,7 +184,7 @@ so the file sits in `internal/model`.
 
 **Done-line:** `just build`.
 
-### P1 — Probe-local turn phases + fidelity run · expert · Status: not started
+### P1 — Probe-local turn phases + fidelity run · expert · Status: done (c2ae06f)
 
 Depends on P0.
 
@@ -223,7 +223,7 @@ Depends on P0.
 
 **Done-line:**
 - `just build`.
-- `just sim-fidelity EXECUTOR=phases DURATION=1d` and `DURATION=1w` both pass. On a difference
+- `just EXECUTOR=phases DURATION=1d sim-fidelity` and `DURATION=1w` both pass. On a difference
   outside the exclusions, fix the copy, not the comparator.
 - `just test-run ./internal/turn .`.
 
@@ -320,6 +320,8 @@ Depends on P1 and P3.
 - The service runs `IngestModelResponse` and `CloseTurn` on `session.execution.succeeded`:
   - the response body is the turn's buffered `text.ended` texts
   - usage comes from the last `step.ended` received before it
+- `IngestModelResponse` always runs before `CloseTurn`, with empty content if no `text.ended`
+  arrived; `CloseTurn` without it commits no response journal entry.
 - A repeated close for the same turn is a no-op. `.failed` or `.interrupted` → `AbortTurn`.
 - The service signals turn completion to the executor in-process. The executor waits on that
   signal, not on the event stream, so the next `BeginTurn` cannot overtake the close.
@@ -345,7 +347,7 @@ Depends on P1 and P3.
 - `just probe-smoke` completes one turn and writes a metrics blob with `oc_missed_deltas`,
   `oc_hook_fallbacks`, `oc_uncomposed_requests` and `oc_user_db_touched` all 0, and
   `checkpoints_performed >= 1`.
-- `just probe-smoke DROP_SOURCE=fs.write` writes `oc_missed_deltas >= 1`.
+- `just DROP_SOURCE=fs.write probe-smoke` writes `oc_missed_deltas >= 1`.
 
 ### P5 — Workload wiring, run metrics, trace, `sim-opencode` · expert · Status: not started
 
@@ -399,7 +401,7 @@ values in `oc_trace.jsonl`, not from the histograms.
 - The PreEvent ordering change (tool deltas after `user.prompt`) and open item 3 are reported,
   not fixed.
 
-**Done-line:** `just sim-opencode DURATION=1d` completes and writes every P3-P5 `oc_*` key,
+**Done-line:** `just DURATION=1d sim-opencode` completes and writes every P3-P5 `oc_*` key,
 `checkpoints_performed` and `oc_trace.jsonl`, and logs the criteria lines.
 
 ### P6 — Rungs and repeat · mechanical · Status: not started
@@ -407,9 +409,10 @@ values in `oc_trace.jsonl`, not from the histograms.
 Depends on P5.
 
 **Runs:**
-1. `just sim-opencode DURATION=1d CADENCE=1`.
-2. `just sim-opencode DURATION=1d CADENCE=8`.
-3. `just sim-opencode DURATION=1d CADENCE=8 TRACE_CHECK=<run 2's oc_trace.jsonl>`. This is the
+Overrides go before the recipe name (`just VAR=value recipe`).
+1. `just DURATION=1d CADENCE=1 sim-opencode`.
+2. `just DURATION=1d CADENCE=8 sim-opencode`.
+3. `just DURATION=1d CADENCE=8 TRACE_CHECK=<run 2's oc_trace.jsonl> sim-opencode`. This is the
    exact-repeat gate. Its logged spread and CV replace the PP references in the growth
    criterion.
 4. From run 2's `oc_turns_per_sec` and `turns`, pick the longest of `7d`, `15d` and `30d` with
