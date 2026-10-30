@@ -650,7 +650,16 @@ type Scenario struct {
 	// artifact; the watchdog is the trip-wire that converts a future
 	// SIGKILL into a stack trace.
 	MemoryCapBytes int64
+
+	// TurnExecutor, when non-nil, drives each step's turn instead of
+	// turn.RunWithInfo. nil (every existing scenario) keeps RunWithInfo.
+	TurnExecutor TurnExecutor
 }
+
+// TurnExecutor runs one step's turn against h.State and returns the
+// tag-stripped body and the turn's TurnInfo. It must read h.State on every
+// call: a RestartSession step replaces it.
+type TurnExecutor func(ctx context.Context, h *Harness, step Step) (string, turn.TurnInfo, error)
 
 // validate fails loud on contradictory or no-op-inducing Scenario field
 // combinations whose violation is otherwise a SILENT no-op or silent
@@ -831,6 +840,9 @@ type Harness struct {
 	// rides along onto State.Model. nil on every mock scenario.
 	liveClient model.Client
 	liveModel  string
+
+	// turnExecutor is Scenario.TurnExecutor; nil means turn.RunWithInfo.
+	turnExecutor TurnExecutor
 }
 
 // installRecaller builds the scenario's custom recaller (if any), installs

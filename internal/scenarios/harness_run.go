@@ -314,7 +314,16 @@ func stepSetClock(h *Harness, idx int, label string, step Step) {
 func stepExecTurn(t *testing.T, h *Harness, idx int, label string, step Step) (string, time.Duration) {
 	t.Helper()
 	start := clock.Profiling()
-	body, info, err := turn.RunWithInfo(context.Background(), h.State, step.PreEvents, step.UserInput, io.Discard)
+	var (
+		body string
+		info turn.TurnInfo
+		err  error
+	)
+	if h.turnExecutor != nil {
+		body, info, err = h.turnExecutor(context.Background(), h, step)
+	} else {
+		body, info, err = turn.RunWithInfo(context.Background(), h.State, step.PreEvents, step.UserInput, io.Discard)
+	}
 	elapsed := clock.Since(start)
 	if err != nil {
 		t.Fatalf("scenario step %d (%s): turn.Run: %v", idx+1, label, err)

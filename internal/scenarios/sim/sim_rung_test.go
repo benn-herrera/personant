@@ -198,6 +198,11 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	// mock path.
 	sc.LiveClient = liveClient
 	sc.LiveModel = liveModel
+	if *simTurnExecutor == "phases" {
+		sc.TurnExecutor = func(ctx context.Context, h *scenarios.Harness, step scenarios.Step) (string, turn.TurnInfo, error) {
+			return turn.RunTurnInProcess(ctx, h.State, step.PreEvents, step.UserInput)
+		}
+	}
 
 	// Relax the heavy-invariant cadence to sim-daily. The sim's per-step
 	// heavy-invariant sweeps were super-linear in turn count and ate the

@@ -124,6 +124,7 @@ api          = "openai"
 		recallerFactory:   sc.Recaller,
 		liveClient:        sc.LiveClient,
 		liveModel:         sc.LiveModel,
+		turnExecutor:      sc.TurnExecutor,
 		// lastClosedDay starts at the pinned clock's day index — day 0
 		// under the Monday-midnight anchor. The first close fires when the
 		// derived day index first ticks to 1, well into the run rather than

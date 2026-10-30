@@ -195,7 +195,7 @@ var simBaselineCheck = flag.String("sim.baseline-check", "",
 	"compare the run's metrics blob against the blob at this path")
 
 var simTurnExecutor = flag.String("sim.turn-executor", "runwithinfo",
-	"turn executor driving the sim; only `runwithinfo` is accepted")
+	"turn executor driving the sim: `runwithinfo` or `phases` (turn.RunTurnInProcess)")
 
 // parseSimDuration maps the -sim.duration flag value to a span. `1d` is
 // the smoke rung and `1w` is the mock default (the §9.1 acceptance ladder
@@ -323,8 +323,8 @@ func TestSim(t *testing.T) {
 		label = "sim-live-" + *simDuration
 	}
 
-	if *simTurnExecutor != "runwithinfo" {
-		t.Fatalf("invalid -sim.turn-executor %q: only runwithinfo is accepted", *simTurnExecutor)
+	if *simTurnExecutor != "runwithinfo" && *simTurnExecutor != "phases" {
+		t.Fatalf("invalid -sim.turn-executor %q: use runwithinfo or phases", *simTurnExecutor)
 	}
 
 	corpus := loadCorpusSlots(t)
@@ -1250,9 +1250,11 @@ func writeMetricsBaseline(t *testing.T, src, dst string) {
 }
 
 // baselineSkipsKey reports whether a metric key is wall-clock noise the
-// baseline comparison ignores.
+// baseline comparison ignores. Git storage byte sizes are noise too: the run
+// repository commits timing telemetry, which changes object content.
 func baselineSkipsKey(k string) bool {
-	return strings.HasSuffix(k, "_ms") || strings.Contains(k, "latency") || k == "day_commit_bytes"
+	return strings.HasSuffix(k, "_ms") || strings.Contains(k, "latency") || k == "day_commit_bytes" ||
+		(strings.HasPrefix(k, "git_") && strings.Contains(k, "_bytes"))
 }
 
 // diffBaselineKeys logs every key of want and got that differs (compared with
