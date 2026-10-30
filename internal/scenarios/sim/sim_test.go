@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -187,6 +188,15 @@ const simHeavyInvariantCadence = 24 * time.Hour
 var simDuration = flag.String("sim.duration", "1d",
 	"simulation span: 1d|1w, or `<N>d` calendar days like 30d, or a Go duration like 168h")
 
+var simBaselineWrite = flag.String("sim.baseline-write", "",
+	"copy the run's metrics blob byte-for-byte to this path")
+
+var simBaselineCheck = flag.String("sim.baseline-check", "",
+	"compare the run's metrics blob against the blob at this path")
+
+var simTurnExecutor = flag.String("sim.turn-executor", "runwithinfo",
+	"turn executor driving the sim; only `runwithinfo` is accepted")
+
 // parseSimDuration maps the -sim.duration flag value to a span. `1d` is
 // the smoke rung and `1w` is the mock default (the §9.1 acceptance ladder
 // proper is the day-based 1d/7d smoke + 15d→30d→60d→120d). A bare `<N>d`
@@ -313,8 +323,19 @@ func TestSim(t *testing.T) {
 		label = "sim-live-" + *simDuration
 	}
 
+	if *simTurnExecutor != "runwithinfo" {
+		t.Fatalf("invalid -sim.turn-executor %q: only runwithinfo is accepted", *simTurnExecutor)
+	}
+
 	corpus := loadCorpusSlots(t)
 	h := runSimRung(t, label, d, corpus, recaller, oracleBlind, liveClient, liveModel)
+
+	if *simBaselineWrite != "" {
+		writeMetricsBaseline(t, h.MetricsPath, *simBaselineWrite)
+	}
+	if *simBaselineCheck != "" {
+		checkMetricsBaseline(t, h.MetricsPath, *simBaselineCheck)
+	}
 
 	// Bind the summary numbers to their forensic directory: the rundata path
 	// (whose manifest.json carries mode/seed/duration/start/end/git-head) is
@@ -1211,6 +1232,79 @@ func readMetrics(path string) (metricsBlob, error) {
 	}
 	err = json.Unmarshal(body, &m)
 	return m, err
+}
+
+// writeMetricsBaseline copies the metrics blob at src to dst byte-for-byte.
+func writeMetricsBaseline(t *testing.T, src, dst string) {
+	t.Helper()
+	body, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("baseline-write: read %s: %v", src, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatalf("baseline-write: %v", err)
+	}
+	if err := os.WriteFile(dst, body, 0o644); err != nil {
+		t.Fatalf("baseline-write: %v", err)
+	}
+}
+
+// baselineSkipsKey reports whether a metric key is wall-clock noise the
+// baseline comparison ignores.
+func baselineSkipsKey(k string) bool {
+	return strings.HasSuffix(k, "_ms") || strings.Contains(k, "latency") || k == "day_commit_bytes"
+}
+
+// diffBaselineKeys logs every key of want and got that differs (compared with
+// reflect.DeepEqual, so histograms compare element-wise in order) and
+// returns the number of differing keys.
+func diffBaselineKeys[V any](t *testing.T, kind string, want, got map[string]V) int {
+	t.Helper()
+	keys := map[string]struct{}{}
+	for k := range want {
+		keys[k] = struct{}{}
+	}
+	for k := range got {
+		keys[k] = struct{}{}
+	}
+	sorted := make([]string, 0, len(keys))
+	for k := range keys {
+		if !baselineSkipsKey(k) {
+			sorted = append(sorted, k)
+		}
+	}
+	sort.Strings(sorted)
+	n := 0
+	for _, k := range sorted {
+		w, wok := want[k]
+		g, gok := got[k]
+		if wok == gok && reflect.DeepEqual(w, g) {
+			continue
+		}
+		n++
+		t.Logf("baseline differs: %s %q: baseline=%v (present=%t) run=%v (present=%t)", kind, k, w, wok, g, gok)
+	}
+	return n
+}
+
+// checkMetricsBaseline compares the run's counters, gauges and histograms
+// against the blob at baselinePath, skipping wall-clock keys.
+func checkMetricsBaseline(t *testing.T, runPath, baselinePath string) {
+	t.Helper()
+	want, err := readMetrics(baselinePath)
+	if err != nil {
+		t.Fatalf("baseline-check: read baseline %s: %v", baselinePath, err)
+	}
+	got, err := readMetrics(runPath)
+	if err != nil {
+		t.Fatalf("baseline-check: read run blob %s: %v", runPath, err)
+	}
+	n := diffBaselineKeys(t, "counter", want.Counters, got.Counters) +
+		diffBaselineKeys(t, "gauge", want.Gauges, got.Gauges) +
+		diffBaselineKeys(t, "histogram", want.Histograms, got.Histograms)
+	if n > 0 {
+		t.Errorf("baseline-check: %d key(s) differ from %s", n, baselinePath)
+	}
 }
 
 // maxOf returns the largest sample, or 0 for an empty series.

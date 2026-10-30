@@ -450,6 +450,11 @@ SIM_WRAP := if os() == "macos" { "caffeinate -i taskpolicy -t 0 -l 0" } else { "
 DURATION := env_var_or_default("DURATION", "1w")
 LIVE_EMBEDDING := env_var_or_default("LIVE_EMBEDDING", "false")
 LIVE_INFERENCE := env_var_or_default("LIVE_INFERENCE", "false")
+EXECUTOR := env_var_or_default("EXECUTOR", "phases")
+CADENCE := env_var_or_default("CADENCE", "8")
+DROP_SOURCE := env_var_or_default("DROP_SOURCE", "")
+TRACE_CHECK := env_var_or_default("TRACE_CHECK", "")
+SIM_BASELINE := justfile_directory() + "/internal/scenarios/testdata/baselines/sim-" + DURATION + ".json"
 
 # The simulation rung walk — TestSim at -sim.duration. By DEFAULT (both live
 # toggles false) this is the MOCK, deterministic acceptance gate: symbolic-
@@ -476,6 +481,19 @@ LIVE_INFERENCE := env_var_or_default("LIVE_INFERENCE", "false")
 sim: build recall-madlibs
     {{ SIM_WRAP }} go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 \
       -sim.duration={{ DURATION }} -sim.live-embedding={{ LIVE_EMBEDDING }} -sim.live-inference={{ LIVE_INFERENCE }}
+
+# Record the mock-sim metrics blob as the committed fidelity baseline for DURATION.
+sim-baseline: build recall-madlibs
+    {{ SIM_WRAP }} go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 \
+      -sim.duration={{ DURATION }} -sim.live-embedding=false -sim.live-inference=false \
+      -sim.baseline-write={{ SIM_BASELINE }}
+
+# Re-run the mock sim under EXECUTOR and compare against the committed baseline.
+# NB: EXECUTOR defaults to "phases"; P0 accepts only EXECUTOR=runwithinfo.
+sim-fidelity: build recall-madlibs
+    {{ SIM_WRAP }} go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 \
+      -sim.duration={{ DURATION }} -sim.live-embedding=false -sim.live-inference=false \
+      -sim.turn-executor={{ EXECUTOR }} -sim.baseline-check={{ SIM_BASELINE }}
 
 B1X4_COMPLETENESS_DURATION := env_var_or_default("B1X4_COMPLETENESS_DURATION", "4d")
 
