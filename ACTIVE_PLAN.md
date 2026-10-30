@@ -227,7 +227,7 @@ Depends on P0.
   outside the exclusions, fix the copy, not the comparator.
 - `just test-run ./internal/turn .`.
 
-### P3 — Driver core: spawn and isolate opencode · expert · Status: not started
+### P3 — Driver core: spawn and isolate opencode · expert · Status: done
 
 Depends on P2.
 
@@ -263,7 +263,7 @@ Depends on P2.
 
 **Done-line:** `just build`. The first exercise is P4's `probe-smoke`.
 
-### P4 — Memory service, plugin, one-step executor, smoke · expert · Status: not started
+### P4 — Memory service, plugin, one-step executor, smoke · expert · Status: done (b6d01bb)
 
 Depends on P1 and P3.
 
@@ -400,6 +400,16 @@ values in `oc_trace.jsonl`, not from the histograms.
   only).
 - The PreEvent ordering change (tool deltas after `user.prompt`) and open item 3 are reported,
   not fixed.
+- **Tool-delta content** (P4 smoke findings):
+  - `fs.write` content is the `write` tool's input `content` from `tool.execute.after` (what was
+    written), not its output, which is only a confirmation line (opencode `write.ts:39`).
+    `fs.read` content stays the tool output as returned (open item 3).
+  - `fs.commit`: the shell command becomes `git add <path> && git commit -q -m probe && git
+    rev-parse HEAD`; the hash parsed from its output goes into `Meta["hash"]`.
+- **Ordering in the trace:** RPCs can reach the service out of order, so every ordered field is
+  ordered by the plugin's sequence number. opencode runs one response's tool calls concurrently
+  (`runner/step.ts:123-133`), so within a turn the `tool.execute.after` entries and the
+  applied-delta ledger are compared as sorted (source, path) lists, not in arrival order.
 
 **Done-line:** `just DURATION=1d sim-opencode` completes and writes every P3-P5 `oc_*` key,
 `checkpoints_performed` and `oc_trace.jsonl`, and logs the criteria lines.
