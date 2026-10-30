@@ -171,4 +171,8 @@ const (
 	MetricTagFidelityReengageMissRate     = "tag_fidelity_reengage_miss_rate"
 	MetricTagFidelitySpuriousNewTopicRate = "tag_fidelity_spurious_new_topic_rate"
 	MetricTagFidelityAnchorOverlap        = "tag_fidelity_anchor_overlap"
+
+	// MetricOCUserDBTouched is the opencode probe's isolation gauge: 1 when
+	// the user's real opencode DB holds a session in the probe workspace.
+	MetricOCUserDBTouched = "oc_user_db_touched"
 )
