@@ -46,10 +46,13 @@ lands (CONVENTIONS.md "Plan dispatchability").
 - **opencode target: v2.2.3.** `opencode --version` → `opencode v2.2.3`; the clone at
   `../opencode` is at tag v2.2.3 (`git rev-parse --short HEAD` → `082ac6281f`). opencode
   citations below are at that tag.
-  - PP was measured on v2.2.1. Its findings are taken to hold at v2.2.3 on the basis of this
-    command in the clone: `git diff --stat v2.2.2 v2.2.3 -- packages/plugin/src packages/core/src/session packages/core/src/tool.ts packages/schema/src/session-event.ts packages/ai/src/protocols/openai-chat.ts packages/ai/src/protocols/shared.ts`.
-  - It lists no change to `session/runner`, `session-event.ts`, `openai-chat.ts` or `shared.ts`.
-    `effect/session.ts` gains only a doc comment.
+  - PP was measured on v2.2.1. In the clone,
+    `git diff --stat v2.2.1 v2.2.3 -- packages/plugin/src packages/core/src/session packages/core/src/tool.ts packages/schema/src/session-event.ts packages/ai/src/protocols/openai-chat.ts packages/ai/src/protocols/shared.ts`
+    lists no change to `session/runner`, `session-event.ts`, `openai-chat.ts` or `shared.ts`, and
+    `effect/session.ts` gains only a doc comment — but `session/history.ts`, `session/prompt.ts`
+    and `session/projector.ts` changed (v2.2.1→v2.2.2).
+  - So F5 and F8 and the rows-read reference are taken as the expected behaviour, not as settled:
+    the P4 smoke re-confirms F5 and F8 at v2.2.3, and P6 run 2 re-measures rows read.
 - **Gates.** Edit gate: `just build`. Checkpoint gate: `just test`, once before each commit
   (AGENTS.md). Every flag added here defaults to current behaviour.
 
@@ -100,7 +103,10 @@ lands (CONVENTIONS.md "Plan dispatchability").
   - A mid-conversation `system` message becomes a `<system-update>` user message with `&<>`
     escaped (:198).
 - **F9. Adding a field to `scenarios.Scenario` breaks no literal.**
-  `git grep -n 'Scenario{[^}]' -- '*.go' | grep -v 'Name:\|:\s'` → no output.
+  - `git grep -nE 'Scenario\{[^}:]+\}' -- '*.go'` → no output (no positional literal).
+  - References, for scope: `git grep -l '\bScenario\b' -- '*.go'` → 17 files:
+    `internal/scenarios/{crash_matrix_test,harness,harness_resolvers,harness_run,harness_setup,harness_validate_test,invariants,invariants_test,marker_contract_test,recall_fidelity_test,recall_madlibs_test,runmanifest_test,scenarios_test}.go`,
+    `internal/scenarios/sim/{sim_embed_test,sim_test,telemetry,workload}.go`.
 - **F10. HTTP API** (opencode/packages/protocol/src/groups):
   - `POST /api/session` (session.ts:165)
   - `…/:sessionID/prompt` (:337)
@@ -121,7 +127,8 @@ Declare these beside `DURATION` / `LIVE_EMBEDDING` / `LIVE_INFERENCE` (justfile:
 - `internal/scenarios/sim/sim_test.go`: flags next to `simDuration` (:187):
   - `-sim.baseline-write=<path>`
   - `-sim.baseline-check=<path>`
-  - `-sim.turn-executor` (default `runwithinfo`; P0 accepts only that value)
+  - `-sim.turn-executor` (default `runwithinfo`; P0 accepts only that value), declared as
+    `var simTurnExecutor = flag.String("sim.turn-executor", "runwithinfo", …)`
 - `justfile`: the `EXECUTOR` variable; targets `sim-baseline` and `sim-fidelity` next to `sim`
   (:476).
 - New tracked files: `internal/scenarios/testdata/baselines/sim-1d.json` and `sim-1w.json`.
@@ -274,8 +281,10 @@ Depends on P1 and P3.
 **Plugin** ("Components" item 5; "Integration shape" §§1-5):
 - Every RPC carries `AbortSignal.timeout`. On failure, leave the event unmodified and increment
   a fallback count.
-- Each RPC carries the plugin-measured RTT of its previous RPC, the cumulative fallback count,
-  and the plugin's own sequence number for forwarded events.
+- Each RPC carries the plugin-measured RTT of its previous RPC tagged with that RPC's turn number
+  and hook name, the cumulative fallback count, and the plugin's own sequence number for
+  forwarded events. The service books each RTT to the turn it measured; the last RPC of the run
+  has no RTT, and that is the only one missing.
 - `session.title` and `session.compaction` return fixed `result`s.
 - Subscribe to `session.text.ended`, `session.step.ended`, `session.usage.updated`,
   `session.execution.succeeded` / `.failed` / `.interrupted`, and the fork, revert and delete
@@ -299,7 +308,9 @@ Depends on P1 and P3.
 
 **Turn close** (F5; open item 4):
 - At `experimental.idle` the plugin only asks the service whether to checkpoint. The service
-  answers yes every `cadence` turns, and the plugin calls `session.compact`.
+  answers yes at most once per turn: on the first idle of a turn whose number is a multiple of
+  `cadence`, and no on every later idle of that turn (F5: idle fires again after the hook
+  enqueues a checkpoint). On yes the plugin calls `session.compact`.
 - On the `session.compaction` hook, the service increments `checkpoints_performed`.
 - The service runs `IngestModelResponse` and `CloseTurn` on `session.execution.succeeded`:
   - the response body is the turn's buffered `text.ended` texts
@@ -310,8 +321,9 @@ Depends on P1 and P3.
 
 **Executor (per step):**
 - Write each `fs.read` path's content into the workspace.
-- `Enqueue` one tool-call response: `fs.read` → `read`, `fs.write` → `write`, `fs.commit` →
-  `shell` `git add <path> && git commit -q -m probe`.
+- `Enqueue` one tool-call response carrying one tool call per PreEvent, in PreEvent order:
+  `fs.read` → `read`, `fs.write` → `write`, `fs.commit` → `shell`
+  `git add <path> && git commit -q -m probe`. A step with no PreEvents enqueues nothing.
 - `POST …/prompt` with `UserInput`. Wait for the service's close signal. Return its `TurnInfo`.
 - **Expected-delta set:** `user.prompt` keyed by a hash of `UserInput`; one entry per PreEvent
   keyed by (source, path); `model.response` keyed by a hash of the served
@@ -320,9 +332,8 @@ Depends on P1 and P3.
   applied-delta ledger, a `model.response` content mismatch, and a usage mismatch against the
   last `ServedRequest.Usage`.
 - **`oc_uncomposed_requests`** counts `TakeRequests()` entries whose `SystemMessages != 1` or
-  whose `SystemHash` is not among this turn's composed hashes. This replaces
-  `oc_unexpected_model_kinds`: model calls are counted at the mock, never from
-  `session.model.request` (F5).
+  whose `SystemHash` is not among this turn's composed hashes. Model calls are counted at the
+  mock, never from `session.model.request` (F5).
 - `dropSource` skips applying the first delta of that source, to prove the detector fires.
 
 **Done-line:**
@@ -347,13 +358,21 @@ Depends on P4.
   - It runs TestSim with `-sim.turn-executor=opencode -sim.checkpoint-cadence={{CADENCE}}
     -sim.trace-check={{TRACE_CHECK}}` and the live flags pinned to `false`.
   - It first checks that `opencode --version` contains `v2.2.` and that the clone matches the
-    installed release (`git -C ../opencode describe --tags --exact-match` equals the version
-    `opencode --version` prints), and fails naming the mismatch otherwise.
+    installed release: `git -C ../opencode describe --tags --exact-match` equals the last
+    whitespace-separated field of `opencode --version` (`opencode v2.2.3` → `v2.2.3`). It fails
+    naming the mismatch otherwise.
   - It is not part of `just test`.
+
+**Metric kinds** (all `oc_*` keys, P3-P5): counters — `oc_missed_deltas`, `oc_hook_fallbacks`,
+`oc_uncomposed_requests`, `checkpoints_performed`; gauges — `oc_user_db_touched` (0/1),
+`oc_db_bytes`, `oc_opencode_rss_bytes` (per sim-day), `oc_turns_per_sec` (turns ÷ wall seconds
+of the turn loop); histograms — `oc_hook_rtt_ms`, `oc_history_messages`, `oc_turn_messages`,
+`oc_step_overhead_ms`. Slopes and maxima in the pass criteria are computed from the per-turn
+values in `oc_trace.jsonl`, not from the histograms.
 
 **Work:**
 - `oc_step_overhead_ms` = the turn's wall time at the executor − the sum of that turn's
-  `ServedRequest.Duration` − the turn's hook RTTs.
+  `ServedRequest.Duration` − the hook RTTs booked to that turn.
 - Per sim-day (when `scenarios.SimDayIndex(h.PinnedClock())` advances), record:
   - `oc_db_bytes`: isolated `opencode.db` + `-wal`
   - `oc_opencode_rss_bytes`: RSS of the recorded PID
@@ -368,7 +387,9 @@ Depends on P4.
     call `t.Errorf`.
   - From the timing fields of both runs, log the run-median spread of `oc_step_overhead_ms` (and
     of each hook's RTT) and the median per-turn cross-run CV.
-- **Post-run.** Log PASS or FAIL with values for each opencode-in-loop pass criterion below. Log
+- **Post-run.** Log PASS or FAIL with values for each opencode-in-loop pass criterion below,
+  judging growth against the PP references (s₀, σ). P7 re-judges every `CADENCE=8` run's growth
+  with run 3's σ. Log
   the recall-key deltas against the committed baseline for the duration (P0 comparator, report
   only).
 - The PreEvent ordering change (tool deltas after `user.prompt`) and open item 3 are reported,
@@ -388,7 +409,8 @@ Depends on P5.
    exact-repeat gate. Its logged spread and CV replace the PP references in the growth
    criterion.
 4. From run 2's `oc_turns_per_sec` and `turns`, pick the longest of `7d`, `15d` and `30d` with
-   days × turns ÷ `oc_turns_per_sec` ≤ 14,400 s. Run it at `CADENCE=8` (open item 6).
+   days × turns ÷ `oc_turns_per_sec` ≤ 14,400 s. Run it at `CADENCE=8` (open item 6). If none
+   fits, run `7d` and record its projected time beside the result.
 
 **On failure:** if a run fails or a gate fails, stop and report the log tail. Do not diagnose.
 
