@@ -4,6 +4,9 @@ A single-user, single-agent runtime that gives an AI assistant persistent workin
 arbitrary projects. The agent has one continuous career: unified memory, no session boundaries, no
 compaction-driven information loss, and cross-project recognition.
 
+## Developer
+<https://keyoxide.org/wkd/benn@bennherrera.dev>
+
 ## Requirements and Supported Platforms
 
 - Go 1.26.1+
