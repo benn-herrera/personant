@@ -175,4 +175,20 @@ const (
 	// MetricOCUserDBTouched is the opencode probe's isolation gauge: 1 when
 	// the user's real opencode DB holds a session in the probe workspace.
 	MetricOCUserDBTouched = "oc_user_db_touched"
+
+	// opencode probe per-turn keys. Counters: MetricOCMissedDeltas (expected
+	// deltas the memory service never applied, plus response and usage
+	// mismatches), MetricOCHookFallbacks (plugin RPCs that failed),
+	// MetricOCUncomposedRequests (model calls whose system message is not one
+	// the service composed this turn), MetricCheckpointsPerformed (answered
+	// compactions). Histograms: MetricOCHookRTTMs (plugin-measured RPC
+	// round trip), MetricOCHistoryMessages (messages in each session.context
+	// input), MetricOCTurnMessages (the turn's own suffix of that input).
+	MetricOCMissedDeltas       = "oc_missed_deltas"
+	MetricOCHookFallbacks      = "oc_hook_fallbacks"
+	MetricOCHookRTTMs          = "oc_hook_rtt_ms"
+	MetricOCUncomposedRequests = "oc_uncomposed_requests"
+	MetricOCHistoryMessages    = "oc_history_messages"
+	MetricOCTurnMessages       = "oc_turn_messages"
+	MetricCheckpointsPerformed = "checkpoints_performed"
 )

@@ -496,6 +496,13 @@ sim-fidelity: build recall-madlibs
       -sim.duration={{ DURATION }} -sim.live-embedding=false -sim.live-inference=false \
       -sim.turn-executor={{ EXECUTOR }} -sim.baseline-check={{ SIM_BASELINE }}
 
+# One handwritten turn through the installed opencode with the probe plugin and
+# in-process memory service. DROP_SOURCE (fs.read|fs.write|fs.commit|
+# model.response) has the service skip that delta, to prove oc_missed_deltas fires:
+#   just DROP_SOURCE=fs.write probe-smoke
+probe-smoke: build
+    PERSONANT_OPENCODE_PROBE=1 go test ./internal/scenarios/opencode -run TestProbeSmoke -count=1 -v -probe.drop-source={{ DROP_SOURCE }}
+
 B1X4_COMPLETENESS_DURATION := env_var_or_default("B1X4_COMPLETENESS_DURATION", "4d")
 
 # B1 rung: the §3.4 completeness FLOOR. Live embedder + MOCK inference over
