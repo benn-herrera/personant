@@ -33,6 +33,9 @@ file is one power-cycle from gone.
   rather than restate it. A plan that needs such a page names it in the plan, so a reader knows which
   source settles a disagreement.
 - Working drafts and half-formed notes are scratch (`.claude-temp/`), not plans.
+- **A probe plan is exempt from the checkpoint gate and the post-sprint review.** Its packages gate
+  only on the runs that make its data trustworthy, plus `just test-run` for any production package
+  they add a file to; its review is a spot check that the data it gathers measures what it claims.
 - Any plan that is activated, regardless of its location, gets a post-sprint review section
   at the end. 
   - That section contains the review, revision, and burndown steps. 
