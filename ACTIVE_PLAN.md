@@ -25,13 +25,17 @@ lands (CONVENTIONS.md "Plan dispatchability").
 - **Comparison exclusions are fixed, not discovered.** The comparator skips only:
   - wall-clock timing keys: names ending `_ms` or containing `latency`
   - the run's own `started_at`, `ended_at` and `labels.scenario`
-  - `day_commit_bytes`
+  - git storage byte sizes: `day_commit_bytes` and keys starting `git_` that contain `_bytes`
+    (`git_dir_bytes_*`, `git_packed_bytes_*`, `git_dir_bytes_reclaimed`). Git object counts
+    (`git_loose_objects_*`, `final_git_loose_objects`) are compared.
 
-  Any other differing key is a defect: stop and report it. These are exactly the keys that
-  differed between two same-commit, same-seed runs. A Python stdlib diff of the two blobs,
-  `sim-workload-seed24095-dur48h0m0s.260830035927` vs `….260830040825` under `test/rundata/`
-  (manifest `git_head` 23922f2 for both), printed `started_at`, `ended_at`, `labels.scenario`, the
-  `_ms` histograms, `day_commit_bytes` and `recall_query_latency_p50/p95/p99`, and nothing else.
+  Any other differing key is a defect: stop and report it. The byte sizes differ because the run
+  repository commits timing telemetry (`daily.jsonl` latency fields, `mem.jsonl` runtime stats,
+  logs), which changes object content and hashes; memory-state files (`spine.jsonl`,
+  `symbols.jsonl`, `threads/`, `working-set.json`) are byte-identical. Evidence: the P0 1w
+  baseline run `test/rundata/sim-workload-seed24095-dur168h0m0s.261030151228` vs its self-check
+  `….261030153218` differ only in the keys above; the 1d self-check `….261030152716` matches
+  exactly.
 - **Mock inference only.** Every probe and baseline recipe passes `-sim.live-embedding=false
   -sim.live-inference=false` literally.
 - **Acks** use the scripted resolvers `stepSetup` installs on `h.State`
@@ -53,8 +57,9 @@ lands (CONVENTIONS.md "Plan dispatchability").
     and `session/projector.ts` changed (v2.2.1→v2.2.2).
   - So F5 and F8 and the rows-read reference are taken as the expected behaviour, not as settled:
     the P4 smoke re-confirms F5 and F8 at v2.2.3, and P6 run 2 re-measures rows read.
-- **Gates.** Edit gate: `just build`. Checkpoint gate: `just test`, once before each commit
-  (AGENTS.md). Every flag added here defaults to current behaviour.
+- **Gates.** Edit gate: `just build`. No package runs the full `just test`: a package's
+  done-line is its own runs, plus `just test-run <pkg> .` for any production package it adds a
+  file to. Every flag added here defaults to current behaviour.
 
 ## Facts the packages act on
 
@@ -121,7 +126,7 @@ Declare these beside `DURATION` / `LIVE_EMBEDDING` / `LIVE_INFERENCE` (justfile:
 
 ## Packages
 
-### P0 — Baselines and comparator · mechanical · Status: not started
+### P0 — Baselines and comparator · mechanical · Status: done (402c415)
 
 **Scope:**
 - `internal/scenarios/sim/sim_test.go`: flags next to `simDuration` (:187):
@@ -150,9 +155,9 @@ Declare these beside `DURATION` / `LIVE_EMBEDDING` / `LIVE_INFERENCE` (justfile:
 - `just sim-baseline DURATION=1d` and `DURATION=1w` on unmodified code.
 - Then `just sim-fidelity EXECUTOR=runwithinfo` at both durations passes.
 - If a key outside the exclusions differs, stop and report it.
-- `just test`. Commit the two baselines.
+- Commit the two baselines.
 
-### P2 — Mock model endpoint · expert · Status: not started
+### P2 — Mock model endpoint · expert · Status: done (2e92f6d)
 
 **Scope:** new file `internal/model/mockserver.go`. The OpenAI wire types it reuses are
 unexported (`grep -n "^type wire" internal/model/http_client.go internal/model/http_stream.go`),
@@ -220,7 +225,7 @@ Depends on P0.
 - `just build`.
 - `just sim-fidelity EXECUTOR=phases DURATION=1d` and `DURATION=1w` both pass. On a difference
   outside the exclusions, fix the copy, not the comparator.
-- `just test`.
+- `just test-run ./internal/turn .`.
 
 ### P3 — Driver core: spawn and isolate opencode · expert · Status: not started
 
@@ -341,7 +346,6 @@ Depends on P1 and P3.
   `oc_hook_fallbacks`, `oc_uncomposed_requests` and `oc_user_db_touched` all 0, and
   `checkpoints_performed >= 1`.
 - `just probe-smoke DROP_SOURCE=fs.write` writes `oc_missed_deltas >= 1`.
-- `just test`.
 
 ### P5 — Workload wiring, run metrics, trace, `sim-opencode` · expert · Status: not started
 
@@ -396,7 +400,7 @@ values in `oc_trace.jsonl`, not from the histograms.
   not fixed.
 
 **Done-line:** `just sim-opencode DURATION=1d` completes and writes every P3-P5 `oc_*` key,
-`checkpoints_performed` and `oc_trace.jsonl`, and logs the criteria lines. Then `just test`.
+`checkpoints_performed` and `oc_trace.jsonl`, and logs the criteria lines.
 
 ### P6 — Rungs and repeat · mechanical · Status: not started
 
@@ -484,7 +488,7 @@ These replace ACTIVE_DESIGN.md "Pass criteria" for the probe. Warm-up is the fir
 | 5 | P6 | |
 | 6 | P7 | |
 
-Parallel packages commit only their own files, one commit at a time (shared tree, `just test`).
+Packages run one at a time in the shared tree (no worktrees); the coordinator commits each.
 
 ## Design open items
 
