@@ -1,6 +1,6 @@
 # ARCHITECTURE – Personant
 
-**Audience:** AI agents (and new contributors) who need to orient quickly. Companions:
+**NOTE** this document has not been updated since the decision to pivot. see ACTIVE_DESIGN.md
 
 | Document | Purpose |
 |---|---|

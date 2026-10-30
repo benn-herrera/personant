@@ -1,5 +1,7 @@
 #  ROADMAP – Personant
 
+**NOTE** this document has not been updated since the decision to pivot. see ACTIVE_DESIGN.md
+
 This file owns **future intent**. It sits **outside** the contract-document precedence chain
 (`SPEC.md` > `ARCHITECTURE.md` > `CONVENTIONS.md` > code): those three state only the *now* —
 current behavior, current constraints, current scope boundaries — and cross-reference here for

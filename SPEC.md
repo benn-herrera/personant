@@ -1,18 +1,6 @@
 # SPEC – Personant
 
-**Audience:** anyone building or checking an implementation. This spec states consumer-facing
-outcomes — on-disk schemas, observable behavior, config keys and defaults, events, user-visible
-surfaces, acceptance-gate properties — such that any implementation meeting them is valid. How this
-implementation meets them is `ARCHITECTURE.md`'s subject; this spec cites it rather than restating
-it.
-
-**Companion docs:**
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — orientation, principles, patterns, mechanisms,
-  anti-patterns. **Read first.**
-- [`CONVENTIONS.md`](CONVENTIONS.md) — house rules for agents in this repo.
-- [`README.md`](README.md) — user-facing description; getting started.
-
----
+**NOTE** this document has not been updated since the decision to pivot. see ACTIVE_DESIGN.md
 
 ## 0. Document conventions
 

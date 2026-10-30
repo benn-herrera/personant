@@ -1,8 +1,5 @@
 # CONVENTIONS – Personant
 
-This file is for AI agents (Claude Code, etc.) working in this repository. Read it before making
-non-trivial changes. Human-facing project info is in [`README.md`](README.md).
-
 ## Thesis (load-bearing)
 
 THESIS.md is the frame every change here answers to; ARCHITECTURE.md's "Applying the thesis" turns
@@ -12,6 +9,64 @@ flags — stop and surface them rather than proceeding:
 - a change that inverts the thesis or trips one of those warning signs;
 - a feature that makes the agent *anticipate* the user rather than *assist* the user;
 - a change that lets the user offload judgment that is actually theirs.
+
+## Plan & Execute Process
+
+Plans are tracked: progress and intent are worth more than a tidy tree, and a plan in an ignored
+file is one power-cycle from gone.
+
+- **`ACTIVE_PLAN.md`** at the repo root is the one plan under way: decisions confirmed at kickoff,
+  work-package boundaries, sequencing and status. Dispatched agents execute out of it; status
+  updates as work packages land. It carries outcomes, their consequences and the principles still
+  steering open choices — not decision history, which lives in commits. When the work lands, its
+  outcomes move into the contract documents and the file is replaced by the next plan.
+- **`ROADMAP_PLANS/`** holds partly-planned work that is not under way: a plan with enough design
+  done that someone could pick it up, usually behind a ROADMAP.md item. A plan leaves when it
+  becomes the active plan, is finished, or is abandoned. A plan there cites only tracked paths.
+- **A plan may name a normative page outside the contract documents, and that page outranks the
+  plan.** The contract documents are THESIS.md, SPEC.md, ARCHITECTURE.md and CONVENTIONS.md. A plan
+  may make a page of its own subject normative — `RIGOR_AND_BEARING_SCORING_SCHEME.md` is such a
+  page, stating the scoring rubric the contract cites — and on
+  that subject the page is the requirement while the plan is the route. Where a plan row and the
+  page disagree, the work implements the page and the plan's line is reported as moved, in the
+  commit that lands it; the page is not edited by the landing, and the contract documents cite it
+  rather than restate it. A plan that needs such a page names it in the plan, so a reader knows which
+  source settles a disagreement.
+- Working drafts and half-formed notes are scratch (`.claude-temp/`), not plans.
+- Any plan that is activated, regardless of its location, gets a post-sprint review section
+  at the end. 
+  - That section contains the review, revision, and burndown steps. 
+  - Unless otherwise specified the reviewers are an architect and a coder reviewing with THESIS.md, SPEC.md,
+  ARCHITECTURE.md, and CONVENTIONS.md as their pre-task reading list. 
+  - They do NOT get the plan doc. Their job is to review the changes against standards and suitability for purpose, not rehash the implementation. 
+  - Their review brief includes reviewing the tests of all touched code
+  - The burndown list is written to a separate `<plan>_REVIEW_BURNDOWN.md` and gets the same
+    prompt engineer review and revision pass as any other document containing agent instructions.
+
+### Plan work rating and dispatch
+- Every plan rates each dispatch **mechanical** or **expert**
+  - The rating decides the model: a mechanical dispatch runs on a stepped-down model, an expert one inherits the coordinator's model. 
+  - Rate what the dispatch must decide, not how much it types
+    - mechanical: a package whose work is settled by the plan's own text — a rename, a transcription, a test that mirrors a stated rule
+    - expert: one that must choose between defensible options, diagnose behaviour, or write model-facing prose
+- Mechanical tasks are dispatched to a stepped-down model as specified in the global AGENTS.md or CLAUDE.md
+
+### Plan dispatchability
+A work package is dispatchable only when the following conditions have been met
+
+- It names its scope in files, packages or symbols — never a span of design sections
+- Carries the command and its answer, or the quoted line, for each fact it acts on
+- A package that changes a type, a signature or a test double names in its scope every file
+  that references it — `git grep -l '<Name>' -- '*.go'`, test files included — and carries
+  that command and its answer
+- States its done-line in runner targets
+- Has received a usability review by the prompt engineer (its definition contains the criteria)
+- Has been revised by the architect based on the findings of the prompt engineer
+
+A plan whose packages lack these is not dispatchable. It is not offered for approval as a dispatch
+plan, and none of its packages is dispatched.
+
+**NOTE** below this line this document has not been updated since the decision to pivot. see ACTIVE_DESIGN.md
 
 ## Language constraints
 
