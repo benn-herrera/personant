@@ -11,6 +11,7 @@ import (
 	"personant/internal/model"
 	"personant/internal/recall/measure"
 	"personant/internal/scenarios"
+	"personant/internal/scenarios/opencode"
 	"personant/internal/store"
 	"personant/internal/turn"
 	"testing"
@@ -203,6 +204,12 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 			return turn.RunTurnInProcess(ctx, h.State, step.PreEvents, step.UserInput)
 		}
 	}
+	var ocExec *opencode.Executor
+	if *simTurnExecutor == "opencode" {
+		ocExec = opencode.NewExecutor(*simCheckpointCadence, "")
+		sc.Setup = ocExec.Setup
+		sc.TurnExecutor = ocExec.Exec
+	}
 
 	// Relax the heavy-invariant cadence to sim-daily. The sim's per-step
 	// heavy-invariant sweeps were super-linear in turn count and ate the
@@ -279,6 +286,11 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	start := clock.Profiling()
 	h := scenarios.RunScenario(t, sc)
 	wall := clock.Since(start)
+	if ocExec != nil {
+		if err := ocExec.Finish(h); err != nil {
+			t.Fatalf("opencode executor finish: %v", err)
+		}
+	}
 
 	// Materialize the telemetry blob: fold every generator-owned series into
 	// h.Metrics, write the blob ONCE, read it back ONCE, and derive the summary

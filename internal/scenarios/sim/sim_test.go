@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,6 +19,7 @@ import (
 	"personant/internal/memops"
 	"personant/internal/recall/measure"
 	"personant/internal/scenarios"
+	"personant/internal/scenarios/opencode"
 	"personant/internal/store"
 	"personant/internal/turn"
 )
@@ -195,7 +197,13 @@ var simBaselineCheck = flag.String("sim.baseline-check", "",
 	"compare the run's metrics blob against the blob at this path")
 
 var simTurnExecutor = flag.String("sim.turn-executor", "runwithinfo",
-	"turn executor driving the sim: `runwithinfo` or `phases` (turn.RunTurnInProcess)")
+	"turn executor driving the sim: `runwithinfo`, `phases` (turn.RunTurnInProcess) or `opencode` (the installed opencode with the probe plugin)")
+
+var simCheckpointCadence = flag.Int("sim.checkpoint-cadence", 8,
+	"opencode executor: checkpoint every N turns")
+
+var simTraceCheck = flag.String("sim.trace-check", "",
+	"opencode executor: compare the run's oc_trace.jsonl against the trace at this path")
 
 // parseSimDuration maps the -sim.duration flag value to a span. `1d` is
 // the smoke rung and `1w` is the mock default (the §9.1 acceptance ladder
@@ -323,12 +331,17 @@ func TestSim(t *testing.T) {
 		label = "sim-live-" + *simDuration
 	}
 
-	if *simTurnExecutor != "runwithinfo" && *simTurnExecutor != "phases" {
-		t.Fatalf("invalid -sim.turn-executor %q: use runwithinfo or phases", *simTurnExecutor)
+	switch *simTurnExecutor {
+	case "runwithinfo", "phases", "opencode":
+	default:
+		t.Fatalf("invalid -sim.turn-executor %q: use runwithinfo, phases or opencode", *simTurnExecutor)
 	}
 
 	corpus := loadCorpusSlots(t)
 	h := runSimRung(t, label, d, corpus, recaller, oracleBlind, liveClient, liveModel)
+	if *simTurnExecutor == "opencode" {
+		logOpencodeCriteria(t, h)
+	}
 
 	if *simBaselineWrite != "" {
 		writeMetricsBaseline(t, h.MetricsPath, *simBaselineWrite)
@@ -1307,6 +1320,244 @@ func checkMetricsBaseline(t *testing.T, runPath, baselinePath string) {
 	if n > 0 {
 		t.Errorf("baseline-check: %d key(s) differ from %s", n, baselinePath)
 	}
+}
+
+// opencode-in-loop pass-criteria references: the first ocWarmupTurns turns
+// are excluded; ocRefSlopeMsPerTurn and ocRefSigmaMs are the pre-probe's
+// checkpointed overhead slope and run-median spread, used for σ when no
+// -sim.trace-check run supplies one; growth is judged only at
+// ocGrowthCadence.
+const (
+	ocWarmupTurns       = 20
+	ocRefSlopeMsPerTurn = 0.14 / 1000
+	ocRefSigmaMs        = 1.6
+	ocGrowthCadence     = 8
+)
+
+func readOCTrace(path string) ([]opencode.TraceLine, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var lines []opencode.TraceLine
+	for _, raw := range strings.Split(strings.TrimSpace(string(body)), "\n") {
+		var l opencode.TraceLine
+		if err := json.Unmarshal([]byte(raw), &l); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		lines = append(lines, l)
+	}
+	return lines, nil
+}
+
+func overheadOf(l opencode.TraceLine) (float64, bool) { return l.OverheadMs, true }
+
+func hookRTTOf(hook string) func(opencode.TraceLine) (float64, bool) {
+	return func(l opencode.TraceLine) (float64, bool) {
+		ms, ok := l.RTTMs[hook]
+		return mean(ms), ok
+	}
+}
+
+// hookNames returns every hook with a booked RTT after warm-up, sorted.
+func hookNames(lines []opencode.TraceLine) []string {
+	seen := map[string]bool{}
+	for _, l := range lines[min(ocWarmupTurns, len(lines)):] {
+		for h := range l.RTTMs {
+			seen[h] = true
+		}
+	}
+	names := make([]string, 0, len(seen))
+	for h := range seen {
+		names = append(names, h)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// postWarmup returns (turn index, value) for every post-warm-up turn that
+// has a value.
+func postWarmup(lines []opencode.TraceLine, val func(opencode.TraceLine) (float64, bool)) (xs, ys []float64) {
+	for i := ocWarmupTurns; i < len(lines); i++ {
+		if v, ok := val(lines[i]); ok {
+			xs, ys = append(xs, float64(i)), append(ys, v)
+		}
+	}
+	return xs, ys
+}
+
+// spreadAndCV returns the two runs' post-warm-up run-median spread and the
+// median, over turns both runs have a value for, of the per-turn cross-run
+// CV (population stdev over mean).
+func spreadAndCV(a, b []opencode.TraceLine, val func(opencode.TraceLine) (float64, bool)) (spread, cv float64) {
+	_, ya := postWarmup(a, val)
+	_, yb := postWarmup(b, val)
+	var cvs []float64
+	for i := ocWarmupTurns; i < min(len(a), len(b)); i++ {
+		va, oka := val(a[i])
+		vb, okb := val(b[i])
+		if oka && okb && va+vb != 0 {
+			cvs = append(cvs, math.Abs(va-vb)/math.Abs(va+vb))
+		}
+	}
+	return math.Abs(percentile(ya, 0.5) - percentile(yb, 0.5)), percentile(cvs, 0.5)
+}
+
+func olsSlope(xs, ys []float64) float64 {
+	if len(xs) < 2 {
+		return 0
+	}
+	mx, my := mean(xs), mean(ys)
+	var num, den float64
+	for i := range xs {
+		num += (xs[i] - mx) * (ys[i] - my)
+		den += (xs[i] - mx) * (xs[i] - mx)
+	}
+	if den == 0 {
+		return 0
+	}
+	return num / den
+}
+
+func passFail(ok bool) string {
+	if ok {
+		return "PASS"
+	}
+	return "FAIL"
+}
+
+func recallKeys[V any](m map[string]V) map[string]V {
+	out := map[string]V{}
+	for k, v := range m {
+		if strings.Contains(k, "recall") {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// logOpencodeCriteria logs PASS or FAIL with values for each
+// opencode-in-loop pass criterion, judged from the metrics blob and the
+// run's oc_trace.jsonl, runs the -sim.trace-check comparison, and logs the
+// recall-key deltas against the committed baseline for the duration. Only
+// the trace check fails the test; the rest is reported.
+func logOpencodeCriteria(t *testing.T, h *scenarios.Harness) {
+	t.Helper()
+	invariantsOK := !t.Failed()
+	m, err := readMetrics(h.MetricsPath)
+	if err != nil {
+		t.Fatalf("opencode criteria: %v", err)
+	}
+	lines, err := readOCTrace(filepath.Join(h.RunHome, opencode.TraceFilename))
+	if err != nil {
+		t.Fatalf("opencode criteria: %v", err)
+	}
+	cadence := *simCheckpointCadence
+
+	zeroOK := m.Gauges[scenarios.MetricOCUserDBTouched] == 0
+	parts := []string{fmt.Sprintf("%s=%v", scenarios.MetricOCUserDBTouched, m.Gauges[scenarios.MetricOCUserDBTouched])}
+	for _, k := range []string{scenarios.MetricOCMissedDeltas, scenarios.MetricOCHookFallbacks, scenarios.MetricOCUncomposedRequests} {
+		zeroOK = zeroOK && m.Counters[k] == 0
+		parts = append(parts, fmt.Sprintf("%s=%d", k, m.Counters[k]))
+	}
+	t.Logf("criterion zero-counts: %s %s", passFail(zeroOK), strings.Join(parts, " "))
+
+	sigma, sigmaFrom := ocRefSigmaMs, "PP §3"
+	var hookSigma map[string]float64
+	if *simTraceCheck == "" {
+		t.Logf("criterion exact-repeat: NOT RUN (no -sim.trace-check)")
+	} else {
+		ref, err := readOCTrace(*simTraceCheck)
+		if err != nil {
+			t.Fatalf("trace-check: %v", err)
+		}
+		first := -1
+		for i := 0; i < max(len(lines), len(ref)); i++ {
+			if i >= len(lines) || i >= len(ref) || !reflect.DeepEqual(lines[i].Exact, ref[i].Exact) {
+				first = i
+				break
+			}
+		}
+		if first >= 0 {
+			show := func(ls []opencode.TraceLine) string {
+				if first >= len(ls) {
+					return "(no such turn)"
+				}
+				b, _ := json.Marshal(ls[first].Exact) // a decoded TraceExact always marshals
+				return string(b)
+			}
+			t.Logf("trace-check: first differing turn %d (0-based; %d vs %d turns)\n  run: %s\n  ref: %s",
+				first, len(lines), len(ref), show(lines), show(ref))
+			t.Errorf("trace-check: oc_trace.jsonl differs from %s at turn %d", *simTraceCheck, first)
+		}
+		t.Logf("criterion exact-repeat: %s (%d vs %d turns)", passFail(first < 0), len(lines), len(ref))
+		var cv float64
+		sigma, cv = spreadAndCV(lines, ref, overheadOf)
+		sigmaFrom = "trace-check"
+		t.Logf("trace-check timing: %s run-median spread %.3f ms, median per-turn cross-run CV %.4f",
+			scenarios.MetricOCStepOverheadMs, sigma, cv)
+		hookSigma = map[string]float64{}
+		for _, hook := range hookNames(lines) {
+			s, c := spreadAndCV(lines, ref, hookRTTOf(hook))
+			hookSigma[hook] = s
+			t.Logf("trace-check timing: %s %s run-median spread %.3f ms, median per-turn cross-run CV %.4f",
+				scenarios.MetricOCHookRTTMs, hook, s, c)
+		}
+	}
+
+	maxHist, maxTurn := 0, 0
+	for _, l := range lines {
+		for _, c := range l.Exact.Contexts {
+			maxHist, maxTurn = max(maxHist, c.Messages), max(maxTurn, c.TurnMessages)
+		}
+	}
+	bound := 1 + cadence*(maxTurn+1)
+	t.Logf("criterion rows-read: %s max %s=%d, bound 1 + %d × (max %s %d + 1) = %d",
+		passFail(maxHist <= bound), scenarios.MetricOCHistoryMessages, maxHist, cadence,
+		scenarios.MetricOCTurnMessages, maxTurn, bound)
+
+	xs, ys := postWarmup(lines, overheadOf)
+	n := float64(len(ys))
+	s := olsSlope(xs, ys)
+	growth := fmt.Sprintf("%s slope %.6f ms/turn × N=%d = %.3f ms; bound s₀×N + σ = %.3f ms (s₀ %.6f ms/turn, σ %.3f ms from %s)",
+		scenarios.MetricOCStepOverheadMs, s, len(ys), s*n, ocRefSlopeMsPerTurn*n+sigma, ocRefSlopeMsPerTurn, sigma, sigmaFrom)
+	if cadence == ocGrowthCadence {
+		t.Logf("criterion growth: %s %s", passFail(s*n <= ocRefSlopeMsPerTurn*n+sigma), growth)
+	} else {
+		t.Logf("criterion growth: NOT JUDGED (cadence %d; judged at %d) %s", cadence, ocGrowthCadence, growth)
+	}
+	for _, hook := range hookNames(lines) {
+		hx, hy := postWarmup(lines, hookRTTOf(hook))
+		hs := olsSlope(hx, hy)
+		line := fmt.Sprintf("%s %s slope %.6f ms/turn × N=%d = %.3f ms", scenarios.MetricOCHookRTTMs, hook, hs, len(ys), hs*n)
+		sh, ok := hookSigma[hook]
+		switch {
+		case cadence != ocGrowthCadence:
+			t.Logf("criterion hook-growth: NOT JUDGED (cadence %d) %s", cadence, line)
+		case !ok:
+			t.Logf("criterion hook-growth: NO σ (needs -sim.trace-check) %s", line)
+		default:
+			t.Logf("criterion hook-growth: %s %s; bound σ %.3f ms", passFail(hs*n <= sh), line, sh)
+		}
+	}
+
+	t.Logf("criterion harness-invariants: %s (no harness invariant or sim gate failed before the criteria)", passFail(invariantsOK))
+	t.Logf("reported: turns=%d %s=%d %s=%.0f %s=%.0f %s=%.2f", m.Counters[scenarios.MetricTurns],
+		scenarios.MetricCheckpointsPerformed, m.Counters[scenarios.MetricCheckpointsPerformed],
+		scenarios.MetricOCDBBytes, m.Gauges[scenarios.MetricOCDBBytes],
+		scenarios.MetricOCOpencodeRSSBytes, m.Gauges[scenarios.MetricOCOpencodeRSSBytes],
+		scenarios.MetricOCTurnsPerSec, m.Gauges[scenarios.MetricOCTurnsPerSec])
+
+	basePath := filepath.Join("..", "testdata", "baselines", "sim-"+*simDuration+".json")
+	base, err := readMetrics(basePath)
+	if err != nil {
+		t.Logf("recall deltas: no committed baseline: %v", err)
+		return
+	}
+	nd := diffBaselineKeys(t, "counter", recallKeys(base.Counters), recallKeys(m.Counters)) +
+		diffBaselineKeys(t, "gauge", recallKeys(base.Gauges), recallKeys(m.Gauges)) +
+		diffBaselineKeys(t, "histogram", recallKeys(base.Histograms), recallKeys(m.Histograms))
+	t.Logf("recall deltas against %s: %d recall key(s) differ (reported, not gated)", basePath, nd)
 }
 
 // maxOf returns the largest sample, or 0 for an empty series.

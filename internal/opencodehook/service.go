@@ -26,23 +26,49 @@ type AppliedDelta struct {
 	SHA    string
 }
 
-// TurnReport is what the service knows about one turn when it closes.
-type TurnReport struct {
-	Turn            int
-	Body            string
-	Info            turn.TurnInfo
-	Err             error
-	Applied         []AppliedDelta
-	ComposedHashes  []string // SystemPromptHash of each composed system text
-	HistoryMessages []int    // hook-input message count per session.context call
-	TurnMessages    int      // the turn's suffix length at its last session.context call
-	Response        string
-	Usage           model.Usage
-	Idles           int
+// ContextCall is one session.context call: the plugin's sequence number,
+// SystemPromptHash of the composed system text, the hook input's message
+// count and JSON byte size, and this turn's suffix length within it.
+type ContextCall struct {
+	Seq          int64
+	Hash         string
+	Messages     int
+	TurnMessages int
+	Bytes        int
 }
 
-// RTT is one plugin-measured RPC round trip, booked to the turn the plugin
-// had when the RPC returned.
+// ToolSeen is one tool.execute.after call, whatever its status.
+type ToolSeen struct {
+	Tool string
+	Path string
+}
+
+// StepTokens is the token count of one session.step.ended.
+type StepTokens struct {
+	Input  int
+	Output int
+}
+
+// TurnReport is what the service knows about one turn when it closes. Ord
+// counts prompts across the run; Turn is state.TurnNumber, which a session
+// reload resets.
+type TurnReport struct {
+	Ord      int
+	Turn     int
+	Body     string
+	Info     turn.TurnInfo
+	Err      error
+	Applied  []AppliedDelta
+	Contexts []ContextCall // in arrival order
+	Tools    []ToolSeen
+	Steps    []StepTokens // events arrive serially, so in sequence order
+	Response string
+	Usage    model.Usage
+	Idles    int
+}
+
+// RTT is one plugin-measured RPC round trip, booked to the turn (Ord) the
+// plugin had when the RPC returned.
 type RTT struct {
 	Turn int
 	Hook string
@@ -50,7 +76,7 @@ type RTT struct {
 }
 
 // OrderEntry is one hook call or event as the plugin observed it: Seq is
-// the plugin's own sequence number, Turn the service's turn at receipt and
+// the plugin's own sequence number, Turn the service's Ord at receipt and
 // Open whether that turn was still in flight.
 type OrderEntry struct {
 	Seq  int64
@@ -83,6 +109,7 @@ type Service struct {
 	texts   []string
 	dropped bool
 	turnNum int
+	ord     int
 	stats   Stats
 	sample  json.RawMessage
 }
@@ -133,6 +160,7 @@ type rpc struct {
 
 	Messages     int             `json:"messages"` // context
 	TurnMessages int             `json:"turnMessages"`
+	Bytes        int             `json:"bytes"`
 	Sample       json.RawMessage `json:"sample"`
 
 	Tool    string          `json:"tool"` // tool
@@ -166,7 +194,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	s.stats.RTTs = append(s.stats.RTTs, req.RTTs...)
 	s.stats.Fallbacks = max(s.stats.Fallbacks, req.Fallbacks)
-	s.stats.Order = append(s.stats.Order, OrderEntry{Seq: req.Seq, Name: req.Name, Turn: s.turnNum, Open: s.cur != nil})
+	s.stats.Order = append(s.stats.Order, OrderEntry{Seq: req.Seq, Name: req.Name, Turn: s.ord, Open: s.cur != nil})
 
 	var out reply
 	var err error
@@ -192,7 +220,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	out.Turn = s.turnNum
+	out.Turn = s.ord
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out) // the client sees a short body as a failed RPC
 }
@@ -201,15 +229,16 @@ func (s *Service) prompt(ctx context.Context, req rpc) error {
 	if s.cur != nil {
 		return fmt.Errorf("prompt while turn %d is open", s.turnNum)
 	}
+	s.ord++
 	state := s.state()
 	t, err := turn.BeginTurn(ctx, state, nil, req.Text)
 	if err != nil {
 		turn.AbortTurn(ctx, t)
-		s.finish(TurnReport{Err: err})
+		s.finish(TurnReport{Ord: s.ord, Err: err})
 		return err
 	}
 	s.cur, s.turnNum = t, state.TurnNumber
-	s.rep = TurnReport{Turn: s.turnNum, Applied: []AppliedDelta{{Source: memops.SourceUserPrompt, SHA: model.SystemPromptHash(req.Text)}}}
+	s.rep = TurnReport{Ord: s.ord, Turn: s.turnNum, Applied: []AppliedDelta{{Source: memops.SourceUserPrompt, SHA: model.SystemPromptHash(req.Text)}}}
 	s.texts = nil
 	return nil
 }
@@ -225,9 +254,8 @@ func (s *Service) compose(ctx context.Context, req rpc) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	s.rep.ComposedHashes = append(s.rep.ComposedHashes, model.SystemPromptHash(sp))
-	s.rep.HistoryMessages = append(s.rep.HistoryMessages, req.Messages)
-	s.rep.TurnMessages = req.TurnMessages
+	s.rep.Contexts = append(s.rep.Contexts, ContextCall{Seq: req.Seq, Hash: model.SystemPromptHash(sp),
+		Messages: req.Messages, TurnMessages: req.TurnMessages, Bytes: req.Bytes})
 	out := reply{System: sp}
 	for _, m := range tail {
 		if m.Content != "" { // opencode drops empty text parts (PP §5)
@@ -237,34 +265,48 @@ func (s *Service) compose(ctx context.Context, req rpc) (reply, error) {
 	return out, nil
 }
 
-var commitPathRE = regexp.MustCompile(`^git add (\S+) && git commit\b`)
+var (
+	commitPathRE = regexp.MustCompile(`^git add (\S+) && .*\bgit commit\b`)
+	commitHashRE = regexp.MustCompile(`\b[0-9a-f]{40}\b`)
+)
 
 func (s *Service) tool(ctx context.Context, req rpc) error {
 	if s.cur == nil {
 		return errors.New("tool result with no open turn")
 	}
-	if req.Status != "completed" {
-		return nil
-	}
 	var in struct {
 		Path    string `json:"path"`
+		Content string `json:"content"`
 		Command string `json:"command"`
 	}
 	if err := json.Unmarshal(req.Input, &in); err != nil {
 		return fmt.Errorf("tool %s input: %w", req.Tool, err)
+	}
+	commit := commitPathRE.FindStringSubmatch(in.Command)
+	seen := ToolSeen{Tool: req.Tool, Path: in.Path}
+	if commit != nil {
+		seen.Path = commit[1]
+	}
+	s.rep.Tools = append(s.rep.Tools, seen)
+	if req.Status != "completed" {
+		return nil
 	}
 	d := turn.Delta{Content: toolText(req.Content)}
 	switch req.Tool {
 	case "read":
 		d.Source, d.Meta = memops.SourceFSRead, map[string]string{"path": in.Path}
 	case "write":
-		d.Source, d.Meta = memops.SourceFSWrite, map[string]string{"path": in.Path}
+		// The write tool's output is only a confirmation line; what was
+		// written is its input.
+		d.Source, d.Meta, d.Content = memops.SourceFSWrite, map[string]string{"path": in.Path}, in.Content
 	case "shell":
-		m := commitPathRE.FindStringSubmatch(in.Command)
-		if m == nil {
+		if commit == nil {
 			return nil
 		}
-		d.Source, d.Meta = memops.SourceFSCommit, map[string]string{"path": m[1]}
+		d.Source, d.Meta = memops.SourceFSCommit, map[string]string{"path": commit[1]}
+		if h := commitHashRE.FindAllString(d.Content, -1); len(h) > 0 {
+			d.Meta["hash"] = h[len(h)-1]
+		}
 	default:
 		return nil
 	}
@@ -323,6 +365,7 @@ func (s *Service) event(ctx context.Context, req rpc) error {
 		if err := json.Unmarshal(req.Data, &d); err != nil {
 			return err
 		}
+		s.rep.Steps = append(s.rep.Steps, StepTokens{Input: d.Tokens.Input, Output: d.Tokens.Output})
 		s.rep.Usage = model.Usage{
 			PromptTokens:     d.Tokens.Input,
 			CompletionTokens: d.Tokens.Output,

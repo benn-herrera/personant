@@ -191,4 +191,15 @@ const (
 	MetricOCHistoryMessages    = "oc_history_messages"
 	MetricOCTurnMessages       = "oc_turn_messages"
 	MetricCheckpointsPerformed = "checkpoints_performed"
+
+	// opencode probe run keys. Histogram: MetricOCStepOverheadMs (turn wall
+	// time at the executor minus the turn's mock-model time and booked hook
+	// RTTs). Gauges: MetricOCDBBytes (isolated opencode.db plus -wal) and
+	// MetricOCOpencodeRSSBytes (opencode's RSS), set at each sim-day advance
+	// and at run end; MetricOCTurnsPerSec (turns over the turn loop's wall
+	// seconds).
+	MetricOCStepOverheadMs   = "oc_step_overhead_ms"
+	MetricOCDBBytes          = "oc_db_bytes"
+	MetricOCOpencodeRSSBytes = "oc_opencode_rss_bytes"
+	MetricOCTurnsPerSec      = "oc_turns_per_sec"
 )

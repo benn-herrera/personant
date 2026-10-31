@@ -503,6 +503,28 @@ sim-fidelity: build recall-madlibs
 probe-smoke: build
     PERSONANT_OPENCODE_PROBE=1 go test ./internal/scenarios/opencode -run TestProbeSmoke -count=1 -v -probe.drop-source={{ DROP_SOURCE }}
 
+# The mock sim with every turn driven through the installed opencode (v2.2.x,
+# matching the ../opencode clone's tag) via the probe plugin and in-process
+# memory service. CADENCE checkpoints every N turns; TRACE_CHECK compares the
+# run's oc_trace.jsonl against an earlier run's. Not part of `just test`:
+#   just DURATION=1d CADENCE=8 TRACE_CHECK=<path>/oc_trace.jsonl sim-opencode
+sim-opencode: build recall-madlibs
+    #!/usr/bin/env bash
+    set -euo pipefail
+    v="$(opencode --version)"
+    case "$v" in *v2.2.*) ;; *) echo "sim-opencode: opencode --version is '$v', not v2.2.x" >&2; exit 1 ;; esac
+    tag="$(git -C ../opencode describe --tags --exact-match)" || { echo "sim-opencode: ../opencode HEAD is not at a tag" >&2; exit 1; }
+    rel="${v##* }"
+    if [ "$tag" != "$rel" ]; then
+      echo "sim-opencode: ../opencode is at $tag but the installed opencode is $rel" >&2
+      exit 1
+    fi
+    tc="{{ TRACE_CHECK }}"  # go test runs in the package directory
+    if [ -n "$tc" ]; then tc="$(cd "$(dirname "$tc")" && pwd)/$(basename "$tc")"; fi
+    {{ SIM_WRAP }} go test ./internal/scenarios/sim/ -run '^TestSim$' -count=1 -v -timeout 0 \
+      -sim.duration={{ DURATION }} -sim.live-embedding=false -sim.live-inference=false \
+      -sim.turn-executor=opencode -sim.checkpoint-cadence={{ CADENCE }} -sim.trace-check="$tc"
+
 B1X4_COMPLETENESS_DURATION := env_var_or_default("B1X4_COMPLETENESS_DURATION", "4d")
 
 # B1 rung: the §3.4 completeness FLOOR. Live embedder + MOCK inference over

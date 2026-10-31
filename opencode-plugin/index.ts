@@ -72,6 +72,7 @@ export default {
       const out = await rpc("/context", "hook.session.context", s, {
         messages: e.messages.length,
         turnMessages: start < 0 ? 0 : e.messages.length - start,
+        bytes: Buffer.byteLength(JSON.stringify(e.messages)),
         ...(sampled ? {} : { sample: e }),
       })
       sampled = true
@@ -127,12 +128,14 @@ export default {
       })
     })
 
-    // Serial: each event is forwarded before the next is read, so the
-    // service sees text and step events before the execution event.
+    // The sequence number is taken as each event is delivered; forwarding is
+    // chained, so the service still sees text and step events before the
+    // execution event. rpc never rejects.
+    let forwarding: Promise<unknown> = Promise.resolve()
     ;(async () => {
       for await (const ev of ctx.event.subscribe({ types: EVENTS })) {
         const s = seq++
-        await rpc("/event", ev.type, s, { data: ev.data })
+        forwarding = forwarding.then(() => rpc("/event", ev.type, s, { data: ev.data }))
       }
     })().catch((err) => {
       fallbacks++
