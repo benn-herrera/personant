@@ -122,6 +122,12 @@ Whole sessions the memory system has finished with (merged sub-mind children) ar
 opencode's own server runs, so its JavaScript plugins and Code Mode work unchanged.
 [ROADMAP_PLANS/code-mode-support.md](ROADMAP_PLANS/code-mode-support.md) applies only to the fallback route.
 
+### 9. Sessions and TUI commands
+- opencode projects map to Personant projects through the existing bootstrap waterfall (ARCHITECTURE.md
+  "Project identity"). An opencode session is a window into the one continuous memory: turns route to threads
+  by the topic mechanism, never by session. Session deletion does not touch memory.
+- `/compact` and `/clear` are no-ops until their mapping is decided.
+
 ---
 
 ## Open decision: the in-band topic tag (R7)
