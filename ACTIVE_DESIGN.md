@@ -2,7 +2,7 @@
 
 ## BLUF
 Personant solves one problem: context management and long-lived agent memory ([THESIS.md](THESIS.md)). It runs
-under **unmodified opencode** (release v2.2.2) as two pieces:
+under **unmodified opencode** (the installed release, currently v2.2.3) as two pieces:
 
 - **A thin opencode server plugin** (TypeScript, no memory logic) that forwards opencode's hook events to the
   memory service and applies its answers.
@@ -77,7 +77,7 @@ reaches `onContextDelta` (`internal/turn/chain.go:70`) through one of:
 | `tool.result`, `fs.read`, `fs.write` | `tool.execute.after` (`packages/core/src/tool.ts:115-157`) |
 | `user.shell-capture` | `session.shell.ended` event (IO §2.3 event table) |
 | `model.response` | `session.step.ended` / `session.text.ended` events |
-| turn close | `experimental.idle` hook (`packages/core/src/session/runner/llm.ts:172-182`), plus `session.execution.succeeded` |
+| turn close | `session.execution.succeeded`; `experimental.idle` fires before the turn's final step event and again after a checkpoint, so it only decides checkpoints (OPENCODE_PROBE_RESULTS.md §6, lessons 1–2) |
 | fork, revert, delete | `session.forked`, `session.revert.committed`, `session.deleted` events (IO §2.7) |
 
 The memory service records which deltas it has applied per turn, so a missing one is detectable (the probe's
@@ -186,7 +186,7 @@ The inversion splits `RunWithInfo` into phase entry points the memory service ca
 | `ComposeRequest` | `session.context` | working-set composition and request assembly, given this turn's messages from the hook input |
 | `IngestToolResult` | `tool.execute.after` | tool-result deltas |
 | `IngestModelResponse` | step/text ended events | `model.response` delta, tag parse |
-| `CloseTurn` | `experimental.idle` | closure, commit, LRU/dormancy, working-set persist |
+| `CloseTurn` | `session.execution.succeeded` | closure, commit, LRU/dormancy, working-set persist |
 
 `RunWithInfo` is re-expressed on top of these phases so the in-process simulation keeps running unchanged. Done-line:
 `just test` passes and `just sim` reproduces its committed baselines (`internal/scenarios/testdata/baselines/`)
@@ -283,7 +283,7 @@ Every new cross-seam key goes in `internal/scenarios/metric_keys.go`.
 | `oc_db_bytes` (gauge, per sim-day) | size of the isolated `opencode.db` plus `-wal` |
 | `oc_missed_deltas` (counter) | deltas the driver/mock produced that the memory service never applied |
 | `oc_hook_fallbacks` (counter) | plugin RPCs that timed out or failed |
-| `oc_unexpected_model_kinds` (counter) | `session.model.request` calls whose `kind` is not `primary` |
+| `oc_uncomposed_requests` (counter) | model requests reaching the mock that the service did not compose — counted at the mock, because `session.model.request` reports title and compaction kinds even when hooks answered them |
 | `oc_turns_per_sec` (gauge) | throughput, to size longer rungs |
 
 Existing harness metrics (recall fidelity, budget, substrate growth) are emitted as in `just sim` and reported, not
@@ -293,14 +293,7 @@ gated, while the topic-tag decision is open.
 It checks `opencode --version` is 2.2.x and fails with that message otherwise. Not part of `just test`.
 
 ### Pass criteria
-- `oc_missed_deltas == 0`, `oc_hook_fallbacks == 0`, `oc_unexpected_model_kinds == 0`.
-- No growth trend in per-turn cost: the median of `oc_step_overhead_ms` and of `oc_hook_rtt_ms` over the last 10% of
-  turns is at most 1.25× the median over the first 10% after warm-up.
-- `oc_history_messages` never exceeds the checkpoint cadence × the workload's maximum messages per turn, plus the
-  checkpoint message.
-- The run's existing invariants pass as in `just sim`.
-- Reported, not gated: `oc_db_bytes` growth (GC is out of scope for the probe), recall-fidelity deltas against the
-  in-process baseline, checkpoint cadence sweep (N = 1 and N = 8).
+As executed: ACTIVE_PLAN.md "Pass criteria for opencode-in-loop runs"; results in OPENCODE_PROBE_RESULTS.md §2.
 
 ### Sequence
 1. Runtime inversion; `just sim` baselines unchanged.
