@@ -430,9 +430,9 @@ Overrides go before the recipe name (`just VAR=value recipe`).
 3. `just DURATION=1d CADENCE=8 TRACE_CHECK=<run 2's oc_trace.jsonl> sim-opencode`. This is the
    exact-repeat gate. Its logged spread and CV replace the PP references in the growth
    criterion.
-4. From run 2's `oc_turns_per_sec` and `turns`, pick the longest of `7d`, `15d` and `30d` with
-   days × turns ÷ `oc_turns_per_sec` ≤ 14,400 s. Run it at `CADENCE=8` (open item 6). If none
-   fits, run `7d` and record its projected time beside the result.
+4. Not run. Long-session opencode cost, payload bound and storage growth are measured in
+   OPENCODE_PREPROBE_RESULTS.md §4 (40,000 turns at cadence 8); the memory system's own growth
+   is the in-process sim's question. P7 records open item 6 against those.
 
 **On failure:** if a run fails or a gate fails, stop and report the log tail. Do not diagnose.
 
