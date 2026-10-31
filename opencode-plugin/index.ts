@@ -122,6 +122,7 @@ export default {
       const s = seq++
       await rpc("/tool", "hook.tool.execute.after", s, {
         tool: e.tool,
+        id: e.id,
         status: e.status,
         input: e.input,
         content: e.status === "completed" ? e.result?.content : undefined,

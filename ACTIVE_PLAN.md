@@ -349,7 +349,7 @@ Depends on P1 and P3.
   `checkpoints_performed >= 1`.
 - `just DROP_SOURCE=fs.write probe-smoke` writes `oc_missed_deltas >= 1`.
 
-### P5 — Workload wiring, run metrics, trace, `sim-opencode` · expert · Status: not started
+### P5 — Workload wiring, run metrics, trace, `sim-opencode` · expert · Status: done
 
 Depends on P4.
 
@@ -406,6 +406,11 @@ values in `oc_trace.jsonl`, not from the histograms.
     `fs.read` content stays the tool output as returned (open item 3).
   - `fs.commit`: the shell command becomes `git add <path> && git commit -q -m probe && git
     rev-parse HEAD`; the hash parsed from its output goes into `Meta["hash"]`.
+- **Tool-result application order:** opencode runs one response's tool calls concurrently, so
+  `tool.execute.after` arrives in no fixed order. The service holds a step's tool results and
+  applies them in tool-call order (the order of the calls in the served response, recoverable
+  from the call `id`), reproducing the in-process PreEvent order; arrival order never reaches
+  memory state.
 - **Ordering in the trace:** RPCs can reach the service out of order, so every ordered field is
   ordered by the plugin's sequence number. opencode runs one response's tool calls concurrently
   (`runner/step.ts:123-133`), so within a turn the `tool.execute.after` entries and the

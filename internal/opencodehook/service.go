@@ -4,12 +4,15 @@
 package opencodehook
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -107,6 +110,7 @@ type Service struct {
 	cur     *turn.Turn
 	rep     TurnReport
 	texts   []string
+	pending []pendingTool
 	dropped bool
 	turnNum int
 	ord     int
@@ -164,6 +168,7 @@ type rpc struct {
 	Sample       json.RawMessage `json:"sample"`
 
 	Tool    string          `json:"tool"` // tool
+	ID      string          `json:"id"`
 	Status  string          `json:"status"`
 	Input   json.RawMessage `json:"input"`
 	Content json.RawMessage `json:"content"`
@@ -239,7 +244,7 @@ func (s *Service) prompt(ctx context.Context, req rpc) error {
 	}
 	s.cur, s.turnNum = t, state.TurnNumber
 	s.rep = TurnReport{Ord: s.ord, Turn: s.turnNum, Applied: []AppliedDelta{{Source: memops.SourceUserPrompt, SHA: model.SystemPromptHash(req.Text)}}}
-	s.texts = nil
+	s.texts, s.pending = nil, nil
 	return nil
 }
 
@@ -249,6 +254,9 @@ func (s *Service) compose(ctx context.Context, req rpc) (reply, error) {
 	}
 	if s.cur == nil {
 		return reply{}, errors.New("context with no open turn")
+	}
+	if err := s.applyPending(ctx); err != nil {
+		return reply{}, err
 	}
 	sp, tail, err := turn.ComposeRequest(ctx, s.cur)
 	if err != nil {
@@ -310,14 +318,43 @@ func (s *Service) tool(ctx context.Context, req rpc) error {
 	default:
 		return nil
 	}
+	m := callIndexRE.FindStringSubmatch(req.ID)
+	if m == nil {
+		return fmt.Errorf("tool %s call id %q has no call index", req.Tool, req.ID)
+	}
+	idx, _ := strconv.Atoi(m[1]) // the pattern admits only digits
 	if s.drop(d.Source) {
 		return nil
 	}
-	if err := turn.IngestToolResult(ctx, s.cur, []turn.Delta{d}); err != nil {
-		s.abort(ctx, err)
-		return err
+	s.pending = append(s.pending, pendingTool{idx: idx, d: d})
+	return nil
+}
+
+// callIndexRE takes a call's position in its served response from the id
+// the executor gives it (call_<step>_<index>).
+var callIndexRE = regexp.MustCompile(`_(\d+)$`)
+
+// pendingTool is a tool result held until its step's results are applied.
+type pendingTool struct {
+	idx int
+	d   turn.Delta
+}
+
+// applyPending applies the held tool results in tool-call order. opencode
+// runs one response's calls concurrently and fires the next session.context
+// (or closes the turn) only after all of them, so applying there keeps
+// arrival order out of memory state.
+func (s *Service) applyPending(ctx context.Context) error {
+	slices.SortStableFunc(s.pending, func(a, b pendingTool) int { return cmp.Compare(a.idx, b.idx) })
+	for _, p := range s.pending {
+		if err := turn.IngestToolResult(ctx, s.cur, []turn.Delta{p.d}); err != nil {
+			s.pending = nil
+			s.abort(ctx, err)
+			return err
+		}
+		s.rep.Applied = append(s.rep.Applied, AppliedDelta{Source: p.d.Source, Path: p.d.Meta["path"], SHA: model.SystemPromptHash(p.d.Content)})
 	}
-	s.rep.Applied = append(s.rep.Applied, AppliedDelta{Source: d.Source, Path: d.Meta["path"], SHA: model.SystemPromptHash(d.Content)})
+	s.pending = nil
 	return nil
 }
 
@@ -380,6 +417,9 @@ func (s *Service) event(ctx context.Context, req rpc) error {
 }
 
 func (s *Service) close(ctx context.Context) error {
+	if err := s.applyPending(ctx); err != nil {
+		return err
+	}
 	content := strings.Join(s.texts, "")
 	s.rep.Response = content
 	if !s.drop(memops.SourceModelResponse) {
