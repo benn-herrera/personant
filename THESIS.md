@@ -27,9 +27,9 @@ precious memory space is not for filling with every revision of every repo ever 
 every document ever edited. Just as with a human, useful patterns may be extracted, but the
 details are retrievable from version control. That is what it is for.
 
-### Behavior is deliberately sculpted interactively with the user
+### Behavior changes only deliberately
 Behavior changes are not automatic. They are chosen deliberately, applied deliberately,
 reviewed over time, and modified as needs dictate and as the inhabiting models evolve.
 
-Nothing learned in a project changes behavior without the human's
-involvement — projects differ in how the work is done, never in who does it.
+Project work never writes behavior memory: what is learned in a project stays career memory.
+Projects differ in how the work is done, never in who does it.
