@@ -128,6 +128,22 @@ opencode's own server runs, so its JavaScript plugins and Code Mode work unchang
   by the topic mechanism, never by session. Session deletion does not touch memory.
 - `/compact` and `/clear` are no-ops until their mapping is decided.
 
+### 10. Slot budgets
+Every slot in the composed request — the ARCHITECTURE.md layers and any slot added for this route (instructions,
+opencode expectations) — defines four things before it ships:
+1. **Budget:** its share.
+2. **Internal priority:** what is dropped first when its own content exceeds its share.
+3. **Overflow form:** what stands in for dropped content — the honest overflow marker, or a thunk per source that
+   names it and can reproduce it on demand.
+4. **Underusage:** whether it lends or borrows unused share.
+
+**Underusage flows from fixed slots to dynamic ones; a lender reclaims first.** A fixed slot (directives, project
+conventions and instructions, the A1 spine, the opencode-expectations slot) changes only on a visible event at a
+turn boundary, so its unused share is reliably idle and is lent. A dynamic slot (live_turn, B, C) varies turn to
+turn and does not lend. When a lender grows, it takes its share back at the next composition and the borrower
+gives way through the existing eviction order (C-oldest, then B-oldest). Fixed slots are composed first, so the
+request keeps a stable prefix across turns.
+
 ---
 
 ## Open decision: the in-band topic tag (R7)
