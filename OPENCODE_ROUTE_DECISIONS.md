@@ -34,6 +34,8 @@ DEFECTS.md.
   even when hooks answered them.
 - The memory service starts and is listening before opencode starts.
 - A crash of the plugin or memory service is a crash hazard to prevent, not a mode the design works around.
+- MCP is supported in full: server instructions, tool definitions, tool and resource results, and prompts
+  (OPENCODE_CONTEXT_INJECTIONS.md I2, M1, M6, R9, T1, T4).
 - Code Mode and opencode's JavaScript plugins run unchanged under this route; ROADMAP_PLANS/code-mode-support.md
   applies only to the fallback.
 - opencode config is read as opencode reads it; Personant-only settings live under `~/.config/personant/` with no
@@ -111,6 +113,12 @@ DEFECTS.md.
   plugin route makes it reachable).
 - **Per-slot answers:** the budget, priority, overflow form and underusage of each slot, including the new
   instructions and opencode-expectations slots.
+- **Tool-definition slot:** built-in and MCP tool definitions are sent with every request and count against the
+  token ceiling, but no layer holds them and OPENCODE_CONTEXT_INJECTIONS.md §5 classifies none of them. They need
+  a slot with the four answers; candidate overflow forms are omitting rarely used tools from a request or listing
+  them by name with definitions on demand. MCP tools are recognisable by the `<server>_` name prefix.
+- **MCP prompt expansions** cannot be told apart from typed prompts in the hook input (OPENCODE_CONTEXT_INJECTIONS.md
+  §2); they are handled as user input unless a detection route is found.
 - **Probe code worth keeping on the main line:** the sim baseline comparator (`sim-baseline`, `sim-fidelity`,
   committed baselines) and `model.MockServer`.
 - **SPEC outcome to state:** a session never requires `/clear` or `/compact`; neither command discards memory.
