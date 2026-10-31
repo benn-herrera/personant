@@ -454,6 +454,7 @@ EXECUTOR := env_var_or_default("EXECUTOR", "phases")
 CADENCE := env_var_or_default("CADENCE", "8")
 DROP_SOURCE := env_var_or_default("DROP_SOURCE", "")
 TRACE_CHECK := env_var_or_default("TRACE_CHECK", "")
+RESUME_CASE := env_var_or_default("RESUME_CASE", "")
 SIM_BASELINE := justfile_directory() + "/internal/scenarios/testdata/baselines/sim-" + DURATION + ".json"
 
 # The simulation rung walk — TestSim at -sim.duration. By DEFAULT (both live
@@ -502,6 +503,14 @@ sim-fidelity: build recall-madlibs
 #   just DROP_SOURCE=fs.write probe-smoke
 probe-smoke: build
     PERSONANT_OPENCODE_PROBE=1 go test ./internal/scenarios/opencode -run TestProbeSmoke -count=1 -v -probe.drop-source={{ DROP_SOURCE }}
+
+# Stop or kill opencode and the memory service mid-session, restart both on
+# the same data, and continue the session; one subtest per opencode mode
+# (stdio|service) and break point (stop|idle|succeeded|tool). RESUME_CASE
+# selects subtests by regexp:
+#   just RESUME_CASE=service-idle probe-resume
+probe-resume: build
+    PERSONANT_OPENCODE_PROBE=1 go test ./internal/scenarios/opencode -run 'TestProbeResume/{{ RESUME_CASE }}' -count=1 -v -timeout 20m
 
 # The mock sim with every turn driven through the installed opencode (v2.2.x,
 # matching the ../opencode clone's tag) via the probe plugin and in-process

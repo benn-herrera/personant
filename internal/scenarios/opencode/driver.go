@@ -36,6 +36,9 @@ type Config struct {
 	MockURL    string // OpenAI-compatible base URL, e.g. http://127.0.0.1:N/v1
 	PluginDir  string // directory holding the plugin's index.ts
 	ServiceURL string // memory service URL, passed as the plugin's only option
+	// Service runs `serve --service` (the managed server the default TUI uses,
+	// which resumes in-flight executions at boot) instead of `serve --stdio`.
+	Service bool
 }
 
 // Driver is one running opencode server.
@@ -45,15 +48,18 @@ type Driver struct {
 	RunHome   string
 	Workspace string
 
-	auth  string
-	stdin io.WriteCloser
-	done  chan struct{} // closed once the process is reaped
+	auth    string
+	service bool
+	stdin   io.WriteCloser
+	done    chan struct{} // closed once the process is reaped
 }
 
-// Start spawns `opencode serve --stdio --port 0` with HOME, TMPDIR, XDG roots
-// and config under cfg.RunHome and its cwd in a fresh git workspace, and
-// returns once /api/info answers. A t.Cleanup kills the process group if it is
-// still running and fails t if anything in it survives.
+// Start spawns `opencode serve --stdio --port 0` (or `--service`) with HOME,
+// TMPDIR, XDG roots and config under cfg.RunHome and its cwd in a git
+// workspace, and returns once /api/info answers. A second Start on the same
+// RunHome reuses its data, so sessions persist across restarts; logs are
+// appended. A t.Cleanup kills the process group if it is still running and
+// fails t if anything in it survives.
 func Start(t testing.TB, cfg Config) (*Driver, error) {
 	home := filepath.Join(cfg.RunHome, "home")
 	ws := filepath.Join(cfg.RunHome, "workspace")
@@ -97,16 +103,21 @@ func Start(t testing.TB, cfg Config) (*Driver, error) {
 		return nil, err
 	}
 
-	stderr, err := os.Create(filepath.Join(cfg.RunHome, "opencode.stderr"))
+	const logFlags = os.O_CREATE | os.O_WRONLY | os.O_APPEND
+	stderr, err := os.OpenFile(filepath.Join(cfg.RunHome, "opencode.stderr"), logFlags, 0o644)
 	if err != nil {
 		return nil, err
 	}
 	defer stderr.Close() // the child holds its own copy
-	stdoutLog, err := os.Create(filepath.Join(cfg.RunHome, "opencode.stdout"))
+	stdoutLog, err := os.OpenFile(filepath.Join(cfg.RunHome, "opencode.stdout"), logFlags, 0o644)
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.Command("opencode", "serve", "--stdio", "--port", "0")
+	mode := "--stdio"
+	if cfg.Service {
+		mode = "--service"
+	}
+	cmd := exec.Command("opencode", "serve", mode, "--port", "0")
 	cmd.Dir, cmd.Env, cmd.Stderr = ws, env, stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdin, err := cmd.StdinPipe()
@@ -125,8 +136,8 @@ func Start(t testing.TB, cfg Config) (*Driver, error) {
 	}
 	d := &Driver{
 		PID: cmd.Process.Pid, RunHome: cfg.RunHome, Workspace: ws,
-		auth:  "Basic " + base64.StdEncoding.EncodeToString([]byte("opencode:"+password)),
-		stdin: stdin, done: make(chan struct{}),
+		auth:    "Basic " + base64.StdEncoding.EncodeToString([]byte("opencode:"+password)),
+		service: cfg.Service, stdin: stdin, done: make(chan struct{}),
 	}
 	t.Cleanup(func() {
 		if err := d.kill(); err != nil {
@@ -151,6 +162,12 @@ func Start(t testing.TB, cfg Config) (*Driver, error) {
 
 	select {
 	case line := <-firstLine:
+		if cfg.Service {
+			if err := d.adoptRegistration(home); err != nil {
+				return nil, fmt.Errorf("opencode --service (stdout %q): %w", line, err)
+			}
+			break
+		}
 		var hello struct{ URL string }
 		if err := json.Unmarshal([]byte(line), &hello); err != nil || hello.URL == "" {
 			return nil, fmt.Errorf("opencode stdout line 1 %q: not {url}", line)
@@ -239,11 +256,37 @@ func (d *Driver) Do(ctx context.Context, method, path string, body, out any) err
 	return json.Unmarshal(raw, out)
 }
 
-// Stop closes opencode's stdin, which ends the server, and waits for it to be
-// reaped; past the deadline it kills the process group. Either way it fails
-// if any process of the group is left.
+// adoptRegistration takes URL and password from the registration a managed
+// server writes under its XDG_STATE_HOME; it ignores OPENCODE_PASSWORD.
+func (d *Driver) adoptRegistration(home string) error {
+	files, err := filepath.Glob(filepath.Join(home, "state", "opencode", "service*.json"))
+	if err != nil || len(files) != 1 {
+		return fmt.Errorf("want one service registration, found %v (%v)", files, err)
+	}
+	raw, err := os.ReadFile(files[0])
+	if err != nil {
+		return err
+	}
+	var reg struct{ URL, Password string }
+	if err := json.Unmarshal(raw, &reg); err != nil || reg.URL == "" {
+		return fmt.Errorf("registration %s: %q (%v)", files[0], raw, err)
+	}
+	d.URL = strings.TrimSuffix(reg.URL, "/")
+	d.auth = "Basic " + base64.StdEncoding.EncodeToString([]byte("opencode:"+reg.Password))
+	return nil
+}
+
+// Stop ends the server — stdin close for --stdio, SIGTERM for --service — and
+// waits for it to be reaped; past the deadline it kills the process group.
+// Either way it fails if any process of the group is left.
 func (d *Driver) Stop() error {
-	if err := d.stdin.Close(); err != nil {
+	var err error
+	if d.service {
+		err = syscall.Kill(d.PID, syscall.SIGTERM)
+	} else {
+		err = d.stdin.Close()
+	}
+	if err != nil {
 		return err
 	}
 	select {

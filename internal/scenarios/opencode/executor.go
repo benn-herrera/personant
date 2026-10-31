@@ -80,8 +80,15 @@ type Executor struct {
 	cadence    int
 	dropSource string
 
+	// service and wrap are set only by the resume probe: run opencode as a
+	// managed server, and wrap the memory service's handler (nil: as is).
+	service bool
+	wrap    func(http.Handler) http.Handler
+
 	svc       *opencodehook.Service
 	mock      *model.MockServer
+	mockURL   string
+	svcURL    string
 	drv       *Driver
 	sessionID string
 	runHome   string
@@ -104,21 +111,19 @@ func NewExecutor(cadence int, dropSource string) *Executor {
 // Setup starts the mock model endpoint, the memory service and opencode,
 // and opens the session every step prompts.
 func (e *Executor) Setup(h *scenarios.Harness) error {
-	e.runHome = filepath.Join(h.RunHome, "opencode")
+	if e.runHome == "" {
+		e.runHome = filepath.Join(h.RunHome, "opencode")
+	}
 	e.mock = model.NewMockServer(h.Mock)
-	e.svc = opencodehook.NewService(func() *turn.State { return h.State }, e.cadence, e.dropSource)
 	mockURL, err := serveLoopback(h, e.mock)
 	if err != nil {
 		return err
 	}
-	svcURL, err := serveLoopback(h, e.svc)
-	if err != nil {
+	e.mockURL = mockURL + "/v1"
+	if err := e.startService(h); err != nil {
 		return err
 	}
-	_, here, _, _ := runtime.Caller(0)
-	plugin := filepath.Join(filepath.Dir(here), "..", "..", "..", "opencode-plugin")
-	e.drv, err = Start(h.T, Config{RunHome: e.runHome, MockURL: mockURL + "/v1", PluginDir: plugin, ServiceURL: svcURL})
-	if err != nil {
+	if err := e.startOpencode(h); err != nil {
 		return err
 	}
 	var created struct {
@@ -126,7 +131,11 @@ func (e *Executor) Setup(h *scenarios.Harness) error {
 			ID string `json:"id"`
 		} `json:"data"`
 	}
-	if err := e.drv.Do(context.Background(), http.MethodPost, "/api/session", map[string]any{}, &created); err != nil {
+	body := map[string]any{}
+	if e.service { // a managed server's cwd is its home, not the workspace
+		body["location"] = map[string]string{"directory": e.drv.Workspace}
+	}
+	if err := e.drv.Do(context.Background(), http.MethodPost, "/api/session", body, &created); err != nil {
 		return err
 	}
 	if created.Data.ID == "" {
@@ -134,6 +143,29 @@ func (e *Executor) Setup(h *scenarios.Harness) error {
 	}
 	e.sessionID = created.Data.ID
 	return nil
+}
+
+// startService serves a fresh memory service over h.State on a new port.
+func (e *Executor) startService(h *scenarios.Harness) error {
+	e.svc = opencodehook.NewService(func() *turn.State { return h.State }, e.cadence, e.dropSource)
+	var handler http.Handler = e.svc
+	if e.wrap != nil {
+		handler = e.wrap(handler)
+	}
+	var err error
+	e.svcURL, err = serveLoopback(h, handler)
+	return err
+}
+
+// startOpencode starts opencode on the run home, its plugin pointed at the
+// current memory service.
+func (e *Executor) startOpencode(h *scenarios.Harness) error {
+	_, here, _, _ := runtime.Caller(0)
+	plugin := filepath.Join(filepath.Dir(here), "..", "..", "..", "opencode-plugin")
+	var err error
+	e.drv, err = Start(h.T, Config{RunHome: e.runHome, MockURL: e.mockURL, PluginDir: plugin,
+		ServiceURL: e.svcURL, Service: e.service})
+	return err
 }
 
 // serveLoopback serves handler on an ephemeral 127.0.0.1 port until the
