@@ -525,6 +525,11 @@ sim-opencode: build recall-madlibs
       -sim.duration={{ DURATION }} -sim.live-embedding=false -sim.live-inference=false \
       -sim.turn-executor=opencode -sim.checkpoint-cadence={{ CADENCE }} -sim.trace-check="$tc"
 
+# List every internal/turn identifier probe_phases.go uses from the rest of the
+# package, exported or not, with its definition site (throwaway probe tooling).
+probe-deps:
+    go run ./internal/turn/probedeps
+
 B1X4_COMPLETENESS_DURATION := env_var_or_default("B1X4_COMPLETENESS_DURATION", "4d")
 
 # B1 rung: the §3.4 completeness FLOOR. Live embedder + MOCK inference over

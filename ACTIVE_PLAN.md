@@ -438,7 +438,7 @@ Overrides go before the recipe name (`just VAR=value recipe`).
 
 **Done-line:** four rundata directories, each with a metrics blob and `oc_trace.jsonl`.
 
-### P7 — Results document · expert · Status: not started
+### P7 — Results document · expert · Status: done
 
 Depends on P6.
 

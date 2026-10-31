@@ -285,7 +285,7 @@ It checks `opencode --version` is 2.2.x and fails with that message otherwise. N
 2. Mock model endpoint, with a unit test decoding its output through `HTTPClient`.
 3. Memory service handlers and plugin; a one-turn smoke test through real opencode.
 4. Driver and workload split; `just sim-opencode DURATION=1d`.
-5. Longer rungs as throughput allows; results recorded in this document.
+5. Longer rungs as throughput allows; results in [OPENCODE_PROBE_RESULTS.md](OPENCODE_PROBE_RESULTS.md).
 
 Work packages for these steps go into `ACTIVE_PLAN.md` under the dispatchability rules in CONVENTIONS.md
 ("Plan dispatchability").
