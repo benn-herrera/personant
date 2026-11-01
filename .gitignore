@@ -42,11 +42,6 @@ internal/scenarios/testdata/recall_madlibs/corpus_queries.json
 internal/scenarios/testdata/recall_madlibs/corpus_queries_m*.json
 internal/scenarios/testdata/recall_madlibs/embeddings.json
 
-# Mad-libs template authoring staging area — scratch. Approved
-# candidates are promoted into the testdata templates tree, which is
-# the canonical home.
-tools/test/madlibs_candidates/
-
 # Scenario-harness run data: each scenario's $PERSONANT_HOME substrate
 # (spine, threads, projects, logs, .git, metrics blob) under one
 # subdirectory per scenario. Forensic data — persists after the test
