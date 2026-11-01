@@ -21,10 +21,20 @@ One CLI, `python3 dicer.py <command> ...`:
   link points into exists. Exit 1 if any check fails.
 - `list <doc.md>` classifies every bold-led line of a document, one TSV row each: `doc:line`,
   class, new heading level, title, enclosing heading.
+- `check-links <root>...` checks markdown files that need not come from a dicing: a directory
+  root is walked for every `.md`, a file root is checked alone. Each relative link or image
+  outside fenced code and code spans must name an existing path, resolved from the linking file's
+  directory; one with a `#fragment` must name a markdown file (the linking file itself, for a bare
+  `#fragment`) with a heading whose GitHub anchor equals it. The anchor is the heading text
+  lowercased, with every character but letters, digits, spaces, `-` and `_` dropped and spaces
+  made `-`; a repeat in one file takes `-1`, `-2`, … in order. It is not a leaf's file-name slug.
+  Headings inside fenced code have none. Links with a URL scheme and root-absolute `/` links are
+  skipped. Prints `file:line: target: missing file` or `missing anchor` to stderr per broken link,
+  then the count; exit 1 if any is broken, 2 on bad arguments or a missing root.
 
 The passes behind them live in `dicerlib/`, one module each: `outline` (headings to files),
 `split` (writing the tree), `linkrewrite` (section links, rebasing, the map), `reassemble` and
-`linkcheck` (the checks), `refactor` (run-ins and the hunk check), `dicedoc` and `manifest` (the
+`linkcheck` (the checks, `check-links` included), `refactor` (run-ins and the hunk check), `dicedoc` and `manifest` (the
 drivers). `just test-dicer` runs the golden cases under `testdata/`.
 
 ## Heading convention

@@ -7,6 +7,7 @@ import sys
 from typing import Optional
 
 from dicerlib.dicedoc import dice_doc, verify
+from dicerlib.linkcheck import check_markdown_links
 from dicerlib.manifest import dice_docs
 from dicerlib.refactor import list_runins, refactor
 from dicerlib.textfile import read_lines
@@ -43,6 +44,9 @@ def _parser() -> argparse.ArgumentParser:
 
     p = commands.add_parser("list", help="classify every bold-led line of a document")
     p.add_argument("doc")
+
+    p = commands.add_parser("check-links", help="check the relative links and anchors of markdown files")
+    p.add_argument("roots", nargs="+", metavar="root", help="a directory, walked for every .md, or one file")
     return parser
 
 
@@ -64,6 +68,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.command == "refactor":
         items = args.items not in ("", "0")
         return refactor(args.input, args.output, items=items, keep=_keep_list(), out=out, err=err)
+    if args.command == "check-links":
+        missing = [root for root in args.roots if not os.path.exists(root)]
+        if missing:
+            parser.error(f"no such root: {', '.join(missing)}")
+        return 0 if check_markdown_links(args.roots, out=out, err=err) else 1
     for row in list_runins(read_lines(args.doc), name=args.doc, keep=_keep_list()):
         print(row, file=out)
     return 0

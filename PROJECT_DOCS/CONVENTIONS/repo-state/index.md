@@ -4,4 +4,5 @@ Contents:
 
 - [Anti-reaccretion doctrine](anti-reaccretion-doctrine.md)
 - [Project documents live in `PROJECT_DOCS/`](project-documents.md)
-- [Versioning & acceptance (read before judging "done")](versioning-acceptance-read-before-judging-done.md)
+- [Section and rule heading brevity](section-and-rule-heading-brevity.md)
+- [Versioning & acceptance (read before judging "done")](versioning-and-acceptance.md)

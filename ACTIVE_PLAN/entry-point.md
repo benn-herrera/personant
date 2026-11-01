@@ -11,7 +11,7 @@ Pre-task reading for every package (the contract documents live under `PROJECT_D
 - CONVENTIONS: `PROJECT_DOCS/CONVENTIONS/repo-state/project-documents.md`,
   `PROJECT_DOCS/CONVENTIONS/build-test/two-gates-do-not-conflate-them.md`,
   `PROJECT_DOCS/CONVENTIONS/build-test/docs-stay-current.md`,
-  `PROJECT_DOCS/CONVENTIONS/house-rules-for-agents/serialization-format-legible-to-whoever-is-debugging.md`.
+  `PROJECT_DOCS/CONVENTIONS/house-rules-for-agents/serialized-data-is-debuggable.md`.
 - ARCHITECTURE: `PROJECT_DOCS/ARCHITECTURE/module-map.md`,
   `PROJECT_DOCS/ARCHITECTURE/substrate-non-negotiables/port-abstraction-policy.md`,
   `PROJECT_DOCS/ARCHITECTURE/storage-and-record-formats/home-layout.md`,

@@ -1,7 +1,8 @@
 ## Before a change
 
 Read THESIS.md and ARCHITECTURE.md "Applying the thesis" before a non-trivial change to this
-repository. Do not write the following changes; report them to whoever assigned the work, with the
+repository, and ARCHITECTURE.md "Substrate non-negotiables" before touching storage, persistence or
+derived files. Do not write the following changes; report them to whoever assigned the work, with the
 row or clause they match, and continue only on that person's direction:
 
 - a change that matches a row of ARCHITECTURE.md "Anti-patterns to push back on";

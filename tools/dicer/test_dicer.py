@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from typing import Optional
 from pathlib import Path
 
 from dicerlib.refactor import check_hunks
@@ -36,12 +37,20 @@ def _case_env(case: Path) -> dict[str, str]:
     return env
 
 
+def _scratch_root() -> Optional[str]:
+    """Where case scratch directories go: $DICER_SCRATCH, created if absent, else the system temp."""
+    root = os.environ.get("DICER_SCRATCH")
+    if root:
+        os.makedirs(root, exist_ok=True)
+    return root or None
+
+
 class GoldenCases(unittest.TestCase):
     def test_cases(self) -> None:
         cases = sorted(p for p in TESTDATA.iterdir() if p.is_dir())
         self.assertTrue(cases, "no cases under testdata/")
         for case in cases:
-            with self.subTest(case=case.name), tempfile.TemporaryDirectory() as scratch:
+            with self.subTest(case=case.name), tempfile.TemporaryDirectory(dir=_scratch_root()) as scratch:
                 run = Path(scratch) / "run"
                 shutil.copytree(case / "input", run)
                 args = (case / "args").read_text(encoding="utf-8").splitlines()
