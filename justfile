@@ -113,6 +113,7 @@ dice-docs manifest src work:
 [doc("check every relative link and #anchor in markdown files: each root is a directory walked for .md files or one file; with no root, PROJECT_DOCS and every top-level *.md; exit 1 on a broken link (see devtools/dicer/README.md)")]
 check-links:
   @python3 tools/dicer/dicer.py check-links PROJECT_DOCS *.md
+  @python3 tools/dicer/dicer.py check-tree PROJECT_DOCS
 
 [doc("run the dicer test suite: every case under tools/dicer/testdata must reproduce its expected files and output")]
 test-dicer:

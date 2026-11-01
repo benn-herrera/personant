@@ -28,6 +28,12 @@ One CLI, `python3 dicer.py <command> ...`:
   `#fragment`) with a heading whose GitHub anchor equals it. The anchor is the heading text
   lowercased, with every character but letters, digits, spaces, `-` and `_` dropped and spaces
   made `-`; a repeat in one file takes `-1`, `-2`, … in order. It is not a leaf's file-name slug.
+- `check-tree <root>...` checks a diced tree's structure, which no link check sees: every
+  document is linked from its parent, and every document is reachable by links from the root's
+  `entry-point.md`. A directory's head is its `entry-point.md` where it has one (the root, a diced
+  volume), else its `index.md`; a document's parent is its directory's head, and a head's parent
+  is the head above it. A leaf that its index stopped listing fails even where another document,
+  such as the entry point's contents, still links it. Exit 1 on any problem.
   Headings inside fenced code have none. Links with a URL scheme and root-absolute `/` links are
   skipped. Prints `file:line: target: missing file` or `missing anchor` to stderr per broken link,
   then the count; exit 1 if any is broken, 2 on bad arguments or a missing root.
@@ -65,8 +71,11 @@ case-sensitive on the title without its trailing `.` or `:`. `list` shows kept l
 
 `§N` links to its file, and `§N.M` followed by a backticked name goes to the child whose heading
 holds that name. A `§N` right after `SPEC `, `ARCHITECTURE `, `THESIS ` or `CONVENTIONS ` is left as
-text (another document's section). Relative links to files outside the document are rewritten to
-resolve from each leaf. The map is TSV: `<target>\t<new path from the run directory>` points a link
+text (another document's section). A link to a heading of the document itself, `#anchor`, goes to
+the file now holding that heading: to the file alone where the heading opens it, else with the
+heading's anchor within that file. An anchor that names no heading is left as written, for
+`check-links` to report. Relative links to files outside the document are rewritten to resolve from
+each leaf. The map is TSV: `<target>\t<new path from the run directory>` points a link
 to a diced document at its entry point; `<target>\t<heading>\t<path>` points a link whose
 following text quotes that heading, as `, "The walk"`, at the heading's leaf.
 

@@ -9,7 +9,7 @@ from dicerlib.textfile import FenceTracker, fence_flags, read_lines
 
 
 def check_reassembly(sections: list[Section], lines: list[str], tree: Tree, *, out: TextIO, err: TextIO) -> bool:
-    linker = Linker(load_outline(sections, err=err), tree)
+    linker = Linker(load_outline(sections, err=err), tree, lines)
     fenced = fence_flags(lines)
     k = 0
     for s in sections:

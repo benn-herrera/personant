@@ -104,6 +104,31 @@ def _scan(s: str, on_link: OnLink, on_ref: Optional[OnRef] = None) -> str:
     return "".join(out)
 
 
+def _anchor_homes(outline: Outline, lines: list[str]) -> dict[str, tuple[str, str]]:
+    """For each heading anchor of the monolith, the file of the diced tree that holds the heading
+    and its anchor there: "" where the heading opens that file (a link to the file needs none),
+    else its anchor within the file, whose repeat suffixes count that file's headings alone."""
+    from dicerlib.linkcheck import heading_anchor_list  # linkcheck imports this module
+
+    owner = {}  # monolith line -> section holding it
+    for s in outline.sections:
+        for no in range(s.first, s.last + 1):
+            owner[no] = s
+    homes: dict[str, tuple[str, str]] = {}
+    per_file: dict[int, list[str]] = {}
+    for no, anchor in heading_anchor_list(lines):
+        s = owner.get(no)
+        if s is None:
+            continue
+        local = per_file.setdefault(s.id, [])
+        local.append(anchor.base)
+        n = local.count(anchor.base) - 1
+        within = f"{anchor.base}-{n}" if n else anchor.base
+        own = no == s.first and s.id > 0
+        homes.setdefault(anchor.name, (s.path, "" if own else within))
+    return homes
+
+
 def link_targets(line: str) -> list[str]:
     """The target of every link in the prose of a line, in order."""
     found = []
@@ -120,11 +145,12 @@ class Linker:
     """Rewrites lines of one diced document; counts the section references it resolved and the
     ones it could not."""
 
-    def __init__(self, outline: Outline, tree: Tree) -> None:
+    def __init__(self, outline: Outline, tree: Tree, lines: Optional[list[str]] = None) -> None:
         self.outline = outline
         self.tree = tree
         self.resolved = 0
         self.dangling: dict[str, int] = {}
+        self.anchors = _anchor_homes(outline, lines or [])
 
     def forward(self, line: str, leaf_dir: str, next_line: str) -> str:
         """Link section references and rebase outside links, for a line written under leaf_dir."""
@@ -185,6 +211,9 @@ class Linker:
         """An outside link target, relative to the run directory, made relative to leaf_dir; a
         target in the link map goes to its diced tree instead (the heading's leaf when the text
         after the link quotes a mapped heading, which may open the next line)."""
+        if target.startswith("#") and target[1:] in self.anchors:
+            path, anchor = self.anchors[target[1:]]
+            return rel(leaf_dir, path) + (f"#{anchor}" if anchor else "")
         if target == "" or URL_SCHEME.match(target) or target[0] in "#/":
             return target
         path, hash_, fragment = target.partition("#")

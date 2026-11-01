@@ -24,7 +24,7 @@ def contents_block(outline: Outline, section: Section) -> list[str]:
 
 def write_tree(sections: list[Section], lines: list[str], tree: Tree, *, err: TextIO) -> None:
     outline = load_outline(sections, err=err)
-    linker = Linker(outline, tree)
+    linker = Linker(outline, tree, lines)
     fenced = fence_flags(lines)
     for s in sections:
         leaf_dir = parent_dir(s.path)

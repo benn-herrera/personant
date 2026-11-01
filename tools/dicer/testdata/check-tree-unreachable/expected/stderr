@@ -1,0 +1,3 @@
+docs/section/index.md: not linked from its parent docs/entry-point.md
+docs/section/child.md: not reachable from docs/entry-point.md
+docs/section/index.md: not reachable from docs/entry-point.md
