@@ -4,6 +4,11 @@
 session; the evidence cited is from that session's fourteen dispatched rows and the
 duplication sweep built at the end of it.*
 
+## REFERENCE PROJECTS
+- ../../adjagent
+- ../../adjagent/kb_tools
+- ../../personant
+
 ## BLUF
 
 Most of what reads as "agentic coding chaff" is not a coding-ability problem. It is a
@@ -502,66 +507,3 @@ house rule to a newcomer in one sentence — why the contract moves with the wor
 briefs carry outcome and not history, why a returned report's judgments are weak — and
 it is the vision-problem diagnosis above in a form that a hardware team, which already
 onboards contractors this way, recognises on hearing.
-
-## Addendum 2026-10-04 — notes toward a comparative instrument for question one
-
-*From a kbase session. Design notes only; nothing built. Question one of the comparative
-sweep — what concept has two implementations — has no instrument yet; `dupe_sweep` answers
-question three over prose. These may help or be a dead end.*
-
-### The cost line first
-
-The LaTeX KB is expensive at build because its subject is fuzzy: a judgment call per claim
-and per edge, then deterministic refresh and verify that cost nothing. Code is not fuzzy
-— it is typed and analyzable — so a code KB's derived layer needs no judgment at all, and
-the only call left is the authored intent, made by the person ruling at the moment they
-rule. **Test for staying cheap: refresh and verify of the code KB spend no inference.**
-The moment keeping it honest needs a model call, the LaTeX bill has been reintroduced.
-
-### Function fingerprints as bags over closed vocabularies
-
-A function is summarised as several multisets, each deterministic, incremental per
-changed function, and comparable by a dot product over count vectors — an embedding in
-the strict sense, hand-built and interpretable: the overlap of two bags says *why* two
-functions score alike, and a wrong score is readable enough to see what the vocabulary
-misfiled. A learned embedding gives a number and no reason; it comes back only if a known
-case survives every bag below.
-
-1. **Canonical signature** — inputs as a multiset of types, order-independent; outputs as
-   the return joined with every out-parameter. Plumbing stripped (`ctx`, loggers,
-   `user_data`), aliases folded, `error` and `Result` one output shape. It is *necessary*:
-   two functions doing one job must have compatible shapes, so a duplicate cannot hide
-   outside its bucket, and incumbent search becomes a lookup — compute the signature you
-   are about to write, read the bucket — which a coder can be required to run. Stated in
-   api_gen's neutral type vocabulary it is cross-language. Primitive-heavy buckets
-   (`string → string`) are too large to mean anything, which is the types saying nothing;
-   a distinct type where an `int` stood (`boxed_scalar`) shrinks the bucket exactly where
-   the meaning was missing. The index rewards the typing discipline wanted anyway.
-2. **Effects** — what the function does to the world: external calls, resources touched,
-   kinds returned or raised. Shape-independent, so it catches the same job done with a
-   different signature (the two spawn-and-classify implementations would collide here).
-   Blind to pure functions, which the signature carries.
-3. **Interior** — direct internal calls first, no taxonomy needed: two functions calling
-   the same mix of the library's own helpers are duplicate candidates on that alone.
-   Second, the bag closed transitively through the call graph to the leaf operations a
-   taxonomy names (math classes, I/O kinds, string processing, collections), since most
-   library functions bottom out in the library itself. Weight by call distance and by
-   rarity across the codebase (IDF), or every top-level function converges on "network,
-   parse, log, allocate". The taxonomy is authored once, extended as cases arrive — the
-   same shape as the glossary question four needs.
-
-**One structural filter the duplication question needs:** a caller legitimately resembles
-its callee, so exclude pairs that lie on a path in the call graph. The finding is two
-functions with overlapping bags and *no* path between them — siblings in different
-packages doing one thing by different routes. Weight cross-package pairs up, per the
-ownership-boundary corollary.
-
-**Order of building:** signature bucket + direct-call bag + no-path filter first — a parse
-and a fixpoint, no taxonomy; then effects; then the leaf-operation taxonomy, only once a
-known duplicate survives the first version. Known-answer tests from git history as with
-the prose sweep: the two classifiers and the duplicated validators as positives, and a
-pair alike in signature and unlike in interior (filter the "and"s from a sentence versus
-a word histogram rendered as JSON — both `string → string`, both effect-free) as the
-negative the interior bag must separate.
-
-Candidates, never verdicts; refuse and say what is missing rather than approximate.
