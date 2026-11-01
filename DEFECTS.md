@@ -165,15 +165,15 @@ recall-query timings.
 runs, so a harness home's files stay uncommitted and crash recovery quarantines them. Any crash scenario run
 through the shared harness loses its uncommitted files.
 
-**Where.** `newHarness`; surfaced by the resume probe (OPENCODE_RESUME_PROBE.md).
+**Where.** `newHarness`; surfaced by the resume probe (OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md).
 
 ---
 
 ## Documentation errata
 
-Factual errors in the opencode reports (v2.2.2/v2.2.3), found by later measurement (OPENCODE_PREPROBE_RESULTS.md
+Factual errors in the opencode reports (v2.2.2/v2.2.3), found by later measurement (OPENCODE_RESEARCH/OPENCODE_PREPROBE_RESULTS.md
 §2):
-- OPENCODE_INTEGRATION_OPTIONS.md §2.3 lists `session.usage.recorded` as an event plugins can use; it is not
+- OPENCODE_RESEARCH/OPENCODE_INTEGRATION_OPTIONS.md §2.3 lists `session.usage.recorded` as an event plugins can use; it is not
   subscribable. The usable event is `session.usage.updated`.
-- OPENCODE_INTEGRATION_OPTIONS.md §2.6 names the provider config key `provider.<id>`; the key is `providers`.
-- OPENCODE_SERVER_SURVEY.md lists `session.status` and `session.idle` events; nothing publishes them.
+- OPENCODE_RESEARCH/OPENCODE_INTEGRATION_OPTIONS.md §2.6 names the provider config key `provider.<id>`; the key is `providers`.
+- OPENCODE_RESEARCH/OPENCODE_SERVER_SURVEY.md lists `session.status` and `session.idle` events; nothing publishes them.

@@ -9,7 +9,7 @@ discipline.
 
 Personant is a memory system under opencode: a stateless TypeScript plugin plus a Go memory service
 (`ARCHITECTURE.md` "Plugin route"). Where an item is described in more detail, it cites the place:
-a dated report (`OPENCODE_*.md`), `SPEC.md`, `ARCHITECTURE.md` or `DEFECTS.md` (D1–D4). **RD** is
+a dated report (`OPENCODE_RESEARCH/`), `SPEC.md`, `ARCHITECTURE.md` or `DEFECTS.md` (D1–D4). **RD** is
 `OPENCODE_ROUTE_DECISIONS.md`, cited only where no other document holds the fact.
 
 **Checklist lifecycle.** Every item is a checkbox. An open item is `- [ ]`; it checks off to `- [x]`
@@ -47,9 +47,9 @@ the tagged clauses get a follow-up pass. Each entry states when it must be decid
   `/keep`, `/threads`, `/spine`, `/index-rebuild`, `/project*`, `/stats`, keep as a plugin command,
   make autonomic, or drop; and the ack channel for the recall offer, closure review queue and
   startup project prompts. Plugins have only a yes/no `permission.assert`
-  (`OPENCODE_INTEGRATION_OPTIONS.md` §2.3). Readings: (a) plugin tools the model calls plus yes/no
+  (`OPENCODE_RESEARCH/OPENCODE_INTEGRATION_OPTIONS.md` §2.3). Readings: (a) plugin tools the model calls plus yes/no
   `permission.assert`; (b) opencode commands carrying a service-recognized marker (spoofable;
-  `OPENCODE_CONTEXT_INJECTIONS.md` §2); (c) an out-of-band `personant` CLI; (d) AUTO-only, no
+  `OPENCODE_RESEARCH/OPENCODE_CONTEXT_INJECTIONS.md` §2); (c) an out-of-band `personant` CLI; (d) AUTO-only, no
   interactive acks; (e) hand the question to the model through the opencode-expectations slot and
   read the answer next turn. Unverified: how the TUI shows a command whose `execute` sends no
   prompt, and how `execute` reports a result. Tagged at SPEC §3.4, §3.5, §3.10.1, §4.2, §4.3,
@@ -68,7 +68,7 @@ the tagged clauses get a follow-up pass. Each entry states when it must be decid
 - [ ] **U7 Plugin failure policy.** Fail open (leave the hook input unmodified; opencode's own
   composition reaches the model and memory silently misses the step) or fail closed (refuse the
   request; the session stops while the service is down). What opencode does when the `context` hook
-  throws or the service refuses is unestablished (`OPENCODE_RESUME_PROBE.md` §6). Blocks
+  throws or the service refuses is unestablished (`OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md` §6). Blocks
   ARCHITECTURE "Plugin route". A5 ships fail-open as the interim; **decide before A9 finalises.**
 - [ ] **U8 Interrupted prompts and retraction.** SPEC §4.3.3 says a retracted prompt never enters
   memory; opencode's interrupt keeps the prompt in the transcript the user sees. (a) Keep the rule:
@@ -76,7 +76,7 @@ the tagged clauses get a follow-up pass. Each entry states when it must be decid
   turn. Also fixes reconcile's treatment of retracted turns (SPEC §4.5.8 (10)). **Decide before
   A8.**
 - [ ] **U9 Restart persistence.** After a service restart the model sees no earlier conversation
-  while the TUI shows all of it (`OPENCODE_RESUME_PROBE.md` §3); today only the working set
+  while the TUI shows all of it (`OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md` §3); today only the working set
   reloads. (a) Persist in-run history and the turn counter. (b) Rebuild them from opencode's stored
   messages. (c) Accept: threads carry the memory. Sets a SPEC continuity outcome (SPEC §1.6,
   §4.5.8). **Decide before A8.**
@@ -86,7 +86,7 @@ the tagged clauses get a follow-up pass. Each entry states when it must be decid
   which grows the eval surface (U3's recall-tool option shrinks it). Gates no item below.
 - [ ] **U11 CONVENTIONS rule, not adopted.** External state (an agent's data home, telemetry) never
   lives inside `~/.personant/` or a test home, because crash recovery quarantines untracked files.
-  The requirement for opencode's data home holds either way (`OPENCODE_RESUME_PROBE.md` §5,
+  The requirement for opencode's data home holds either way (`OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md` §5,
   ARCHITECTURE "Start order and resume"); the question is whether it becomes a general CONVENTIONS
   rule. Yes or no; adopt into CONVENTIONS if yes.
 
@@ -99,14 +99,10 @@ the tagged clauses get a follow-up pass. Each entry states when it must be decid
 Runner-target done-lines are written when each item is planned. A8, A9, A10 and A12 wait on the
 decisions named in them.
 
-- [ ] **A0. Start the implementation branch.** Branch fresh from `pivot-setup` and carry across
-  exactly: `THESIS.md`, `SPEC.md`, `ARCHITECTURE.md`, `CONVENTIONS.md`, `ROADMAP.md`, `README.md`
-  (once rewritten), `DEFECTS.md`, all `OPENCODE_*.md` reports (including
-  `OPENCODE_ROUTE_DECISIONS.md`), `ACTIVE_DESIGN.md` (until it retires),
-  `DOC_RECALIBRATION_PLAN.md` (until its remaining steps finish), and
-  `ROADMAP_PLANS/OPENCODE_SERVER_REPLACEMENT.md` and `ROADMAP_PLANS/code-mode-support.md`. Leave the
-  probe code behind. `probe-path` stays alive, untagged and undeleted, as the reference until it is
-  no longer needed. Every code item below lands on the new branch.
+- [x] **A0. Start the implementation branch.** `plugin-route`, cut from `pivot-setup` with the
+  recalibrated documents and reports carried across and the probe code left behind. `probe-path`
+  stays alive, untagged and undeleted, as the reference until it is no longer needed. Every code
+  item below lands on `plugin-route`.
 - [x] **A1. Fix the stale model name in `TestLoadConfigFixture`** so `just test` is green; every
   checkpoint commit needs that gate (CONVENTIONS "Two gates").
 - [ ] **A2. Carry over the probe code worth keeping.** Bring the baseline comparator
@@ -114,7 +110,7 @@ decisions named in them.
   to keep `model.MockServer` (the mock served as an OpenAI-compatible endpoint; if kept, add it to
   SPEC §9.2). Needed before A3, whose done-line uses the comparator. (SPEC §9.1–§9.2.)
 - [ ] **A3. Real runtime inversion.** Turn the runtime into the phase entry points opencode's hooks
-  trigger (prompt, context, tool deltas, turn close), exporting what `OPENCODE_PROBE_RESULTS.md` §8
+  trigger (prompt, context, tool deltas, turn close), exporting what `OPENCODE_RESEARCH/OPENCODE_PROBE_RESULTS.md` §8
   lists. The in-process sim reproduces its baselines unchanged. The probe counterpart
   (`internal/turn/probe_phases.go` on `probe-path`) is reference only, not ported. Unblocks A5.
   (ARCHITECTURE "Runtime inversion".)
@@ -126,51 +122,54 @@ decisions named in them.
   results applied in call order (production must find a source for order, since real provider
   tool-call ids carry no index); plugin-side sequence numbers taken as events arrive; turn close on
   `session.execution.succeeded`; one non-empty system part; the `context` hook resetting
-  `options.maxTokens`; provider-side request counting (`OPENCODE_PROBE_RESULTS.md` §6 lessons
-  1–6, 8; `OPENCODE_CONTEXT_INJECTIONS.md` §3). Complete the delta mapping: `edit` (verify opencode
+  `options.maxTokens`; provider-side request counting; Go decoding of every part type of opencode's
+  provider-neutral messages, which have no machine-readable schema (opencode
+  `packages/ai/src/schema/messages.ts` is mirrored by hand), pinned by a contract test against
+  captured hook input (`OPENCODE_RESEARCH/OPENCODE_PROBE_RESULTS.md` §6 lessons
+  1–6, 8; `OPENCODE_RESEARCH/OPENCODE_CONTEXT_INJECTIONS.md` §3). Complete the delta mapping: `edit` (verify opencode
   exposes post-edit file bytes for the SPEC §3.0.1 `fs.write` delta), generic `tool.result`, and
   `read` stored as file bytes, not formatted output (SPEC §3.9.1). Failure policy interim:
-  fail-open (`ACTIVE_DESIGN.md` §5); A9 decides. The probe counterpart
+  fail-open (ARCHITECTURE "Failure handling"); A9 decides. The probe counterpart
   (`internal/opencodehook/service.go`, `opencode-plugin/index.ts`, `internal/scenarios/opencode/*`
   on `probe-path`) is reference only, not ported. (SPEC §1, §3.0.1; ARCHITECTURE "Plugin route".)
 - [ ] **A6. Injection handling.** Instructions slot rebuilt each request from per-source
   `{key, text}` with content hashes; nested `AGENTS.md` captured as its own keyed source;
   opencode-expectations slot; history rows typed by joining on message `id`; content already
   accounted for dropped on re-injection; the evicted-content thunk. Unblocks A7's accounting.
-  (`OPENCODE_CONTEXT_INJECTIONS.md` §§1–5; SPEC §1.3–§1.4.)
+  (`OPENCODE_RESEARCH/OPENCODE_CONTEXT_INJECTIONS.md` §§1–5; SPEC §1.3–§1.4.)
 - [ ] **A7. Per-slot budgets, including the tool-definition slot.** For every slot (instructions,
   opencode expectations, tool definitions, existing layers) fix budget, internal priority, overflow
   form and underusage; underusage flows from fixed slots to dynamic ones. Tool definitions count
   against the token ceiling but are pass-through today, with no budget or overflow form
-  (`OPENCODE_CONTEXT_INJECTIONS.md` §5); candidate overflow forms are omitting rarely used tools
+  (`OPENCODE_RESEARCH/OPENCODE_CONTEXT_INJECTIONS.md` §5); candidate overflow forms are omitting rarely used tools
   or listing them by name with definitions on demand (MCP tools carry a `<server>_` prefix).
   Without this slot the whole-request ceiling cannot be enforced. Absorbs static-prompt-scaffolding
   byte accounting (orientation preamble, topic-tag directive and headers ride on top of the byte
   proxy unaccounted; a fixed deduction would zero the tiny ceilings the acceptance tests use).
   Settles whether `conventions_paths` (SPEC §2.5.1) overlaps the instructions slot, and the
-  stable-prefix claim for the now-dynamic expectations slot. (SPEC §3.1; `ACTIVE_DESIGN.md` §10.)
+  stable-prefix claim for the now-dynamic expectations slot. (SPEC §3.1 "Slot answers".)
 - [ ] **A8. Resume and recovery.** Fix D4 first (crash scenarios through the shared harness are not
   evidence until it lands). Then: a recovery turn on a context call with no preceding prompt;
   reconcile against opencode's stored messages at service start; start order (service listening
   before opencode, managed background server included); opencode's data home outside
   `~/.personant/`; restart persistence per **U9**. If **U8** keeps retraction, add a record that
   distinguishes a retraction rollback from a crash rollback (reconcile skips retracted turns but no
-  record tells the two apart). (`OPENCODE_RESUME_PROBE.md` §§4–5; DEFECTS.md D4; SPEC §1.6,
+  record tells the two apart). (`OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md` §§4–5; DEFECTS.md D4; SPEC §1.6,
   §4.5.8.)
 - [ ] **A9. Plugin failure policy.** Spike what opencode does when the `context` hook throws or the
   service refuses, then decide **U7** and adjust A5's fail-open interim. (ARCHITECTURE "Plugin
-  route"; `OPENCODE_RESUME_PROBE.md` §6.)
+  route"; `OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md` §6.)
 - [ ] **A10. Topic tag** per **U3** (stream-abort spike, or recall tool), together with the missing
   `derived_from` lineage: no thread carries lineage through opencode while in-process runs do;
   candidate causes are tool deltas now ordered after `user.prompt` and the §5.5 mid-turn fetch not
-  firing (`OPENCODE_PROBE_RESULTS.md` §11). Behind this item, whichever U3 branch is taken:
+  firing (`OPENCODE_RESEARCH/OPENCODE_PROBE_RESULTS.md` §11). Behind this item, whichever U3 branch is taken:
   residual never-attempted tags and a doubled anchor-list shape the parser
   (`internal/prompt/parser.go`) does not absorb; the tag-fidelity instrument limits (no `topic.tag-parsed` event; the
   re-engagement miss rate is inflated by spurious `*new-topic*` duplicates; SPEC §9.1 "Topic-tag
   fidelity"); runtime hot-reload of the topic-tag template (`internal/prompt/template.go`).
 - [ ] **A11. Fix D1.** Per-turn commit cost grows with tracked files. After the fix, re-measure past
   sim-day 9 with opencode in the loop: whether memory-side cost keeps growing is unmeasured, as is
-  the unattributed non-commit growth. (DEFECTS.md D1; `OPENCODE_PROBE_RESULTS.md` §§4, 11; SPEC
+  the unattributed non-commit growth. (DEFECTS.md D1; `OPENCODE_RESEARCH/OPENCODE_PROBE_RESULTS.md` §§4, 11; SPEC
   §3.11, §9.1.)
 - [ ] **A12. Install, config and the user command and ack channel.** `personant init` writes the
   opencode-side settings (`compaction.auto: false`, the plugin entry) in opencode's own format;
@@ -189,17 +188,21 @@ decisions named in them.
   readability, html-to-markdown and terminal/signal dependencies and CONVENTIONS "Free-API
   citizenship". **Precondition:** A5–A12 done and one end-to-end session through opencode passing
   with `oc_missed_deltas == 0` and `oc_uncomposed_requests == 0`
-  (`OPENCODE_PROBE_RESULTS.md` §2). (ARCHITECTURE "Superseded code".)
+  (`OPENCODE_RESEARCH/OPENCODE_PROBE_RESULTS.md` §2). (ARCHITECTURE "Superseded code".)
 - [ ] **B2. Fix D2.** `recall_query_latency_*` gauges copy turn-duration percentiles instead of
   timing recall queries. (DEFECTS.md D2; SPEC §9.4.)
 - [ ] **B3. opencode database cleanup.** Checkpoints must not grow opencode's database without
   bound and cleanup must never break a kept session's scrollback, fork or revert; use
-  `modernc.org/sqlite` for any Go SQLite need. (SPEC §1.7; `ACTIVE_DESIGN.md` §7;
-  `OPENCODE_PROBE_RESULTS.md` §3.4 for the measured growth.)
+  `modernc.org/sqlite` for any Go SQLite need. (SPEC §1.7; ARCHITECTURE "opencode database cleanup";
+  `OPENCODE_RESEARCH/OPENCODE_PROBE_RESULTS.md` §3.4 for the measured growth.)
 - [ ] **B4. MCP prompt expansions and injection unknowns.** Detect MCP prompt expansions, which are
   indistinguishable from typed prompts in the hook input and are treated as user input until a
   route is found; establish hook order after a plugin reload and how system-role messages lower on
-  provider routes other than openai-chat. (`OPENCODE_CONTEXT_INJECTIONS.md` §§2, 6; SPEC §1.2.)
+  provider routes other than openai-chat. (`OPENCODE_RESEARCH/OPENCODE_CONTEXT_INJECTIONS.md` §§2, 6; SPEC §1.2.)
+- [ ] **B4a. Events missed across a plugin reload.** opencode reloads a local plugin when its files
+  change. Whether `event.subscribe` delivers events published during the reload is unverified; the
+  source suggests a live bus with no replay, in which case recovery reads stored messages instead.
+  (`OPENCODE_RESEARCH/OPENCODE_INTEGRATION_OPTIONS.md` §5, item 5.)
 - [ ] **B5. Concurrent sessions.** Full design capture is kept here; `ARCHITECTURE.md` keeps a short
   now-stub. The plugin route makes this reachable (the service is already the single writer).
 
@@ -225,16 +228,16 @@ decisions named in them.
   and re-merge: each decides whether a branch's work is incorporated or discarded. Memory side of
   agent work: session memory readable by a sub-agent through recall-as-a-tool, no working-set dump
   and no writes; a sub-agent may *propose* that a finding be cached, and promotion into career
-  memory is the main session's write. (SPEC §1.1; RD "Sessions, commands, layout".)
+  memory is the main session's write. (SPEC §1.1.)
 - [ ] **B7. Agents and skills.** Whether and how opencode agent definitions and skills are
   supported; candidate mapping: agent definitions as Layer E directives scoped per agent, skill
   content as transient task-class. (RD Open.)
 - [ ] **B8. `/compact` and `/clear` mapping.** Both are no-ops today because memory is not keyed on
   session (SPEC §1.1). Decide what they eventually map to and whether a TUI plugin can replace or
-  disable them. (`OPENCODE_CONTEXT_INJECTIONS.md` §§4, 6.)
+  disable them. (`OPENCODE_RESEARCH/OPENCODE_CONTEXT_INJECTIONS.md` §§4, 6.)
 - [ ] **B9. Resume cases not exercised.** A graceful stop with a turn in flight; a standalone-kill
   claim later swept by a managed server; the resume budget, background-job, subagent and shell
-  recovery; how a real model answers a resumed request. (`OPENCODE_RESUME_PROBE.md` §6.)
+  recovery; how a real model answers a resumed request. (`OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md` §6.)
 - [ ] **B10. Memory vetting build.** Review of memory text before commit by a model applying a fixed
   rubric; a single write path for behavior memory with provenance on every outcome; a
   user-configurable acceptance policy that never blocks a turn; periodic re-review of standing

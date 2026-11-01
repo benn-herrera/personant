@@ -1,7 +1,7 @@
 # OPENCODE SERVER REPLACEMENT – Personant
 
 **Status:** fallback. The active route integrates through opencode's server plugin hooks with opencode unmodified
-([ACTIVE_DESIGN.md](../ACTIVE_DESIGN.md)). This plan applies if that route cannot give the memory system the control it
+([ARCHITECTURE "Plugin route"](../PROJECT_DOCS/ARCHITECTURE/plugin-route/index.md)). This plan applies if that route cannot give the memory system the control it
 needs.
 
 ## BLUF
@@ -34,8 +34,8 @@ was definitely too far. A new balance will need to be found.
 2. Only then: trace where context management cuts into the session path, and change it there.
 
 Target release: opencode v2.2.2. The TUI attaches to an external server with `opencode --server <url>`
-(see [OPENCODE_TUI_LAUNCH.md](../OPENCODE_TUI_LAUNCH.md)). The contract reference is
-[OPENCODE_SERVER_SURVEY.md](../OPENCODE_SERVER_SURVEY.md); the authoritative route definition is opencode's generated
+(see [OPENCODE_TUI_LAUNCH.md](../OPENCODE_RESEARCH/OPENCODE_TUI_LAUNCH.md)). The contract reference is
+[OPENCODE_SERVER_SURVEY.md](../OPENCODE_RESEARCH/OPENCODE_SERVER_SURVEY.md); the authoritative route definition is opencode's generated
 `packages/protocol/openapi.json`, with event payload shapes taken from its generated client types.
 
 ### Port priority

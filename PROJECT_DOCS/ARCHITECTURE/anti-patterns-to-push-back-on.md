@@ -5,7 +5,7 @@ If you see one of these proposed (or are about to write it), stop and surface th
 | Anti-pattern | Why it's wrong | Reach for instead |
 |---|---|---|
 | "Let the LLM decide where to put state" | Pushes canonical state into the LLM | Deterministic code holds state; the LLM drafts, deterministic code validates and writes |
-| "Re-implement something opencode owns" (tools, permissions, UI, session storage, providers) | Wheel re-invention; the project's one hard problem is context | Conform to opencode; take over only what enters the request, through a hook |
+| "Re-implement something opencode owns" (tools, permissions, UI, session storage, providers) | Wheel re-invention; the project's one hard problem is context | Conform to opencode; take over only what enters the request, through a hook. Elsewhere, borrow existing designs and use well-maintained imports |
 | "Put memory logic in the plugin" | Splits the single writer; the plugin cannot be tested with the sim | The plugin forwards and applies; all state and logic stay in Go |
 | "Use SQLite for the spine" | Substrate violation; loses inspectability + git-diffability | Text + git; SQLite stays in reserve as a *derived* index if scale forces it |
 | "Have the LLM run `git commit` on the home tree" | Mixes LLM-controlled with autonomic git | The service commits autonomically |

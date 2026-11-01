@@ -8,7 +8,7 @@
 | Record and file formats | "Storage and record formats" (this document) |
 | Substrate constraints | `ARCHITECTURE.md` §"Substrate non-negotiables" |
 | v0.1 acceptance criteria | `SPEC.md` §9.1 |
-| opencode facts the route rests on | the `OPENCODE_*.md` reports (shorthand under "Plugin route") |
+| opencode facts the route rests on | the reports in `OPENCODE_RESEARCH/` (shorthand under "Plugin route") |
 
 ---
 
