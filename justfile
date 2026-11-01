@@ -28,10 +28,11 @@ GOSRCDIRS := "cmd internal"
 
 # GOTESTCOUNT is the test-cache control knob for the routine runs (`test`,
 # `test-be`, `test-fe`, `test-changed`). EMPTY by default — Go's test cache
-# stays ON, the cheapest form of "test what changed": the cache key is
-# content-addressed over the package's source, its transitive dependencies,
-# the testdata files a test actually reads, and the env vars it calls
-# os.Getenv on, so it invalidates exactly when a result could have changed.
+# stays ON, the cheapest form of "test what changed": the cache key covers
+# the package's source and transitive dependencies by content, and the
+# files and directories a test reads or stats by stat info (mtime, size),
+# plus the env vars it calls os.Getenv on. `just test-cache-why <pkg>`
+# names the input behind a miss.
 # Override for one call with `just GOTESTCOUNT=--count=1 test` (or the same
 # spelling as an env var — this variable is a plain default, not
 # env-sourced, matching the Makefile's `:=` semantics it replaces). The
@@ -298,6 +299,30 @@ test-fe: build fmt-check fe-scope-check
 # EDIT GATE — run only the touched test(s) instead of the checkpoint gate.
 test-run pkg run='.': build recall-madlibs
     go test {{ pkg }} -run '{{ run }}' -count=1 -timeout {{ GOTESTTIMEOUT }}
+
+[doc("DIAGNOSTIC (not a gate): run one package with the test cache ON; on a miss, print the test inputs (env vars, files stat'ed/opened) whose hash changed since this recipe's last run of the same pkg/run. Full debug log: bin/test-cache-why/<pkg-run>/debug.log")]
+test-cache-why pkg run='.': build recall-madlibs
+  #!/usr/bin/env bash
+  set -uo pipefail
+  out="{{ BINDIR }}/test-cache-why/$(tr -c 'A-Za-z0-9.\n' _ <<< '{{ pkg }}-{{ run }}')"
+  mkdir -p "${out}"
+  GODEBUG=gocachetest=1,gocachehash=1 go test {{ pkg }} -run '{{ run }}' -timeout {{ GOTESTTIMEOUT }} 2>"${out}/debug.log"
+  status=$?
+  grep '^testcache:' "${out}/debug.log"
+  # One file per input-list hash: the checks (on a miss) come first, the save last.
+  awk -v d="${out}" '/^HASH\[testInputs\]$/ { f = d "/inputs." ++n }
+    f && /^HASH\[testInputs\]: "/ { print > f }
+    /^HASH\[testInputs\]: [0-9a-f]+$/ { close(f); f = "" }' "${out}/debug.log"
+  if grep -q 'test output not found' "${out}/debug.log" && [[ -f "${out}/saved" ]]; then
+    echo "test-cache-why: inputs changed since the last saved run (< saved, > now):"
+    diff "${out}/saved" "${out}/inputs.1" | grep '^[<>]' | sort | uniq -c
+  fi
+  last="$(command ls "${out}" | grep '^inputs\.' | sort -t. -k2 -n | tail -1)"
+  if grep -q 'save test ID' "${out}/debug.log" && [[ -n "${last}" ]]; then
+    command mv "${out}/${last}" "${out}/saved"
+  fi
+  command rm -f "${out}"/inputs.*
+  exit "${status}"
 
 # RACEPKGS: packages that earn a place under the race detector — one
 # launches a goroutine in non-test code, or its own tests run >=2 goroutines

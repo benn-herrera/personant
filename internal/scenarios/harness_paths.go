@@ -1,6 +1,8 @@
 package scenarios
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,8 +19,8 @@ var runTimestampSuffixRE = regexp.MustCompile(`\.\d{12}$`)
 // home: <repo-root>/test/rundata/<scenario-name>/. Run data is forensic
 // data — it deliberately does NOT live under t.TempDir() (which Go
 // auto-deletes) so a developer can inspect spine/threads/logs/metrics
-// after an interesting or failing run. The directory is cleared and
-// recreated at the start of each run so it always holds the latest run
+// after an interesting or failing run. The directory is emptied (or
+// created) at the start of each run so it always holds the latest run
 // of that scenario; no cleanup is registered, so it persists after the
 // test exits. test/rundata/ is gitignored.
 //
@@ -42,13 +44,36 @@ func runDataHome(t *testing.T, name string) string {
 		name += ".000000000000"
 	}
 	home := filepath.Join(repoRoot(t), "test", "rundata", name)
-	if err := os.RemoveAll(home); err != nil {
+	if err := emptyRunHome(home); err != nil {
 		t.Fatalf("scenario %s: clear run home %s: %v", name, home, err)
 	}
-	if err := os.MkdirAll(home, 0o755); err != nil {
-		t.Fatalf("scenario %s: create run home %s: %v", name, home, err)
-	}
 	return home
+}
+
+// emptyRunHome creates home, or empties it if it exists, without removing,
+// stat'ing or listing its parent: Go's test cache keys on the stat info of
+// test/rundata and of every entry in it when listed, so replacing the home
+// itself would invalidate every package that runs this harness.
+func emptyRunHome(home string) error {
+	err := os.Mkdir(home, 0o755)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, fs.ErrNotExist):
+		return os.MkdirAll(home, 0o755)
+	case !errors.Is(err, fs.ErrExist):
+		return err
+	}
+	entries, err := os.ReadDir(home)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := os.RemoveAll(filepath.Join(home, e.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // measurementBlobPath resolves a persistent path for a standalone
@@ -60,7 +85,7 @@ func runDataHome(t *testing.T, name string) string {
 func measurementBlobPath(t *testing.T, filename string) string {
 	t.Helper()
 	dir := filepath.Join(repoRoot(t), "test", "rundata")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.Mkdir(dir, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
 		t.Fatalf("create rundata dir %s: %v", dir, err)
 	}
 	return filepath.Join(dir, filename)
