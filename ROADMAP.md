@@ -24,7 +24,7 @@ in a list is checked, the **list is disposed of**: removed from this file, its h
 - Review of `PROJECT_DOCS/CONVENTIONS/`, particularly house rules. some or all of the conventions
   may have undergone some rot or may have become superseded/duplicates to changes in global
   CLAUDE.md/AGENTS.md or agent definitions
-- Retire `DEFECTS.md` once the excerpt-folio plan (`ACTIVE_PLAN/`) lands: give every entry still
+- Retire `DEFECTS.md` (the excerpt-folio plan it waited on has landed): give every entry still
   open a ROADMAP item (D2 has B2; D4, the scenario harness skipping the startup reconcile, needs
   one), then delete the file and the rules that cite it (CONVENTIONS "Docs stay current" and
   "Probe work").

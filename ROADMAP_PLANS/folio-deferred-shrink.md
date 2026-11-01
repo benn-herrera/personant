@@ -1,9 +1,9 @@
 # Folio: deferred shrink after unbind
 
-Status: partly planned, not under way. It lands after the excerpt-folio plan (WP0–WP5: folio
-format, tier-transparent reads, settle step B1b, verify checks, measurement) has completed. Where
-this plan cites a contract document, it means that document as WP4 leaves it: the folio
-mechanism is then recorded in
+Status: partly planned, not under way. It builds on the excerpt folios, landed in commits
+`1cecf0c`–`a4e6f60` (WP0–WP5 below name that plan's packages: instrumentation, folio format and
+settle, home format 2, verify checks, barrier step B1b, measurement). The folio mechanism is
+recorded in
 `PROJECT_DOCS/ARCHITECTURE/storage-and-record-formats/thread-directory-threads-thr-id.md` and in
 `PROJECT_DOCS/ARCHITECTURE/mechanisms/crash-stability-and-the-dual-repo-substrate.md`, with the B1b
 outcome in SPEC §4.5.8 (5).
@@ -299,8 +299,8 @@ Done-line:
 - `just bench ./internal/store 'BenchmarkFolioSettleRewarm'`: `unbind` at most 10% of step 1's
   figure on the same machine, and `drop` reported. If `drop` exceeds that same 10% bound, open
   point 2 decides.
-- `just DURATION=9d sim`: mean `barrier_duration_ms` not above WP5's after-run (that run's
-  directory is in WP5's commit message).
+- `just DURATION=9d sim`: mean `barrier_duration_ms` not above WP5's after-run, 2,266 ms
+  (commit `a4e6f60`).
 - Checkpoint `just test`, then commit.
 
 ## Open points for the user
