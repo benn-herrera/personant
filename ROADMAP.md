@@ -19,6 +19,16 @@ in a list is checked, the **list is disposed of**: removed from this file, its h
 
 ---
 
+## Maintenance
+
+- Review of `PROJECT_DOCS/CONVENTIONS/`, particularly house rules. some or all of the conventions
+  may have undergone some rot or may have become superseded/duplicates to changes in global
+  CLAUDE.md/AGENTS.md or agent definitions
+- Retire `DEFECTS.md` once the excerpt-folio plan (`ACTIVE_PLAN/`) lands: give every entry still
+  open a ROADMAP item (D2 has B2; D4, the scenario harness skipping the startup reconcile, needs
+  one), then delete the file and the rules that cite it (CONVENTIONS "Docs stay current" and
+  "Probe work").
+
 ## Pending decisions
 
 SPEC and ARCHITECTURE tag clauses that wait on a decision with `Open: Un`. Once a decision is made,
@@ -242,6 +252,15 @@ decisions named in them.
   `~/.personant/`, so the statement cannot hold as written. Decide whether to enforce it (for
   example a plugin hook on shell tool calls) or restate it as intention in SPEC and ARCHITECTURE.
   (RD Open "Gaps".)
+- [ ] **B13. `personant init` refuses an existing home.** `init` creates a home and nothing else: it
+  succeeds on an absent or empty directory and otherwise exits non-zero, naming the path and
+  pointing to `personant verify`. Drops "idempotent" from SPEC §4.1 and §8.1; touches
+  `cmd/init.go`, `store.Init` and the init tests.
+- [ ] **B14. Rune-safe truncation of thread descriptions and summaries.** `descriptionFromNewThread`
+  and `summarizeForNewThread` (`internal/turn/excerpt.go`) cut with `s[:maxLen-3]`, a byte index, so
+  multi-byte text can be split mid-rune; the invalid bytes reach `spine.jsonl`, where the JSON
+  encoder silently substitutes U+FFFD. Cut at a rune boundary, as SPEC §3.1 requires for layer
+  truncation, with a test on multi-byte input.
 
 ---
 

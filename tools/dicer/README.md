@@ -24,7 +24,8 @@ directory the documents' relative links are written against.
 headings inside fenced code are text. A heading starting `N.` or `N.M` is numbered: its file is
 `<number>-<slug>`, and `§N`, `§N.M` in prose link to it. Any other heading is named by its slug.
 A heading with children becomes a directory with an `index.md`; otherwise one leaf file. Leaves
-hold exactly the original lines, heading included. Text before the first `##` is `entry-point.md`
+hold exactly the original lines, heading included. Sibling headings with the same slug would write
+the same file, so they are an error and the run fails. Text before the first `##` is `entry-point.md`
 with a `Contents:` list.
 
 ## Transforms (`refactor.sh`)
@@ -35,6 +36,12 @@ level below its enclosing heading, then a blank line and the rest. With `items`,
 in `<out.md>.skipped`: titles over 8 words; bold followed by more sentence (`**Note** that ...`);
 indented items; bold at the start of a wrapped line; bold outside any section. Every changed hunk is
 checked to be one of these conversions.
+
+Titles in the keep-list are never converted: the paragraph or item stays verbatim inside its section's
+leaf and produces no hunk. The list is the comma-separated environment variable `DICER_KEEP` (read by
+`refactor.sh`, so it reaches `dice-all.sh` runs too), default `Open`; set it empty to keep none.
+Matching is exact and case-sensitive on the title without its trailing `.` or `:`. In `runins.awk` it
+is `-v keep=T1,T2` (no default there; `-v mode=list` shows kept lines as `KEEP`).
 
 ## Link rewriting and the map
 

@@ -8,6 +8,7 @@
 #          LABEL  paragraph-start bold that is a sentence subject or has punctuation outside the bold
 #          LIST   other list item or indented line led by bold
 #          MID    bold at line start, but the previous line is not blank
+#          KEEP   RUNIN/ITEM whose title is in the -v keep=T1,T2 comma list: never converted, copied verbatim
 # a title of more than 8 words is skipped (SKIPLONG) in convert mode
 function infence(l,   t, c, n) {
   t = l; sub(/^ +/, "", t); c = substr(t, 1, 1)
@@ -20,6 +21,7 @@ function infence(l,   t, c, n) {
   if (c == fch && n >= flen && substr(t, n + 1) ~ /^ *$/) fch = ""
   return 1
 }
+BEGIN { nk = split(keep, kk, ","); for (i = 1; i <= nk; i++) K[kk[i]] = 1 }
 function emit(s) { if (mode == "convert") print s > dest }
 {
   fz = infence($0)
@@ -43,6 +45,7 @@ function emit(s) { if (mode == "convert") print s > dest }
   }
   if ((cls == "RUNIN" || cls == "ITEM") && hl < 2) cls = cls "-OUTSIDE-SECTION"
   if (cls == "ITEM" && !items && mode == "convert") cls = "LIST"
+  if ((cls == "RUNIN" || cls == "ITEM") && (t in K)) cls = "KEEP"
   w = split(t, ww, " ")
   if ((cls == "RUNIN" || cls == "ITEM") && w > 8 && mode == "convert") { cls = "SKIPLONG"; printf "skipped long: line %d: %s\n", NR, t > "/dev/stderr" }
   if (cls != "" && mode == "list") {

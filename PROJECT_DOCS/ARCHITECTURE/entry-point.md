@@ -1,0 +1,107 @@
+# ARCHITECTURE – Personant
+
+How this implementation meets SPEC.md: module responsibilities, invariants, mechanisms and the
+reasons for them. Outcomes live in SPEC.md and are cited, not restated.
+
+| Document | Purpose |
+|---|---|
+| `THESIS.md` | purpose and intent — read first |
+| `ARCHITECTURE.md` (you are here) | principles, mechanisms, storage and record formats, module map |
+| `SPEC.md` | consumer-facing outcomes and algorithms |
+| `CONVENTIONS.md` | house rules for AI agents working in this repo |
+| `ROADMAP.md` | future intent; lists and sequences the open decisions |
+| `DEFECTS.md` | known defects, not yet fixed |
+| `README.md` | user-facing description; getting started |
+
+**`Open:`** marks a clause that depends on a decision not yet made; the form is defined in SPEC.md
+§0. A tag such as U3 names the pending decision.
+
+**Superseded code.** `internal/chat`, `internal/term`, `internal/shell`, `internal/tools`,
+`internal/tools/web` and the `chat` verb are the self-built harness that opencode replaces. They
+stay in the tree until the replacement works (ROADMAP.md, "Retire the self-built harness") and are
+not the product. The `ping` and `models` verbs (backed by `internal/ping` and `internal/modellist`)
+wait on U5.
+
+---
+
+Contents:
+
+- [What this is](what-this-is.md)
+- [Plugin route](plugin-route/index.md)
+  - [Tense](plugin-route/tense.md)
+  - [Boundary](plugin-route/boundary.md)
+  - [Pinned release](plugin-route/pinned-release.md)
+  - [Failure handling](plugin-route/failure-handling.md)
+  - [Integration shape](plugin-route/integration-shape.md)
+  - [Event observation](plugin-route/event-observation.md)
+  - [Ordering and correlation](plugin-route/ordering-and-correlation.md)
+  - [Injection handling](plugin-route/injection-handling.md)
+  - [Runtime inversion](plugin-route/runtime-inversion/index.md)
+    - [Close ordering](plugin-route/runtime-inversion/close-ordering.md)
+    - [Invariant for the production inversion](plugin-route/runtime-inversion/invariant-for-the-production-inversion.md)
+  - [Start order and resume](plugin-route/start-order-and-resume.md)
+  - [opencode database cleanup](plugin-route/opencode-database-cleanup.md)
+- [Module map](module-map.md)
+- [Applying the thesis (load-bearing)](applying-the-thesis-load-bearing.md)
+- [Recurring patterns](recurring-patterns/index.md)
+  - [The model drafts, deterministic code writes](recurring-patterns/the-model-drafts-deterministic-code-writes.md)
+  - [Autonomic vs LLM-controlled](recurring-patterns/autonomic-vs-llm-controlled.md)
+  - [Single spelunking location](recurring-patterns/single-spelunking-location.md)
+  - [No speculative prefetch](recurring-patterns/no-speculative-prefetch.md)
+  - [Asymmetric cost: prove ahead of time](recurring-patterns/asymmetric-cost-prove-ahead-of-time.md)
+  - [Approved-when-earned dependencies](recurring-patterns/approved-when-earned-dependencies.md)
+  - [Port-and-adapter at the substrate boundary](recurring-patterns/port-and-adapter-at-the-substrate-boundary.md)
+- [Substrate non-negotiables](substrate-non-negotiables/index.md)
+  - [Substrate evolution: if/when scale forces it](substrate-non-negotiables/substrate-evolution-if-when-scale-forces-it.md)
+  - [Port abstraction policy](substrate-non-negotiables/port-abstraction-policy.md)
+- [Storage and record formats](storage-and-record-formats/index.md)
+  - [Home layout](storage-and-record-formats/home-layout.md)
+  - [Spine record (`spine.jsonl`)](storage-and-record-formats/spine-record-spine-jsonl/index.md)
+    - [Constraints enforced by `personant verify`](storage-and-record-formats/spine-record-spine-jsonl/constraints-enforced-by-personant-verify.md)
+  - [Thread directory (`threads/thr_<id>/`)](storage-and-record-formats/thread-directory-threads-thr-id.md)
+  - [Symbol index (`symbols.jsonl`)](storage-and-record-formats/symbol-index-symbols-jsonl.md)
+  - [Project metadata](storage-and-record-formats/project-metadata.md)
+  - [Symbol normalization](storage-and-record-formats/symbol-normalization.md)
+  - [Symbol source](storage-and-record-formats/symbol-source.md)
+  - [Symbol lifecycle and anchor projection](storage-and-record-formats/symbol-lifecycle-and-anchor-projection/index.md)
+    - [Projection](storage-and-record-formats/symbol-lifecycle-and-anchor-projection/projection.md)
+- [The §3.0 hook chain (load-bearing primitive)](the-3-0-hook-chain-load-bearing-primitive/index.md)
+  - [Transient-data lifecycle (load-bearing for recall fidelity)](the-3-0-hook-chain-load-bearing-primitive/transient-data-lifecycle-load-bearing-for-recall-fidelity.md)
+- [The layered working set](the-layered-working-set/index.md)
+  - [Names and recency state](the-layered-working-set/names-and-recency-state.md)
+- [Key abstractions](key-abstractions.md)
+- [Mechanisms](mechanisms/index.md)
+  - [Thread lifecycle](mechanisms/thread-lifecycle.md)
+  - [Spine entries are the recognition surface](mechanisms/spine-entries-are-the-recognition-surface.md)
+  - [Symbol extraction (three passes ordered cheapest-first)](mechanisms/symbol-extraction-three-passes-ordered-cheapest-first/index.md)
+    - [Anchors vs. history (the evolving-anchor model)](mechanisms/symbol-extraction-three-passes-ordered-cheapest-first/anchors-vs-history-the-evolving-anchor-model.md)
+  - [Topic-tag mechanics](mechanisms/topic-tag-mechanics.md)
+  - [Recall mechanisms (four, layered by cost)](mechanisms/recall-mechanisms-four-layered-by-cost/index.md)
+    - [Guarantee boundary — findability, not reminiscence](mechanisms/recall-mechanisms-four-layered-by-cost/guarantee-boundary-findability-not-reminiscence.md)
+  - [Closure and retirement](mechanisms/closure-and-retirement.md)
+  - [Fallback dissection (worst-case path)](mechanisms/fallback-dissection-worst-case-path.md)
+  - [Multi-project as lifelong accrual](mechanisms/multi-project-as-lifelong-accrual.md)
+  - [Personalization through directive accrual](mechanisms/personalization-through-directive-accrual.md)
+  - [Memory vetting](mechanisms/memory-vetting.md)
+  - [Crash stability and the dual-repo substrate](mechanisms/crash-stability-and-the-dual-repo-substrate.md)
+  - [Memory consolidation — the "sleep" cycle](mechanisms/memory-consolidation-the-sleep-cycle.md)
+  - [Serving deployment](mechanisms/serving-deployment.md)
+  - [Model-family as platform {#model-family-as-platform-v10-platform-coupling}](mechanisms/model-family-as-platform-model-family-as-platform-v10-platform-coupling/index.md)
+    - [Architectural mechanism](mechanisms/model-family-as-platform-model-family-as-platform-v10-platform-coupling/architectural-mechanism.md)
+    - [Two context figures](mechanisms/model-family-as-platform-model-family-as-platform-v10-platform-coupling/two-context-figures.md)
+  - [Minimize infrastructural prompts](mechanisms/minimize-infrastructural-prompts.md)
+  - [Concurrent sessions](mechanisms/concurrent-sessions.md)
+- [Project identity (dual-layered)](project-identity-dual-layered.md)
+- [Testing as the lab bench](testing-as-the-lab-bench/index.md)
+  - [Harness ↔ system-under-test coupling rule](testing-as-the-lab-bench/harness-system-under-test-coupling-rule.md)
+  - [Simulation-harness structure](testing-as-the-lab-bench/simulation-harness-structure/index.md)
+    - [File layout — `internal/scenarios/`](testing-as-the-lab-bench/simulation-harness-structure/file-layout-internal-scenarios.md)
+    - [Generator ↔ harness protocol](testing-as-the-lab-bench/simulation-harness-structure/generator-harness-protocol.md)
+    - [Acceptance-run mechanics](testing-as-the-lab-bench/simulation-harness-structure/acceptance-run-mechanics.md)
+  - [Event log format](testing-as-the-lab-bench/event-log-format.md)
+  - [opencode-in-loop harness](testing-as-the-lab-bench/opencode-in-loop-harness.md)
+- [Deferred work](deferred-work.md)
+- [Anti-patterns to push back on](anti-patterns-to-push-back-on.md)
+- [Document map](document-map.md)
+- [How decisions evolve](how-decisions-evolve.md)
+- [Mental model summary](mental-model-summary.md)

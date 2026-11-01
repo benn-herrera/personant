@@ -119,7 +119,7 @@ func TestChainDecisionClassNotMinimized(t *testing.T) {
 // as a backticked row token inside §3.0.1, while the prose explanation of
 // the prune may name them.
 func TestEventTaxonomyHasNoUnroutedEvents(t *testing.T) {
-	section := readSpecSection(t, "#### 3.0.1")
+	section := readSpecSection(t, "PROJECT_DOCS/SPEC/3-core-algorithms/3.0-context-modification-events-the-architectural-primitive/3.0.1-the-event-taxonomy.md", "#### 3.0.1")
 
 	pruned := []string{"digest.refresh", "slash.injected", "directive.reloaded"}
 	for _, ev := range pruned {
@@ -166,23 +166,18 @@ func readChainLogs(t *testing.T, paths store.PersonantPaths) string {
 	return b.String()
 }
 
-// readSpecSection returns the body of the SPEC.md subsection beginning
-// with the given heading, up to the next "#### " heading. SPEC.md lives
-// two directories above the test package (internal/turn).
-func readSpecSection(t *testing.T, heading string) string {
+// readSpecSection returns the contents of the SPEC leaf at the given
+// repo-relative path, and fails unless the leaf begins with heading. The
+// repo root lives two directories above the test package (internal/turn).
+func readSpecSection(t *testing.T, leaf, heading string) string {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "..", "SPEC.md"))
+	data, err := os.ReadFile(filepath.Join("..", "..", leaf))
 	if err != nil {
-		t.Fatalf("read SPEC.md: %v", err)
+		t.Fatalf("read SPEC leaf %s: %v", leaf, err)
 	}
 	text := string(data)
-	start := strings.Index(text, heading)
-	if start < 0 {
-		t.Fatalf("SPEC.md: heading %q not found", heading)
+	if !strings.HasPrefix(text, heading) {
+		t.Fatalf("SPEC leaf %s: does not begin with heading %q", leaf, heading)
 	}
-	rest := text[start+len(heading):]
-	if end := strings.Index(rest, "\n#### "); end >= 0 {
-		return text[start : start+len(heading)+end]
-	}
-	return text[start:]
+	return text
 }

@@ -1,0 +1,36 @@
+### The opencode source clone (`../opencode`) is read-only
+
+Never edit it and never move it off
+the installed release's tag; it moves only in the change that updates the `sim-opencode` version
+check (ARCHITECTURE.md "Plugin route", "Pinned release").
+- **Open:** U11 — whether to adopt the rule: never place external state (an agent's data home,
+  telemetry) inside `~/.personant/` or a test home, because crash recovery quarantines untracked
+  files. opencode's data home is already excluded (ARCHITECTURE.md "Single spelunking location").
+- **Spawned processes: self-limiting, or verified dead** (origin: commit 4fcb0e5). Binding on any
+  background process an agent starts — load generators, watchers, servers, opencode servers,
+  children of stress harnesses:
+  1. **Fail safe, not fail hot.** Every spawned process bounds its own lifetime — a loop with an
+     iteration cap, or a `timeout N` wrapper. A bare `while :; do :; done &` has "spin forever" as
+     its failure mode.
+  2. **Kill by collected PIDs, never `$(jobs -p)`.** Record `$!` at spawn and kill that list. In
+     zsh, `$(jobs -p)` expands in a subshell whose job table is empty, so `kill $(jobs -p)` is a
+     silent no-op.
+  3. **Verify the kill.** A post-cleanup count probe (`ps ... | wc -l`) returning 0 is part of the
+     task's definition of done. Nonzero is a failed gate, not a warning.
+  4. **Never silence cleanup stderr.** A cleanup command's stderr is the only witness when it
+     breaks; `kill ... 2>/dev/null` hides the error that exposes a no-op.
+  5. **Prefer in-process contention.** `go test -cpu 8,8,...` and `-count` create scheduler pressure
+     inside the test process and leak nothing; external burners are a last resort and carry rules
+     1–4.
+- **Free-API citizenship is a hard requirement** (origin: commit 8e62cb4). Code that talks to a
+  free, volunteer- or donor-funded API complies with all of that service's etiquette and required
+  behaviors:
+  1. **Read the service's published policy before coding against it**, and record its specific
+     obligations in the code's doc comment.
+  2. **Descriptive User-Agent with contact info**, sourced from configuration — never compiled-in
+     personal data. Code for a service that requires contact info refuses to run without it
+     configured, with a message naming the setting.
+  3. **Serial requests per host**, plus any service-specific minimum spacing.
+  4. **Honor `429`/`503` `Retry-After`**: one retry after the stated delay, then a clean error.
+  5. **A local cap on requests per run**, so a loop cannot turn one request into unbounded upstream
+     load.

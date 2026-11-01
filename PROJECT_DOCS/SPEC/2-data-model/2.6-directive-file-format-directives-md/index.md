@@ -1,0 +1,43 @@
+### 2.6 Directive file format (`directives/*.md`)
+
+Directive files are markdown documents with YAML frontmatter for parameter overrides.
+
+```markdown
+---
+scope: user                         # one of: defaults | user | project
+project: null                       # null for defaults/user; project name for project-scoped
+parameters:
+  closure.ack-mode: always          # override system default of auto
+  recall.ack-mode: always           # override system default of banded
+last_modified: 2026-05-08T19:42:00-07:00
+modification_source: accrual        # one of: install | user-edit | accrual (§1.8: cross-project only)
+---
+
+# User directives
+
+## Revisit guidelines
+
+User has accepted 12/15 of last cross-project recall offers; threshold tightened from 0.5 to 0.45.
+
+[Free-form prose explaining the user-facing behavior the parameters encode. Inspectable, editable.]
+```
+
+A change proposed to the defaults or user-wide directive file, by accrual or any other proposer, is
+a behavior-memory change and follows [§1.8](../../1-operating-model/1.8-memory-vetting.md); a user's direct edit is not prevented. Accrual may
+propose such a change only from patterns aggregated across projects; a pattern observed in one
+project stays project-scoped ([§1.8](../../1-operating-model/1.8-memory-vetting.md)).
+
+**Open:** whether a change to a project-scoped directive file is a behavior-memory change (the
+behavior/convention boundary of [§1.8](../../1-operating-model/1.8-memory-vetting.md)).
+
+**Directive precedence** (highest wins):
+1. Project-scoped (`directives/prj_<n>/project.md`)
+2. User-wide (`directives/user.md`)
+3. System defaults (`directives/defaults.md`)
+
+A parameter read walks the precedence chain and returns the first match; missing parameters fall
+through to defaults.
+
+Contents:
+
+- [§2.6.1 Recognized parameters](2.6.1-recognized-parameters.md)
