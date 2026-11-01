@@ -56,6 +56,12 @@ var crashScenarioCoverage = map[string]string{
 	"store.WriteFileAtomic.preRename": "store.TestWriteFileAtomicPreRenameCrash (also scenarios.TestCrashMatrix_WTurn)",
 	"store.WriteFileAtomic.tornWrite": "store.TestWriteFileAtomicTornWriteCrash (also scenarios.TestCrashMatrix_WTurn)",
 
+	// Excerpt-tier settle windows — armed in the owning package.
+	"folio.settle.midLooseWrite":                 "store.TestFolioSettleCrashConverges",
+	"folio.settle.postLooseWrite.preFolioWrite":  "store.TestFolioSettleCrashConverges",
+	"folio.settle.postFolioWrite.preLooseRemove": "store.TestFolioSettleCrashConverges",
+	"folio.settle.midLooseRemove":                "store.TestFolioSettleCrashConverges",
+
 	// morning-init — the two R4-deferred points, armed here on a greenfield
 	// home whose first Reconcile is where daily is born.
 	"morninginit.preBaseline":               "scenarios.TestCrashMatrix_MorningInit",

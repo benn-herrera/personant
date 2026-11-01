@@ -13,12 +13,18 @@ import (
 	"personant/internal/memops"
 )
 
+// jsonlMaxLineBytes caps one ReadJSONL line, its trailing newline
+// included: a longer line fails the read. Writers whose records can grow
+// without bound check against it before writing.
+const jsonlMaxLineBytes = 1024 * 1024
+
 // ReadJSONL reads a JSONL file into a slice of T. One JSON object per line;
 // blank lines are skipped. A nonexistent file is an error; an existing but
 // empty file returns (nil, nil).
 //
-// Malformed lines (parse error or trailing non-whitespace after the JSON
-// object) are reported with the 1-based line number wrapped in the error.
+// Malformed lines (parse error, trailing non-whitespace after the JSON
+// object, or a line over jsonlMaxLineBytes) are reported with the 1-based
+// line number wrapped in the error.
 func ReadJSONL[T any](path string) ([]T, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -30,7 +36,7 @@ func ReadJSONL[T any](path string) ([]T, error) {
 	scanner := bufio.NewScanner(f)
 	// Allow lines longer than the default 64KB buffer; spine summaries are
 	// short, but project meta or digest content could push past it.
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), jsonlMaxLineBytes)
 
 	lineNo := 0
 	for scanner.Scan() {
@@ -51,7 +57,7 @@ func ReadJSONL[T any](path string) ([]T, error) {
 		out = append(out, rec)
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, fmt.Errorf("%s:%d: read: %w", path, lineNo+1, err)
 	}
 	return out, nil
 }

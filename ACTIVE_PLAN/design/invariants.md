@@ -40,9 +40,9 @@
    and removed, its bytes kept in the quarantine directory. Because tiers change only at a barrier
    (invariant 4) and settle skipped the broken thread, HEAD's folio is consistent with the thread's
    loose files, so invariant 3 holds after the restore.
-8. **Folio before loose.** Settle relies on this ordering. After settle, every folio entry sorts
-   before every loose entry of the same thread, so the folio is a prefix and the loose files a
-   suffix. Readers that are satisfied by the loose files skip the folio. Only a hand-made loose
-   excerpt numbered below the folio's highest entry can break the ordering, and only for window
-   reads until the next barrier, which re-establishes it.
+8. **The newest H are loose.** After settle, a warm thread's newest H = 528 excerpts are loose and
+   appends are newer still, so a read needing at most min(loose count, H) excerpts reads loose
+   files alone. Any larger read merges the folio in. Loose files can also sit below folio entries
+   permanently: a too-large or conflicting excerpt stays loose, as does a hand-made one, so readers
+   never assume the folio is a strict prefix.
 

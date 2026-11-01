@@ -36,7 +36,7 @@ change, so no caller or test double changes.
 
 | Reader | Needs | Folio access |
 |---|---|---|
-| `ReadThreadBody` (Layer B, `LoadThread`: closure, fetch, coarse index, archive size) | newest ≤ 512 within a byte budget | only when the loose files run out before the budget or window is met: warm threads after a barrier never touch it |
+| `ReadThreadBody` (Layer B, `LoadThread`: closure, fetch, coarse index, archive size) | newest ≤ 512 within a byte budget | only when the read needs more than min(loose count, H) excerpts (invariant 8): warm threads after a barrier never decode it |
 | `ReadDebtWindowExcerpts` (completeness floor) | the `maxN` below the newest 512 | only when loose count < 512 + `maxN` |
 | `ReadThreadExcerpts` (flush job, cache reconcile, `GrepThreads`) | all, oldest first | always when a folio exists: one file replaces many |
 | archival capture / recovery (`autogit.CheckoutTree`, `TreeHashAt`, `WorktreeTreeHash`) | the directory as bytes | the folio is one more file in the subtree; tree hash and byte-exact restore are unchanged |

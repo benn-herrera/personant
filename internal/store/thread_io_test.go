@@ -394,19 +394,19 @@ func TestAppendThreadTurnRetainsPastWindow(t *testing.T) {
 			t.Fatalf("AppendThreadTurn %d: %v", n, err)
 		}
 	}
-	nums, err := turnFileNumbers(ThreadTurnsDir(paths, fm.ID))
+	entries, err := ListExcerptEntries(paths, fm.ID)
 	if err != nil {
-		t.Fatalf("turnFileNumbers: %v", err)
+		t.Fatalf("ListExcerptEntries: %v", err)
 	}
 	// Every excerpt is retained — nothing evicted.
-	if len(nums) != total {
-		t.Fatalf("retained %d turn files, want %d (all retained, no FIFO delete)", len(nums), total)
+	if len(entries) != total {
+		t.Fatalf("retained %d turn files, want %d (all retained, no FIFO delete)", len(entries), total)
 	}
-	if nums[0] != 1 {
-		t.Errorf("lowest retained turn = %d, want 1 (earliest excerpt kept past window)", nums[0])
+	if entries[0].Number != 1 {
+		t.Errorf("lowest retained turn = %d, want 1 (earliest excerpt kept past window)", entries[0].Number)
 	}
-	if nums[len(nums)-1] != total {
-		t.Errorf("highest retained turn = %d, want %d", nums[len(nums)-1], total)
+	if last := entries[len(entries)-1].Number; last != total {
+		t.Errorf("highest retained turn = %d, want %d", last, total)
 	}
 }
 
@@ -506,9 +506,13 @@ func TestSeedThreadSplitsBodyIntoTurns(t *testing.T) {
 	if err := SeedThread(paths, thr); err != nil {
 		t.Fatalf("SeedThread: %v", err)
 	}
-	nums, err := turnFileNumbers(ThreadTurnsDir(paths, fm.ID))
+	entries, err := ListExcerptEntries(paths, fm.ID)
 	if err != nil {
-		t.Fatalf("turnFileNumbers: %v", err)
+		t.Fatalf("ListExcerptEntries: %v", err)
+	}
+	var nums []int
+	for _, e := range entries {
+		nums = append(nums, e.Number)
 	}
 	if !reflect.DeepEqual(nums, []int{7, 8}) {
 		t.Errorf("seeded turn numbers = %v, want [7 8]", nums)

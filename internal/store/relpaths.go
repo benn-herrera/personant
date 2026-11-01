@@ -13,6 +13,7 @@ const (
 	threadsDirName      = "threads"
 	threadMetaFileName  = "thread.md"
 	threadTurnsDirName  = "turns"
+	threadFolioFileName = "folio.jsonl"
 	threadFilesFileName = "files.json"
 	projectsDirName     = "projects"
 )
@@ -27,7 +28,18 @@ func ThreadMetaRel(threadID string) string {
 
 // ThreadTurnRel is the repo-relative path of one turn-excerpt file.
 func ThreadTurnRel(threadID string, turnNumber int) string {
-	return threadsDirName + "/" + threadID + "/" + threadTurnsDirName + "/" + turnFileName(turnNumber)
+	return threadExcerptRel(threadID, turnFileName(turnNumber))
+}
+
+// threadExcerptRel is the repo-relative path of the loose excerpt file
+// named name.
+func threadExcerptRel(threadID, name string) string {
+	return threadsDirName + "/" + threadID + "/" + threadTurnsDirName + "/" + name
+}
+
+// ThreadFolioRel is the repo-relative path of a thread's excerpt folio.
+func ThreadFolioRel(threadID string) string {
+	return threadsDirName + "/" + threadID + "/" + threadFolioFileName
 }
 
 // ThreadFilesRel is the repo-relative path of a thread's tracked-file

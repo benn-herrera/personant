@@ -140,8 +140,9 @@ type MemoryOps interface {
 	// thread exists for the ID; callers distinguish "fresh thread about
 	// to be created" from a parse failure.
 	//
-	// LoadThread assembles the body from every retained turn-excerpt
-	// file. For callers that only need metadata, LoadThreadMeta
+	// LoadThread assembles the body from the thread's most recent
+	// turn-excerpts, up to the assembly window. For callers that only
+	// need metadata, LoadThreadMeta
 	// is the cheaper choice — it never touches the turns/ directory.
 	LoadThread(ctx context.Context, threadID string) (Thread, error)
 
@@ -153,17 +154,13 @@ type MemoryOps interface {
 	// LoadThread.
 	LoadThreadMeta(ctx context.Context, threadID string) (ThreadMeta, error)
 
-	// LoadThreadExcerpts returns the thread's retained turn-excerpts as
-	// discrete per-turn units (one per turns/<n>.md file), in turn-number
-	// order. Unlike LoadThread, which assembles the excerpts into a single
-	// joined body, this preserves the per-turn boundary the fine-tier
-	// embedding index (§3.4 / intra-thread recall) chunks on — splitting
-	// the joined body would be lossy because an excerpt's own text can
-	// contain the blank-line separator the join uses.
-	//
-	// Returns the excerpts currently on the substrate; FIFO eviction
-	// (ThreadTurnWindow) means an excerpt that scrolled out long ago is
-	// not returned. A thread with no turns/ directory yet returns
+	// LoadThreadExcerpts returns every retained turn-excerpt of the thread
+	// as discrete per-turn units, in turn-number order. Unlike LoadThread,
+	// which assembles the excerpts into a single joined body, this
+	// preserves the per-turn boundary the fine-tier embedding index (§3.4 /
+	// intra-thread recall) chunks on — splitting the joined body would be
+	// lossy because an excerpt's own text can contain the blank-line
+	// separator the join uses. A thread with no excerpts yet returns
 	// (nil, nil).
 	LoadThreadExcerpts(ctx context.Context, threadID string) ([]ThreadExcerpt, error)
 
@@ -175,8 +172,8 @@ type MemoryOps interface {
 	// §3.4): the recall path lexically scans this bounded set so durable
 	// content in the async-flush lag window stays findable, with no unbounded
 	// per-query scan. Unlike LoadThreadExcerpts (which loads the full retained
-	// set), this reads at most maxN excerpt files, so the per-query cost does
-	// not grow with thread age. maxN <= 0, or a thread shorter than the
+	// set), this reads at most maxN excerpts, so the per-query cost does not
+	// grow with thread age. maxN <= 0, or a thread shorter than the
 	// assembly window (nothing scrolled out), returns (nil, nil). Excerpts are
 	// returned in turn-number order.
 	LoadDebtWindowExcerpts(ctx context.Context, threadID string, maxN int) ([]ThreadExcerpt, error)
