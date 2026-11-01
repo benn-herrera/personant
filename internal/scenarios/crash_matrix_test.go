@@ -56,11 +56,12 @@ var crashScenarioCoverage = map[string]string{
 	"store.WriteFileAtomic.preRename": "store.TestWriteFileAtomicPreRenameCrash (also scenarios.TestCrashMatrix_WTurn)",
 	"store.WriteFileAtomic.tornWrite": "store.TestWriteFileAtomicTornWriteCrash (also scenarios.TestCrashMatrix_WTurn)",
 
-	// Excerpt-tier settle windows — armed in the owning package.
-	"folio.settle.midLooseWrite":                 "store.TestFolioSettleCrashConverges",
-	"folio.settle.postLooseWrite.preFolioWrite":  "store.TestFolioSettleCrashConverges",
-	"folio.settle.postFolioWrite.preLooseRemove": "store.TestFolioSettleCrashConverges",
-	"folio.settle.midLooseRemove":                "store.TestFolioSettleCrashConverges",
+	// Excerpt-tier settle windows — armed inside a live barrier's B1b and
+	// in the owning package.
+	"folio.settle.midLooseWrite":                 "fileadapter.TestBarrier_CrashWalk (also store.TestFolioSettleCrashConverges)",
+	"folio.settle.postLooseWrite.preFolioWrite":  "fileadapter.TestBarrier_CrashWalk (also store.TestFolioSettleCrashConverges)",
+	"folio.settle.postFolioWrite.preLooseRemove": "fileadapter.TestBarrier_CrashWalk (also store.TestFolioSettleCrashConverges)",
+	"folio.settle.midLooseRemove":                "fileadapter.TestBarrier_CrashWalk (also store.TestFolioSettleCrashConverges)",
 
 	// morning-init — the two R4-deferred points, armed here on a greenfield
 	// home whose first Reconcile is where daily is born.
@@ -71,6 +72,7 @@ var crashScenarioCoverage = map[string]string{
 	// arms every one and asserts the roll-forward terminal (F1/INV-2).
 	"barrier.preArchival":                      "fileadapter.TestBarrier_CrashWalk",
 	"barrier.postArchival.preDayCommit":        "fileadapter.TestBarrier_CrashWalk",
+	"barrier.postSettle.preDayCommit":          "fileadapter.TestBarrier_CrashWalk",
 	"barrier.postDayCommit.preRebuild":         "fileadapter.TestBarrier_CrashWalk",
 	"barrier.postRebuild.preNuke":              "fileadapter.TestBarrier_CrashWalk",
 	"barrier.midNuke":                          "fileadapter.TestBarrier_CrashWalk",

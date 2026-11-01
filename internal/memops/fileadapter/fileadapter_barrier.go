@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -35,6 +36,9 @@ import (
 //	B0  write marker (after the no-in-flight-scope check)
 //	B1  archival-if-pressure → PRIMARY, via archiveBatch inside the
 //	    already-open barrier scope (no nested op=archival marker, F4)
+//	B1b settle excerpt tiers: move each live thread's turn excerpts
+//	    between loose files and its folio to match the placement rule
+//	    (worktree only, byte-preserving, idempotent; lands in B2)
 //	B2  day-commit worktree → PRIMARY (`Personant-Day: N`,
 //	    AllowEmptyCommits — F3; spine-integrity gate on the staged tree
 //	    BEFORE the mint, structural errors only — F5/F1: a spine-broken
@@ -49,13 +53,14 @@ import (
 //
 // Only B1/B2 mutate primary; B4/B5 are pure daily-DB lifecycle; B3/B6
 // touch derived + watermark (operational, disposable). The worktree is
-// untouched by B2-B6 and only reduced (never lost — bytes land in
-// primary first) by B1's removals.
+// untouched by B2-B6, only reduced (never lost — bytes land in primary
+// first) by B1's removals, and only rearranged (no byte lost) by B1b.
 
 // Crashpoints (#94 R3b §7) — one per step boundary; R4 exhausts them.
 var (
 	cpBarrierPreArchival   = crashpoint.Register("barrier.preArchival")
 	cpBarrierPostArchival  = crashpoint.Register("barrier.postArchival.preDayCommit")
+	cpBarrierPostSettle    = crashpoint.Register("barrier.postSettle.preDayCommit")
 	cpBarrierPostDayCommit = crashpoint.Register("barrier.postDayCommit.preRebuild")
 	cpBarrierPostRebuild   = crashpoint.Register("barrier.postRebuild.preNuke")
 	cpBarrierMidNuke       = crashpoint.Register("barrier.midNuke")
@@ -171,6 +176,11 @@ func (a *FileAdapter) runBarrier(ctx context.Context, day int, res *memops.DayBa
 	}
 	crashpoint.At(cpBarrierPostArchival)
 
+	if err := a.settleExcerptTiers(ctx, day); err != nil {
+		return err
+	}
+	crashpoint.At(cpBarrierPostSettle)
+
 	if err := a.barrierTail(ctx, day, res, false); err != nil {
 		return err
 	}
@@ -214,6 +224,34 @@ func (a *FileAdapter) drainArchivalPressure(ctx context.Context, day int, res *m
 			fmt.Sprintf("spine=%d low-water=%d wanted=%d archived=%d retired-exhausted",
 				len(recs)-archived, memops.ArchiveLowWater, target, archived))
 	}
+	return nil
+}
+
+// settleExcerptTiers is B1b: each live thread's excerpts move between
+// loose files and its folio until they match the placement rule, retired
+// threads binding everything. It runs after B1, so archived threads are
+// gone, and before B2, whose full-tree stage captures the moves. A settle
+// error fails the barrier with the marker kept; per-name anomalies are
+// logged skips.
+func (a *FileAdapter) settleExcerptTiers(ctx context.Context, day int) error {
+	recs, err := a.ListThreads(ctx, memops.ThreadFilter{})
+	if err != nil {
+		return fmt.Errorf("fileadapter: day barrier: settle: list threads: %w", err)
+	}
+	slices.SortFunc(recs, func(x, y memops.SpineRecord) int { return strings.Compare(x.ID, y.ID) })
+	bound, unbound := 0, 0
+	for _, rec := range recs {
+		out, err := store.SettleExcerptTiers(a.paths, rec.ID, memops.IsRetiredState(rec.State))
+		if err != nil {
+			return fmt.Errorf("fileadapter: day barrier: settle %s: %w", rec.ID, err)
+		}
+		bound += out.Bound
+		unbound += out.Unbound
+		for _, s := range out.Skipped {
+			a.logBarrier("folio-skip", fmt.Sprintf("thr=%s name=%s reason=%s", rec.ID, s.Name, s.Reason))
+		}
+	}
+	a.logBarrier("folio-settled", fmt.Sprintf("day=%d threads=%d bound=%d unbound=%d", day, len(recs), bound, unbound))
 	return nil
 }
 
@@ -795,7 +833,9 @@ func (a *FileAdapter) completePending(ctx context.Context, p *memops.PendingComp
 		//     windows can never have candidates (B1 finished before B2),
 		//     and archival commits on top of a landed day-commit would
 		//     leave HEAD non-day-shape (the F1 re-fire wedge);
-		//  3. B2 (guarded) … B6 + marker clear — barrierTail(recovering).
+		//  3. re-run B1b under the same gate: once the day-commit has
+		//     landed, settle had already finished;
+		//  4. B2 (guarded) … B6 + marker clear — barrierTail(recovering).
 		if err := a.completeArchivalBatch(ctx, day); err != nil {
 			return info, err
 		}
@@ -806,6 +846,9 @@ func (a *FileAdapter) completePending(ctx context.Context, p *memops.PendingComp
 		}
 		if !sealed {
 			if err := a.drainArchivalPressure(ctx, day, &res); err != nil {
+				return info, err
+			}
+			if err := a.settleExcerptTiers(ctx, day); err != nil {
 				return info, err
 			}
 		}

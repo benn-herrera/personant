@@ -2,8 +2,11 @@
 
 - **`thread.md`** — YAML frontmatter (canonical for metadata) and a single `# <title>` line; no
   accumulating body, rewritten in full on every engagement.
-- **`turns/`** — one terse excerpt file per primary-engagement turn, named by the thread's turn
-  number zero-padded to 7 digits (`turns/0000024.md`). Appending a turn writes one small file.
+- **`turns/`** — the warm tier: one terse excerpt file per primary-engagement turn, named by the
+  thread's turn number zero-padded to 7 digits (`turns/0000024.md`). Appending a turn writes one
+  small loose file; the turn path never writes the folio.
+- **`folio.jsonl`** — the cold tier: the thread's bound excerpts, one JSONL line each (see
+  "Excerpt tiers"). Absent when nothing is bound.
 - **`files.json`** — the tracked-file sidecar (SPEC §3.9).
 
 ```markdown
@@ -47,6 +50,36 @@ A turn-excerpt file (`turns/0000024.md`):
   decision-class content; raw task-class output is never written as one (SPEC §3.10.6). Durable
   turn content lives only in excerpts, never the event log. Retention trimming is the deferred
   keep/toss layer (SPEC §3.10.8); v0.1 keeps all excerpts.
+- **Excerpt tiers.** A thread's excerpts are split between loose files (`turns/`) and its folio so
+  the tracked-file count does not grow with thread length (SPEC §2.3). Tiers change only in the
+  day barrier's step B1b (`store.SettleExcerptTiers`, see "Crash stability and the dual-repo
+  substrate").
+  - *Folio format.* JSONL, one line per bound excerpt, keys in the order
+    `{"name":"0000024.md","content":"<the file's exact bytes>"}`, sorted ascending by (turn number,
+    name) with no repeated name, written and read through the generic `store.WriteJSONL` /
+    `store.ReadJSONL` (atomic write, default HTML escaping as in every home JSONL file). A line is
+    malformed if it fails to decode, its `name` is not an excerpt name, or `content` is absent.
+  - *Placement rule.* A pure function of canonical state: the spine record's state and the
+    thread's excerpt names. A retired thread (`memops.IsRetiredState`) binds every excerpt; any
+    other thread keeps its newest `store.HotExcerptTail` (= `ThreadTurnWindow` +
+    `memops.EmbeddingDebtCap` = 528, the assembly window plus the steady-state embedding-debt
+    window) loose and binds the rest. An excerpt whose folio line would exceed `ReadJSONL`'s
+    1 MiB line cap stays loose, and a name in both tiers with different bytes (a hand edit) moves
+    in neither direction. Loose files can therefore sit permanently below folio entries, as can a
+    hand-made one: nothing assumes the folio is a strict prefix of the loose files. Idleness and
+    Layer B/C membership are not placement signals.
+  - *Tier-transparent readers.* `ReadThreadBody`, `ReadDebtWindowExcerpts` and
+    `ReadThreadExcerpts` return the union of both tiers, each name once, the loose copy winning
+    for a name in both, byte-identical whichever tier holds it. A reader decodes the folio only
+    when it needs more than min(loose count, `HotExcerptTail`) of the newest excerpts, so a warm
+    thread after a barrier never opens it; `ReadThreadExcerpts` reads it whenever one exists. A
+    read never moves an excerpt: a re-engaged retired thread reads its bound excerpts from the
+    folio until the next barrier unbinds its hot tail. `store.ListExcerptEntries` and
+    `store.ReadFolio` serve `personant verify`'s folio checks.
+  - *UTF-8.* Excerpt content is valid UTF-8 (it arrives through JSON decoding). Bind asserts it
+    before writing anything for the thread, since Go's JSON encoder would silently replace invalid
+    bytes; a violation fails the barrier with `store.ErrExcerptNotUTF8` naming the file, never a
+    skip or a repair.
 - **`description` vs `summary`.** `description` is a whitespace-collapsed copy of the spawning
   prompt, truncated to the new-thread summary length bound, set deterministically (no LLM
   paraphrase). `summary` is the curator's closure gist, in frontmatter only (never in a turn file);

@@ -209,8 +209,8 @@ func (a *FileAdapter) EngageThread(ctx context.Context, w memops.ThreadWrite) er
 // writeThread persists a ThreadWrite to the substrate: it rewrites the
 // bounded thread.md frontmatter file, then appends w.TurnExcerpt as turn
 // w.Meta.TurnCount (a no-op when the excerpt is empty — the closure
-// path's meta-only update). The turn-excerpt directory is FIFO-windowed
-// by store.AppendThreadTurn. Shared by CreateThread and EngageThread;
+// path's meta-only update). Excerpts are appended loose; the day barrier
+// moves cold ones into the thread's folio. Shared by CreateThread and EngageThread;
 // the only difference between the two is the spine op. Each successful
 // write is recorded into the turn's scoped write set.
 func (a *FileAdapter) writeThread(w memops.ThreadWrite) error {

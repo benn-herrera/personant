@@ -2,9 +2,12 @@ package fileadapter
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -291,6 +294,165 @@ func TestBarrier_CrashWalk(t *testing.T) {
 			}
 			assertBarrierTerminal(t, b, day)
 		})
+	}
+
+	// The settle (B1b) windows, each killed on the fixture that gives its
+	// step work: bind moves thr_1's four loose excerpts into its folio,
+	// unbind moves them back out after thr_1 warms.
+	folioPoints := []struct {
+		point  string
+		unbind bool
+	}{
+		{"folio.settle.midLooseWrite", true},
+		{"folio.settle.postLooseWrite.preFolioWrite", true},
+		{"folio.settle.postFolioWrite.preLooseRemove", false},
+		{"folio.settle.midLooseRemove", false},
+		{"barrier.postSettle.preDayCommit", false},
+	}
+	for _, fp := range folioPoints {
+		t.Run("folio/"+fp.point, func(t *testing.T) {
+			a := newFolioBindHome(t)
+			ctx := context.Background()
+			when := bDay1
+			if fp.unbind {
+				pinBarrierClock(t, bDay1)
+				if _, err := a.MaybeDayBarrier(ctx); err != nil {
+					t.Fatalf("binding barrier: %v", err)
+				}
+				rec, _, err := store.FindSpineRecord(a.paths, "thr_1")
+				if err != nil {
+					t.Fatalf("find thr_1: %v", err)
+				}
+				rec.State = memops.ThreadActive
+				if err := store.UpdateSpineRecord(a.paths, rec); err != nil {
+					t.Fatalf("warm thr_1: %v", err)
+				}
+				when = bDay2
+			}
+			want := threadExcerptBytes(t, a.paths, "thr_1")
+			if len(want) != 4 {
+				t.Fatalf("fixture holds %d excerpts for thr_1, want 4", len(want))
+			}
+			pinBarrierClock(t, when)
+			day := autogit.DayIndexOf(when) - 1
+
+			crashRun(t, fp.point, func() { _, _ = a.MaybeDayBarrier(ctx) })
+
+			b := NewFileAdapter(a.paths)
+			rep, err := b.Reconcile(ctx)
+			if err != nil {
+				t.Fatalf("Reconcile after crash at %s: %v", fp.point, err)
+			}
+			if rep.ResetPerformed || len(rep.RevertedPaths) != 0 || len(rep.ScopedRestored) != 0 {
+				t.Errorf("settle recovery reset=%v reverted=%v restored=%v, want roll-forward only",
+					rep.ResetPerformed, rep.RevertedPaths, rep.ScopedRestored)
+			}
+			assertExcerptsReadBack(t, b.paths, "thr_1", want)
+			folio := store.ThreadFolioPath(b.paths, "thr_1")
+			turns := store.ThreadTurnsDir(b.paths, "thr_1")
+			if fp.unbind {
+				for name, content := range want {
+					got, err := os.ReadFile(filepath.Join(turns, name))
+					if err != nil || string(got) != content {
+						t.Errorf("loose %s = %q (err %v), want %q", name, got, err, content)
+					}
+				}
+				if _, err := os.Stat(folio); !os.IsNotExist(err) {
+					t.Errorf("folio.jsonl after unbind: stat err %v, want absent", err)
+				}
+			} else {
+				lines, err := store.ReadFolio(folio)
+				if err != nil {
+					t.Fatalf("read folio: %v", err)
+				}
+				got := map[string]string{}
+				for _, l := range lines {
+					got[l.Name] = *l.Content
+				}
+				if !maps.Equal(got, want) {
+					t.Errorf("folio holds %v, want %v", got, want)
+				}
+				if _, err := os.Stat(turns); !os.IsNotExist(err) {
+					t.Errorf("turns/ after bind: stat err %v, want absent", err)
+				}
+			}
+			assertBarrierTerminal(t, b, day)
+		})
+	}
+}
+
+// newFolioBindHome is the settle fixture: three retired threads, too few
+// for archival pressure, with thr_1 holding four loose excerpts.
+func newFolioBindHome(t *testing.T) *FileAdapter {
+	t.Helper()
+	a := newBarrierHome(t, 3)
+	for n := 2; n <= 4; n++ {
+		if err := store.AppendThreadTurn(a.paths, "thr_1", n, fmt.Sprintf("## Turn %d\n\nbody thr_1 turn %d\n", n, n)); err != nil {
+			t.Fatalf("append thr_1 turn %d: %v", n, err)
+		}
+	}
+	return a
+}
+
+// threadExcerptBytes returns each excerpt name of a thread with its exact
+// bytes, from whichever tier holds it (the loose copy for a name in both).
+func threadExcerptBytes(t *testing.T, paths store.PersonantPaths, id string) map[string]string {
+	t.Helper()
+	entries, err := store.ListExcerptEntries(paths, id)
+	if err != nil {
+		t.Fatalf("list excerpts %s: %v", id, err)
+	}
+	out := map[string]string{}
+	var folio map[string]string
+	for _, e := range entries {
+		if e.Tier == store.ExcerptLoose {
+			data, err := os.ReadFile(filepath.Join(store.ThreadTurnsDir(paths, id), e.Name))
+			if err != nil {
+				t.Fatalf("read loose %s: %v", e.Name, err)
+			}
+			out[e.Name] = string(data)
+			continue
+		}
+		if folio == nil {
+			lines, err := store.ReadFolio(store.ThreadFolioPath(paths, id))
+			if err != nil {
+				t.Fatalf("read folio %s: %v", id, err)
+			}
+			folio = map[string]string{}
+			for _, l := range lines {
+				folio[l.Name] = *l.Content
+			}
+		}
+		if _, loose := out[e.Name]; !loose {
+			out[e.Name] = folio[e.Name]
+		}
+	}
+	return out
+}
+
+// assertExcerptsReadBack asserts the thread's readers return each name in
+// want exactly once, oldest first, with its text.
+func assertExcerptsReadBack(t *testing.T, paths store.PersonantPaths, id string, want map[string]string) {
+	t.Helper()
+	got, err := store.ReadThreadExcerpts(paths, id)
+	if err != nil {
+		t.Fatalf("ReadThreadExcerpts %s: %v", id, err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("ReadThreadExcerpts %s returned %d excerpts, want %d", id, len(got), len(want))
+	}
+	for i, e := range got {
+		if i > 0 && e.TurnNumber <= got[i-1].TurnNumber {
+			t.Errorf("excerpt %d out of order after %d", e.TurnNumber, got[i-1].TurnNumber)
+		}
+		content, ok := want[fmt.Sprintf("%07d.md", e.TurnNumber)]
+		if !ok {
+			t.Errorf("unexpected excerpt %d", e.TurnNumber)
+			continue
+		}
+		if e.Text != strings.TrimRight(content, "\n") {
+			t.Errorf("excerpt %d text = %q, want %q", e.TurnNumber, e.Text, content)
+		}
 	}
 }
 
@@ -699,7 +861,8 @@ func TestBarrier_OvernightHandEdit(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(handEdit), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(handEdit, []byte("## Turn 2\n\nhand-edited overnight\n"), 0o644); err != nil {
+	const handEdited = "## Turn 2\n\nhand-edited overnight\n"
+	if err := os.WriteFile(handEdit, []byte(handEdited), 0o644); err != nil {
 		t.Fatalf("write hand edit: %v", err)
 	}
 
@@ -717,7 +880,8 @@ func TestBarrier_OvernightHandEdit(t *testing.T) {
 	if _, err := a.MaybeDayBarrier(ctx); err != nil {
 		t.Fatalf("barrier with hand-edit: %v", err)
 	}
-	// The hand-edit is in the day-commit's tree (B2 staged everything).
+	// The hand-edit is in the day-commit's tree (B2 staged everything);
+	// thr_1 is retired, so B1b bound it into the folio.
 	repo, err := autogit.Open(a.paths, autogit.Primary)
 	if err != nil {
 		t.Fatalf("open primary: %v", err)
@@ -727,10 +891,84 @@ func TestBarrier_OvernightHandEdit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HEAD commit: %v", err)
 	}
-	if _, err := commit.File("threads/thr_1/turns/2.md"); err != nil {
-		t.Errorf("hand-edit missing from day-commit tree: %v", err)
+	f, err := commit.File(store.ThreadFolioRel("thr_1"))
+	if err != nil {
+		t.Fatalf("folio missing from day-commit tree: %v", err)
+	}
+	contents, err := f.Contents()
+	if err != nil {
+		t.Fatalf("read committed folio: %v", err)
+	}
+	found := false
+	for _, raw := range strings.Split(strings.TrimSuffix(contents, "\n"), "\n") {
+		var l store.FolioLine
+		if err := json.Unmarshal([]byte(raw), &l); err != nil {
+			t.Fatalf("committed folio line %q: %v", raw, err)
+		}
+		if l.Name == "2.md" {
+			found = true
+			if *l.Content != handEdited {
+				t.Errorf("committed 2.md = %q, want %q", *l.Content, handEdited)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("hand-edit 2.md missing from the day-commit's folio:\n%s", contents)
 	}
 	assertBarrierTerminal(t, a, day)
+}
+
+// TestFolioHandBrokenQuarantinedOnCompletion: a hand-broken folio fails
+// the live barrier's B2 verify with the marker kept; the next open's
+// completion quarantines it byte-exact and restores the last day-commit's
+// folio, so every excerpt stays readable.
+func TestFolioHandBrokenQuarantinedOnCompletion(t *testing.T) {
+	a := newFolioBindHome(t)
+	ctx := context.Background()
+	pinBarrierClock(t, bDay1)
+	if _, err := a.MaybeDayBarrier(ctx); err != nil {
+		t.Fatalf("binding barrier: %v", err)
+	}
+	want := threadExcerptBytes(t, a.paths, "thr_1")
+	if len(want) != 4 {
+		t.Fatalf("fixture holds %d excerpts for thr_1, want 4", len(want))
+	}
+	folio := store.ThreadFolioPath(a.paths, "thr_1")
+	good, err := os.ReadFile(folio)
+	if err != nil {
+		t.Fatalf("read folio: %v", err)
+	}
+	broken := string(good) + "not json\n"
+	if err := os.WriteFile(folio, []byte(broken), 0o644); err != nil {
+		t.Fatalf("break folio: %v", err)
+	}
+
+	pinBarrierClock(t, bDay2)
+	day := autogit.DayIndexOf(bDay2) - 1
+	if _, err := a.MaybeDayBarrier(ctx); err == nil {
+		t.Fatal("barrier over a broken folio succeeded; want the B2 verify failure")
+	}
+	if m, present, _ := store.ReadMarker(a.paths); !present || m.Op != store.OpBarrier {
+		t.Fatalf("marker after failed barrier: %+v present=%v, want op=barrier intact", m, present)
+	}
+
+	b := NewFileAdapter(a.paths)
+	rep, err := b.Reconcile(ctx)
+	if err != nil {
+		t.Fatalf("completion Reconcile: %v", err)
+	}
+	if !slices.Contains(rep.ScopedRestored, store.ThreadFolioRel("thr_1")) {
+		t.Errorf("ScopedRestored = %v, want %s", rep.ScopedRestored, store.ThreadFolioRel("thr_1"))
+	}
+	matches, err := filepath.Glob(filepath.Join(b.paths.RecoveryDir, "quarantine", "*", "threads", "thr_1", "folio.jsonl"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("quarantined folio copies = %v (err %v), want 1", matches, err)
+	}
+	if q, err := os.ReadFile(matches[0]); err != nil || string(q) != broken {
+		t.Errorf("quarantined folio not byte-exact (err %v)", err)
+	}
+	assertExcerptsReadBack(t, b.paths, "thr_1", want)
+	assertBarrierTerminal(t, b, day)
 }
 
 // TestBarrier_PersistentSpineBreak is fixture (i) — the §2.7

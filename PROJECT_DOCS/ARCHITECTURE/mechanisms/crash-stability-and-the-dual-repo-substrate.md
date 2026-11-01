@@ -39,7 +39,22 @@ only alongside a fresh primary, so a missing daily on an existing home keeps its
 shape. The barrier mints its day-commit with `AllowEmptyCommits` after `CheckSpineIntegrity` on the
 staged tree, asserts `CheckDerivedFresh` at B6, and derives lifecycle tags through
 `autogit.TagStamp` / `ParseTagStamp` (the only formatters), reading the sealed day's log with the
-tolerant `eventlog` reader and tolerating `ErrTagExists`. Recovery handles and plumbs the
+tolerant `eventlog` reader and tolerating `ErrTagExists`. Barrier step B1b
+(`settleExcerptTiers`, between B1's drain and B2) calls `store.SettleExcerptTiers` per spine
+record in ascending id order with `memops.IsRetiredState` as the coldness signal; completion
+re-runs it after the drain while the day-commit has not landed. Per thread it writes each
+unbound excerpt loose and fsyncs `turns/` and the thread directory, then writes the folio
+(`WriteFileAtomic`, which does not fsync the parent) and fsyncs the thread directory, reads it
+back, and only then removes the bound loose files — so every excerpt is readable from at least
+one tier at every crash point. Convergence: a name in both tiers with identical bytes is an
+unfinished move and settle keeps the target-tier copy; different bytes are a hand edit, and
+neither copy moves (`folio-skip reason=conflict`). A torn folio temp file (`tmp-folio.jsonl`) is
+quarantined by recovery's unconditional `tmp-` residue sweep. A hand-broken folio is skipped by settle (`reason=unreadable`) and fails
+B2's verify gate on the live run, marker kept; the next open's completion runs
+`spineQuarantineRepair`, quarantining the folio byte-exact and scoped-restoring it from primary
+HEAD (or removing it as an orphan add), which is consistent with the thread's loose files because
+tiers change only at a barrier. Crashpoints: the four `folio.settle.*` in `store` and
+`barrier.postSettle.preDayCommit`, all walked by `TestBarrier_CrashWalk`. Recovery handles and plumbs the
 `op=rebaseline` marker, but the mid-day arming trigger is not wired (ROADMAP.md). Packing: after
 every `gcCheckEveryCommits` (64) daily commits the adapter reads daily's loose-object count and runs
 gc at `gcLooseObjectThreshold` (5000); `MemoryOps.Consolidate` (go-git `RepackObjects` + `Prune`)

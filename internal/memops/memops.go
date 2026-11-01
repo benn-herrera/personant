@@ -117,8 +117,8 @@ type MemoryOps interface {
 
 	// EngageThread atomically updates an existing thread: the adapter
 	// rewrites thread.md from w.Meta, appends w.TurnExcerpt as
-	// turn w.Meta.TurnCount (FIFO-windowed in the turns/
-	// directory), and updates the spine record. An empty w.TurnExcerpt
+	// turn w.Meta.TurnCount (a loose file in turns/; the day barrier
+	// later binds cold excerpts into the folio), and updates the spine record. An empty w.TurnExcerpt
 	// is a meta-only update (the closure path). Folds in the
 	// updateExistingThread path currently open-coded in
 	// internal/turn/turn.go.

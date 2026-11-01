@@ -560,9 +560,9 @@ func TreeHashAt(ctx context.Context, paths store.PersonantPaths, which Repo, com
 // This is the verify primitive (design §5 E3 / invariant 2): after
 // recovery restores a subtree to disk, the caller re-hashes it here and
 // compares against the stored tree hash. Symlinks and submodules are not
-// part of a personant thread directory (thread.md + turns/ + files.json),
-// so only regular files and directories are handled; an unexpected
-// non-regular entry is an error rather than a silent skip.
+// part of a personant thread directory (thread.md + turns/ + folio.jsonl +
+// files.json), so only regular files and directories are handled; an
+// unexpected non-regular entry is an error rather than a silent skip.
 func WorktreeTreeHash(paths store.PersonantPaths, dirPath string) (string, error) {
 	if dirPath == "" {
 		return "", errors.New("autogit.WorktreeTreeHash: dirPath is empty")

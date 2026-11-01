@@ -6,7 +6,8 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
   symbols.jsonl                     # [derived] inverse symbol → threads index
   threads/thr_<id>/                 # one directory per thread
     thread.md                       # frontmatter (canonical) + title; no accumulating body
-    turns/                          # serial FIFO-windowed turn-excerpt files (0000024.md)
+    turns/                          # warm turn excerpts, one file each (0000024.md)
+    folio.jsonl                     # bound cold turn excerpts, one line each
     files.json                      # tracked-file sidecar (SPEC §3.9)
   projects/prj_<n>/
     meta.json                       # project metadata (canonical)

@@ -5,7 +5,7 @@
 | `cmd/` | cobra subcommands: `init`, `index`, `verify`, `archive`, `version`; persistent flags `--home`, `--allow-newer-home`. Every verb that opens the substrate goes through the one `openHome` helper (format gate, then Reconcile); `version` is ungated and never fails on a broken home. `chat`, `ping`, `models`: see the superseded-code note at the top. |
 | `internal/memops/` | the `MemoryOps` port: interface plus the domain types it trades in (`SpineRecord`, `Thread`, `ProjectMeta`, `Config`, the symbol enums, `Normalize`, `DominantSource`). The application layer depends only on this; it imports no internal package. |
 | `internal/memops/fileadapter/` | the substrate-backed adapter: JSONL + markdown + YAML + TOML + go-git on `~/.personant/` |
-| `internal/store/` | file substrate: paths, JSONL helpers, init, spine and project ops, thread I/O, bootstrap. Depends on `memops` for the domain types. |
+| `internal/store/` | file substrate: paths, JSONL helpers, init, spine and project ops, thread I/O, excerpt folios, bootstrap. Depends on `memops` for the domain types. |
 | `internal/autogit/` | go-git-backed autonomic git wrapper with bitflag systemic-validation policy |
 | `internal/recovery/` | startup reconcile orchestrator over the on-disk observables |
 | `internal/crashpoint/` | named kill-point hooks, test-armed and a no-op in production |

@@ -683,7 +683,7 @@ const seedReadmeMD = "# personant home\n" +
 	"\n" +
 	"- `spine.jsonl` — unified thread spine (canonical).\n" +
 	"- `symbols.jsonl` — inverse symbol index (derived; rebuilt from canonical).\n" +
-	"- `threads/thr_<n>/` — one directory per thread: `thread.md` (frontmatter + title), `turns/` (FIFO-windowed turn excerpts), `files.json`.\n" +
+	"- `threads/thr_<n>/` — one directory per thread: `thread.md` (frontmatter + title), `turns/` (warm turn excerpts, one file each), `folio.jsonl` (bound cold turn excerpts, one line each), `files.json`.\n" +
 	"- `projects/prj_<n>/` — per-project metadata and digests, keyed by stable handle.\n" +
 	"- `directives/` — tunable behavior (defaults, user-wide, per-project).\n" +
 	"- `logs/` — daily plain-text event logs.\n" +
@@ -737,9 +737,10 @@ derived-watermark
 recovery/
 # .recall-cache/ is the derived embedding-vector cache (§3.4 / intra-thread
 # recall). It is operational state — rebuildable from canonical (spine.jsonl
-# + threads/*/turns/*.md) on any miss or staleness — and is NEVER canonical
-# (I5). Deleting it costs CPU at next startup, never data. Git-tracking it
-# would couple a regenerable derivation to its source for no information gain.
+# + both excerpt tiers, threads/*/turns/*.md and threads/*/folio.jsonl) on
+# any miss or staleness — and is NEVER canonical (I5). Deleting it costs CPU
+# at next startup, never data. Git-tracking it would couple a regenerable
+# derivation to its source for no information gain.
 .recall-cache/
 # symbols.jsonl is a derived index — rebuildable from spine.jsonl plus
 # thread frontmatters via index.Rebuild. Single-source-of-truth:

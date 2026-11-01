@@ -13,7 +13,7 @@ Mechanism:
 2. Runtime parses tag (per [§5.1.2](../5.1-topic-tag-emission-format/5.1.2-parser.md)) before consuming any response body.
 3. For each `thr_<n>` in the tag not currently in Layer B:
    - Read `threads/thr_<n>/` (frontmatter from `thread.md`, body assembled from the recency-windowed
-     `turns/` excerpts; see [§2.3](../../2-data-model/2.3-thread-file-format-threads-thr-id.md)).
+     warm excerpts and, when needed, the per-thread folio `folio.jsonl`; see [§2.3](../../2-data-model/2.3-thread-file-format-threads-thr-id.md)).
    - Truncate to budget allowance (subject to [§3.1](../../3-core-algorithms/3.1-working-set-composition/index.md) layer caps).
    - Inject as a `thread.fetched` context delta (per [§3.0](../../3-core-algorithms/3.0-context-modification-events-the-architectural-primitive/index.md)).
 4. Re-prompt the model with the augmented context; the response body is generated against it.
