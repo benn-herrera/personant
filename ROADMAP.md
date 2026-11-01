@@ -9,7 +9,7 @@ discipline.
 
 Personant is a memory system under opencode: a stateless TypeScript plugin plus a Go memory service
 (`ARCHITECTURE.md` "Plugin route"). Where an item is described in more detail, it cites the place:
-a dated report (`OPENCODE_RESEARCH/`), `SPEC.md`, `ARCHITECTURE.md` or `DEFECTS.md` (D1–D4). **RD** is
+a dated report (`OPENCODE_RESEARCH/`), `SPEC.md`, `ARCHITECTURE.md` or `DEFECTS.md`. **RD** is
 `OPENCODE_ROUTE_DECISIONS.md`, cited only where no other document holds the fact.
 
 **Checklist lifecycle.** Every item is a checkbox. An open item is `- [ ]`; it checks off to `- [x]`
@@ -167,10 +167,22 @@ decisions named in them.
   (`internal/prompt/parser.go`) does not absorb; the tag-fidelity instrument limits (no `topic.tag-parsed` event; the
   re-engagement miss rate is inflated by spurious `*new-topic*` duplicates; SPEC §9.1 "Topic-tag
   fidelity"); runtime hot-reload of the topic-tag template (`internal/prompt/template.go`).
-- [ ] **A11. Fix D1.** Per-turn commit cost grows with tracked files. After the fix, re-measure past
-  sim-day 9 with opencode in the loop: whether memory-side cost keeps growing is unmeasured, as is
-  the unattributed non-commit growth. (DEFECTS.md D1; `OPENCODE_RESEARCH/OPENCODE_PROBE_RESULTS.md` §§4, 11; SPEC
-  §3.11, §9.1.)
+- [ ] **A11. Commit-cost growth: fixed; opencode-in-loop re-measure remains.** Single-load staging
+  (`793890f`) and excerpt folios (`1cecf0c`–`631cd48`) hold per-turn commit cost flat (13–21 ms/turn
+  over 54 mock sim-days, `test/rundata/sim-workload-seed24095-dur2880h0m0s.261101104107`, stopped at
+  day 54) and the daily index near 2,000 entries. What remains is the re-measure with opencode in the
+  loop, worth running when it can show memory-side cost under real inference that a mock run
+  cannot. (`OPENCODE_RESEARCH/OPENCODE_PROBE_RESULTS.md` §§4, 11; SPEC §3.11, §9.1.)
+- [ ] **A11a. Find the per-turn growth outside the commit.** Mean per-turn time rises 55 → 352 ms
+  over 54 mock sim-days and accelerates (≈3.7 ms/day over days 1–11, ≈8.5 ms/day over days 31–51)
+  while commit time, the daily index (~2,000 entries) and the spine (150 threads, from day 10) stay
+  bounded. Same run as A11. Known so far: the day-9 profile diff (`just DURATION=8d sim-profile`,
+  `9d`, `just pprof -top -cum -focus='turn\.RunWithInfo$' -diff_base=…`) puts most non-commit CPU in
+  `ComposeWorkingSet` → `ReadThreadBody` file opens and reads, which is bounded by spine × 512 and
+  so should plateau; the recall fine index grows without bound (1,133 → 16,069 chunks by day 47,
+  about half the main thread's) and the main thread's history grows without bound, so a per-turn
+  scan of either, or a full-history folio decode, grows with it. Unattributed: what grows at days
+  30–50. Breaks SPEC §9.1's flat per-operation latency.
 - [ ] **A12. Install, config and the user command and ack channel.** `personant init` writes the
   opencode-side settings (`compaction.auto: false`, the plugin entry) in opencode's own format;
   Personant-only settings move to `~/.config/personant/` (`internal/store/paths.go` still places
@@ -399,3 +411,10 @@ Concrete, mostly single-package items; independent of the sequence above unless 
 - `code-mode-support.md` — applies only to that fallback.
 - `within-thread-interleaving.md` — design for within-thread topic interleaving in the sim
   workload; not implemented (SPEC §9.1 "Workload interleaving").
+- `folio-deferred-shrink.md` — unbind writes loose copies without fsync and drops the duplicate
+  folio entries only once the copies are sealed in a day-commit; follows the excerpt-folio plan.
+  Open: whether a power-loss-torn loose copy is accepted as a residual or readers fall back to the
+  folio.
+- `strip-self-built-harness.md` — removes the self-built REPL, tools, terminal and provider
+  handling with their tests, and reshapes config for a memory service under opencode (extends B1).
+  Waits on U5, U6, the config-migration stance and whether to strip before A5–A12.
