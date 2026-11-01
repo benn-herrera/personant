@@ -102,22 +102,28 @@ agents:
   just --justfile "{{AGENTS_DIR}}/justfile" install "$(pwd)" --harness=claude
   just --justfile "{{AGENTS_DIR}}/justfile" install "$(pwd)" --harness=opencode --model-tier-map=default
 
+PROJECT_ROOT := justfile_dir()
+VENV := PROJECT_ROOT / ".venv"
+PYBIN := if os() == "windows" { "Scripts" } else { "bin" }
+EXE := if os() == "windows" { ".exe" } else { "" }
+VENV_PYTHON := VENV / PYBIN / "python" + EXE
+
 [doc("split a markdown monolith by heading level into linked leaves under out (optional link map TSV), then check the leaves reassemble it and every relative link resolves")]
-dice-doc monolith out map="":
-  @python3 "{{justfile_directory()}}/tools/dicer/dicer.py" dice-doc "{{monolith}}" "{{out}}" "{{map}}"
+dice-doc monolith out map="": _docdicer
+    "{{VENV_PYTHON}}" -m docdicer dice-doc "{{monolith}}" "{{out}}" "{{map}}"
 
 [doc("dice the documents listed in a manifest TSV, read from src-dir, into linked volumes, with intermediates in work-dir, then verify all trees (see tools/dicer/README.md)")]
-dice-docs manifest src work:
-  @python3 "{{justfile_directory()}}/tools/dicer/dicer.py" dice-docs "{{manifest}}" "{{src}}" "{{work}}"
+dice-docs manifest src work: _docdicer
+    "{{VENV_PYTHON}}" -m docdicer dice-docs "{{manifest}}" "{{src}}" "{{work}}"
 
-[doc("check every relative link and #anchor in markdown files: each root is a directory walked for .md files or one file; with no root, PROJECT_DOCS and every top-level *.md; exit 1 on a broken link (see devtools/dicer/README.md)")]
-check-links:
-  @python3 tools/dicer/dicer.py check-links PROJECT_DOCS *.md
-  @python3 tools/dicer/dicer.py check-tree PROJECT_DOCS
+[doc("check every relative link and #anchor under PROJECT_DOCS and the top-level *.md, and that each diced tree's documents are linked from their parent and reachable (tools/dicer)")]
+check-links: _docdicer
+    "{{VENV_PYTHON}}" -m docdicer check-links PROJECT_DOCS *.md
+    "{{VENV_PYTHON}}" -m docdicer check-tree PROJECT_DOCS NEW_MCP_CLI_DESIGN NEW_MCP_CLI_PLAN
 
-[doc("run the dicer test suite: every case under tools/dicer/testdata must reproduce its expected files and output")]
-test-dicer:
-  @python3 -m unittest discover -s tools/dicer -p 'test_*.py'
+[private]
+_docdicer: _venv
+  @[[ -d tools/docdicer ]] || git -C tools clone git@github.com:benn-herrera/docdicer
 
 # NOT the tool for adding one dependency (see add-dependency) — this is
 # deliberate whole-graph churn.
@@ -609,3 +615,13 @@ integration-test: build
 # Remove the compiled binary.
 clean:
     rm -f {{ BINDIR }}/personant
+
+[private]
+_venv:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [[ ! -x "{{VENV_PYTHON}}" ]]; then
+    python3 -m venv "{{VENV}}"
+    "{{VENV_PYTHON}}" -m pip install pip --upgrade
+    "{{VENV_PYTHON}}" -m pip install git+https://github.com/benn-herrera/docdicer
+  fi
