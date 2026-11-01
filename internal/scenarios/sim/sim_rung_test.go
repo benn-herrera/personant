@@ -267,6 +267,7 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 			h.Metrics.Record(scenarios.MetricMorningInitDurationMs, float64(res.MorningInitDuration.Microseconds())/1000.0)
 			h.Metrics.Record(scenarios.MetricDayCommitBytes, float64(res.DayCommitBytes))
 			h.Metrics.Record(scenarios.MetricDailyLooseObjects, float64(res.DailyLooseObjects))
+			h.Metrics.Record(scenarios.MetricDailyIndexEntries, float64(res.DailyIndexEntries))
 		}
 		daily.onDayClose(h, day, simDate)
 	}

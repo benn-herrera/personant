@@ -156,6 +156,9 @@ func (a *FileAdapter) runBarrier(ctx context.Context, day int, res *memops.DayBa
 	if n, lerr := autogit.LooseObjectCount(a.paths, autogit.Daily); lerr == nil {
 		res.DailyLooseObjects = n
 	}
+	if n, ierr := autogit.IndexEntryCount(a.paths, autogit.Daily); ierr == nil {
+		res.DailyIndexEntries = n
+	}
 	// B0 — the marker owns the WHOLE sequence including B1's batch (F4).
 	if err := store.WriteMarker(a.paths, store.Marker{Op: store.OpBarrier, Day: day}); err != nil {
 		return fmt.Errorf("fileadapter: day barrier: marker: %w", err)

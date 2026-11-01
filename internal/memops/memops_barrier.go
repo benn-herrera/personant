@@ -33,6 +33,9 @@ type DayBarrierResult struct {
 	// just before the barrier nuked the day's accrual — the §6.2
 	// re-baseline-knob observable (daily_loose_object_count gauge).
 	DailyLooseObjects int
+	// DailyIndexEntries is the daily DB's index entry count (tracked
+	// files) sampled at the same point as DailyLooseObjects.
+	DailyIndexEntries int
 }
 
 // Archival cardinality-pressure watermarks (§3.8). When the total spine

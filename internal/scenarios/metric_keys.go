@@ -34,13 +34,18 @@ const (
 	// MetricDayCommitBytes is the primary object-store growth per day;
 	// MetricDailyLooseObjects samples the daily DB's loose-object count
 	// at each day close (the §6.2 re-baseline-knob observable), taken
-	// BEFORE the barrier nukes the day's accrual.
+	// BEFORE the barrier nukes the day's accrual. MetricDailyIndexEntries
+	// samples the daily DB's index entry count at the same point.
 	MetricBarrierCount          = "barrier_count"
 	MetricBarrierDurationMs     = "barrier_duration_ms"
 	MetricDayCommitDurationMs   = "day_commit_duration_ms"
 	MetricMorningInitDurationMs = "morning_init_duration_ms"
 	MetricDayCommitBytes        = "day_commit_bytes"
 	MetricDailyLooseObjects     = "daily_loose_object_count"
+	MetricDailyIndexEntries     = "daily_index_entries"
+
+	// MetricTurnCommitMs is the per-turn CommitTurn latency histogram.
+	MetricTurnCommitMs = "turn_commit_ms"
 
 	// Sleep-cycle keys (#108). MetricSleepCycles counts sleep/consolidation
 	// passes (one per day-off); the GitDirBytes trio are the substrate .git

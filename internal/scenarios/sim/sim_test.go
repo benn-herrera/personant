@@ -1793,6 +1793,14 @@ func TestDailyStatsSeries(t *testing.T) {
 	assertFloatEq(t, "day1 delta p50", d1.DayDelta.LatencyP50ThisDay, d1.RunToDate.LatencyP50)
 	assertFloatEq(t, "day1 delta p99", d1.DayDelta.LatencyP99ThisDay, d1.RunToDate.LatencyP99)
 	assertFloatEq(t, "day1 delta mean", d1.DayDelta.PerTurnMsMeanThisDay, d1.RunToDate.PerTurnMsMean)
+
+	// (e) the substrate-cost fields: day 1 follows a sealed barrier.
+	if d1.DayDelta.TurnCommitMsMeanThisDay <= 0 {
+		t.Errorf("day 1 turn_commit_ms_mean_this_day = %v, want > 0", d1.DayDelta.TurnCommitMsMeanThisDay)
+	}
+	if d1.DayDelta.DailyIndexEntriesAtSeal <= 0 {
+		t.Errorf("day 1 daily_index_entries_at_seal = %v, want > 0", d1.DayDelta.DailyIndexEntriesAtSeal)
+	}
 }
 
 // fakeCosineRecaller is a minimal measure.Recaller that also satisfies

@@ -335,6 +335,21 @@ func LooseObjectCount(paths store.PersonantPaths, which Repo) (int, error) {
 	return count, nil
 }
 
+// IndexEntryCount returns the number of entries in the selected repo's
+// index — the tracked-file count that every per-turn staging and commit
+// walks. A missing index counts as zero.
+func IndexEntryCount(paths store.PersonantPaths, which Repo) (int, error) {
+	repo, err := openRepo(paths, which)
+	if err != nil {
+		return 0, fmt.Errorf("autogit.IndexEntryCount: open %s repo: %w", which, err)
+	}
+	idx, err := repo.Storer.Index()
+	if err != nil {
+		return 0, fmt.Errorf("autogit.IndexEntryCount: %w", err)
+	}
+	return len(idx.Entries), nil
+}
+
 // Checkout restores a specific file from a specific commit to the
 // working tree. Implemented via tree-walk + raw write of the blob,
 // not via worktree.Checkout (which is whole-tree-only) and not via

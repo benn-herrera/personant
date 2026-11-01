@@ -50,6 +50,7 @@ func TestSimBarrier2Day(t *testing.T) {
 		scenarios.MetricMorningInitDurationMs,
 		scenarios.MetricDayCommitBytes,
 		scenarios.MetricDailyLooseObjects,
+		scenarios.MetricDailyIndexEntries,
 	} {
 		if len(m.Histograms[key]) == 0 {
 			t.Errorf("gauge %s recorded no samples", key)

@@ -325,10 +325,8 @@ func stepExecTurn(t *testing.T, h *Harness, idx int, label string, step Step) (s
 	// Per-turn commit latency (#94 R3, the design's open cost question).
 	// The runtime measures its own CommitTurn wall-clock (TurnInfo); one
 	// sample per turn, mock and live alike — the commit is equally real on
-	// both paths. Harness-local key: written here, read from the metrics
-	// blob (no sim-side consumer yet), so per the registry discipline it
-	// stays out of metric_keys.go until a cross-seam reader exists.
-	h.Metrics.Record(metricTurnCommitMs, float64(info.CommitDuration.Microseconds())/1000.0)
+	// both paths. Cross-seam key: the sim's daily series reads it.
+	h.Metrics.Record(MetricTurnCommitMs, float64(info.CommitDuration.Microseconds())/1000.0)
 	// The other half of the measured per-turn crash-stability overhead:
 	// the two fsynced journal appends (prompt + response), summed by the
 	// runtime into TurnInfo.JournalDuration. Same one-sample-per-turn
@@ -353,12 +351,13 @@ func stepExecTurn(t *testing.T, h *Harness, idx int, label string, step Step) (s
 		h.Metrics.Record(MetricMorningInitDurationMs, float64(b.MorningInitDuration.Microseconds())/1000.0)
 		h.Metrics.Record(MetricDayCommitBytes, float64(b.DayCommitBytes))
 		h.Metrics.Record(MetricDailyLooseObjects, float64(b.DailyLooseObjects))
+		h.Metrics.Record(MetricDailyIndexEntries, float64(b.DailyIndexEntries))
 	}
 	return body, elapsed
 }
 
-// Harness-local crash-stability cost keys (#94 R3). turn_commit_ms is the
-// per-turn CommitTurn latency histogram and turn_journal_ms its journal
+// Harness-local crash-stability cost keys (#94 R3). turn_commit_ms (in the
+// registry) is the per-turn CommitTurn latency histogram and turn_journal_ms its journal
 // counterpart (the turn's two fsynced appends); turn_gc_ms is the
 // post-commit pressure-gc cost (MaybeGC), split out of turn_commit_ms so a
 // repack no longer contaminates the commit gauge; git_loose_objects_{pre,post}_gc
@@ -366,7 +365,6 @@ func stepExecTurn(t *testing.T, h *Harness, idx int, label string, step Step) (s
 // metric (per-turn commits make loose-object growth ~turns/day, and the
 // sleep gc is the stated hard dependency that bounds it).
 const (
-	metricTurnCommitMs         = "turn_commit_ms"
 	metricTurnJournalMs        = "turn_journal_ms"
 	metricTurnGCMs             = "turn_gc_ms"
 	metricGitLooseObjectsPre   = "git_loose_objects_pre_gc"

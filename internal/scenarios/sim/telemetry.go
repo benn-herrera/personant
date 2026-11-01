@@ -229,6 +229,12 @@ type dailyDelta struct {
 	LatencyP50ThisDay    float64 `json:"latency_p50_this_day"`
 	LatencyP95ThisDay    float64 `json:"latency_p95_this_day"`
 	LatencyP99ThisDay    float64 `json:"latency_p99_this_day"`
+	// TurnCommitMsMeanThisDay is the mean of the turn_commit_ms samples
+	// recorded since the previous record.
+	TurnCommitMsMeanThisDay float64 `json:"turn_commit_ms_mean_this_day"`
+	// DailyIndexEntriesAtSeal is the last daily_index_entries sample recorded
+	// since the previous record; 0 when no barrier sealed in that span.
+	DailyIndexEntriesAtSeal float64 `json:"daily_index_entries_at_seal"`
 }
 
 // dailySnapshotWriter appends one run-to-date stats record to daily.jsonl per
@@ -254,6 +260,10 @@ type dailySnapshotWriter struct {
 	day         int
 	prevTurns   int64
 	prevHistLen int
+	// prevCommitLen and prevIndexLen are the turn_commit_ms and
+	// daily_index_entries histogram lengths at the prior record.
+	prevCommitLen int
+	prevIndexLen  int
 }
 
 func newDailySnapshotWriter(gen *generator) *dailySnapshotWriter {
@@ -310,6 +320,14 @@ func (w *dailySnapshotWriter) appendRecord(h *scenarios.Harness, simDate time.Ti
 	}
 	dayHist := durations[lo:currHistLen]
 
+	commits := h.Metrics.HistogramSnapshot(scenarios.MetricTurnCommitMs)
+	indexEntries := h.Metrics.HistogramSnapshot(scenarios.MetricDailyIndexEntries)
+	dayCommits := commits[min(w.prevCommitLen, len(commits)):]
+	var indexAtSeal float64
+	if newIdx := indexEntries[min(w.prevIndexLen, len(indexEntries)):]; len(newIdx) > 0 {
+		indexAtSeal = newIdx[len(newIdx)-1]
+	}
+
 	// Run-to-date sim-derived gauges from the SAME pure function the end-of-run
 	// summary uses — fed the run-to-date liveThreads + percentiles. At finalize
 	// these are the exact end-of-run values (the #120 correctness invariant).
@@ -362,6 +380,9 @@ func (w *dailySnapshotWriter) appendRecord(h *scenarios.Harness, simDate time.Ti
 			LatencyP50ThisDay:    percentile(dayHist, 0.50),
 			LatencyP95ThisDay:    percentile(dayHist, 0.95),
 			LatencyP99ThisDay:    percentile(dayHist, 0.99),
+
+			TurnCommitMsMeanThisDay: mean(dayCommits),
+			DailyIndexEntriesAtSeal: indexAtSeal,
 		},
 	}
 
@@ -385,6 +406,8 @@ func (w *dailySnapshotWriter) appendRecord(h *scenarios.Harness, simDate time.Ti
 
 	w.prevTurns = turns
 	w.prevHistLen = currHistLen
+	w.prevCommitLen = len(commits)
+	w.prevIndexLen = len(indexEntries)
 }
 
 // cosineOpsReporter is the recaller surface the MEASURED recall_query_cosine_ops
