@@ -25,8 +25,8 @@ no requests, no venv. Polite by construction — descriptive User-Agent,
 inter-request delay, redirect following, missing-page skip.
 
 Usage:
-    python3 test/tools/wikipedia_corpus.py            # full fetch
-    python3 test/tools/wikipedia_corpus.py --limit 5  # smoke test
+    python3 tools/test/wikipedia_corpus.py            # full fetch
+    python3 tools/test/wikipedia_corpus.py --limit 5  # smoke test
 """
 
 import argparse
@@ -234,7 +234,7 @@ def main(argv):
 
     doc = {
         "_comment": "MINED SNAPSHOT - Wikipedia extracts fetched by "
-        "test/tools/wikipedia_corpus.py. Committed deliberately: the "
+        "tools/test/wikipedia_corpus.py. Committed deliberately: the "
         "source is non-reproducible (articles change). Refresh by "
         "editing wikipedia_corpus_articles.txt and re-running.",
         "source": "en.wikipedia.org",

@@ -38,7 +38,7 @@ import random
 import re
 import sys
 
-# This script lives at <repo>/test/tools/; the recall-madlibs data
+# This script lives at <repo>/tools/test/; the recall-madlibs data
 # (hand-crafted templates, derived queries.json) lives in the Go test
 # tree so the scenarios harness can consume it.
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent

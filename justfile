@@ -142,8 +142,8 @@ add-dependency mod:
 #
 # Regenerate derived recall-fidelity query fixtures from committed templates.
 recall-madlibs:
-    python3 test/tools/madlibs_generate.py
-    python3 test/tools/madlibs_generate.py \
+    python3 tools/test/madlibs_generate.py
+    python3 tools/test/madlibs_generate.py \
       --templates-dir {{ RECALL_MADLIBS_DATA }}/corpus_templates \
       --out {{ RECALL_MADLIBS_DATA }}/corpus_queries.json
 
@@ -155,7 +155,7 @@ recall-corpus-sweep-data:
     #!/usr/bin/env bash
     set -euo pipefail
     for m in 1 2 3 4; do
-      python3 test/tools/madlibs_generate.py \
+      python3 tools/test/madlibs_generate.py \
         --templates-dir {{ RECALL_MADLIBS_DATA }}/corpus_templates \
         --synonym-depth "${m}" \
         --out {{ RECALL_MADLIBS_DATA }}/corpus_queries_m${m}.json
@@ -166,7 +166,7 @@ recall-corpus-sweep-data:
 #
 # Embed the corpus texts and query strings. NETWORKED — needs `reaper` reachable.
 recall-embed-data: recall-corpus-sweep-data
-    python3 test/tools/embed_corpus.py
+    python3 tools/test/embed_corpus.py
 
 # The tests ALWAYS COMPILE (part of the normal `just test` compile);
 # EXECUTION is opt-in via PERSONANT_CORPUS_TESTS (without it they skip, so
@@ -184,7 +184,7 @@ recall-corpus-test: build recall-madlibs recall-corpus-sweep-data
 #
 # Refresh/extend the recall-fidelity Wikipedia corpus; commit the result.
 recall-corpus-fetch:
-    python3 test/tools/wikipedia_corpus.py
+    python3 tools/test/wikipedia_corpus.py
 
 # Runs the opt-in SLOW sim rungs gated by testsupport.RequireSlowSim
 # (PERSONANT_SLOW_SIM_TESTS): the 14d arm of
@@ -400,7 +400,7 @@ test-race: build recall-madlibs
 #     file there (non-test .go, testdata, embedded files) keeps the closure.
 #   - changed path outside cmd/internal -> selects nothing, but is LISTED
 #     (.md as ignored, anything else as not a selector: justfile,
-#     test/config.toml, test/tools/*, .gitignore). Untracked files outside
+#     test/config.toml, tools/test/*, .gitignore). Untracked files outside
 #     cmd/internal are not scanned.
 # `just LIST=1 test-changed` prints the selected set without running it.
 #
