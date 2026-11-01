@@ -448,6 +448,27 @@ test-changed: build fmt-check recall-madlibs
 bench pkg='./internal/memops/fileadapter' bench_re='BenchmarkProposeRecall': build
     go test {{ pkg }} -run '^$' -bench '{{ bench_re }}' -benchmem --count=1
 
+# PROFILE_DIR receives every *-profile recipe's output. The test binary is
+# written beside the profile (-o) so go test leaves no <pkg>.test in the
+# repo root.
+PROFILE_DIR := env_var_or_default("PROFILE_DIR", BINDIR + "/profiles")
+
+#   just bench-profile ./internal/autogit 'BenchmarkTurnCommit/addpaths/N=16000$' commit16k 10s
+#   just pprof -top bin/profiles/commit16k.cpu.pprof
+#
+# CPU-profile benchmarks into PROFILE_DIR/<name>.cpu.pprof.
+bench-profile pkg bench_re name='bench' benchtime='1s': build
+    @mkdir -p {{ PROFILE_DIR }}
+    go test {{ pkg }} -run '^$' -bench '{{ bench_re }}' -benchmem --count=1 -benchtime {{ benchtime }} \
+      -o {{ PROFILE_DIR }}/{{ name }}.test -cpuprofile {{ PROFILE_DIR }}/{{ name }}.cpu.pprof
+
+# Arguments pass through to `go tool pprof` unchanged (quoting preserved).
+#
+# Report on a CPU profile.
+[positional-arguments]
+pprof +args:
+    go tool pprof "$@"
+
 # -coverpkg instruments every package for every test binary, so the number
 # reflects how much of the codebase the WHOLE suite exercises, not just each
 # package's own tests. The final `total:` line is the headline; `go tool
@@ -491,6 +512,21 @@ LIVE_INFERENCE := env_var_or_default("LIVE_INFERENCE", "false")
 sim: build recall-madlibs
     {{ SIM_WRAP }} go test ./internal/scenarios/sim/ -run TestSim -count=1 -v -timeout 0 \
       -sim.duration={{ DURATION }} -sim.live-embedding={{ LIVE_EMBEDDING }} -sim.live-inference={{ LIVE_INFERENCE }}
+
+# A CPU profile covers the whole run. To see one late span alone, profile
+# two durations and diff them: the mock run is deterministic per seed, so
+# the shorter run is a prefix of the longer one.
+#   just DURATION=8d sim-profile && just DURATION=9d sim-profile
+#   just pprof -top -diff_base=bin/profiles/sim-8d.cpu.pprof bin/profiles/sim-9d.cpu.pprof
+#
+# Runs TestSim alone (`sim`'s -run TestSim also matches the TestSim_* tests).
+#
+# CPU-profile the mock simulation (`sim` at DURATION, live toggles off).
+sim-profile: build recall-madlibs
+    @mkdir -p {{ PROFILE_DIR }}
+    {{ SIM_WRAP }} go test ./internal/scenarios/sim/ -run '^TestSim$' -count=1 -v -timeout 0 \
+      -sim.duration={{ DURATION }} -sim.live-embedding=false -sim.live-inference=false \
+      -o {{ PROFILE_DIR }}/sim-{{ DURATION }}.test -cpuprofile {{ PROFILE_DIR }}/sim-{{ DURATION }}.cpu.pprof
 
 B1X4_COMPLETENESS_DURATION := env_var_or_default("B1X4_COMPLETENESS_DURATION", "4d")
 
