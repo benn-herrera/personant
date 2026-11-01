@@ -26,7 +26,7 @@ GOPKGS := "./cmd/... ./internal/..."
 # go.mod keeps gofmt output identical across machines/agents.
 GOSRCDIRS := "cmd internal"
 
-# GOTESTCOUNT is the test-cache control knob for the ROUTINE gates (`test`,
+# GOTESTCOUNT is the test-cache control knob for the routine runs (`test`,
 # `test-be`, `test-fe`, `test-changed`). EMPTY by default — Go's test cache
 # stays ON, the cheapest form of "test what changed": the cache key is
 # content-addressed over the package's source, its transitive dependencies,
@@ -75,7 +75,7 @@ build:
 fmt:
     gofmt -w {{ GOSRCDIRS }}
 
-# Wired into `test` so drift fails the checkpoint gate; runs in
+# Wired into `test` so drift fails `test` and `test-changed`; runs in
 # milliseconds, so it fronts the slow `go test` run (fail fast).
 #
 # Read-only gate: fails if any file isn't canonically formatted.
@@ -198,26 +198,19 @@ _test-body count=GOTESTCOUNT: build fmt-check recall-madlibs
     go vet {{ GOPKGS }}
     go test {{ GOPKGS }} {{ count }} -timeout {{ GOTESTTIMEOUT }}
 
-# CHECKPOINT GATE (substrate): fmt-check (drift fails the gate) + go vet +
-# go test over {{GOPKGS}} (full suite, incl. multi-day sim rungs). Go's test
-# cache is ON by default (GOTESTCOUNT) — an unchanged package returns
-# instantly. Run ONCE before a commit, not between edits; see CONVENTIONS.md
-# "Two gates."
+# fmt-check (drift fails) + go vet + go test over {{GOPKGS}} (full suite,
+# incl. multi-day sim rungs). Go's test cache is ON by default (GOTESTCOUNT)
+# — Go's test cache scopes the run, so unchanged packages return instantly.
+# CHECKPOINT GATE: run once before a commit, not between edits.
 #
-# CHECKPOINT GATE (substrate): full go vet + go test.
+# CHECKPOINT GATE: fmt-check + go vet + go test over every package (cached).
 test: _test-body
 
-# Run before a push, when a cached PASS is itself under suspicion, or after
-# a toolchain/dependency change.
+# Run when a cached PASS is itself under suspicion, or after a toolchain/dependency change.
 #
 # `test` with the test cache DEFEATED — the same full suite, forced clean.
 test-nocache: (_test-body "--count=1")
 
-# There is no back-end fast path to have: cmd/ and internal/chat/ are a
-# dependency LEAF (nothing imports them) so a front-end change can use the
-# cheap scoped gate, but the front end imports the substrate, so a
-# substrate change must run everything.
-#
 # Alias of `test`, named for symmetry with test-fe.
 test-be: test
 
@@ -275,17 +268,17 @@ fe-scope-check:
       for f in ${outside}; do echo "  ${f}"; done
       echo "front-end scope is: {{ FE_SCOPE_PREFIXES }}"
       echo "the front end IMPORTS the substrate, so a substrate change is not covered"
-      echo "by the fast target. run 'just test' (== 'just test-be', the full suite)."
+      echo "by the fast target. run 'just test' (the checkpoint gate)."
       exit 1
     fi
 
-# CHECKPOINT GATE (front-end-only change): the scoped ~15s counterpart to
-# `test`, safe by STRUCTURE (fe-scope-check mechanically refuses anything
+# DIAGNOSTIC (not a gate): scoped go vet + go test over FE_TESTPKGS, ~15s. The checkpoint gate is test.
+# Safe by STRUCTURE (fe-scope-check mechanically refuses anything
 # outside FE_SCOPE_PREFIXES), not by judgment. Mirrors test's build +
 # fmt-check prerequisites but NOT recall-madlibs — no package in
 # FE_TESTPKGS reads the generated mad-libs query set.
 #
-# CHECKPOINT GATE (front-end-only change): scoped go vet + go test, ~15s.
+# DIAGNOSTIC (not a gate): scoped go vet + go test over FE_TESTPKGS, ~15s. The checkpoint gate is test.
 test-fe: build fmt-check fe-scope-check
     go vet {{ FE_TESTPKGS }}
     go test {{ FE_TESTPKGS }} {{ GOTESTCOUNT }}
@@ -294,7 +287,7 @@ test-fe: build fmt-check fe-scope-check
 #   just test-run ./internal/scenarios TestDayOffThroughHarness
 #   just test-run ./internal/recall/scoring TestScanChunks
 #
-# EDIT GATE — run only the touched test(s) instead of the full checkpoint suite.
+# EDIT GATE — run only the touched test(s) instead of the checkpoint gate.
 test-run pkg run='.': build recall-madlibs
     go test {{ pkg }} -run '{{ run }}' -count=1 -timeout {{ GOTESTTIMEOUT }}
 
@@ -349,12 +342,11 @@ LIST := env_var_or_default("LIST", "")
 test-race: build recall-madlibs
     go test -race {{ RACEPKGS }} -count=1 -timeout 30m
 
-# DIAGNOSTIC/convenience, same category as test-race — NOT a gate and not a
-# third scoping rule; a green test-changed does not satisfy the checkpoint
-# gate (front-end-only -> test-fe; anything else -> test, unchanged). What
-# it buys is fast ITERATION: only the packages the working tree could have
-# affected, so a leaf-package change doesn't drag the 1625s sim package
-# along.
+# DIAGNOSTIC (not a gate): the gate steps of `test` (build, fmt-check,
+# recall-madlibs, go vet, go test) over only the packages the working tree
+# could have affected, so a leaf-package change doesn't drag the 1625s sim
+# package along. For fast iteration; a green test-changed does NOT satisfy
+# the checkpoint gate (`test`).
 #
 # Selection: (1) changed paths = `git diff --name-only HEAD` (staged +
 # unstaged + deletions) plus untracked files under GOSRCDIRS; (2) path ->
@@ -362,25 +354,31 @@ test-race: build recall-madlibs
 # testdata edit resolves to its package, matching how go's test cache
 # hashes testdata); (3) reverse-dependency closure via `go list -test`
 # (this is what catches a dependent reached only through _test.go imports);
-# (4) `go test` over the closure, cached like `test`.
+# (4) `go vet` then `go test` over the selection, cached like `test`.
 #
 # Deliberate handling of the awkward inputs:
-#   - clean tree -> selects nothing, says so, exits 0 (not an error, not
-#     "run everything").
+#   - clean tree -> selects nothing, says so, exits 0 after fmt-check (not an
+#     error, not "run everything").
 #   - go.mod/go.sum changed -> selects EVERY package (a dependency-version
 #     change can reach anything).
-#   - anything outside cmd/internal (justfile, docs, test/tools/*) -> not a
-#     selector, but LISTED so the omission is visible.
+#   - package directory whose changed files are all _test.go (added,
+#     modified or deleted) -> selects only that package, no closure:
+#     _test.go files compile into no other package. Any other changed
+#     file there (non-test .go, testdata, embedded files) keeps the closure.
+#   - changed path outside cmd/internal -> selects nothing, but is LISTED
+#     (.md as ignored, anything else as not a selector: justfile,
+#     test/config.toml, test/tools/*, .gitignore). Untracked files outside
+#     cmd/internal are not scanned.
 # `just LIST=1 test-changed` prints the selected set without running it.
 #
-# DIAGNOSTIC (not a gate): run only the packages the working tree could affect.
-test-changed: build recall-madlibs
+# DIAGNOSTIC (not a gate): gate steps over only the packages the working tree could affect.
+test-changed: build fmt-check recall-madlibs
     #!/usr/bin/env bash
     set -uo pipefail
     changed="$( { git diff --name-only HEAD; \
                   git ls-files --others --exclude-standard -- {{ GOSRCDIRS }}; } \
                 | sort -u )"
-    forcefull=""; dirs=""; outside=""
+    forcefull=""; dirs=""; tdirs=""; outside=""
     for f in ${changed}; do
       case "${f}" in
         go.mod|go.sum) forcefull=1 ;;
@@ -389,32 +387,46 @@ test-changed: build recall-madlibs
           while [[ -n "${d}" ]] && ! ls "${d}"/*.go >/dev/null 2>&1; do
             case "${d}" in */*) d="${d%/*}" ;; *) d="" ;; esac
           done
-          [[ -z "${d}" ]] || dirs="${dirs} ./${d}"
+          [[ -n "${d}" ]] || continue
+          # test-only only when the _test.go file sits directly in the package dir
+          if [[ "${f}" == *_test.go && "${f%/*}" == "${d}" ]]; then
+            tdirs="${tdirs} ./${d}"
+          else
+            dirs="${dirs} ./${d}"
+          fi
           ;;
-        *) outside="${outside} ${f}" ;;
+        *.md) outside="${outside}"$'\n'"  ${f} (ignored)" ;;
+        *) outside="${outside}"$'\n'"  ${f} (not a selector)" ;;
       esac
     done
+    # a directory with any non-test change keeps the closure
+    tonly=""
+    for t in ${tdirs}; do
+      case " ${dirs} " in *" ${t} "*) ;; *) tonly="${tonly} ${t}" ;; esac
+    done
     if [[ -n "${outside}" ]]; then
-      echo "test-changed: changed paths outside {{ GOSRCDIRS }} — not selectors:"
-      for f in ${outside}; do echo "  ${f}"; done
+      echo "test-changed: changed paths outside {{ GOSRCDIRS }}:${outside}"
     fi
     if [[ -n "${forcefull}" ]]; then
       echo "test-changed: go.mod/go.sum changed — selecting every package."
       sel="$(go list {{ GOPKGS }} | sort -u)"
-    elif [[ -z "${dirs}" ]]; then
-      sel=""
     else
-      sel="$(go list -test -f '{{ "{{" }}.ImportPath{{ "}}" }}{{ "{{" }}range .Deps{{ "}}" }} {{ "{{" }}.{{ "}}" }}{{ "{{" }}end{{ "}}" }}' {{ GOPKGS }} \
-             | awk -v ch="$(go list -e ${dirs} | sort -u | tr '\n' ' ')" \
-                   -v all="$(go list {{ GOPKGS }} | tr '\n' ' ')" '
-                 BEGIN { n=split(ch, A, " "); for (i=1;i<=n;i++) if (A[i]!="") CH[A[i]]=1;
-                         m=split(all, B, " "); for (i=1;i<=m;i++) if (B[i]!="") ALL[B[i]]=1; }
-                 { base=$1; sub(/\.test$/, "", base); sub(/_test$/, "", base);
-                   hit=(base in CH);
-                   for (i=2;i<=NF;i++) if ($i in CH) hit=1;
-                   if (hit && (base in ALL)) SEL[base]=1; }
-                 END { for (k in SEL) print k }' \
-             | sort -u)"
+      sel=""
+      if [[ -n "${dirs}" ]]; then
+        sel="$(go list -test -f '{{ "{{" }}.ImportPath{{ "}}" }}{{ "{{" }}range .Deps{{ "}}" }} {{ "{{" }}.{{ "}}" }}{{ "{{" }}end{{ "}}" }}' {{ GOPKGS }} \
+               | awk -v ch="$(go list -e ${dirs} | sort -u | tr '\n' ' ')" \
+                     -v all="$(go list {{ GOPKGS }} | tr '\n' ' ')" '
+                   BEGIN { n=split(ch, A, " "); for (i=1;i<=n;i++) if (A[i]!="") CH[A[i]]=1;
+                           m=split(all, B, " "); for (i=1;i<=m;i++) if (B[i]!="") ALL[B[i]]=1; }
+                   { base=$1; sub(/\.test$/, "", base); sub(/_test$/, "", base);
+                     hit=(base in CH);
+                     for (i=2;i<=NF;i++) if ($i in CH) hit=1;
+                     if (hit && (base in ALL)) SEL[base]=1; }
+                   END { for (k in SEL) print k }')"
+      fi
+      if [[ -n "${tonly}" ]]; then
+        sel="$( { printf '%s\n' "${sel}"; go list -e ${tonly}; } | sed '/^$/d' | sort -u)"
+      fi
     fi
     if [[ -z "${sel}" ]]; then
       echo "test-changed: no changed Go packages — nothing to run."
@@ -423,6 +435,7 @@ test-changed: build recall-madlibs
     echo "test-changed: selected $(echo ${sel} | wc -w | tr -d ' ') package(s):"
     for p in ${sel}; do echo "  ${p}"; done
     if [[ -n "{{ LIST }}" ]]; then echo "test-changed: LIST=1 — not running."; exit 0; fi
+    go vet ${sel} || exit 1
     go test ${sel} {{ GOTESTCOUNT }} -timeout {{ GOTESTTIMEOUT }}
 
 # Defaults hit the recall hot path the #93 frontmatter cache accelerates —
@@ -439,7 +452,9 @@ bench pkg='./internal/memops/fileadapter' bench_re='BenchmarkProposeRecall': bui
 # reflects how much of the codebase the WHOLE suite exercises, not just each
 # package's own tests. The final `total:` line is the headline; `go tool
 # cover -html=cover.out` for a line-by-line view. cover.out is .gitignore'd.
-# Build-tagged tests (integration, sim rungs past 1d) are not included.
+# Env-gated tests (PERSONANT_LIVE_TESTS, PERSONANT_CORPUS_TESTS,
+# PERSONANT_SLOW_SIM_TESTS) skip unless set in the caller's environment, and
+# the sim runs at its default duration, so those paths are not counted.
 #
 # Aggregate test coverage report across all packages.
 cover: build recall-madlibs

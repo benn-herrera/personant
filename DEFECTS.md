@@ -55,14 +55,6 @@ recall-query timings.
 
 ---
 
-## D3. `TestLoadConfigFixture` expects a stale model name
-
-**Fact.** `internal/store/config_test.go` `TestLoadConfigFixture` expects `Chat.DefaultModel ==
-"dummy-router/gemma-main"`; the committed fixture `test/config.toml` sets `dummy-router/gemma-26B-A4B-it`
-(changed in `f97a5e3`, "model name normalization"). `just test` fails on it. The test is the stale side.
-
----
-
 ## D4. The scenario harness never runs the startup reconcile
 
 **Fact.** `newHarness` (`internal/scenarios/harness_setup.go`) does not run the startup reconcile production

@@ -17,8 +17,8 @@ func TestLoadConfigFixture(t *testing.T) {
 	if cfg.Embedding.Model != "dummy-embedding/dummy-creator/dummy-emb-model" {
 		t.Errorf("Embedding.Model = %q, want dummy-embedding/dummy-creator/dummy-emb-model", cfg.Embedding.Model)
 	}
-	if cfg.Chat.DefaultModel != "dummy-router/gemma-main" {
-		t.Errorf("Chat.DefaultModel = %q, want dummy-router/gemma-main", cfg.Chat.DefaultModel)
+	if cfg.Chat.DefaultModel != "dummy-router/gemma-26B-A4B-it" {
+		t.Errorf("Chat.DefaultModel = %q, want dummy-router/gemma-26B-A4B-it", cfg.Chat.DefaultModel)
 	}
 	// [search] names a pool entry and carries no key of its own — the
 	// backend's apiKeyFile lives on its providers.toml entry, which is

@@ -1,372 +1,191 @@
 # README – Personant
 
-A single-user, single-agent runtime that gives an AI assistant persistent working memory across
-arbitrary projects. The agent has one continuous career: unified memory, no session boundaries, no
-compaction-driven information loss, and cross-project recognition.
+> **Work in progress.** Personant is being rebuilt to run under opencode. The opencode plugin and
+> memory service are not built yet, and parts of this document describe the target, not the
+> current tree. Progress: [`ROADMAP.md`](ROADMAP.md) Part A.
+
+Personant is a context-management and long-lived memory system designed to run under unmodified
+[opencode](https://opencode.ai) as a server plugin plus a Go memory service. It owns what enters
+every model request, so the agent keeps one continuous career across sessions and projects.
+Purpose: [`THESIS.md`](THESIS.md); operating model: [`SPEC.md`](SPEC.md) §1.
 
 ## Developer
 <https://keyoxide.org/wkd/benn@bennherrera.dev>
 
 ## Requirements and Supported Platforms
 
-- Go 1.26.1+
+- Go 1.26.1+ (`go.mod`)
 - macOS or Linux
-- No host runtime dependencies beyond Go — ships as a single binary
+- Development only: Python 3, standard library only. `just recall-madlibs` runs it, and every
+  test and sim recipe depends on that recipe. Running Personant does not need Python.
+- To run the plugin route: opencode at the pinned release. The plugin and the production service are
+  not built yet, so the pin is not yet stated anywhere; see
+  [`ARCHITECTURE.md`](ARCHITECTURE.md) "Plugin route".
 
 ## Quick Start Guide
+
+**The plugin route is under construction.** There is no plugin to install and no service to start
+under opencode yet. What is built and what remains: [`ROADMAP.md`](ROADMAP.md) Part A; the design:
+[`ARCHITECTURE.md`](ARCHITECTURE.md) "Plugin route".
+
+What the current tree builds and runs:
 
 ```sh
 git clone <repo>
 cd personant
-just build          # produces bin/personant
-just test           # go vet + go test (compiles everything; skips live tests)
-./bin/personant     # defaults to chat REPL
+just build          # compiles every package and produces bin/personant
+./bin/personant version
 ```
 
-On first run, `bin/personant` initializes `~/.personant/` as a git repository. Override the home
-directory with `$PERSONANT_HOME`.
+`bin/personant` carries the memory-store commands (`init`, `index`, `verify`, `archive`, `version`;
+[`SPEC.md`](SPEC.md) §4.1), plus the self-built chat REPL and its `chat`, `ping` and `models` verbs
+([`ARCHITECTURE.md`](ARCHITECTURE.md) "Superseded code"). A bare `./bin/personant` still starts the
+REPL. Memory initializes at `~/.personant/` as a git repository; override with `$PERSONANT_HOME` or
+`--home`.
 
-## Using the Chat REPL
+## How an opencode Session Relates to Memory
 
-`bin/personant` (equivalently `personant chat`) opens an interactive REPL. Type a message and press
-Enter to take a turn; the assistant streams its reply. Work is organized as **projects** — one
-active at a time — each holding **topics**, the conversation strands the runtime tracks, engages and
-closes. A topic is stored as a *thread* (`thr_N`), which is the term the rest of this document, the
-spec and the event log use; the id is what you type back at `/back-to` and friends. Lines beginning
-with `/` are commands:
+An opencode session is a window into one continuous memory, not a container for it. Contract and
+open items: [`SPEC.md`](SPEC.md) §1.1.
 
-| Command | Effect |
-|---|---|
-| `/help` | list commands |
-| `/topic <name>` | start a new topic and engage it |
-| `/topic rename <new-name>` | rename the active topic — its display name only; nothing the runtime matches on moves, and the old name stops resolving |
-| `/topics [all]` | list this project's topics, grouped and recency-sorted (`all` includes old closed ones) |
-| `/done [thr_id\|name]` | close the active (or named) topic |
-| `/closures` | review the closures queued for your ack (§3.5) |
-| `/pause [thr_id\|name]` | pause the active (or named) topic |
-| `/resume [thr_id\|name]` | resume a paused topic |
-| `/back-to <thr_id\|name>` | re-engage a topic into the working set — see `/topics` |
-| `/project` | print active project info |
-| `/project rename <new-name>` | rename the active project |
-| `/project switch <name-or-id>` | switch to a known project |
-| `/thinking [on\|off]` | show/hide the model's live reasoning (dimmed); bare form reports the state |
-| `/model [<model-id>\|<provider>/<model-id>]` | switch the session's model (and provider); bare form reports the active one. Session-scoped — `config.toml` is never rewritten |
-| `/stats` | session and spine statistics |
-| `/version` | version identity + this home's on-disk format |
-| `/terminal-setup` | set the hosting terminal up so Shift+Enter inserts a line break |
-| `/quit`, `/exit` | end the session |
+## Where Settings Live
 
-`/no-revisit` and `/cd-project` are recognized but stubbed for a later phase.
+opencode's configuration, Personant's own settings and the memory home: [`SPEC.md`](SPEC.md) §8.1,
+§8.2.2 and §2.1; [`ARCHITECTURE.md`](ARCHITECTURE.md) "Single spelunking location". The current
+code does not match them yet (ROADMAP A12).
 
-**Multi-line input.** Alt/Option+Enter inserts a line break with no setup at all; bare Enter submits
-the whole buffer. Shift+Enter additionally needs the terminal to send something distinguishable from
-Enter, which `/terminal-setup` arranges: it detects the terminal and prints the one-line recipe, or
-— for Zed, where the recipe is a file write — offers to install the keybinding into
-`~/.config/zed/keymap.json`. That is the only file personant ever writes outside `~/.personant`, so
-it asks first every time, backs the previous file up alongside, leaves an already-configured keymap
-untouched, and refuses rather than risk mangling a file it cannot edit byte-safely.
+## Chat REPL
 
-While a turn is working — before the first token, and again while it closes out — a one-line
-indicator names the phase the runtime is in (composing context, waiting on the model, searching
-memory, closing turn) with an elapsed counter, and advertises `esc to abort` while the turn can
-still be abandoned. It appears only after a couple of seconds, only on a real terminal, and it
-clears itself the instant the response starts arriving; a piped or redirected run gets no decoration
-at all.
-
-A thinking model's reasoning is **off by default and never stored**. `config.toml`'s `[chat]
-showThinking` sets the session default and `/thinking on|off` overrides it for the running session;
-when on, the reasoning stream is rendered live and dimmed as it arrives, closed off on its own line
-before the answer begins (on a terminal with no ANSI support it is bracketed `[thinking] …
-[/thinking]` instead). It is scratch, not an answer: it is never journaled, never feeds symbol
-extraction, and is never replayed to the model. A piped or redirected run emits none of it
-regardless of the setting.
-
-**Every tool call leaves a receipt.** When the model runs one of the web tools, a single dimmed line
-lands in your scrollback and stays there — `[tool] web.wikipedia q="general relativity" → ok, 4.1kB
-(0.4s)` — including when the call failed or refused to run, which is the case worth seeing. It is
-always on (not tied to `/thinking`), and like the reasoning display it appears only on a real
-terminal: a piped or redirected run emits none of it. The point is that you never have to ask the
-model whether it looked something up.
-
-Line editing and history are personant's own: emacs-style in-line editing (Ctrl-A/E/B/F, Ctrl-W/U/K,
-Home/End/Delete), Up/Down history recall, and long lines that wrap and stay editable across rows.
-History persists across sessions in `~/.personant/history` (deduplicated, capped at 1000 entries),
-multi-line entries included. A menu question is part of the read rather than printed before it, so
-it survives your first keystroke, and single-key answers take effect without Enter.
-
-**Multi-line prompts.** **Alt/Option+Enter** inserts a line break; **Enter** submits the whole
-thing, newlines intact. Home/End move within the line you are on; Ctrl-U still clears the whole
-draft. **Shift+Enter** also inserts a break, but only if your terminal can say that Shift was held —
-most terminals send the identical byte for Enter and Shift+Enter, and personant deliberately does
-not switch the terminal into an enhanced keyboard protocol to find out. One keybinding fixes it: in
-iTerm2 map Shift+Enter to **Send Escape Sequence** `[13;2u`; in Zed add `{"context": "Terminal",
-"bindings": {"shift-enter": ["terminal::SendText", "\u001b\r"]}}` to your keymap. Alt/Option+Enter
-needs no configuration anywhere (on macOS Terminal.app, enable *Use Option as Meta key*). SPEC
-§4.3.1 has the full contract.
-
-Two keys, two meanings. **Ctrl-C** clears the line you are typing — the session survives and the
-cleared text is not remembered. At an empty prompt the first press hints and a second consecutive
-press ends the session cleanly (silent; working set checkpointed, session-end logged); typing
-anything in between makes the next press a first press again. During a turn it abandons the turn and
-unwinds to that same clean shutdown with a one-line notice, and a second Ctrl-C during shutdown
-forces an immediate exit. Ctrl-D at an empty prompt ends the session too (with text, it deletes
-forward). Ctrl-Z suspends cleanly and `fg` brings you back to a working terminal, mid-turn included.
-**Esc retracts the turn in flight** and drops you back at the prompt with the session intact; at the
-prompt it does nothing. Esc means "that input was a mistake", not "stop generating" — so nothing
-from the abandoned turn is kept, including any response text already on screen (a `[cancelled …]`
-marker says so, since scrolled output cannot be erased). A retracted prompt does not enter memory;
-it comes back at the next prompt as an editable default (and in `↑` history), and re-submitting it
-is the only way it ever does. The next launch opens without a recovery banner, because an abort is
-an ordinary action rather than a crash. Esc is honoured up to the point a turn starts writing; after
-that the turn finishes. On a piped or redirected run nothing here changes.
-
-> The front end is a **dogfood-minimum** REPL: the interactive surface is deliberately small and has
-> not yet been hardened by direct human use.
+The self-built chat REPL (`internal/chat`, `internal/term`, `internal/shell`, `internal/tools`,
+`internal/tools/web`) remains in the tree until ROADMAP B1 retires it. It is not the product. Which
+of its memory commands return under opencode is open (U4).
 
 ## Build Targets
 
 ```sh
-just build                # compile bin/personant
-just test                 # go vet + go test ./... (standard gate; alias: test-be)
-just test-fe              # fast scoped gate for a front-end-only change (cmd/, chat/, version/);
-                          #   refuses if the diff touches the substrate — see CONVENTIONS.md "Two gates"
-just cover                # test coverage report across all packages
-just bench                # recall hot-path benchmarks (see justfile for pkg/bench_re knobs)
-just sim                  # acceptance simulation (see Sim Knobs below)
-just integration-test     # live reaper endpoint tests (opt-in; see below)
-just recall-corpus-test   # Wikipedia corpus recall-fidelity measurement (opt-in)
+just build                # compile every package, then bin/personant (edit gate, step 1)
+just test-run <pkg> [re]  # run only the touched test(s) (edit gate, step 2)
+just test                 # checkpoint gate: fmt-check + go vet + go test, cache-scoped
+just test-changed         # diagnostic: only the packages the working tree could affect
+just test-nocache         # `test` with the test cache defeated
+just test-fe              # diagnostic, not a gate: scoped run for a front-end change (U6)
+just test-race            # diagnostic: -race over the packages with concurrent code
+just fmt                  # gofmt -w over cmd/ and internal/
+just fmt-check            # fail on gofmt drift
+just cover                # coverage report across all packages
+just bench                # recall hot-path benchmarks (pkg and bench_re arguments)
+just sim                  # acceptance simulation (see Sim Knobs)
+just sim-completeness-rung  # live-embedder recall-completeness rung
+just sim-tokenceiling-rung  # live-inference whole-request token-ceiling rung
+just sim-shadow-slow-test # opt-in slow sim rungs
+just integration-test     # live reaper endpoint tests (opt-in)
 just recall-madlibs       # regenerate derived query fixtures from committed templates
+just recall-corpus-sweep-data  # synonym-depth query sets for the calibration sweep
+just recall-embed-data    # embed the corpus (networked; needs reaper)
+just recall-corpus-test   # Wikipedia corpus recall-fidelity measurement (opt-in)
+just recall-corpus-fetch  # refresh the committed Wikipedia corpus (networked, slow)
+just add-dependency <mod>@<ver>  # pin one vetted module
+just update-dependencies  # upgrade the whole module graph
+just agents               # install the agent set
 just clean                # remove bin/personant
 ```
 
-Run `just` (default recipe `info`) for the full, current recipe list with docstrings.
+`just` alone lists every recipe with its description.
+
+**Gates** ([`CONVENTIONS.md`](CONVENTIONS.md) "Two gates"):
+
+- **Edit gate:** `just build` plus `just test-run <pkg> <regexp>` for the touched tests.
+- **Checkpoint gate:** `just test`, the full suite, scoped by Go's test cache.
+- **Diagnostic:** `just test-changed` runs only the packages the working tree could affect;
+  `just LIST=1 test-changed` prints the selection without running it.
 
 ### Sim Knobs
 
-`just sim` runs `TestSim` in `internal/scenarios/sim/`. By default it is the **mock, deterministic
-acceptance gate**: symbolic-only recall with scripted mock responses.
-
-> **Recall-completeness is symbolic-only until the embedder-enabled rung is green (B1).** The
-> default `just sim` / `just test` gate runs with a nil embedder, so the §3.4 embedding fine tier
-> and its bounded lexical completeness floor (#123) do **not** execute there. The
-> recall-completeness claim (no dead zones) is proven for the embedding-flush-lag case only by the
-> **`just sim-completeness-rung`** rung below; until it is wired and green, treat that claim as
-> symbolic-only-validated.
+`just sim` runs `TestSim` in `internal/scenarios/sim/`. By default it is the mock, deterministic
+acceptance simulation: scripted mock responses and symbolic-only recall (nil embedder).
 
 ```sh
 just sim                                          # mock gate, default span (1w)
-just sim DURATION=1d                              # named span
-just sim DURATION=30d                             # bare-day form
-just sim DURATION=168h                            # Go duration form
-just sim LIVE_EMBEDDING=true                      # real §3.4 embedder (reaper required)
-just sim LIVE_INFERENCE=true DURATION=1d          # real inference, capped at 1 sim-day
-just sim LIVE_EMBEDDING=true LIVE_INFERENCE=true DURATION=1d
-just sim-completeness-rung                        # B1: §3.4 completeness floor (live embedder, several sim-days)
-just sim-tokenceiling-rung                        # X4: whole-request token ceiling (live inference, 1 sim-day)
+just DURATION=1d sim                              # named span
+just DURATION=30d sim                             # bare-day form
+just DURATION=168h sim                            # Go duration form
+just LIVE_EMBEDDING=true sim                      # real embedder (reaper required)
+just LIVE_INFERENCE=true DURATION=1d sim          # real inference, capped at 1 sim-day
+just LIVE_EMBEDDING=true LIVE_INFERENCE=true DURATION=1d sim
+just sim-completeness-rung                        # live embedder, several sim-days
+just sim-tokenceiling-rung                        # live inference, 1 sim-day
 ```
 
-**`DURATION`** accepts: named rungs `1d|1w`, bare-day form `<N>d` (e.g. `30d`, `120d`), or a Go
-duration (e.g. `168h`). Defaults to `1w` for mock runs.
+| Knob | Values | Effect |
+|---|---|---|
+| `DURATION` | `1d`, `1w`, `<N>d`, Go duration (`168h`) | simulated span; default `1w` |
+| `LIVE_EMBEDDING` | `true` / `false` (default `false`) | use the real embedder |
+| `LIVE_INFERENCE` | `true` / `false` (default `false`) | use real inference; refused past 1 sim-day |
+| `B1X4_COMPLETENESS_DURATION` | same forms as `DURATION`; default `4d` | span of `sim-completeness-rung` |
 
-**B1+X4 embedder-enabled rung.** `just sim-completeness-rung` (live embedder + mock inference)
-drives the main thread past the assembly window so a probe target lands in the flush-lag dead zone,
-then asserts the §3.4 lexical completeness floor surfaced it (with a non-vacuity guard that at least
-one dead-zone probe was observed). `just sim-tokenceiling-rung` (live inference, capped at 1
-sim-day) injects large verbose tool-result payloads and asserts the fully-assembled request's
-`usage.prompt_tokens` stays within the configured ceiling. Both are bounded and **not** part of
-`just test`. They MEASURE the X4-PROD violation; the production token bound is #127's work.
+Knobs are `just` variables (`just DURATION=1d sim`; overrides go before the recipe name) or environment variables (`DURATION=1d just
+sim`). Both live toggles read `test/rundata/test.{providers,config}.toml` (user-provided,
+gitignored) and need a reachable `reaper.local` endpoint; a missing or unreachable endpoint is a
+hard failure, not a skip. On macOS, sim runs are wrapped in `caffeinate` and `taskpolicy` against
+idle sleep and background-QoS demotion.
 
-**`LIVE_EMBEDDING=true` / `LIVE_INFERENCE=true`** opt in real inference/embedding independently.
-Both require `test/rundata/test.{providers,config}.toml` (user-provided, gitignored) and a reachable
-`reaper.local` endpoint. A missing or unreachable endpoint is a hard failure, not a skip.
-`LIVE_INFERENCE=true` is refused past 1 sim-day — always pair it with `DURATION=1d`.
-
-On Darwin, long sim runs are automatically wrapped with `caffeinate` + `taskpolicy` to prevent
-idle-sleep and background-QoS demotion.
+The mock runs (`just sim`, and the sim package under `just test`) run without the embedder, so
+embedding recall and its completeness floor do not execute there ([`SPEC.md`](SPEC.md) §3.4). `sim-completeness-rung` covers
+that case, and `sim-tokenceiling-rung` measures the whole-request token ceiling; neither is part of
+`just test`.
 
 ### Live and slow test opt-ins
 
-Slow and live tests always compile (a refactor that breaks them fails `just test`) but gate
-execution at runtime via environment variables. `//go:build` tags are not used — tagged tests are
-excluded from the normal compile and bit-rot silently.
+Slow and live tests always compile, so a refactor that breaks them fails `just test`. They gate
+execution at runtime through environment variables; `//go:build` tags are not used, because tagged
+tests drop out of the normal compile and rot silently.
 
 | Opt-in | Set by | Effect |
 |---|---|---|
 | `PERSONANT_LIVE_TESTS=1` | `just integration-test` | live reaper endpoint tests; unreachable = failure |
 | `PERSONANT_CORPUS_TESTS=1` | `just recall-corpus-test` | slow Wikipedia corpus measurement |
-| `-sim.live-embedding` / `-sim.live-inference` | `just sim LIVE_*=true` | live sim elements |
+| `PERSONANT_SLOW_SIM_TESTS=1` | `just sim-shadow-slow-test` | slow sim rungs |
+| `-sim.live-embedding` / `-sim.live-inference` | `just LIVE_*=true sim` | live sim elements |
 
-## Project Anatomy
+## Module Map
 
-```
-cmd/                        cobra subcommands (init, index, verify, ping, models, chat)
-                            bare `personant` defaults to chat
-internal/memops/            MemoryOps port: the interface + domain types
-                            (SpineRecord, Thread, ProjectMeta, Provider, Config,
-                            symbol enums); imports nothing internal — the
-                            application layer depends only on this
-internal/memops/fileadapter/  v0.1 substrate-backed adapter
-internal/store/             file substrate: paths, JSONL helpers, init, spine ops,
-                            project ops, providers, thread I/O, bootstrap
-internal/autogit/           go-git-backed autonomic git wrapper with bitflag
-                            systemic-validation policy
-internal/turn/              §3.0 turn chain + turn loop, per-turn coalescing,
-                            transient-data staging buffer, §3.4 recall surface,
-                            §3.5 decay-triggered closure flow
-internal/recall/scoring/    pure Jaccard/cosine recall primitives (substrate-free);
-                            chunk-tier: ProposeChunks, DescendChunks beam descent,
-                            BuildTree agglomerative clustering
-internal/recall/measure/    application-side recall stack (Service, Recaller);
-                            async single-indexer goroutine + atomic.Pointer snapshot;
-                            .recall-cache sidecars (.vec, .tree); sleep-cycle
-                            tree builder; W1 divergence probe
-internal/curator/           closure-summary drafting (§3.5/§5.2)
-internal/chat/              REPL, slash dispatch, bootstrap UX, §6.1 tool-registry
-                            construction
-internal/tools/             §6.1 tool registry + dispatch
-internal/tools/web/         the web tools — fetch, search (Exa), wikipedia,
-                            wiktionary, wikidata, arxiv, crossref — plus the shared
-                            free-API citizenship layer (contact-bearing
-                            User-Agent, per-host serial gate + spacing,
-                            Retry-After, local query caps)
-internal/workset/           layered context composition (E/A1/A2/B/C)
-internal/prompt/            template + topic-tag parser + stream filter
-internal/model/             OpenAI-compatible HTTP client + scripted/generated mock
-                            + SSE streaming
-internal/scenarios/         scenario harness, invariants, metrics, recall-fidelity
-                            test infrastructure (C.1–C.6)
-internal/{eventlog,metrics,
-  index,verify,clock,
-  ping,modellist,log}/      supporting subsystems
-ROADMAP_PLANS/              parked plans for pending work (intra-thread recall, archival, etc.)
-test/tools/                 Python stdlib-only tooling (madlibs_generate.py,
-                            wikipedia_corpus.py, embed_corpus.py)
-test/rundata/               user-provided, gitignored: test.providers.toml,
-                            test.config.toml (live test credentials)
-ARCHITECTURE.md             orientation for contributors and agents — read first
-SPEC.md                     field-level schemas, algorithms, surface APIs
-CONVENTIONS.md                   house rules for AI agents working in this repo
-```
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) "Module map".
 
 ## Storage Layout
 
-Personant stores all state under `~/.personant/` (override with `$PERSONANT_HOME`). The directory is
-git-initialized on first run. See [`SPEC.md` §2.1](SPEC.md) for the full schema; a sketch:
+Memory is plain text in git under `~/.personant/` (override with `$PERSONANT_HOME` or `--home`).
+The tree: [`ARCHITECTURE.md`](ARCHITECTURE.md) "Home layout"; outcomes: [`SPEC.md`](SPEC.md) §2.
 
-```
-~/.personant/
-  spine.jsonl          canonical cross-project record (sorted by id)
-  symbols.jsonl        [derived] inverse symbol → threads index
-  threads/             one directory per thread (thread.md + turns/ + files.json)
-  projects/            per-project metadata + Layer A2 digests
-  directives/          tunable behavior (defaults / user / per-project)
-  logs/                YYYY-MM-DD.log, plain text, append-only; archive/ for old months
-  history              REPL line-edit history (deduplicated, capped)
-  providers.toml       endpoint pool: inference + search connectivity catalog
-  config.toml          your identity ([user] contact) + active chat / embedding / search choices
-  version.toml         on-disk layout revision (`format = N`)
-  api_keys/            secret-bearing key files — never read by agents
-  archive/             deep cold archive index (recoverable git-based archival)
-  recovery/            quarantine/ — byte-exact bytes preserved by crash recovery
-  turn-journal.jsonl   in-flight-turn content journal (crash durability)
-  .git/                primary git tree — permanent day-grain career history
-  .git-daily/          disposable per-turn recovery DB; reborn each day
-```
+## Crash Recovery
 
-**Crash recovery.** Your data survives a hard kill — SIGKILL, a power loss, a mid-turn crash.
-Personant journals each turn's raw prompt and response to disk *before* touching canonical state,
-and commits work to a git substrate that treats the on-disk files as the source of truth, so on the
-next launch it reconciles automatically and loses at most the one turn that was in flight. Recovered
-content from an interrupted turn is **surfaced to you** in the startup banner (never silently
-replayed, so nothing acts on your behalf without you seeing it). Anything a recovery step could not
-safely restore is **quarantined byte-exact** under `recovery/quarantine/` rather than deleted — your
-bytes are never thrown away.
+Contract: [`SPEC.md`](SPEC.md) §4.5.8, and §1.6 for turns opencode itself interrupted. Mechanism:
+[`ARCHITECTURE.md`](ARCHITECTURE.md) "Crash stability and the dual-repo substrate".
 
 ## Status
 
-Two independently-versioned tracks. Run `personant version` for the current values — they live in
-`internal/version`, not in this document.
+The plugin route is not built; sequencing is in [`ROADMAP.md`](ROADMAP.md) Part A. The memory
+runtime beneath it (storage, turn chain, recall, closure, archival, crash recovery) exists and is
+exercised in-process by the acceptance simulation ([`SPEC.md`](SPEC.md) §9.1). Open decisions are
+listed in `ROADMAP.md` "Pending decisions"; known defects in [`DEFECTS.md`](DEFECTS.md).
 
-- **Substrate** (runtime + `MemoryOps` API): converging toward **v0.5.0** via a four-month (120-day)
-  realism-convergence acceptance simulation. "Done" means every identified realism element accounted
-  for — simulated, modeled-and-unit-tested, or honestly parked as a known-unknown — converging to a
-  run that surfaces no new gap. See [`SPEC.md` §9.1](SPEC.md) for the normative gate.
-- **Front end** (chat REPL + interactive feature set): the REPL loop is closed but has not been
-  validated by direct human use; the interactive feature set is incomplete. Front-end **v0.1.0**
-  gates on a human U/X phase after substrate v0.5.0 lands.
-
-A third, separate integer versions the home's on-disk layout (`~/.personant/version.toml`). A home
-written by a **newer** personant is refused rather than opened — `--allow-newer-home` overrides that
-at your own risk, and says so loudly. `personant version` reports the home's stamp even when the
-home is missing or unreadable; it is the one command that never gates.
-
-**What is shipped and validated:**
-
-- Phase 1–3: storage scaffold, turn loop, topic tagging, REPL, layered working-set composition,
-  scenario harness, opportunistic recall via symbolic Jaccard.
-- Phase A: `MemoryOps` port + `FileAdapter`; `internal/autogit` autonomic git wrapper.
-- Phase B: transient-data lifecycle with source-driven retention classification.
-- §3.4 layer-2 embedding recall: `model.Embedder`, `recall.ProposeEmbedding` cosine matcher,
-  session-scoped in-memory thread-embedding index.
-- Intra-thread recall (#109/#111): chunk-level hierarchical embedding index for the engaged
-  long-running thread, coarse→fine descent with exemplar-set keys, persisted `.vec` vector cache and
-  `.tree` sidecar, async single-indexer goroutine + `atomic.Pointer` snapshot, sleep-cycle
-  `RebuildTrees`, sim shadow-chunk oracle and Candidate-A workload metrics.
-- Anchor-lifecycle redesign: `anchors` as a deterministic projection of active `history_symbols`;
-  superseded anchors retained (not evicted); validated across the acceptance ladder.
-- Recall-fidelity test infrastructure (C.1–C.6): mad-libs query generator, adversarial templates,
-  152-article Wikipedia corpus (~1090 fragments), LLM-assisted template authoring, calibration
-  sweep, embedding head-to-head measurement.
-
-**Implemented and wired into the turn loop (pending full acceptance-validation):**
-
-- Thread closure / retirement (§3.5): curator-drafted summary; the decay-triggered closure scan
-  fires at turn close. Routine closures are auto-accepted with one committed line (user ruling
-  2026-08-04 — a per-thread ack every time a side topic decays was an unreasonable interruption);
-  the exceptions (anchor-rich or long-engaged threads) queue and are acked at a boundary — session
-  exit or `/closures`. `closure.ack-mode: always` restores the per-decay prompt.
-- Banded recall surface (§3.4): a candidate whose score clears its tier's auto threshold is pulled
-  into context with one committed line (`recalled thr_N: <topic> — <gist>` — a committed topic
-  reference is always id-first, so the id you would type back leads the line) and no prompt; the
-  middle band is asked once per turn with a legible offer — thread name, gist, why it matched, score
-  — and nothing else surfaces (user ruling 2026-08-05 — a cryptic `[1] thr_3 score=0.56` question
-  asked routinely is answered by reflex, not judgment). `recall.ack-mode: always` restores the
-  per-candidate prompt.
-- Recoverable deep-cold archival (§3.8): `internal/turn/archival.go` +
-  `internal/memops/fileadapter/fileadapter_archive.go`; the cardinality-pressure archival scan fires
-  at turn close.
-- Working-set content dedup / git minimization (§3.9): `internal/dedup` + `AgeFileChains`, applied
-  per engaged thread.
-- Startup crash recovery (§4.5.8, #94): dual-repo git substrate (disposable per-turn `.git-daily/` +
-  permanent day-grain `.git/`), ≤1-turn durability journal, deterministic cold-start reconciliation,
-  and a crash-injection matrix with a mechanical coverage gate.
-
-**Queued:**
-
-- Phase 5: cross-project digest, fallback dissection, directive accrual.
-- v0.2: transient-data event-log compaction.
+`personant version` prints the version lines. What they are: [`SPEC.md`](SPEC.md) §9.1 "Version
+lines" and [`CONVENTIONS.md`](CONVENTIONS.md) "Versioning & acceptance".
 
 ## Design Principles
 
-Personant bets that **deterministic state as canonical, the LLM in narrow judgment roles, and human
-acknowledgement at high-leverage moments only** scales further than agent-figures-it-all-out
-alternatives. Concretely: deterministic Go code owns canonical state, integrity, and all mechanical
-operations; the LLM handles topic tagging, summary drafting, anchor selection, and recognition; the
-human acks at three load-bearing moments (thread closure, recall surface, fallback dissection) —
-with the first two amended by living-with rulings so the ack stays on the judgment calls and the
-routine cases apply themselves with a committed one-liner. The substrate is plain text in git —
-inspectability, recoverability, and history come for free.
-
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full architectural orientation.
-[`SPEC.md`](SPEC.md) has field-level schemas and algorithms.
+[`ARCHITECTURE.md`](ARCHITECTURE.md) "Applying the thesis", "The model drafts, deterministic code
+writes" and "Substrate non-negotiables".
 
 ## Third Party Acknowledgements
 
 | Package | Author / Org | License | Use |
 |---|---|---|---|
 | `github.com/BurntSushi/toml` | BurntSushi | MIT | `providers.toml` and `config.toml` parsing |
-| `codeberg.org/readeck/go-readability/v2` | Readeck contributors | MIT | `web.fetch` — boilerplate-stripped article extraction |
-| `github.com/JohannesKaufmann/html-to-markdown/v2` | Johannes Kaufmann | MIT | `web.fetch` — HTML → Markdown conversion |
+| `codeberg.org/readeck/go-readability/v2` | Readeck contributors | MIT | `web.fetch` — boilerplate-stripped article extraction (self-built harness) |
+| `github.com/JohannesKaufmann/html-to-markdown/v2` | Johannes Kaufmann | MIT | `web.fetch` — HTML → Markdown conversion (self-built harness) |
 | `github.com/go-git/go-git/v5` | go-git contributors | Apache 2.0 | `internal/autogit` — autonomic git operations on `~/.personant/` |
+| `github.com/go-git/go-billy/v5` | go-git contributors | Apache 2.0 | `internal/autogit`, `internal/store` — filesystem layer under go-git |
+| `golang.org/x/net` | The Go Authors | BSD 3-Clause | `web.fetch` — HTML parsing (self-built harness) |
+| `golang.org/x/sys` | The Go Authors | BSD 3-Clause | `internal/term` — terminal control for the chat REPL (self-built harness) |
 | `github.com/spf13/cobra` | Steve Francia | Apache 2.0 | CLI subcommand dispatch (`cmd/`) |
 | `gopkg.in/yaml.v3` | Canonical Ltd. | MIT / Apache 2.0 | Thread frontmatter read/write |

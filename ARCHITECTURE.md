@@ -1414,7 +1414,7 @@ harness drive loop. The protocol is:
   `testdata/baselines/<scenario>.json`. `just sim-baseline` records the committed baseline for a
   duration and `just sim-fidelity` re-runs the mock sim under a chosen turn executor and compares
   against it.
-- The default gate (`just test` / `just sim`) runs with a nil embedder, so the fine tier and the
+- The mock runs (`just sim`, and the sim package under `just test`) run with a nil embedder, so the fine tier and the
   lexical completeness floor do not execute there; `just sim-completeness-rung` is the
   embedder-enabled rung that asserts every flush-lag dead-zone probe is surfaced. The scenario
   harness pins `recall.ack-mode: always` (a scripted `Step.RecallAck` stands in for a user's

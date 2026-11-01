@@ -297,7 +297,6 @@ test change with no document edit (`~/.claude/CLAUDE.md` routing: bug fix → no
 |---|---|
 | D1 commit cost grows with tracked files | SPEC §3.11 "Per-turn (daily)" (O(write-set), cost stays flat). §2.3 "per-turn write cost does not grow with thread length". §9.1 "Operation runtime costs … stable" and "Steady-state … per-operation latency flat". §9.4 "Steady-state trajectory" and "Operation latency within bounds". ARCHITECTURE "Crash stability and the dual-repo substrate" ("per-turn commits are cheap"). Possibly also §4.5.8 (5) morning-init "O(active working-set bytes), independent of career-history length": each daily repo starts from a full copy of the tree (D1 "Where"). Unmeasured; say so. |
 | D2 `recall_query_latency_*` copies turn duration | SPEC §9.4: metrics measure what they name. ARCHITECTURE "Testing as the lab bench" ("a measurement seam that silently fails … makes its gate pass vacuously"). |
-| D3 stale model name in `TestLoadConfigFixture` | CONVENTIONS "Two gates": the checkpoint gate must pass before a commit. No SPEC clause. |
 | D4 harness skips the startup reconcile | SPEC §4.5.8 startup order "init → startup recovery → (day barrier if new-day) → session load". ARCHITECTURE "Testing as the lab bench" (the harness inherits production discipline) and "Acceptance-run mechanics" crash injection, whose fixtures then start from unreconciled homes. |
 | Documentation errata | No contract clause; these are errors in reports. Move each erratum into its report as a dated note when RD retires (section 10). DEFECTS keeps system defects only. |
 

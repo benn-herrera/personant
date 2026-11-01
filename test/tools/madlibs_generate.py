@@ -296,9 +296,13 @@ def main(argv):
 
     # Stable formatting: a re-run with the same inputs is byte-identical.
     text = json.dumps(doc, indent=2, sort_keys=True) + "\n"
-    args.out.write_text(text, encoding="utf-8")
+    encoded = text.encode("utf-8")
+    # Skip identical rewrites: a bumped mtime invalidates Go's test cache.
+    unchanged = args.out.exists() and args.out.read_bytes() == encoded
+    if not unchanged:
+        args.out.write_text(text, encoding="utf-8")
     print(
-        f"wrote {args.out} - {len(doc['queries'])} queries "
+        f"{'unchanged' if unchanged else 'wrote'} {args.out} - {len(doc['queries'])} queries "
         f"across {len(templates)} templates"
     )
     return 0

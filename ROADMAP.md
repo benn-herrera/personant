@@ -97,9 +97,8 @@ decisions named in them.
   `ROADMAP_PLANS/OPENCODE_SERVER_REPLACEMENT.md` and `ROADMAP_PLANS/code-mode-support.md`. Leave the
   probe code behind. `probe-path` stays alive, untagged and undeleted, as the reference until it is
   no longer needed. Every code item below lands on the new branch.
-- [ ] **A1. Fix D3.** `TestLoadConfigFixture` expects a stale model name; `just test` fails on it,
-  and every checkpoint commit needs that gate green. The test is the stale side. (DEFECTS.md D3;
-  CONVENTIONS "Two gates".)
+- [x] **A1. Fix the stale model name in `TestLoadConfigFixture`** so `just test` is green; every
+  checkpoint commit needs that gate (CONVENTIONS "Two gates").
 - [ ] **A2. Carry over the probe code worth keeping.** Bring the baseline comparator
   (`sim-baseline`, `sim-fidelity`, the committed baselines) from `probe-path`, and decide whether
   to keep `model.MockServer` (the mock served as an OpenAI-compatible endpoint; if kept, add it to
