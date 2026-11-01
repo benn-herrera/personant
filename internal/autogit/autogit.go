@@ -42,7 +42,9 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
+	gitindex "github.com/go-git/go-git/v5/plumbing/format/index"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/storage"
 	"github.com/go-git/go-git/v5/storage/filesystem"
 
 	"personant/internal/index"
@@ -229,13 +231,15 @@ func Add(ctx context.Context, paths store.PersonantPaths, which Repo, patterns .
 // AddPaths stages exactly the named repo-relative FILE paths, skipping
 // go-git's whole-tree status walk (#94 R3-addendum item 3: the scoped
 // per-turn staging). Each path is staged with SkipStatus, which hashes
-// and indexes just that file — O(write-set), not O(repo). An unchanged
-// recorded file is re-hashed and re-indexed to the same blob (wasted
-// but harmless); a recorded path that no longer exists on disk falls
-// back through go-git's status-assisted delete-from-index path (rare —
-// the adapter records only after successful writes). Directories are
-// NOT accepted: a directory add re-triggers the full status walk this
-// function exists to avoid; callers record file-level paths.
+// and indexes just that file, and the index is loaded once and written
+// once for the whole set — one on-disk index write, nothing written if
+// any path fails. An unchanged recorded file is re-hashed and
+// re-indexed to the same blob (wasted but harmless); a recorded path
+// that no longer exists on disk falls back through go-git's
+// status-assisted delete-from-index path (rare — the adapter records
+// only after successful writes). Directories are NOT accepted: a
+// directory add re-triggers the full status walk this function exists
+// to avoid; callers record file-level paths.
 func AddPaths(ctx context.Context, paths store.PersonantPaths, which Repo, rels []string) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("autogit.AddPaths: %w", err)
@@ -251,11 +255,44 @@ func AddPaths(ctx context.Context, paths store.PersonantPaths, which Repo, rels 
 	if err != nil {
 		return fmt.Errorf("autogit.AddPaths: worktree: %w", err)
 	}
+	idx, err := repo.Storer.Index()
+	if err != nil {
+		return fmt.Errorf("autogit.AddPaths: load index: %w", err)
+	}
+	buf := &bufferedIndexStorer{Storer: repo.Storer, idx: idx}
+	bufRepo, err := git.Open(buf, wt.Filesystem)
+	if err != nil {
+		return fmt.Errorf("autogit.AddPaths: open buffered %s repo: %w", which, err)
+	}
+	bufWt, err := bufRepo.Worktree()
+	if err != nil {
+		return fmt.Errorf("autogit.AddPaths: worktree: %w", err)
+	}
 	for _, rel := range rels {
-		if err := wt.AddWithOptions(&git.AddOptions{Path: rel, SkipStatus: true}); err != nil {
+		if err := bufWt.AddWithOptions(&git.AddOptions{Path: rel, SkipStatus: true}); err != nil {
 			return fmt.Errorf("autogit.AddPaths: add %q: %w", rel, err)
 		}
 	}
+	if err := repo.Storer.SetIndex(buf.idx); err != nil {
+		return fmt.Errorf("autogit.AddPaths: save index: %w", err)
+	}
+	return nil
+}
+
+// bufferedIndexStorer holds the index in memory and passes every other
+// storage call through. go-git's per-path add loads and rewrites the
+// whole index on each call; running it over this storer keeps go-git's
+// own entry construction (blob hash, mode, size, times, stat fields) while
+// the caller loads and saves the index once.
+type bufferedIndexStorer struct {
+	storage.Storer
+	idx *gitindex.Index
+}
+
+func (s *bufferedIndexStorer) Index() (*gitindex.Index, error) { return s.idx, nil }
+
+func (s *bufferedIndexStorer) SetIndex(idx *gitindex.Index) error {
+	s.idx = idx
 	return nil
 }
 

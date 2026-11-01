@@ -14,11 +14,10 @@ days, and §2.3 ("per-turn write cost does not grow with thread length") for the
 
 **Where.**
 - `CommitTurn` (`internal/memops/fileadapter/fileadapter_recovery.go`) stages the turn's write set through
-  `autogit.AddPaths` (`internal/autogit/autogit.go`), which calls go-git `Worktree.AddWithOptions` once per path
-  with `SkipStatus`.
-- In go-git v5.19.2 each such call decodes the whole index and re-encodes and rewrites it, and `Worktree.Commit`
-  decodes it again and builds the tree from every entry — per turn O(k·N), k = paths written this turn,
-  N = tracked files.
+  `autogit.AddPaths` (`internal/autogit/autogit.go`), which loads the index once, stages each path with go-git's
+  own add, and saves the index once — one O(N) index load and one O(N) save per turn.
+- `Worktree.Commit` decodes the index again and builds every tree from every entry (go-git has no cache tree) —
+  O(N) per turn, N = tracked files.
 - N grows without bound: each daily repository starts from a full copy of the tree, and turn-excerpt files under
   a live thread's `turns/` are never removed (archival removes only retired threads).
 
@@ -80,6 +79,9 @@ mock inference, seed 24095, Apple M3 Max):
   - `Commit` is one index load plus the tree build. A turn written to a short thread instead of the
     wide `thr_main/turns/` costs 7.9 ms less at N = 16,000: that changed tree is re-encoded and stored
     as a new loose object every turn.
+  - Re-measured 2026-11-01 at `5bd4c74` (Go 1.27.3, go-git v5.19.3), same command: `AddPaths` +
+    `Commit` 19.8 / 39.0 / 113.8 ms and single-load stage + `Commit` 15.4 / 24.9 / 58.5 ms at
+    N = 1,000 / 4,000 / 16,000. Index load and save are unchanged; the update moves totals by 2–5%.
 - **`wt.Commit` split**, CPU profile at N = 16,000 (`just bench-profile ./internal/autogit
   'BenchmarkTurnCommit/addpaths/N=16000$' commit16k 15s`, then `just pprof -top -cum
   -focus='autogit\.Commit$' <profile>`; taken while a sim run shared the machine): index decode 39%;

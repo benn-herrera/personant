@@ -2,17 +2,12 @@ package autogit
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/filemode"
-	"github.com/go-git/go-git/v5/plumbing/format/index"
 
 	"personant/internal/clock"
 	"personant/internal/store"
@@ -26,28 +21,24 @@ import (
 // of the turn excerpts plus benchSmallThreads short threads, the shape a
 // long run's daily index takes.
 //
-// Variants: "addpaths" is the production path; "single-load" stages the
-// same write set with one index load and one save (stageSingleLoad), to
-// price the per-path index round trip; "addpaths-side" is the production
-// path with the turn landing in a short thread, so the main thread's wide
-// turns/ tree is unchanged. Metrics per op: stage-ms (the staging call),
-// commit-ms (Commit), and index-load-ms / index-save-ms (one standalone
-// Storer.Index / SetIndex, untimed by ns/op). ns/op covers stage + commit
-// only.
+// Variants: "addpaths" is the production path; "addpaths-side" is the
+// production path with the turn landing in a short thread, so the main
+// thread's wide turns/ tree is unchanged. Metrics per op: stage-ms
+// (AddPaths), commit-ms (Commit), and index-load-ms / index-save-ms (one
+// standalone Storer.Index / SetIndex, untimed by ns/op). ns/op covers
+// stage + commit only.
 func BenchmarkTurnCommit(b *testing.B) {
 	variants := []struct {
-		name       string
-		singleLoad bool
-		thread     string
+		name   string
+		thread string
 	}{
-		{"addpaths", false, benchMainThread},
-		{"single-load", true, benchMainThread},
-		{"addpaths-side", false, "threads/thr_s000"},
+		{"addpaths", benchMainThread},
+		{"addpaths-side", "threads/thr_s000"},
 	}
 	for _, v := range variants {
 		for _, n := range []int{1000, 4000, 16000} {
 			b.Run(fmt.Sprintf("%s/N=%d", v.name, n), func(b *testing.B) {
-				benchTurnCommit(b, n, v.singleLoad, v.thread)
+				benchTurnCommit(b, n, v.thread)
 			})
 		}
 	}
@@ -71,7 +62,7 @@ var benchMiscFiles = []string{
 	"projects/prj_1/digest.json", "archive/index.jsonl",
 }
 
-func benchTurnCommit(b *testing.B, n int, singleLoad bool, thread string) {
+func benchTurnCommit(b *testing.B, n int, thread string) {
 	ctx := context.Background()
 	h := newTurnBenchHome(b, n)
 	var load, save, stage, commit time.Duration
@@ -84,12 +75,7 @@ func benchTurnCommit(b *testing.B, n int, singleLoad bool, thread string) {
 		b.StartTimer()
 
 		t0 := clock.Profiling()
-		var err error
-		if singleLoad {
-			err = stageSingleLoad(h.paths, rels)
-		} else {
-			err = AddPaths(ctx, h.paths, Daily, rels)
-		}
+		err := AddPaths(ctx, h.paths, Daily, rels)
 		stage += clock.Since(t0)
 		if err != nil {
 			b.Fatalf("stage: %v", err)
@@ -162,7 +148,7 @@ func newTurnBenchHome(b *testing.B, n int) *turnBenchHome {
 	}
 	h.nextTurn--
 
-	if err := stageSingleLoad(paths, rels); err != nil {
+	if err := AddPaths(context.Background(), paths, Daily, rels); err != nil {
 		b.Fatalf("stage baseline: %v", err)
 	}
 	if err := Commit(context.Background(), paths, Daily, "baseline", 0, 0); err != nil {
@@ -225,59 +211,6 @@ func probeIndexRoundTrip(b *testing.B, paths store.PersonantPaths) (load, save t
 		b.Fatalf("index save: %v", err)
 	}
 	return load, clock.Since(t1)
-}
-
-// stageSingleLoad writes the same blobs and index entries go-git's
-// per-path AddWithOptions{SkipStatus} does, with one index load and one
-// save for the whole write set.
-func stageSingleLoad(paths store.PersonantPaths, rels []string) error {
-	repo, err := openRepo(paths, Daily)
-	if err != nil {
-		return err
-	}
-	idx, err := repo.Storer.Index()
-	if err != nil {
-		return err
-	}
-	for _, rel := range rels {
-		abs := filepath.Join(paths.Home, filepath.FromSlash(rel))
-		data, err := os.ReadFile(abs)
-		if err != nil {
-			return err
-		}
-		fi, err := os.Lstat(abs)
-		if err != nil {
-			return err
-		}
-		obj := repo.Storer.NewEncodedObject()
-		obj.SetType(plumbing.BlobObject)
-		obj.SetSize(int64(len(data)))
-		w, err := obj.Writer()
-		if err != nil {
-			return err
-		}
-		if _, err := w.Write(data); err != nil {
-			return err
-		}
-		if err := w.Close(); err != nil {
-			return err
-		}
-		hash, err := repo.Storer.SetEncodedObject(obj)
-		if err != nil {
-			return err
-		}
-		e, err := idx.Entry(rel)
-		if errors.Is(err, index.ErrEntryNotFound) {
-			e = idx.Add(rel)
-		} else if err != nil {
-			return err
-		}
-		e.Hash = hash
-		e.Mode = filemode.Regular
-		e.ModifiedAt = fi.ModTime()
-		e.Size = uint32(fi.Size())
-	}
-	return repo.Storer.SetIndex(idx)
 }
 
 // benchText returns n bytes of word-like text, so zlib sees prose-like
