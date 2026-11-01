@@ -1,0 +1,37 @@
+src/SPEC.md: 0 long titles skipped; merged hunks 1 bad 0
+src/ARCH.md: 0 long titles skipped; merged hunks 1 bad 0
+=== SPEC.md
+refs linked: 2; dangling: 0 distinct:
+reassemble ok: 20 lines
+links checked: 12, dead: 4
+=== ARCH.md
+refs linked: 0; dangling: 0 distinct:
+reassemble ok: 19 lines
+links checked: 8, dead: 0
+=== scoring-a.md
+refs linked: 0; dangling: 0 distinct:
+reassemble ok: 7 lines
+links checked: 2, dead: 1
+=== scoring-b.md
+refs linked: 0; dangling: 0 distinct:
+reassemble ok: 7 lines
+links checked: 1, dead: 0
+=== work/SPEC.md -> out/SPEC
+reassemble ok: 20 lines
+  links checked: 13, dead: 0
+  leaves: 5
+=== work/ARCH.md -> out/ARCH
+reassemble ok: 19 lines
+  links checked: 8, dead: 0
+  leaves: 3
+=== src/scoring-a.md -> out/SPEC/scoring/a
+reassemble ok: 7 lines
+  links checked: 2, dead: 0
+  leaves: 1
+=== src/scoring-b.md -> out/SPEC/scoring/b
+reassemble ok: 7 lines
+  links checked: 1, dead: 0
+  leaves: 1
+=== files written by this script: link targets exist
+  checked out/SPEC/scoring/index.md
+  checked out/entry-point.md

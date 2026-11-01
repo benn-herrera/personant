@@ -1,0 +1,7 @@
+# file	outdir	flags	label
+THESIS.md	out	entry
+SPEC.md	out/SPEC	refactor
+ARCH.md	out/ARCH	refactor,items
+
+scoring-a.md	out/SPEC/scoring/a		Scoring schemes
+scoring-b.md	out/SPEC/scoring/b		Ignored label

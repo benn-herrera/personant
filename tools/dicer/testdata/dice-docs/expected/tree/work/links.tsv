@@ -1,0 +1,15 @@
+THESIS.md	out/entry-point.md
+SPEC.md	out/SPEC/entry-point.md
+SPEC.md	Storage	out/SPEC/1-storage/index.md
+SPEC.md	Durability	out/SPEC/1-storage/durability.md
+SPEC.md	Layout	out/SPEC/1-storage/1.1-layout.md
+SPEC.md	Scoring	out/SPEC/2-scoring.md
+ARCH.md	out/ARCH/entry-point.md
+ARCH.md	Storage layer	out/ARCH/storage-layer/index.md
+ARCH.md	Write path	out/ARCH/storage-layer/write-path.md
+ARCH.md	Read path	out/ARCH/storage-layer/read-path.md
+ARCH.md	Other	out/ARCH/other.md
+scoring-a.md	out/SPEC/scoring/a/entry-point.md
+scoring-a.md	Rubric	out/SPEC/scoring/a/rubric.md
+scoring-b.md	out/SPEC/scoring/b/entry-point.md
+scoring-b.md	Weights	out/SPEC/scoring/b/weights.md

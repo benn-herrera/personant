@@ -104,11 +104,15 @@ agents:
 
 [doc("split a markdown monolith by heading level into linked leaves under out (optional link map TSV), then check the leaves reassemble it and every relative link resolves")]
 dice-doc monolith out map="":
-  @tools/dicer/dice-doc.sh "{{monolith}}" "{{out}}" "{{map}}"
+  @python3 "{{justfile_directory()}}/tools/dicer/dicer.py" dice-doc "{{monolith}}" "{{out}}" "{{map}}"
 
 [doc("dice the documents listed in a manifest TSV, read from src-dir, into linked volumes, with intermediates in work-dir, then verify all trees (see tools/dicer/README.md)")]
 dice-docs manifest src work:
-  @tools/dicer/dice-all.sh "{{manifest}}" "{{src}}" "{{work}}"
+  @python3 "{{justfile_directory()}}/tools/dicer/dicer.py" dice-docs "{{manifest}}" "{{src}}" "{{work}}"
+
+[doc("run the dicer test suite: every case under tools/dicer/testdata must reproduce its expected files and output")]
+test-dicer:
+  @python3 -m unittest discover -s tools/dicer -p 'test_*.py'
 
 # NOT the tool for adding one dependency (see add-dependency) — this is
 # deliberate whole-graph churn.

@@ -1,22 +1,31 @@
 # dicer
 
 Splits a markdown document by heading into a tree of small linked files, and keeps documents that
-cite each other linked across their trees. POSIX sh and awk only (macOS awk compatible); the tools
+cite each other linked across their trees. Python 3.9 or later, standard library only; the tools
 take every input as an argument and name nothing specific to a repository. Run them from the
 directory the documents' relative links are written against.
 
 ## Tools
 
-- `dice-doc.sh <monolith.md> <out-dir> [map.tsv]` dices one document and runs the checks below.
-- `refactor.sh <in.md> <out.md> [items]` turns bold run-in titles into headings (see Transforms).
-- `dice-all.sh <manifest.tsv> <src-dir> <work-dir>` drives several documents: refactor where
-  flagged, link map, dice each, group indexes and entry point, verify. Intermediates go to
-  `<work-dir>`; output directories not nested in another output are removed first.
-  See Worked example for a manifest.
-- `verify.sh <map|-> <work-dir> <monolith> <out-dir> ...` re-runs the checks on built trees, once
-  every tree a link points into exists.
-- `dice-doc.awk`, `runins.awk`, `hunkcheck.awk`: the passes behind the above. `runins.awk -v
-  mode=list` classifies every bold-led line.
+One CLI, `python3 dicer.py <command> ...`:
+
+- `dice-doc <monolith.md> <out-dir> [map.tsv]` dices one document and runs the checks below.
+  `out-dir` must be absent or empty. Exit 1 when a step fails, 2 on bad arguments.
+- `refactor <in.md> <out.md> [items]` turns bold run-in titles into headings (see Transforms);
+  any `items` value other than empty or `0` converts bold list items too. Exit 1 on a bad hunk.
+- `dice-docs <manifest.tsv> <src-dir> <work-dir>` drives several documents: refactor where
+  flagged, link map, dice each, group indexes and entry point, verify. Intermediates (refactored
+  copies, their `.skipped` lists, the link map `links.tsv`) go to `<work-dir>`; output
+  directories not nested in another output are removed first. See Worked example for a manifest.
+- `verify <map|-> <monolith> <out-dir> ...` re-runs the checks on built trees, once every tree a
+  link points into exists. Exit 1 if any check fails.
+- `list <doc.md>` classifies every bold-led line of a document, one TSV row each: `doc:line`,
+  class, new heading level, title, enclosing heading.
+
+The passes behind them live in `dicerlib/`, one module each: `outline` (headings to files),
+`split` (writing the tree), `linkrewrite` (section links, rebasing, the map), `reassemble` and
+`linkcheck` (the checks), `refactor` (run-ins and the hunk check), `dicedoc` and `manifest` (the
+drivers). `just test-dicer` runs the golden cases under `testdata/`.
 
 ## Heading convention
 
@@ -28,7 +37,7 @@ hold exactly the original lines, heading included. Sibling headings with the sam
 the same file, so they are an error and the run fails. Text before the first `##` is `entry-point.md`
 with a `Contents:` list.
 
-## Transforms (`refactor.sh`)
+## Transforms (`refactor`)
 
 A paragraph opening with `**Title.**`, `**Title:**` or a whole-line `**Title**` becomes a heading one
 level below its enclosing heading, then a blank line and the rest. With `items`, a column-0 list item
@@ -39,9 +48,8 @@ checked to be one of these conversions.
 
 Titles in the keep-list are never converted: the paragraph or item stays verbatim inside its section's
 leaf and produces no hunk. The list is the comma-separated environment variable `DICER_KEEP` (read by
-`refactor.sh`, so it reaches `dice-all.sh` runs too), default `Open`; set it empty to keep none.
-Matching is exact and case-sensitive on the title without its trailing `.` or `:`. In `runins.awk` it
-is `-v keep=T1,T2` (no default there; `-v mode=list` shows kept lines as `KEEP`).
+`refactor`, `dice-docs` and `list`), default `Open`; set it empty to keep none. Matching is exact and
+case-sensitive on the title without its trailing `.` or `:`. `list` shows kept lines as `KEEP`.
 
 ## Link rewriting and the map
 
@@ -52,14 +60,15 @@ resolve from each leaf. The map is TSV: `<target>\t<new path from the run direct
 to a diced document at its entry point; `<target>\t<heading>\t<path>` points a link whose
 following text quotes that heading, as `, "The walk"`, at the heading's leaf.
 
-## Manifest (`dice-all.sh`)
+## Manifest (`dice-docs`)
 
-Tab separated: `file`, `outdir`, `flags`, `label`. Flags (comma list, may be empty): `refactor`,
-`items`, `entry` (the file is copied verbatim to `<outdir>/entry-point.md` with a `Volumes:` list of
-the volumes directly under `<outdir>`, each with the first sentence of its opening paragraph; it is
-not diced). A volume nested as `<parent>/<group>/<name>` takes the group's title in `label`; the
-group gets an `index.md` and the parent's entry point gains a line for it. Parents precede children.
-Documents link to each other by the base name of `file`.
+Tab separated: `file`, `outdir`, `flags`, `label`; blank lines and lines starting `#` are skipped.
+Flags (comma list, may be empty): `refactor`, `items`, `entry` (the file is copied verbatim to
+`<outdir>/entry-point.md` with a `Volumes:` list of the volumes directly under `<outdir>`, each with
+the first sentence of its opening paragraph; it is not diced). A volume nested as
+`<parent>/<group>/<name>` takes the group's title in `label`; the group gets an `index.md` and the
+parent's entry point gains a line for it. Parents precede children. Documents link to each other by
+the base name of `file`.
 
 ## Checks
 

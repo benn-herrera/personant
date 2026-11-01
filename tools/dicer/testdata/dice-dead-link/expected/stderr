@@ -1,0 +1,4 @@
+refs linked: 0; dangling: 0 distinct:
+dead link: out/section/index.md:3 -> ../../missing.md
+dead link: out/section/index.md:3 -> /etc/hosts
+dead link: out/section/deeper.md:3 -> ../../sub/gone.md
