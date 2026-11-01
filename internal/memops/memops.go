@@ -629,8 +629,7 @@ type MemoryOps interface {
 
 	// StampHomeFormat records `format` as the substrate's on-disk revision,
 	// replacing any existing stamp. Two callers only: the adopt-forward arm
-	// of GateHomeFormat (stamping an unversioned home as
-	// version.UnversionedHomeFormat) and a future migration on completion.
+	// and the migration arm of GateHomeFormat, both acted on by openHome.
 	// Nothing on a turn path may call it — see HomeFormat's ordering note
 	// for why that discipline is what makes the pre-Reconcile read safe.
 	//

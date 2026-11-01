@@ -35,20 +35,20 @@ const Substrate = "0.2.7"
 const FrontEnd = "0.0.26"
 
 // CurrentHomeFormat is the home on-disk format revision this binary
-// writes and understands.
-const CurrentHomeFormat = 1
+// writes and understands. Format 2 adds optional per-thread folio.jsonl
+// files to format 1.
+const CurrentHomeFormat = 2
 
 // UnversionedHomeFormat is the format a home is ASSUMED to be when it
 // carries no format stamp — i.e. a home written before versioning
 // existed.
 //
 // It is deliberately a SEPARATE constant, never an alias of
-// CurrentHomeFormat, and its value must stay pinned at 1 forever. When
-// CurrentHomeFormat later becomes 2, an unversioned home must resolve to
-// 1 so that it takes its migration; resolving it to "whatever is current"
-// would silently declare an old, unmigrated home modern and skip the
-// migration that makes it readable. The two constants coincide today
-// only because there has been exactly one format.
+// CurrentHomeFormat, and its value must stay pinned at 1 forever: an
+// unversioned home must resolve to 1 so that it takes every registered
+// migration; resolving it to "whatever is current" would silently declare
+// an old, unmigrated home modern and skip the migrations that make it
+// readable.
 const UnversionedHomeFormat = 1
 
 // Unknown is what the rendered forms show for an absent build stamp.

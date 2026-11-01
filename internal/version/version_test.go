@@ -1,18 +1,17 @@
 package version
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
 
 // TestUnversionedHomeFormatIsPinned documents the invariant that gives
 // UnversionedHomeFormat its reason to exist: it is a SEPARATE constant
-// pinned at 1 forever, not an alias of CurrentHomeFormat. The two values
-// coincide today (there has been exactly one format), so the test asserts
-// the literal — writing `UnversionedHomeFormat = CurrentHomeFormat` would
-// pass today and fail here the moment CurrentHomeFormat becomes 2, which
-// is precisely when the distinction starts mattering: an unversioned home
-// must resolve to 1 and take its migration, not be declared modern.
+// pinned at 1 forever, not an alias of CurrentHomeFormat. The test asserts
+// the literal, so aliasing it to CurrentHomeFormat fails here: an
+// unversioned home must resolve to 1 and take its migrations, not be
+// declared modern.
 func TestUnversionedHomeFormatIsPinned(t *testing.T) {
 	if UnversionedHomeFormat != 1 {
 		t.Errorf("UnversionedHomeFormat = %d, want 1 (pinned forever)", UnversionedHomeFormat)
@@ -73,7 +72,7 @@ func TestBuildCommitRendering(t *testing.T) {
 
 func TestShortForm(t *testing.T) {
 	stamped := shortForm(Build{Revision: "abc1234def", Time: "2026-07-27T00:00:00Z"})
-	for _, want := range []string{"personant " + Substrate, "front end " + FrontEnd, "commit abc1234", "home format 1"} {
+	for _, want := range []string{"personant " + Substrate, "front end " + FrontEnd, "commit abc1234", "home format " + strconv.Itoa(CurrentHomeFormat)} {
 		if !strings.Contains(stamped, want) {
 			t.Errorf("stamped short form %q missing %q", stamped, want)
 		}
@@ -85,7 +84,7 @@ func TestShortForm(t *testing.T) {
 	if strings.Contains(bare, "commit") {
 		t.Errorf("unstamped short form mentions a commit: %q", bare)
 	}
-	for _, want := range []string{"personant " + Substrate, "front end " + FrontEnd, "home format 1"} {
+	for _, want := range []string{"personant " + Substrate, "front end " + FrontEnd, "home format " + strconv.Itoa(CurrentHomeFormat)} {
 		if !strings.Contains(bare, want) {
 			t.Errorf("unstamped short form %q missing %q", bare, want)
 		}

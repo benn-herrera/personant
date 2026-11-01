@@ -147,6 +147,12 @@ func openHome() (*fileadapter.FileAdapter, store.PersonantPaths, error) {
 	if err := eventlog.LogBootstrap(paths, decision.Format); err != nil {
 		fmt.Fprintf(os.Stderr, "warn: log system.bootstrap: %v\n", err)
 	}
+	if decision.MigratedFrom != 0 {
+		if err := eventlog.Log(paths, memops.LogCategorySystem, "home-format-migrated",
+			fmt.Sprintf("from=%d to=%d", decision.MigratedFrom, decision.Format)); err != nil {
+			fmt.Fprintf(os.Stderr, "warn: log system.home-format-migrated: %v\n", err)
+		}
+	}
 	if decision.NewerAccepted {
 		warnNewerHomeAccepted(paths, decision.Format)
 	}

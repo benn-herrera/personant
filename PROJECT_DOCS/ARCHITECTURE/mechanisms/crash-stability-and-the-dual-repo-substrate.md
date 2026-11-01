@@ -47,4 +47,8 @@ packs both repos on the day-off idle window. Session checkpoints target daily wi
 sweep. The open sequence runs `memops.GateHomeFormat` before Reconcile;
 `version.UnversionedHomeFormat` is pinned at 1 forever and is never an alias of
 `version.CurrentHomeFormat`, so an unmigrated legacy home keeps resolving to format 1.
+`GateHomeFormat` migrates an older home by walking the registry `homeFormatMigrations` (steps
+keyed by from-format; 1→2 restamps only, since format 2 adds optional folios to format 1), the
+caller writes the stamp before Reconcile, and a crash between stamp and log leaves a current-format
+home that needs nothing further.
 

@@ -54,21 +54,39 @@ func TestGateHomeFormat(t *testing.T) {
 			want:       HomeFormatDecision{Format: 2, NewerAccepted: true},
 		},
 		{
-			// Unreachable in production today (current == 1 is the only
-			// format), defined so the first migration has a shape to fill.
-			name:    "older home has no migration path",
+			name:    "older home migrates forward",
 			found:   true,
 			onDisk:  1,
 			current: 2,
-			wantErr: ErrHomeFormatNoMigration,
+			want:    HomeFormatDecision{Format: 2, StampFormat: 2, MigratedFrom: 1},
 		},
 		{
-			name:       "older home is refused even under allow-newer",
+			name:       "older home migrates forward under allow-newer",
 			found:      true,
 			onDisk:     1,
 			current:    2,
 			allowNewer: true,
-			wantErr:    ErrHomeFormatNoMigration,
+			want:       HomeFormatDecision{Format: 2, StampFormat: 2, MigratedFrom: 1},
+		},
+		{
+			name:    "unstamped home migrates forward",
+			found:   false,
+			current: 2,
+			want:    HomeFormatDecision{Format: 2, StampFormat: 2, MigratedFrom: 1},
+		},
+		{
+			name:    "older home with no registered step is refused",
+			found:   true,
+			onDisk:  2,
+			current: 3,
+			wantErr: ErrHomeFormatNoMigration,
+		},
+		{
+			name:    "chain breaks partway",
+			found:   true,
+			onDisk:  1,
+			current: 3,
+			wantErr: ErrHomeFormatNoMigration,
 		},
 		{
 			name:    "zero on-disk format is nonsense",
@@ -112,6 +130,32 @@ func TestGateHomeFormat(t *testing.T) {
 				t.Errorf("GateHomeFormat = %+v, want %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestHomeFormatMigrationChainReachesCurrent: a format bump that registers
+// no step fails here, not on a user's home.
+func TestHomeFormatMigrationChainReachesCurrent(t *testing.T) {
+	pos := version.UnversionedHomeFormat
+	prevFrom := 0
+	for _, m := range homeFormatMigrations {
+		if m.From <= prevFrom {
+			t.Errorf("step %+v is not strictly ascending by From", m)
+		}
+		if m.To <= m.From {
+			t.Errorf("step %+v does not advance the format", m)
+		}
+		prevFrom = m.From
+	}
+	for pos < version.CurrentHomeFormat {
+		next, ok := nextHomeFormat(pos)
+		if !ok {
+			t.Fatalf("no step from format %d toward %d", pos, version.CurrentHomeFormat)
+		}
+		pos = next
+	}
+	if pos != version.CurrentHomeFormat {
+		t.Errorf("chain ends at format %d, want %d", pos, version.CurrentHomeFormat)
 	}
 }
 

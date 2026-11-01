@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -125,7 +126,8 @@ func TestAllowNewerHomeOverrideLeavesATrace(t *testing.T) {
 	}
 
 	logs := readHomeLogs(t, home)
-	if !strings.Contains(logs, "system.home-format-override on-disk=99 binary=1") {
+	wantOverride := fmt.Sprintf("system.home-format-override on-disk=99 binary=%d", version.CurrentHomeFormat)
+	if !strings.Contains(logs, wantOverride) {
 		t.Errorf("event log missing the override trace:\n%s", logs)
 	}
 	// system.bootstrap carries the EFFECTIVE revision the session ran
@@ -136,7 +138,8 @@ func TestAllowNewerHomeOverrideLeavesATrace(t *testing.T) {
 }
 
 // TestUnversionedHomeIsAdoptedForward: a home written before versioning
-// existed is stamped at version.UnversionedHomeFormat on the next open.
+// existed is taken as format 1 and migrated forward to the current format on
+// the next open.
 func TestUnversionedHomeIsAdoptedForward(t *testing.T) {
 	home := t.TempDir()
 	runCLI(t, home, "init", "--quiet")
@@ -149,9 +152,12 @@ func TestUnversionedHomeIsAdoptedForward(t *testing.T) {
 	}
 
 	found, format, err := store.ReadHomeFormat(store.PathsForHome(home))
-	if err != nil || !found || format != version.UnversionedHomeFormat {
+	if err != nil || !found || format != version.CurrentHomeFormat {
 		t.Errorf("stamp after adopt-forward = (%v, %d, %v), want (true, %d, nil)",
-			found, format, err, version.UnversionedHomeFormat)
+			found, format, err, version.CurrentHomeFormat)
+	}
+	if logs := readHomeLogs(t, home); !strings.Contains(logs, "system.home-format-migrated from=1") {
+		t.Errorf("event log missing the migration line:\n%s", logs)
 	}
 }
 

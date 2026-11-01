@@ -24,9 +24,14 @@ open sequence is format gate → startup recovery → service-run load.
 - **Equal** → proceed.
 - **Newer on disk → refuse.** `--allow-newer-home` overrides the refusal for one invocation; a
   waved-through open emits a stderr warning and a `system.home-format-override` event ([§2.8](../../2-data-model/2.8-log-event-format-logs-yyyy-mm-dd-log/index.md)).
-- **Older on disk → refuse**, pending a registered migration.
-- **No stamp → adopt forward.** A home predating versioning is taken to be format 1 and stamped as
-  such — always 1, even after the current format advances, so it takes its migration.
+- **Older on disk → migrate forward** when this binary registers a chain of migration steps from
+  that format to the current one: the home is brought to the current format and restamped, and
+  the open emits a `system.home-format-migrated` event ([§2.8](../../2-data-model/2.8-log-event-format-logs-yyyy-mm-dd-log/index.md)) naming both formats. An older
+  format with no registered chain is refused. `personant init` gates but never stamps, so it
+  leaves an older home's stamp for the next open to migrate.
+- **No stamp → adopt forward.** A home predating versioning is taken to be format 1 — always 1,
+  even after the current format advances — and then takes the older-on-disk path, so it is
+  migrated and stamped at the current format.
 
 `personant version` is **ungated**: it reports the binary's identity, the resolved home path, and
 the home's stamp (a concrete revision, *absent*, or *unreadable*) and exits 0 either way. It never
