@@ -75,8 +75,11 @@ func Verify(paths store.PersonantPaths, opts VerifyOptions) (memops.VerifyReport
 
 	// Threads: every spine record's thread.md must exist and parse. The
 	// turns/ directory is structural and recency-windowed; verify does
-	// not read every excerpt, only confirms the bounded metadata file.
+	// not read loose excerpts, only confirms the bounded metadata file.
+	// Folios are decoded in full; a loose excerpt is read only when its
+	// name is also in the folio.
 	checkThreads(&report, paths, spine)
+	checkFolios(&report, paths, spine)
 
 	// Index drift: delegate to internal/index.
 	idxOpts := index.Options{Quiet: true}
@@ -204,7 +207,8 @@ func checkSpine(report *memops.VerifyReport, spine []memops.SpineRecord, entryMa
 // path that legitimately strands a spine record without a thread, but
 // Phase 4 retirement may; surfacing it as a warning keeps that future
 // code landable. The recency-windowed turns/ directory is structural;
-// checkThreads does not read excerpt files.
+// checkThreads does not read excerpt files (checkFolios reads folios and,
+// for names held in both tiers only, those loose excerpts).
 func checkThreads(report *memops.VerifyReport, paths store.PersonantPaths, spine []memops.SpineRecord) {
 	for i, rec := range spine {
 		if rec.ID == "" {
@@ -230,6 +234,96 @@ func checkThreads(report *memops.VerifyReport, paths store.PersonantPaths, spine
 			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "project",
 				Message: fmt.Sprintf("frontmatter project %q != spine project %q", fm.Project, rec.Project)})
 		}
+	}
+}
+
+// checkFolios validates the folio.jsonl of every spine thread that has one.
+// A malformed line, lines out of (number, name) order and a repeated name
+// are errors; a name held in both tiers is a warning, either an unfinished
+// settle (identical bytes) or a conflict (the reader uses the loose copy).
+func checkFolios(report *memops.VerifyReport, paths store.PersonantPaths, spine []memops.SpineRecord) {
+	for _, rec := range spine {
+		if rec.ID == "" {
+			continue // already flagged by checkSpine
+		}
+		loc := store.ThreadFolioRel(rec.ID)
+		lines, err := store.ReadFolio(store.ThreadFolioPath(paths, rec.ID))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc,
+				Message: fmt.Sprintf("folio.jsonl malformed: %v", err)})
+			continue
+		}
+		if !checkFolioOrder(report, loc, lines) {
+			continue
+		}
+		checkFolioDuplicates(report, paths, rec.ID, loc, lines)
+	}
+}
+
+// checkFolioOrder reports repeated names and lines not strictly ascending
+// by (number, name), and returns whether the folio is clean.
+func checkFolioOrder(report *memops.VerifyReport, loc string, lines []store.FolioLine) bool {
+	clean := true
+	seen := make(map[string]bool, len(lines))
+	for i, l := range lines {
+		if seen[l.Name] {
+			clean = false
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc,
+				Message: fmt.Sprintf("folio.jsonl:%d: repeated name %s", i+1, l.Name)})
+			continue
+		}
+		seen[l.Name] = true
+		if i > 0 && compareFolioNames(lines[i-1].Name, l.Name) >= 0 {
+			clean = false
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc,
+				Message: fmt.Sprintf("folio.jsonl:%d: name %s is not after %s", i+1, l.Name, lines[i-1].Name)})
+		}
+	}
+	return clean
+}
+
+// compareFolioNames orders two valid excerpt names by (turn number, name).
+func compareFolioNames(a, b string) int {
+	na, _ := strconv.Atoi(strings.TrimSuffix(a, ".md"))
+	nb, _ := strconv.Atoi(strings.TrimSuffix(b, ".md"))
+	if na != nb {
+		return na - nb
+	}
+	return strings.Compare(a, b)
+}
+
+// checkFolioDuplicates warns about each name held in both tiers. The loose
+// file is read only for those names.
+func checkFolioDuplicates(report *memops.VerifyReport, paths store.PersonantPaths, id, loc string, lines []store.FolioLine) {
+	entries, err := store.ListExcerptEntries(paths, id)
+	if err != nil {
+		report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc,
+			Message: fmt.Sprintf("list excerpts: %v", err)})
+		return
+	}
+	folio := make(map[string]string, len(lines))
+	for _, l := range lines {
+		folio[l.Name] = *l.Content
+	}
+	for i := 1; i < len(entries); i++ {
+		if entries[i].Name != entries[i-1].Name {
+			continue
+		}
+		name := entries[i].Name
+		loose, err := os.ReadFile(filepath.Join(store.ThreadTurnsDir(paths, id), name))
+		if err != nil {
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc,
+				Message: fmt.Sprintf("read loose excerpt %s: %v", name, err)})
+			continue
+		}
+		msg := fmt.Sprintf("%s is in both tiers with different bytes; conflict; the loose copy is read", name)
+		if string(loose) == folio[name] {
+			msg = fmt.Sprintf("%s is in both tiers with identical bytes; settle pending", name)
+		}
+		report.Warnings = append(report.Warnings, memops.VerifyFinding{Path: loc, Message: msg})
 	}
 }
 

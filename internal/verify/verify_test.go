@@ -432,3 +432,114 @@ func TestVerifyDirectivesMissing(t *testing.T) {
 		t.Errorf("expected summary-too-long under fallback default; got errors=%v", r.Errors)
 	}
 }
+
+// folioFixture seeds thr_1 with the given raw folio text and loose
+// excerpts (name -> bytes), then rebuilds the derived files.
+func folioFixture(t *testing.T, folio string, loose map[string]string) store.PersonantPaths {
+	t.Helper()
+	paths := initFreshHome(t)
+	writeSpine(t, paths, []memops.SpineRecord{validRecord("thr_1")})
+	if err := os.WriteFile(store.ThreadFolioPath(paths, "thr_1"), []byte(folio), 0o644); err != nil {
+		t.Fatalf("write folio: %v", err)
+	}
+	if len(loose) > 0 {
+		dir := store.ThreadTurnsDir(paths, "thr_1")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir turns: %v", err)
+		}
+		for name, body := range loose {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+				t.Fatalf("write loose %s: %v", name, err)
+			}
+		}
+	}
+	rebuild(t, paths)
+	return paths
+}
+
+const (
+	folioLine1 = `{"name":"0000001.md","content":"one\n"}` + "\n"
+	folioLine2 = `{"name":"0000002.md","content":"two\n"}` + "\n"
+	folioLine3 = `{"name":"0000010.md","content":"ten\n"}` + "\n"
+)
+
+func TestFolioClean(t *testing.T) {
+	paths := folioFixture(t, folioLine1+folioLine2+folioLine3, map[string]string{"0000011.md": "eleven\n"})
+	r := run(t, paths)
+	if r.HasErrors() || len(r.Warnings) != 0 {
+		t.Fatalf("expected no findings; errors=%v warnings=%v", r.Errors, r.Warnings)
+	}
+}
+
+func TestFolioMalformedLine(t *testing.T) {
+	paths := folioFixture(t, folioLine1+"{not json\n", nil)
+	r := run(t, paths)
+	if !errorsContain(r, "folio.jsonl:2:") {
+		t.Fatalf("expected malformed-line error naming line 2; got %v", r.Errors)
+	}
+	if got := r.Errors[len(r.Errors)-1].Path; got != "threads/thr_1/folio.jsonl" {
+		t.Errorf("finding path = %q", got)
+	}
+}
+
+func TestFolioBadName(t *testing.T) {
+	paths := folioFixture(t, `{"name":"2.txt","content":"x"}`+"\n", nil)
+	if r := run(t, paths); !errorsContain(r, "folio.jsonl:1:") {
+		t.Fatalf("expected error for bad name; got %v", r.Errors)
+	}
+}
+
+func TestFolioMissingContent(t *testing.T) {
+	paths := folioFixture(t, `{"name":"0000001.md"}`+"\n", nil)
+	if r := run(t, paths); !errorsContain(r, "folio.jsonl:1:") {
+		t.Fatalf("expected error for missing content; got %v", r.Errors)
+	}
+}
+
+func TestFolioOutOfOrder(t *testing.T) {
+	paths := folioFixture(t, folioLine2+folioLine1, nil)
+	r := run(t, paths)
+	if !errorsContain(r, "folio.jsonl:2: name 0000001.md is not after 0000002.md") {
+		t.Fatalf("expected order error; got %v", r.Errors)
+	}
+}
+
+// Order is by turn number, not lexical: 9.md precedes 10.md.
+func TestFolioOrderIsNumeric(t *testing.T) {
+	line9 := `{"name":"9.md","content":"nine"}` + "\n"
+	line10 := `{"name":"10.md","content":"ten"}` + "\n"
+	paths := folioFixture(t, line9+line10, nil)
+	if r := run(t, paths); r.HasErrors() {
+		t.Fatalf("9.md then 10.md is ascending; got %v", r.Errors)
+	}
+}
+
+func TestFolioRepeatedName(t *testing.T) {
+	paths := folioFixture(t, folioLine1+folioLine1, nil)
+	r := run(t, paths)
+	if !errorsContain(r, "repeated name 0000001.md") {
+		t.Fatalf("expected repeated-name error; got %v", r.Errors)
+	}
+}
+
+func TestFolioSettlePendingWarning(t *testing.T) {
+	paths := folioFixture(t, folioLine1+folioLine2, map[string]string{"0000002.md": "two\n"})
+	r := run(t, paths)
+	if r.HasErrors() {
+		t.Fatalf("unexpected errors: %v", r.Errors)
+	}
+	if !warningsContain(r, "0000002.md is in both tiers with identical bytes; settle pending") || len(r.Warnings) != 1 {
+		t.Fatalf("expected one settle-pending warning; got %v", r.Warnings)
+	}
+}
+
+func TestFolioConflictWarning(t *testing.T) {
+	paths := folioFixture(t, folioLine1+folioLine2, map[string]string{"0000002.md": "hand edited\n"})
+	r := run(t, paths)
+	if r.HasErrors() {
+		t.Fatalf("unexpected errors: %v", r.Errors)
+	}
+	if !warningsContain(r, "0000002.md is in both tiers with different bytes; conflict; the loose copy is read") || len(r.Warnings) != 1 {
+		t.Fatalf("expected one conflict warning; got %v", r.Warnings)
+	}
+}
