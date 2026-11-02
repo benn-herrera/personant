@@ -121,6 +121,16 @@ check-links: _venv
     @"{{VENV_PYTHON}}" -m docdicer check-links PROJECT_DOCS *.md
     @"{{VENV_PYTHON}}" -m docdicer check-tree PROJECT_DOCS
 
+[private]
+_venv:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [[ ! -x "{{VENV_PYTHON}}" ]]; then
+    python3 -m venv "{{VENV}}"
+    "{{VENV_PYTHON}}" -m pip install pip --upgrade
+    "{{VENV_PYTHON}}" -m pip install git+https://github.com/benn-herrera/docdicer
+  fi
+
 # NOT the tool for adding one dependency (see add-dependency) — this is
 # deliberate whole-graph churn.
 #
@@ -611,13 +621,3 @@ integration-test: build
 # Remove the compiled binary.
 clean:
     rm -f {{ BINDIR }}/personant
-
-[private]
-_venv:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  if [[ ! -x "{{VENV_PYTHON}}" ]]; then
-    python3 -m venv "{{VENV}}"
-    "{{VENV_PYTHON}}" -m pip install pip --upgrade
-    "{{VENV_PYTHON}}" -m pip install git+https://github.com/benn-herrera/docdicer
-  fi
