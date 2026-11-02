@@ -13,6 +13,7 @@ import (
 	"personant/internal/memops"
 	"personant/internal/store"
 	"personant/internal/verify"
+	"personant/internal/workset"
 )
 
 // InvariantCheck is one validator. Returns nil on pass, a structured
@@ -502,9 +503,8 @@ func VerifyArchiveResolvable(h *Harness) error {
 // truncates every layer to its cap, so a violation means a future change
 // bypassed that truncation (the bypass this invariant exists to catch).
 //
-// The same compose's file-expansion report is checked by
-// checkFileExpansions, and its literal and diff counts are added to the
-// MetricDedupExpansionsLiteral and MetricDedupExpansionsDiff counters.
+// The same compose's file-expansion report is checked against its Layer B
+// by verifyFileExpansions, which also counts its literals and diffs.
 //
 // Per D1 (SPEC §9.1): the X4 whole-request TOKEN ceiling is the NORMATIVE
 // zero-overflow gate. This per-layer BYTE check is a cheap belt-and-suspenders
@@ -552,6 +552,36 @@ func VerifyNoBudgetOverflow(h *Harness) error {
 	if len(over) > 0 {
 		return fmt.Errorf("VerifyNoBudgetOverflow: %s (§3.1 truncation contract bypassed)", strings.Join(over, "; "))
 	}
+	return verifyFileExpansions(h, ws, layerBPlanThreads(h.Paths, h.State.ActiveThreads, budget.BTopK))
+}
+
+// layerBPlanThreads loads the Layer B threads, ids capped at bTopK, in
+// Layer B order, as composition does: a thread whose frontmatter does not
+// load is not in Layer B, and one whose index does not read has no entries.
+func layerBPlanThreads(paths store.PersonantPaths, ids []string, bTopK int) []dedup.PlanThread {
+	if bTopK > 0 && len(ids) > bTopK {
+		ids = ids[:bTopK]
+	}
+	threads := make([]dedup.PlanThread, 0, len(ids))
+	for _, id := range ids {
+		fm, err := store.LoadThreadFrontmatter(paths, id)
+		if err != nil {
+			continue
+		}
+		entries, err := store.ReadTrackedIndex(paths, id)
+		if err != nil {
+			entries = nil
+		}
+		threads = append(threads, dedup.PlanThread{ID: id, Project: fm.Project, Entries: entries})
+	}
+	return threads
+}
+
+// verifyFileExpansions adds ws's literal and diff counts to the
+// MetricDedupExpansionsLiteral and MetricDedupExpansionsDiff counters and
+// checks its expansion report against ws.LayerB and threads, the Layer B
+// threads in Layer B order.
+func verifyFileExpansions(h *Harness, ws memops.WorksetLayers, threads []dedup.PlanThread) error {
 	var literals, diffs int64
 	for _, x := range ws.FileExpansions.Expansions {
 		if x.Kind == string(dedup.ExpansionDiff) {
@@ -562,20 +592,49 @@ func VerifyNoBudgetOverflow(h *Harness) error {
 	}
 	h.Metrics.Counter(MetricDedupExpansionsLiteral, literals)
 	h.Metrics.Counter(MetricDedupExpansionsDiff, diffs)
-	return checkFileExpansions(ws.FileExpansions)
+	return checkFileExpansions(ws.FileExpansions, ws.LayerB, threads)
+}
+
+// expansionEndMarker is the closing line x renders with in Layer B.
+func expansionEndMarker(x memops.FileExpansion) string {
+	return workset.ExpansionEndMarker(workset.Expansion{Kind: workset.ExpansionKind(x.Kind), ID: x.ID, From: x.From, To: x.To})
 }
 
 // checkFileExpansions fails a composition's expansion report that breaks
-// SPEC §3.9.2: a (project, path) or a content id rendered as a literal
-// twice, an expansion of a path at or above the report's LiteralMax, or a
-// diff at or above dedup.DiffLiteralThreshold of its path's current size.
-func checkFileExpansions(r memops.FileExpansionReport) error {
+// SPEC §3.9.2 or does not match what layerB renders: a (project, path) or a
+// content id rendered as a literal twice, an expansion of a path at or
+// above the report's LiteralMax, a diff at or above
+// dedup.DiffLiteralThreshold of its path's current size, more than
+// dedup.LiveDiffWindow diffs of one (project, path), a literal not at its
+// path's latest index entry across threads (on equal At, the earlier
+// thread's), or an expansion whose end marker is absent from layerB.
+func checkFileExpansions(r memops.FileExpansionReport, layerB string, threads []dedup.PlanThread) error {
 	type projectPath struct{ project, path string }
+	type position struct {
+		threadID string
+		turn     int
+		at       time.Time
+	}
+	latest := map[projectPath]position{}
+	for _, t := range threads {
+		for _, e := range t.Entries {
+			k := projectPath{t.Project, e.Path}
+			if cur, seen := latest[k]; !seen || e.At.After(cur.at) {
+				latest[k] = position{t.ID, e.Turn, e.At}
+			}
+		}
+	}
+
 	byPath := map[projectPath]int{}
+	diffsByPath := map[projectPath]int{}
 	byID := map[string]int{}
 	var problems []string
 	for _, x := range r.Expansions {
 		at := fmt.Sprintf("%s turn %d %s", x.ThreadID, x.Turn, x.Path)
+		k := projectPath{x.Project, x.Path}
+		if !strings.Contains(layerB, expansionEndMarker(x)) {
+			problems = append(problems, fmt.Sprintf("%s: %s reported but its end marker is not in layer B", at, x.Kind))
+		}
 		if x.PathSize >= r.LiteralMax {
 			problems = append(problems, fmt.Sprintf("%s: %s of a %d-byte path at or above literal max %d", at, x.Kind, x.PathSize, r.LiteralMax))
 		}
@@ -583,9 +642,18 @@ func checkFileExpansions(r memops.FileExpansionReport) error {
 			if float64(x.Size) >= dedup.DiffLiteralThreshold*float64(x.PathSize) {
 				problems = append(problems, fmt.Sprintf("%s: %d-byte diff at or above %.2f of path size %d", at, x.Size, dedup.DiffLiteralThreshold, x.PathSize))
 			}
+			diffsByPath[k]++
+			if diffsByPath[k] == dedup.LiveDiffWindow+1 {
+				problems = append(problems, fmt.Sprintf("%s: more than %d diffs of %s:%s", at, dedup.LiveDiffWindow, x.Project, x.Path))
+			}
 			continue
 		}
-		k := projectPath{x.Project, x.Path}
+		switch p, ok := latest[k]; {
+		case !ok:
+			problems = append(problems, fmt.Sprintf("%s: literal of %s:%s, which no Layer B index names", at, x.Project, x.Path))
+		case p.threadID != x.ThreadID || p.turn != x.Turn:
+			problems = append(problems, fmt.Sprintf("%s: literal not at its latest index entry, %s turn %d", at, p.threadID, p.turn))
+		}
 		byPath[k]++
 		byID[x.ID]++
 		if byPath[k] == 2 {

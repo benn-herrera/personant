@@ -198,7 +198,7 @@ func reportInferenceBehavior(t *testing.T, h *scenarios.Harness, d time.Duration
 	// true here) — the mock path never reaches it, keeping the mock blob clean.
 	cfg := WorkloadConfig{Seed: simSeed, Duration: d, Corpus: corpus}
 	cfg.LargeInputEveryN = largeInputRungEveryN
-	cfg.LargeInputBytes = largeInputRungBytes
+	cfg.LargeInputBytes = largeInputBytesFor(memops.DefaultBudget())
 	recordTagFidelityMetrics(t, h, cfg, true)
 
 	m, err := readMetrics(h.MetricsPath)

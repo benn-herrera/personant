@@ -16,21 +16,13 @@ import (
 	"testing"
 )
 
-// largeInputRungEveryN / largeInputRungBytes are the B1+X4 token-ceiling
-// profile's large-input injection knobs (design §2.3, criterion 3): on the
-// live-inference rung, every largeInputRungEveryN-th work turn carries a
-// ~largeInputRungBytes verbose-tool-result payload, so a handful per session
-// compound toward the ceiling. ~48 KB is a meaningful fraction of the
-// ceiling × ~2.5 B/tok ≈ 500 KB the #127 partition implies; every-3rd work turn
-// keeps a steady payload without saturating every turn. Calibration starting
-// points (design §5) — tune from the first run's request_prompt_tokens max
-// (rung criterion 3: the recorded max must be a meaningful fraction of the
-// ceiling). Only consulted on the live-inference profile; the mock gate and the
-// live-embedding completeness profile keep the knob off.
-const (
-	largeInputRungEveryN = 3
-	largeInputRungBytes  = 48 * 1024
-)
+// largeInputRungEveryN is the live-inference rung's large-input cadence: every
+// 3rd work turn reads a file sized by largeInputBytesFor, so tracked-file
+// literals just under the share threshold fill the composed Layer B and the
+// ceiling check measures real provider tokens of file content against the
+// byte-derived budget. Only the live-inference profile sets it; the mock gate
+// and the live-embedding completeness profile keep the knob off.
+const largeInputRungEveryN = 3
 
 // gatePolicy is the single source of truth for which §9.4 acceptance gates
 // fire as hard t.Errorf asserts versus downgrade to logged observations on a
@@ -170,18 +162,19 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 		Duration: d,
 		Corpus:   corpus,
 	}
-	// B1+X4 token-ceiling profile: ONLY when a live chat client is installed
-	// (the -sim.live-inference rung, paired with oracleBlind) do we turn on the
-	// large-input injection that stresses the assembled request toward the token
-	// ceiling. The mock acceptance gate (liveClient == nil) and the
-	// live-embedding completeness profile both keep the knob OFF, so their step
+	// Token-ceiling profile: ONLY when a live chat client is installed (the
+	// -sim.live-inference rung, paired with oracleBlind) do we turn on the
+	// large-input injection. Its size comes from the budget the harness's
+	// turn.State is built with, memops.DefaultBudget(). The mock acceptance
+	// gate (liveClient == nil) and the live-embedding completeness profile
+	// both keep the knob OFF, so their step
 	// streams stay byte-identical (rung invariant 8 / oracle-clean). The injection
 	// is only meaningful when the prompt-token count is a REAL provider number;
 	// with the mock client (canned PromptTokens=8) it would inflate the request
 	// for no observable gain and perturb the determinism contract.
 	if liveClient != nil {
 		cfg.LargeInputEveryN = largeInputRungEveryN
-		cfg.LargeInputBytes = largeInputRungBytes
+		cfg.LargeInputBytes = largeInputBytesFor(memops.DefaultBudget())
 	}
 	sc := GenerateWorkload(cfg)
 	// Run-manifest provenance (burndown 2026-07b item 3): the rung label,

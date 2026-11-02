@@ -9,7 +9,7 @@
 | P5 | Barrier step B1c, format 2 → 3 | expert | P4 evidence | — | done |
 | P6 | Remove the old mechanism | mechanical | P4 evidence, P5 | **C2** after P6 | done; C2 passed |
 | P7 | Measurement (A11a) | expert | C2 | **C3** after P7 | done; C3 passed |
-| — | Post-sprint review ([§6](6-post-sprint-review.md)) | — | C3 | — | in progress |
+| — | Post-sprint review ([§6](6-post-sprint-review.md)) | — | C3 | — | done (R1–R6) |
 
 P3 → P6 form one checkpoint (C2). The contract text P3–P6 land is consistent only as a whole: for
 example, the new SPEC §3.9.1 (P5) states the day-barrier retention that B1c implements and that the

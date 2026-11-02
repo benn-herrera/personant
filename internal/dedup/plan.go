@@ -79,17 +79,19 @@ type placedChange struct {
 
 // Plan decides which excerpt positions expand file content, across the
 // Layer B threads given in Layer B order. literalMax is
-// LiteralShareThreshold × the per-thread share, in bytes.
+// ⌈LiteralShareThreshold × the per-thread share⌉, in bytes.
 //
 // Per (project, path), the most recent entry is the one with the latest
 // At; on equal At, the earlier thread wins. A path whose most recent size
 // is at or above literalMax gets no expansion. Otherwise it gets a literal
-// at that entry's turn unless another path wins the same id: the later
-// At, then the earlier thread, then the path that sorts first. Each path
-// under the gate also gets diffs for the LiveDiffWindow most recent
-// changes, across all threads, that were kept and are below
-// DiffLiteralThreshold × the path's current size. Recency among changes is
-// At, then the earlier thread, then the later turn and later index.
+// candidate at that entry's turn, even when another path's current content
+// has the same id: which of those renders is the composition walk's
+// decision. Each path under the gate also gets diffs for those of its
+// LiveDiffWindow most recent changes, across all threads, that were kept
+// and are below DiffLiteralThreshold × the path's current size; a change
+// dropped from the window is not replaced by an older one. Recency among
+// changes is At, then the earlier thread, then the later turn and later
+// index.
 //
 // Within a position, expansions are ordered by path, and per path its
 // diffs, oldest first, precede its literal.
@@ -113,17 +115,6 @@ func Plan(threads []PlanThread, literalMax int) map[ExcerptPosition][]Expansion 
 		}
 	}
 
-	literalOf := map[string]placedEntry{}
-	for _, k := range keys {
-		p := latest[k]
-		if p.entry.Size >= literalMax {
-			continue
-		}
-		if w, ok := literalOf[p.entry.ID]; !ok || literalBeats(p, w) {
-			literalOf[p.entry.ID] = p
-		}
-	}
-
 	plan := map[ExcerptPosition][]Expansion{}
 	add := func(e Expansion) {
 		pos := ExcerptPosition{e.ThreadID, e.Turn}
@@ -141,13 +132,11 @@ func Plan(threads []PlanThread, literalMax int) map[ExcerptPosition][]Expansion 
 				Size: c.change.Size, PathSize: cur.entry.Size,
 			})
 		}
-		if literalOf[cur.entry.ID] == cur {
-			add(Expansion{
-				ThreadID: cur.thread.ID, Turn: cur.entry.Turn, Project: k.project, Path: k.path,
-				Kind: ExpansionLiteral, ID: cur.entry.ID,
-				Size: cur.entry.Size, PathSize: cur.entry.Size,
-			})
-		}
+		add(Expansion{
+			ThreadID: cur.thread.ID, Turn: cur.entry.Turn, Project: k.project, Path: k.path,
+			Kind: ExpansionLiteral, ID: cur.entry.ID,
+			Size: cur.entry.Size, PathSize: cur.entry.Size,
+		})
 	}
 	for _, exps := range plan {
 		slices.SortStableFunc(exps, func(a, b Expansion) int {
@@ -164,30 +153,17 @@ func kindOrder(k ExpansionKind) int {
 	return 1
 }
 
-// literalBeats reports whether a takes a shared id's literal from b.
-func literalBeats(a, b placedEntry) bool {
-	if !a.entry.At.Equal(b.entry.At) {
-		return a.entry.At.After(b.entry.At)
-	}
-	if a.rank != b.rank {
-		return a.rank < b.rank
-	}
-	return a.entry.Path < b.entry.Path
-}
-
-// recentDiffs returns the LiveDiffWindow most recent qualifying changes of
-// one (project, path) across its entries, oldest first.
+// recentDiffs returns, oldest first, those of one (project, path)'s
+// LiveDiffWindow most recent changes that were kept and are below
+// DiffLiteralThreshold × currentSize.
 func recentDiffs(entries []placedEntry, currentSize int) []placedChange {
-	var qual []placedChange
+	var changes []placedChange
 	for _, p := range entries {
 		for i := range p.entry.Changes {
-			c := &p.entry.Changes[i]
-			if c.Diff && float64(c.Size) < DiffLiteralThreshold*float64(currentSize) {
-				qual = append(qual, placedChange{p.rank, p.thread, i, c})
-			}
+			changes = append(changes, placedChange{p.rank, p.thread, i, &p.entry.Changes[i]})
 		}
 	}
-	slices.SortFunc(qual, func(a, b placedChange) int {
+	slices.SortFunc(changes, func(a, b placedChange) int {
 		return cmp.Or(
 			a.change.At.Compare(b.change.At),
 			cmp.Compare(b.rank, a.rank),
@@ -195,5 +171,7 @@ func recentDiffs(entries []placedEntry, currentSize int) []placedChange {
 			cmp.Compare(a.index, b.index),
 		)
 	})
-	return qual[max(0, len(qual)-LiveDiffWindow):]
+	return slices.DeleteFunc(changes[max(0, len(changes)-LiveDiffWindow):], func(c placedChange) bool {
+		return !c.change.Diff || float64(c.change.Size) >= DiffLiteralThreshold*float64(currentSize)
+	})
 }

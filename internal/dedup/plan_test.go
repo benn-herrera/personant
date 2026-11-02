@@ -66,7 +66,7 @@ func TestPlan(t *testing.T) {
 			want: []string{"A:5 p/f literal x size=10 cur=10", "B:7 q/f literal y size=10 cur=10"},
 		},
 		{
-			name: "shared id: later at gets the literal, loser keeps its diffs",
+			name: "shared id: every path gets a literal candidate and keeps its diffs",
 			threads: []PlanThread{
 				{ID: "A", Project: "p", Entries: []FileEntry{
 					{Path: "x", ID: "s", Size: 100, Turn: 9, At: at(5)},
@@ -74,29 +74,14 @@ func TestPlan(t *testing.T) {
 						{Turn: 4, At: at(2), From: "y0", To: "s", Diff: true, Size: 10},
 					}},
 				}},
+				{ID: "B", Project: "p", Entries: []FileEntry{{Path: "z", ID: "s", Size: 100, Turn: 8, At: at(5)}}},
 			},
 			want: []string{
 				"A:4 p/y diff y0>s size=10 cur=100",
+				"A:4 p/y literal s size=100 cur=100",
 				"A:9 p/x literal s size=100 cur=100",
+				"B:8 p/z literal s size=100 cur=100",
 			},
-		},
-		{
-			name: "shared id at equal at: earlier thread wins",
-			threads: []PlanThread{
-				{ID: "A", Project: "p", Entries: []FileEntry{{Path: "y", ID: "s", Size: 100, Turn: 3, At: at(5)}}},
-				{ID: "B", Project: "p", Entries: []FileEntry{{Path: "x", ID: "s", Size: 100, Turn: 8, At: at(5)}}},
-			},
-			want: []string{"A:3 p/y literal s size=100 cur=100"},
-		},
-		{
-			name: "shared id at equal at in one thread: path sorting first wins",
-			threads: []PlanThread{
-				{ID: "A", Project: "p", Entries: []FileEntry{
-					{Path: "b", ID: "s", Size: 100, Turn: 3, At: at(5)},
-					{Path: "a", ID: "s", Size: 100, Turn: 3, At: at(5)},
-				}},
-			},
-			want: []string{"A:3 p/a literal s size=100 cur=100"},
 		},
 		{
 			name: "size at literalMax gets nothing, literalMax-1 gets the literal",
@@ -111,7 +96,7 @@ func TestPlan(t *testing.T) {
 			want: []string{"A:3 p/fits literal f size=999 cur=999"},
 		},
 		{
-			name: "N most recent qualifying diffs by at, from two threads",
+			name: "N most recent changes by at, from two threads, the unkept one dropped and not replaced",
 			threads: []PlanThread{
 				{ID: "A", Project: "p", Entries: []FileEntry{{Path: "f", ID: "c6", Size: 100, Turn: 6, At: at(6), Changes: []FileChange{
 					{Turn: 1, At: at(1), From: "c0", To: "c1", Diff: true, Size: 5},
@@ -125,16 +110,16 @@ func TestPlan(t *testing.T) {
 				}}}},
 			},
 			want: []string{
-				"A:3 p/f diff c2>c3 size=5 cur=100",
 				"A:6 p/f literal c6 size=100 cur=100",
 				"B:4 p/f diff c3>c4 size=5 cur=100",
 				"B:5 p/f diff c4>c5 size=5 cur=100",
 			},
 		},
 		{
-			name: "after the file shrank, diffs at or above 0.7 of current size are not planned",
+			name: "after the file shrank, diffs at or above 0.7 of current size are dropped, not replaced by older ones",
 			threads: []PlanThread{
 				{ID: "A", Project: "p", Entries: []FileEntry{{Path: "f", ID: "c3", Size: 100, Turn: 3, At: at(3), Changes: []FileChange{
+					{Turn: 0, At: at(0), From: "cx", To: "c0", Diff: true, Size: 5},
 					{Turn: 1, At: at(1), From: "c0", To: "c1", Diff: true, Size: 70},
 					{Turn: 2, At: at(2), From: "c1", To: "c2", Diff: true, Size: 69},
 					{Turn: 3, At: at(3), From: "c2", To: "c3", Diff: true, Size: 300},

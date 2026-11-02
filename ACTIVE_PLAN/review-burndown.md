@@ -24,12 +24,12 @@ already relative to that leaf.
 
 | # | Package | Findings | Rating | Depends on | State |
 |---|---|---|---|---|---|
-| R1 | Composition walk and plan | W1+C1, W4, C4, C5, N9+C6a, compose-test `diffRecord` | expert | — | in progress |
-| R2 | Tracked store, verify and barrier repair | W5+C3, N4, C6e, N5+C6d, crash case before the index write, B1c order wording | expert | — | not started |
-| R3 | File-event input validation | N6+C2, N3+C6c, C6b | mechanical | — | not started |
-| R4 | Harness: large-input rung and expansion check | W6, W7 | expert | R1 | not started |
-| R5 | SPEC and module-map text | W2, W3, N1, N2, N10, N8 (module map), the R1 note rule | mechanical | R1, R2 | not started |
-| R6 | Cleanup | leftovers, `TestApplyDiffMismatch`, N8 (package doc) | mechanical | — | not started |
+| R1 | Composition walk and plan | W1+C1, W4, C4, C5, N9+C6a, compose-test `diffRecord` | expert | — | done (uncommitted until checkpoint) |
+| R2 | Tracked store, verify and barrier repair | W5+C3, N4, C6e, N5+C6d, crash case before the index write, B1c order wording | expert | — | done (uncommitted until checkpoint) |
+| R3 | File-event input validation | N6+C2, N3+C6c, C6b | mechanical | — | done (uncommitted until checkpoint) |
+| R4 | Harness: large-input rung and expansion check | W6, W7 | expert | R1 | done (uncommitted until checkpoint) |
+| R5 | SPEC and module-map text | W2, W3, N1, N2, N10, N8 (module map), the R1 note rule | mechanical | R1, R2 | done (uncommitted until checkpoint) |
+| R6 | Cleanup | leftovers, `TestApplyDiffMismatch`, N8 (package doc) | mechanical | — | done; closing checkpoint passed |
 | — | Checkpoint: `just test`, one commit (dispatching session) | | | R1–R6 | not started |
 | — | Optional live check of R4 (dispatching session, needs the user's go) | | | R4 | not started |
 

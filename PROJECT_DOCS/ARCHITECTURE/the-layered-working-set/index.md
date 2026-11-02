@@ -17,15 +17,15 @@ rule, the opencode-content slots and the tool-output cap. This section keeps the
 - **Tool output.** `boundTaskResultDeltas` (`internal/turn/livebudget.go`) applies the cap to the
   delta, so the bounded content is what the request carries and what the working window holds.
 - **File content.** `ComposeWorkingSet` loads each Layer B thread's `files.jsonl` and runs one
-  pure `dedup.Plan` across them. The plan gives each path a literal at its most recent
-  position and diffs at its N most recent changes. A path whose current size is at or above
-  `dedup.literal-share-threshold` × the per-thread share gets neither, and a diff at or above
-  `dedup.diff-literal-threshold` of the current size is skipped. Excerpts are then walked
-  newest-first, each charged with its planned expansions from the sizes in the index. An
-  excerpt whose text does not fit ends the walk; the newest is always taken. An expansion that does
-  not fit renders as its identifier with a size note. Only expansions that render are read.
-  `workset` renders them inside their excerpt. `ComposeWorkingSet` also returns a structured
-  report of the expansions rendered.
+  pure `dedup.Plan` across them. The plan gives each path under the size gate a literal
+  candidate at its most recent position. It gives diffs at the path's N most recent changes,
+  minus those not kept or at or above `dedup.diff-literal-threshold` of the current size. A
+  path whose current size is at or above `dedup.literal-share-threshold` × the per-thread share
+  gets neither. Threads are walked in Layer B order and their excerpts newest-first. An excerpt
+  is admitted only if its text and a size note per planned expansion fit; the newest is always
+  admitted. Notes then become content while the share allows. A content id renders as a literal
+  once: the first taken wins. Only content that renders is read. `workset` renders it inside
+  its excerpt, and `ComposeWorkingSet` returns a structured report of what rendered.
 - **Scaffolding.** Static prompt scaffolding (about 1.7 KB: preamble, topic-tag directive, recovery
   reminders, headers) is charged to no layer share and rides on top of the byte proxy.
   `TestA4PreflightAssembledBytesWithinBudget` bounds it (`Total + measured scaffolding`); a fixed

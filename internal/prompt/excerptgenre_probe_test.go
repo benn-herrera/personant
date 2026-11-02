@@ -51,6 +51,7 @@ import (
 	"personant/internal/model"
 	"personant/internal/prompt"
 	"personant/internal/testsupport"
+	"personant/internal/workset"
 )
 
 const (
@@ -146,7 +147,7 @@ func buildExcerptSystem(t *testing.T, fix probeFixture) string {
 	appendThread := func(spineOff int, reserveLast bool) bool {
 		e := fix.Spine[(fix.TargetIdx+spineOff)%n]
 		if body.Len() > 0 {
-			body.WriteString("\n---\n")
+			body.WriteString(workset.ThreadSeparator)
 		}
 		fmt.Fprintf(&body, "# %s (%s) — %s\n[anchors]: %s\n\n",
 			summaryFor(e.Article), e.ID,

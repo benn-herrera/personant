@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"personant/internal/clock"
 	"personant/internal/eventlog"
@@ -710,7 +711,6 @@ func (a *FileAdapter) RecordFileEvents(ctx context.Context, threadID string, tur
 	}
 	when, reason := a.checkFileEvents(threadID, turn, at, events)
 	if reason != "" {
-		_ = a.Log(ctx, memops.LogCategoryFS, "write-error", "thr="+threadID+" reason="+reason)
 		return fmt.Errorf("fileadapter: record file events %s: %s", threadID, reason)
 	}
 	written, err := store.ApplyFileEvents(a.paths, threadID, turn, when, events)
@@ -742,6 +742,8 @@ func (a *FileAdapter) checkFileEvents(threadID string, turn int, at string, even
 			return time.Time{}, "empty-path"
 		case strings.Contains(ev.Path, "\n"):
 			return time.Time{}, "newline-in-path"
+		case !utf8.ValidString(ev.Path):
+			return time.Time{}, "invalid-utf8-path"
 		}
 	}
 	return when, ""

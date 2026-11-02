@@ -317,9 +317,9 @@ func renderLayerB(in Inputs, budget memops.Budget) string {
 	if budget.BTopK > 0 && limit > budget.BTopK {
 		limit = budget.BTopK
 	}
-	// Per-thread share. The adapter's walk sizes each thread to it; the
-	// truncation here is the backstop for the always-taken newest excerpt
-	// and charged size notes.
+	// Per-thread share. The adapter's walk sizes each thread, with its
+	// ThreadSeparator, to it; the truncation here is the backstop for an
+	// always-taken newest excerpt whose text alone overruns the share.
 	perThread := PerThreadBudget(budget.LayerB, limit)
 
 	rendered := make([]string, 0, limit)
@@ -335,9 +335,12 @@ func renderLayerB(in Inputs, budget memops.Budget) string {
 	if len(rendered) == 0 {
 		return ""
 	}
-	joined := strings.Join(rendered, "\n---\n")
+	joined := strings.Join(rendered, ThreadSeparator)
 	return truncateToBudget(joined, budget.LayerB, "Layer B")
 }
+
+// ThreadSeparator joins the rendered Layer B threads.
+const ThreadSeparator = "\n---\n"
 
 // minPerThreadBudget is the floor for a single Layer B thread's per-thread
 // share — the "Layer B floored against recency starvation" guarantee
@@ -445,14 +448,24 @@ func ExpansionLen(x Expansion) int {
 // when x is Omitted. Nothing in the frame depends on Content, which
 // ExpansionLen relies on.
 func renderExpansion(x Expansion) string {
-	label := fmt.Sprintf("file content #%s", short12(x.ID))
-	if x.Kind == ExpansionDiff {
-		label = fmt.Sprintf("file diff #%s -> #%s", short12(x.From), short12(x.To))
-	}
+	label := expansionLabel(x)
 	if x.Omitted {
 		return fmt.Sprintf("\n\n[%s not shown: %d bytes] %s", label, x.Size, x.Path)
 	}
-	return fmt.Sprintf("\n\n[%s] %s\n%s\n[end %s]", label, x.Path, x.Content, label)
+	return fmt.Sprintf("\n\n[%s] %s\n%s\n%s", label, x.Path, x.Content, ExpansionEndMarker(x))
+}
+
+// ExpansionEndMarker is the closing line of x's rendered block when x is
+// not Omitted. It depends only on x's Kind, ID, From and To.
+func ExpansionEndMarker(x Expansion) string {
+	return "[end " + expansionLabel(x) + "]"
+}
+
+func expansionLabel(x Expansion) string {
+	if x.Kind == ExpansionDiff {
+		return fmt.Sprintf("file diff #%s -> #%s", short12(x.From), short12(x.To))
+	}
+	return fmt.Sprintf("file content #%s", short12(x.ID))
 }
 
 func short12(id string) string { return id[:min(12, len(id))] }

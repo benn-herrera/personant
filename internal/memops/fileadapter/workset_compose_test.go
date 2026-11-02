@@ -20,6 +20,7 @@ import (
 	"personant/internal/dedup"
 	"personant/internal/memops"
 	"personant/internal/store"
+	"personant/internal/workset"
 )
 
 // TestComposeWorkingSet_LayerE_DirectivesAndConventions seeds the three
@@ -148,16 +149,18 @@ func TestComposeWorkingSet_LayerA2_DigestsSortedByLastActive(t *testing.T) {
 }
 
 // testShare is the per-thread Layer B share the file-content compose tests
-// run at; its literal limit is LiteralShareThreshold of it, 1024 bytes.
-const testShare = 4096
-
-var testLiteralMax = int(dedup.LiteralShareThreshold * testShare)
+// run at. Its literal limit, ⌈0.25 × 4097⌉, is 1025 bytes: 0.25 × 4097 is
+// fractional, so a limit that rounds down shows here.
+const (
+	testShare      = 4097
+	testLiteralMax = 1025
+)
 
 // TestComposeWorkingSet_InPlaceAcrossThreads: two Layer B threads touch
 // src/a.go. Its literal renders once, at its most recent position; its N
 // most recent changes render as diffs at their turns; its older position
 // in the other thread expands nothing; and src/copy.go, holding the same
-// content at an earlier time, gets no literal.
+// content and walked later, renders as a size note.
 func TestComposeWorkingSet_InPlaceAcrossThreads(t *testing.T) {
 	a := newAdapter(t)
 	seedTurns(t, a, "thr_1", "t1", "t2", "t3", "t4", "t5", "t6")
@@ -171,39 +174,65 @@ func TestComposeWorkingSet_InPlaceAcrossThreads(t *testing.T) {
 	out := composeLayerB(t, a, "thr_1", "thr_2")
 
 	want := []memops.FileExpansion{
-		diffRecord("thr_1", 4, "src/a.go", revision(2), revision(3), final),
-		diffRecord("thr_1", 5, "src/a.go", revision(3), revision(4), final),
-		diffRecord("thr_1", 6, "src/a.go", revision(4), final, final),
+		diffRecord(t, a, "thr_1", 4, "src/a.go", revision(2), revision(3), final),
+		diffRecord(t, a, "thr_1", 5, "src/a.go", revision(3), revision(4), final),
+		diffRecord(t, a, "thr_1", 6, "src/a.go", revision(4), final, final),
 		{ThreadID: "thr_1", Turn: 6, Project: "prj_1", Path: "src/a.go", Kind: "literal",
 			ID: dedup.ContentID([]byte(final)), Size: len(final), PathSize: len(final)},
 	}
 	assertReport(t, out, want)
-	if n := strings.Count(out.LayerB, "[file content #"); n != 1 {
+	if n := strings.Count(out.LayerB, "[end file content #"); n != 1 {
 		t.Errorf("LayerB renders %d literals, want 1:\n%s", n, out.LayerB)
 	}
-	if n := strings.Count(out.LayerB, "[file diff #"); n != dedup.LiveDiffWindow {
+	if n := strings.Count(out.LayerB, "[end file diff #"); n != dedup.LiveDiffWindow {
 		t.Errorf("LayerB renders %d diffs, want %d:\n%s", n, dedup.LiveDiffWindow, out.LayerB)
 	}
 	t6 := strings.Index(out.LayerB, "## Turn 6")
-	literal := strings.Index(out.LayerB, "[file content #")
+	literal := strings.Index(out.LayerB, "[end file content #")
 	thr2 := strings.Index(out.LayerB, "(thr_2)")
 	if t6 < 0 || literal < t6 || literal > thr2 {
 		t.Errorf("literal is not inside thr_1's turn 6 excerpt:\n%s", out.LayerB)
 	}
-	if strings.Contains(out.LayerB[thr2:], "[file ") {
+	if strings.Contains(out.LayerB[thr2:], "[end file ") || strings.Contains(out.LayerB[thr2:], "] src/a.go") {
 		t.Errorf("thr_2 expands file content:\n%s", out.LayerB[thr2:])
+	}
+	if note := fmt.Sprintf("not shown: %d bytes] src/copy.go", len(final)); !strings.Contains(out.LayerB[thr2:], note) {
+		t.Errorf("thr_2 lacks %q:\n%s", note, out.LayerB[thr2:])
+	}
+}
+
+// TestComposeWorkingSet_SharedIDUnwalkedPositionRendersAtOtherPath: x.go
+// and y.go hold the same content; x.go's position is more recent but lies
+// in an excerpt the walk does not reach, so y.go renders the literal.
+func TestComposeWorkingSet_SharedIDUnwalkedPositionRendersAtOtherPath(t *testing.T) {
+	a := newAdapter(t)
+	shared := lines(100, 's')
+	seedTurns(t, a, "thr_1", "UNWALKED")
+	recordFiles(t, a, "thr_1", 1, 9, readEvent("x.go", shared))
+	appendSizedTurn(t, a, "thr_1", 2, 0)
+	seedTurns(t, a, "thr_2", "y")
+	recordFiles(t, a, "thr_2", 1, 1, readEvent("y.go", shared))
+
+	out := composeLayerB(t, a, "thr_1", "thr_2")
+
+	assertReport(t, out, []memops.FileExpansion{{
+		ThreadID: "thr_2", Turn: 1, Project: "prj_1", Path: "y.go", Kind: "literal",
+		ID: dedup.ContentID([]byte(shared)), Size: len(shared), PathSize: len(shared),
+	}})
+	if strings.Contains(out.LayerB, "UNWALKED") {
+		t.Errorf("the walk reached thr_1's turn 1:\n%s", out.LayerB)
 	}
 }
 
 // TestComposeWorkingSet_ShareThresholdBoundary: a file at the literal
-// limit renders no literal and no diff; one a byte under it renders its
-// literal.
+// limit renders no literal and no diff; a 1024-byte file, under
+// 0.25 × 4097 bytes, renders its literal.
 func TestComposeWorkingSet_ShareThresholdBoundary(t *testing.T) {
 	a := newAdapter(t)
 	seedTurns(t, a, "thr_1", "t1", "t2", "t3")
 	atMax := lines(testLiteralMax, 'a')
 	changed := "b" + atMax[1:]
-	under := lines(testLiteralMax-1, 'c')
+	under := lines(1024, 'c')
 	recordFiles(t, a, "thr_1", 2, 2, readEvent("at.go", atMax))
 	recordFiles(t, a, "thr_1", 3, 3, writeEvent("at.go", changed), readEvent("under.go", under))
 	entries, err := store.ReadTrackedIndex(a.paths, "thr_1")
@@ -248,14 +277,26 @@ func TestComposeWorkingSet_LoadsOnlyRenderedExpansions(t *testing.T) {
 	}
 }
 
-// TestComposeWorkingSet_BlobHashMismatchLogsDedupError: a taken
-// expansion whose blob does not hash to its id logs dedup.error and
-// renders nothing in its place.
-func TestComposeWorkingSet_BlobHashMismatchLogsDedupError(t *testing.T) {
+// TestComposeWorkingSet_ReadFailureRendersSizeNote: content whose blob
+// does not hash to its id logs dedup.error, renders as its size note and
+// adds no report record. Its charge drops back to the note's, which leaves
+// room for the older excerpt.
+func TestComposeWorkingSet_ReadFailureRendersSizeNote(t *testing.T) {
 	a := newAdapter(t)
-	seedTurns(t, a, "thr_1", "t1", "t2")
 	content := lines(100, 'x')
+	note := workset.Expansion{Kind: workset.ExpansionLiteral, Path: "x.go",
+		ID: dedup.ContentID([]byte(content)), Size: len(content), Omitted: true}
+	full := note
+	full.Omitted = false
+	older := strings.Repeat("o", 90)
+	olderLen := workset.ExcerptTextLen("## Turn 1\n\n" + older)
+	extra := workset.ExpansionLen(full) - workset.ExpansionLen(note)
+	if olderLen > extra {
+		t.Fatalf("precondition: the older excerpt (%d bytes) must fit in the content's %d extra bytes", olderLen, extra)
+	}
+	seedTurns(t, a, "thr_1", older)
 	recordFiles(t, a, "thr_1", 2, 2, readEvent("x.go", content))
+	appendSizedTurn(t, a, "thr_1", 2, workset.ExpansionLen(note)+extra)
 	corruptBlob(t, a, "thr_1", content)
 
 	out := composeLayerB(t, a, "thr_1")
@@ -263,8 +304,11 @@ func TestComposeWorkingSet_BlobHashMismatchLogsDedupError(t *testing.T) {
 	if log := readEventLog(t, a); !strings.Contains(log, "dedup.error") {
 		t.Errorf("no dedup.error logged:\n%s", log)
 	}
-	if strings.Contains(out.LayerB, "] x.go") {
-		t.Errorf("x.go expands despite a corrupt blob:\n%s", out.LayerB)
+	if !strings.Contains(out.LayerB, "not shown: 100 bytes] x.go") || strings.Contains(out.LayerB, "[end file") {
+		t.Errorf("x.go does not render as its size note:\n%s", out.LayerB)
+	}
+	if !strings.Contains(out.LayerB, older) {
+		t.Errorf("the failed read kept its content's charge; the older excerpt is missing:\n%s", out.LayerB)
 	}
 	assertReport(t, out, nil)
 }
@@ -304,8 +348,64 @@ func TestComposeWorkingSet_OverflowRule(t *testing.T) {
 		if !strings.Contains(out.LayerB, "truncated") {
 			t.Errorf("the backstop did not cut the oversized excerpt:\n%s", out.LayerB)
 		}
+		if strings.Contains(out.LayerB, "tiny.go") {
+			t.Errorf("a size note renders past the share:\n%s", out.LayerB)
+		}
 		assertReport(t, out, nil)
 	})
+	t.Run("the newest excerpt's notes that do not fit are dropped and its text is not cut", func(t *testing.T) {
+		a := newAdapter(t)
+		seedTurns(t, a, "thr_1", "t1")
+		recordFiles(t, a, "thr_1", 2, 2, readEvent("f.go", lines(100, 'f')))
+		body := appendSizedTurn(t, a, "thr_1", 2, 10)
+		out := composeLayerB(t, a, "thr_1")
+		if strings.Contains(out.LayerB, "truncated") || !strings.HasSuffix(out.LayerB, body) {
+			t.Errorf("the newest excerpt's text is cut:\n%s", out.LayerB)
+		}
+		if strings.Contains(out.LayerB, "f.go") {
+			t.Errorf("f.go's note renders past the share:\n%s", out.LayerB)
+		}
+		assertReport(t, out, nil)
+	})
+	t.Run("an older excerpt whose text fits but whose notes do not is not admitted", func(t *testing.T) {
+		a := newAdapter(t)
+		seedTurns(t, a, "thr_1", "OLDER")
+		recordFiles(t, a, "thr_1", 1, 1, readEvent("f.go", lines(100, 'f')))
+		body := appendSizedTurn(t, a, "thr_1", 2, workset.ExcerptTextLen("## Turn 1\n\nOLDER")+5)
+		out := composeLayerB(t, a, "thr_1")
+		if strings.Contains(out.LayerB, "OLDER") || strings.Contains(out.LayerB, "f.go") {
+			t.Errorf("the older excerpt was admitted:\n%s", out.LayerB)
+		}
+		if strings.Contains(out.LayerB, "truncated") || !strings.HasSuffix(out.LayerB, body) {
+			t.Errorf("the newest excerpt's text is cut:\n%s", out.LayerB)
+		}
+	})
+}
+
+// TestComposeWorkingSet_ThreeFullThreadsFitLayerB: at a LayerB of three
+// shares plus two bytes, three threads each filled to their share, with
+// the separator charged, render without the Layer B cut.
+func TestComposeWorkingSet_ThreeFullThreadsFitLayerB(t *testing.T) {
+	a := newAdapter(t)
+	ids := []string{"thr_1", "thr_2", "thr_3"}
+	var bodies []string
+	for _, id := range ids {
+		seedTurns(t, a, id, "OLD")
+		// Charged without the separator, the older excerpt would fit.
+		left := workset.ExcerptTextLen("## Turn 1\n\nOLD") + 2 - len(workset.ThreadSeparator)
+		bodies = append(bodies, appendSizedTurn(t, a, id, 2, left))
+	}
+
+	out := composeWithLayerB(t, a, 3*testShare+2, ids...)
+
+	if strings.Contains(out.LayerB, "truncated") || len(out.LayerB) > 3*testShare+2 {
+		t.Errorf("Layer B (%d bytes) is cut or over budget:\n%s", len(out.LayerB), out.LayerB)
+	}
+	for i, body := range bodies {
+		if !strings.Contains(out.LayerB, body) {
+			t.Errorf("%s's newest excerpt is missing", ids[i])
+		}
+	}
 }
 
 // TestComposeWorkingSet_ShrunkFileDiffGate: a diff kept when the file was
@@ -523,11 +623,35 @@ func corruptBlob(t *testing.T, a *FileAdapter, id, content string) {
 	}
 }
 
+// appendSizedTurn appends turn to thread id with a body, returned, sized so
+// that at testShare the turn's excerpt text leaves left bytes after the
+// thread header, the thread separator and itself.
+func appendSizedTurn(t *testing.T, a *FileAdapter, id string, turn, left int) string {
+	t.Helper()
+	fm, err := store.LoadThreadFrontmatter(a.paths, id)
+	if err != nil {
+		t.Fatalf("LoadThreadFrontmatter %s: %v", id, err)
+	}
+	prefix := fmt.Sprintf("## Turn %d\n\n", turn)
+	textLen := testShare - len(workset.RenderThreadHeader(id, fm)) - len(workset.ThreadSeparator) - left
+	body := id + strings.Repeat("b", textLen-workset.ExcerptTextLen(prefix+id))
+	if err := store.AppendThreadTurn(a.paths, id, turn, prefix+body); err != nil {
+		t.Fatalf("AppendThreadTurn: %v", err)
+	}
+	return body
+}
+
 // composeLayerB composes with ids as Layer B, each at testShare.
 func composeLayerB(t *testing.T, a *FileAdapter, ids ...string) memops.WorksetLayers {
 	t.Helper()
+	return composeWithLayerB(t, a, testShare*len(ids), ids...)
+}
+
+// composeWithLayerB composes with ids as Layer B at a LayerB of layerB.
+func composeWithLayerB(t *testing.T, a *FileAdapter, layerB int, ids ...string) memops.WorksetLayers {
+	t.Helper()
 	budget := memops.DefaultBudget()
-	budget.LayerB = testShare * len(ids)
+	budget.LayerB = layerB
 	budget.BTopK = len(ids)
 	out, err := a.ComposeWorkingSet(context.Background(), memops.WorksetInput{
 		ActiveProject: memops.ProjectMeta{ID: "prj_1"},
@@ -541,12 +665,18 @@ func composeLayerB(t *testing.T, a *FileAdapter, ids ...string) memops.WorksetLa
 }
 
 // diffRecord is the report record of the kept diff from content from to
-// content to, of a path whose current content is current.
-func diffRecord(thread string, turn int, path, from, to, current string) memops.FileExpansion {
-	d, _ := dedup.Diff(from, to)
+// content to, of a path whose current content is current. Its size is
+// the stored diff file's.
+func diffRecord(t *testing.T, a *FileAdapter, thread string, turn int, path, from, to, current string) memops.FileExpansion {
+	t.Helper()
+	fromID, toID := dedup.ContentID([]byte(from)), dedup.ContentID([]byte(to))
+	info, err := os.Stat(store.TrackedDiffPath(a.paths, thread, fromID, toID))
+	if err != nil {
+		t.Fatalf("stat stored diff: %v", err)
+	}
 	return memops.FileExpansion{
 		ThreadID: thread, Turn: turn, Project: "prj_1", Path: path, Kind: "diff",
-		From: dedup.ContentID([]byte(from)), To: dedup.ContentID([]byte(to)), Size: len(d), PathSize: len(current),
+		From: fromID, To: toID, Size: int(info.Size()), PathSize: len(current),
 	}
 }
 

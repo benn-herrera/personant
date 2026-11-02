@@ -3,6 +3,7 @@ package turn
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"strconv"
 	"strings"
@@ -1284,7 +1285,7 @@ func TestRunFileCommitUntrackedIsNonFatal(t *testing.T) {
 	pinClock(t, time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
 
 	pre := []Delta{
-		{Source: "fs.commit", Meta: map[string]string{"path": "never-written.go", "hash": "h"}},
+		{Source: "fs.commit", Meta: map[string]string{"path": "never-written.go", "hash": "abc1234"}},
 	}
 	if _, err := RunWithDeltas(context.Background(), state, pre, "commit it", io.Discard); err != nil {
 		t.Fatalf("RunWithDeltas must not fail on untracked commit: %v", err)
@@ -1294,7 +1295,7 @@ func TestRunFileCommitUntrackedIsNonFatal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadThreadBody: %v", err)
 	}
-	if !strings.Contains(body, "[file commit @h] never-written.go\n") {
+	if !strings.Contains(body, "[file commit @abc1234] never-written.go\n") {
 		t.Errorf("excerpt lacks the commit identifier line:\n%s", body)
 	}
 	if _, ok := trackedEntry(t, paths, "thr_42", "never-written.go"); ok {
@@ -1336,6 +1337,115 @@ func TestRunFileEditNewlineInPathIsRejected(t *testing.T) {
 	}
 	if entries, err := store.ReadTrackedIndex(paths, "thr_42"); err != nil || len(entries) != 0 {
 		t.Errorf("tracked entries = %+v, err = %v; want none", entries, err)
+	}
+}
+
+// TestRunFileEditInvalidUTF8PathIsRejected — a path that is not valid UTF-8
+// would be rewritten as U+FFFD in the tracked index and collide with
+// another path; it is logged and buffered nowhere.
+func TestRunFileEditInvalidUTF8PathIsRejected(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedThreadAndSpine(t, paths, meta.ID, "thr_42")
+
+	mock := model.NewScriptedMock([]model.Response{
+		{Content: "*topic: thr_42 [a, b, c, d]*\nDone."},
+	}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	pinClock(t, time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
+
+	pre := []Delta{
+		{Source: "fs.write", Content: "v1", Meta: map[string]string{"path": "a\xff.go"}},
+	}
+	if _, err := RunWithDeltas(context.Background(), state, pre, "edit it", io.Discard); err != nil {
+		t.Fatalf("RunWithDeltas: %v", err)
+	}
+	if !strings.Contains(readDayLog(t, paths), "fs.edit-no-path source=fs.write reason=invalid-utf8-path") {
+		t.Error("log lacks fs.edit-no-path reason=invalid-utf8-path")
+	}
+	body, err := store.ReadThreadBody(paths, "thr_42", 1<<20)
+	if err != nil {
+		t.Fatalf("ReadThreadBody: %v", err)
+	}
+	if strings.Contains(body, "[file ") {
+		t.Errorf("rejected path reached the excerpt:\n%s", body)
+	}
+	if entries, err := store.ReadTrackedIndex(paths, "thr_42"); err != nil || len(entries) != 0 {
+		t.Errorf("tracked entries = %+v, err = %v; want none", entries, err)
+	}
+}
+
+// TestRunFileCommitBadHashIsRejected — an fs.commit whose hash is not 7 to
+// 64 hex digits writes no identifier line and is logged once.
+func TestRunFileCommitBadHashIsRejected(t *testing.T) {
+	for _, tt := range []struct{ name, hash string }{
+		{"empty", ""},
+		{"non-hex", "zzzzzzzz"},
+		{"newline", "abc1234\nff"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			paths, meta := newTestHome(t)
+			seedThreadAndSpine(t, paths, meta.ID, "thr_42")
+
+			mock := model.NewScriptedMock([]model.Response{
+				{Content: "*topic: thr_42 [a, b, c, d]*\nDone."},
+			}, nil)
+			state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+			pinClock(t, time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
+
+			pre := []Delta{
+				{Source: "fs.commit", Meta: map[string]string{"path": "a.go", "hash": tt.hash}},
+			}
+			if _, err := RunWithDeltas(context.Background(), state, pre, "commit it", io.Discard); err != nil {
+				t.Fatalf("RunWithDeltas: %v", err)
+			}
+			const want = "fs.edit-no-path source=fs.commit reason=bad-commit-hash"
+			if n := strings.Count(readDayLog(t, paths), want); n != 1 {
+				t.Errorf("log has %d %q lines, want 1", n, want)
+			}
+			body, err := store.ReadThreadBody(paths, "thr_42", 1<<20)
+			if err != nil {
+				t.Fatalf("ReadThreadBody: %v", err)
+			}
+			if strings.Contains(body, "[file ") {
+				t.Errorf("rejected commit reached the excerpt:\n%s", body)
+			}
+		})
+	}
+}
+
+// failRecordOps wraps the real adapter, failing every RecordFileEvents.
+type failRecordOps struct {
+	memops.MemoryOps
+}
+
+func (failRecordOps) RecordFileEvents(context.Context, string, int, string, []memops.FileEvent) error {
+	return errors.New("record file events thr_1: injected")
+}
+
+// TestRunFileEditStoreErrorLoggedOnce — a RecordFileEvents failure does not
+// fail the turn and is logged as exactly one fs.write-error.
+func TestRunFileEditStoreErrorLoggedOnce(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedThreadAndSpine(t, paths, meta.ID, "thr_42")
+
+	mock := model.NewScriptedMock([]model.Response{
+		{Content: "*topic: thr_42 [a, b, c, d]*\nDone."},
+	}, nil)
+	state := NewState(failRecordOps{fileadapter.NewFileAdapter(paths)}, meta, memops.Provider{}, mock)
+	pinClock(t, time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
+
+	pre := []Delta{
+		{Source: "fs.write", Content: "v1", Meta: map[string]string{"path": "src/a.go"}},
+	}
+	if _, err := RunWithDeltas(context.Background(), state, pre, "edit it", io.Discard); err != nil {
+		t.Fatalf("RunWithDeltas: %v", err)
+	}
+	log := readDayLog(t, paths)
+	if n := strings.Count(log, "fs.write-error"); n != 1 {
+		t.Errorf("log has %d fs.write-error lines, want 1:\n%s", n, log)
+	}
+	if !strings.Contains(log, "err=") || !strings.Contains(log, "injected") {
+		t.Errorf("fs.write-error lacks err= and injected:\n%s", log)
 	}
 }
 

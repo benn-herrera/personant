@@ -76,6 +76,10 @@ var crashScenarioCoverage = map[string]string{
 	"barrier.prune.postIndex":        "fileadapter.TestBarrier_CrashWalk (also store.TestPruneTrackedFilesCrashAfterIndexConverges)",
 	"barrier.postPrune.preDayCommit": "fileadapter.TestBarrier_CrashWalk",
 
+	// Tracked-file turn write: between the store's blob and diff writes and
+	// its index write.
+	"fs.applyEvents.preIndex": "scenarios.TestCrashMatrix_WTurnFileEvents",
+
 	// morning-init — the two R4-deferred points, armed here on a greenfield
 	// home whose first Reconcile is where daily is born.
 	"morninginit.preBaseline":               "scenarios.TestCrashMatrix_MorningInit",
@@ -273,6 +277,7 @@ func TestCrashMatrix_WTurnFileEvents(t *testing.T) {
 		hit       int
 		committed bool
 	}{
+		{"applyEventsPreIndex", "fs.applyEvents.preIndex", 0, false},
 		{"postJournalPreCanonical", "turn.postJournalPreCanonical", 0, false},
 		{"betweenRenames.k1", "turn.betweenCanonicalRenames", 1, false},
 		{"commitPostAddPreCommit", "fileadapter.CommitTurn.postAddPreCommit", 0, false},

@@ -50,6 +50,12 @@ func TrackedIndexRel(threadID string) string {
 	return threadsDirName + "/" + threadID + "/" + trackedIndexName
 }
 
+// TrackedFilesDirRel is the repo-relative path of the directory holding a
+// thread's tracked-file blobs and kept diffs.
+func TrackedFilesDirRel(threadID string) string {
+	return threadsDirName + "/" + threadID + "/" + trackedFilesDirName
+}
+
 // TrackedBlobRel is the repo-relative path of a thread's tracked-file blob
 // with content id id.
 func TrackedBlobRel(threadID, id string) string {

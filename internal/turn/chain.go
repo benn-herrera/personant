@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"personant/internal/dedup"
 	"personant/internal/memops"
@@ -134,9 +135,9 @@ func onContextDelta(ctx context.Context, state *State, delta Delta) error {
 // bufferFileEdit is the §3.9 step-3 hook: it appends a buffered file
 // event to state.fileEdits for an fs.read / fs.write / fs.commit delta.
 // The file path is read from delta.Meta["path"]; a delta whose path is
-// empty, or contains a newline and so cannot be the remainder of an
-// identifier line, is logged and skipped. Non-fs delta sources are
-// ignored.
+// empty, contains a newline, or is not valid UTF-8 and so cannot be the
+// remainder of an identifier line, is logged and skipped; so is an fs.commit
+// whose hash is not 7 to 64 hex digits. Non-fs delta sources are ignored.
 func bufferFileEdit(ctx context.Context, state *State, delta Delta) error {
 	var kind dedup.FileEventKind
 	switch delta.Source {
@@ -156,6 +157,10 @@ func bufferFileEdit(ctx context.Context, state *State, delta Delta) error {
 		reason = "missing-meta-path"
 	case strings.Contains(path, "\n"):
 		reason = "newline-in-path"
+	case !utf8.ValidString(path):
+		reason = "invalid-utf8-path"
+	case kind == dedup.FileCommit && !isCommitHash(delta.Meta["hash"]):
+		reason = "bad-commit-hash"
 	}
 	if reason != "" {
 		return state.Ops.Log(ctx, memops.LogCategoryFS, "edit-no-path",
@@ -169,6 +174,19 @@ func bufferFileEdit(ctx context.Context, state *State, delta Delta) error {
 	}
 	state.fileEdits = append(state.fileEdits, fe)
 	return nil
+}
+
+// isCommitHash reports whether h is 7 to 64 hexadecimal digits.
+func isCommitHash(h string) bool {
+	if len(h) < 7 || len(h) > 64 {
+		return false
+	}
+	for _, c := range h {
+		if !('0' <= c && c <= '9' || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 // provisionalRetention returns the §3.0.1 source-driven default

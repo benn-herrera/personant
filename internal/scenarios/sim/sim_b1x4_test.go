@@ -209,3 +209,32 @@ func TestCompletenessFloor_SpanConditionality(t *testing.T) {
 		t.Errorf("qualifyingCompletenessSpan with 0 main turns = %s, want 0 (nothing to scale)", got)
 	}
 }
+
+// TestLargeInputBytesFor pins the large-input size one byte under the literal
+// limit, and the filler the rung injects at that size below the default
+// budget's 19,479-byte limit, so the injected file can render as a literal.
+func TestLargeInputBytesFor(t *testing.T) {
+	cases := []struct {
+		name   string
+		budget memops.Budget
+		want   int
+	}{
+		{"default budget", memops.DefaultBudget(), 19478},
+		{"share 4097", memops.Budget{LayerB: 4097, BTopK: 1}, 1024},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := largeInputBytesFor(c.budget); got != c.want {
+				t.Errorf("largeInputBytesFor = %d, want %d", got, c.want)
+			}
+		})
+	}
+
+	const defaultLiteralLimit = 19479
+	for _, bytes := range []int{largeInputBytesFor(memops.DefaultBudget()), 0} {
+		n := len(largeToolResultDelta(largeInputRungEveryN, bytes).Content)
+		if n == 0 || n >= defaultLiteralLimit {
+			t.Errorf("filler at LargeInputBytes=%d is %d bytes, want in (0, %d)", bytes, n, defaultLiteralLimit)
+		}
+	}
+}

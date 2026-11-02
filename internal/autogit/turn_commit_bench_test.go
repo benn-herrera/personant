@@ -132,13 +132,13 @@ func newTurnBenchHome(b *testing.B, n int) *turnBenchHome {
 	for i := range benchSmallThreads {
 		dir := fmt.Sprintf("threads/thr_s%03d", i)
 		add(dir+"/thread.md", benchText(r, benchThreadMDBytes))
-		add(dir+"/files.json", benchText(r, 256))
+		add(dir+"/files.jsonl", benchText(r, 256))
 		for j := range benchSmallTurns {
 			add(fmt.Sprintf("%s/turns/%07d.md", dir, j+1), benchText(r, benchTurnBytes))
 		}
 	}
 	add(benchMainThread+"/thread.md", h.threadMD)
-	add(benchMainThread+"/files.json", benchText(r, 256))
+	add(benchMainThread+"/files.jsonl", benchText(r, 256))
 	mainTurns := n - len(rels)
 	if mainTurns < 1 {
 		b.Fatalf("N=%d is below the fixed layout's %d entries", n, len(rels)+1)

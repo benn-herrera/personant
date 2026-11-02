@@ -75,11 +75,13 @@ package sim
 import (
 	"fmt"
 	"hash/fnv"
+	"math"
 	"math/rand"
 	"slices"
 	"strings"
 	"time"
 
+	"personant/internal/dedup"
 	pnlog "personant/internal/log"
 	"personant/internal/memops"
 	"personant/internal/model"
@@ -87,6 +89,7 @@ import (
 	"personant/internal/recall/scoring"
 	"personant/internal/scenarios"
 	"personant/internal/turn"
+	"personant/internal/workset"
 )
 
 // simRecallThreshold is the minimum symbolic-Jaccard score for the
@@ -253,19 +256,19 @@ type WorkloadConfig struct {
 	// post-flight usage.prompt_tokens assertion against a payload that COULD blow
 	// the window (rung invariant 6).
 	//
-	// When LargeInputEveryN > 0, every LargeInputEveryN-th WORK turn carries an
-	// inflated payload of ~LargeInputBytes deterministic filler. Per #127 Q3 the
-	// production live-turn sub-policy REJECTS oversize user-authored input but
-	// TRUNCATION-bounds tool results — so the stress is injected via the
-	// verbose-TOOL-RESULT path (an oversized fs.read content delta), which grows
-	// the request rather than being rejected; the large-USER-INPUT path is NOT
-	// injected here (it would exercise the reject path, not request growth, and
-	// the rung's job is to stress the ceiling assertion). The filler carries NO
-	// new recall-bearing tags (it is topic-free noise appended to the existing
-	// tagged content), so ExpectedRecallMatches and the shadow chunk model are
-	// unaffected (design §2.3 negative constraint). Seed-deterministic: placement
-	// is keyed off the work-turn count and the bytes are a fixed pattern, so a
-	// run with the same (Seed, Duration, Corpus, LargeInput*) is reproducible.
+	// When LargeInputEveryN > 0, every LargeInputEveryN-th WORK turn also reads
+	// a file of at most LargeInputBytes deterministic filler, at a path of its
+	// own. Sized by largeInputBytesFor just under the literal-share threshold,
+	// each such file becomes a tracked-file literal in the composed Layer B from
+	// the next turn on, so the live rung's ceiling check measures real provider
+	// tokens of file content against the byte-derived budget. A file at or
+	// above the threshold never renders, which is why the size is derived and
+	// not fixed. Zero LargeInputBytes means largeInputBytesFor at
+	// memops.DefaultBudget(). The filler carries NO recall-bearing tags, so
+	// ExpectedRecallMatches and the shadow chunk model are unaffected.
+	// Seed-deterministic: placement is keyed off the work-turn count and the
+	// bytes are a fixed pattern, so a run with the same (Seed, Duration, Corpus,
+	// LargeInput*) is reproducible.
 	LargeInputEveryN int
 	LargeInputBytes  int
 }
@@ -2023,7 +2026,7 @@ type generator struct {
 	// workTurnSeq counts WORK turns emitted so far (incremented once per
 	// buildWorkPreEvents call) — the deterministic placement key for the B1+X4
 	// large-input injection (cfg.LargeInputEveryN). Every LargeInputEveryN-th
-	// work turn carries the inflated verbose-tool-result payload. Pure (no rng),
+	// work turn carries the large-input fs.read (largeToolResultDelta). Pure (no rng),
 	// so it does not perturb the action stream's determinism; 0/unused when the
 	// knob is off (LargeInputEveryN == 0).
 	workTurnSeq int
@@ -3309,17 +3312,12 @@ func buildMockResponse(isNew bool, threadID string, anchorTags []string, slot Co
 // Otherwise the agentic-edit default line is used. Mutates the
 // thread's fileState (content, writeCount).
 //
-// B1+X4 stress (cfg.LargeInputEveryN > 0): every LargeInputEveryN-th work turn
-// ALSO emits a separate verbose-tool-result delta — an oversized fs.read of a
-// synthetic large file (largeToolResultDelta) sized ~LargeInputBytes. Per #127
-// Q3 a tool result is TRUNCATION-bounded by the production live-turn sub-policy
-// (not rejected like oversize user input), so it grows the assembled request,
-// pushing usage.prompt_tokens toward the ceiling — the X4-PROD payload the mock
-// mad-libs turns never produce. It is a STANDALONE delta carrying tag-free
-// filler; the thread's persistent fs.content is NOT inflated, so dedup, the
-// fs diff, the shadow chunk model, and the recall oracle are all unaffected
-// (design §2.3 negative constraint). The knob defaults off → this is skipped →
-// the mock step stream is byte-identical.
+// Large-input stress (cfg.LargeInputEveryN > 0): every LargeInputEveryN-th
+// work turn ALSO emits an fs.read of a synthetic file (largeToolResultDelta)
+// of at most LargeInputBytes. It is a STANDALONE delta carrying tag-free
+// filler; the thread's work file is NOT inflated, and the shadow chunk model
+// and the recall oracle are unaffected. The knob defaults off → this is
+// skipped → the mock step stream is byte-identical.
 func (g *generator) buildWorkPreEvents(idx int, slot CorpusSlot, userDictated bool) []turn.Delta {
 	g.workTurnSeq++
 	fs := g.workFile(idx)
@@ -3328,10 +3326,9 @@ func (g *generator) buildWorkPreEvents(idx int, slot CorpusSlot, userDictated bo
 		Content: fs.content,
 		Meta:    map[string]string{"path": fs.path},
 	}}
-	// B1+X4 verbose-tool-result injection — placed right after the genuine
-	// fs.read. The filler is an fs.read of its own path, so it becomes a
-	// tracked path of the turn's owner and renders from the next turn's
-	// composition, not this turn's request. Off by default.
+	// Pre-prompt deltas never reach this turn's request: the filler becomes a
+	// tracked path of the turn's owner and renders as a literal from the next
+	// turn's composition. Off by default.
 	if g.cfg.LargeInputEveryN > 0 && g.workTurnSeq%g.cfg.LargeInputEveryN == 0 {
 		preEvents = append(preEvents, largeToolResultDelta(g.workTurnSeq, g.cfg.LargeInputBytes))
 	}
@@ -3360,17 +3357,15 @@ func (g *generator) buildWorkPreEvents(idx int, slot CorpusSlot, userDictated bo
 	return preEvents
 }
 
-// largeToolResultDelta builds a B1+X4 verbose-tool-result delta: a synthetic
-// fs.read of an oversized "log dump" sized to ~bytes, used to stress the
-// token-ceiling assertion (X4-PROD fix 2). The content is deterministic
-// (seed-free — a fixed pattern keyed off seq) so the step stream stays
-// reproducible, and it carries NO #-tags or corpus vocabulary — it is topic-free
-// filler, so the runtime's symbol extraction yields nothing recall-bearing and
-// the recall oracle is unperturbed (design §2.3). A distinct synthetic path per
-// seq keeps the delta from being mistaken for the thread's tracked work file.
+// largeToolResultDelta builds the large-input fs.read: a synthetic file of at
+// most bytes (largeInputBytesFor(memops.DefaultBudget()) when bytes is not
+// positive). The content is deterministic (a fixed pattern keyed off seq) and
+// carries NO #-tags or corpus vocabulary, so the runtime's symbol extraction
+// yields nothing recall-bearing. A distinct path per seq keeps it apart from
+// the thread's work file.
 func largeToolResultDelta(seq, bytes int) turn.Delta {
 	if bytes <= 0 {
-		bytes = defaultLargeInputBytes
+		bytes = largeInputBytesFor(memops.DefaultBudget())
 	}
 	return turn.Delta{
 		Source:  memops.SourceFSRead,
@@ -3379,30 +3374,28 @@ func largeToolResultDelta(seq, bytes int) turn.Delta {
 	}
 }
 
-// largeFiller returns ~bytes of deterministic, tag-free filler text. Each line
-// is a fixed-shape log line carrying the seq and a line counter — no '#'
-// characters and no corpus tags, so the deterministic symbol-extraction pass
-// finds no recall-bearing identifier in it (it is noise around the real tagged
-// content, not new ground truth). The exact byte count is approximate (whole
-// lines), which is fine: the token-ceiling assertion reads the provider's true
-// post-assembly count, not this estimate.
+// largeFiller returns the most whole fixed-shape log lines, keyed by seq and
+// a line counter, that fit in bytes. It never exceeds bytes, so a size just
+// under the literal limit stays under it. No line carries '#' or a corpus tag.
 func largeFiller(seq, bytes int) string {
 	const line = "log line %06d: synthetic verbose tool output for run %d — padding to stress the live-turn payload budget\n"
 	var b strings.Builder
-	b.Grow(bytes + len(line))
-	for i := 0; b.Len() < bytes; i++ {
-		fmt.Fprintf(&b, line, i, seq)
+	b.Grow(bytes)
+	for i := 0; ; i++ {
+		l := fmt.Sprintf(line, i, seq)
+		if b.Len()+len(l) > bytes {
+			return b.String()
+		}
+		b.WriteString(l)
 	}
-	return b.String()
 }
 
-// defaultLargeInputBytes is the fallback verbose-tool-result size when the rung
-// sets LargeInputEveryN but leaves LargeInputBytes zero. ~48 KB is a meaningful
-// fraction of the ~500 KB (= ceiling × ~2.5 B/tok) the #127 partition implies,
-// and a handful per session compounds toward the ceiling (design §5 starting
-// guess: tens-of-KB tool results). A calibration starting point — tune from the
-// first run's request_prompt_tokens max (rung criterion 3).
-const defaultLargeInputBytes = 48 * 1024
+// largeInputBytesFor is the largest file size that budget b still renders as
+// a Layer B literal: one byte under ⌈dedup.LiteralShareThreshold × the
+// per-thread share⌉, the size at or above which a file never expands.
+func largeInputBytesFor(b memops.Budget) int {
+	return int(math.Ceil(dedup.LiteralShareThreshold*float64(workset.PerThreadBudget(b.LayerB, b.BTopK)))) - 1
+}
 
 // syntheticHash returns a short deterministic hex digest of content, used
 // as the synthetic git-commit hash on an fs.commit delta. It is a content

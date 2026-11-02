@@ -59,7 +59,7 @@ func commitAll(t *testing.T, paths store.PersonantPaths, repo *git.Repository, m
 }
 
 // writeThreadDir lays down a representative thread directory:
-// thread.md + turns/<n>.md + files.json. Returns the repo-relative path.
+// thread.md + turns/<n>.md + files.jsonl + files/<id>. Returns the repo-relative path.
 func writeThreadDir(t *testing.T, paths store.PersonantPaths, id string) string {
 	t.Helper()
 	rel := filepath.ToSlash(filepath.Join("threads", id))
@@ -68,10 +68,11 @@ func writeThreadDir(t *testing.T, paths store.PersonantPaths, id string) string 
 		t.Fatalf("mkdir thread dir: %v", err)
 	}
 	files := map[string]string{
-		"thread.md":  "---\nid: " + id + "\n---\n# " + id + "\n",
-		"turns/1.md": "first turn excerpt for " + id + "\n",
-		"turns/2.md": "second turn excerpt for " + id + "\n",
-		"files.json": "{\"files\":{}}\n",
+		"thread.md":   "---\nid: " + id + "\n---\n# " + id + "\n",
+		"turns/1.md":  "first turn excerpt for " + id + "\n",
+		"turns/2.md":  "second turn excerpt for " + id + "\n",
+		"files.jsonl": "{\"path\":\"a.go\",\"id\":\"ce013625030ba8dba906f756967f9e9ca394464a\",\"size\":6,\"turn\":2,\"at\":\"2026-05-18T12:00:00Z\",\"changes\":[]}\n",
+		"files/ce013625030ba8dba906f756967f9e9ca394464a": "hello\n",
 	}
 	for name, content := range files {
 		p := filepath.Join(abs, filepath.FromSlash(name))

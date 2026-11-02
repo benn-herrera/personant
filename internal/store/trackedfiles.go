@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -164,6 +165,10 @@ func ReadTrackedBlob(paths PersonantPaths, threadID, id string) ([]byte, error) 
 	return data, nil
 }
 
+// cpApplyEventsPreIndex fires after a turn's blob and diff writes and
+// before its index write.
+var cpApplyEventsPreIndex = crashpoint.Register("fs.applyEvents.preIndex")
+
 // ApplyFileEvents applies one turn's file events, in order, to a thread's
 // tracked-file store and returns the repo-relative paths it wrote. turn is
 // the owner excerpt number and at its header timestamp.
@@ -171,10 +176,12 @@ func ReadTrackedBlob(paths PersonantPaths, threadID, id string) ([]byte, error) 
 // A path's first event creates its entry with no change. A later event
 // whose content differs records a change from the previous content, with
 // its diff written when dedup.Diff keeps it, and trims the changes to the
-// dedup.LiveDiffWindow most recent. Every event sets the entry's current
-// id, size, turn and at. Blobs and diffs are written only when absent, and
-// all of them before the index, which is written once at the end. On error
-// the paths already written are returned with it.
+// dedup.LiveDiffWindow most recent. A previous blob that does not read
+// records the change with no diff. Every event sets the entry's current
+// id, size, turn and at. A blob or diff is written when absent or when its
+// bytes differ from what would be written, and all of them before the
+// index, which is written once at the end. On error the paths already
+// written are returned with it.
 func ApplyFileEvents(paths PersonantPaths, threadID string, turn int, at time.Time, events []memops.FileEvent) ([]string, error) {
 	if len(events) == 0 {
 		return nil, nil
@@ -190,9 +197,9 @@ func ApplyFileEvents(paths PersonantPaths, threadID string, turn int, at time.Ti
 
 	var written []string
 	put := func(path, rel string, data []byte) error {
-		if _, err := os.Stat(path); err == nil {
+		if have, err := os.ReadFile(path); err == nil && bytes.Equal(have, data) {
 			return nil
-		} else if !errors.Is(err, os.ErrNotExist) {
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		if err := WriteFileAtomic(path, data); err != nil {
@@ -216,11 +223,11 @@ func ApplyFileEvents(paths PersonantPaths, threadID string, turn int, at time.Ti
 		}
 		e := &entries[i]
 		if ok && e.ID != id {
-			old, err := ReadTrackedBlob(paths, threadID, e.ID)
-			if err != nil {
-				return written, fmt.Errorf("apply file events %s: %s: %w", threadID, ev.Path, err)
+			var diff string
+			var kept bool
+			if old, err := ReadTrackedBlob(paths, threadID, e.ID); err == nil {
+				diff, kept = dedup.Diff(string(old), ev.Content)
 			}
-			diff, kept := dedup.Diff(string(old), ev.Content)
 			if kept {
 				if err := put(TrackedDiffPath(paths, threadID, e.ID, id), TrackedDiffRel(threadID, e.ID, id), []byte(diff)); err != nil {
 					return written, fmt.Errorf("apply file events %s: %s: %w", threadID, ev.Path, err)
@@ -235,6 +242,7 @@ func ApplyFileEvents(paths PersonantPaths, threadID string, turn int, at time.Ti
 		e.ID, e.Size, e.Turn, e.At = id, len(ev.Content), turn, at
 	}
 
+	crashpoint.At(cpApplyEventsPreIndex)
 	if err := writeTrackedIndex(paths, threadID, entries); err != nil {
 		return written, fmt.Errorf("apply file events %s: %w", threadID, err)
 	}

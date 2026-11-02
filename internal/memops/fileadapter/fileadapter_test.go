@@ -503,8 +503,8 @@ func TestArchiveThenRecover_RoundTrip(t *testing.T) {
 	// The git restore is byte-exact (the tree-hash verify in RecoverThread
 	// already proved that). Recovery then deliberately re-stamps thread.md
 	// with state=wip / last_engaged=now per design §7.2, so thread.md is NOT
-	// expected to be byte-identical. Every OTHER file (the turn-excerpt body,
-	// files.json) must be byte-exact — that is the recoverable content the
+	// expected to be byte-identical. Every OTHER file (the turn excerpts,
+	// files.jsonl and files/) must be byte-exact — that is the recoverable content the
 	// archival round-trip exists to preserve.
 	for name, content := range before {
 		if name == "thread.md" {

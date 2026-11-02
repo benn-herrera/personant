@@ -619,6 +619,80 @@ func TestBarrier_PruneUnreadableIndexRecovers(t *testing.T) {
 	assertBarrierTerminal(t, b, day)
 }
 
+// TestBarrier_RepairRestoresTrackedStoreUnit: a blob written since the last
+// day-commit and then deleted fails B2's verify gate. HEAD has no copy of
+// it, so completion quarantines the thread's files.jsonl and files/
+// together and restores both from primary HEAD, and the day seals.
+func TestBarrier_RepairRestoresTrackedStoreUnit(t *testing.T) {
+	a := newBarrierHome(t, 3)
+	seedPrunableStore(t, a)
+	ctx := context.Background()
+	pinBarrierClock(t, bDay1)
+	if _, err := a.MaybeDayBarrier(ctx); err != nil {
+		t.Fatalf("first barrier: %v", err)
+	}
+	index := store.TrackedIndexPath(a.paths, "thr_1")
+	filesDir := filepath.Join(store.ThreadDir(a.paths, "thr_1"), "files")
+	goodIndex, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	goodFiles := snapshotDir(t, filesDir)
+
+	content := editedLines(dedup.LiveDiffWindow + 4)
+	ev := []memops.FileEvent{{Kind: memops.FileEventWrite, Path: "a.go", Content: content}}
+	if _, err := store.ApplyFileEvents(a.paths, "thr_1", store.ThreadTurnWindow+5, bDay1, ev); err != nil {
+		t.Fatalf("apply today's write: %v", err)
+	}
+	blob := store.TrackedBlobPath(a.paths, "thr_1", dedup.ContentID([]byte(content)))
+	if err := os.Remove(blob); err != nil {
+		t.Fatalf("remove today's blob: %v", err)
+	}
+
+	pinBarrierClock(t, bDay2)
+	day := autogit.DayIndexOf(bDay2) - 1
+	if _, err := a.MaybeDayBarrier(ctx); err == nil {
+		t.Fatal("barrier over a missing blob succeeded; want the B2 verify failure")
+	}
+	if m, present, _ := store.ReadMarker(a.paths); !present || m.Op != store.OpBarrier {
+		t.Fatalf("marker after failed barrier: %+v present=%v, want op=barrier intact", m, present)
+	}
+	brokenIndex, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	brokenFiles := snapshotDir(t, filesDir)
+
+	b := NewFileAdapter(a.paths)
+	rep, err := b.Reconcile(ctx)
+	if err != nil {
+		t.Fatalf("completion Reconcile: %v", err)
+	}
+	for _, rel := range []string{store.TrackedIndexRel("thr_1"), store.TrackedFilesDirRel("thr_1")} {
+		if !slices.Contains(rep.ScopedRestored, rel) {
+			t.Errorf("ScopedRestored = %v, want %s", rep.ScopedRestored, rel)
+		}
+	}
+	qIndex, err := filepath.Glob(filepath.Join(b.paths.RecoveryDir, "quarantine", "*", "threads", "thr_1", "files.jsonl"))
+	if err != nil || len(qIndex) != 1 {
+		t.Fatalf("quarantined index copies = %v (err %v), want 1", qIndex, err)
+	}
+	if q, err := os.ReadFile(qIndex[0]); err != nil || string(q) != string(brokenIndex) {
+		t.Errorf("quarantined index not byte-exact (err %v)", err)
+	}
+	if q := snapshotDir(t, filepath.Join(filepath.Dir(qIndex[0]), "files")); !maps.Equal(q, brokenFiles) {
+		t.Errorf("quarantined files/ not byte-exact")
+	}
+	if restored, err := os.ReadFile(index); err != nil || string(restored) != string(goodIndex) {
+		t.Errorf("index after completion = %q (err %v), want the last day-commit's", restored, err)
+	}
+	if restored := snapshotDir(t, filesDir); !maps.Equal(restored, goodFiles) {
+		t.Errorf("files/ after completion differs from the last day-commit's")
+	}
+	assertIndexedFilesPresent(t, b.paths, "thr_1")
+	assertBarrierTerminal(t, b, day)
+}
+
 // newFolioBindHome is the settle fixture: three retired threads, too few
 // for archival pressure, with thr_1 holding four loose excerpts.
 func newFolioBindHome(t *testing.T) *FileAdapter {

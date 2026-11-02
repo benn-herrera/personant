@@ -370,6 +370,28 @@ func TestExpansionLenMatchesRendered(t *testing.T) {
 	}
 }
 
+func TestExpansionEndMarkerIsLastLine(t *testing.T) {
+	cases := []struct {
+		name string
+		x    Expansion
+		want string
+	}{
+		{"literal", Expansion{Kind: ExpansionLiteral, Path: "a.go", ID: idA, Content: "package a\n"},
+			"[end file content #111111111111]"},
+		{"diff", Expansion{Kind: ExpansionDiff, Path: "a.go", From: idA, To: idB, Content: "@@ -1 +1 @@\n-a\n+b"},
+			"[end file diff #111111111111 -> #222222222222]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			block := renderExpansion(tc.x)
+			last := block[strings.LastIndex(block, "\n")+1:]
+			if got := ExpansionEndMarker(tc.x); got != last || got != tc.want {
+				t.Errorf("ExpansionEndMarker = %q, last line %q, want %q", got, last, tc.want)
+			}
+		})
+	}
+}
+
 func TestLayerCRendersDormantSpineDisplays(t *testing.T) {
 	dormant := make(map[string]memops.SpineRecord, 3)
 	ids := []string{"thr_1", "thr_2", "thr_3"}

@@ -54,14 +54,17 @@ B2's verify gate on the live run, marker kept; the next open's completion runs
 `spineQuarantineRepair`, quarantining the folio byte-exact and scoped-restoring it from primary
 HEAD (or removing it as an orphan add), which is consistent with the thread's loose files because
 tiers change only at a barrier. Barrier step B1c (`pruneTrackedFiles`, between B1b and B2) calls
-`store.PruneTrackedFiles` per spine record in numeric id order with the record's `TurnCount`. It
-rewrites a thread's `files.jsonl` only if an entry drops, then deletes the files no kept entry
-names, so a crash leaves orphans, never a dangling index. Completion re-runs it under the same
-condition as B1b. An unreadable index is skipped (`dedup.prune-skip reason=unreadable`) and fails
-B2's verify gate, and completion's `spineQuarantineRepair` restores it from primary HEAD, as for a
-hand-broken folio. Crashpoints: the four `folio.settle.*` and `barrier.prune.postIndex` in
-`store`, and `barrier.postSettle.preDayCommit` and `barrier.postPrune.preDayCommit`, all walked by
-`TestBarrier_CrashWalk`. Recovery handles and plumbs the
+`store.PruneTrackedFiles` per
+spine record, in spine order, with the record's `TurnCount`. It rewrites a thread's
+`files.jsonl` only if an entry drops, then deletes the files no kept entry names, so a crash
+leaves orphans, never a dangling index. Completion re-runs it under the same condition as B1b.
+An unreadable index is skipped (`dedup.prune-skip reason=unreadable`) and fails B2's verify
+gate. Any tracked-file finding makes completion's `spineQuarantineRepair` quarantine the
+thread's `files.jsonl` and `files/` together and restore both from primary HEAD. Crashpoints:
+the four `folio.settle.*` and `barrier.prune.postIndex` in `store`, and
+`barrier.postSettle.preDayCommit` and `barrier.postPrune.preDayCommit`, all walked by
+`TestBarrier_CrashWalk`; and `fs.applyEvents.preIndex` in `store`, between a turn's tracked-file
+writes and its index write, walked by `TestCrashMatrix_WTurnFileEvents`. Recovery handles and plumbs the
 `op=rebaseline` marker, but the mid-day arming trigger is not wired (ROADMAP.md). Packing: after
 every `gcCheckEveryCommits` (64) daily commits the adapter reads daily's loose-object count and runs
 gc at `gcLooseObjectThreshold` (5000); `MemoryOps.Consolidate` (go-git `RepackObjects` + `Prune`)

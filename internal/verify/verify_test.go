@@ -640,6 +640,45 @@ func TestTrackedFilesHashMismatch(t *testing.T) {
 	wantOneError(t, run(t, paths), "threads/thr_1/files/"+b)
 }
 
+func TestTrackedFilesSizeMismatch(t *testing.T) {
+	tests := []struct {
+		name string
+		// field returns the index text recording the size under test and
+		// that text with the size off by one.
+		field func(t *testing.T, paths store.PersonantPaths, a1, a2 string) (string, string)
+	}{
+		{"blob", func(*testing.T, store.PersonantPaths, string, string) (string, string) {
+			return `"size":2,"turn":1,`, `"size":3,"turn":1,` // b.go, "b\n"
+		}},
+		{"diff", func(t *testing.T, paths store.PersonantPaths, a1, a2 string) (string, string) {
+			info, err := os.Stat(store.TrackedDiffPath(paths, "thr_1", a1, a2))
+			if err != nil {
+				t.Fatal(err)
+			}
+			n := info.Size()
+			return fmt.Sprintf(`"diff":true,"size":%d}`, n), fmt.Sprintf(`"diff":true,"size":%d}`, n+1)
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			paths, a1, a2, _ := trackedFixture(t)
+			index := store.TrackedIndexPath(paths, "thr_1")
+			raw, err := os.ReadFile(index)
+			if err != nil {
+				t.Fatal(err)
+			}
+			from, to := tc.field(t, paths, a1, a2)
+			if !strings.Contains(string(raw), from) {
+				t.Fatalf("index has no %s:\n%s", from, raw)
+			}
+			if err := os.WriteFile(index, []byte(strings.Replace(string(raw), from, to, 1)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			wantOneError(t, run(t, paths), "threads/thr_1/files.jsonl")
+		})
+	}
+}
+
 func TestTrackedFilesNoIndexIsClean(t *testing.T) {
 	paths := initFreshHome(t)
 	writeSpine(t, paths, []memops.SpineRecord{validRecord("thr_1")})

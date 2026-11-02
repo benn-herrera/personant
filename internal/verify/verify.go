@@ -266,38 +266,55 @@ func checkFolios(report *memops.VerifyReport, paths store.PersonantPaths, spine 
 
 // checkTrackedFiles validates the tracked-file store of every spine thread
 // that has an index: the index must load, and every blob and kept diff it
-// names must exist, each blob hashing to its name. Each finding's Path is
-// the offending file, so recovery can restore exactly that file.
+// names must exist, each blob hashing to its name, and every recorded size
+// must match its file. A missing or corrupt file's finding has that file as
+// its Path; a size mismatch's has the index, since the hash-checked blob is
+// right and the record is wrong.
 func checkTrackedFiles(report *memops.VerifyReport, paths store.PersonantPaths, spine []memops.SpineRecord) {
 	for _, rec := range spine {
 		if rec.ID == "" {
 			continue // already flagged by checkSpine
 		}
+		index := store.TrackedIndexRel(rec.ID)
 		entries, err := store.ReadTrackedIndex(paths, rec.ID)
 		if err != nil {
-			report.Errors = append(report.Errors, memops.VerifyFinding{Path: store.TrackedIndexRel(rec.ID),
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: index,
 				Message: fmt.Sprintf("files.jsonl unreadable: %v", err)})
 			continue
 		}
-		checked := map[string]bool{}
+		blobLen := map[string]int{}
 		for _, e := range entries {
-			if !checked[e.ID] {
-				checked[e.ID] = true
-				if _, err := store.ReadTrackedBlob(paths, rec.ID, e.ID); err != nil {
+			n, checked := blobLen[e.ID]
+			if !checked {
+				n = -1
+				if blob, err := store.ReadTrackedBlob(paths, rec.ID, e.ID); err == nil {
+					n = len(blob)
+				} else {
 					msg := fmt.Sprintf("blob of %s is corrupt: %v", e.Path, err)
 					if errors.Is(err, os.ErrNotExist) {
 						msg = fmt.Sprintf("blob of %s is missing", e.Path)
 					}
 					report.Errors = append(report.Errors, memops.VerifyFinding{Path: store.TrackedBlobRel(rec.ID, e.ID), Message: msg})
 				}
+				blobLen[e.ID] = n
+			}
+			if n >= 0 && n != e.Size {
+				report.Errors = append(report.Errors, memops.VerifyFinding{Path: index,
+					Message: fmt.Sprintf("%s records size %d; its blob has %d bytes", e.Path, e.Size, n)})
 			}
 			for _, c := range e.Changes {
 				if !c.Diff {
 					continue
 				}
-				if _, err := os.Stat(store.TrackedDiffPath(paths, rec.ID, c.From, c.To)); err != nil {
+				info, err := os.Stat(store.TrackedDiffPath(paths, rec.ID, c.From, c.To))
+				if err != nil {
 					report.Errors = append(report.Errors, memops.VerifyFinding{Path: store.TrackedDiffRel(rec.ID, c.From, c.To),
 						Message: fmt.Sprintf("diff of %s: %v", e.Path, err)})
+					continue
+				}
+				if info.Size() != int64(c.Size) {
+					report.Errors = append(report.Errors, memops.VerifyFinding{Path: index,
+						Message: fmt.Sprintf("diff of %s records size %d; its file has %d bytes", e.Path, c.Size, info.Size())})
 				}
 			}
 		}

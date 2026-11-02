@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -238,7 +239,7 @@ func loadProjectDigest(paths store.PersonantPaths, id string, logf func(string, 
 // dedup.Plan across them, then each thread's budgeted walk. The returned
 // map is keyed by id; a thread whose frontmatter or excerpts fail to load
 // is warned and absent (workset skips it). The report lists the
-// expansions the walks took.
+// expansions the walks rendered as content.
 func (a *FileAdapter) loadActiveThreadData(ctx context.Context, ids []string, budget memops.Budget, logf func(string, ...any)) (map[string]workset.ThreadData, memops.FileExpansionReport) {
 	if len(ids) == 0 || budget.LayerB <= 0 {
 		return nil, memops.FileExpansionReport{}
@@ -248,7 +249,7 @@ func (a *FileAdapter) loadActiveThreadData(ctx context.Context, ids []string, bu
 		limit = budget.BTopK
 	}
 	perThread := workset.PerThreadBudget(budget.LayerB, limit)
-	report := memops.FileExpansionReport{LiteralMax: int(dedup.LiteralShareThreshold * float64(perThread))}
+	report := memops.FileExpansionReport{LiteralMax: int(math.Ceil(dedup.LiteralShareThreshold * float64(perThread)))}
 
 	metas := make([]memops.ThreadMeta, 0, limit)
 	threads := make([]dedup.PlanThread, 0, limit)
@@ -269,8 +270,9 @@ func (a *FileAdapter) loadActiveThreadData(ctx context.Context, ids []string, bu
 	plan := dedup.Plan(threads, report.LiteralMax)
 
 	out := make(map[string]workset.ThreadData, len(threads))
+	literals := map[string]bool{}
 	for i, t := range threads {
-		excerpts, rendered, err := a.walkThreadExcerpts(ctx, t.ID, metas[i], perThread, plan)
+		excerpts, rendered, err := a.walkThreadExcerpts(ctx, t.ID, metas[i], perThread, plan, literals)
 		if err != nil {
 			logf("workset: layer B: %s: read excerpts: %v", t.ID, err)
 			continue
@@ -282,40 +284,64 @@ func (a *FileAdapter) loadActiveThreadData(ctx context.Context, ids []string, bu
 }
 
 // walkThreadExcerpts takes one thread's excerpts newest-first against its
-// share, less its header, and returns them oldest first with the
-// expansions rendered at them. Each excerpt is charged its text with the
-// separator before it; an excerpt that does not fit ends the walk, except
-// the newest, which is always taken. Each of its planned expansions is
-// then taken if it fits, and otherwise becomes a size note, which is
-// charged. Sizes come from the plan, so only taken expansions are read.
-func (a *FileAdapter) walkThreadExcerpts(ctx context.Context, id string, fm memops.ThreadMeta, share int, plan map[dedup.ExcerptPosition][]dedup.Expansion) ([]workset.Excerpt, []memops.FileExpansion, error) {
-	remaining := share - len(workset.RenderThreadHeader(id, fm))
+// share, less its header and workset.ThreadSeparator, and returns them
+// oldest first with the expansions rendered at them.
+//
+// An excerpt is admitted only if its text and a size note for each of its
+// planned expansions fit; the first that is not ends the walk. The newest
+// is always admitted, with only the notes that fit. Each admitted note, in
+// render order, then becomes its content if the extra length fits, unless
+// it is a literal whose id is in literals; literals gains the id of every
+// literal rendered. A note whose content fails to read stays a note. Sizes
+// come from the plan, so only content that renders is read, and the thread
+// overruns its share only when the newest excerpt's text alone does.
+func (a *FileAdapter) walkThreadExcerpts(ctx context.Context, id string, fm memops.ThreadMeta, share int, plan map[dedup.ExcerptPosition][]dedup.Expansion, literals map[string]bool) ([]workset.Excerpt, []memops.FileExpansion, error) {
+	remaining := share - len(workset.RenderThreadHeader(id, fm)) - len(workset.ThreadSeparator)
 	var excerpts []workset.Excerpt
 	var rendered []memops.FileExpansion
 	err := store.ExcerptsNewestFirst(a.paths, id, func(e memops.ThreadExcerpt) bool {
+		planned := plan[dedup.ExcerptPosition{ThreadID: id, Turn: e.TurnNumber}]
 		textLen := workset.ExcerptTextLen(e.Text)
-		if len(excerpts) > 0 && textLen > remaining {
+		need := textLen
+		for _, p := range planned {
+			need += workset.ExpansionLen(sizeNote(p))
+		}
+		if len(excerpts) > 0 && need > remaining {
 			return false
 		}
 		remaining -= textLen
+
 		ex := workset.Excerpt{Turn: e.TurnNumber, Text: e.Text}
-		for _, p := range plan[dedup.ExcerptPosition{ThreadID: id, Turn: e.TurnNumber}] {
-			x := worksetExpansion(p)
-			n := workset.ExpansionLen(x)
-			if n > remaining {
-				x.Omitted = true
-				remaining -= workset.ExpansionLen(x)
-				ex.Expansions = append(ex.Expansions, x)
+		var admitted []dedup.Expansion
+		for _, p := range planned {
+			note := sizeNote(p)
+			if n := workset.ExpansionLen(note); n <= remaining {
+				remaining -= n
+				ex.Expansions = append(ex.Expansions, note)
+				admitted = append(admitted, p)
+			}
+		}
+		for i, p := range admitted {
+			if p.Kind == dedup.ExpansionLiteral && literals[p.ID] {
 				continue
 			}
-			remaining -= n
+			full := ex.Expansions[i]
+			full.Omitted = false
+			extra := workset.ExpansionLen(full) - workset.ExpansionLen(ex.Expansions[i])
+			if extra > remaining {
+				continue
+			}
 			content, err := a.readExpansion(p)
 			if err != nil {
 				_ = a.Log(ctx, memops.LogCategoryDedup, "error", memops.SanitizeDetail(err.Error()))
 				continue
 			}
-			x.Content = content
-			ex.Expansions = append(ex.Expansions, x)
+			full.Content = content
+			ex.Expansions[i] = full
+			remaining -= extra
+			if p.Kind == dedup.ExpansionLiteral {
+				literals[p.ID] = true
+			}
 			rendered = append(rendered, fileExpansionRecord(p))
 		}
 		excerpts = append(excerpts, ex)
@@ -347,12 +373,13 @@ func (a *FileAdapter) readExpansion(p dedup.Expansion) (string, error) {
 	return string(data), nil
 }
 
-func worksetExpansion(p dedup.Expansion) workset.Expansion {
+// sizeNote is p as the workset size note that names it.
+func sizeNote(p dedup.Expansion) workset.Expansion {
 	kind := workset.ExpansionLiteral
 	if p.Kind == dedup.ExpansionDiff {
 		kind = workset.ExpansionDiff
 	}
-	return workset.Expansion{Kind: kind, Path: p.Path, ID: p.ID, From: p.From, To: p.To, Size: p.Size}
+	return workset.Expansion{Kind: kind, Path: p.Path, ID: p.ID, From: p.From, To: p.To, Size: p.Size, Omitted: true}
 }
 
 func fileExpansionRecord(p dedup.Expansion) memops.FileExpansion {

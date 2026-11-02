@@ -32,6 +32,7 @@ func TestRecordFileEventsRejectsInvalidInput(t *testing.T) {
 		{"commit kind", "thr_1", 2, recordAt, []memops.FileEvent{{Kind: "commit", Path: "a.go"}}, "bad-kind"},
 		{"empty path", "thr_1", 2, recordAt, read(""), "empty-path"},
 		{"newline in path", "thr_1", 2, recordAt, read("a.go\nb.go"), "newline-in-path"},
+		{"invalid UTF-8 path", "thr_1", 2, recordAt, read("a\xff.go"), "invalid-utf8-path"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -39,12 +40,15 @@ func TestRecordFileEventsRejectsInvalidInput(t *testing.T) {
 			seedThread(t, a, "thr_1", "prj_1", "## Turn 1\n\nbody\n")
 			a.resetTurnScope()
 
-			if err := a.RecordFileEvents(context.Background(), tt.thread, tt.turn, tt.at, tt.events); err == nil {
+			err := a.RecordFileEvents(context.Background(), tt.thread, tt.turn, tt.at, tt.events)
+			if err == nil {
 				t.Fatal("RecordFileEvents accepted invalid input")
 			}
-			want := "fs.write-error thr=" + tt.thread + " reason=" + tt.reason
-			if log := readEventLog(t, a); !strings.Contains(log, want) {
-				t.Errorf("log lacks %q:\n%s", want, log)
+			if !strings.Contains(err.Error(), tt.reason) {
+				t.Errorf("error %q lacks reason %q", err, tt.reason)
+			}
+			if log := readEventLog(t, a); strings.Contains(log, "fs.write-error") {
+				t.Errorf("adapter logged fs.write-error:\n%s", log)
 			}
 			if _, err := os.Stat(store.TrackedIndexPath(a.paths, "thr_1")); !os.IsNotExist(err) {
 				t.Errorf("index written for rejected input (stat err %v)", err)

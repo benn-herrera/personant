@@ -266,7 +266,9 @@ func (a *FileAdapter) settleExcerptTiers(ctx context.Context, day int) error {
 
 // pruneTrackedFiles is B1c: retention over each spine thread's
 // tracked-file store with the record's TurnCount, in ListThreads order,
-// which is numeric id order. It runs after B1b and before B2, whose
+// which is spine order: string order by id (thr_10 before thr_2). Order is
+// immaterial, since each thread is pruned independently. It runs after B1b
+// and before B2, whose
 // full-tree stage captures the deletions. A thread whose index does not
 // read is skipped and logged; B2's verify gate then fails on it.
 func (a *FileAdapter) pruneTrackedFiles(ctx context.Context) error {
@@ -493,7 +495,9 @@ func (a *FileAdapter) dayCommit(ctx context.Context, day int, res *memops.DayBar
 // parent walk or day-shape special case is needed — and the single
 // §2.7 re-run is the re-verify at the end. A path absent from HEAD's
 // tree is an orphan add: quarantined and removed (nothing valid exists
-// to restore to). The CALLER owns any subsequent staging/mint, so a
+// to restore to). A finding in a thread's tracked-file store takes the
+// whole store, files.jsonl and files/, as one unit, once per thread; when
+// HEAD has neither, both stay removed. The CALLER owns any subsequent staging/mint, so a
 // completed barrier always ends with primary HEAD being the day-commit
 // (F1 — no trailing repair commit to leave HEAD non-day-shape and
 // re-fire the barrier on the next same-day open), and a refused open
@@ -513,18 +517,29 @@ func (a *FileAdapter) spineQuarantineRepair(ctx context.Context, findings []memo
 		if rel == "" {
 			continue
 		}
-		if _, dup := seen[rel]; dup {
-			continue
+		units := []repairUnit{{rel, autogit.Checkout}}
+		if id, ok := trackedStoreThread(rel); ok {
+			// A file written since the last day-commit is absent from
+			// HEAD, so restoring it alone would leave the index naming it.
+			units = []repairUnit{
+				{store.TrackedIndexRel(id), autogit.Checkout},
+				{store.TrackedFilesDirRel(id), autogit.CheckoutTree},
+			}
 		}
-		seen[rel] = struct{}{}
-		if _, qerr := q.quarantineAndRemove(rel); qerr != nil {
-			return fmt.Errorf("fileadapter: day barrier: quarantine %s: %w", rel, qerr)
-		}
-		// Scoped restore (path-scoped checkout — never reset). A checkout
-		// error means the path is absent from HEAD's tree: orphan add,
-		// stays removed.
-		if err := autogit.Checkout(ctx, a.paths, autogit.Primary, head, rel, 0, 0); err == nil {
-			a.scopedRestored = append(a.scopedRestored, rel)
+		for _, u := range units {
+			if _, dup := seen[u.rel]; dup {
+				continue
+			}
+			seen[u.rel] = struct{}{}
+			if _, qerr := q.quarantineAndRemove(u.rel); qerr != nil {
+				return fmt.Errorf("fileadapter: day barrier: quarantine %s: %w", u.rel, qerr)
+			}
+			// Scoped restore (path-scoped checkout — never reset). A checkout
+			// error means the path is absent from HEAD's tree: orphan add,
+			// stays removed.
+			if err := u.checkout(ctx, a.paths, autogit.Primary, head, u.rel, 0, 0); err == nil {
+				a.scopedRestored = append(a.scopedRestored, u.rel)
+			}
 		}
 	}
 	if len(seen) == 0 {
@@ -545,6 +560,28 @@ func (a *FileAdapter) spineQuarantineRepair(ctx context.Context, findings []memo
 		return fmt.Errorf("fileadapter: day barrier: spine still broken after quarantine-and-proceed (%d error(s))", len(rep.Errors))
 	}
 	return nil
+}
+
+// repairUnit is one path spineQuarantineRepair quarantines, with the
+// autogit restore that fits it: Checkout for a file, CheckoutTree for a
+// directory.
+type repairUnit struct {
+	rel      string
+	checkout func(ctx context.Context, paths store.PersonantPaths, which autogit.Repo, commitHash, rel string, pre, post autogit.GitCheckFlags) error
+}
+
+// trackedStoreThread returns the thread whose tracked-file store holds rel:
+// its files.jsonl or a path under its files/.
+func trackedStoreThread(rel string) (string, bool) {
+	parts := strings.SplitN(rel, "/", 3)
+	if len(parts) != 3 {
+		return "", false
+	}
+	id := parts[1]
+	if rel == store.TrackedIndexRel(id) || strings.HasPrefix(rel, store.TrackedFilesDirRel(id)+"/") {
+		return id, true
+	}
+	return "", false
 }
 
 // assertDerivedFresh is B6's once-a-day derived integrity gate. On

@@ -3,7 +3,7 @@
 // the composition plan and the retention keep set.
 //
 // The package is pure: no I/O, no dependency on other internal packages,
-// and no knowledge of file names, the index format or rendered labels.
+// and no knowledge of file names, the index format or expansion delimiters; the only text it renders is an excerpt identifier line.
 package dedup
 
 import (
@@ -179,8 +179,8 @@ func diffOps(a, b []string) []op {
 
 // noNewline is the marker emitted (on its own line) immediately after a
 // diff line whose text does not end in "\n". It matches the GNU diff
-// convention "\ No newline at end of file" and lets apply reconstruct a
-// missing trailing newline byte-exactly.
+// convention "\ No newline at end of file" so a missing trailing
+// newline is represented byte-exactly.
 const noNewline = "\\ No newline at end of file"
 
 // diffContext is the number of unchanged lines emitted on each side of a

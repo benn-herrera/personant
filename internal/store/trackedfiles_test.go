@@ -252,6 +252,83 @@ func TestFileStoreTamperedBlobFailsRead(t *testing.T) {
 	}
 }
 
+func TestFileStoreUnreadablePreviousBlobRecordsNoDiff(t *testing.T) {
+	tests := []struct {
+		name   string
+		damage func(path string) error
+	}{
+		{"missing", os.Remove},
+		{"corrupt", func(path string) error { return os.WriteFile(path, []byte("tampered\n"), 0o644) }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			paths := newThreadHome(t)
+			a1, a2 := numberedLines(40, 0), numberedLines(40, 20)
+			id1, id2 := dedup.ContentID([]byte(a1)), dedup.ContentID([]byte(a2))
+			applyEvents(t, paths, 1, writeEvent("a.go", a1))
+			if err := tc.damage(TrackedBlobPath(paths, fileStoreThread, id1)); err != nil {
+				t.Fatal(err)
+			}
+
+			applyEvents(t, paths, 2, writeEvent("a.go", a2), writeEvent("b.go", "b\n"))
+
+			entries := readIndex(t, paths)
+			if len(entries) != 2 || entries[0].ID != id2 || entries[1].Path != "b.go" {
+				t.Fatalf("entries = %+v, want a.go at its new id, and b.go", entries)
+			}
+			c := entries[0].Changes
+			if len(c) != 1 || c[0].From != id1 || c[0].To != id2 || c[0].Diff || c[0].Size != 0 {
+				t.Errorf("changes = %+v, want one %s -> %s with diff false, size 0", c, id1, id2)
+			}
+			if _, err := ReadTrackedBlob(paths, fileStoreThread, id2); err != nil {
+				t.Errorf("new blob: %v", err)
+			}
+		})
+	}
+}
+
+func TestFileStoreRewritesCorruptExistingBlob(t *testing.T) {
+	paths := newThreadHome(t)
+	v1, v2 := numberedLines(40, 0), numberedLines(40, 20)
+	id1, id2 := dedup.ContentID([]byte(v1)), dedup.ContentID([]byte(v2))
+	applyEvents(t, paths, 1, writeEvent("a.go", v1))
+	applyEvents(t, paths, 2, writeEvent("a.go", v2))
+	for _, p := range []string{TrackedBlobPath(paths, fileStoreThread, id1), TrackedDiffPath(paths, fileStoreThread, id1, id2)} {
+		if err := os.WriteFile(p, []byte("tampered\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(TrackedBlobPath(paths, fileStoreThread, id2), []byte("tampered\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// b.go reads v2, landing on a.go's tampered blob; c.go goes from v1 to
+	// v2, landing on the tampered blob and diff of a.go's earlier change.
+	written := applyEvents(t, paths, 3,
+		writeEvent("b.go", v2),
+		writeEvent("c.go", v1),
+		writeEvent("c.go", v2))
+
+	want := []string{
+		TrackedBlobRel(fileStoreThread, id2),
+		TrackedBlobRel(fileStoreThread, id1),
+		TrackedDiffRel(fileStoreThread, id1, id2),
+		TrackedIndexRel(fileStoreThread),
+	}
+	if !reflect.DeepEqual(written, want) {
+		t.Errorf("written = %v, want %v", written, want)
+	}
+	for _, id := range []string{id1, id2} {
+		if _, err := ReadTrackedBlob(paths, fileStoreThread, id); err != nil {
+			t.Errorf("blob %s: %v", id, err)
+		}
+	}
+	diff, err := ReadTrackedDiff(paths, fileStoreThread, id1, id2)
+	if wantDiff, _ := dedup.Diff(v1, v2); err != nil || string(diff) != wantDiff {
+		t.Errorf("diff = %q, %v; want %q", diff, err, wantDiff)
+	}
+}
+
 // assertIndexedFilesPresent fails for each blob or kept diff the index
 // names that is absent.
 func assertIndexedFilesPresent(t *testing.T, paths PersonantPaths) {

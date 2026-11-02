@@ -172,16 +172,6 @@ func TestDiffRoundTrip(t *testing.T) {
 	}
 }
 
-func TestApplyDiffMismatch(t *testing.T) {
-	diff := makeDiff("a\nb\n", "a\nc\n")
-	if _, err := applyDiff("x\ny\n", diff); err == nil {
-		t.Fatal("expected context-mismatch error applying diff to wrong source")
-	}
-	if _, err := applyDiff("a\nb\n", "garbage"); err == nil {
-		t.Fatal("expected error on malformed diff (no hunk header)")
-	}
-}
-
 func TestDiffKeptRoundTrip(t *testing.T) {
 	var lines []string
 	for i := range 20 {
