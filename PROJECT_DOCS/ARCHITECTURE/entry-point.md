@@ -9,8 +9,7 @@ reasons for them. Outcomes live in SPEC.md and are cited, not restated.
 | `ARCHITECTURE.md` (you are here) | principles, mechanisms, storage and record formats, module map |
 | `SPEC.md` | consumer-facing outcomes and algorithms |
 | `CONVENTIONS.md` | house rules for AI agents working in this repo |
-| `ROADMAP.md` | future intent; lists and sequences the open decisions |
-| `DEFECTS.md` | known defects, not yet fixed |
+| `ROADMAP.md` | future intent and known defects; lists and sequences the open decisions |
 | `README.md` | user-facing description; getting started |
 
 **`Open:`** marks a clause that depends on a decision not yet made; the form is defined in SPEC.md

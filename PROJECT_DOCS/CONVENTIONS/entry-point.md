@@ -19,6 +19,7 @@ Contents:
 - [Repo state](repo-state/index.md)
   - [Anti-reaccretion doctrine](repo-state/anti-reaccretion-doctrine.md)
   - [Project documents live in `PROJECT_DOCS/`](repo-state/project-documents.md)
+  - [Pre-production: no transition scaffolding](repo-state/pre-production-no-transition-scaffolding.md)
   - [Section and rule heading brevity](repo-state/section-and-rule-heading-brevity.md)
   - [Versioning & acceptance (read before judging "done")](repo-state/versioning-and-acceptance.md)
 - [Build / test](build-test/index.md)

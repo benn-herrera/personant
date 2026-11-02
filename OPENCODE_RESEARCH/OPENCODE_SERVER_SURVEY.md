@@ -4,6 +4,9 @@
 (local clone `../opencode`). All paths are repo-relative to that clone unless prefixed `personant:`.
 Claims not confirmed in source are marked *unverified*.
 
+**Erratum** (later measurement, `OPENCODE_PREPROBE_RESULTS.md` §2): nothing publishes the
+`session.status` and `session.idle` events listed below.
+
 **Provenance.** Section 1 was read directly. Sections 2 to 4 and the personant inventory were
 compiled by research sub-agents. For files that changed between an earlier commit and v2.2.2, they
 re-checked their claims against v2.2.2. Their key citations were spot-checked against the code:

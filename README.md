@@ -166,7 +166,7 @@ Contract: [`SPEC.md`](SPEC.md) §4.5.8, and §1.6 for turns opencode itself inte
 The plugin route is not built; sequencing is in [`ROADMAP.md`](ROADMAP.md) Part A. The memory
 runtime beneath it (storage, turn chain, recall, closure, archival, crash recovery) exists and is
 exercised in-process by the acceptance simulation ([`SPEC.md`](SPEC.md) §9.1). Open decisions are
-listed in `ROADMAP.md` "Pending decisions"; known defects in [`DEFECTS.md`](DEFECTS.md).
+listed in `ROADMAP.md` "Pending decisions"; known defects are `ROADMAP.md` items.
 
 `personant version` prints the version lines. What they are: [`SPEC.md`](SPEC.md) §9.1 "Version
 lines" and [`CONVENTIONS.md`](CONVENTIONS.md) "Versioning & acceptance".

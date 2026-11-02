@@ -3,6 +3,11 @@
 **Question.** What is the least invasive way to put Personant's memory system (THESIS.md; ACTIVE_DESIGN.md
 "Boundary") under opencode? The candidates are compared against what that memory system has to do at runtime.
 
+**Errata** (later measurement, `OPENCODE_PREPROBE_RESULTS.md` §2):
+- `session.usage.recorded` is not subscribable by plugins; the usable event is
+  `session.usage.updated` (§2.3 and the R12 row).
+- The provider config key is `providers`, not `provider.<id>` (§2.6).
+
 **Sources.** opencode release tag **v2.2.2**, commit `098aa7fd6e02b03d6fc410f0b052038c7d4c5e81`, at
 `../opencode`. opencode paths are repo-relative to that clone. Personant documents are cited by file and section.
 OPENCODE_SERVER_SURVEY.md was used only to find things; every opencode claim below was checked in source at the
