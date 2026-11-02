@@ -112,11 +112,11 @@ VENV_PYTHON := VENV / PYBIN / "python" + EXE
 dice-doc monolith out map="": _venv
     @"{{VENV_PYTHON}}" -m docdicer dice-doc "{{monolith}}" "{{out}}" "{{map}}"
 
-[doc("dice the documents listed in a manifest TSV, read from src-dir, into linked volumes, with intermediates in work-dir, then verify all trees (see tools/dicer/README.md)")]
+[doc("dice the documents listed in a manifest TSV, read from src-dir, into linked volumes, with intermediates in work-dir, then verify all trees (docdicer)")]
 dice-docs manifest src work: _venv
     @"{{VENV_PYTHON}}" -m docdicer dice-docs "{{manifest}}" "{{src}}" "{{work}}"
 
-[doc("check every relative link and #anchor under PROJECT_DOCS and the top-level *.md, and that each diced tree's documents are linked from their parent and reachable (tools/dicer)")]
+[doc("check every relative link and #anchor under PROJECT_DOCS and the top-level *.md, and that each diced tree's documents are linked from their parent and reachable (docdicer)")]
 check-links: _venv
     @"{{VENV_PYTHON}}" -m docdicer check-links PROJECT_DOCS *.md
     @"{{VENV_PYTHON}}" -m docdicer check-tree PROJECT_DOCS

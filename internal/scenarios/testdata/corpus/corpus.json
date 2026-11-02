@@ -1,5 +1,5 @@
 {
-  "_comment": "MINED SNAPSHOT - Wikipedia extracts fetched by test/tools/wikipedia_corpus.py. Committed deliberately: the source is non-reproducible (articles change). Refresh by editing wikipedia_corpus_articles.txt and re-running.",
+  "_comment": "MINED SNAPSHOT - Wikipedia extracts fetched by tools/test/wikipedia_corpus.py. Committed deliberately: the source is non-reproducible (articles change). Refresh by editing wikipedia_corpus_articles.txt and re-running.",
   "article_count": 304,
   "articles": [
     {

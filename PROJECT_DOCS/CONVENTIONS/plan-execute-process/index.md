@@ -15,7 +15,7 @@
     then the old plan is deleted.
 - Working drafts and half-formed notes are scratch (`.claude-temp/`), not plans.
 - **A plan over 800 lines is diced** with `just dice-doc <plan>.md <plan-dir>` into a tree of
-  section files (`tools/dicer/README.md`), the monolith is removed, and its work-package
+  section files (docdicer, <https://github.com/benn-herrera/docdicer>), the monolith is removed, and its work-package
   dispatches cite leaves. A plan at or under 800 lines stays one file.
 - **A plan may name a normative page outside the contract documents, and that page outranks the
   plan.** The contract documents are THESIS.md, SPEC.md, ARCHITECTURE.md and CONVENTIONS.md. A plan
