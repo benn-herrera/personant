@@ -1,8 +1,12 @@
 # CONVENTIONS – Personant
 
-House rules for agents working in this repository. Purpose: THESIS.md. Outcomes: SPEC.md.
-Mechanisms, the module map and design anti-patterns: ARCHITECTURE.md. `Open:` lines take the form
-SPEC.md §0 defines.
+Project-specific process and house rules
+
+Must-see:
+
+- No user-facing behaviors or outcomes are designed here, that belongs to SPEC
+- No project mechanisms or code structure are put forth, that belongs to ARCHITECTURE
+- Always read [Two gates](build-test/two-gates-do-not-conflate-them.md) before choosing a gate check
 
 Contents:
 

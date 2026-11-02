@@ -50,17 +50,15 @@ the tagged clauses get a follow-up pass. Each entry states when it must be decid
   read the answer next turn. Unverified: how the TUI shows a command whose `execute` sends no
   prompt, and how `execute` reports a result. Tagged at SPEC §3.4, §3.5, §3.10.1, §4.2, §4.3,
   §4.5.3–§4.5.8. **Decide before A12.**
-- [ ] **U5 How the service reaches its own models** (curator, dissector, embedder, memory-vetting
-  reviewer) and where their settings live. (a) The plugin's `experimental.generate` over opencode's
-  providers: no overlap, though the embedder still needs Personant config because opencode has no
-  embedding provider. (b) A Personant provider pool under `~/.config/personant/`: overlaps
-  opencode's providers when both name one endpoint, which Personant config must not do. Decides
-  SPEC §1.8, §2.1, §5.2–§5.3, §8.1, §8.2, the `ping` and `models` verbs and the
-  `langchaingo/llms` dependency rule. **Decide before A12.**
-- [ ] **U6 Front-end version line.** `version.FrontEnd`, its bump contract and `test-fe` tracked the
-  REPL. (a) Retire it, keeping the substrate and home-format lines; (b) repurpose it for the
-  plugin. Decides SPEC §9.1 "Two version lines", CONVENTIONS "Versioning", README Status and the
-  justfile. **Decide before B1.**
+- [x] **U5 Inference for Personant's internal calls** (curator, dissector, embedder,
+  memory-vetting reviewer). Personant has no inference path or provider configuration of its own:
+  every call goes through opencode, text generation through the plugin's `experimental.generate`,
+  embeddings per A12a (forking opencode if it has no route). The provider pool, `providers.toml`,
+  the `ping` and `models` verbs and the `langchaingo/llms` dependency go. Follow-up pass: SPEC
+  §1.8, §2.1, §5.2–§5.3, §8.1, §8.2.
+- [x] **U6 Front-end version line: retired.** `version.FrontEnd`, its bump contract, `test-fe` and
+  `fe-scope-check` go with the REPL; the substrate and home-format lines stay. Follow-up pass: SPEC
+  §9.1 "Two version lines", CONVENTIONS "Versioning", README Status and the justfile.
 - [ ] **U7 Plugin failure policy.** Fail open (leave the hook input unmodified; opencode's own
   composition reaches the model and memory silently misses the step) or fail closed (refuse the
   request; the session stops while the service is down). What opencode does when the `context` hook
@@ -198,21 +196,25 @@ decisions named in them.
 - [ ] **A12. Install, config and the user command and ack channel.** `personant init` writes the
   opencode-side settings (`compaction.auto: false`, the plugin entry) in opencode's own format;
   Personant-only settings move to `~/.config/personant/` (`internal/store/paths.go` still places
-  `config.toml` and `providers.toml` under the home) per **U5**; memory-native commands and the ack
+  `config.toml` under the home, and `providers.toml`, which goes per **U5**); memory-native commands and the ack
   channel per **U4**, including the recovery banner, project prompts and the closure-drain boundary
   (an opencode session never "exits"). Implement the CLI verbs SPEC §4.1 keeps but `cmd/` lacks
   (`search`, `deps`, `log`), or remove them from SPEC. (SPEC §2.1, §4.1, §8; ARCHITECTURE "Single
   spelunking location".)
+- [ ] **A12a. Embeddings through opencode.** Recall's embedding index (SPEC §3.4) needs an
+  embedding endpoint, and Personant has no inference path of its own (**U5**). Establish opencode's
+  route for embeddings; if it has none, fork opencode to add one. No Personant-side endpoint
+  configuration.
 
 ### Part B: after the first usable build
 
 - [ ] **B1. Retire the self-built harness.** Remove `internal/chat`, `internal/term`,
-  `internal/shell`, `internal/tools` and `internal/tools/web`, the `chat` verb, the `ping` and
-  `models` verbs per **U5**, and `test-fe` / `fe-scope-check` per **U6**; then delete the
-  readability, html-to-markdown and terminal/signal dependencies and CONVENTIONS "Free-API
-  citizenship". **Precondition:** A5–A12 done and one end-to-end session through opencode passing
-  with `oc_missed_deltas == 0` and `oc_uncomposed_requests == 0`
-  (`OPENCODE_RESEARCH/OPENCODE_PROBE_RESULTS.md` §2). (ARCHITECTURE "Superseded code".)
+  `internal/shell`, `internal/tools` and `internal/tools/web`, `internal/ping`,
+  `internal/modellist` and the provider pool, the `chat`, `ping` and `models` verbs (**U5**), and
+  `version.FrontEnd`, `test-fe` and `fe-scope-check` (**U6**); then delete the readability,
+  html-to-markdown, terminal/signal and `langchaingo/llms` dependencies and CONVENTIONS "Free-API
+  citizenship". The old systems are not a fallback: nothing waits on the plugin route to remove
+  them. Plan: `ROADMAP_PLANS/strip-self-built-harness.md`.
 - [ ] **B2. `recall_query_latency_*` does not measure recall.** The sim's p50/p95/p99 gauges
   (`metricRecallQueryLatencyP50/P95/P99`, `internal/scenarios/sim/workload.go`, populated in
   `sim/telemetry.go`) copy turn-duration percentiles instead of timing recall queries. (SPEC §9.4.)
@@ -275,7 +277,7 @@ decisions named in them.
   rubric; a single write path for behavior memory with provenance on every outcome; a
   user-configurable acceptance policy that never blocks a turn; periodic re-review of standing
   behavior memory; mechanical write checks and batch content review for career memory. Open within
-  it: the default acceptance policy, the rubric's content, which model reviews (**U5**), the
+  it: the default acceptance policy, the rubric's content, which model reviews (through opencode, **U5**), the
   re-review cadence. (SPEC §1.8; ARCHITECTURE "Memory vetting".)
 - [ ] **B11. Directive accrual aggregation.** The cross-project digest, fallback dissection and
   directive accrual (the old "Phase 5"): accrual may propose a behavior-memory change only from
@@ -437,4 +439,4 @@ Concrete, mostly single-package items; independent of the sequence above unless 
   folio.
 - `strip-self-built-harness.md` — removes the self-built REPL, tools, terminal and provider
   handling with their tests, and reshapes config for a memory service under opencode (extends B1).
-  Waits on U5, U6, the config-migration stance and whether to strip before A5–A12.
+  U5 and U6 are decided; waits on the config-migration stance and whether to strip before A5–A12.

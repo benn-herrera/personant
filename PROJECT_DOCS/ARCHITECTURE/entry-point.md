@@ -1,25 +1,10 @@
 # ARCHITECTURE – Personant
 
-How this implementation meets SPEC.md: module responsibilities, invariants, mechanisms and the
-reasons for them. Outcomes live in SPEC.md and are cited, not restated.
+How this projects' implementation meets requirements designated by SPEC
 
-| Document | Purpose |
-|---|---|
-| `THESIS.md` | purpose and intent — read first |
-| `ARCHITECTURE.md` (you are here) | principles, mechanisms, storage and record formats, module map |
-| `SPEC.md` | consumer-facing outcomes and algorithms |
-| `CONVENTIONS.md` | house rules for AI agents working in this repo |
-| `ROADMAP.md` | future intent and known defects; lists and sequences the open decisions |
-| `README.md` | user-facing description; getting started |
-
-**`Open:`** marks a clause that depends on a decision not yet made; the form is defined in SPEC.md
-§0. A tag such as U3 names the pending decision.
-
-**Superseded code.** `internal/chat`, `internal/term`, `internal/shell`, `internal/tools`,
-`internal/tools/web` and the `chat` verb are the self-built harness that opencode replaces. They
-stay in the tree until the replacement works (ROADMAP.md, "Retire the self-built harness") and are
-not the product. The `ping` and `models` verbs (backed by `internal/ping` and `internal/modellist`)
-wait on U5.
+Must-see:
+- No user-facing behaviors or outcomes are designed here, that belongs to SPEC
+- No project-specific process is dictated, that belongs to CONVENTIONS
 
 ---
 
