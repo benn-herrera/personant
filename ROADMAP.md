@@ -172,7 +172,7 @@ decisions named in them.
   day 54) and the daily index near 2,000 entries. What remains is the re-measure with opencode in the
   loop, worth running when it can show memory-side cost under real inference that a mock run
   cannot. (`OPENCODE_RESEARCH/OPENCODE_PROBE_RESULTS.md` §§4, 11; SPEC §3.11, §9.1.)
-- [ ] **A11a. Per-turn growth outside the commit: `Chain.LiveWindow` is quadratic.** Mean per-turn
+- [x] **A11a. Per-turn growth outside the commit: `Chain.LiveWindow` is quadratic.** Mean per-turn
   time rises with sim-day and accelerates, breaking SPEC §9.1's flat per-operation latency. The main
   cause is `dedup.(*Chain).LiveWindow` (`internal/dedup/livewindow.go`), called per turn from
   `loadTrackedFiles` (`internal/memops/fileadapter/workset_compose.go`): it `Reconstruct`s every
@@ -189,6 +189,12 @@ decisions named in them.
   harness's `VerifyNoBudgetOverflow`, which roughly doubles the sim's run time. Rule out after the
   fix: residual growth in `CommitTurn` CPU, `ReadThreadBody` → `readExcerptText`, and
   `closeTurnAndUpdateEngagement`.
+- [ ] **A11b. Whole-thread reads grow with thread length.** `store.ReadThreadBody` reads every
+  excerpt of a thread (`store.LoadThread` passes no byte budget), so its per-turn CPU rises with
+  sim-day. Its callers in a mock run are `turn.fetchThroughChain` and `turn.draftClosure`, via
+  `FileAdapter.LoadThread`. Measured per-turn ratio over the seed-24095 mock sim: 1.27 from day 9 to
+  day 20 and 1.47 from day 9 to day 31 (`ReadThreadBody` → `readExcerptText` alone: 1.21 and 1.44),
+  against a flat band of 1.25. Small in absolute terms (≈ 1.3% of sim CPU at day 31). (SPEC §9.1.)
 - [ ] **A12. Install, config and the user command and ack channel.** `personant init` writes the
   opencode-side settings (`compaction.auto: false`, the plugin entry) in opencode's own format;
   Personant-only settings move to `~/.config/personant/` (`internal/store/paths.go` still places
