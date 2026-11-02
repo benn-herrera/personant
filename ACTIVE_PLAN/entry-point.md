@@ -8,4 +8,6 @@ Two volumes:
 - [plan/](plan/entry-point.md) — the route: outcomes, sequence and status, work packages P1–P7,
   checkpoints and the post-sprint review.
 
+- [review-burndown.md](review-burndown.md) — the post-sprint review's fix packages R1–R6.
+
 In `plan/`, "design §N" names the design's section N.

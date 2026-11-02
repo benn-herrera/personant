@@ -79,17 +79,19 @@ Each item gives the text to land, in full. Paths are under `PROJECT_DOCS/ARCHITE
     landed.", add:
 
     > Barrier step B1c (`pruneTrackedFiles`, between B1b and B2) calls `store.PruneTrackedFiles`
-    > per spine record in numeric id order with the record's `TurnCount`. It rewrites a thread's
+    > per spine record, in spine order, with the record's `TurnCount`. It rewrites a thread's
     > `files.jsonl` only if an entry drops, then deletes the files no kept entry names, so a crash
     > leaves orphans, never a dangling index. Completion re-runs it under the same condition as
     > B1b. An unreadable index is skipped (`dedup.prune-skip reason=unreadable`) and fails B2's
-    > verify gate, and completion's `spineQuarantineRepair` restores it from primary HEAD, as for
-    > a hand-broken folio.
+    > verify gate. Any tracked-file finding makes completion's `spineQuarantineRepair` quarantine
+    > the thread's `files.jsonl` and `files/` together and restore both from primary HEAD.
 
   - In the crashpoint list, "the four `folio.settle.*` in `store` and
     `barrier.postSettle.preDayCommit`" becomes "the four `folio.settle.*` and
     `barrier.prune.postIndex` in `store`, and `barrier.postSettle.preDayCommit` and
-    `barrier.postPrune.preDayCommit`".
+    `barrier.postPrune.preDayCommit`, all walked by `TestBarrier_CrashWalk`; and
+    `fs.applyEvents.preIndex` in `store`, between a turn's tracked-file writes and its index write,
+    walked by `TestCrashMatrix_WTurnFileEvents`".
   - "(steps keyed by from-format; 1→2 restamps only, since format 2 adds optional folios to format
     1)" becomes "(steps keyed by from-format; 1→2 and 2→3 restamp only: format 2 adds optional
     folios, format 3 the tracked-file store, whose legacy `files.json` B1c removes)".
