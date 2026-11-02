@@ -10,7 +10,7 @@
 | `internal/recovery/` | startup reconcile orchestrator over the on-disk observables |
 | `internal/crashpoint/` | named kill-point hooks, test-armed and a no-op in production |
 | `internal/eventlog/` | daily-rotated plain-text event log |
-| `internal/dedup/` | reverse-delta content-versioning engine |
+| `internal/dedup/` | content identifiers, write-time diffs, excerpt identifier lines and the composition plan; pure, dependency leaf |
 | `internal/turn/` | the §3.0 chain, the turn loop, per-turn coalescing, the staging buffer, the recall surface, the decay-triggered closure flow, and the phase entry points (`probe_phases.go`) |
 | `internal/recall/scoring/` | pure Jaccard and cosine recall primitives, substrate-free; chunk tier, beam descent, summary-tree build |
 | `internal/recall/measure/` | application-side recall stack: `Service`, `Recaller`, the single async indexer and its snapshot, `.recall-cache` sidecars, sleep-cycle tree builder |

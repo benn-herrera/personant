@@ -36,12 +36,12 @@ var (
 )
 
 // HomeFormatMigration is one registered step: it reads a home at format
-// From and leaves it at format To. The 1→2 step is a restamp only; it
-// changes no bytes.
+// From and leaves it at format To. The 1→2 and 2→3 steps are restamps
+// only; they change no bytes.
 type HomeFormatMigration struct{ From, To int }
 
 // homeFormatMigrations is the registry of steps, ascending by From.
-var homeFormatMigrations = []HomeFormatMigration{{From: 1, To: 2}}
+var homeFormatMigrations = []HomeFormatMigration{{From: 1, To: 2}, {From: 2, To: 3}}
 
 // HomeFormatDecision is what the caller does next after a successful gate.
 // A non-nil error from GateHomeFormat means REFUSE; a nil error means

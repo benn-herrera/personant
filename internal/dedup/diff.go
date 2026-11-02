@@ -46,8 +46,7 @@ func Diff(oldContent, newContent string) (diff string, kept bool) {
 }
 
 // The rest of this file is a minimal, self-contained line-based
-// unified-diff implementation: an LCS line diff plus unified-format emit
-// and apply.
+// unified-diff implementation: an LCS line diff plus unified-format emit.
 //
 // A well-established diff dependency was considered and rejected: the
 // scope here is bounded (line granularity, one hunk grouping pass, no
@@ -83,7 +82,7 @@ func splitLines(s string) []string {
 // int, so delta-encoding a large tracked file (tens of thousands of lines)
 // can require gigabytes: two 100k-line versions would need
 // ~100k × 100k × 8 B = 80 GB. Above this line-count product, callers
-// (Diff, encodeDemoted) skip the diff rather than build the table.
+// (Diff) skip the diff rather than build the table.
 //
 // Budget arithmetic: cap the worst-case table at ~64 MB. An int is 8 bytes,
 // so 64 MiB / 8 B = 8,388,608 table entries; rounded down to a clean
@@ -191,8 +190,7 @@ const noNewline = "\\ No newline at end of file"
 const diffContext = 3
 
 // makeDiff produces a line-based unified diff transforming oldContent
-// into newContent. The result, applied via applyDiff to oldContent,
-// yields newContent byte-for-byte. Identical inputs yield "".
+// into newContent. Identical inputs yield "".
 //
 // Output is standard multi-hunk unified diff: changed regions are
 // grouped into hunks, each carrying up to diffContext unchanged lines of
@@ -297,103 +295,4 @@ func writeDiffLine(sb *strings.Builder, kind byte, line string) {
 		sb.WriteString(noNewline)
 		sb.WriteByte('\n')
 	}
-}
-
-// applyDiff applies a unified diff (as produced by makeDiff) to
-// oldContent and returns the transformed content. An empty diff is the
-// identity. A diff that does not describe oldContent is a corruption
-// signal and returns an error rather than silently producing garbage.
-func applyDiff(oldContent, diff string) (string, error) {
-	if diff == "" {
-		return oldContent, nil
-	}
-	a := splitLines(oldContent)
-	lines := splitLines(diff)
-
-	var result strings.Builder
-	ai := 0 // next unconsumed source line
-	i := 0
-	for i < len(lines) {
-		header := strings.TrimRight(lines[i], "\n")
-		if !strings.HasPrefix(header, "@@ ") {
-			return "", fmt.Errorf("dedup: malformed diff: expected hunk header, got %q", header)
-		}
-		aStart, err := parseHunkSourceStart(header)
-		if err != nil {
-			return "", err
-		}
-		i++
-		// Source line numbers are 1-based; aStart==0 means the hunk
-		// targets an empty source. Copy intervening unchanged lines.
-		copyTo := aStart - 1
-		if copyTo < ai || copyTo > len(a) {
-			return "", fmt.Errorf("dedup: hunk start %d out of range", aStart)
-		}
-		for ; ai < copyTo; ai++ {
-			result.WriteString(a[ai])
-		}
-		// Consume hunk body until the next header or end of diff.
-		for i < len(lines) {
-			raw := lines[i]
-			if raw == "" {
-				i++
-				continue
-			}
-			if strings.HasPrefix(strings.TrimRight(raw, "\n"), "@@ ") {
-				break
-			}
-			i++
-			kind := raw[0]
-			text := raw[1:]
-			if i < len(lines) && strings.TrimRight(lines[i], "\n") == noNewline {
-				text = strings.TrimSuffix(text, "\n")
-				i++
-			}
-			switch kind {
-			case ' ':
-				if ai >= len(a) || a[ai] != text {
-					return "", fmt.Errorf("dedup: diff context mismatch at source line %d", ai+1)
-				}
-				result.WriteString(text)
-				ai++
-			case '-':
-				if ai >= len(a) || a[ai] != text {
-					return "", fmt.Errorf("dedup: diff delete mismatch at source line %d", ai+1)
-				}
-				ai++
-			case '+':
-				result.WriteString(text)
-			default:
-				return "", fmt.Errorf("dedup: malformed diff line: %q", raw)
-			}
-		}
-	}
-	// Trailing unchanged lines past the last hunk.
-	for ; ai < len(a); ai++ {
-		result.WriteString(a[ai])
-	}
-	return result.String(), nil
-}
-
-// parseHunkSourceStart extracts the 1-based source start line from a
-// unified-diff hunk header "@@ -aStart,aCount +bStart,bCount @@".
-func parseHunkSourceStart(header string) (int, error) {
-	// header form: "@@ -A,B +C,D @@"
-	rest, ok := strings.CutPrefix(header, "@@ -")
-	if !ok {
-		return 0, fmt.Errorf("dedup: malformed hunk header: %q", header)
-	}
-	comma := strings.IndexByte(rest, ',')
-	space := strings.IndexByte(rest, ' ')
-	if comma < 0 || space < 0 || comma > space {
-		return 0, fmt.Errorf("dedup: malformed hunk header: %q", header)
-	}
-	var n int
-	if _, err := fmt.Sscanf(rest[:comma], "%d", &n); err != nil {
-		return 0, fmt.Errorf("dedup: malformed hunk header %q: %w", header, err)
-	}
-	if n == 0 {
-		return 1, nil // empty-source convention: start before line 1
-	}
-	return n, nil
 }

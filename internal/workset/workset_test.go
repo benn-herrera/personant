@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"personant/internal/dedup"
 	"personant/internal/memops"
 )
 
@@ -196,7 +195,7 @@ func TestLayerBRespectsBTopK(t *testing.T) {
 				Summary: id + " summary",
 				State:   memops.ThreadActive,
 			},
-			Body: fmt.Sprintf("thread %d body BBBBBBBBBB", i),
+			Excerpts: []Excerpt{{Turn: 1, Text: fmt.Sprintf("thread %d body BBBBBBBBBB", i)}},
 		}
 	}
 	in := Inputs{
@@ -234,8 +233,8 @@ func TestLayerBOversizedThreadTruncates(t *testing.T) {
 		ActiveThreads: []string{id},
 		ActiveThreadData: map[string]ThreadData{
 			id: {
-				Meta: memops.ThreadMeta{ID: id, Anchors: []string{"alpha"}, Summary: "huge", State: memops.ThreadActive},
-				Body: huge,
+				Meta:     memops.ThreadMeta{ID: id, Anchors: []string{"alpha"}, Summary: "huge", State: memops.ThreadActive},
+				Excerpts: []Excerpt{{Turn: 1, Text: huge}},
 			},
 		},
 	}
@@ -270,63 +269,104 @@ func TestLayerBMissingThreadDataSilent(t *testing.T) {
 	}
 }
 
-func TestLayerBTrackedFilesSection(t *testing.T) {
-	// Hand-build a window covering current + diff + identifier kinds so
-	// the test is independent of dedup's anchor cadence.
-	window := []dedup.WindowEntry{
-		{Kind: "identifier", Version: 0, Text: "[chain anchor: see most-recent position]"},
-		{Kind: "diff", Version: 4, Text: "@@ -1 +1 @@\n-old\n+new\n"},
-		{Kind: "current", Version: 5, Text: "title\nrevision 5\nstable footer\n"},
-	}
-	id := "thr_1"
-	in := Inputs{
-		ActiveProject: activeMeta,
-		Budget:        defaultBudget(),
-		ActiveThreads: []string{id},
-		ActiveThreadData: map[string]ThreadData{
-			id: {
-				Meta: memops.ThreadMeta{ID: id, Anchors: []string{"alpha"}, Summary: "with files", State: memops.ThreadActive},
-				Body: "thread body text",
-				TrackedFiles: []TrackedFile{{
-					Path:   "src/main.go",
-					Window: window,
-				}},
-			},
+const (
+	idA = "1111111111111111111111111111111111111111"
+	idB = "2222222222222222222222222222222222222222"
+	idC = "3333333333333333333333333333333333333333"
+)
+
+// expansionThread is one thread with two excerpts: the older carries a
+// diff then a literal, the newer a size note in place of a literal.
+func expansionThread() ThreadData {
+	return ThreadData{
+		Meta: memops.ThreadMeta{ID: "thr_1", Anchors: []string{"alpha"}, Summary: "with files", State: memops.ThreadActive},
+		Excerpts: []Excerpt{
+			{Turn: 1, Text: "## Turn 1\n\nOLDER EXCERPT\n", Expansions: []Expansion{
+				{Kind: ExpansionDiff, Path: "src/a.go", From: idA, To: idB, Size: 18, Content: "@@ -1 +1 @@\n-x\n+y\n"},
+				{Kind: ExpansionLiteral, Path: "src/a.go", ID: idB, Size: 2, Content: "y\n"},
+			}},
+			{Turn: 2, Text: "## Turn 2\n\nNEWER EXCERPT", Expansions: []Expansion{
+				{Kind: ExpansionLiteral, Path: "src/big.go", ID: idC, Size: 5000, Omitted: true},
+			}},
 		},
+	}
+}
+
+func TestLayerBExpansionsRenderInsideTheirExcerptInOrder(t *testing.T) {
+	in := Inputs{
+		ActiveProject:    activeMeta,
+		Budget:           defaultBudget(),
+		ActiveThreads:    []string{"thr_1"},
+		ActiveThreadData: map[string]ThreadData{"thr_1": expansionThread()},
 	}
 	params, err := Compose(in, ComposeOptions{})
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
 	}
-	for _, want := range []string{
-		"=== tracked files ===",
-		"--- src/main.go ---",
-		"revision 5",
-		"[version 4 diff]",
-		"see most-recent position",
-	} {
-		if !strings.Contains(params.LayerB, want) {
-			t.Errorf("LayerB missing %q\ngot: %s", want, params.LayerB)
+	order := []string{
+		"OLDER EXCERPT",
+		"[file diff #111111111111 -> #222222222222] src/a.go\n@@ -1 +1 @@\n-x\n+y\n\n[end file diff #111111111111 -> #222222222222]",
+		"[file content #222222222222] src/a.go\ny\n\n[end file content #222222222222]",
+		"NEWER EXCERPT",
+		"[file content #333333333333 not shown: 5000 bytes] src/big.go",
+	}
+	pos := -1
+	for _, want := range order {
+		i := strings.Index(params.LayerB, want)
+		if i < 0 {
+			t.Fatalf("LayerB missing %q\ngot: %s", want, params.LayerB)
 		}
+		if i <= pos {
+			t.Errorf("%q renders out of order\ngot: %s", want, params.LayerB)
+		}
+		pos = i
+	}
+	if strings.Contains(params.LayerB, "tracked files") {
+		t.Errorf("LayerB has a separate tracked-files section: %s", params.LayerB)
 	}
 }
 
-func TestLayerBNoTrackedFilesSection(t *testing.T) {
-	id := "thr_1"
-	in := Inputs{
-		ActiveProject: activeMeta,
-		Budget:        defaultBudget(),
-		ActiveThreads: []string{id},
-		ActiveThreadData: map[string]ThreadData{
-			id: {
-				Meta: memops.ThreadMeta{ID: id, Summary: "plain", State: memops.ThreadActive},
-				Body: "plain thread body",
-			},
-		},
+func TestLayerBExcerptLengthsAddUpToThread(t *testing.T) {
+	data := expansionThread()
+	got := renderThreadBody("thr_1", data)
+	sum := len(RenderThreadHeader("thr_1", data.Meta))
+	for _, e := range data.Excerpts {
+		n := ExcerptTextLen(e.Text)
+		for _, x := range e.Expansions {
+			n += ExpansionLen(x)
+		}
+		if r := len(RenderExcerpt(e)); r != n {
+			t.Errorf("turn %d: RenderExcerpt is %d bytes, sized as %d", e.Turn, r, n)
+		}
+		sum += n
 	}
-	params, _ := Compose(in, ComposeOptions{})
-	if strings.Contains(params.LayerB, "tracked files") {
-		t.Errorf("LayerB should have no tracked-files section; got %q", params.LayerB)
+	if sum != len(got) {
+		t.Errorf("thread renders %d bytes, header plus excerpts size to %d", len(got), sum)
+	}
+}
+
+func TestExpansionLenMatchesRendered(t *testing.T) {
+	cases := []struct {
+		name string
+		x    Expansion
+	}{
+		{"literal", Expansion{Kind: ExpansionLiteral, Path: "a.go", ID: idA, Content: "package a\n"}},
+		{"literal without final newline", Expansion{Kind: ExpansionLiteral, Path: "dir/b c.txt", ID: idB, Content: "naïve"}},
+		{"empty literal", Expansion{Kind: ExpansionLiteral, Path: "empty", ID: idC}},
+		{"diff", Expansion{Kind: ExpansionDiff, Path: "a.go", From: idA, To: idB, Content: "@@ -1 +1 @@\n-a\n+b\n"}},
+		{"literal size note", Expansion{Kind: ExpansionLiteral, Path: "a.go", ID: idA, Size: 123456, Omitted: true}},
+		{"diff size note", Expansion{Kind: ExpansionDiff, Path: "a.go", From: idA, To: idB, Size: 7, Omitted: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			x := tc.x
+			if !x.Omitted {
+				x.Size = len(x.Content)
+			}
+			if got, want := ExpansionLen(x), len(renderExpansion(x)); got != want {
+				t.Errorf("ExpansionLen = %d, rendered %d bytes: %q", got, want, renderExpansion(x))
+			}
+		})
 	}
 }
 
@@ -406,8 +446,8 @@ func TestComposeFullIntegration(t *testing.T) {
 	activeIDs := []string{"thr_3", "thr_2", "thr_1"}
 	for _, id := range activeIDs {
 		active[id] = ThreadData{
-			Meta: memops.ThreadMeta{ID: id, Summary: id, State: memops.ThreadActive},
-			Body: "body of " + id,
+			Meta:     memops.ThreadMeta{ID: id, Summary: id, State: memops.ThreadActive},
+			Excerpts: []Excerpt{{Turn: 1, Text: "body of " + id}},
 		}
 	}
 	spineRecs := make([]memops.SpineRecord, 0, 5)
@@ -545,8 +585,8 @@ func TestComposeNoWarnWhenLayerRenders(t *testing.T) {
 				Budget:        defaultBudget(),
 				ActiveThreads: []string{"thr_1"},
 				ActiveThreadData: map[string]ThreadData{"thr_1": {
-					Meta: memops.ThreadMeta{ID: "thr_1", Summary: "s", State: memops.ThreadActive},
-					Body: "body",
+					Meta:     memops.ThreadMeta{ID: "thr_1", Summary: "s", State: memops.ThreadActive},
+					Excerpts: []Excerpt{{Turn: 1, Text: "body"}},
 				}},
 			},
 		},
@@ -568,8 +608,8 @@ func TestComposeNoWarnWhenLayerRenders(t *testing.T) {
 }
 
 // TestPerThreadBudgetFloor pins the substrate-fetch contract: the
-// adapter uses PerThreadBudget to bound store.ReadThreadBody reads to
-// the same share workset will render at, so the floor enforcement here
+// adapter uses PerThreadBudget to size its excerpt walk to the same
+// share workset will render at, so the floor enforcement here
 // matches the render-time floor exactly.
 func TestPerThreadBudgetFloor(t *testing.T) {
 	if got := PerThreadBudget(100, 0); got != 100 {

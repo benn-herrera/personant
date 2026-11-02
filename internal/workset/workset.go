@@ -23,7 +23,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"personant/internal/dedup"
 	"personant/internal/memops"
 	"personant/internal/prompt"
 )
@@ -94,23 +93,43 @@ type ProjectDigestEntry struct {
 	Digest memops.ProjectDigest
 }
 
-// ThreadData is the per-thread input for Layer B rendering: metadata,
-// body (already recency-windowed + byte-budgeted by the adapter), and
-// tracked-file entries (already with the live-window pre-computed).
+// ThreadData is the per-thread input for Layer B rendering: metadata and
+// the excerpts the adapter's budgeted walk took, oldest first, each with
+// the expansions planned at its position.
 type ThreadData struct {
-	Meta         memops.ThreadMeta
-	Body         string
-	TrackedFiles []TrackedFile
+	Meta     memops.ThreadMeta
+	Excerpts []Excerpt
 }
 
-// TrackedFile is one §3.9.2 tracked-file block: path, commit pointer,
-// and the live diff/identifier window (oldest-first; last entry is
-// current). Substrate-free — dedup.WindowEntry is itself a pure value
-// type (dedup is dependency-leaf).
-type TrackedFile struct {
-	Path       string
-	LastCommit string
-	Window     []dedup.WindowEntry
+// Excerpt is one turn excerpt and the file content expanded at it, in
+// render order.
+type Excerpt struct {
+	Turn       int
+	Text       string
+	Expansions []Expansion
+}
+
+// ExpansionKind is what an expansion renders.
+type ExpansionKind string
+
+const (
+	ExpansionLiteral ExpansionKind = "literal"
+	ExpansionDiff    ExpansionKind = "diff"
+)
+
+// Expansion is file content rendered inside an excerpt: a file's current
+// content (ExpansionLiteral, named by ID) or a unified diff
+// (ExpansionDiff, from From to To). Size is the content's length in
+// bytes. An Omitted expansion carries no Content and renders as a note
+// naming the content and its size.
+type Expansion struct {
+	Kind     ExpansionKind
+	Path     string
+	ID       string
+	From, To string
+	Size     int
+	Content  string
+	Omitted  bool
 }
 
 // ComposeOptions tweaks rendering behavior. Logger receives the §3.1
@@ -298,8 +317,9 @@ func renderLayerB(in Inputs, budget memops.Budget) string {
 	if budget.BTopK > 0 && limit > budget.BTopK {
 		limit = budget.BTopK
 	}
-	// Per-thread share. A single oversized thread is truncated to its
-	// share so it does not crowd out its peers.
+	// Per-thread share. The adapter's walk sizes each thread to it; the
+	// truncation here is the backstop for the always-taken newest excerpt
+	// and charged size notes.
 	perThread := PerThreadBudget(budget.LayerB, limit)
 
 	rendered := make([]string, 0, limit)
@@ -332,9 +352,9 @@ const minPerThreadBudget = 4096
 
 // PerThreadBudget is the per-thread byte share for Layer B given the
 // total Layer B budget and the number of threads chosen for rendering.
-// The adapter uses this to bound store.ReadThreadBody reads to the same
-// share the renderer will truncate to, so substrate I/O matches render
-// budget. n ≤ 0 returns the full budget unchanged.
+// The adapter walks each thread's excerpts against the same share the
+// renderer truncates to, so substrate I/O matches render budget. n ≤ 0
+// returns the full budget unchanged.
 func PerThreadBudget(layerB, n int) int {
 	if n <= 0 {
 		return layerB
@@ -346,20 +366,24 @@ func PerThreadBudget(layerB, n int) int {
 	return share
 }
 
-// renderThreadBody renders one active thread as:
+// renderThreadBody renders one active thread as its header followed by
+// each excerpt in chronological order. Its length is exactly the header's
+// plus each excerpt's, so the adapter can size the walk with the same
+// functions.
+func renderThreadBody(id string, data ThreadData) string {
+	var b strings.Builder
+	b.WriteString(RenderThreadHeader(id, data.Meta))
+	for _, e := range data.Excerpts {
+		b.WriteString(RenderExcerpt(e))
+	}
+	return b.String()
+}
+
+// RenderThreadHeader renders a Layer B thread's header:
 //
 //	# <summary> (<id>) — <state>
 //	[anchors]: a, b, c, d
-//
-//	<body>
-//
-//	=== tracked files ===
-//	<one block per §3.9.2 tracked file>
-//
-// Body is supplied pre-windowed and pre-byte-budgeted by the caller;
-// tracked-file windows are likewise pre-computed.
-func renderThreadBody(id string, data ThreadData) string {
-	fm := data.Meta
+func RenderThreadHeader(id string, fm memops.ThreadMeta) string {
 	state := strings.ToUpper(string(fm.State))
 	if state == "" {
 		state = "UNKNOWN"
@@ -383,75 +407,55 @@ func renderThreadBody(id string, data ThreadData) string {
 	b.WriteString(state)
 	b.WriteString("\n[anchors]: ")
 	b.WriteString(strings.Join(fm.Anchors, ", "))
-	b.WriteString("\n\n")
-	b.WriteString(strings.TrimRight(data.Body, "\n"))
-
-	appendTrackedFiles(&b, data.TrackedFiles)
 	return b.String()
 }
 
-// appendTrackedFiles appends the §3.9.2 tracked-files section to b. An
-// empty slice renders nothing (no header).
-func appendTrackedFiles(b *strings.Builder, files []TrackedFile) {
-	if len(files) == 0 {
-		return
+// RenderExcerpt renders one excerpt as it appears in its thread: the
+// separator before it, its text, then its expansions in order.
+func RenderExcerpt(e Excerpt) string {
+	var b strings.Builder
+	b.WriteString(excerptSeparator)
+	b.WriteString(strings.TrimRight(e.Text, "\n"))
+	for _, x := range e.Expansions {
+		b.WriteString(renderExpansion(x))
 	}
-	// Caller hands us files in arbitrary order; render sorted by path
-	// so the layer output is deterministic across calls.
-	sorted := make([]TrackedFile, len(files))
-	copy(sorted, files)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Path < sorted[j].Path })
-
-	var section strings.Builder
-	for _, f := range sorted {
-		writeTrackedFile(&section, f)
-	}
-	if section.Len() == 0 {
-		return
-	}
-	b.WriteString("\n\n=== tracked files ===\n")
-	b.WriteString(strings.TrimRight(section.String(), "\n"))
+	return b.String()
 }
 
-// writeTrackedFile renders one tracked file's §3.9.2 block: a path
-// header (with the commit hash when committed), the current literal,
-// then the older entries oldest-first — diffs as labelled unified-diff
-// blocks, identifiers as their bracketed line.
-func writeTrackedFile(b *strings.Builder, f TrackedFile) {
-	b.WriteString("--- ")
-	b.WriteString(f.Path)
-	if f.LastCommit != "" {
-		b.WriteString(" [committed ")
-		b.WriteString(f.LastCommit)
-		b.WriteString("]")
-	}
-	b.WriteString(" ---\n")
-
-	// window is oldest-first; the last entry is current. Render the
-	// current literal first, then the older history in temporal order.
-	for _, e := range f.Window {
-		if e.Kind != "current" {
-			continue
-		}
-		b.WriteString(e.Text)
-		if !strings.HasSuffix(e.Text, "\n") {
-			b.WriteString("\n")
-		}
-	}
-	for _, e := range f.Window {
-		switch e.Kind {
-		case "diff":
-			fmt.Fprintf(b, "[version %d diff]\n", e.Version)
-			b.WriteString(e.Text)
-			if !strings.HasSuffix(e.Text, "\n") {
-				b.WriteString("\n")
-			}
-		case "identifier":
-			fmt.Fprintf(b, "[version %d] %s\n", e.Version, e.Text)
-		}
-	}
-	b.WriteString("\n")
+// ExcerptTextLen is the rendered length of an excerpt's text with the
+// separator before it, without its expansions.
+func ExcerptTextLen(text string) int {
+	return len(excerptSeparator) + len(strings.TrimRight(text, "\n"))
 }
+
+const excerptSeparator = "\n\n"
+
+// ExpansionLen is x's rendered length, computed from its header fields
+// and Size without its Content: the size note's length when x is
+// Omitted, the full block's otherwise.
+func ExpansionLen(x Expansion) int {
+	if x.Omitted {
+		return len(renderExpansion(x))
+	}
+	x.Content = ""
+	return len(renderExpansion(x)) + x.Size
+}
+
+// renderExpansion renders x as a delimited block, or as its size note
+// when x is Omitted. Nothing in the frame depends on Content, which
+// ExpansionLen relies on.
+func renderExpansion(x Expansion) string {
+	label := fmt.Sprintf("file content #%s", short12(x.ID))
+	if x.Kind == ExpansionDiff {
+		label = fmt.Sprintf("file diff #%s -> #%s", short12(x.From), short12(x.To))
+	}
+	if x.Omitted {
+		return fmt.Sprintf("\n\n[%s not shown: %d bytes] %s", label, x.Size, x.Path)
+	}
+	return fmt.Sprintf("\n\n[%s] %s\n%s\n[end %s]", label, x.Path, x.Content, label)
+}
+
+func short12(id string) string { return id[:min(12, len(id))] }
 
 // ---------- Layer C: dormant thread summaries ----------
 

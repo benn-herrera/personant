@@ -99,16 +99,12 @@ func TestRunEmptyResponsePersistentBindingOwnerDefault(t *testing.T) {
 	}
 
 	// Owner-default bound the turn: thr_42 owns (excerpt + turn_count++)
-	// and the sidecar carries the edit.
+	// and the tracked-file store carries the edit.
 	if got := spineTurnCount(t, paths, "thr_42"); got != 2 {
 		t.Errorf("thr_42 TurnCount: got %d want 2 (seed 1 + owner-defaulted turn)", got)
 	}
-	tf, err := store.LoadThreadFiles(paths, "thr_42")
-	if err != nil {
-		t.Fatalf("LoadThreadFiles: %v", err)
-	}
-	if _, ok := tf.Entry("src/e.go"); !ok {
-		t.Error("sidecar missing src/e.go on default owner thr_42")
+	if _, ok := trackedEntry(t, paths, "thr_42", "src/e.go"); !ok {
+		t.Error("tracked-file store missing src/e.go on default owner thr_42")
 	}
 	// The excerpt's agent section is EMPTY — the honest record of a model
 	// that produced nothing (fabricated content would forge the history).
@@ -238,11 +234,7 @@ func TestRunEmptyThenFetchThenTagRepromptAllCausesCapped(t *testing.T) {
 	if got := spineTurnCount(t, paths, "thr_42"); got != 2 {
 		t.Errorf("thr_42 TurnCount: got %d want 2", got)
 	}
-	tf, terr := store.LoadThreadFiles(paths, "thr_42")
-	if terr != nil {
-		t.Fatalf("LoadThreadFiles: %v", terr)
-	}
-	if _, ok := tf.Entry("src/g.go"); !ok {
-		t.Error("sidecar missing src/g.go on thr_42")
+	if _, ok := trackedEntry(t, paths, "thr_42", "src/g.go"); !ok {
+		t.Error("tracked-file store missing src/g.go on thr_42")
 	}
 }

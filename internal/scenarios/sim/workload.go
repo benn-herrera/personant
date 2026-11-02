@@ -3329,8 +3329,9 @@ func (g *generator) buildWorkPreEvents(idx int, slot CorpusSlot, userDictated bo
 		Meta:    map[string]string{"path": fs.path},
 	}}
 	// B1+X4 verbose-tool-result injection — placed right after the genuine
-	// fs.read so the inflated bytes ride into THIS turn's assembled request
-	// (preEvents fire before the user.prompt delta). Off by default.
+	// fs.read. The filler is an fs.read of its own path, so it becomes a
+	// tracked path of the turn's owner and renders from the next turn's
+	// composition, not this turn's request. Off by default.
 	if g.cfg.LargeInputEveryN > 0 && g.workTurnSeq%g.cfg.LargeInputEveryN == 0 {
 		preEvents = append(preEvents, largeToolResultDelta(g.workTurnSeq, g.cfg.LargeInputBytes))
 	}

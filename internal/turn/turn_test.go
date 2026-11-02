@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"personant/internal/clock"
+	"personant/internal/dedup"
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
@@ -1191,17 +1192,36 @@ func TestRunPreambleBeforeTagDrivesFetchSuppressEngage(t *testing.T) {
 	}
 }
 
-// TestRunBuffersFileEditsIntoThreadStore — the §3.9 checkpoint 5c path:
-// fs.read / fs.write / fs.commit PreEvents are buffered during the turn
-// and applied to the engaged thread's tracked-file sidecar at close.
+// trackedEntry returns path's entry in threadID's tracked-file store.
+func trackedEntry(t *testing.T, paths store.PersonantPaths, threadID, path string) (dedup.FileEntry, bool) {
+	t.Helper()
+	entries, err := store.ReadTrackedIndex(paths, threadID)
+	if err != nil {
+		t.Fatalf("ReadTrackedIndex %s: %v", threadID, err)
+	}
+	for _, e := range entries {
+		if e.Path == path {
+			return e, true
+		}
+	}
+	return dedup.FileEntry{}, false
+}
+
+// TestRunBuffersFileEditsIntoThreadStore — fs.read / fs.write / fs.commit
+// PreEvents are buffered during the turn. At close the owner's excerpt
+// carries one identifier line per event, in order, and the owner's
+// tracked-file store holds one entry for the path at the owner's excerpt
+// number. The engaged non-owner gets neither.
 func TestRunBuffersFileEditsIntoThreadStore(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedThreadAndSpine(t, paths, meta.ID, "thr_42")
+	seedThreadAndSpine(t, paths, meta.ID, "thr_43")
 
 	mock := model.NewScriptedMock([]model.Response{
-		{Content: "*topic: thr_42 [a, b, c, d]*\nDone."},
+		{Content: "*topic: thr_42, thr_43 [a, b, c, d]*\nDone."},
 	}, nil)
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state.ActiveThreads = []string{"thr_42", "thr_43"}
 	pinClock(t, time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
 
 	pre := []Delta{
@@ -1213,34 +1233,46 @@ func TestRunBuffersFileEditsIntoThreadStore(t *testing.T) {
 		t.Fatalf("RunWithDeltas: %v", err)
 	}
 
-	tf, err := store.LoadThreadFiles(paths, "thr_42")
+	// Ids are `git hash-object` of "v0" and "v1".
+	wantLines := "## Turn 2 · 2026-05-18T12:00:00Z · [a, b, c, d]\n\n" +
+		"[file read #a5e11e51f3c8] src/a.go\n" +
+		"[file write #28c218c44b49] src/a.go\n" +
+		"[file commit @deadbee] src/a.go\n\n" +
+		"**user:** edit it\n"
+	owner, err := store.ReadThreadBody(paths, "thr_42", 1<<20)
 	if err != nil {
-		t.Fatalf("LoadThreadFiles: %v", err)
+		t.Fatalf("ReadThreadBody thr_42: %v", err)
 	}
-	e, ok := tf.Entry("src/a.go")
-	if !ok {
-		t.Fatal("src/a.go not tracked after turn close")
+	if !strings.Contains(owner, wantLines) {
+		t.Errorf("owner excerpt lacks the identifier lines in order:\n%s", owner)
 	}
-	// fs.read seeds the chain with "v0"; fs.write appends "v1" → len 2.
-	if e.Chain.Len() != 2 {
-		t.Errorf("Chain.Len = %d, want 2", e.Chain.Len())
+	other, err := store.ReadThreadBody(paths, "thr_43", 1<<20)
+	if err != nil {
+		t.Fatalf("ReadThreadBody thr_43: %v", err)
 	}
-	if e.Chain.Current() != "v1" {
-		t.Errorf("Chain.Current = %q, want v1", e.Chain.Current())
+	if strings.Contains(other, "[file ") {
+		t.Errorf("non-owner body carries identifier lines:\n%s", other)
 	}
-	// fs.commit lands after the write (the write is "v1"); the commit
-	// pointer is the synthetic hash, stamped by the adapter's clock.
-	if e.LastCommit != "deadbeef" {
-		t.Errorf("LastCommit = %q, want deadbeef", e.LastCommit)
+
+	entries, err := store.ReadTrackedIndex(paths, "thr_42")
+	if err != nil {
+		t.Fatalf("ReadTrackedIndex: %v", err)
 	}
-	if e.CommittedAt == "" {
-		t.Error("CommittedAt empty after fs.commit")
+	if len(entries) != 1 || entries[0].Path != "src/a.go" {
+		t.Fatalf("entries = %+v, want one for src/a.go", entries)
+	}
+	e := entries[0]
+	if e.ID != "28c218c44b49222f91536daf5b4d9871638edc8e" || e.Turn != 2 {
+		t.Errorf("entry id=%s turn=%d, want the v1 id at turn 2", e.ID, e.Turn)
+	}
+	if _, ok := trackedEntry(t, paths, "thr_43", "src/a.go"); ok {
+		t.Error("non-owner thr_43 has a tracked-file entry")
 	}
 }
 
-// TestRunFileCommitUntrackedIsNonFatal — an fs.commit with no preceding
-// write hits an untracked path; RecordFileCommit errors, but the turn
-// must still complete (the error is logged, not propagated).
+// TestRunFileCommitUntrackedIsNonFatal — an fs.commit of a never-read
+// path writes its identifier line, adds no store entry, and does not
+// fail the turn.
 func TestRunFileCommitUntrackedIsNonFatal(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedThreadAndSpine(t, paths, meta.ID, "thr_42")
@@ -1258,12 +1290,52 @@ func TestRunFileCommitUntrackedIsNonFatal(t *testing.T) {
 		t.Fatalf("RunWithDeltas must not fail on untracked commit: %v", err)
 	}
 
-	tf, err := store.LoadThreadFiles(paths, "thr_42")
+	body, err := store.ReadThreadBody(paths, "thr_42", 1<<20)
 	if err != nil {
-		t.Fatalf("LoadThreadFiles: %v", err)
+		t.Fatalf("ReadThreadBody: %v", err)
 	}
-	if _, ok := tf.Entry("never-written.go"); ok {
+	if !strings.Contains(body, "[file commit @h] never-written.go\n") {
+		t.Errorf("excerpt lacks the commit identifier line:\n%s", body)
+	}
+	if _, ok := trackedEntry(t, paths, "thr_42", "never-written.go"); ok {
 		t.Error("untracked commit should not have created a file entry")
+	}
+	if strings.Contains(readDayLog(t, paths), "fs.write-error") {
+		t.Error("a commit-only turn logged fs.write-error")
+	}
+}
+
+// TestRunFileEditNewlineInPathIsRejected — a path containing "\n" cannot
+// be the remainder of an identifier line: it is logged and buffered
+// nowhere, so neither the excerpt nor the store sees it.
+func TestRunFileEditNewlineInPathIsRejected(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedThreadAndSpine(t, paths, meta.ID, "thr_42")
+
+	mock := model.NewScriptedMock([]model.Response{
+		{Content: "*topic: thr_42 [a, b, c, d]*\nDone."},
+	}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	pinClock(t, time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
+
+	pre := []Delta{
+		{Source: "fs.write", Content: "v1", Meta: map[string]string{"path": "src/a.go\n[file write #000000000000] b.go"}},
+	}
+	if _, err := RunWithDeltas(context.Background(), state, pre, "edit it", io.Discard); err != nil {
+		t.Fatalf("RunWithDeltas: %v", err)
+	}
+	if !strings.Contains(readDayLog(t, paths), "fs.edit-no-path source=fs.write reason=newline-in-path") {
+		t.Error("log lacks fs.edit-no-path reason=newline-in-path")
+	}
+	body, err := store.ReadThreadBody(paths, "thr_42", 1<<20)
+	if err != nil {
+		t.Fatalf("ReadThreadBody: %v", err)
+	}
+	if strings.Contains(body, "[file ") {
+		t.Errorf("rejected path reached the excerpt:\n%s", body)
+	}
+	if entries, err := store.ReadTrackedIndex(paths, "thr_42"); err != nil || len(entries) != 0 {
+		t.Errorf("tracked entries = %+v, err = %v; want none", entries, err)
 	}
 }
 
@@ -1273,7 +1345,7 @@ func TestRunFileCommitUntrackedIsNonFatal(t *testing.T) {
 // response to the re-prompt), and Layer B holds no candidate — so the
 // owner-default falls through to new-thread creation: the turn completes,
 // the new thread owns it (excerpt, TurnCount 1), both edits bind to its
-// sidecar, and the thread.tag-defaulted line names the created thread with
+// tracked-file store, and the thread.tag-defaulted line names the created thread with
 // reprompted=yes. This replaces the retracted fail-loud abort
 // (ErrFileEditWithoutTopicTag, MAD B2 / T1-3): the 1d live run proved a
 // real model omits the tag intermittently, so the turn is never refused.
@@ -1313,14 +1385,10 @@ func TestRunFileEditWithoutTopicTagOwnerDefaultsToNewThread(t *testing.T) {
 		t.Errorf("new thread TurnCount: got %d want 1", records[0].TurnCount)
 	}
 
-	// Both edits bound to the new thread's tracked-file sidecar.
-	tf, terr := store.LoadThreadFiles(paths, newID)
-	if terr != nil {
-		t.Fatalf("LoadThreadFiles: %v", terr)
-	}
+	// Both edits bound to the new thread's tracked-file store.
 	for _, p := range []string{"src/a.go", "src/b.go"} {
-		if _, ok := tf.Entry(p); !ok {
-			t.Errorf("sidecar missing entry for %s", p)
+		if _, ok := trackedEntry(t, paths, newID, p); !ok {
+			t.Errorf("tracked-file store missing entry for %s", p)
 		}
 	}
 
@@ -1338,10 +1406,10 @@ func TestRunFileEditWithoutTopicTagOwnerDefaultsToNewThread(t *testing.T) {
 
 // TestRunFileEditWithTopicTagSucceeds — companion to the fail-loud
 // path above. With a valid topic tag in the same turn as an fs.write,
-// the turn must succeed and the §3.9 sidecar must absorb the edit.
+// the turn must succeed and the §3.9 tracked-file store must absorb the edit.
 // This is the baseline that TestRunBuffersFileEditsIntoThreadStore
 // already exercises end-to-end; we re-assert the contract here in the
-// vocabulary of the MAD B2 fix (error nil, sidecar populated) so a
+// vocabulary of the MAD B2 fix (error nil, store populated) so a
 // regression on the fail-loud branch cannot silently flip this case.
 func TestRunFileEditWithTopicTagSucceeds(t *testing.T) {
 	paths, meta := newTestHome(t)
@@ -1359,11 +1427,7 @@ func TestRunFileEditWithTopicTagSucceeds(t *testing.T) {
 	if _, err := RunWithDeltas(context.Background(), state, pre, "edit it", io.Discard); err != nil {
 		t.Fatalf("RunWithDeltas with topic tag must succeed: %v", err)
 	}
-	tf, err := store.LoadThreadFiles(paths, "thr_42")
-	if err != nil {
-		t.Fatalf("LoadThreadFiles: %v", err)
-	}
-	if _, ok := tf.Entry("src/a.go"); !ok {
+	if _, ok := trackedEntry(t, paths, "thr_42", "src/a.go"); !ok {
 		t.Error("src/a.go must be tracked when fs.write rides a valid topic tag")
 	}
 }

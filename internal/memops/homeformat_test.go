@@ -75,17 +75,24 @@ func TestGateHomeFormat(t *testing.T) {
 			want:    HomeFormatDecision{Format: 2, StampFormat: 2, MigratedFrom: 1},
 		},
 		{
-			name:    "older home with no registered step is refused",
+			name:    "format 2 home migrates to 3",
 			found:   true,
 			onDisk:  2,
 			current: 3,
+			want:    HomeFormatDecision{Format: 3, StampFormat: 3, MigratedFrom: 2},
+		},
+		{
+			name:    "older home with no registered step is refused",
+			found:   true,
+			onDisk:  3,
+			current: 4,
 			wantErr: ErrHomeFormatNoMigration,
 		},
 		{
 			name:    "chain breaks partway",
 			found:   true,
 			onDisk:  1,
-			current: 3,
+			current: 4,
 			wantErr: ErrHomeFormatNoMigration,
 		},
 		{

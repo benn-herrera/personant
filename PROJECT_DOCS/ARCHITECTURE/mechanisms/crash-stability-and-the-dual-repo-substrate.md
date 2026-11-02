@@ -53,8 +53,15 @@ quarantined by recovery's unconditional `tmp-` residue sweep. A hand-broken foli
 B2's verify gate on the live run, marker kept; the next open's completion runs
 `spineQuarantineRepair`, quarantining the folio byte-exact and scoped-restoring it from primary
 HEAD (or removing it as an orphan add), which is consistent with the thread's loose files because
-tiers change only at a barrier. Crashpoints: the four `folio.settle.*` in `store` and
-`barrier.postSettle.preDayCommit`, all walked by `TestBarrier_CrashWalk`. Recovery handles and plumbs the
+tiers change only at a barrier. Barrier step B1c (`pruneTrackedFiles`, between B1b and B2) calls
+`store.PruneTrackedFiles` per spine record in numeric id order with the record's `TurnCount`. It
+rewrites a thread's `files.jsonl` only if an entry drops, then deletes the files no kept entry
+names, so a crash leaves orphans, never a dangling index. Completion re-runs it under the same
+condition as B1b. An unreadable index is skipped (`dedup.prune-skip reason=unreadable`) and fails
+B2's verify gate, and completion's `spineQuarantineRepair` restores it from primary HEAD, as for a
+hand-broken folio. Crashpoints: the four `folio.settle.*` and `barrier.prune.postIndex` in
+`store`, and `barrier.postSettle.preDayCommit` and `barrier.postPrune.preDayCommit`, all walked by
+`TestBarrier_CrashWalk`. Recovery handles and plumbs the
 `op=rebaseline` marker, but the mid-day arming trigger is not wired (ROADMAP.md). Packing: after
 every `gcCheckEveryCommits` (64) daily commits the adapter reads daily's loose-object count and runs
 gc at `gcLooseObjectThreshold` (5000); `MemoryOps.Consolidate` (go-git `RepackObjects` + `Prune`)
@@ -63,7 +70,8 @@ sweep. The open sequence runs `memops.GateHomeFormat` before Reconcile;
 `version.UnversionedHomeFormat` is pinned at 1 forever and is never an alias of
 `version.CurrentHomeFormat`, so an unmigrated legacy home keeps resolving to format 1.
 `GateHomeFormat` migrates an older home by walking the registry `homeFormatMigrations` (steps
-keyed by from-format; 1→2 restamps only, since format 2 adds optional folios to format 1), the
+keyed by from-format; 1→2 and 2→3 restamp only: format 2 adds optional folios, format 3 the
+tracked-file store, whose legacy `files.json` B1c removes), the
 caller writes the stamp before Reconcile, and a crash between stamp and log leaves a current-format
 home that needs nothing further.
 

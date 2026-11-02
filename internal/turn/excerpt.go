@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"personant/internal/dedup"
 	"personant/internal/prompt"
 )
 
@@ -24,12 +25,13 @@ func turnAnchorList(responseBody string, fallback []string) []string {
 //
 //	## Turn <N> · <RFC3339> · [a, b, c]
 //
+//	<fileLines, one per line, followed by a blank line; absent when empty>
 //	**user:** <userInput>
 //
 //	**agent:** <responseBody with topic tag stripped>
 //
 // Exactly one trailing newline is preserved.
-func renderTurnExcerpt(turnN int, when string, anchors []string, userInput, responseBody string) string {
+func renderTurnExcerpt(turnN int, when string, anchors, fileLines []string, userInput, responseBody string) string {
 	stripped := responseBody
 	if pr, err := prompt.Parse(responseBody); err == nil {
 		stripped = pr.Body
@@ -46,6 +48,10 @@ func renderTurnExcerpt(turnN int, when string, anchors []string, userInput, resp
 	b.WriteString(" · [")
 	b.WriteString(strings.Join(anchors, ", "))
 	b.WriteString("]\n\n")
+	if len(fileLines) > 0 {
+		b.WriteString(strings.Join(fileLines, "\n"))
+		b.WriteString("\n\n")
+	}
 	b.WriteString("**user:** ")
 	b.WriteString(user)
 	b.WriteString("\n\n")
@@ -53,6 +59,20 @@ func renderTurnExcerpt(turnN int, when string, anchors []string, userInput, resp
 	b.WriteString(stripped)
 	b.WriteString("\n")
 	return b.String()
+}
+
+// fileEventLines renders one identifier line per buffered file event, in
+// buffer order.
+func fileEventLines(edits []fileEdit) []string {
+	lines := make([]string, len(edits))
+	for i, fe := range edits {
+		id := fe.hash
+		if fe.kind != dedup.FileCommit {
+			id = dedup.ContentID([]byte(fe.content))
+		}
+		lines[i] = dedup.IdentifierLine(fe.kind, id, fe.path)
+	}
+	return lines
 }
 
 // descriptionFromNewThread derives a thread's Description (spec §2.3):

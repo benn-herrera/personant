@@ -112,7 +112,6 @@ func AssertPostRecovery(t testing.TB, paths store.PersonantPaths, ops memops.Mem
 		{"VerifyProjectReferences", VerifyProjectReferences},
 		{"VerifyThreadMetaMatchesSpine", VerifyThreadMetaMatchesSpine},
 		{"VerifyArchiveResolvable", VerifyArchiveResolvable},
-		{"VerifyDedupConsistency", VerifyDedupConsistency},
 	}
 	for _, inv := range invariants {
 		if err := inv.fn(h); err != nil {

@@ -77,7 +77,7 @@ Contents:
     - [§3.8.3 Recovery](3-core-algorithms/3.8-deep-cold-archival/3.8.3-recovery.md)
     - [§3.8.4 Recall treatment of archived threads (v0.1: off-recall)](3-core-algorithms/3.8-deep-cold-archival/3.8.4-recall-treatment-of-archived-threads-v0-1-off-recall.md)
   - [§3.9 Working-set content dedup](3-core-algorithms/3.9-working-set-content-dedup/index.md)
-    - [§3.9.1 Persistent storage (thread file body, log)](3-core-algorithms/3.9-working-set-content-dedup/3.9.1-persistent-storage-thread-file-body-log.md)
+    - [§3.9.1 Persistent storage and retention](3-core-algorithms/3.9-working-set-content-dedup/3.9.1-persistent-storage-and-retention.md)
     - [§3.9.2 Live context composition (working window)](3-core-algorithms/3.9-working-set-content-dedup/3.9.2-live-context-composition-working-window.md)
     - [§3.9.3 Diff format](3-core-algorithms/3.9-working-set-content-dedup/3.9.3-diff-format.md)
     - [§3.9.4 Identifier-only references](3-core-algorithms/3.9-working-set-content-dedup/3.9.4-identifier-only-references.md)

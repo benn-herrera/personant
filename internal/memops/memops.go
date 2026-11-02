@@ -399,87 +399,13 @@ type MemoryOps interface {
 
 	// ---------- §3.9 tracked-file content ----------
 
-	// RecordFileWrite records a content write for a tracked file in the
-	// per-thread §3.9 file store: it loads the thread's tracked-file
-	// sidecar, appends `content` as the path's new version, and saves it.
-	// Folds in store.LoadThreadFiles + ThreadFiles.RecordWrite +
-	// store.SaveThreadFiles.
-	//
-	// The write is idempotent on unchanged content: a re-write whose
-	// `content` equals the path's current version grows neither the
-	// version chain nor un-commits a committed file. The durable home of
-	// file content is this store, not the delta event log — the event
-	// log records only the event line.
-	RecordFileWrite(ctx context.Context, threadID, path, content string) error
-
-	// RecordFileCommit records a git-commit pointer for a tracked file in
-	// the per-thread §3.9 file store: it loads the sidecar, sets the
-	// commit hash + timestamp + turn number on the path's entry, and saves
-	// it. The adapter stamps the commit timestamp itself (clock.Timeline())
-	// — the port carries no timestamp; `committedTurn` is the turn at which
-	// the commit happened and feeds the turn-count side of the §3.9
-	// git-minimization retention window. Folds in store.LoadThreadFiles +
-	// ThreadFiles.RecordCommit + store.SaveThreadFiles.
-	//
-	// Returns an error when `path` is not tracked (a file the store has
-	// never seen a write for cannot be committed); callers treat that as
-	// non-fatal.
-	RecordFileCommit(ctx context.Context, threadID, path, hash string, committedTurn int) error
-
-	// AgeFileChains applies the §3.9 git-minimization policy to threadID's
-	// tracked-file store: a committed file's reverse-delta chain — which is
-	// pure duplication of what the project git repo holds at the commit
-	// hash — is dropped once a retention window has elapsed, leaving only
-	// the hash as a recovery pointer. Folds in store.LoadThreadFiles +
-	// ThreadFiles.AgeOut/DropChain + store.SaveThreadFiles.
-	//
-	// Reachability gate (the headline §3.9.1 invariant): a window-expired
-	// entry's chain is dropped ONLY IF the BLOB at its recorded commit hash
-	// AND path is confirmed reachable in the workspace repo — the exact
-	// `hash:path` GetFileVersion recovers through, not merely the commit.
-	// (Checking the commit alone is too weak: a commit can resolve while the
-	// recorded path is absent from its tree — path-form mismatch, a rename
-	// before commit, case divergence — so a commit-only gate could drop the
-	// only copy while recovery fails. Blob-at-path is the single shared
-	// predicate; a reachable blob implies a reachable commit.) A blob that
-	// is NOT reachable — the user amended, rebased, gc'd, moved the
-	// workspace, or the path is absent at that commit — causes aging to be
-	// REFUSED: the chain is RETAINED, not dropped, and a dedup/chain-age-
-	// refused event is logged (thread, path, hash, reason). No durable
-	// content is ever aged away without an application-reachable recovery
-	// path. If git is unavailable there is no second copy to minimize
-	// against, so every chain is retained and the refusal is logged once.
-	//
-	// A thread with no tracked-file sidecar is a no-op: (nil, 0, nil) with
-	// no sidecar written. Returns the sorted aged paths and total bytes
-	// freed (demand-sizing forensic data, also written to the event log).
-	AgeFileChains(ctx context.Context, threadID string, currentTurn int) (agedPaths []string, bytesFreed int, err error)
-
-	// GetFileVersion retrieves the committed content of a tracked file at a
-	// recorded commit hash — the §3.9.1 recovery path that makes the
-	// "recoverable by commit hash" claim deliverable end-to-end.
-	//
-	// Resolution order:
-	//   1. If the path's chain is still retained (not yet aged out) and the
-	//      hash matches the entry's LastCommit, the live literal is returned
-	//      from the chain directly — no git access.
-	//   2. Otherwise the adapter reads the blob from the workspace git tree
-	//      at that hash (read-only `git show <hash>:<path>`-class query,
-	//      §6.1.3).
-	//
-	// Returns ErrFileVersionUnreachable (sentinel, errors.Is) when the blob
-	// at `hash:path` is not reachable in the workspace repo — the hash is
-	// unresolvable or the path is absent at that commit (amend/rebase/gc
-	// orphaned it, the workspace moved, or a path-form mismatch). This is
-	// the exact condition that causes AgeFileChains to REFUSE to age: both
-	// consult store.BlobReachable/ShowFileAtCommit on the same normalized
-	// `hash:path`, so the recovery path and the aging precondition share one
-	// literal predicate — the gate drops a chain iff this method could
-	// recover it. Never returns ("", nil): an unrecoverable hash is always a
-	// sentinel, never an empty-string success.
-	//
-	// Read-only: never mutates the workspace tree.
-	GetFileVersion(ctx context.Context, threadID, path, hash string) (content string, err error)
+	// RecordFileEvents applies one turn's read/write events, in order, to
+	// threadID's tracked-file store. turn is the owner excerpt number and
+	// at its RFC3339 header timestamp. Inputs are validated first: a
+	// thread that does not exist, turn <= 0, an unparsable at, a kind other
+	// than read or write, or an empty path or one containing "\n" is
+	// logged and rejected with an error, and nothing is written.
+	RecordFileEvents(ctx context.Context, threadID string, turn int, at string, events []FileEvent) error
 
 	// ---------- Substrate recovery points ----------
 

@@ -10,6 +10,7 @@ import (
 
 	"personant/internal/clock"
 	"personant/internal/crashpoint"
+	"personant/internal/dedup"
 	"personant/internal/memops"
 	"personant/internal/prompt"
 	"personant/internal/store"
@@ -18,8 +19,8 @@ import (
 // Topic-tag protocol recovery surface (D6, burn-down 2026-07b A1). When an
 // LLM response omits the topic tag on a turn whose deltas require owner
 // binding (buffered §3.9 file edits), the workspace file is already written
-// (OS-level fs.write is irreversible) and a canonical sidecar entry must
-// bind to SOME thread. The former fail-loud abort
+// (OS-level fs.write is irreversible) and a canonical tracked-file entry
+// must bind to SOME thread. The former fail-loud abort
 // (ErrFileEditWithoutTopicTag, MAD B2 / T1-3) is retracted: the 1d
 // live-inference run showed a real model intermittently omits the tag
 // (turn 91 abort after ~90 coherent turns), so refusing the turn punishes
@@ -201,7 +202,7 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 	// Engaged thread IDs in this turn — includes resolved IDs for the
 	// *new-topic* sentinel. Used to update the Layer B/C LRU below. The
 	// owner is placed at index 0 so the §3.9 file-edit application binds
-	// to it (applyFileEdits keys off engaged[0]).
+	// to it (recordFileEvents keys off engaged[0]).
 	engaged := make([]string, 0, len(ids))
 
 	// Owner first. The W-TURN multi-write kill point fires after EACH
@@ -301,27 +302,10 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 			"thr="+engaged[0]+" cause="+cause+" reprompted="+reprompted)
 	}
 
-	// §3.9 step-3 close: apply this turn's buffered file edits to the
-	// primary engaged thread (engaged[0] — for a `work` turn that is the
-	// turn's single engaged thread). A RecordFileCommit error (an
-	// untracked path — e.g. a commit with no preceding write) is
-	// non-fatal: log it and continue, do not abort the turn.
-	if len(state.fileEdits) > 0 {
-		applyFileEdits(ctx, state, engaged[0])
-	}
-
-	// §3.9 git-minimization: age out committed-file reverse-delta chains
-	// on every engaged thread. This runs regardless of whether this turn
-	// touched any file — a long-committed chain on a thread engaged only
-	// for conversation must still age. A non-empty agedPaths result is
-	// expected; an error is non-fatal (logged, consistent with the other
-	// close-time substrate calls).
-	for _, id := range engaged {
-		if _, _, err := state.Ops.AgeFileChains(ctx, id, state.TurnNumber); err != nil {
-			_ = state.Ops.Log(ctx, memops.LogCategoryDedup, "error",
-				"thr="+id+" chain-age "+memops.SanitizeDetail(err.Error()))
-		}
-	}
+	// §3.9 step-3 close: the owner's excerpt already carries this turn's
+	// identifier lines; its tracked-file store takes the reads and writes.
+	// A store failure is non-fatal: logged, and the turn continues.
+	recordFileEvents(ctx, state, engaged[0], now)
 
 	updateLayerLRU(state, engaged)
 
@@ -392,27 +376,31 @@ func defaultOwnerForTagless(ctx context.Context, state *State) (string, error) {
 	return "", nil
 }
 
-// applyFileEdits flushes this turn's buffered §3.9 file-edit events into
-// threadID's tracked-file store, in buffer (chain) order. A write folds
-// content into the path's version chain via RecordFileWrite; a commit
-// records the git-commit pointer via RecordFileCommit. A commit against
-// an untracked path (no preceding write) is non-fatal — RecordFileCommit
-// returns an error, which is logged as fs/commit-untracked and skipped so
-// the turn still completes.
-func applyFileEdits(ctx context.Context, state *State, threadID string) {
+// recordFileEvents hands this turn's buffered reads and writes, in buffer
+// order, to the owner threadID's tracked-file store at the owner's excerpt
+// turn and header timestamp at. Commits never reach the store: they exist
+// only as identifier lines. An error is logged as fs.write-error and does
+// not fail the turn.
+func recordFileEvents(ctx context.Context, state *State, threadID, at string) {
+	var events []memops.FileEvent
 	for _, fe := range state.fileEdits {
+		var kind memops.FileEventKind
 		switch fe.kind {
-		case fileEditWrite:
-			if err := state.Ops.RecordFileWrite(ctx, threadID, fe.path, fe.content); err != nil {
-				_ = state.Ops.Log(ctx, memops.LogCategoryFS, "write-error",
-					"thr="+threadID+" path="+fe.path+" err="+memops.SanitizeDetail(err.Error()))
-			}
-		case fileEditCommit:
-			if err := state.Ops.RecordFileCommit(ctx, threadID, fe.path, fe.hash, state.TurnNumber); err != nil {
-				_ = state.Ops.Log(ctx, memops.LogCategoryFS, "commit-untracked",
-					"thr="+threadID+" path="+fe.path+" err="+memops.SanitizeDetail(err.Error()))
-			}
+		case dedup.FileRead:
+			kind = memops.FileEventRead
+		case dedup.FileWrite:
+			kind = memops.FileEventWrite
+		default:
+			continue
 		}
+		events = append(events, memops.FileEvent{Kind: kind, Path: fe.path, Content: fe.content})
+	}
+	if len(events) == 0 {
+		return
+	}
+	if err := state.Ops.RecordFileEvents(ctx, threadID, state.ownerExcerptTurn, at, events); err != nil {
+		_ = state.Ops.Log(ctx, memops.LogCategoryFS, "write-error",
+			"thr="+threadID+" err="+memops.SanitizeDetail(err.Error()))
 	}
 }
 
@@ -658,7 +646,8 @@ func updateExistingThread(ctx context.Context, state *State, rec memops.SpineRec
 		if err := claimTurnOwner(state, threadID); err != nil {
 			return err
 		}
-		excerpt = renderTurnExcerpt(mergeTurn, now, turnAnchors, userInput, responseBody)
+		excerpt = renderTurnExcerpt(mergeTurn, now, turnAnchors, fileEventLines(state.fileEdits), userInput, responseBody)
+		state.ownerExcerptTurn = mergeTurn
 	}
 	if err := state.Ops.EngageThread(ctx, memops.ThreadWrite{
 		Spine:       rec,
@@ -765,7 +754,8 @@ func createNewThread(ctx context.Context, state *State, owner bool, userInput, r
 		if err := claimTurnOwner(state, newID); err != nil {
 			return "", err
 		}
-		excerpt = renderTurnExcerpt(1, now, turnAnchors, userInput, responseBody)
+		excerpt = renderTurnExcerpt(1, now, turnAnchors, fileEventLines(state.fileEdits), userInput, responseBody)
+		state.ownerExcerptTurn = 1
 	}
 
 	if err := state.Ops.CreateThread(ctx, memops.ThreadWrite{

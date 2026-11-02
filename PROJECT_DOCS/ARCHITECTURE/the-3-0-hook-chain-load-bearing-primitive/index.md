@@ -20,7 +20,8 @@ change what the composer (`workset.Compose`) assembles.
    retention class.
 2. **Engagement signal** (§3.2) — coalesced per-turn (multi-tool-call turns don't multiply
    `turn_count`).
-3. **Dedup decision** (§3.9) — content-addressed identifier replacement.
+3. **Dedup decision** (§3.9) — buffered; identifier lines and the tracked-file store update at
+   turn close; replacement at composition.
 4. **Budget check** (§3.1) — bump-eviction so the budget is honored before the next event lands.
 5. **Logging** (SPEC §2.8; see "Event log format").
 

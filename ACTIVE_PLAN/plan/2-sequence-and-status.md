@@ -4,11 +4,11 @@
 |---|---|---|---|---|---|
 | P1 | `dedup` primitives | expert | — | — | done |
 | P2 | Tracked-file store format, excerpt reader, verify check | expert | P1 | **C1** after P2 | done; C1 passed |
-| P3 | Turn-close write switch | expert | C1 | — | in progress |
-| P4 | Composition switch (evidence step) | expert | P3 | — | not started |
-| P5 | Barrier step B1c, format 2 → 3 | expert | P4 evidence | — | not started |
-| P6 | Remove the old mechanism | mechanical | P4 evidence, P5 | **C2** after P6 | not started |
-| P7 | Measurement (A11a) | expert | C2 | **C3** after P7 | not started |
+| P3 | Turn-close write switch | expert | C1 | — | done |
+| P4 | Composition switch (evidence step) | expert | P3 | — | done; evidence `dedup-expansions: literal=1697 diff=2355` (1d sim) |
+| P5 | Barrier step B1c, format 2 → 3 | expert | P4 evidence | — | done |
+| P6 | Remove the old mechanism | mechanical | P4 evidence, P5 | **C2** after P6 | done; C2 passed |
+| P7 | Measurement (A11a) | expert | C2 | **C3** after P7 | in progress |
 | — | Post-sprint review ([§6](6-post-sprint-review.md)) | — | C3 | — | not started |
 
 P3 → P6 form one checkpoint (C2). The contract text P3–P6 land is consistent only as a whole: for

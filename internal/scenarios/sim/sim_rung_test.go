@@ -416,6 +416,8 @@ func logRungSummary(t *testing.T, label string, rep rungReport, gen *generator) 
 	t.Logf("turn latency:     P50=%.1fms P95=%.1fms mean=%.2fms", rep.p50, rep.p95, rep.meanMs)
 	t.Logf("user-dictated turns: %d (Realism C variant — user prompt carries the literal line being appended)",
 		gen.userDictatedCount)
+	t.Logf("dedup-expansions: literal=%d diff=%d",
+		m.Counters[scenarios.MetricDedupExpansionsLiteral], m.Counters[scenarios.MetricDedupExpansionsDiff])
 
 	// Recall fidelity is measured (RecallMeasureOnly), never pass/fail at this
 	// rung. Truth-in-labeling (sim-vs-reality MAD T0-1): this figure measures

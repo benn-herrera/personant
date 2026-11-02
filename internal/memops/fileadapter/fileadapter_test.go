@@ -531,6 +531,53 @@ func TestArchiveThenRecover_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestArchiveThenRecover_TrackedFileStore: archival captures a thread's
+// tracked-file store (files.jsonl and files/) with its subtree, and
+// recovery restores it byte-exact.
+func TestArchiveThenRecover_TrackedFileStore(t *testing.T) {
+	pinClock(t)
+	a := newAdapter(t)
+	ctx := context.Background()
+	seedThread(t, a, "thr_1", "prj_1", "## Turn 1\n\nthe thread body\n")
+	for turn, content := range []string{"package a\n", "package a\n\nfunc A() {}\n"} {
+		ev := []memops.FileEvent{{Kind: memops.FileEventWrite, Path: "a.go", Content: content}}
+		if err := a.RecordFileEvents(ctx, "thr_1", turn+1, "2026-05-18T12:00:00Z", ev); err != nil {
+			t.Fatalf("RecordFileEvents turn %d: %v", turn+1, err)
+		}
+	}
+	dir := store.ThreadDir(a.paths, "thr_1")
+	before := snapshotDir(t, dir)
+	stored := 0
+	for name := range before {
+		if strings.HasPrefix(name, "files"+string(filepath.Separator)) {
+			stored++
+		}
+	}
+	if _, ok := before["files.jsonl"]; !ok || stored < 2 {
+		t.Fatalf("fixture store = %d files under files/ (index present %v), want an index and two blobs", stored, ok)
+	}
+
+	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
+		t.Fatalf("ArchiveThread: %v", err)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("thread dir still present after archival: err=%v", err)
+	}
+	if _, err := a.RecoverThread(ctx, "thr_1"); err != nil {
+		t.Fatalf("RecoverThread: %v", err)
+	}
+
+	after := snapshotDir(t, dir)
+	for name, content := range before {
+		if name == "thread.md" {
+			continue
+		}
+		if after[name] != content {
+			t.Errorf("file %q not byte-exact after recovery", name)
+		}
+	}
+}
+
 // seedThreadWithDerivedFrom seeds a thread (seedThread) and then overwrites its
 // frontmatter so its history_symbols carry the given §2.7.3 DerivedFrom origin
 // provenance. Returns the history_symbols slice as written, for the caller to

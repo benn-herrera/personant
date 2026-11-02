@@ -36,8 +36,10 @@ const FrontEnd = "0.0.26"
 
 // CurrentHomeFormat is the home on-disk format revision this binary
 // writes and understands. Format 2 adds optional per-thread folio.jsonl
-// files to format 1.
-const CurrentHomeFormat = 2
+// files to format 1. Format 3 adds the per-thread tracked-file store
+// (files.jsonl, files/); a format-2 home's legacy files.json is removed by
+// its first day barrier.
+const CurrentHomeFormat = 3
 
 // UnversionedHomeFormat is the format a home is ASSUMED to be when it
 // carries no format stamp — i.e. a home written before versioning

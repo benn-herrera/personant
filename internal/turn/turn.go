@@ -259,6 +259,11 @@ type State struct {
 	// threads. Reset at the top of every Run alongside coalesce.
 	turnOwner string
 
+	// ownerExcerptTurn is the turn number in the owner's excerpt header,
+	// set when that excerpt is rendered; the tracked-file store records
+	// file events at it. Reset alongside turnOwner.
+	ownerExcerptTurn int
+
 	// tagReprompted records that this turn's D6 missing-tag re-prompt was
 	// spent: the first stream lacked a leading topic tag while §3.9 file
 	// edits were buffered, so the request was re-issued with
@@ -800,6 +805,7 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	// The single-owner stamp is per-turn — clear it so the prior turn's
 	// owner cannot trip this turn's claim guard.
 	state.turnOwner = ""
+	state.ownerExcerptTurn = 0
 	// The D6 tag / empty-response re-prompt flags are per-turn — clear them
 	// so a prior turn's re-prompt neither caps this turn's nor mislabels
 	// its thread.tag-defaulted line.
@@ -1395,7 +1401,7 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	// (gitignored), so writing it after CommitTurn is outside any marker
 	// scope's concern. A save failure is non-fatal: log and continue,
 	// consistent with the other close-time substrate calls
-	// (AgeFileChains, recall).
+	// (recall).
 	if err := state.Ops.SaveWorkingSet(ctx, state.ActiveThreads, state.DormantThreads); err != nil {
 		_ = state.Ops.Log(ctx, memops.LogCategorySession, "working-set-save-error", memops.SanitizeDetail(err.Error()))
 	}

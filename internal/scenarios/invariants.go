@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"personant/internal/autogit"
+	"personant/internal/dedup"
 	"personant/internal/memops"
 	"personant/internal/store"
 	"personant/internal/verify"
@@ -74,13 +75,11 @@ var heavyDefaultInvariants = []InvariantCheck{
 	VerifyProjectReferences,
 	VerifyThreadMetaMatchesSpine,
 	VerifyThreadAccounting,
-	// §3.8/§3.9 checks are substrate-scale: VerifyArchiveResolvable walks the
-	// archive index doing git object lookups (NOT cheap), VerifyDedupConsistency
-	// reads every live thread's files.json sidecar. They ride the same
-	// heavy-cadence the other full-spine checks use — per-step on handwritten
-	// scenarios, day-cadenced + end-of-run on the sim.
+	// VerifyArchiveResolvable walks the §3.8 archive index doing git object
+	// lookups (NOT cheap), so it rides the same heavy cadence the other
+	// full-spine checks use — per-step on handwritten scenarios,
+	// day-cadenced + end-of-run on the sim.
 	VerifyArchiveResolvable,
-	VerifyDedupConsistency,
 }
 
 // VerifySpineIntegrity wraps verify.Verify and surfaces any errors.
@@ -495,56 +494,6 @@ func VerifyArchiveResolvable(h *Harness) error {
 	return nil
 }
 
-// VerifyDedupConsistency asserts every live thread's §3.9 tracked-file sidecar
-// (threads/<id>/files.json) round-trips: it loads, and every reverse-delta
-// chain reconstructs byte-exactly.
-//
-// A present-but-corrupt sidecar fails LoadThreadFiles (a missing one is the
-// benign fresh state and loads as empty). For each tracked file, every recorded
-// version must Reconstruct without error — a broken delta or missing literal
-// anchor surfaces here — and Current() must agree with the newest reconstructed
-// version (the newest is always stored as a literal). Chains are short (bounded
-// by the live window + anchor cadence), so the per-file cost is small; the
-// enumeration over live threads is what puts it in the heavy tier.
-func VerifyDedupConsistency(h *Harness) error {
-	recs, err := store.ReadSpine(h.Paths.Spine)
-	if err != nil {
-		return fmt.Errorf("VerifyDedupConsistency: read spine: %w", err)
-	}
-	var problems []string
-	for _, r := range recs {
-		tf, err := store.LoadThreadFiles(h.Paths, r.ID)
-		if err != nil {
-			problems = append(problems, fmt.Sprintf("%s: sidecar unloadable: %v", r.ID, err))
-			continue
-		}
-		for path, fe := range tf.Files {
-			if fe == nil {
-				problems = append(problems, fmt.Sprintf("%s:%s: nil file entry", r.ID, path))
-				continue
-			}
-			chain := &fe.Chain
-			n := chain.Len()
-			for v := 0; v < n; v++ {
-				if _, rerr := chain.Reconstruct(v); rerr != nil {
-					problems = append(problems, fmt.Sprintf("%s:%s: version %d unreconstructable: %v", r.ID, path, v, rerr))
-				}
-			}
-			if n > 0 {
-				if cur, rerr := chain.Reconstruct(n - 1); rerr == nil && cur != chain.Current() {
-					problems = append(problems, fmt.Sprintf("%s:%s: Current() disagrees with newest reconstructed version", r.ID, path))
-				}
-			}
-		}
-	}
-	if len(problems) > 0 {
-		sort.Strings(problems)
-		return fmt.Errorf("VerifyDedupConsistency: %d inconsistent tracked-file chain(s): %s",
-			len(problems), strings.Join(problems, "; "))
-	}
-	return nil
-}
-
 // VerifyNoBudgetOverflow asserts the §3.1 render-time truncation contract held:
 // after composition, each rendered working-set layer is within its Budget byte
 // allocation. It re-composes via the harness's live session (h.Ops /
@@ -552,6 +501,10 @@ func VerifyDedupConsistency(h *Harness) error {
 // layer's byte length against the derived per-layer cap. workset.Compose
 // truncates every layer to its cap, so a violation means a future change
 // bypassed that truncation (the bypass this invariant exists to catch).
+//
+// The same compose's file-expansion report is checked by
+// checkFileExpansions, and its literal and diff counts are added to the
+// MetricDedupExpansionsLiteral and MetricDedupExpansionsDiff counters.
 //
 // Per D1 (SPEC §9.1): the X4 whole-request TOKEN ceiling is the NORMATIVE
 // zero-overflow gate. This per-layer BYTE check is a cheap belt-and-suspenders
@@ -598,6 +551,52 @@ func VerifyNoBudgetOverflow(h *Harness) error {
 	}
 	if len(over) > 0 {
 		return fmt.Errorf("VerifyNoBudgetOverflow: %s (§3.1 truncation contract bypassed)", strings.Join(over, "; "))
+	}
+	var literals, diffs int64
+	for _, x := range ws.FileExpansions.Expansions {
+		if x.Kind == string(dedup.ExpansionDiff) {
+			diffs++
+		} else {
+			literals++
+		}
+	}
+	h.Metrics.Counter(MetricDedupExpansionsLiteral, literals)
+	h.Metrics.Counter(MetricDedupExpansionsDiff, diffs)
+	return checkFileExpansions(ws.FileExpansions)
+}
+
+// checkFileExpansions fails a composition's expansion report that breaks
+// SPEC §3.9.2: a (project, path) or a content id rendered as a literal
+// twice, an expansion of a path at or above the report's LiteralMax, or a
+// diff at or above dedup.DiffLiteralThreshold of its path's current size.
+func checkFileExpansions(r memops.FileExpansionReport) error {
+	type projectPath struct{ project, path string }
+	byPath := map[projectPath]int{}
+	byID := map[string]int{}
+	var problems []string
+	for _, x := range r.Expansions {
+		at := fmt.Sprintf("%s turn %d %s", x.ThreadID, x.Turn, x.Path)
+		if x.PathSize >= r.LiteralMax {
+			problems = append(problems, fmt.Sprintf("%s: %s of a %d-byte path at or above literal max %d", at, x.Kind, x.PathSize, r.LiteralMax))
+		}
+		if x.Kind == string(dedup.ExpansionDiff) {
+			if float64(x.Size) >= dedup.DiffLiteralThreshold*float64(x.PathSize) {
+				problems = append(problems, fmt.Sprintf("%s: %d-byte diff at or above %.2f of path size %d", at, x.Size, dedup.DiffLiteralThreshold, x.PathSize))
+			}
+			continue
+		}
+		k := projectPath{x.Project, x.Path}
+		byPath[k]++
+		byID[x.ID]++
+		if byPath[k] == 2 {
+			problems = append(problems, fmt.Sprintf("%s: second literal of %s:%s", at, x.Project, x.Path))
+		}
+		if byID[x.ID] == 2 {
+			problems = append(problems, fmt.Sprintf("%s: second literal of id %s", at, x.ID))
+		}
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("file expansions: %s", strings.Join(problems, "; "))
 	}
 	return nil
 }

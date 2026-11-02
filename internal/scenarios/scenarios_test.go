@@ -1197,6 +1197,22 @@ func fsWritePre(path string) []turn.Delta {
 	}}
 }
 
+// hasTrackedPath reports whether threadID's tracked-file store has an
+// entry for path.
+func hasTrackedPath(t *testing.T, paths store.PersonantPaths, threadID, path string) bool {
+	t.Helper()
+	entries, err := store.ReadTrackedIndex(paths, threadID)
+	if err != nil {
+		t.Fatalf("ReadTrackedIndex %s: %v", threadID, err)
+	}
+	for _, e := range entries {
+		if e.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
 // TestScenario_TagOmissionRepromptRecovers drives the D6 stage-1 recovery
 // end-to-end under `make test` via the mock OmitTagEveryN knob (A1
 // acceptance): with N=2, step 2's first consult (counter 2) omits the tag on
@@ -1239,12 +1255,8 @@ func TestScenario_TagOmissionRepromptRecovers(t *testing.T) {
 	if strings.Contains(logBody, "thread.tag-defaulted") {
 		t.Errorf("owner-default fired though the re-prompt recovered the tag:\n%s", logBody)
 	}
-	tf, err := store.LoadThreadFiles(h.Paths, "thr_2")
-	if err != nil {
-		t.Fatalf("LoadThreadFiles thr_2: %v", err)
-	}
-	if _, ok := tf.Entry("src/a.go"); !ok {
-		t.Error("sidecar missing src/a.go on thr_2 (recovered tag did not bind the edit)")
+	if !hasTrackedPath(t, h.Paths, "thr_2", "src/a.go") {
+		t.Error("tracked-file store missing src/a.go on thr_2 (recovered tag did not bind the edit)")
 	}
 }
 
@@ -1289,13 +1301,9 @@ func TestScenario_TagOmissionDoubleMissOwnerDefault(t *testing.T) {
 	if got := strings.Count(logBody, "thread.tag-defaulted thr=thr_1 cause=missing-tag reprompted=yes"); got != 2 {
 		t.Errorf("tag-defaulted count: got %d want 2:\n%s", got, logBody)
 	}
-	tf, err := store.LoadThreadFiles(h.Paths, "thr_1")
-	if err != nil {
-		t.Fatalf("LoadThreadFiles thr_1: %v", err)
-	}
 	for _, p := range []string{"src/a.go", "src/b.go"} {
-		if _, ok := tf.Entry(p); !ok {
-			t.Errorf("sidecar missing %s on default owner thr_1", p)
+		if !hasTrackedPath(t, h.Paths, "thr_1", p) {
+			t.Errorf("tracked-file store missing %s on default owner thr_1", p)
 		}
 	}
 }

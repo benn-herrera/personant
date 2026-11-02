@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 
+	"personant/internal/dedup"
 	"personant/internal/memops"
 	"personant/internal/prompt"
 )
@@ -21,23 +23,13 @@ import (
 // provisionalRetention(Source).
 type Delta = memops.Delta
 
-// fileEditKind discriminates the two §3.9 buffered file-edit operations:
-// a content write (from fs.read or fs.write) or a git-commit pointer
-// update (from fs.commit).
-type fileEditKind int
-
-const (
-	fileEditWrite fileEditKind = iota
-	fileEditCommit
-)
-
-// fileEdit is one buffered §3.9 file-edit event. It is accumulated on
-// State.fileEdits during a turn and applied to the primary engaged
-// thread's tracked-file store at turn close. For a write, content holds
-// the full file content; for a commit, hash holds the commit hash and
-// content is unused.
+// fileEdit is one buffered §3.9 file event. It is accumulated on
+// State.fileEdits during a turn and recorded at turn close in the owner's
+// excerpt and, for a read or write, its tracked-file store. For a read or
+// write, content holds the full file content; for a commit, hash holds
+// the commit hash and content is unused.
 type fileEdit struct {
-	kind    fileEditKind
+	kind    dedup.FileEventKind
 	path    string
 	content string
 	hash    string
@@ -139,38 +131,43 @@ func onContextDelta(ctx context.Context, state *State, delta Delta) error {
 	return nil
 }
 
-// bufferFileEdit is the §3.9 step-3 hook: it appends a buffered file-edit
-// entry to state.fileEdits for an fs.read / fs.write / fs.commit delta.
-// fs.read and fs.write both buffer a write entry (the store's RecordWrite
-// no-op guard makes an unchanged re-read harmless); fs.commit buffers a
-// commit entry. The file path is read from delta.Meta["path"]; a delta
-// with no path is logged and skipped — it cannot be attributed to a file.
-// Non-fs delta sources are ignored.
+// bufferFileEdit is the §3.9 step-3 hook: it appends a buffered file
+// event to state.fileEdits for an fs.read / fs.write / fs.commit delta.
+// The file path is read from delta.Meta["path"]; a delta whose path is
+// empty, or contains a newline and so cannot be the remainder of an
+// identifier line, is logged and skipped. Non-fs delta sources are
+// ignored.
 func bufferFileEdit(ctx context.Context, state *State, delta Delta) error {
+	var kind dedup.FileEventKind
 	switch delta.Source {
-	case memops.SourceFSRead, memops.SourceFSWrite, memops.SourceFSCommit:
+	case memops.SourceFSRead:
+		kind = dedup.FileRead
+	case memops.SourceFSWrite:
+		kind = dedup.FileWrite
+	case memops.SourceFSCommit:
+		kind = dedup.FileCommit
 	default:
 		return nil
 	}
 	path := delta.Meta["path"]
-	if path == "" {
+	reason := ""
+	switch {
+	case path == "":
+		reason = "missing-meta-path"
+	case strings.Contains(path, "\n"):
+		reason = "newline-in-path"
+	}
+	if reason != "" {
 		return state.Ops.Log(ctx, memops.LogCategoryFS, "edit-no-path",
-			"source="+delta.Source+" reason=missing-meta-path")
+			"source="+delta.Source+" reason="+reason)
 	}
-	switch delta.Source {
-	case memops.SourceFSRead, memops.SourceFSWrite:
-		state.fileEdits = append(state.fileEdits, fileEdit{
-			kind:    fileEditWrite,
-			path:    path,
-			content: delta.Content,
-		})
-	case memops.SourceFSCommit:
-		state.fileEdits = append(state.fileEdits, fileEdit{
-			kind: fileEditCommit,
-			path: path,
-			hash: delta.Meta["hash"],
-		})
+	fe := fileEdit{kind: kind, path: path}
+	if kind == dedup.FileCommit {
+		fe.hash = delta.Meta["hash"]
+	} else {
+		fe.content = delta.Content
 	}
+	state.fileEdits = append(state.fileEdits, fe)
 	return nil
 }
 

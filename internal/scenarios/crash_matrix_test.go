@@ -27,10 +27,18 @@ package scenarios
 import (
 	"context"
 	"io"
+	"maps"
 	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
+	"github.com/go-git/go-git/v5/plumbing/object"
+
+	"personant/internal/autogit"
 	"personant/internal/crashpoint"
+	"personant/internal/dedup"
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/store"
@@ -62,6 +70,11 @@ var crashScenarioCoverage = map[string]string{
 	"folio.settle.postLooseWrite.preFolioWrite":  "fileadapter.TestBarrier_CrashWalk (also store.TestFolioSettleCrashConverges)",
 	"folio.settle.postFolioWrite.preLooseRemove": "fileadapter.TestBarrier_CrashWalk (also store.TestFolioSettleCrashConverges)",
 	"folio.settle.midLooseRemove":                "fileadapter.TestBarrier_CrashWalk (also store.TestFolioSettleCrashConverges)",
+
+	// Tracked-file prune (B1c) windows — armed inside a live barrier and,
+	// for the store's own point, in the owning package.
+	"barrier.prune.postIndex":        "fileadapter.TestBarrier_CrashWalk (also store.TestPruneTrackedFilesCrashAfterIndexConverges)",
+	"barrier.postPrune.preDayCommit": "fileadapter.TestBarrier_CrashWalk",
 
 	// morning-init — the two R4-deferred points, armed here on a greenfield
 	// home whose first Reconcile is where daily is born.
@@ -244,6 +257,155 @@ func TestCrashMatrix_WTurn(t *testing.T) {
 			AssertPostRecovery(t, h.Paths, fileadapter.NewFileAdapter(h.Paths), &oracle)
 		})
 	}
+}
+
+// TestCrashMatrix_WTurnFileEvents kills a turn that carries fs.read and
+// fs.write deltas. After recovery the owner's excerpts and tracked-file
+// store match daily HEAD byte for byte, and they agree with each other: the
+// turn's identifier line and its store entry are both present (committed)
+// or both absent (torn). AssertPostRecovery's verify pass covers the
+// tracked-file findings.
+func TestCrashMatrix_WTurnFileEvents(t *testing.T) {
+	const path = "src/crash.go"
+	cases := []struct {
+		name      string
+		point     string
+		hit       int
+		committed bool
+	}{
+		{"postJournalPreCanonical", "turn.postJournalPreCanonical", 0, false},
+		{"betweenRenames.k1", "turn.betweenCanonicalRenames", 1, false},
+		{"commitPostAddPreCommit", "fileadapter.CommitTurn.postAddPreCommit", 0, false},
+		{"commitPostCommitPreTruncate", "fileadapter.CommitTurn.postCommitPreTruncate", 0, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := buildThreeThreadHome(t)
+			h.Mock.SetResponse(NewMockResponseWithTag(
+				[]string{"thr_1", "thr_2", "thr_3"},
+				[]string{"alpha", "beta", "gamma", "probe"},
+				"editing a file."))
+			oracle := SnapshotTurnOracle(t, h.Paths)
+			pre := []turn.Delta{
+				{Source: memops.SourceFSRead, Content: "v0\n", Meta: map[string]string{"path": path}},
+				{Source: memops.SourceFSWrite, Content: "v1\n", Meta: map[string]string{"path": path}},
+			}
+			drive := func() {
+				_, _, _ = turn.RunWithInfo(context.Background(), h.State, pre, "crash-probe file turn", io.Discard)
+			}
+			var opts []crashpoint.ArmOption
+			if c.hit > 0 {
+				opts = append(opts, crashpoint.ArmOnHit(c.hit))
+			}
+			RestartWithCrash(t, h.Paths, c.point, drive, opts...)
+			AssertPostRecovery(t, h.Paths, fileadapter.NewFileAdapter(h.Paths), &oracle)
+
+			if got, want := threadStoreAndExcerpts(t, h.Paths, "thr_1", worktreeFile(h.Paths)), threadStoreAndExcerpts(t, h.Paths, "thr_1", dailyHeadFile(t, h.Paths)); !maps.Equal(got, want) {
+				t.Errorf("thr_1 excerpts and store differ from daily HEAD:\nworktree %v\ndaily    %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
+			}
+			entries, err := store.ReadTrackedIndex(h.Paths, "thr_1")
+			if err != nil {
+				t.Fatalf("read thr_1 index: %v", err)
+			}
+			body, err := store.ReadThreadBody(h.Paths, "thr_1", 1<<20)
+			if err != nil {
+				t.Fatalf("read thr_1 body: %v", err)
+			}
+			hasEntry := slices.ContainsFunc(entries, func(e dedup.FileEntry) bool { return e.Path == path })
+			hasLine := strings.Contains(body, "] "+path+"\n")
+			if hasEntry != c.committed || hasLine != c.committed {
+				t.Errorf("store entry %v, identifier line %v; want both %v", hasEntry, hasLine, c.committed)
+			}
+		})
+	}
+}
+
+// threadStoreAndExcerpts returns the bytes of a thread's tracked-file
+// index, files under files/, and loose excerpts, keyed by home-relative
+// path, as read returns them. Candidates come from both the worktree and
+// daily HEAD; a path read reports absent is left out.
+func threadStoreAndExcerpts(t *testing.T, paths store.PersonantPaths, id string, read func(rel string) (string, bool)) map[string]string {
+	t.Helper()
+	rels := map[string]bool{store.TrackedIndexRel(id): true}
+	dir := store.ThreadDir(paths, id)
+	for _, sub := range []string{"files", "turns"} {
+		des, _ := os.ReadDir(filepath.Join(dir, sub))
+		for _, d := range des {
+			rels["threads/"+id+"/"+sub+"/"+d.Name()] = true
+		}
+	}
+	for _, rel := range dailyHeadPaths(t, paths, "threads/"+id+"/") {
+		if strings.HasPrefix(rel, "threads/"+id+"/files") || strings.HasPrefix(rel, "threads/"+id+"/turns/") {
+			rels[rel] = true
+		}
+	}
+	out := map[string]string{}
+	for rel := range rels {
+		if data, ok := read(rel); ok {
+			out[rel] = data
+		}
+	}
+	return out
+}
+
+func worktreeFile(paths store.PersonantPaths) func(string) (string, bool) {
+	return func(rel string) (string, bool) {
+		data, err := os.ReadFile(filepath.Join(paths.Home, filepath.FromSlash(rel)))
+		return string(data), err == nil
+	}
+}
+
+func dailyHeadTree(t *testing.T, paths store.PersonantPaths) *object.Tree {
+	t.Helper()
+	repo, err := autogit.Open(paths, autogit.Daily)
+	if err != nil {
+		t.Fatalf("open daily: %v", err)
+	}
+	head, err := repo.Head()
+	if err != nil {
+		t.Fatalf("daily HEAD: %v", err)
+	}
+	commit, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		t.Fatalf("daily HEAD commit: %v", err)
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		t.Fatalf("daily HEAD tree: %v", err)
+	}
+	return tree
+}
+
+func dailyHeadFile(t *testing.T, paths store.PersonantPaths) func(string) (string, bool) {
+	tree := dailyHeadTree(t, paths)
+	return func(rel string) (string, bool) {
+		f, err := tree.File(rel)
+		if err != nil {
+			return "", false
+		}
+		data, err := f.Contents()
+		if err != nil {
+			t.Fatalf("daily HEAD %s: %v", rel, err)
+		}
+		return data, true
+	}
+}
+
+// dailyHeadPaths lists the files of daily HEAD whose path starts with
+// prefix.
+func dailyHeadPaths(t *testing.T, paths store.PersonantPaths, prefix string) []string {
+	t.Helper()
+	var out []string
+	err := dailyHeadTree(t, paths).Files().ForEach(func(f *object.File) error {
+		if strings.HasPrefix(f.Name, prefix) {
+			out = append(out, f.Name)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk daily HEAD: %v", err)
+	}
+	return out
 }
 
 // TestCrashMatrix_MorningInit arms the two R4-deferred morning-init points

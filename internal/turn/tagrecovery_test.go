@@ -47,7 +47,7 @@ func spineTurnCount(t *testing.T, paths store.PersonantPaths, thrID string) int 
 // TestRunTagRepromptRecoversBinding — D6 stage 1. First stream lacks a tag
 // while fs.write is buffered → exactly one re-prompt fires with
 // prompt.TopicTagReminder appended; the second response's tag binds
-// normally (owner, excerpt, sidecar), and no owner-default is needed.
+// normally (owner, excerpt, tracked-file store), and no owner-default is needed.
 func TestRunTagRepromptRecoversBinding(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedThreadAndSpine(t, paths, meta.ID, "thr_42")
@@ -89,12 +89,8 @@ func TestRunTagRepromptRecoversBinding(t *testing.T) {
 	if got := spineTurnCount(t, paths, "thr_42"); got != 2 {
 		t.Errorf("thr_42 TurnCount: got %d want 2 (seed 1 + owned turn)", got)
 	}
-	tf, err := store.LoadThreadFiles(paths, "thr_42")
-	if err != nil {
-		t.Fatalf("LoadThreadFiles: %v", err)
-	}
-	if _, ok := tf.Entry("src/a.go"); !ok {
-		t.Error("sidecar missing src/a.go on thr_42")
+	if _, ok := trackedEntry(t, paths, "thr_42", "src/a.go"); !ok {
+		t.Error("tracked-file store missing src/a.go on thr_42")
 	}
 
 	logBody := readDayLog(t, paths)
@@ -147,19 +143,15 @@ func TestRunOwnerDefaultBindsMostRecentlyEngaged(t *testing.T) {
 	}
 
 	// thr_43 (LastEngagedTurn 2 > thr_42's 1) owns turn 3: excerpt
-	// (TurnCount 1+1+1=3) and the sidecar binding. thr_42 stays at 2.
+	// (TurnCount 1+1+1=3) and the tracked-file binding. thr_42 stays at 2.
 	if got := spineTurnCount(t, paths, "thr_43"); got != 3 {
 		t.Errorf("thr_43 TurnCount: got %d want 3 (owner-default owned turn 3)", got)
 	}
 	if got := spineTurnCount(t, paths, "thr_42"); got != 2 {
 		t.Errorf("thr_42 TurnCount: got %d want 2 (not the default owner)", got)
 	}
-	tf, err := store.LoadThreadFiles(paths, "thr_43")
-	if err != nil {
-		t.Fatalf("LoadThreadFiles: %v", err)
-	}
-	if _, ok := tf.Entry("src/b.go"); !ok {
-		t.Error("sidecar missing src/b.go on default owner thr_43")
+	if _, ok := trackedEntry(t, paths, "thr_43", "src/b.go"); !ok {
+		t.Error("tracked-file store missing src/b.go on default owner thr_43")
 	}
 
 	logBody := readDayLog(t, paths)
@@ -268,12 +260,8 @@ func TestRunRepromptCapOnePerCauseBothCausesOneTurn(t *testing.T) {
 	if got := spineTurnCount(t, paths, "thr_42"); got != 2 {
 		t.Errorf("thr_42 TurnCount: got %d want 2", got)
 	}
-	tf, terr := store.LoadThreadFiles(paths, "thr_42")
-	if terr != nil {
-		t.Fatalf("LoadThreadFiles: %v", terr)
-	}
-	if _, ok := tf.Entry("src/c.go"); !ok {
-		t.Error("sidecar missing src/c.go on thr_42")
+	if _, ok := trackedEntry(t, paths, "thr_42", "src/c.go"); !ok {
+		t.Error("tracked-file store missing src/c.go on thr_42")
 	}
 }
 
@@ -347,12 +335,8 @@ func TestRunOwnerDefaultSurvivesRestartRecency(t *testing.T) {
 	if strings.Contains(logBody, "tag-defaulted thr=thr_42") {
 		t.Error("owner-default bound stale prior-session thr_42 (F1 anti-recency bug)")
 	}
-	tf, err := store.LoadThreadFiles(paths, "thr_43")
-	if err != nil {
-		t.Fatalf("LoadThreadFiles: %v", err)
-	}
-	if _, ok := tf.Entry("src/f1.go"); !ok {
-		t.Error("sidecar missing src/f1.go on session-current thr_43")
+	if _, ok := trackedEntry(t, paths, "thr_43", "src/f1.go"); !ok {
+		t.Error("tracked-file store missing src/f1.go on session-current thr_43")
 	}
 }
 
@@ -462,11 +446,7 @@ func TestRunFetchFirstThenTagReprompt(t *testing.T) {
 	if got := spineTurnCount(t, paths, "thr_42"); got != 2 {
 		t.Errorf("thr_42 TurnCount: got %d want 2", got)
 	}
-	tf, terr := store.LoadThreadFiles(paths, "thr_42")
-	if terr != nil {
-		t.Fatalf("LoadThreadFiles: %v", terr)
-	}
-	if _, ok := tf.Entry("src/d.go"); !ok {
-		t.Error("sidecar missing src/d.go on thr_42")
+	if _, ok := trackedEntry(t, paths, "thr_42", "src/d.go"); !ok {
+		t.Error("tracked-file store missing src/d.go on thr_42")
 	}
 }

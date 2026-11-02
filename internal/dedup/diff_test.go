@@ -38,6 +38,103 @@ func TestSplitLines(t *testing.T) {
 	}
 }
 
+// applyDiff applies a unified diff (as produced by makeDiff) to
+// oldContent and returns the transformed content. It is the round-trip
+// oracle for Diff: production never applies a diff.
+func applyDiff(oldContent, diff string) (string, error) {
+	if diff == "" {
+		return oldContent, nil
+	}
+	a := splitLines(oldContent)
+	lines := splitLines(diff)
+
+	var result strings.Builder
+	ai := 0 // next unconsumed source line
+	i := 0
+	for i < len(lines) {
+		header := strings.TrimRight(lines[i], "\n")
+		if !strings.HasPrefix(header, "@@ ") {
+			return "", fmt.Errorf("dedup: malformed diff: expected hunk header, got %q", header)
+		}
+		aStart, err := parseHunkSourceStart(header)
+		if err != nil {
+			return "", err
+		}
+		i++
+		// Source line numbers are 1-based; aStart==0 means the hunk
+		// targets an empty source. Copy intervening unchanged lines.
+		copyTo := aStart - 1
+		if copyTo < ai || copyTo > len(a) {
+			return "", fmt.Errorf("dedup: hunk start %d out of range", aStart)
+		}
+		for ; ai < copyTo; ai++ {
+			result.WriteString(a[ai])
+		}
+		// Consume hunk body until the next header or end of diff.
+		for i < len(lines) {
+			raw := lines[i]
+			if raw == "" {
+				i++
+				continue
+			}
+			if strings.HasPrefix(strings.TrimRight(raw, "\n"), "@@ ") {
+				break
+			}
+			i++
+			kind := raw[0]
+			text := raw[1:]
+			if i < len(lines) && strings.TrimRight(lines[i], "\n") == noNewline {
+				text = strings.TrimSuffix(text, "\n")
+				i++
+			}
+			switch kind {
+			case ' ':
+				if ai >= len(a) || a[ai] != text {
+					return "", fmt.Errorf("dedup: diff context mismatch at source line %d", ai+1)
+				}
+				result.WriteString(text)
+				ai++
+			case '-':
+				if ai >= len(a) || a[ai] != text {
+					return "", fmt.Errorf("dedup: diff delete mismatch at source line %d", ai+1)
+				}
+				ai++
+			case '+':
+				result.WriteString(text)
+			default:
+				return "", fmt.Errorf("dedup: malformed diff line: %q", raw)
+			}
+		}
+	}
+	// Trailing unchanged lines past the last hunk.
+	for ; ai < len(a); ai++ {
+		result.WriteString(a[ai])
+	}
+	return result.String(), nil
+}
+
+// parseHunkSourceStart extracts the 1-based source start line from a
+// unified-diff hunk header "@@ -aStart,aCount +bStart,bCount @@".
+func parseHunkSourceStart(header string) (int, error) {
+	rest, ok := strings.CutPrefix(header, "@@ -")
+	if !ok {
+		return 0, fmt.Errorf("dedup: malformed hunk header: %q", header)
+	}
+	comma := strings.IndexByte(rest, ',')
+	space := strings.IndexByte(rest, ' ')
+	if comma < 0 || space < 0 || comma > space {
+		return 0, fmt.Errorf("dedup: malformed hunk header: %q", header)
+	}
+	var n int
+	if _, err := fmt.Sscanf(rest[:comma], "%d", &n); err != nil {
+		return 0, fmt.Errorf("dedup: malformed hunk header %q: %w", header, err)
+	}
+	if n == 0 {
+		return 1, nil // empty-source convention: start before line 1
+	}
+	return n, nil
+}
+
 // TestDiffRoundTrip exercises makeDiff/applyDiff: applying the diff of
 // (old -> new) to old must reproduce new byte-for-byte.
 func TestDiffRoundTrip(t *testing.T) {

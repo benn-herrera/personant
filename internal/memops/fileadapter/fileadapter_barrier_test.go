@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"personant/internal/autogit"
 	"personant/internal/clock"
 	"personant/internal/crashpoint"
+	"personant/internal/dedup"
 	"personant/internal/eventlog"
 	"personant/internal/index"
 	"personant/internal/memops"
@@ -379,6 +381,242 @@ func TestBarrier_CrashWalk(t *testing.T) {
 			assertBarrierTerminal(t, b, day)
 		})
 	}
+
+	// The prune (B1c) windows, each killed on the fixture that gives the
+	// step work: an index entry to drop and files to delete.
+	for _, point := range []string{"barrier.prune.postIndex", "barrier.postPrune.preDayCommit"} {
+		t.Run("prune/"+point, func(t *testing.T) {
+			a := newBarrierHome(t, 3)
+			seedPrunableStore(t, a)
+			ctx := context.Background()
+			pinBarrierClock(t, bDay1)
+			day := autogit.DayIndexOf(bDay1) - 1
+
+			crashRun(t, point, func() { _, _ = a.MaybeDayBarrier(ctx) })
+			assertIndexedFilesPresent(t, a.paths, "thr_1")
+
+			b := NewFileAdapter(a.paths)
+			rep, err := b.Reconcile(ctx)
+			if err != nil {
+				t.Fatalf("Reconcile after crash at %s: %v", point, err)
+			}
+			if rep.ResetPerformed || len(rep.RevertedPaths) != 0 || len(rep.ScopedRestored) != 0 {
+				t.Errorf("prune recovery reset=%v reverted=%v restored=%v, want roll-forward only",
+					rep.ResetPerformed, rep.RevertedPaths, rep.ScopedRestored)
+			}
+			assertPrunedStore(t, b, "thr_1")
+			assertBarrierTerminal(t, b, day)
+		})
+	}
+}
+
+// editedLines returns 40 numbered lines with line i changed, so successive
+// versions differ by one line and keep their diffs.
+func editedLines(i int) string {
+	var b strings.Builder
+	for n := 1; n <= 40; n++ {
+		if n == i {
+			fmt.Fprintf(&b, "edited %d\n", n)
+			continue
+		}
+		fmt.Fprintf(&b, "line %d\n", n)
+	}
+	return b.String()
+}
+
+// seedPrunableStore gives thr_1 a tracked-file store with B1c work: a.go
+// edited LiveDiffWindow+4 times from turn 10, old.go last touched at turn 1
+// (past the window of the TurnCount it sets), and a legacy files.json. It
+// warms thr_1 so B1b leaves its excerpts where they are.
+func seedPrunableStore(t *testing.T, a *FileAdapter) {
+	t.Helper()
+	write := func(turn int, path, content string) {
+		ev := []memops.FileEvent{{Kind: memops.FileEventWrite, Path: path, Content: content}}
+		if _, err := store.ApplyFileEvents(a.paths, "thr_1", turn, bDay0, ev); err != nil {
+			t.Fatalf("apply %s turn %d: %v", path, turn, err)
+		}
+	}
+	write(1, "old.go", "old\n")
+	for i := 0; i < dedup.LiveDiffWindow+4; i++ {
+		write(10+i, "a.go", editedLines(i))
+	}
+	legacy := filepath.Join(store.ThreadDir(a.paths, "thr_1"), "files.json")
+	if err := os.WriteFile(legacy, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write files.json: %v", err)
+	}
+	rec, _, err := store.FindSpineRecord(a.paths, "thr_1")
+	if err != nil {
+		t.Fatalf("find thr_1: %v", err)
+	}
+	rec.State = memops.ThreadActive
+	rec.TurnCount = store.ThreadTurnWindow + 5
+	if err := store.UpdateSpineRecord(a.paths, rec); err != nil {
+		t.Fatalf("update thr_1: %v", err)
+	}
+}
+
+// assertIndexedFilesPresent fails for each blob or kept diff a thread's
+// index names that is absent.
+func assertIndexedFilesPresent(t *testing.T, paths store.PersonantPaths, id string) {
+	t.Helper()
+	entries, err := store.ReadTrackedIndex(paths, id)
+	if err != nil {
+		t.Fatalf("read index %s: %v", id, err)
+	}
+	for _, e := range entries {
+		if _, err := os.Stat(store.TrackedBlobPath(paths, id, e.ID)); err != nil {
+			t.Errorf("blob of %s: %v", e.Path, err)
+		}
+		for _, c := range e.Changes {
+			if !c.Diff {
+				continue
+			}
+			if _, err := os.Stat(store.TrackedDiffPath(paths, id, c.From, c.To)); err != nil {
+				t.Errorf("diff of %s: %v", e.Path, err)
+			}
+		}
+	}
+}
+
+// assertPrunedStore asserts the store seedPrunableStore leaves after B1c:
+// one index line, one blob and at most LiveDiffWindow diffs under files/,
+// no files.json, and primary HEAD holding none of the removed files.
+func assertPrunedStore(t *testing.T, a *FileAdapter, id string) {
+	t.Helper()
+	assertIndexedFilesPresent(t, a.paths, id)
+	entries, err := store.ReadTrackedIndex(a.paths, id)
+	if err != nil {
+		t.Fatalf("read index %s: %v", id, err)
+	}
+	if len(entries) != 1 || entries[0].Path != "a.go" {
+		t.Fatalf("index = %+v, want the one a.go line", entries)
+	}
+	des, err := os.ReadDir(filepath.Join(store.ThreadDir(a.paths, id), "files"))
+	if err != nil {
+		t.Fatalf("read files/: %v", err)
+	}
+	blobs, diffs := 0, 0
+	for _, d := range des {
+		if strings.HasSuffix(d.Name(), ".diff") {
+			diffs++
+		} else {
+			blobs++
+		}
+	}
+	if blobs != 1 || diffs > dedup.LiveDiffWindow {
+		t.Errorf("files/ holds %d blobs and %d diffs, want 1 and at most %d", blobs, diffs, dedup.LiveDiffWindow)
+	}
+	if _, err := os.Stat(filepath.Join(store.ThreadDir(a.paths, id), "files.json")); !os.IsNotExist(err) {
+		t.Errorf("files.json after prune: stat err %v, want absent", err)
+	}
+
+	repo, err := autogit.Open(a.paths, autogit.Primary)
+	if err != nil {
+		t.Fatalf("open primary: %v", err)
+	}
+	head, err := repo.Head()
+	if err != nil {
+		t.Fatalf("primary HEAD: %v", err)
+	}
+	commit, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		t.Fatalf("HEAD commit: %v", err)
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		t.Fatalf("HEAD tree: %v", err)
+	}
+	dir, err := tree.Tree(path.Join("threads", id, "files"))
+	if err != nil {
+		t.Fatalf("HEAD files/ of %s: %v", id, err)
+	}
+	if len(dir.Entries) != len(des) {
+		t.Errorf("primary HEAD files/ holds %d entries, worktree %d", len(dir.Entries), len(des))
+	}
+}
+
+// TestBarrier_PruneKeepsBoundedStore: after many edits of one path and one
+// barrier, the thread holds one blob, at most N diffs and one index line,
+// the entry past the window is gone, and the thread's excerpt bytes are
+// untouched.
+func TestBarrier_PruneKeepsBoundedStore(t *testing.T) {
+	a := newBarrierHome(t, 3)
+	seedPrunableStore(t, a)
+	turnsBefore := snapshotDir(t, store.ThreadTurnsDir(a.paths, "thr_1"))
+	folioBefore, folioErr := os.ReadFile(store.ThreadFolioPath(a.paths, "thr_1"))
+	pinBarrierClock(t, bDay1)
+
+	if _, err := a.MaybeDayBarrier(context.Background()); err != nil {
+		t.Fatalf("barrier: %v", err)
+	}
+
+	assertPrunedStore(t, a, "thr_1")
+	if after := snapshotDir(t, store.ThreadTurnsDir(a.paths, "thr_1")); !maps.Equal(after, turnsBefore) {
+		t.Errorf("turns/ changed by the barrier")
+	}
+	folioAfter, err := os.ReadFile(store.ThreadFolioPath(a.paths, "thr_1"))
+	if string(folioAfter) != string(folioBefore) || os.IsNotExist(err) != os.IsNotExist(folioErr) {
+		t.Errorf("folio.jsonl changed by the barrier")
+	}
+	if log := readEventLog(t, a); !strings.Contains(log, "dedup.pruned thr=thr_1 files=") {
+		t.Errorf("log lacks dedup.pruned for thr_1:\n%s", log)
+	}
+}
+
+// TestBarrier_PruneUnreadableIndexRecovers: an unreadable index makes B1c
+// skip the thread and fails B2's verify gate on the index; the next open's
+// completion restores the index from primary HEAD and seals the day.
+func TestBarrier_PruneUnreadableIndexRecovers(t *testing.T) {
+	a := newBarrierHome(t, 3)
+	seedPrunableStore(t, a)
+	ctx := context.Background()
+	pinBarrierClock(t, bDay1)
+	if _, err := a.MaybeDayBarrier(ctx); err != nil {
+		t.Fatalf("first barrier: %v", err)
+	}
+	index := store.TrackedIndexPath(a.paths, "thr_1")
+	good, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	broken := string(good) + "not json\n"
+	if err := os.WriteFile(index, []byte(broken), 0o644); err != nil {
+		t.Fatalf("break index: %v", err)
+	}
+
+	pinBarrierClock(t, bDay2)
+	day := autogit.DayIndexOf(bDay2) - 1
+	_, err = a.MaybeDayBarrier(ctx)
+	if err == nil || !strings.Contains(err.Error(), store.TrackedIndexRel("thr_1")) {
+		t.Fatalf("barrier over a broken index = %v; want the B2 verify failure naming %s", err, store.TrackedIndexRel("thr_1"))
+	}
+	if log := readEventLog(t, a); !strings.Contains(log, "dedup.prune-skip thr=thr_1 reason=unreadable") {
+		t.Errorf("log lacks the prune-skip:\n%s", log)
+	}
+	if m, present, _ := store.ReadMarker(a.paths); !present || m.Op != store.OpBarrier {
+		t.Fatalf("marker after failed barrier: %+v present=%v, want op=barrier intact", m, present)
+	}
+
+	b := NewFileAdapter(a.paths)
+	rep, err := b.Reconcile(ctx)
+	if err != nil {
+		t.Fatalf("completion Reconcile: %v", err)
+	}
+	if !slices.Contains(rep.ScopedRestored, store.TrackedIndexRel("thr_1")) {
+		t.Errorf("ScopedRestored = %v, want %s", rep.ScopedRestored, store.TrackedIndexRel("thr_1"))
+	}
+	matches, err := filepath.Glob(filepath.Join(b.paths.RecoveryDir, "quarantine", "*", "threads", "thr_1", "files.jsonl"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("quarantined index copies = %v (err %v), want 1", matches, err)
+	}
+	if q, err := os.ReadFile(matches[0]); err != nil || string(q) != broken {
+		t.Errorf("quarantined index not byte-exact (err %v)", err)
+	}
+	if restored, err := os.ReadFile(index); err != nil || string(restored) != string(good) {
+		t.Errorf("index after completion = %q (err %v), want the last day-commit's", restored, err)
+	}
+	assertIndexedFilesPresent(t, b.paths, "thr_1")
+	assertBarrierTerminal(t, b, day)
 }
 
 // newFolioBindHome is the settle fixture: three retired threads, too few

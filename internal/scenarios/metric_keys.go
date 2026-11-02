@@ -47,6 +47,11 @@ const (
 	// MetricTurnCommitMs is the per-turn CommitTurn latency histogram.
 	MetricTurnCommitMs = "turn_commit_ms"
 
+	// SPEC §3.9 file-content expansions, summed over every working set the
+	// per-step VerifyNoBudgetOverflow composes; read by the rung summary.
+	MetricDedupExpansionsLiteral = "dedup_expansions_literal"
+	MetricDedupExpansionsDiff    = "dedup_expansions_diff"
+
 	// Sleep-cycle keys (#108). MetricSleepCycles counts sleep/consolidation
 	// passes (one per day-off); the GitDirBytes trio are the substrate .git
 	// footprint before/after the gc plus the total reclaimed across cycles —

@@ -3,7 +3,7 @@
 | Concept | Definition | Spec |
 |---|---|---|
 | **Spine record** | one line of `spine.jsonl`; canonical thread bookkeeping (id, project, anchors, summary, state, timestamps, turn_count, recall_fires) | "Storage and record formats" |
-| **Thread** | contiguous run of turns united by working on one specific problem; identified by `thr_<n>` (stable forever); a directory holding `thread.md` (YAML frontmatter), serial turn excerpts and a tracked-file sidecar | "Storage and record formats" |
+| **Thread** | contiguous run of turns united by working on one specific problem; identified by `thr_<n>` (stable forever); a directory holding `thread.md` (YAML frontmatter), serial turn excerpts and a tracked-file store | "Storage and record formats" |
 | **Project** | three-layer identity: stable handle `prj_<n>`, mutable display name, optional canonical external identity (normalized git remote URL) | "Project metadata", SPEC §4.5 |
 | **Anchor symbol** | `[derived]` 0..8 normalized symbols, projected from active `history_symbols` (see "Symbol extraction"); drive recall and surface in the spine line | "Symbol lifecycle and anchor projection" |
 | **History symbol** | per-thread accumulated symbol (`raw`, `normalized`, `first_seen_turn`, `count`, `source`) plus a `lifecycle` (`active`/`superseded`) and an `ever_central` latch; the thread's evolving identity and the recall match set; capped per `history.cap-per-thread`, evicted with ever-central + high-specificity protection | "Storage and record formats" |

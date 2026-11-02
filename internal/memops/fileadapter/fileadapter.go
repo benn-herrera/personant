@@ -21,8 +21,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -700,253 +701,50 @@ func (a *FileAdapter) Log(ctx context.Context, category, action, details string)
 
 // ---------- §3.9 tracked-file content ----------
 
-// RecordFileWrite loads the thread's §3.9 tracked-file sidecar, appends
-// content as the path's new version, and saves the sidecar. A missing
-// sidecar is the fresh state — store.LoadThreadFiles returns an empty
-// store, so the first write seeds the path's chain. The write is
-// idempotent on unchanged content (see store.ThreadFiles.RecordWrite).
-func (a *FileAdapter) RecordFileWrite(ctx context.Context, threadID, path, content string) error {
+// RecordFileEvents validates its inputs, applies events to threadID's
+// tracked-file store and records every file written in the turn scope,
+// including those written before a failure.
+func (a *FileAdapter) RecordFileEvents(ctx context.Context, threadID string, turn int, at string, events []memops.FileEvent) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	tf, err := store.LoadThreadFiles(a.paths, threadID)
+	when, reason := a.checkFileEvents(threadID, turn, at, events)
+	if reason != "" {
+		_ = a.Log(ctx, memops.LogCategoryFS, "write-error", "thr="+threadID+" reason="+reason)
+		return fmt.Errorf("fileadapter: record file events %s: %s", threadID, reason)
+	}
+	written, err := store.ApplyFileEvents(a.paths, threadID, turn, when, events)
+	a.touchTurnScope(written...)
 	if err != nil {
-		return fmt.Errorf("fileadapter: record file write %s: load: %w", threadID, err)
+		return fmt.Errorf("fileadapter: record file events: %w", err)
 	}
-	tf.RecordWrite(path, content)
-	if err := store.SaveThreadFiles(a.paths, tf); err != nil {
-		return fmt.Errorf("fileadapter: record file write %s: save: %w", threadID, err)
-	}
-	a.touchTurnScope(store.ThreadFilesRel(threadID))
 	return nil
 }
 
-// RecordFileCommit loads the thread's §3.9 tracked-file sidecar, sets the
-// git-commit pointer on the path's entry, and saves the sidecar. The
-// commit timestamp is stamped here from clock.Timeline() in RFC3339 form
-// — consistent with how eventlog stamps events — so the port signature
-// carries no timestamp. committedTurn is recorded for the §3.9
-// git-minimization retention window. Surfaces ThreadFiles.RecordCommit's
-// untracked-path error to the caller (a commit with no preceding write).
-func (a *FileAdapter) RecordFileCommit(ctx context.Context, threadID, path, hash string, committedTurn int) error {
-	if err := ctx.Err(); err != nil {
-		return err
+// checkFileEvents returns the parsed at, or a short reason naming the
+// first input RecordFileEvents must reject.
+func (a *FileAdapter) checkFileEvents(threadID string, turn int, at string, events []memops.FileEvent) (time.Time, string) {
+	if _, err := os.Stat(store.ThreadMetaPath(a.paths, threadID)); err != nil {
+		return time.Time{}, "unknown-thread"
 	}
-	tf, err := store.LoadThreadFiles(a.paths, threadID)
+	if turn <= 0 {
+		return time.Time{}, "turn=" + strconv.Itoa(turn)
+	}
+	when, err := time.Parse(time.RFC3339, at)
 	if err != nil {
-		return fmt.Errorf("fileadapter: record file commit %s: load: %w", threadID, err)
+		return time.Time{}, "bad-at"
 	}
-	committedAt := clock.Timeline().Format(time.RFC3339)
-	if err := tf.RecordCommit(path, hash, committedAt, committedTurn); err != nil {
-		return fmt.Errorf("fileadapter: record file commit %s: %w", threadID, err)
-	}
-	if err := store.SaveThreadFiles(a.paths, tf); err != nil {
-		return fmt.Errorf("fileadapter: record file commit %s: save: %w", threadID, err)
-	}
-	a.touchTurnScope(store.ThreadFilesRel(threadID))
-	return nil
-}
-
-// workspaceGitRoot resolves the workspace git root for threadID's project
-// (Q1 — adapter-internal resolution, keeping the port path-free): thread →
-// spine record → project → CurrentRootPath → store.FindGitRoot walked from
-// it. Returns ok=false when the chain cannot be completed (thread/project
-// absent, no recorded root, root not under a git repo, or the recorded path
-// is stale/moved). A false ok is the SAFE answer — it makes the aging gate
-// refuse to drop and the recovery path return ErrFileVersionUnreachable. A
-// non-nil error is reserved for an I/O failure that prevented resolution
-// (it must not be swallowed into a silent "not reachable").
-func (a *FileAdapter) workspaceGitRoot(threadID string) (root string, ok bool, err error) {
-	rec, found, err := store.FindSpineRecord(a.paths, threadID)
-	if err != nil {
-		return "", false, fmt.Errorf("find spine: %w", err)
-	}
-	if !found || rec.Project == "" {
-		return "", false, nil
-	}
-	meta, err := store.LoadProjectMeta(a.paths, rec.Project)
-	if err != nil {
-		if errors.Is(err, memops.ErrProjectNotFound) {
-			return "", false, nil
-		}
-		return "", false, fmt.Errorf("load project %s: %w", rec.Project, err)
-	}
-	if meta.CurrentRootPath == "" {
-		return "", false, nil
-	}
-	gitRoot, found, err := store.FindGitRoot(meta.CurrentRootPath)
-	if err != nil {
-		return "", false, fmt.Errorf("find git root: %w", err)
-	}
-	if !found {
-		return "", false, nil
-	}
-	return gitRoot, true, nil
-}
-
-// gitPathForShow normalizes a tracked-file path into the git-root-relative
-// form that `git show <hash>:<path>` / `git cat-file -e <hash>:<path>`
-// require. §3.9 tracked paths are caller-supplied (delta.Meta["path"]) and
-// documented as workspace-relative, but nothing enforces that at this
-// boundary; an absolute path would make git reject the pathspec. An
-// absolute path under gitRoot is rebased to gitRoot; anything else (an
-// already-relative path, or an absolute path that escapes gitRoot) is
-// returned unchanged.
-//
-// This is the ONE shared normalization used by BOTH the aging gate
-// (BlobReachable) and the recovery read (ShowFileAtCommit), so the two
-// consult git with identical inputs. That is what keeps the "one shared
-// predicate" claim literally true: for any given (root, hash, path) the
-// gate refuses aging exactly when recovery would fail, and drops a chain
-// exactly when recovery would succeed — they can never diverge.
-func gitPathForShow(gitRoot, path string) string {
-	if !filepath.IsAbs(path) {
-		return path
-	}
-	rel, err := filepath.Rel(gitRoot, path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return path // not under gitRoot — git rejects it identically in both paths
-	}
-	return rel
-}
-
-// AgeFileChains applies the §3.9 git-minimization policy to threadID's
-// tracked-file store, gated by workspace-git reachability. A thread with no
-// tracked-file sidecar (zero files) is a no-op — no empty sidecar is
-// written.
-//
-// store.ThreadFiles.AgeOut computes the window-expired CANDIDATES (pure, no
-// git, no mutation). For each candidate the adapter consults the headline
-// §3.9.1 reachability gate: a chain is dropped (via tf.DropChain) ONLY IF
-// the BLOB at the recorded commit hash AND path is confirmed reachable in
-// the workspace repo (store.BlobReachable — the same `hash:path` the
-// recovery read consults, not merely the commit). An unreachable blob —
-// amend/rebase/gc/move, a path absent at that commit (path-form mismatch,
-// rename before commit), or git unavailable — REFUSES aging: the chain is
-// retained and a dedup/chain-age-refused event is logged. No durable
-// content is ever aged away without an application-reachable recovery path.
-//
-// When anything actually ages, the updated sidecar is saved and one
-// dedup/chain-aged event-log line records the aged paths and bytes freed
-// (the demand-sizing forensic data — kept exact, like the archival byte
-// counts). A pass that refuses every candidate writes no sidecar (nothing
-// changed) but still logs each refusal.
-func (a *FileAdapter) AgeFileChains(ctx context.Context, threadID string, currentTurn int) ([]string, int, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, 0, err
-	}
-	tf, err := store.LoadThreadFiles(a.paths, threadID)
-	if err != nil {
-		return nil, 0, fmt.Errorf("fileadapter: age file chains %s: load: %w", threadID, err)
-	}
-	if len(tf.Files) == 0 {
-		// No sidecar (or an empty one) — nothing to age, and we must not
-		// materialize an empty sidecar where none existed.
-		return nil, 0, nil
-	}
-	candidates := tf.AgeOut(currentTurn, clock.Timeline())
-	if len(candidates) == 0 {
-		return nil, 0, nil
-	}
-
-	root, rootOK, err := a.workspaceGitRoot(threadID)
-	if err != nil {
-		return nil, 0, fmt.Errorf("fileadapter: age file chains %s: resolve workspace root: %w", threadID, err)
-	}
-
-	var agedPaths []string
-	var bytesFreed int
-	for _, path := range candidates {
-		e, ok := tf.Entry(path)
-		if !ok {
-			continue // defensive: candidate disappeared between calls
-		}
-		reachable := false
-		reason := "workspace-root-unresolved"
-		if rootOK {
-			r, rerr := store.BlobReachable(root, e.LastCommit, gitPathForShow(root, path))
-			if rerr != nil {
-				return agedPaths, bytesFreed, fmt.Errorf("fileadapter: age file chains %s: reachability %s: %w", threadID, path, rerr)
-			}
-			reachable = r
-			if !reachable {
-				reason = "blob-unreachable"
-			}
-		}
-		if !reachable {
-			// Refuse to age: retain the chain, log the skipped reclamation
-			// so it is forensically visible (Inv 3). Details are adapter-
-			// built (path, hash, reason) — never user content.
-			if logErr := eventlog.Log(a.paths, "dedup", "chain-age-refused",
-				fmt.Sprintf("thr=%s path=%s hash=%s reason=%s", threadID, path, e.LastCommit, reason)); logErr != nil {
-				return agedPaths, bytesFreed, fmt.Errorf("fileadapter: age file chains %s: log refusal: %w", threadID, logErr)
-			}
-			a.touchTurnScope(eventlog.DayLogRel(clock.Timeline()))
-			continue
-		}
-		if freed, ok := tf.DropChain(path); ok {
-			bytesFreed += freed
-			agedPaths = append(agedPaths, path)
+	for _, ev := range events {
+		switch {
+		case ev.Kind != memops.FileEventRead && ev.Kind != memops.FileEventWrite:
+			return time.Time{}, "bad-kind"
+		case ev.Path == "":
+			return time.Time{}, "empty-path"
+		case strings.Contains(ev.Path, "\n"):
+			return time.Time{}, "newline-in-path"
 		}
 	}
-
-	if len(agedPaths) == 0 {
-		// Every candidate was refused — nothing mutated, so no sidecar
-		// write. Refusals were already logged above.
-		return nil, 0, nil
-	}
-	if err := store.SaveThreadFiles(a.paths, tf); err != nil {
-		return nil, 0, fmt.Errorf("fileadapter: age file chains %s: save: %w", threadID, err)
-	}
-	a.touchTurnScope(store.ThreadFilesRel(threadID))
-	if err := eventlog.Log(a.paths, "dedup", "chain-aged",
-		fmt.Sprintf("thr=%s paths=%s bytes=%d", threadID, strings.Join(agedPaths, ","), bytesFreed)); err != nil {
-		return agedPaths, bytesFreed, fmt.Errorf("fileadapter: age file chains %s: log: %w", threadID, err)
-	}
-	a.touchTurnScope(eventlog.DayLogRel(clock.Timeline()))
-	return agedPaths, bytesFreed, nil
-}
-
-// GetFileVersion recovers a tracked file's committed content at a recorded
-// commit hash — the §3.9.1 recovery path (port doc on MemoryOps). Fast
-// path: when the path's chain is still retained and the hash matches
-// LastCommit, the live literal is returned with no git access. Otherwise
-// the blob is read read-only from the workspace git tree
-// (store.ShowFileAtCommit). ErrFileVersionUnreachable when the hash is
-// unreachable / the blob is absent / the workspace root cannot be resolved.
-// Never returns ("", nil).
-func (a *FileAdapter) GetFileVersion(ctx context.Context, threadID, path, hash string) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	tf, err := store.LoadThreadFiles(a.paths, threadID)
-	if err != nil {
-		return "", fmt.Errorf("fileadapter: get file version %s: load: %w", threadID, err)
-	}
-	// Fast path: retained chain whose LastCommit matches — return the live
-	// literal directly, no workspace git. Aging only fires post-commit on an
-	// unchanged-since-commit entry, so Chain.Current() is the committed
-	// state. (Recovering an older in-chain version by a non-LastCommit hash
-	// is out of scope — only LastCommit is a hash, §3.9.1.)
-	if e, ok := tf.Entry(path); ok && e.LastCommit == hash && e.Chain.Len() > 0 {
-		return e.Chain.Current(), nil
-	}
-
-	root, rootOK, err := a.workspaceGitRoot(threadID)
-	if err != nil {
-		return "", fmt.Errorf("fileadapter: get file version %s: resolve workspace root: %w", threadID, err)
-	}
-	if !rootOK {
-		return "", fmt.Errorf("fileadapter: get file version %s %s@%s: %w", threadID, path, hash, memops.ErrFileVersionUnreachable)
-	}
-	content, present, err := store.ShowFileAtCommit(root, hash, gitPathForShow(root, path))
-	if err != nil {
-		return "", fmt.Errorf("fileadapter: get file version %s: show: %w", threadID, err)
-	}
-	if !present {
-		return "", fmt.Errorf("fileadapter: get file version %s %s@%s: %w", threadID, path, hash, memops.ErrFileVersionUnreachable)
-	}
-	return content, nil
+	return when, ""
 }
 
 // ---------- Bootstrap and verification ----------

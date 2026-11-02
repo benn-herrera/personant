@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"personant/internal/crashpoint"
 	"personant/internal/dedup"
 	"personant/internal/memops"
 )
@@ -50,6 +51,20 @@ func TrackedDiffPath(paths PersonantPaths, threadID, from, to string) string {
 }
 
 func trackedDiffName(from, to string) string { return from + "-" + to + ".diff" }
+
+// ReadTrackedDiff returns the bytes of the kept diff from content id from
+// to content id to, failing when either is not a content id. A missing
+// diff's error satisfies errors.Is(err, os.ErrNotExist).
+func ReadTrackedDiff(paths PersonantPaths, threadID, from, to string) ([]byte, error) {
+	if !isContentID(from) || !isContentID(to) {
+		return nil, fmt.Errorf("read tracked diff %s: %q -> %q: not content ids", threadID, from, to)
+	}
+	data, err := os.ReadFile(TrackedDiffPath(paths, threadID, from, to))
+	if err != nil {
+		return nil, fmt.Errorf("read tracked diff %s: %w", threadID, err)
+	}
+	return data, nil
+}
 
 // ReadTrackedIndex loads a thread's tracked-file index as plan entries, in
 // path order. A missing index is no tracked files. An index that does not
@@ -220,12 +235,105 @@ func ApplyFileEvents(paths PersonantPaths, threadID string, turn int, at time.Ti
 		e.ID, e.Size, e.Turn, e.At = id, len(ev.Content), turn, at
 	}
 
+	if err := writeTrackedIndex(paths, threadID, entries); err != nil {
+		return written, fmt.Errorf("apply file events %s: %w", threadID, err)
+	}
+	return append(written, TrackedIndexRel(threadID)), nil
+}
+
+func writeTrackedIndex(paths PersonantPaths, threadID string, entries []dedup.FileEntry) error {
 	recs := make([]trackedRecord, len(entries))
 	for i, e := range entries {
 		recs[i] = trackedRecordOf(e)
 	}
-	if err := WriteJSONL(TrackedIndexPath(paths, threadID), recs, func(r trackedRecord) string { return r.Path }); err != nil {
-		return written, fmt.Errorf("apply file events %s: %w", threadID, err)
+	return WriteJSONL(TrackedIndexPath(paths, threadID), recs, func(r trackedRecord) string { return r.Path })
+}
+
+// cpPrunePostIndex fires between a prune's index rewrite and its deletes,
+// only for a thread whose prune has work.
+var cpPrunePostIndex = crashpoint.Register("barrier.prune.postIndex")
+
+// PruneUnreadable is the TrackedPrune.Skip reason for an index that does
+// not read.
+const PruneUnreadable = "unreadable"
+
+// TrackedPrune is what one PruneTrackedFiles call removed.
+type TrackedPrune struct {
+	Files int   // files removed
+	Bytes int64 // their total size
+	Skip  string
+}
+
+// PruneTrackedFiles applies retention to a thread's tracked-file store:
+// it keeps the entries dedup.Retain keeps for turnCount over
+// ThreadTurnWindow, with the blobs and kept diffs they name, and removes
+// every other file under files/ and the legacy files.json. The index is
+// rewritten, only if an entry drops, before anything is removed, so a
+// crash between the two leaves orphans, never an index naming an absent
+// file. An index that does not read leaves the thread untouched, with
+// Skip set to PruneUnreadable.
+func PruneTrackedFiles(paths PersonantPaths, threadID string, turnCount int) (TrackedPrune, error) {
+	var out TrackedPrune
+	entries, err := ReadTrackedIndex(paths, threadID)
+	if err != nil {
+		out.Skip = PruneUnreadable
+		return out, nil
 	}
-	return append(written, TrackedIndexRel(threadID)), nil
+	keep := dedup.Retain(entries, turnCount, ThreadTurnWindow)
+	kept := make(map[string]bool, len(keep.Blobs)+len(keep.Diffs))
+	for id := range keep.Blobs {
+		kept[id] = true
+	}
+	for d := range keep.Diffs {
+		kept[trackedDiffName(d.From, d.To)] = true
+	}
+
+	type doomedFile struct {
+		path string
+		size int64
+	}
+	var doomed []doomedFile
+	filesDir := filepath.Join(ThreadDir(paths, threadID), trackedFilesDirName)
+	des, err := os.ReadDir(filesDir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return out, fmt.Errorf("prune tracked files %s: %w", threadID, err)
+	}
+	for _, de := range des {
+		if kept[de.Name()] {
+			continue
+		}
+		info, err := de.Info()
+		if err != nil {
+			return out, fmt.Errorf("prune tracked files %s: %w", threadID, err)
+		}
+		doomed = append(doomed, doomedFile{filepath.Join(filesDir, de.Name()), info.Size()})
+	}
+	legacy := filepath.Join(ThreadDir(paths, threadID), threadFilesFileName)
+	if info, err := os.Lstat(legacy); err == nil {
+		doomed = append(doomed, doomedFile{legacy, info.Size()})
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return out, fmt.Errorf("prune tracked files %s: %w", threadID, err)
+	}
+
+	dropped := len(keep.Entries) < len(entries)
+	if !dropped && len(doomed) == 0 {
+		return out, nil
+	}
+	if dropped {
+		if err := writeTrackedIndex(paths, threadID, keep.Entries); err != nil {
+			return out, fmt.Errorf("prune tracked files %s: %w", threadID, err)
+		}
+	}
+	crashpoint.At(cpPrunePostIndex)
+	for _, f := range doomed {
+		if err := os.Remove(f.path); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return out, fmt.Errorf("prune tracked files %s: %w", threadID, err)
+		}
+		out.Files++
+		out.Bytes += f.size
+	}
+	return out, nil
 }

@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"personant/internal/dedup"
 	"personant/internal/memops"
 	"personant/internal/store"
 )
@@ -317,38 +316,6 @@ func TestVerifyArchiveResolvable_PassOnDriftRecordEntry(t *testing.T) {
 	}
 }
 
-func TestVerifyDedupConsistency_PassOnValidSidecar(t *testing.T) {
-	h := invariantHarness(t)
-	seedThread(t, h, validRecord()) // thr_1 on the spine
-	ch := dedup.New()
-	ch.Append("line one\n")
-	ch.Append("line one\nline two\n")
-	ch.Append("line one\nline two\nline three\n")
-	tf := store.ThreadFiles{
-		ThreadID: "thr_1",
-		Files: map[string]*store.FileEntry{
-			"src/foo.go": {Path: "src/foo.go", Chain: *ch},
-		},
-	}
-	if err := store.SaveThreadFiles(h.Paths, tf); err != nil {
-		t.Fatalf("save thread files: %v", err)
-	}
-	if err := VerifyDedupConsistency(h); err != nil {
-		t.Fatalf("valid sidecar should pass, got %v", err)
-	}
-}
-
-func TestVerifyDedupConsistency_FailsOnCorruptSidecar(t *testing.T) {
-	h := invariantHarness(t)
-	seedThread(t, h, validRecord()) // thr_1 on the spine
-	if err := os.WriteFile(store.ThreadFilesPath(h.Paths, "thr_1"), []byte("{ not json"), 0o644); err != nil {
-		t.Fatalf("corrupt sidecar: %v", err)
-	}
-	if err := VerifyDedupConsistency(h); err == nil {
-		t.Fatalf("expected fail on corrupt sidecar; passed")
-	}
-}
-
 // seedEventLog writes a day-log file and tails+folds it into the
 // harness's cumulative created set — the same sequence runStep performs
 // after each turn. Lets the accounting tests exercise
@@ -463,6 +430,70 @@ func TestVerifyNoBudgetOverflow_PassOnComposedSession(t *testing.T) {
 	h := RunScenario(t, sc)
 	if err := VerifyNoBudgetOverflow(h); err != nil {
 		t.Fatalf("composed layers should be within budget, got %v", err)
+	}
+}
+
+// cleanExpansionReport is a report every rule passes: one literal per
+// path and id, both paths under LiteralMax, a diff under its gate.
+func cleanExpansionReport() memops.FileExpansionReport {
+	return memops.FileExpansionReport{
+		LiteralMax: 1000,
+		Expansions: []memops.FileExpansion{
+			{ThreadID: "thr_1", Turn: 3, Project: "prj_1", Path: "a.go", Kind: "literal", ID: "id-a", Size: 500, PathSize: 500},
+			{ThreadID: "thr_1", Turn: 3, Project: "prj_1", Path: "a.go", Kind: "diff", From: "id-0", To: "id-a", Size: 349, PathSize: 500},
+			{ThreadID: "thr_2", Turn: 1, Project: "prj_1", Path: "b.go", Kind: "literal", ID: "id-b", Size: 999, PathSize: 999},
+			{ThreadID: "thr_2", Turn: 1, Project: "prj_2", Path: "a.go", Kind: "literal", ID: "id-c", Size: 10, PathSize: 10},
+		},
+	}
+}
+
+func TestFileExpansionCheck_PassesClean(t *testing.T) {
+	if err := checkFileExpansions(cleanExpansionReport()); err != nil {
+		t.Fatalf("clean report failed: %v", err)
+	}
+}
+
+func TestFileExpansionCheck_FailsOnTwoLiteralsForOnePath(t *testing.T) {
+	r := cleanExpansionReport()
+	r.Expansions = append(r.Expansions, memops.FileExpansion{
+		ThreadID: "thr_2", Turn: 2, Project: "prj_1", Path: "a.go", Kind: "literal", ID: "id-d", Size: 5, PathSize: 5,
+	})
+	if err := checkFileExpansions(r); err == nil {
+		t.Fatal("two literals of prj_1:a.go passed")
+	}
+}
+
+func TestFileExpansionCheck_FailsOnSharedIDTwice(t *testing.T) {
+	r := cleanExpansionReport()
+	r.Expansions = append(r.Expansions, memops.FileExpansion{
+		ThreadID: "thr_2", Turn: 2, Project: "prj_1", Path: "copy.go", Kind: "literal", ID: "id-a", Size: 500, PathSize: 500,
+	})
+	if err := checkFileExpansions(r); err == nil {
+		t.Fatal("two literals of id-a passed")
+	}
+}
+
+func TestFileExpansionCheck_FailsOverLimit(t *testing.T) {
+	for _, kind := range []string{"literal", "diff"} {
+		t.Run(kind, func(t *testing.T) {
+			r := cleanExpansionReport()
+			r.Expansions = append(r.Expansions, memops.FileExpansion{
+				ThreadID: "thr_3", Turn: 1, Project: "prj_1", Path: "big.go", Kind: kind, ID: "id-big", From: "id-x", To: "id-big", Size: 1, PathSize: 1000,
+			})
+			if err := checkFileExpansions(r); err == nil {
+				t.Fatalf("a %s of a path at LiteralMax passed", kind)
+			}
+		})
+	}
+}
+
+func TestFileExpansionCheck_FailsOnDiffOverGate(t *testing.T) {
+	r := cleanExpansionReport()
+	r.Expansions = append(r.Expansions, memops.FileExpansion{
+		ThreadID: "thr_1", Turn: 2, Project: "prj_1", Path: "a.go", Kind: "diff", From: "id-x", To: "id-0", Size: 350, PathSize: 500,
+	})
+	if err := checkFileExpansions(r); err == nil {
+		t.Fatal("a diff at 0.7 of its path size passed")
 	}
 }
 

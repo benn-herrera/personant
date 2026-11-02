@@ -44,12 +44,6 @@ func ThreadFolioRel(threadID string) string {
 	return threadsDirName + "/" + threadID + "/" + threadFolioFileName
 }
 
-// ThreadFilesRel is the repo-relative path of a thread's tracked-file
-// sidecar (files.json).
-func ThreadFilesRel(threadID string) string {
-	return threadsDirName + "/" + threadID + "/" + threadFilesFileName
-}
-
 // TrackedIndexRel is the repo-relative path of a thread's tracked-file
 // index (files.jsonl).
 func TrackedIndexRel(threadID string) string {

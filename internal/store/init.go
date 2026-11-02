@@ -683,7 +683,7 @@ const seedReadmeMD = "# personant home\n" +
 	"\n" +
 	"- `spine.jsonl` — unified thread spine (canonical).\n" +
 	"- `symbols.jsonl` — inverse symbol index (derived; rebuilt from canonical).\n" +
-	"- `threads/thr_<n>/` — one directory per thread: `thread.md` (frontmatter + title), `turns/` (warm turn excerpts, one file each), `folio.jsonl` (bound cold turn excerpts, one line each), `files.json`.\n" +
+	"- `threads/thr_<n>/` — one directory per thread: `thread.md` (frontmatter + title), `turns/` (warm turn excerpts, one file each), `folio.jsonl` (bound cold turn excerpts, one line each), `files.jsonl` + `files/` (tracked-file store).\n" +
 	"- `projects/prj_<n>/` — per-project metadata and digests, keyed by stable handle.\n" +
 	"- `directives/` — tunable behavior (defaults, user-wide, per-project).\n" +
 	"- `logs/` — daily plain-text event logs.\n" +

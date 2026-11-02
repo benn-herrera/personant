@@ -225,6 +225,35 @@ type WorksetLayers struct {
 	LayerB string
 	// LayerC is recently engaged dormant threads' summaries.
 	LayerC string
+
+	// FileExpansions reports the file content LayerB renders, so checks
+	// read it without parsing the layer text. It is not prompt content.
+	FileExpansions FileExpansionReport
+}
+
+// FileExpansionReport lists the file-content expansions one composition
+// rendered (SPEC §3.9.2). A size note in place of content is not an
+// expansion and has no record.
+type FileExpansionReport struct {
+	// LiteralMax is the byte size at or above which a file is never
+	// expanded.
+	LiteralMax int
+	Expansions []FileExpansion
+}
+
+// FileExpansion is one rendered expansion: a file's current content
+// (Kind "literal", named by ID) or a diff (Kind "diff", From → To) at a
+// thread's excerpt.
+type FileExpansion struct {
+	ThreadID string
+	Turn     int
+	Project  string
+	Path     string
+	Kind     string
+	ID       string
+	From, To string
+	Size     int // the expansion's own byte size
+	PathSize int // the path's current size
 }
 
 // Budget is the token-denominated whole-request context budget (spec

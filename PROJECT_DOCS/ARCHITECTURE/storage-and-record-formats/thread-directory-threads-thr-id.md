@@ -7,7 +7,7 @@
   small loose file; the turn path never writes the folio.
 - **`folio.jsonl`** — the cold tier: the thread's bound excerpts, one JSONL line each (see
   "Excerpt tiers"). Absent when nothing is bound.
-- **`files.json`** — the tracked-file sidecar (SPEC §3.9).
+- **`files.jsonl`, `files/`** — the tracked-file store (SPEC §3.9); see "Tracked-file store".
 
 ```markdown
 ---
@@ -36,6 +36,10 @@ A turn-excerpt file (`turns/0000024.md`):
 
 ```markdown
 ## Turn 24 · 2026-05-08T03:12:00-07:00 · [trefoil, unknot, body-topology]
+
+[file read #1a2b3c4d5e6f] src/a.go
+[file write #9f8e7d6c5b4a] src/a.go
+[file commit @abc1234] src/a.go
 
 **user:** [terse prompt excerpt]
 
@@ -80,6 +84,27 @@ A turn-excerpt file (`turns/0000024.md`):
     before writing anything for the thread, since Go's JSON encoder would silently replace invalid
     bytes; a violation fails the barrier with `store.ErrExcerptNotUTF8` naming the file, never a
     skip or a repair.
+- **Tracked-file store.** One index and its content files per thread, written at turn close
+  for the owner's file events (`store.ApplyFileEvents`) and pruned at barrier step B1c
+  (`store.PruneTrackedFiles`).
+  - *Index format.* `files.jsonl`, one line per path, sorted by `path`, keys in the order
+    `{"path","id","size","turn","at","changes":[{"turn","at","from","to","diff","size"}]}`,
+    written through `store.WriteJSONL`. `path` is the event's path as given. `id` is the git
+    blob id of the current bytes, `size` their length in bytes. `turn` and `at` are the owner
+    excerpt number and timestamp of the latest read or write. `changes` holds the last
+    `dedup.live-diff-window` id transitions, oldest first; `diff` says whether the diff was
+    kept, and the change's `size` is the diff's length (0 when not kept).
+  - *Content files.* `files/<id>` holds the current bytes; `files/<from>-<to>.diff` a kept
+    forward unified diff.
+  - *Write order.* Blob and diff files are written (`WriteFileAtomic`) before the index that
+    names them, so the index never names an absent file; the turn path never deletes.
+  - *Retention.* B1c keeps entries with `turn > TurnCount − ThreadTurnWindow` and the blob and
+    `diff:true` files they name. It deletes every other file under `files/` and a legacy
+    `files.json`, rewriting the index before deleting. The store per thread is bounded by the
+    paths touched within the assembly window × (current size + the diff window).
+  - *Identifier lines.* Each file event of a turn is one line in the owner's excerpt,
+    between the header and `**user:**`. Composition never parses them; which positions
+    expand comes from the index.
 - **`description` vs `summary`.** `description` is a whitespace-collapsed copy of the spawning
   prompt, truncated to the new-thread summary length bound, set deterministically (no LLM
   paraphrase). `summary` is the curator's closure gist, in frontmatter only (never in a turn file);

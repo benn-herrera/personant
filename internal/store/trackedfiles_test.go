@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"personant/internal/crashpoint"
 	"personant/internal/dedup"
 	"personant/internal/memops"
 )
@@ -247,5 +249,177 @@ func TestFileStoreTamperedBlobFailsRead(t *testing.T) {
 	_, err := ReadTrackedBlob(paths, fileStoreThread, id)
 	if err == nil || errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("ReadTrackedBlob err = %v, want a hash mismatch", err)
+	}
+}
+
+// assertIndexedFilesPresent fails for each blob or kept diff the index
+// names that is absent.
+func assertIndexedFilesPresent(t *testing.T, paths PersonantPaths) {
+	t.Helper()
+	for _, e := range readIndex(t, paths) {
+		if _, err := os.Stat(TrackedBlobPath(paths, fileStoreThread, e.ID)); err != nil {
+			t.Errorf("blob of %s: %v", e.Path, err)
+		}
+		for _, c := range e.Changes {
+			if !c.Diff {
+				continue
+			}
+			if _, err := os.Stat(TrackedDiffPath(paths, fileStoreThread, c.From, c.To)); err != nil {
+				t.Errorf("diff of %s: %v", e.Path, err)
+			}
+		}
+	}
+}
+
+func indexPaths(t *testing.T, paths PersonantPaths) []string {
+	t.Helper()
+	var out []string
+	for _, e := range readIndex(t, paths) {
+		out = append(out, e.Path)
+	}
+	return out
+}
+
+func writeLegacySidecar(t *testing.T, paths PersonantPaths) string {
+	t.Helper()
+	legacy := filepath.Join(ThreadDir(paths, fileStoreThread), threadFilesFileName)
+	if err := os.WriteFile(legacy, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return legacy
+}
+
+func TestPruneTrackedFilesKeepsCurrentBlobAndWindowDiffs(t *testing.T) {
+	paths := newThreadHome(t)
+	edits := dedup.LiveDiffWindow + 4
+	for i := 0; i < edits; i++ {
+		applyEvents(t, paths, i+1, writeEvent("a.go", numberedLines(40, i)))
+	}
+	legacy := writeLegacySidecar(t, paths)
+	indexBefore, err := os.ReadFile(TrackedIndexPath(paths, fileStoreThread))
+	if err != nil {
+		t.Fatal(err)
+	}
+	filesBefore := len(storeFiles(t, paths))
+
+	got, err := PruneTrackedFiles(paths, fileStoreThread, edits)
+	if err != nil {
+		t.Fatalf("PruneTrackedFiles: %v", err)
+	}
+
+	e := readIndex(t, paths)[0]
+	want := []string{e.ID}
+	for _, c := range e.Changes {
+		if !c.Diff {
+			t.Fatalf("fixture change %+v kept no diff", c)
+		}
+		want = append(want, trackedDiffName(c.From, c.To))
+	}
+	slices.Sort(want)
+	if files := storeFiles(t, paths); !reflect.DeepEqual(files, want) {
+		t.Errorf("files/ = %v, want %v", files, want)
+	}
+	if indexAfter, _ := os.ReadFile(TrackedIndexPath(paths, fileStoreThread)); string(indexAfter) != string(indexBefore) {
+		t.Errorf("index rewritten with no entry dropped")
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Errorf("files.json after prune: stat err %v, want absent", err)
+	}
+	if wantFiles := filesBefore - len(want) + 1; got.Files != wantFiles || got.Bytes <= 0 || got.Skip != "" {
+		t.Errorf("prune = %+v, want %d files removed", got, wantFiles)
+	}
+	if again, err := PruneTrackedFiles(paths, fileStoreThread, edits); err != nil || again != (TrackedPrune{}) {
+		t.Errorf("second prune = %+v, %v; want nothing", again, err)
+	}
+}
+
+// pastWindowFixture holds entries at turn 1 (old.go, and shared-old.go
+// whose content shared-new.go also holds) and at turn 10, and returns a
+// turn count that keeps only the turn-10 entries.
+func pastWindowFixture(t *testing.T, paths PersonantPaths) int {
+	t.Helper()
+	applyEvents(t, paths, 1, writeEvent("old.go", "old\n"), writeEvent("shared-old.go", "shared\n"))
+	applyEvents(t, paths, 10, writeEvent("new.go", "new\n"), writeEvent("shared-new.go", "shared\n"))
+	return ThreadTurnWindow + 5
+}
+
+func TestPruneTrackedFilesDropsEntriesPastWindow(t *testing.T) {
+	paths := newThreadHome(t)
+	turnCount := pastWindowFixture(t, paths)
+
+	got, err := PruneTrackedFiles(paths, fileStoreThread, turnCount)
+	if err != nil {
+		t.Fatalf("PruneTrackedFiles: %v", err)
+	}
+
+	if p := indexPaths(t, paths); !reflect.DeepEqual(p, []string{"new.go", "shared-new.go"}) {
+		t.Errorf("index paths = %v, want [new.go shared-new.go]", p)
+	}
+	want := []string{dedup.ContentID([]byte("new\n")), dedup.ContentID([]byte("shared\n"))}
+	slices.Sort(want)
+	if files := storeFiles(t, paths); !reflect.DeepEqual(files, want) {
+		t.Errorf("files/ = %v, want %v", files, want)
+	}
+	if got.Files != 1 || got.Bytes != int64(len("old\n")) {
+		t.Errorf("prune = %+v, want old.go's blob removed", got)
+	}
+}
+
+func TestPruneTrackedFilesUnreadableIndexDeletesNothing(t *testing.T) {
+	paths := newThreadHome(t)
+	turnCount := pastWindowFixture(t, paths)
+	legacy := writeLegacySidecar(t, paths)
+	index := TrackedIndexPath(paths, fileStoreThread)
+	raw, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := string(raw) + "not json\n"
+	if err := os.WriteFile(index, []byte(broken), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	filesBefore := storeFiles(t, paths)
+
+	got, err := PruneTrackedFiles(paths, fileStoreThread, turnCount)
+	if err != nil || got != (TrackedPrune{Skip: PruneUnreadable}) {
+		t.Fatalf("PruneTrackedFiles = %+v, %v; want skip %q", got, err, PruneUnreadable)
+	}
+	if files := storeFiles(t, paths); !reflect.DeepEqual(files, filesBefore) {
+		t.Errorf("files/ = %v, want untouched %v", files, filesBefore)
+	}
+	if after, _ := os.ReadFile(index); string(after) != broken {
+		t.Errorf("unreadable index rewritten")
+	}
+	if _, err := os.Stat(legacy); err != nil {
+		t.Errorf("files.json removed from a skipped thread: %v", err)
+	}
+}
+
+func TestPruneTrackedFilesCrashAfterIndexConverges(t *testing.T) {
+	paths := newThreadHome(t)
+	turnCount := pastWindowFixture(t, paths)
+	oldBlob := TrackedBlobPath(paths, fileStoreThread, dedup.ContentID([]byte("old\n")))
+
+	disarm := crashpoint.Arm("barrier.prune.postIndex")
+	recoverCrash(t, "barrier.prune.postIndex", func() {
+		_, _ = PruneTrackedFiles(paths, fileStoreThread, turnCount)
+	})
+	disarm()
+
+	if p := indexPaths(t, paths); !reflect.DeepEqual(p, []string{"new.go", "shared-new.go"}) {
+		t.Errorf("index paths at the crash = %v, want the rewritten index", p)
+	}
+	assertIndexedFilesPresent(t, paths)
+	if _, err := os.Stat(oldBlob); err != nil {
+		t.Errorf("old.go's blob gone before the deletes: %v", err)
+	}
+
+	got, err := PruneTrackedFiles(paths, fileStoreThread, turnCount)
+	if err != nil || got.Files != 1 {
+		t.Fatalf("re-run prune = %+v, %v; want old.go's blob removed", got, err)
+	}
+	assertIndexedFilesPresent(t, paths)
+	if _, err := os.Stat(oldBlob); !os.IsNotExist(err) {
+		t.Errorf("old.go's blob after re-run: stat err %v, want absent", err)
 	}
 }

@@ -1,9 +1,9 @@
 // workset_compose.go is the substrate-fetch half of MemoryOps.ComposeWorkingSet.
 // It loads everything workset.Compose needs from the file substrate
 // (spine, project metas, digests, directive markdown, conventions
-// files, thread frontmatters + bodies, tracked-file sidecars + their
-// pre-computed live windows) into a substrate-free workset.Inputs, then
-// hands off to workset.Compose for pure rendering.
+// files, thread frontmatters, the excerpts and file content that fit each
+// thread's share) into a substrate-free workset.Inputs, then hands off to
+// workset.Compose for pure rendering.
 //
 // Per-substrate-source failures (a missing digest, an unreadable thread)
 // are non-fatal: the affected layer contribution is silently omitted on
@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 
 	"personant/internal/dedup"
 	"personant/internal/memops"
@@ -58,20 +58,22 @@ func (a *FileAdapter) ComposeWorkingSet(ctx context.Context, in memops.WorksetIn
 		Conventions:        a.loadConventions(in.ActiveProject, logf),
 		ActiveProjectSpine: a.loadActiveSpine(in.ActiveProject.ID, logf),
 		OtherProjects:      a.loadOtherProjectDigests(in.ActiveProject.ID, logf),
-		ActiveThreadData:   a.loadActiveThreadData(in.ActiveThreads, budget, logf),
 		DormantSpine:       a.loadDormantSpine(in.DormantThreads, logf),
 	}
+	var report memops.FileExpansionReport
+	inputs.ActiveThreadData, report = a.loadActiveThreadData(ctx, in.ActiveThreads, budget, logf)
 
 	params, err := workset.Compose(inputs, workset.ComposeOptions{Logger: logf})
 	if err != nil {
 		return memops.WorksetLayers{}, fmt.Errorf("fileadapter: compose working set: %w", err)
 	}
 	return memops.WorksetLayers{
-		LayerE:  params.LayerE,
-		LayerA1: params.LayerA1,
-		LayerA2: params.LayerA2,
-		LayerB:  params.LayerB,
-		LayerC:  params.LayerC,
+		LayerE:         params.LayerE,
+		LayerA1:        params.LayerA1,
+		LayerA2:        params.LayerA2,
+		LayerB:         params.LayerB,
+		LayerC:         params.LayerC,
+		FileExpansions: report,
 	}, nil
 }
 
@@ -231,92 +233,133 @@ func loadProjectDigest(paths store.PersonantPaths, id string, logf func(string, 
 
 // ---------- Layer B fetch ----------
 
-// loadActiveThreadData loads frontmatter + body + tracked-file windows
-// for each active thread up to BTopK. The returned map is keyed by id;
-// threads that fail to load are absent (workset skips them silently —
-// the warning is the adapter's responsibility, emitted here).
-//
-// Per-thread byte budget mirrors workset's per-thread share so the
-// ReadThreadBody read is bounded: only as many recent turn excerpts as
-// fit in the share are loaded.
-func (a *FileAdapter) loadActiveThreadData(ids []string, budget memops.Budget, logf func(string, ...any)) map[string]workset.ThreadData {
+// loadActiveThreadData loads the Layer B threads, up to BTopK, in two
+// passes: every thread's frontmatter and tracked-file index, one
+// dedup.Plan across them, then each thread's budgeted walk. The returned
+// map is keyed by id; a thread whose frontmatter or excerpts fail to load
+// is warned and absent (workset skips it). The report lists the
+// expansions the walks took.
+func (a *FileAdapter) loadActiveThreadData(ctx context.Context, ids []string, budget memops.Budget, logf func(string, ...any)) (map[string]workset.ThreadData, memops.FileExpansionReport) {
 	if len(ids) == 0 || budget.LayerB <= 0 {
-		return nil
+		return nil, memops.FileExpansionReport{}
 	}
 	limit := len(ids)
 	if budget.BTopK > 0 && limit > budget.BTopK {
 		limit = budget.BTopK
 	}
 	perThread := workset.PerThreadBudget(budget.LayerB, limit)
-	out := make(map[string]workset.ThreadData, limit)
-	for i := 0; i < limit; i++ {
-		id := ids[i]
-		data, ok := a.loadOneThreadData(id, perThread, logf)
-		if !ok {
-			continue
-		}
-		out[id] = data
-	}
-	return out
-}
+	report := memops.FileExpansionReport{LiteralMax: int(dedup.LiteralShareThreshold * float64(perThread))}
 
-// loadOneThreadData fetches frontmatter, body (byte-budget-bounded),
-// and tracked-file windows for one thread. A first-error wins
-// short-circuits: a missing thread.md yields ok=false; everything
-// after the frontmatter is tolerate-and-continue (a corrupt sidecar
-// is warned and rendered without the tracked-files section).
-func (a *FileAdapter) loadOneThreadData(id string, perThread int, logf func(string, ...any)) (workset.ThreadData, bool) {
-	fm, err := store.LoadThreadFrontmatter(a.paths, id)
-	if err != nil {
-		logf("workset: layer B: %s: load frontmatter: %v", id, err)
-		return workset.ThreadData{}, false
-	}
-	body, err := store.ReadThreadBody(a.paths, id, perThread)
-	if err != nil {
-		logf("workset: layer B: %s: read body: %v", id, err)
-		return workset.ThreadData{}, false
-	}
-	return workset.ThreadData{
-		Meta:         fm,
-		Body:         body,
-		TrackedFiles: a.loadTrackedFiles(id, logf),
-	}, true
-}
-
-// loadTrackedFiles loads the §3.9.2 sidecar and pre-computes each
-// entry's live-diff window. A missing sidecar is the empty-file case
-// (no warning, no section); a corrupt sidecar is warned and the
-// section is omitted entirely; a live-window failure on a single
-// entry is warned and that entry is skipped.
-func (a *FileAdapter) loadTrackedFiles(id string, logf func(string, ...any)) []workset.TrackedFile {
-	tf, err := store.LoadThreadFiles(a.paths, id)
-	if err != nil {
-		logf("workset: layer B: %s: load tracked files: %v", id, err)
-		return nil
-	}
-	if len(tf.Files) == 0 {
-		return nil
-	}
-	paths := make([]string, 0, len(tf.Files))
-	for p := range tf.Files {
-		paths = append(paths, p)
-	}
-	sort.Strings(paths)
-	out := make([]workset.TrackedFile, 0, len(paths))
-	for _, p := range paths {
-		entry := tf.Files[p]
-		window, err := entry.Chain.LiveWindow(dedup.LiveDiffWindow)
+	metas := make([]memops.ThreadMeta, 0, limit)
+	threads := make([]dedup.PlanThread, 0, limit)
+	for _, id := range ids[:limit] {
+		fm, err := store.LoadThreadFrontmatter(a.paths, id)
 		if err != nil {
-			logf("workset: layer B: %s: tracked file %s: %v", id, p, err)
+			logf("workset: layer B: %s: load frontmatter: %v", id, err)
 			continue
 		}
-		out = append(out, workset.TrackedFile{
-			Path:       entry.Path,
-			LastCommit: entry.LastCommit,
-			Window:     window,
-		})
+		entries, err := store.ReadTrackedIndex(a.paths, id)
+		if err != nil {
+			logf("workset: layer B: %s: tracked files: %v", id, err)
+			entries = nil
+		}
+		metas = append(metas, fm)
+		threads = append(threads, dedup.PlanThread{ID: id, Project: fm.Project, Entries: entries})
 	}
-	return out
+	plan := dedup.Plan(threads, report.LiteralMax)
+
+	out := make(map[string]workset.ThreadData, len(threads))
+	for i, t := range threads {
+		excerpts, rendered, err := a.walkThreadExcerpts(ctx, t.ID, metas[i], perThread, plan)
+		if err != nil {
+			logf("workset: layer B: %s: read excerpts: %v", t.ID, err)
+			continue
+		}
+		out[t.ID] = workset.ThreadData{Meta: metas[i], Excerpts: excerpts}
+		report.Expansions = append(report.Expansions, rendered...)
+	}
+	return out, report
+}
+
+// walkThreadExcerpts takes one thread's excerpts newest-first against its
+// share, less its header, and returns them oldest first with the
+// expansions rendered at them. Each excerpt is charged its text with the
+// separator before it; an excerpt that does not fit ends the walk, except
+// the newest, which is always taken. Each of its planned expansions is
+// then taken if it fits, and otherwise becomes a size note, which is
+// charged. Sizes come from the plan, so only taken expansions are read.
+func (a *FileAdapter) walkThreadExcerpts(ctx context.Context, id string, fm memops.ThreadMeta, share int, plan map[dedup.ExcerptPosition][]dedup.Expansion) ([]workset.Excerpt, []memops.FileExpansion, error) {
+	remaining := share - len(workset.RenderThreadHeader(id, fm))
+	var excerpts []workset.Excerpt
+	var rendered []memops.FileExpansion
+	err := store.ExcerptsNewestFirst(a.paths, id, func(e memops.ThreadExcerpt) bool {
+		textLen := workset.ExcerptTextLen(e.Text)
+		if len(excerpts) > 0 && textLen > remaining {
+			return false
+		}
+		remaining -= textLen
+		ex := workset.Excerpt{Turn: e.TurnNumber, Text: e.Text}
+		for _, p := range plan[dedup.ExcerptPosition{ThreadID: id, Turn: e.TurnNumber}] {
+			x := worksetExpansion(p)
+			n := workset.ExpansionLen(x)
+			if n > remaining {
+				x.Omitted = true
+				remaining -= workset.ExpansionLen(x)
+				ex.Expansions = append(ex.Expansions, x)
+				continue
+			}
+			remaining -= n
+			content, err := a.readExpansion(p)
+			if err != nil {
+				_ = a.Log(ctx, memops.LogCategoryDedup, "error", memops.SanitizeDetail(err.Error()))
+				continue
+			}
+			x.Content = content
+			ex.Expansions = append(ex.Expansions, x)
+			rendered = append(rendered, fileExpansionRecord(p))
+		}
+		excerpts = append(excerpts, ex)
+		return true
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	slices.Reverse(excerpts)
+	return excerpts, rendered, nil
+}
+
+// readExpansion loads a planned expansion's bytes and checks they are the
+// size the index recorded, which the walk charged.
+func (a *FileAdapter) readExpansion(p dedup.Expansion) (string, error) {
+	var data []byte
+	var err error
+	if p.Kind == dedup.ExpansionDiff {
+		data, err = store.ReadTrackedDiff(a.paths, p.ThreadID, p.From, p.To)
+	} else {
+		data, err = store.ReadTrackedBlob(a.paths, p.ThreadID, p.ID)
+	}
+	if err != nil {
+		return "", fmt.Errorf("expansion %s %s: %w", p.Kind, p.Path, err)
+	}
+	if len(data) != p.Size {
+		return "", fmt.Errorf("expansion %s %s in %s: %d bytes, index records %d", p.Kind, p.Path, p.ThreadID, len(data), p.Size)
+	}
+	return string(data), nil
+}
+
+func worksetExpansion(p dedup.Expansion) workset.Expansion {
+	kind := workset.ExpansionLiteral
+	if p.Kind == dedup.ExpansionDiff {
+		kind = workset.ExpansionDiff
+	}
+	return workset.Expansion{Kind: kind, Path: p.Path, ID: p.ID, From: p.From, To: p.To, Size: p.Size}
+}
+
+func fileExpansionRecord(p dedup.Expansion) memops.FileExpansion {
+	return memops.FileExpansion{
+		ThreadID: p.ThreadID, Turn: p.Turn, Project: p.Project, Path: p.Path, Kind: string(p.Kind),
+		ID: p.ID, From: p.From, To: p.To, Size: p.Size, PathSize: p.PathSize,
+	}
 }
 
 // ---------- Layer C fetch ----------
