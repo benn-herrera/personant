@@ -1,6 +1,6 @@
 ## Applying the thesis (load-bearing)
 
-THESIS.md states why Personant exists. This implementation applies two design rules at every layer:
+THESIS states why Personant exists. This implementation applies two design rules at every layer:
 
 > **Deterministic state as canonical. LLM in narrow judgment roles.**
 

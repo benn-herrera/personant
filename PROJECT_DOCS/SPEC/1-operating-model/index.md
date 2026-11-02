@@ -6,7 +6,7 @@ owns everything else: the terminal UI, session storage, the message data model, 
 agents, permissions, tools, providers and configuration. Where opencode has made a choice outside
 context management, Personant uses it as it is. Personant does not define interaction modes, a
 workflow, or how much the user takes part. opencode's plugins and Code Mode work unchanged. The
-components and their wiring: ARCHITECTURE.md "Plugin route".
+components and their wiring: ARCHITECTURE "Plugin route".
 
 **Open:** U7 — plugin failure policy: fail open (opencode's own composition reaches the model;
 memory misses the step) or fail closed (the request is refused).

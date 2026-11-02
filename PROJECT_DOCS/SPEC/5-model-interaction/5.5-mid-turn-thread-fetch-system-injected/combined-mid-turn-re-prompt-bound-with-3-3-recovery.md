@@ -10,7 +10,7 @@ against emptiness, with one exception — an all-whitespace response longer than
 window ([§5.1.2](../5.1-topic-tag-emission-format/5.1.2-parser.md)) counts as tag-less rather than empty, so it fires the missing-tag reminder instead
 of the empty-response one. A fetch costs at most one aborted stream
 plus one full stream; turns that trigger no cause pay nothing. Speculative pre-fetch is a non-goal
-(ARCHITECTURE.md "No speculative prefetch").
+(ARCHITECTURE "No speculative prefetch").
 
 ---
 

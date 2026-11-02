@@ -10,7 +10,6 @@ Must-see:
 
 Contents:
 
-- [§0 Document conventions](0-document-conventions.md)
 - [§1 Operating model](1-operating-model/index.md)
   - [§1.1 Sessions and service runs](1-operating-model/1.1-sessions-and-service-runs.md)
   - [§1.2 MCP](1-operating-model/1.2-mcp.md)

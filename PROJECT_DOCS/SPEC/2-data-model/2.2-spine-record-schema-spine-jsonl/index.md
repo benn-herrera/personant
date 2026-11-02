@@ -1,6 +1,6 @@
 ### 2.2 Spine record schema (`spine.jsonl`)
 
-Unused → ARCHITECTURE.md «Storage and record formats». Every thread has one bookkeeping record in
+Unused → ARCHITECTURE «Storage and record formats». Every thread has one bookkeeping record in
 a single file sorted by id, so diffs stay line-grain: project, anchors, summary, description,
 state, timestamps, turn count and recall-fire count. The `description` is the triggering
 utterance, set once at creation and never rewritten; the `summary` is curator-drafted at

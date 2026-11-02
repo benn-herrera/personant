@@ -22,6 +22,7 @@ Contents:
   - [Auxiliary scripts: Python, stdlib only](language-constraints/auxiliary-scripts-python-stdlib-only.md)
 - [Repo state](repo-state/index.md)
   - [Anti-reaccretion doctrine](repo-state/anti-reaccretion-doctrine.md)
+  - [Document conventions](repo-state/document-conventions.md)
   - [Project documents live in `PROJECT_DOCS/`](repo-state/project-documents.md)
   - [Pre-production: no transition scaffolding](repo-state/pre-production-no-transition-scaffolding.md)
   - [Section and rule heading brevity](repo-state/section-and-rule-heading-brevity.md)

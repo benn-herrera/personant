@@ -2,10 +2,10 @@
 
 Never edit it and never move it off
 the installed release's tag; it moves only in the change that updates the `sim-opencode` version
-check (ARCHITECTURE.md "Plugin route", "Pinned release").
+check (ARCHITECTURE "Plugin route", "Pinned release").
 - **Open:** U11 — whether to adopt the rule: never place external state (an agent's data home,
   telemetry) inside `~/.personant/` or a test home, because crash recovery quarantines untracked
-  files. opencode's data home is already excluded (ARCHITECTURE.md "Single spelunking location").
+  files. opencode's data home is already excluded (ARCHITECTURE "Single spelunking location").
 - **Spawned processes: self-limiting, or verified dead** (origin: commit 4fcb0e5). Binding on any
   background process an agent starts — load generators, watchers, servers, opencode servers,
   children of stress harnesses:

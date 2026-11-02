@@ -3,8 +3,8 @@
 Every activated plan — a plan whose packages are being dispatched —
 wherever it lives, ends with a post-sprint review section holding the review, revision and
 burndown steps (probe plans: "Probe work").
-- Unless the plan names others, the reviewers are an architect and a coder, with THESIS.md,
-  SPEC.md, ARCHITECTURE.md and CONVENTIONS.md as their pre-task reading. They do not get the
+- Unless the plan names others, the reviewers are an architect and a coder, with THESIS,
+  SPEC, ARCHITECTURE and CONVENTIONS as their pre-task reading. They do not get the
   plan: they review the changes against the standards and for fitness for purpose, the tests of
   all touched code included.
 - The burndown list is written to a separate `<plan>_REVIEW_BURNDOWN.md` and gets a

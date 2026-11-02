@@ -2,7 +2,7 @@
 
 This section states what a compliant implementation must keep in memory and the properties of that
 storage. The storage layout and the record, symbol and log formats this implementation uses are in
-ARCHITECTURE.md "Storage and record formats" and "Event log format"; directive files ([§2.6](2.6-directive-file-format-directives-md/index.md)) stay
+ARCHITECTURE "Storage and record formats" and "Event log format"; directive files ([§2.6](2.6-directive-file-format-directives-md/index.md)) stay
 here because users edit them.
 
 Contents:

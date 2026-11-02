@@ -1,6 +1,6 @@
 ### Dependencies
 
-General dependency discipline: ARCHITECTURE.md "Approved-when-earned
+General dependency discipline: ARCHITECTURE "Approved-when-earned
 dependencies". `go.mod` is the catalog.
 - **Permanently out** (architectural conflict): `langchaingo/memory`, `langchaingo/chains`,
   `mattn/go-sqlite3`. Do not reintroduce.
@@ -22,4 +22,4 @@ dependencies". `go.mod` is the catalog.
   owns the terminal (origin: commit c1ddea2). Both entries go in the change that removes their
   consumer.
 - **Application code talks to `MemoryOps`, not to the substrate directly.** Package-level detail
-  and the substrate-free exceptions: ARCHITECTURE.md "Port-and-adapter at the substrate boundary".
+  and the substrate-free exceptions: ARCHITECTURE "Port-and-adapter at the substrate boundary".

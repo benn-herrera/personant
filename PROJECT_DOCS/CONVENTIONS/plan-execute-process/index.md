@@ -18,7 +18,7 @@
   section files (docdicer, <https://github.com/benn-herrera/docdicer>), the monolith is removed, and its work-package
   dispatches cite leaves. A plan at or under 800 lines stays one file.
 - **A plan may name a normative page outside the contract documents, and that page outranks the
-  plan.** The contract documents are THESIS.md, SPEC.md, ARCHITECTURE.md and CONVENTIONS.md. A plan
+  plan.** The contract documents are THESIS, SPEC, ARCHITECTURE and CONVENTIONS. A plan
   may make a page of its own subject normative — for example, a scoring rubric the contract cites —
   and on that subject the page is the requirement while the plan is the route. Where a plan row and
   the page disagree, the work implements the page and the plan's line is reported as moved, in the

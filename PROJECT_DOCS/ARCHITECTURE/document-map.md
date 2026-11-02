@@ -6,8 +6,8 @@
 | How the plugin, service and opencode fit together | "Plugin route" (this document) |
 | Where a package lives and what it does | "Module map" (this document) |
 | Record and file formats | "Storage and record formats" (this document) |
-| Substrate constraints | `ARCHITECTURE.md` §"Substrate non-negotiables" |
-| v0.1 acceptance criteria | `SPEC.md` §9.1 |
+| Substrate constraints | ARCHITECTURE §"Substrate non-negotiables" |
+| v0.1 acceptance criteria | SPEC §9.1 |
 | opencode facts the route rests on | the reports in `OPENCODE_RESEARCH/` (shorthand under "Plugin route") |
 
 ---
