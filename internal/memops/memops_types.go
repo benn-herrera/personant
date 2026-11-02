@@ -518,6 +518,22 @@ type InitOptions struct {
 	Out io.Writer
 }
 
+// FileEventKind is the operation a FileEvent records.
+type FileEventKind string
+
+const (
+	FileEventRead  FileEventKind = "read"
+	FileEventWrite FileEventKind = "write"
+)
+
+// FileEvent is one read or write of a tracked file in a turn: the path as
+// the producer gave it and the file's full content after the event.
+type FileEvent struct {
+	Kind    FileEventKind
+	Path    string
+	Content string
+}
+
 // VerifyReport aggregates the result of a Verify run.
 // Errors-or-drift drive non-zero exit codes; warnings alone do not.
 type VerifyReport struct {

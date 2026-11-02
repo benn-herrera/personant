@@ -6,13 +6,6 @@ import (
 	"fmt"
 )
 
-// LiveDiffWindow is the dedup.live-diff-window default (N). The N
-// versions immediately before the current one are rendered as literal
-// unified diffs in the working window (spec §3.9.2); older versions
-// collapse to content-addressed identifiers. The name mirrors the
-// directive key, like AnchorCadence / DiffLiteralThreshold in chain.go.
-const LiveDiffWindow = 3
-
 // windowKind discriminates how a version is rendered in the live window.
 type windowKind string
 

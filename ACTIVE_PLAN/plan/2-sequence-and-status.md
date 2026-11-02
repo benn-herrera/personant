@@ -2,9 +2,9 @@
 
 | # | Package | Rating | Depends on | Checkpoint | State |
 |---|---|---|---|---|---|
-| P1 | `dedup` primitives | expert | — | — | in progress |
-| P2 | Tracked-file store format, excerpt reader, verify check | expert | P1 | **C1** after P2 | not started |
-| P3 | Turn-close write switch | expert | C1 | — | not started |
+| P1 | `dedup` primitives | expert | — | — | done |
+| P2 | Tracked-file store format, excerpt reader, verify check | expert | P1 | **C1** after P2 | done; C1 passed |
+| P3 | Turn-close write switch | expert | C1 | — | in progress |
 | P4 | Composition switch (evidence step) | expert | P3 | — | not started |
 | P5 | Barrier step B1c, format 2 → 3 | expert | P4 evidence | — | not started |
 | P6 | Remove the old mechanism | mechanical | P4 evidence, P5 | **C2** after P6 | not started |
@@ -18,6 +18,10 @@ removal of aging (P6) makes true. So no commit lands between C1 and C2.
 **Every dispatch reads first:** `THESIS.md`, `SPEC.md`, `ARCHITECTURE.md`, `CONVENTIONS.md` (all via
 `PROJECT_DOCS/`), this plan's [§1](1-outcomes-this-plan-carries.md) and its own package section, and the design sections the package
 names.
+
+**Checkpoints are run by the dispatching session**, in the background, after the package's coder
+reports its done-line: `just test` outlasts a coder's foreground shell limit. A coder never runs
+`just test`.
 
 **Test naming.** Every new test's name starts with one of the prefixes in its package's done-line
 regexp, so the done-line runs it.

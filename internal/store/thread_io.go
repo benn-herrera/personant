@@ -187,25 +187,16 @@ func LoadThreadFrontmatter(paths PersonantPaths, threadID string) (memops.Thread
 // naturally top-to-bottom. A thread with no excerpts yet returns
 // ("", nil).
 func ReadThreadBody(paths PersonantPaths, threadID string, byteBudget int) (string, error) {
-	refs, err := threadExcerptRefs(paths, threadID, ThreadTurnWindow)
+	// selected is newest-first; it is reversed for the chronological join.
+	var selected []string
+	total := 0
+	err := ExcerptsNewestFirst(paths, threadID, func(e memops.ThreadExcerpt) bool {
+		selected = append(selected, e.Text)
+		total += len(e.Text)
+		return byteBudget <= 0 || total < byteBudget
+	})
 	if err != nil {
 		return "", fmt.Errorf("read thread body %s: %w", threadID, err)
-	}
-	// Walk newest-first until the window or the budget is reached; selected
-	// is reversed for the chronological join.
-	turnsDir := ThreadTurnsDir(paths, threadID)
-	selected := make([]string, 0, min(len(refs), ThreadTurnWindow))
-	total := 0
-	for i := len(refs) - 1; i >= 0 && len(selected) < ThreadTurnWindow; i-- {
-		text, err := readExcerptText(turnsDir, refs[i])
-		if err != nil {
-			return "", fmt.Errorf("read thread body %s: %w", threadID, err)
-		}
-		selected = append(selected, text)
-		total += len(text)
-		if byteBudget > 0 && total >= byteBudget {
-			break
-		}
 	}
 
 	var b strings.Builder
@@ -220,6 +211,27 @@ func ReadThreadBody(paths PersonantPaths, threadID string, byteBudget int) (stri
 		b.WriteByte('\n')
 	}
 	return b.String(), nil
+}
+
+// ExcerptsNewestFirst calls yield with each excerpt of a thread's assembly
+// window — at most its ThreadTurnWindow most recent — newest first, until
+// yield returns false. An excerpt is read only when it is reached.
+func ExcerptsNewestFirst(paths PersonantPaths, threadID string, yield func(memops.ThreadExcerpt) bool) error {
+	refs, err := threadExcerptRefs(paths, threadID, ThreadTurnWindow)
+	if err != nil {
+		return err
+	}
+	turnsDir := ThreadTurnsDir(paths, threadID)
+	for i := len(refs) - 1; i >= max(0, len(refs)-ThreadTurnWindow); i-- {
+		text, err := readExcerptText(turnsDir, refs[i])
+		if err != nil {
+			return err
+		}
+		if !yield(memops.ThreadExcerpt{TurnNumber: refs[i].Number, Text: text}) {
+			return nil
+		}
+	}
+	return nil
 }
 
 // ReadThreadExcerpts reads every retained turn-excerpt of a thread as

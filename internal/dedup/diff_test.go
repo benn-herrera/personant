@@ -1,6 +1,7 @@
 package dedup
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -81,5 +82,65 @@ func TestApplyDiffMismatch(t *testing.T) {
 	}
 	if _, err := applyDiff("a\nb\n", "garbage"); err == nil {
 		t.Fatal("expected error on malformed diff (no hunk header)")
+	}
+}
+
+func TestDiffKeptRoundTrip(t *testing.T) {
+	var lines []string
+	for i := range 20 {
+		lines = append(lines, fmt.Sprintf("line %02d %s\n", i, strings.Repeat("x", 32)))
+	}
+	old := strings.Join(lines, "")
+	lines[10] = "changed\n"
+	new := strings.Join(lines, "")
+	d, kept := Diff(old, new)
+	if !kept {
+		t.Fatalf("small edit not kept: diff %d bytes, new %d bytes", len(d), len(new))
+	}
+	got, err := applyDiff(old, d)
+	if err != nil {
+		t.Fatalf("applyDiff: %v", err)
+	}
+	if got != new {
+		t.Fatalf("round trip = %q, want %q", got, new)
+	}
+}
+
+func TestDiffLineProductGuard(t *testing.T) {
+	// 3000 × 3000 lines = 9,000,000 > lcsLineProductMax.
+	old := strings.Repeat("x\n", 3000)
+	new := old[:len(old)-2] + "y\n"
+	if d, kept := Diff(old, new); kept || d != "" {
+		t.Fatalf("Diff over the line-product guard = (%d bytes, %v), want (\"\", false)", len(d), kept)
+	}
+}
+
+func TestDiffThresholdBoundary(t *testing.T) {
+	// The tail line sits outside the hunk's context, so the diff is the
+	// same 70 bytes whatever the tail's length; only len(new) moves.
+	ctx := "cccccccccccc01\ncccccccccccc02\ncccccccccccc03\n"
+	build := func(tailLen int) (string, string) {
+		tail := strings.Repeat("t", tailLen-1) + "\n"
+		return "a\n" + ctx + tail, "b\n" + ctx + tail
+	}
+	tests := []struct {
+		name    string
+		tailLen int
+		newLen  int
+		kept    bool
+	}{
+		{"diff at 0.7 of new", 53, 100, false},
+		{"diff below 0.7 of new", 54, 101, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			old, new := build(tt.tailLen)
+			if len(new) != tt.newLen || len(makeDiff(old, new)) != 70 {
+				t.Fatalf("fixture: len(new)=%d, len(diff)=%d; want %d, 70", len(new), len(makeDiff(old, new)), tt.newLen)
+			}
+			if _, kept := Diff(old, new); kept != tt.kept {
+				t.Errorf("kept = %v, want %v", kept, tt.kept)
+			}
+		})
 	}
 }

@@ -454,6 +454,64 @@ func TestReadThreadBodyWindowsOnRead(t *testing.T) {
 	}
 }
 
+// appendTurns seeds thr_1 with excerpts 1..n.
+func appendTurns(t *testing.T, paths PersonantPaths, n int) {
+	t.Helper()
+	for i := 1; i <= n; i++ {
+		if err := AppendThreadTurn(paths, "thr_1", i, turnExcerpt(i)); err != nil {
+			t.Fatalf("AppendThreadTurn %d: %v", i, err)
+		}
+	}
+}
+
+func TestExcerptsNewestFirstStopsEarly(t *testing.T) {
+	paths := newThreadHome(t)
+	appendTurns(t, paths, 5)
+	var got []int
+	err := ExcerptsNewestFirst(paths, "thr_1", func(e memops.ThreadExcerpt) bool {
+		got = append(got, e.TurnNumber)
+		if e.Text != strings.TrimRight(turnExcerpt(e.TurnNumber), "\n") {
+			t.Errorf("turn %d text = %q", e.TurnNumber, e.Text)
+		}
+		return len(got) < 2
+	})
+	if err != nil {
+		t.Fatalf("ExcerptsNewestFirst: %v", err)
+	}
+	if !reflect.DeepEqual(got, []int{5, 4}) {
+		t.Fatalf("yielded turns %v, want [5 4]", got)
+	}
+}
+
+func TestExcerptsNewestFirstWindowBound(t *testing.T) {
+	paths := newThreadHome(t)
+	total := ThreadTurnWindow + 5
+	appendTurns(t, paths, total)
+	var got []int
+	err := ExcerptsNewestFirst(paths, "thr_1", func(e memops.ThreadExcerpt) bool {
+		got = append(got, e.TurnNumber)
+		return true
+	})
+	if err != nil {
+		t.Fatalf("ExcerptsNewestFirst: %v", err)
+	}
+	if len(got) != ThreadTurnWindow || got[0] != total || got[len(got)-1] != total-ThreadTurnWindow+1 {
+		t.Fatalf("yielded %d turns, %d..%d; want %d turns, %d..%d",
+			len(got), got[0], got[len(got)-1], ThreadTurnWindow, total, total-ThreadTurnWindow+1)
+	}
+}
+
+func TestExcerptsNewestFirstNoExcerpts(t *testing.T) {
+	paths := newThreadHome(t)
+	err := ExcerptsNewestFirst(paths, "thr_1", func(memops.ThreadExcerpt) bool {
+		t.Fatal("yield called for a thread with no excerpts")
+		return false
+	})
+	if err != nil {
+		t.Fatalf("ExcerptsNewestFirst: %v", err)
+	}
+}
+
 func TestAppendThreadTurnEmptyExcerptIsNoOp(t *testing.T) {
 	paths := newThreadHome(t)
 	fm := sampleFrontmatter()

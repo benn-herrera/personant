@@ -15,6 +15,8 @@ const (
 	threadTurnsDirName  = "turns"
 	threadFolioFileName = "folio.jsonl"
 	threadFilesFileName = "files.json"
+	trackedIndexName    = "files.jsonl"
+	trackedFilesDirName = "files"
 	projectsDirName     = "projects"
 )
 
@@ -46,6 +48,24 @@ func ThreadFolioRel(threadID string) string {
 // sidecar (files.json).
 func ThreadFilesRel(threadID string) string {
 	return threadsDirName + "/" + threadID + "/" + threadFilesFileName
+}
+
+// TrackedIndexRel is the repo-relative path of a thread's tracked-file
+// index (files.jsonl).
+func TrackedIndexRel(threadID string) string {
+	return threadsDirName + "/" + threadID + "/" + trackedIndexName
+}
+
+// TrackedBlobRel is the repo-relative path of a thread's tracked-file blob
+// with content id id.
+func TrackedBlobRel(threadID, id string) string {
+	return threadsDirName + "/" + threadID + "/" + trackedFilesDirName + "/" + id
+}
+
+// TrackedDiffRel is the repo-relative path of a thread's kept diff from
+// content id from to content id to.
+func TrackedDiffRel(threadID, from, to string) string {
+	return threadsDirName + "/" + threadID + "/" + trackedFilesDirName + "/" + trackedDiffName(from, to)
 }
 
 // ProjectMetaRel is the repo-relative path of a project's meta.json.

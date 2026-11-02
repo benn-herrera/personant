@@ -2,11 +2,13 @@ package verify
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"personant/internal/index"
 	"personant/internal/memops"
@@ -541,5 +543,108 @@ func TestFolioConflictWarning(t *testing.T) {
 	}
 	if !warningsContain(r, "0000002.md is in both tiers with different bytes; conflict; the loose copy is read") || len(r.Warnings) != 1 {
 		t.Fatalf("expected one conflict warning; got %v", r.Warnings)
+	}
+}
+
+// trackedFixture seeds thr_1's tracked-file store with a.go at two
+// versions (one kept diff) and b.go at one, and returns the paths, the
+// content ids of a.go's versions and b.go's id.
+func trackedFixture(t *testing.T) (paths store.PersonantPaths, a1, a2, b string) {
+	t.Helper()
+	paths = initFreshHome(t)
+	writeSpine(t, paths, []memops.SpineRecord{validRecord("thr_1")})
+	var v1 strings.Builder
+	for i := range 40 {
+		fmt.Fprintf(&v1, "line %d\n", i)
+	}
+	v2 := strings.Replace(v1.String(), "line 20\n", "changed 20\n", 1)
+	at := time.Date(2026, 5, 9, 4, 0, 0, 0, time.UTC)
+	for turn, events := range [][]memops.FileEvent{
+		{{Kind: memops.FileEventWrite, Path: "a.go", Content: v1.String()}, {Kind: memops.FileEventRead, Path: "b.go", Content: "b\n"}},
+		{{Kind: memops.FileEventWrite, Path: "a.go", Content: v2}},
+	} {
+		if _, err := store.ApplyFileEvents(paths, "thr_1", turn+1, at, events); err != nil {
+			t.Fatalf("ApplyFileEvents: %v", err)
+		}
+	}
+	rebuild(t, paths)
+	entries, err := store.ReadTrackedIndex(paths, "thr_1")
+	if err != nil || len(entries) != 2 || len(entries[0].Changes) != 1 || !entries[0].Changes[0].Diff {
+		t.Fatalf("fixture index = %+v, %v; want a.go with one kept diff, and b.go", entries, err)
+	}
+	return paths, entries[0].Changes[0].From, entries[0].ID, entries[1].ID
+}
+
+// wantOneError asserts the report holds exactly one error, at path.
+func wantOneError(t *testing.T, r memops.VerifyReport, path string) {
+	t.Helper()
+	if len(r.Errors) != 1 || r.Errors[0].Path != path {
+		t.Fatalf("errors = %+v; want one at %s", r.Errors, path)
+	}
+}
+
+func TestTrackedFilesClean(t *testing.T) {
+	paths, _, _, _ := trackedFixture(t)
+	if r := run(t, paths); r.HasErrors() {
+		t.Fatalf("expected no errors; got %+v drift=%v", r.Errors, r.Drift)
+	}
+}
+
+func TestTrackedFilesIndexFindings(t *testing.T) {
+	tests := []struct {
+		name    string
+		rewrite func(lines []string) string
+	}{
+		{"unreadable", func(lines []string) string { return "{not json\n" }},
+		{"unsorted", func(lines []string) string { return lines[1] + "\n" + lines[0] + "\n" }},
+		{"duplicate path", func(lines []string) string { return lines[0] + "\n" + lines[0] + "\n" }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			paths, _, _, _ := trackedFixture(t)
+			index := store.TrackedIndexPath(paths, "thr_1")
+			raw, err := os.ReadFile(index)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+			if err := os.WriteFile(index, []byte(tc.rewrite(lines)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			wantOneError(t, run(t, paths), "threads/thr_1/files.jsonl")
+		})
+	}
+}
+
+func TestTrackedFilesMissingBlob(t *testing.T) {
+	paths, _, a2, _ := trackedFixture(t)
+	if err := os.Remove(store.TrackedBlobPath(paths, "thr_1", a2)); err != nil {
+		t.Fatal(err)
+	}
+	wantOneError(t, run(t, paths), "threads/thr_1/files/"+a2)
+}
+
+func TestTrackedFilesMissingDiff(t *testing.T) {
+	paths, a1, a2, _ := trackedFixture(t)
+	if err := os.Remove(store.TrackedDiffPath(paths, "thr_1", a1, a2)); err != nil {
+		t.Fatal(err)
+	}
+	wantOneError(t, run(t, paths), "threads/thr_1/files/"+a1+"-"+a2+".diff")
+}
+
+func TestTrackedFilesHashMismatch(t *testing.T) {
+	paths, _, _, b := trackedFixture(t)
+	if err := os.WriteFile(store.TrackedBlobPath(paths, "thr_1", b), []byte("tampered\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wantOneError(t, run(t, paths), "threads/thr_1/files/"+b)
+}
+
+func TestTrackedFilesNoIndexIsClean(t *testing.T) {
+	paths := initFreshHome(t)
+	writeSpine(t, paths, []memops.SpineRecord{validRecord("thr_1")})
+	rebuild(t, paths)
+	if r := run(t, paths); r.HasErrors() {
+		t.Fatalf("expected no errors; got %+v drift=%v", r.Errors, r.Drift)
 	}
 }

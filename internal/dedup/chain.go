@@ -11,12 +11,6 @@ const (
 	// bound reverse-delta chain length and prevent cumulative drift —
 	// the same role I-frames play in video compression.
 	AnchorCadence = 10
-
-	// DiffLiteralThreshold is the dedup.diff-literal-threshold default.
-	// If a reverse-delta's size is >= this fraction of the literal it
-	// would replace, the literal is stored instead — the delta is not
-	// earning its keep (same heuristic as lzma's literal-vs-match).
-	DiffLiteralThreshold = 0.7
 )
 
 // versionKind discriminates how a stored version is encoded.

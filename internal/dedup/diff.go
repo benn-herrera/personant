@@ -1,18 +1,9 @@
-// Package dedup is the reverse-delta content-versioning engine for spec
-// §3.9 (working-set content dedup).
+// Package dedup holds the working-set content dedup primitives of spec
+// §3.9: content identifiers, write-time diffs, excerpt identifier lines,
+// the composition plan and the retention keep set.
 //
-// A [Chain] is the reverse-delta-encoded version history of one content
-// blob (one file). The current version is kept as a full literal — hot,
-// the thing active cognition works on — and older versions are stored as
-// reverse-deltas: the unified diff that transforms a newer state back
-// into the older one. History reconstructs backward from the live
-// literal; periodic anchor literals bound the reverse-delta chain length
-// (spec §3.9.1).
-//
-// The package is pure: a data structure plus an algorithm, no file I/O,
-// no dependency on other internal packages. A separate persistence layer
-// marshals [Chain] to disk; this package only guarantees the type
-// round-trips losslessly through encoding/json.
+// The package is pure: no I/O, no dependency on other internal packages,
+// and no knowledge of file names, the index format or rendered labels.
 package dedup
 
 import (
@@ -20,15 +11,50 @@ import (
 	"strings"
 )
 
-// This file is a minimal, self-contained line-based unified-diff
-// implementation: an LCS line diff plus unified-format emit and apply.
+// Default dedup.* parameters from spec §2.6.1, fixed at their defaults.
+// Names mirror the directive keys.
+const (
+	// DiffLiteralThreshold is the dedup.diff-literal-threshold default:
+	// a diff at or above this fraction of the content size it is
+	// measured against is not kept.
+	DiffLiteralThreshold = 0.7
+
+	// LiveDiffWindow is the dedup.live-diff-window default (N): the
+	// number of most recent changes per file kept and rendered as diffs.
+	LiveDiffWindow = 3
+
+	// LiteralShareThreshold is the dedup.literal-share-threshold
+	// default: a file whose current size is at or above this fraction of
+	// its thread's Layer B share is never expanded.
+	LiteralShareThreshold = 0.25
+)
+
+// Diff returns the forward unified diff from oldContent to newContent
+// and whether it is kept. It is not kept when the line-count product of
+// the two exceeds lcsLineProductMax (the diff is then never computed),
+// or when the diff is at or above DiffLiteralThreshold × len(newContent).
+// An unkept diff is returned as "".
+func Diff(oldContent, newContent string) (diff string, kept bool) {
+	if countLines(oldContent)*countLines(newContent) > lcsLineProductMax {
+		return "", false
+	}
+	d := makeDiff(oldContent, newContent)
+	if float64(len(d)) >= DiffLiteralThreshold*float64(len(newContent)) {
+		return "", false
+	}
+	return d, true
+}
+
+// The rest of this file is a minimal, self-contained line-based
+// unified-diff implementation: an LCS line diff plus unified-format emit
+// and apply.
 //
 // A well-established diff dependency was considered and rejected: the
 // scope here is bounded (line granularity, one hunk grouping pass, no
 // fuzzy context matching), correctness is fully exercised by the
 // round-trip tests, and a hand-rolled implementation keeps the package
-// stdlib-only as the project prefers. The unified-diff text emitted here
-// is the format the LLM will eventually see (spec §3.9.3).
+// free of a diff dependency. The unified-diff text emitted here is the
+// format the LLM sees (spec §3.9.3).
 
 // splitLines splits s into lines, preserving the information needed to
 // reconstruct s byte-exactly. Each returned element retains its
@@ -56,11 +82,8 @@ func splitLines(s string) []string {
 // (lcs, below) is allowed to demand. lcs allocates an (n+1)×(m+1) table of
 // int, so delta-encoding a large tracked file (tens of thousands of lines)
 // can require gigabytes: two 100k-line versions would need
-// ~100k × 100k × 8 B = 80 GB. Above this line-count product, the caller
-// (encodeDemoted) skips delta-encoding and keeps the full literal instead.
-// Correctness is preserved — Chain.Reconstruct handles literals natively;
-// only this one version's compression is sacrificed for a bounded memory
-// ceiling.
+// ~100k × 100k × 8 B = 80 GB. Above this line-count product, callers
+// (Diff, encodeDemoted) skip the diff rather than build the table.
 //
 // Budget arithmetic: cap the worst-case table at ~64 MB. An int is 8 bytes,
 // so 64 MiB / 8 B = 8,388,608 table entries; rounded down to a clean

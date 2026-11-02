@@ -80,6 +80,7 @@ func Verify(paths store.PersonantPaths, opts VerifyOptions) (memops.VerifyReport
 	// name is also in the folio.
 	checkThreads(&report, paths, spine)
 	checkFolios(&report, paths, spine)
+	checkTrackedFiles(&report, paths, spine)
 
 	// Index drift: delegate to internal/index.
 	idxOpts := index.Options{Quiet: true}
@@ -260,6 +261,46 @@ func checkFolios(report *memops.VerifyReport, paths store.PersonantPaths, spine 
 			continue
 		}
 		checkFolioDuplicates(report, paths, rec.ID, loc, lines)
+	}
+}
+
+// checkTrackedFiles validates the tracked-file store of every spine thread
+// that has an index: the index must load, and every blob and kept diff it
+// names must exist, each blob hashing to its name. Each finding's Path is
+// the offending file, so recovery can restore exactly that file.
+func checkTrackedFiles(report *memops.VerifyReport, paths store.PersonantPaths, spine []memops.SpineRecord) {
+	for _, rec := range spine {
+		if rec.ID == "" {
+			continue // already flagged by checkSpine
+		}
+		entries, err := store.ReadTrackedIndex(paths, rec.ID)
+		if err != nil {
+			report.Errors = append(report.Errors, memops.VerifyFinding{Path: store.TrackedIndexRel(rec.ID),
+				Message: fmt.Sprintf("files.jsonl unreadable: %v", err)})
+			continue
+		}
+		checked := map[string]bool{}
+		for _, e := range entries {
+			if !checked[e.ID] {
+				checked[e.ID] = true
+				if _, err := store.ReadTrackedBlob(paths, rec.ID, e.ID); err != nil {
+					msg := fmt.Sprintf("blob of %s is corrupt: %v", e.Path, err)
+					if errors.Is(err, os.ErrNotExist) {
+						msg = fmt.Sprintf("blob of %s is missing", e.Path)
+					}
+					report.Errors = append(report.Errors, memops.VerifyFinding{Path: store.TrackedBlobRel(rec.ID, e.ID), Message: msg})
+				}
+			}
+			for _, c := range e.Changes {
+				if !c.Diff {
+					continue
+				}
+				if _, err := os.Stat(store.TrackedDiffPath(paths, rec.ID, c.From, c.To)); err != nil {
+					report.Errors = append(report.Errors, memops.VerifyFinding{Path: store.TrackedDiffRel(rec.ID, c.From, c.To),
+						Message: fmt.Sprintf("diff of %s: %v", e.Path, err)})
+				}
+			}
+		}
 	}
 }
 
