@@ -7,20 +7,20 @@ A11a checked off in place if the criteria hold (ROADMAP "Checklist lifecycle"). 
 growth found becomes its own open ROADMAP item that states the frame and the measured rise. Scratch
 logs go under `.claude-temp/a11a/`.
 
-**Design to read:** §12 criterion 4, §13.
+**Design to read:** [design §12](../../design/12-acceptance-criteria.md) criterion 4;
+[design §13](../../design/13-measurement-the-a11a-method.md) (commands, baseline table, tolerance
+and the ROADMAP rule).
 
 **Facts.**
 - Recipes. `sim-profile` writes `bin/profiles/sim-<DURATION>.cpu.pprof`. `pprof` passes its
   arguments to `go tool pprof` (justfile, recipes `sim-profile` and `pprof`). `DURATION` is a
   justfile variable (`DURATION := env_var_or_default("DURATION", "1w")`).
 - Turn count. TestSim prints a `turns:` line (`internal/scenarios/sim/sim_rung_test.go:412`). The
-  pre-change 31d run printed `turns: 26704` and took 4064.30 s (`.claude-temp/growth/prof-31d.log`).
-- Baseline, pre-change, 9d → 31d cumulative seconds: `ComposeWorkingSet` 12.49 → 96.15;
-  `loadTrackedFiles` 0.97 → 79.06; `dedup.(*Chain).LiveWindow` 1.22 → 77.66; `CommitTurn`
-  16.28 → 27.22; `store.ReadThreadBody` 10.49 → 18.08; `closeTurnAndUpdateEngagement` 6.27 → 12.53
-  (`.claude-temp/growth/per-turn-cpu-day9-vs-day31.txt`).
-- The sim's tracked file crosses the 19,479 B limit between day 20 (14,390 B) and day 30
-  (22,705 B), so only the 9d → 20d ratio shows the expansion path under load (design §13).
+  pre-change 31d run printed `turns: 26704` and took 4,064 s (design §13 step 3).
+- Baseline: the pre-change 9d → 31d cumulative seconds are tabulated in design §13 step 3; the
+  measurement depends on no scratch file.
+- The sim's tracked file crosses the 19,479-byte limit between day 20 (14,512 bytes) and day 30
+  (22,873 bytes), so only the 9d → 20d ratio shows the expansion path under load (design §13).
 
 **Work.** Capture output as it runs, for example
 `just DURATION=9d sim-profile 2>&1 | tee .claude-temp/a11a/sim-9d.log`. Then:
@@ -43,11 +43,9 @@ the most-edited thread's `files/` at the end of the 31d run; the rundata path is
 - `closeTurnAndUpdateEngagement`;
 - `VerifyNoBudgetOverflow`'s share of sim time.
 
-**Tolerance and the check-off rule.** "Flat" means a per-turn ratio of at most **1.25**.
-- Why 1.25: before the change, `ComposeWorkingSet`'s per-turn cost roughly doubled from 9d to 31d.
-  That is 12.49 s over ≈ 7,750 turns (9/31 of 26,704; P7 records the measured count) against
-  96.15 s over 26,704 turns, ≈ 1.6 ms → 3.6 ms, a ratio of ≈ 2.2. A 25% band sits well below that
-  growth and above CPU-sampling variation on frames measured in seconds.
+**Tolerance and the check-off rule.** "Flat" means a per-turn ratio of at most **1.25**; the reason
+for the value is in [design §13](../../design/13-measurement-the-a11a-method.md) step 4. Record the
+measured 9d turn count.
 - A11a is checked off only when all of the following hold:
   - the 20d/9d and 31d/9d per-turn ratios of `ComposeWorkingSet`, `RecordFileEvents` and
     `loadActiveThreadData` are each ≤ 1.25;

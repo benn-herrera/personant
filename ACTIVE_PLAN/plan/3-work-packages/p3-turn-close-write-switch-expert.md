@@ -15,9 +15,17 @@
 - `internal/scenarios/sim/workload.go`: comment fix.
 - The contract leaves listed under "Contract".
 
-**Design to read:** [§1](../1-outcomes-this-plan-carries.md) E1–E2, [§2](../2-sequence-and-status.md), [§3](index.md) invariants 2, 8, 10, [§4](../4-acceptance-criteria.md) (`internal/turn` and port rows), §5.2,
-§7 rows for `RecordFileWrite`, `fs.commit-untracked`, `VerifyDedupConsistency` and
-`buildWorkPreEvents`, §8 "Turn path".
+**Design to read:**
+[design E1](../../design/1-established-facts/e1-where-file-content-gets-into-the-model-s-context.md),
+[design E2](../../design/1-established-facts/e2-what-identifiers-can-attach-to.md);
+[design §2](../../design/2-design-in-one-paragraph.md);
+[design §3](../../design/3-invariants.md) invariants 2, 8, 10;
+[design §4](../../design/4-module-skeleton.md) (`internal/turn` and port rows);
+[design §5.1](../../design/5-store-format-and-retention/5.1-layout.md) (`turn`, `at`, `path`);
+[design §5.2](../../design/5-store-format-and-retention/5.2-write-at-turn-close-applyfileevents.md);
+[design §7](../../design/7-fate-of-current-mechanisms.md) rows for `RecordFileWrite`,
+`fs.commit-untracked`, `VerifyDedupConsistency` and `buildWorkPreEvents`;
+[design §8](../../design/8-barrier-step-b1c-and-crash-safety/index.md) "Turn path".
 
 **Facts.**
 - The port has one implementer. `git grep -n -E "func \([^)]*\) (AgeFileChains|RecordFileWrite|RecordFileCommit|GetFileVersion)\(" -- '*.go'`
@@ -104,25 +112,21 @@
    - `TestRecordFileEvents…`: each invariant-10 violation is rejected and logged; written paths
      reach the turn scope.
 
-**Contract** (text from the design's §9–§10, links resolved as relative paths from each leaf). Any
-link to §3.9.1 targets the leaf's current file name,
+**Contract.** The text to land is in
+[design §9](../../design/9-proposed-spec-text-replaces-the-leaves-under-project-docs-spec-3-core-algorithms-3-9-working-set-content-dedup.md)
+(SPEC) and [design §10](../../design/10-architecture-changes-same-change.md) (ARCHITECTURE). Links
+are relative paths from each leaf. Any link to SPEC §3.9.1 targets the leaf's current file name,
 `3-core-algorithms/3.9-working-set-content-dedup/3.9.1-persistent-storage-thread-file-body-log.md`,
 so `just check-links` passes; P5 renames the leaf and fixes the links.
-- SPEC `2-data-model/2.3-thread-file-format-threads-thr-id.md`: "tracked-file sidecar" →
-  "tracked-file store". Add to the decision-class bullet "a file event appears in an excerpt only
-  as its identifier line ([§3.9.1])".
-- SPEC `3.0.2-the-hook-chain.md` step 3: the design's text.
-- ARCHITECTURE `storage-and-record-formats/thread-directory-threads-thr-id.md`:
-  - the "Tracked-file store" subsection (design §5.1–§5.3);
-  - the identifier lines in the excerpt example;
-  - the statement that composition never parses them;
-  - the "tracked-file count does not grow with thread length" claim (line 54) stays, with the
-    store's bound added: per thread, the paths touched within the assembly window × (current size +
-    N diffs) (design §5.3).
+- SPEC §2.3 (`2-data-model/2.3-thread-file-format-threads-thr-id.md`): the two edits in design §9.
+- SPEC §3.0.2 (`3.0.2-the-hook-chain.md`) step 3: the text in design §9.
+- ARCHITECTURE `storage-and-record-formats/thread-directory-threads-thr-id.md`: the bullet
+  replacement, the excerpt example and the "Tracked-file store" subsection, as written in design
+  §10. Its "Retention" bullet describes B1c, which lands in P5 within the same checkpoint.
 - ARCHITECTURE `storage-and-record-formats/home-layout.md`, `key-abstractions.md`, and
-  `the-3-0-hook-chain-load-bearing-primitive/index.md` step 3.
-- ARCHITECTURE `testing-as-the-lab-bench/event-log-format.md`: the `fs` row becomes
-  `edit-no-path`, `write-error`.
+  `the-3-0-hook-chain-load-bearing-primitive/index.md` step 3: as written in design §10.
+- ARCHITECTURE `testing-as-the-lab-bench/event-log-format.md`: the `fs` row, as written in design
+  §10.
 
 **Done-line.** `just build`;
 `just test-run ./internal/turn 'TestRunBuffersFileEdits|TestRunFileCommit|TestRunFileEdit|TestRunEmpty|TestRunTagReprompt|TestRunOwnerDefault|TestRunRepromptCap|TestRunFetchFirst|TestRunExistingThreadAppendsExcerpt|TestRenderTurnExcerpt'`;

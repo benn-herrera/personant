@@ -1,5 +1,8 @@
 ## 9. Proposed SPEC text (replaces the leaves under `PROJECT_DOCS/SPEC/3-core-algorithms/3.9-working-set-content-dedup/`)
 
+Inside the quoted text, `[§N]` is a SPEC cross-reference; it lands as a relative link to that SPEC
+leaf, per SPEC §0 "Cross-references".
+
 **index.md**
 
 > ### 3.9 Working-set content dedup
@@ -20,7 +23,8 @@
 > Contents: §3.9.1 Persistent storage and retention · §3.9.2 Live context composition · §3.9.3 Diff
 > format · §3.9.4 Identifier-only references
 
-**3.9.1-persistent-storage-and-retention.md** (renamed from `…-thread-file-body-log.md`)
+**3.9.1-persistent-storage-and-retention.md** (renamed from
+`3.9.1-persistent-storage-thread-file-body-log.md`)
 
 > #### 3.9.1 Persistent storage and retention
 >
@@ -33,8 +37,8 @@
 >
 > **Positions.** Each `fs.read`, `fs.write` and `fs.commit` of a turn is recorded in the owning
 > thread's excerpt for that turn as one identifier line — operation, identifier (a commit hash for
-> `fs.commit`) and path — in event order. An identifier line is written once and never rewritten;
-> an excerpt never holds file bytes.
+> `fs.commit`) and path — in event order. An identifier line is written once and never rewritten.
+> Personant never writes file bytes into an excerpt.
 >
 > **What is kept**, per thread and file: the current content (the bytes of the file's most recent
 > read or write) and its `dedup.live-diff-window` most recent changes, each as a diff from the prior
@@ -45,13 +49,13 @@
 >
 > **Bounds are Personant's own.** Storage per thread is bounded by the files read or written within
 > its assembly window times (current size + the diff window), whatever the user does with version
-> control — commit, rebase, or no repository at all. Retention never consults the workspace
-> repository; Personant runs no git operation against it.
+> control — commit, rebase, or no repository at all. Storage, retention and composition never
+> consult the workspace repository.
 >
-> **Earlier content.** Content no longer kept is recovered, where it can be, through the user's own
-> version control by its identifier; Personant guarantees nothing about it. Superseded content is
-> not evicted content in the [§1.4] sense: a file's current content is kept and is what an evicted
-> entry brings back.
+> **Earlier versions.** A superseded version of a file is not content evicted for budget in the
+> [§1.4] sense, and Personant does not keep file history. An earlier version is recovered, where it
+> can be, through the user's own version control or opencode's snapshots; its identifier is a git
+> blob id, so it resolves there. Personant guarantees nothing about it.
 >
 > ##### Symbol lifecycle for file-edit events
 >
@@ -67,10 +71,12 @@
 > ([§2.3]). Replacement happens there, in place, and only for positions the context holds:
 >
 > - **Literal current content** at each file's most recent read or write position, when the context
->   holds that position. One file, and one content, render as a literal at most once across the whole
->   composed context, Layer B threads included; the most recent position wins.
+>   holds that position and the content fits there. One file, and one content, render as a literal
+>   at most once across the whole composed context, Layer B threads included. A literal is never
+>   moved to an earlier position.
 > - **The N most recent changes** of each file (`dedup.live-diff-window`, default N = 3) render as
->   literal diffs at their positions, when the context holds them.
+>   literal diffs at their positions, when the context holds them. A diff at or above
+>   `dedup.diff-literal-threshold` of the file's current size does not render.
 > - **Every other position** renders as its identifier line alone.
 > - **A file too large for its thread's share is never rendered as content.** When a file's current
 >   content is at or above `dedup.literal-share-threshold` (default 0.25) of its thread's Layer B
@@ -79,9 +85,14 @@
 >
 > Positions are never rewritten in storage; replacement is a composition decision each turn. Content
 > rendered at a position counts against the budget of the layer holding it, together with its
-> excerpt ([§3.1]); content that cannot fit renders as its identifier with its size and stays
-> retrievable ([§1.4]). Composition reads only the content it renders, plus one record per file kept
-> for the thread.
+> excerpt ([§3.1]). Content under the share threshold that does not fit renders as its identifier
+> with its size: that is content evicted for budget in the [§1.4] sense, named at the version it
+> had, and the store keeps those bytes ([§3.9.1]). Composition reads only the content it renders,
+> plus one record per file kept for the thread.
+>
+> **Open:** ROADMAP B6a — bringing back on demand the content of a file at or above
+> `dedup.literal-share-threshold`. Such a file is named by its identifier and size; no route yet
+> brings its content back.
 
 **3.9.3-diff-format.md**
 
@@ -104,31 +115,34 @@
 >
 > ##### For active reasoning over content, identifier-only is insufficient
 >
-> A file recently the subject of `read`, `write` or `edit` in an engaged thread keeps its literal
-> at its most recent position in Layer B, however many positions precede it, provided it is under
-> `dedup.literal-share-threshold` ([§3.9.2]). A file at or above it is shown by identifier only;
-> work that needs its content is not carried by the composed context.
+> A file read or written in an engaged thread keeps its literal at its most recent position in
+> Layer B, when the context holds that position, however many positions precede it, provided it
+> is under `dedup.literal-share-threshold` ([§3.9.2]). A file at or above it is shown by identifier
+> only.
 
 **Other SPEC leaves (same change):**
 
-- `2.3`:
+- SPEC §2.3 (`2-data-model/2.3-thread-file-format-threads-thr-id.md`):
   - "and the [§3.9] tracked-file sidecar" → "and the [§3.9] tracked-file store".
   - Add to the decision-class bullet: "a file event appears in an excerpt only as its identifier line
     ([§3.9.1])".
-- `2.6.1`:
-  - Delete `dedup.anchor-cadence`, `dedup.chain-retention-turns` and `dedup.chain-retention-days`.
-  - `dedup.diff-literal-threshold: 0.7  # a change's diff at or above this fraction of the new content's size is not kept (§3.9.1)`.
-  - `dedup.live-diff-window: 3  # N most-recent changes per file kept (§3.9.1) and rendered as diffs (§3.9.2)`.
+- SPEC §2.6.1 (`2-data-model/2.6-directive-file-format-directives-md/2.6.1-recognized-parameters.md`).
+  Each edit replaces the whole entry, including its continuation comment lines:
+  - Delete the entries `dedup.anchor-cadence`, `dedup.chain-retention-turns` and
+    `dedup.chain-retention-days`.
+  - The `dedup.diff-literal-threshold` entry becomes
+    `dedup.diff-literal-threshold: 0.7  # a change's diff at or above this fraction of the new content's size is not kept (§3.9.1)`.
+  - The `dedup.live-diff-window` entry becomes
+    `dedup.live-diff-window: 3  # N most-recent changes per file kept (§3.9.1) and rendered as diffs (§3.9.2)`.
   - Add `dedup.literal-share-threshold: 0.25  # a file whose current content is at or above this fraction of its thread's Layer B share is never expanded; identifier only (§3.9.2)`.
-- `3.0.2` step 3: "Dedup decision ([§3.9]): a file-edit delta is buffered for the turn; at turn
+- SPEC §3.0.2 step 3: "Dedup decision ([§3.9]): a file-edit delta is buffered for the turn; at turn
   close it becomes an identifier line in the owner's excerpt and updates the tracked-file store
   ([§3.9.1]). Which positions render content is decided at composition ([§3.9.2])."
-- `3.8.1`: "`files.json`" → "the tracked-file store".
-- `3.8.3` "Two recovery surfaces, different strength" → "Archived *threads* recover from
+- SPEC §3.8.1: "`files.json`" → "the tracked-file store".
+- SPEC §3.8.3, "Two recovery surfaces, different strength" → "Archived *threads* recover from
   Personant's own home git, which it never rewrites: an unconditional guarantee. File content a
   thread no longer keeps ([§3.9.1]) is not Personant's to recover; its identifier names it in the
   user's version control."
-- `3.10.6` last paragraph: "([§3.9.1], `files.json`)" → "([§3.9.1])".
+- SPEC §3.10.6, last paragraph: "([§3.9.1], `files.json`)" → "([§3.9.1])".
 
 ---
-

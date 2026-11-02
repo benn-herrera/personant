@@ -17,7 +17,10 @@
 - The criterion-7 migration test in `internal/memops/fileadapter/fileadapter_homeformat_test.go`.
 - The contract leaves listed under "Contract".
 
-**Design to read:** §5.3, §8 (all), §12 criteria 2, 3, 6, 7.
+**Design to read:** [design §5.3](../../design/5-store-format-and-retention/5.3-retention.md);
+[design §8](../../design/8-barrier-step-b1c-and-crash-safety/index.md) and
+[design §8.1](../../design/8-barrier-step-b1c-and-crash-safety/8.1-migration-format-2-to-3.md);
+[design §12](../../design/12-acceptance-criteria.md) criteria 2, 5, 6, 7.
 
 **Facts.**
 - Barrier order. `internal/memops/fileadapter/fileadapter_barrier.go` `runBarrier` runs
@@ -71,9 +74,14 @@
    - the completion re-run.
 3. Format: add `{From: 2, To: 3}` and set `CurrentHomeFormat = 3`; it is a restamp only.
 4. Tests:
-   - after many edits and one barrier, the thread holds one blob, ≤ N diffs and one index line
-     (criterion 2);
+   - `TestBarrier_Prune…`: after many edits and one barrier, the thread holds one blob, ≤ N diffs
+     and one index line (criterion 2), and its `turns/` and `folio.jsonl` bytes are identical
+     before and after the barrier (criterion 5);
    - entries past the window are dropped;
+   - `TestBarrier_PruneUnreadableIndexRecovers`: an unreadable index makes B1c skip the thread
+     (`dedup.prune-skip reason=unreadable`) and fails B2's verify gate with the index as the
+     finding's path. The next open's completion (`spineQuarantineRepair`) restores the index from
+     primary HEAD, and the barrier then completes (design §8);
    - a crash at either point converges on completion and never deletes an indexed file;
    - `TestHomeFormat_Migrate2To3RemovesLegacySidecar` (`fileadapter_homeformat_test.go`): a home
      stamped 2 and holding a thread `files.json` passes `memops.GateHomeFormat` with
@@ -85,9 +93,11 @@
      the owner excerpt and the store agree with daily HEAD, and `verify.Verify` reports no
      tracked-file error.
 
-**Contract.**
-- SPEC: `3.9.1-persistent-storage-thread-file-body-log.md` is replaced by
-  `3.9.1-persistent-storage-and-retention.md`, with the design's §9 text. Every link to the old
+**Contract.** The text to land is in
+[design §9](../../design/9-proposed-spec-text-replaces-the-leaves-under-project-docs-spec-3-core-algorithms-3-9-working-set-content-dedup.md)
+(SPEC) and [design §10](../../design/10-architecture-changes-same-change.md) (ARCHITECTURE).
+- SPEC §3.9.1: `3.9.1-persistent-storage-thread-file-body-log.md` is replaced by
+  `3.9.1-persistent-storage-and-retention.md`, with the text in design §9. Every link to the old
   file name is updated: `grep -rln "3.9.1-persistent-storage-thread-file-body-log" PROJECT_DOCS *.md`
   → at `c23b036`:
   `PROJECT_DOCS/SPEC/3-core-algorithms/3.0-context-modification-events-the-architectural-primitive/3.0.2-the-hook-chain.md`,
@@ -96,13 +106,15 @@
   `PROJECT_DOCS/SPEC/3-core-algorithms/3.10-transient-data-lifecycle/3.10.6-what-stays-transient.md`,
   `PROJECT_DOCS/SPEC/entry-point.md`; plus
   `PROJECT_DOCS/SPEC/2-data-model/2.3-thread-file-format-threads-thr-id.md` (added by P3), and any
-  §3.9.1 link P4 added. Re-run the command; after the fix it returns nothing.
-- SPEC: `3.8.1-mechanism.md` and `3.10.6-what-stays-transient.md` per the design.
-- SPEC `2.6.1`: the `dedup.diff-literal-threshold` line becomes the design's wording.
-- ARCHITECTURE `mechanisms/crash-stability-and-the-dual-repo-substrate.md`: B1c and its
-  crashpoints, and the 1→2, 2→3 registry.
+  SPEC §3.9.1 link P4 added. Re-run the command; after the fix it returns nothing.
+- SPEC §3.8.1 (`3.8.1-mechanism.md`) and SPEC §3.10.6 (`3.10.6-what-stays-transient.md`): the
+  edits in design §9.
+- SPEC §2.6.1: the `dedup.diff-literal-threshold` entry, including its continuation comment,
+  becomes the design's wording.
+- ARCHITECTURE `mechanisms/crash-stability-and-the-dual-repo-substrate.md`: the three edits in
+  design §10 (B1c sentences, crashpoint list, registry).
 - ARCHITECTURE `testing-as-the-lab-bench/event-log-format.md`: add `pruned` and `prune-skip` to the
-  `dedup` row.
+  `dedup` row (P6 removes the `chain-*` actions).
 
 **Done-line.** `just build`;
 `just test-run ./internal/store 'TestPruneTrackedFiles'`;

@@ -2,7 +2,7 @@
 
 | # | Package | Rating | Depends on | Checkpoint | State |
 |---|---|---|---|---|---|
-| P1 | `dedup` primitives | expert | — | — | not started |
+| P1 | `dedup` primitives | expert | — | — | in progress |
 | P2 | Tracked-file store format, excerpt reader, verify check | expert | P1 | **C1** after P2 | not started |
 | P3 | Turn-close write switch | expert | C1 | — | not started |
 | P4 | Composition switch (evidence step) | expert | P3 | — | not started |
