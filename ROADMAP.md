@@ -9,8 +9,8 @@ discipline.
 
 Personant is a memory system under opencode: a stateless TypeScript plugin plus a Go memory service
 (`ARCHITECTURE.md` "Plugin route"). Where an item is described in more detail, it cites the place:
-a dated report (`OPENCODE_RESEARCH/`), `SPEC.md`, `ARCHITECTURE.md` or `DEFECTS.md`. **RD** is
-`OPENCODE_ROUTE_DECISIONS.md`, cited only where no other document holds the fact.
+a dated report (`OPENCODE_RESEARCH/`), `SPEC.md` or `ARCHITECTURE.md`. A known defect is an item
+here that states the fact and where it lives.
 
 **Checklist lifecycle.** Every item is a checkbox. An open item is `- [ ]`; it checks off to `- [x]`
 **in place** the moment it ships and stays visible while its list has open siblings. When every item
@@ -24,10 +24,6 @@ in a list is checked, the **list is disposed of**: removed from this file, its h
 - Review of `PROJECT_DOCS/CONVENTIONS/`, particularly house rules. some or all of the conventions
   may have undergone some rot or may have become superseded/duplicates to changes in global
   CLAUDE.md/AGENTS.md or agent definitions
-- Retire `DEFECTS.md` (the excerpt-folio plan it waited on has landed): give every entry still
-  open a ROADMAP item (D2 has B2; D4, the scenario harness skipping the startup reconcile, needs
-  one), then delete the file and the rules that cite it (CONVENTIONS "Docs stay current" and
-  "Probe work").
 
 ## Pending decisions
 
@@ -79,7 +75,8 @@ the tagged clauses get a follow-up pass. Each entry states when it must be decid
   while the TUI shows all of it (`OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md` §3); today only the working set
   reloads. (a) Persist in-run history and the turn counter. (b) Rebuild them from opencode's stored
   messages. (c) Accept: threads carry the memory. Sets a SPEC continuity outcome (SPEC §1.6,
-  §4.5.8). **Decide before A8.**
+  §4.5.8), and settles SPEC §4.3.3's rollback, which restores run-volatile state whose restart
+  persistence is this question. **Decide before A8.**
 - [ ] **U10 Model family.** ARCHITECTURE "Model-family as platform" targets one family (Gemma);
   opencode lets the user pick any model. (a) Keep one tuned family for the memory prompts and warn
   on others. (b) Support whatever opencode runs and measure tag and curator quality per family,
@@ -148,13 +145,15 @@ decisions named in them.
   proxy unaccounted; a fixed deduction would zero the tiny ceilings the acceptance tests use).
   Settles whether `conventions_paths` (SPEC §2.5.1) overlaps the instructions slot, and the
   stable-prefix claim for the now-dynamic expectations slot. (SPEC §3.1 "Slot answers".)
-- [ ] **A8. Resume and recovery.** Fix D4 first (crash scenarios through the shared harness are not
-  evidence until it lands). Then: a recovery turn on a context call with no preceding prompt;
+- [ ] **A8. Resume and recovery.** First: `newHarness` (`internal/scenarios/harness_setup.go`)
+  does not run the startup reconcile that production runs, so a harness home's files stay
+  uncommitted and crash recovery quarantines them; crash scenarios through the shared harness are
+  not evidence until it does. Then: a recovery turn on a context call with no preceding prompt;
   reconcile against opencode's stored messages at service start; start order (service listening
   before opencode, managed background server included); opencode's data home outside
   `~/.personant/`; restart persistence per **U9**. If **U8** keeps retraction, add a record that
   distinguishes a retraction rollback from a crash rollback (reconcile skips retracted turns but no
-  record tells the two apart). (`OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md` §§4–5; DEFECTS.md D4; SPEC §1.6,
+  record tells the two apart). (`OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md` §§4–5; SPEC §1.6,
   §4.5.8.)
 - [ ] **A9. Plugin failure policy.** Spike what opencode does when the `context` hook throws or the
   service refuses, then decide **U7** and adjust A5's fail-open interim. (ARCHITECTURE "Plugin
@@ -173,16 +172,23 @@ decisions named in them.
   day 54) and the daily index near 2,000 entries. What remains is the re-measure with opencode in the
   loop, worth running when it can show memory-side cost under real inference that a mock run
   cannot. (`OPENCODE_RESEARCH/OPENCODE_PROBE_RESULTS.md` §§4, 11; SPEC §3.11, §9.1.)
-- [ ] **A11a. Find the per-turn growth outside the commit.** Mean per-turn time rises 55 → 352 ms
-  over 54 mock sim-days and accelerates (≈3.7 ms/day over days 1–11, ≈8.5 ms/day over days 31–51)
-  while commit time, the daily index (~2,000 entries) and the spine (150 threads, from day 10) stay
-  bounded. Same run as A11. Known so far: the day-9 profile diff (`just DURATION=8d sim-profile`,
-  `9d`, `just pprof -top -cum -focus='turn\.RunWithInfo$' -diff_base=…`) puts most non-commit CPU in
-  `ComposeWorkingSet` → `ReadThreadBody` file opens and reads, which is bounded by spine × 512 and
-  so should plateau; the recall fine index grows without bound (1,133 → 16,069 chunks by day 47,
-  about half the main thread's) and the main thread's history grows without bound, so a per-turn
-  scan of either, or a full-history folio decode, grows with it. Unattributed: what grows at days
-  30–50. Breaks SPEC §9.1's flat per-operation latency.
+- [ ] **A11a. Per-turn growth outside the commit: `Chain.LiveWindow` is quadratic.** Mean per-turn
+  time rises with sim-day and accelerates, breaking SPEC §9.1's flat per-operation latency. The main
+  cause is `dedup.(*Chain).LiveWindow` (`internal/dedup/livewindow.go`), called per turn from
+  `loadTrackedFiles` (`internal/memops/fileadapter/workset_compose.go`): it `Reconstruct`s every
+  version of a tracked file's chain, only to hash the old ones into identifiers. Cost is versions ×
+  file size, and both grow with every edit. The chain never shrinks in a mock run because §3.9
+  aging requires the version's blob to be reachable in the workspace repo (`store.BlobReachable`).
+  The sim never commits the workspace, so every aging attempt is refused with
+  `reason=blob-unreachable`. A real user who never commits a tracked file sees the same thing.
+  This misses SPEC §3.9's intent. Older copies were meant to be replaced in place where the context
+  holds them. The build instead appends a per-version identifier list in a separate tracked-files
+  section, and ties retention to the user's git. The fix is to implement the designed in-place
+  dedup (`ACTIVE_PLAN/`). Secondary, smaller: `LoadThreadFiles` decodes `files.json` twice per
+  engaged turn (compose and `AgeFileChains`). The same `LiveWindow` cost also runs in the sim
+  harness's `VerifyNoBudgetOverflow`, which roughly doubles the sim's run time. Rule out after the
+  fix: residual growth in `CommitTurn` CPU, `ReadThreadBody` → `readExcerptText`, and
+  `closeTurnAndUpdateEngagement`.
 - [ ] **A12. Install, config and the user command and ack channel.** `personant init` writes the
   opencode-side settings (`compaction.auto: false`, the plugin entry) in opencode's own format;
   Personant-only settings move to `~/.config/personant/` (`internal/store/paths.go` still places
@@ -201,8 +207,9 @@ decisions named in them.
   citizenship". **Precondition:** A5–A12 done and one end-to-end session through opencode passing
   with `oc_missed_deltas == 0` and `oc_uncomposed_requests == 0`
   (`OPENCODE_RESEARCH/OPENCODE_PROBE_RESULTS.md` §2). (ARCHITECTURE "Superseded code".)
-- [ ] **B2. Fix D2.** `recall_query_latency_*` gauges copy turn-duration percentiles instead of
-  timing recall queries. (DEFECTS.md D2; SPEC §9.4.)
+- [ ] **B2. `recall_query_latency_*` does not measure recall.** The sim's p50/p95/p99 gauges
+  (`metricRecallQueryLatencyP50/P95/P99`, `internal/scenarios/sim/workload.go`, populated in
+  `sim/telemetry.go`) copy turn-duration percentiles instead of timing recall queries. (SPEC §9.4.)
 - [ ] **B3. opencode database cleanup.** Checkpoints must not grow opencode's database without
   bound and cleanup must never break a kept session's scrollback, fork or revert; use
   `modernc.org/sqlite` for any Go SQLite need. (SPEC §1.7; ARCHITECTURE "opencode database cleanup";
@@ -241,9 +248,17 @@ decisions named in them.
   agent work: session memory readable by a sub-agent through recall-as-a-tool, no working-set dump
   and no writes; a sub-agent may *propose* that a finding be cached, and promotion into career
   memory is the main session's write. (SPEC §1.1.)
+- [ ] **B6a. Delegated large-file work.** A task that needs a file too large for its thread's Layer
+  B share is handed whole to a sub-mind: it reads, edits and checks the file, and returns a summary
+  of what it did and learned, with the identifiers of files it read or changed and the diffs it
+  made, so the main mind can check the summary against them. The returned summary is the main
+  thread's excerpt; no file literal crosses back. The size threshold forces delegation, and the main
+  mind may also delegate smaller work. On the plugin route, whether the plugin can route such a read
+  to an opencode child session, or only steer the model toward one, is an open research question.
+  Shares the sub-mind mechanics of B6. (SPEC §3.9.)
 - [ ] **B7. Agents and skills.** Whether and how opencode agent definitions and skills are
   supported; candidate mapping: agent definitions as Layer E directives scoped per agent, skill
-  content as transient task-class. (RD Open.)
+  content as transient task-class.
 - [ ] **B8. `/compact` and `/clear` mapping.** Both are no-ops today because memory is not keyed on
   session (SPEC §1.1). Decide what they eventually map to and whether a TUI plugin can replace or
   disable them. (`OPENCODE_RESEARCH/OPENCODE_CONTEXT_INJECTIONS.md` §§4, 6.)
@@ -266,7 +281,6 @@ decisions named in them.
 - [ ] **B12. Enforcement of "the LLM never touches the home's git tree".** opencode's shell reaches
   `~/.personant/`, so the statement cannot hold as written. Decide whether to enforce it (for
   example a plugin hook on shell tool calls) or restate it as intention in SPEC and ARCHITECTURE.
-  (RD Open "Gaps".)
 - [ ] **B13. `personant init` refuses an existing home.** `init` creates a home and nothing else: it
   succeeds on an absent or empty directory and otherwise exits non-zero, naming the path and
   pointing to `personant verify`. Drops "idempotent" from SPEC §4.1 and §8.1; touches
