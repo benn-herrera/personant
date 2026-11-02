@@ -11,27 +11,44 @@ Today's assistants live in sessions. Each conversation starts from zero, and lon
 until what mattered is gone. Whatever the model learned about the work, the person, or the last
 project was never kept.
 
-The aim is a partner with one continuous career.
+The aim is a durable assistant with one continuous career.
 
-### Behavior vs history
+### Three kinds of memory
 
-Career memory and behavior memory are different things. What the agent has done and how each
-project works is career memory; it is scoped and it informs. How the agent thinks and acts is
-behavior memory; it is universal. 
+The memory that steers the agent comes in three kinds, separated by scope and by how each may
+change.
+
+- **Behavior memory**: how the agent thinks and conducts itself. General logic, comportment, and
+  its approach to novel and to familiar situations. Universal.
+- **Process memory**: how work is done on any project, whatever its topic. Practices that hold for
+  every project, plus heuristics scoped to a category of project (a language, a platform, a kind of
+  system) or to a role in the work (designing, implementing, reviewing). It will never be complete
+  and will never match a seasoned engineer's flexibility. Its job is to raise the floor, so that
+  human guidance is a delta on it rather than a bootstrap from scratch.
+- **Career memory**: the toolkit. Techniques and solutions developed on specific projects that may
+  serve others, grown beyond what base training supplies.
+
+### What a project leaves behind
 
 The work's artifacts are not the memory. What personant helps produce lives in the user's
-workspace and belongs to the work. Aspects of it survive in career memory, but the agent's
-precious memory space is not for filling with every revision of every repo ever worked in or
-every document ever edited. Just as with a human, useful patterns may be extracted, but the
-details are retrievable from version control. That is what it is for.
+workspace and belongs to the work; a project's own state and history live there and in its version
+control. The agent's precious memory space is not for filling with every revision of every repo
+ever worked in or every document ever edited. That is what version control is for.
 
-### Behavior changes only deliberately
+From a project, memory keeps only lessons worth carrying forward, filed under the kind of memory
+they change. A lesson about how work is done goes to process memory; a lesson about what to reach
+for goes to career memory. A bad result is not kept for its own sake, only when it is a notable
+attractive nuisance: something that will look like a good idea again.
 
-Behavior changes are not automatic. They are chosen deliberately, applied deliberately,
-reviewed over time, and modified as needs dictate and as the inhabiting models evolve.
+### Behavior and process change only deliberately
 
-Project work never writes behavior memory: what is learned in a project stays career memory.
-Projects differ in how the work is done, never in who does it.
+Behavior and process changes are not automatic. They are chosen deliberately, applied
+deliberately, reviewed over time, and modified as needs dictate and as the inhabiting models
+evolve.
+
+Project work never writes behavior memory, and never writes process memory directly: a project may
+propose a process change, and adopting it is a deliberate, reviewed act. Projects differ in their
+techniques and in which category heuristics apply, never in who does the work.
 
 ---
 

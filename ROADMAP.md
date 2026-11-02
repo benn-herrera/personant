@@ -285,7 +285,7 @@ decisions named in them.
   behavior memory and project-convention career memory: every behavior adjustment learned in a
   project resolves to exactly one of (a) promotion to universal behavior memory, or (b)
   reformulation as a project convention rule, never a per-project behavior variant. (SPEC §1.8;
-  THESIS "Behavior vs history"; ARCHITECTURE "Personalization through directive accrual".)
+  THESIS "Three kinds of memory"; ARCHITECTURE "Personalization through directive accrual".)
 - [ ] **B12. Enforcement of "the LLM never touches the home's git tree".** opencode's shell reaches
   `~/.personant/`, so the statement cannot hold as written. Decide whether to enforce it (for
   example a plugin hook on shell tool calls) or restate it as intention in SPEC and ARCHITECTURE.
