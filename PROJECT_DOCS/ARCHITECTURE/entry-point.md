@@ -6,8 +6,6 @@ Must-see:
 - No user-facing behaviors or outcomes are designed here, that belongs to SPEC
 - No project-specific process is dictated, that belongs to CONVENTIONS
 
----
-
 Contents:
 
 - [What this is](what-this-is.md)
