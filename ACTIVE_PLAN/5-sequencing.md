@@ -15,3 +15,17 @@ Serial, one package at a time: WP1 → WP2 → WP3 → WP4 → WP5 → WP6 → W
 
 Mechanical: WP1, WP2, WP4, WP8, WP10. Expert: WP3, WP5, WP6, WP7, WP9.
 
+| WP | State |
+|---|---|
+| WP1 | in progress |
+| WP2 | not started |
+| WP3 | not started |
+| WP4 | not started |
+| WP5 | not started |
+| WP6 | not started |
+| WP7 | not started |
+| WP8 | not started |
+| WP9 | not started |
+| WP10 | not started |
+| Post-sprint review | not started |
+

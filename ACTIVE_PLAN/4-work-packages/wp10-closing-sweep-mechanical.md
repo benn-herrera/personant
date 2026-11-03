@@ -49,7 +49,6 @@ ROADMAP.md, exact:
   key (`context.token-budget`, `staging.window-turns`, `history.cap-per-thread`,
   `anchor.projection-max`, `spine.entry-max-chars`, and so on) is a compiled-in constant. The
   reader is built with its first consumer. (SPEC §2.6.1, §3.10.3, §3.1.)"
-- "Parked plans": delete the `strip-self-built-harness/` bullet; activation moves the plan.
 
 Contract and README, exact:
 
