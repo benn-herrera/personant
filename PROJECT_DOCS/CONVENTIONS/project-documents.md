@@ -1,4 +1,4 @@
-### Project documents live in `PROJECT_DOCS/`
+## Project documents live in `PROJECT_DOCS/`
 
 THESIS, SPEC, ARCHITECTURE and CONVENTIONS are trees of small files under `PROJECT_DOCS/`, each
 section one file. The root `THESIS.md`, `SPEC.md`, `ARCHITECTURE.md` and `CONVENTIONS.md` only

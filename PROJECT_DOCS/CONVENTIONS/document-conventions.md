@@ -1,4 +1,4 @@
-### Document conventions
+## Document conventions
 
 How the project documents (THESIS, SPEC, ARCHITECTURE, CONVENTIONS) are written and read.
 
