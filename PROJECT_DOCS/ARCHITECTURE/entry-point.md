@@ -1,6 +1,6 @@
 # ARCHITECTURE – Personant
 
-How this projects' implementation meets requirements designated by SPEC
+How this project's implementation meets requirements designated by SPEC
 
 Must-see:
 - No user-facing behaviors or outcomes are designed here, that belongs to SPEC
