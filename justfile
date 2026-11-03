@@ -22,12 +22,12 @@ GOPKGS := "./cmd/... ./internal/..."
 # trees, so pointing either at test/ would descend into test/api_keys (mode
 # 0700, benn-owned) and fail the walk for a non-owner. cmd/ and internal/
 # hold 100% of the Go code; test/ holds none. Used by fmt/fmt-check and by
-# the fe-scope-check untracked-file enumeration. The pinned toolchain in
+# test-changed's untracked-file scan. The pinned toolchain in
 # go.mod keeps gofmt output identical across machines/agents.
 GOSRCDIRS := "cmd internal"
 
 # GOTESTCOUNT is the test-cache control knob for the routine runs (`test`,
-# `test-be`, `test-fe`, `test-changed`). EMPTY by default — Go's test cache
+# `test-changed`). EMPTY by default — Go's test cache
 # stays ON, the cheapest form of "test what changed": the cache key covers
 # the package's source and transitive dependencies by content, and the
 # files and directories a test reads or stats by stat info (mtime, size),
@@ -44,7 +44,7 @@ GOSRCDIRS := "cmd internal"
 GOTESTCOUNT := ""
 
 # GOTESTTIMEOUT is the per-package ceiling for every recipe that can reach
-# the sim package — `test` (and test-be/test-nocache), `test-run`,
+# the sim package — `test` (and test-nocache), `test-run`,
 # `test-changed`. internal/scenarios/sim measured 1508.8s on a quiet
 # machine; 60m leaves headroom for a contended box without turning a genuine
 # hang into a 30-minute-later discovery. test-race deliberately does not use
@@ -61,8 +61,7 @@ RECALL_MADLIBS_DATA := "internal/scenarios/testdata/recall_madlibs"
 # It compiles in TWO steps and both are load-bearing. `go build {{GOPKGS}}`
 # type-checks EVERY package; building only ./cmd walks the import graph from
 # main, so a package nothing imports yet is never compiled and an edit gate
-# run against it passes vacuously (internal/term was written and "gated"
-# that way once). Multi-package `go build` discards its objects — it is
+# run against it passes vacuously. Multi-package `go build` discards its objects — it is
 # exactly a compile check. It runs first so the broadest check fails
 # fastest; the linked binary follows, nearly free off the build cache.
 #
@@ -154,6 +153,10 @@ add-dependency mod:
     go get {{ mod }}
     go mod tidy
 
+# Prune and complete go.mod/go.sum to the current imports (go mod tidy).
+tidy-dependencies:
+    go mod tidy
+
 # recall-madlibs regenerates the derived recall-fidelity query sets from the
 # committed templates: hand-crafted C.2/C.3 templates -> queries.json
 # (consumed by the default `just test`), and the Wikipedia-corpus templates
@@ -241,78 +244,6 @@ test: _test-body
 # `test` with the test cache DEFEATED — the same full suite, forced clean.
 test-nocache: (_test-body "--count=1")
 
-# Alias of `test`, named for symmetry with test-fe.
-test-be: test
-
-# FE_SCOPE_PREFIXES are the path prefixes a front-end-only change may touch.
-# internal/version/ is included because every front-end change bumps
-# version.FrontEnd (CONVENTIONS.md's bump contract), and it is also imported by
-# substrate packages — see FE_TESTPKGS. internal/shell/ and internal/term/
-# qualify by the same leaf rule: nothing outside this set imports them.
-# Before adding a further prefix here, verify the leaf property holds:
-# `grep -rl personant/internal/<pkg>` must show importers only from within
-# this set — widening this list is what makes the guard untrustworthy.
-FE_SCOPE_PREFIXES := "cmd/ internal/chat/ internal/version/ internal/shell/ internal/term/"
-
-# FE_TESTPKGS is the package set `test-fe` runs: the front-end leaf plus the
-# cheap substrate importers of internal/version, insurance against a
-# version-const bump breaking a substrate assertion. Measured ~15-16s total
-# vs ~29 minutes for the full suite. ./internal/memops is EXACT, deliberately
-# not ./internal/memops/... — the /... form pulls in fileadapter, whose
-# suite alone is 229s and pure substrate; do not "fix" this to /....
-FE_TESTPKGS := "./cmd/... ./internal/chat/... ./internal/version/... \
-                ./internal/shell/... ./internal/term/... \
-                ./internal/eventlog/... ./internal/store/... ./internal/memops"
-
-# fe-scope-check is the MECHANICAL guard that makes `test-fe` safe to trust:
-# it refuses if the working tree contains any changed .go file outside
-# FE_SCOPE_PREFIXES, so scope classification is a property of the diff
-# rather than self-assessment. A clean tree passes.
-#
-# Changed set = `git diff --name-only HEAD` (staged + unstaged + deletions)
-# plus untracked files, the latter scoped to GOSRCDIRS so it never descends
-# into test/api_keys (mode 0700, benn-owned).
-#
-# LIMITATION, stated rather than left implicit: this inspects GO SOURCE
-# ONLY. A justfile, doc, testdata, or go.mod edit does not trip it — those
-# are either build tooling (this change), covered by the mechanical-diff
-# exception, or the caller's judgment.
-#
-# Mechanical scope guard behind `test-fe` — refuses on any non-front-end Go diff.
-fe-scope-check:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    changed="$( { git diff --name-only HEAD; \
-                  git ls-files --others --exclude-standard -- {{ GOSRCDIRS }}; } \
-                | grep '\.go$' | sort -u || true )"
-    outside=""
-    for f in ${changed}; do
-      ok=""
-      for p in {{ FE_SCOPE_PREFIXES }}; do
-        case "${f}" in "${p}"*) ok=1 ;; esac
-      done
-      [[ -n "${ok}" ]] || outside="${outside} ${f}"
-    done
-    if [[ -n "${outside}" ]]; then
-      echo "just test-fe REFUSED — changed Go files outside the front-end scope:"
-      for f in ${outside}; do echo "  ${f}"; done
-      echo "front-end scope is: {{ FE_SCOPE_PREFIXES }}"
-      echo "the front end IMPORTS the substrate, so a substrate change is not covered"
-      echo "by the fast target. run 'just test' (the checkpoint gate)."
-      exit 1
-    fi
-
-# DIAGNOSTIC (not a gate): scoped go vet + go test over FE_TESTPKGS, ~15s. The checkpoint gate is test.
-# Safe by STRUCTURE (fe-scope-check mechanically refuses anything
-# outside FE_SCOPE_PREFIXES), not by judgment. Mirrors test's build +
-# fmt-check prerequisites but NOT recall-madlibs — no package in
-# FE_TESTPKGS reads the generated mad-libs query set.
-#
-# DIAGNOSTIC (not a gate): scoped go vet + go test over FE_TESTPKGS, ~15s. The checkpoint gate is test.
-test-fe: build fmt-check fe-scope-check
-    go vet {{ FE_TESTPKGS }}
-    go test {{ FE_TESTPKGS }} {{ GOTESTCOUNT }}
-
 # Seconds, not minutes. RUN defaults to running everything in PKG.
 #   just test-run ./internal/scenarios TestDayOffThroughHarness
 #   just test-run ./internal/recall/scoring TestScanChunks
@@ -349,12 +280,6 @@ test-cache-why pkg run='.': build recall-madlibs
 # launches a goroutine in non-test code, or its own tests run >=2 goroutines
 # against shared state. -race instruments every package linked into a test
 # binary, so a single-goroutine package buys nothing.
-#   internal/chat            progress ticker + control.go signal goroutine
-#                             + term's pump, three goroutines over one
-#                             session's state
-#   internal/term             the terminal arbiter: one mutex serializing
-#                             every emitted byte, contended by the three
-#                             producers above
 #   internal/recall/measure  single indexer goroutine, atomic.Pointer
 #                             snapshot swap, job channel
 #   internal/model            SSE stream reader closeOnce/closeMu; mock mu
@@ -364,9 +289,6 @@ test-cache-why pkg run='.': build recall-madlibs
 #                             emit mutex, written from every goroutine above
 #   internal/scenarios        the memtel heap-watchdog goroutine — EXACT,
 #                             not /..., see the sim exclusion below
-#   internal/shell             §4.4 trailer-reader goroutine; Runner.pgid
-#                             written on the REPL goroutine, read from the
-#                             signal handler
 # EXCLUDED so nobody "fixes" this later by broadening it:
 #   internal/scenarios/sim is ~1605s unraced; -race costs 2-10x, putting
 #     this in the hours for concurrency already covered above through a
@@ -377,9 +299,9 @@ test-cache-why pkg run='.': build recall-madlibs
 #   internal/turn, internal/store, internal/index, internal/crashpoint:
 #     checked and rejected — no non-test goroutine, no concurrent test.
 # Never point this at test/ — test/api_keys is mode 0700 and benn-owned.
-RACEPKGS := "./internal/chat/... ./internal/recall/measure/... ./internal/model/... \
+RACEPKGS := "./internal/recall/measure/... ./internal/model/... \
              ./internal/eventlog/... ./internal/metrics/... ./internal/log/... \
-             ./internal/shell/... ./internal/term/... ./internal/scenarios"
+             ./internal/scenarios"
 
 # LIST is test-changed's print-only escape hatch (see its comment below).
 LIST := env_var_or_default("LIST", "")

@@ -38,10 +38,8 @@ just build          # compiles every package and produces bin/personant
 ```
 
 `bin/personant` carries the memory-store commands (`init`, `index`, `verify`, `archive`, `version`;
-[`SPEC.md`](SPEC.md) §4.1), plus the self-built chat REPL and its `chat`, `ping` and `models` verbs
-([`ARCHITECTURE.md`](ARCHITECTURE.md) "Superseded code"). A bare `./bin/personant` still starts the
-REPL. Memory initializes at `~/.personant/` as a git repository; override with `$PERSONANT_HOME` or
-`--home`.
+[`SPEC.md`](SPEC.md) §4.1). Memory initializes at `~/.personant/` as a git repository; override with
+`$PERSONANT_HOME` or `--home`.
 
 ## How an opencode Session Relates to Memory
 
@@ -54,12 +52,6 @@ opencode's configuration, Personant's own settings and the memory home: [`SPEC.m
 §8.2.2 and §2.1; [`ARCHITECTURE.md`](ARCHITECTURE.md) "Single spelunking location". The current
 code does not match them yet (ROADMAP A12).
 
-## Chat REPL
-
-The self-built chat REPL (`internal/chat`, `internal/term`, `internal/shell`, `internal/tools`,
-`internal/tools/web`) remains in the tree until ROADMAP B1 retires it. It is not the product. Which
-of its memory commands return under opencode is open (U4).
-
 ## Build Targets
 
 ```sh
@@ -68,7 +60,6 @@ just test-run <pkg> [re]  # run only the touched test(s) (edit gate, step 2)
 just test                 # checkpoint gate: fmt-check + go vet + go test, cache-scoped
 just test-changed         # diagnostic: only the packages the working tree could affect
 just test-nocache         # `test` with the test cache defeated
-just test-fe              # diagnostic, not a gate: scoped run for a front-end change (U6)
 just test-race            # diagnostic: -race over the packages with concurrent code
 just fmt                  # gofmt -w over cmd/ and internal/
 just fmt-check            # fail on gofmt drift
@@ -186,6 +177,5 @@ writes" and "Substrate non-negotiables".
 | `github.com/go-git/go-git/v5` | go-git contributors | Apache 2.0 | `internal/autogit` — autonomic git operations on `~/.personant/` |
 | `github.com/go-git/go-billy/v5` | go-git contributors | Apache 2.0 | `internal/autogit`, `internal/store` — filesystem layer under go-git |
 | `golang.org/x/net` | The Go Authors | BSD 3-Clause | `web.fetch` — HTML parsing (self-built harness) |
-| `golang.org/x/sys` | The Go Authors | BSD 3-Clause | `internal/term` — terminal control for the chat REPL (self-built harness) |
 | `github.com/spf13/cobra` | Steve Francia | Apache 2.0 | CLI subcommand dispatch (`cmd/`) |
 | `gopkg.in/yaml.v3` | Canonical Ltd. | MIT / Apache 2.0 | Thread frontmatter read/write |

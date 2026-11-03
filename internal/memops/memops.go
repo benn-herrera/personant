@@ -3,9 +3,8 @@
 //
 // # Port-and-adapter boundary
 //
-// The application layer (internal/turn, internal/recall, internal/workset,
-// internal/chat) depends on MemoryOps, not on any concrete substrate
-// package. One adapter ships today — internal/memops/fileadapter, which
+// The application layer (internal/turn, internal/recall, internal/workset)
+// depends on MemoryOps, not on any concrete substrate package. One adapter ships today — internal/memops/fileadapter, which
 // wraps internal/store and its derived-index helpers; future adapters can
 // swap in without rewriting callers or tests.
 //

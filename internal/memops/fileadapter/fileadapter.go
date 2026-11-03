@@ -12,9 +12,8 @@
 // # Caller migration is out of scope here (Phase A.2)
 //
 // This package is added alongside the existing application packages
-// (internal/turn, internal/recall/measure, internal/workset,
-// internal/chat) that still call internal/store directly. Caller
-// migration happens in A.3+.
+// (internal/turn, internal/recall/measure, internal/workset) that still
+// call internal/store directly. Caller migration happens in A.3+.
 package fileadapter
 
 import (

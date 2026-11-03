@@ -296,11 +296,6 @@ type ProjectDigest struct {
 // APIKey, which the runtime is the sole consumer of — it must never
 // appear in a log line, error message, or LLM-bound context.
 
-// LocalProviderName is the conventional providers.toml name for the
-// on-machine OpenAI-compatible endpoint (e.g. llama-server). It is the
-// default provider for CLI subcommands when --provider is unset.
-const LocalProviderName = "local"
-
 // Provider kinds and wire protocols. A pool entry declares both, and
 // both are REQUIRED: what the endpoint IS (`type`) and how to talk to
 // it (`api`). There is deliberately no default for either. A default

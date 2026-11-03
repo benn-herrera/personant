@@ -5,12 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"personant/internal/chat"
 	"personant/internal/eventlog"
 	"personant/internal/log"
 	"personant/internal/memops"
@@ -35,44 +33,9 @@ var rootCmd = &cobra.Command{
 	Use:   "personant",
 	Short: "a persistent-context ai agent",
 	Long: `Personant is a single-user agent runtime with persistent working
-memory across projects. With no subcommand it drops into an interactive
-chat session (see 'personant chat'). Subcommands handle scaffolding,
-indexing, verification, and provider-connectivity smoke tests.`,
-	// Bare invocation drops into the chat REPL with default options.
-	// '--help'/'-h' still prints help (cobra short-circuits before RunE).
-	RunE: func(cmd *cobra.Command, args []string) error {
-		ops, paths, err := openHome()
-		if err != nil {
-			return err
-		}
-		return chat.Run(withStdStreams(chat.Options{
-			Ops:         ops,
-			HistoryFile: historyPath(paths),
-		}))
-	},
+memory across projects. Subcommands handle scaffolding, indexing and
+verification.`,
 	SilenceUsage: true,
-}
-
-// withStdStreams points a session's options at the process's real file
-// descriptors. It lives here, in the composition root, because naming
-// os.Stdin/Stdout/Stderr is a WIRING decision: internal/chat holds terminal
-// policy and internal/term holds the fds, and neither has any business
-// deciding which three streams a session runs on. Tests supply their own.
-//
-// One helper for both chat entry points (`personant` bare and `personant
-// chat`) rather than the same three assignments twice — and it is the only
-// place in cmd/ that names the session's streams.
-func withStdStreams(o chat.Options) chat.Options {
-	o.Stdin = os.Stdin
-	o.Stdout = os.Stdout
-	o.Stderr = os.Stderr
-	return o
-}
-
-// historyPath is the REPL line-edit history file (§2.1 <home>/history,
-// §4.3.1). Operational state; the store gitignores it alongside last-active.
-func historyPath(paths store.PersonantPaths) string {
-	return filepath.Join(paths.Home, "history")
 }
 
 // resolvePaths honors --home for tests; otherwise uses the standard
@@ -102,10 +65,8 @@ func checkHomeFormat(ctx context.Context, ops memops.MemoryOps) (memops.HomeForm
 // openHome resolves the home paths, builds the substrate adapter, and runs
 // the §9.1 on-disk format gate before returning it. It is the single
 // process-boundary entry point for opening the substrate: reconciledOps
-// adds Reconcile on top of it for the CLI verbs, and the two chat entry
-// points hand the adapter it returns to chat.Run. A gate only some callers
-// run is not a gate, which is why chat.Run takes an already-opened adapter
-// rather than resolving one itself.
+// adds Reconcile on top of it for the CLI verbs. A gate only some callers
+// run is not a gate.
 //
 // ORDERING INVARIANT (load-bearing): the gate runs BEFORE Reconcile.
 // Reconcile is crash recovery — it resets the worktree to a recovery
@@ -125,9 +86,7 @@ func openHome() (*fileadapter.FileAdapter, store.PersonantPaths, error) {
 
 	// Greenfield: no home on disk yet. There is no layout to adopt forward
 	// and no event log to append to — writing either here would scaffold,
-	// and scaffolding belongs to `personant init` (and, on the chat path,
-	// chat.Run's idempotent Init, which writes the canonical stamp itself).
-	// The gate above still ran; an absent stamp cannot be newer than this
+	// and scaffolding belongs to `personant init`. The gate above still ran; an absent stamp cannot be newer than this
 	// binary, so nothing is waved through.
 	if _, serr := os.Stat(paths.Home); errors.Is(serr, os.ErrNotExist) {
 		return ops, paths, nil
@@ -183,14 +142,13 @@ func warnNewerHomeAccepted(paths store.PersonantPaths, onDisk int) {
 // substrate state must open through here: operating on an unreconciled
 // home would read torn canonical state back as truth (verify reporting
 // phantom errors, index rebuild baking crash debris into derived files).
-// Same refuse-on-error semantics as chat: a Reconcile failure refuses the
-// verb; the recovery marker is left behind so a retry converges. On a
+// A Reconcile failure refuses the verb; the recovery marker is left behind so a retry converges. On a
 // home that was never initialized Reconcile fails to resolve HEAD — that
 // refusal is honest too (nothing to operate on); verbs do NOT scaffold
 // (`personant init` owns that).
 //
 // A non-routine reconcile prints one terse stderr note; the full detail
-// is in the event log and, interactively, the chat banner.
+// is in the event log.
 func reconciledOps() (*fileadapter.FileAdapter, error) {
 	ops, _, err := openHome()
 	if err != nil {

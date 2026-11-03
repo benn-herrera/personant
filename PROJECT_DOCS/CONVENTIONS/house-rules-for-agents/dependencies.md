@@ -17,9 +17,6 @@ dependencies". `go.mod` is the catalog.
   5692c75.)
 - **Pending removal with their consumers** (ROADMAP.md B1, "Retire the self-built harness"):
   `codeberg.org/readeck/go-readability/v2` and `github.com/JohannesKaufmann/html-to-markdown/v2`
-  serve only `internal/tools/web/`. Do not reintroduce `github.com/peterh/liner` or any other
-  library that takes the process's terminal fds, termios or `SIGWINCH` handling: `internal/term/`
-  owns the terminal (origin: commit c1ddea2). Both entries go in the change that removes their
-  consumer.
+  serve only `internal/tools/web/`. Both entries go in the change that removes their consumer.
 - **Application code talks to `MemoryOps`, not to the substrate directly.** Package-level detail
   and the substrate-free exceptions: ARCHITECTURE "Port-and-adapter at the substrate boundary".
