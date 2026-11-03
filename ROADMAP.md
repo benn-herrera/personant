@@ -274,18 +274,22 @@ decisions named in them.
   claim later swept by a managed server; the resume budget, background-job, subagent and shell
   recovery; how a real model answers a resumed request. (`OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md` §6.)
 - [ ] **B10. Memory vetting build.** Review of memory text before commit by a model applying a fixed
-  rubric; a single write path for behavior memory with provenance on every outcome; a
+  rubric; a single write path for behavior and process memory with provenance on every outcome; a
   user-configurable acceptance policy that never blocks a turn; periodic re-review of standing
-  behavior memory; mechanical write checks and batch content review for career memory. Open within
+  behavior and process memory; mechanical write checks and batch content review for career memory. Open within
   it: the default acceptance policy, the rubric's content, which model reviews (through opencode, **U5**), the
   re-review cadence. (SPEC §1.8; ARCHITECTURE "Memory vetting".)
 - [ ] **B11. Directive accrual aggregation.** The cross-project digest, fallback dissection and
   directive accrual (the old "Phase 5"): accrual may propose a behavior-memory change only from
   patterns aggregated across projects, through the B10 review path. Define the boundary between
-  behavior memory and project-convention career memory: every behavior adjustment learned in a
-  project resolves to exactly one of (a) promotion to universal behavior memory, or (b)
-  reformulation as a project convention rule, never a per-project behavior variant. (SPEC §1.8;
-  THESIS "Three kinds of memory"; ARCHITECTURE "Personalization through directive accrual".)
+  behavior memory and process memory: every behavior adjustment learned in a project resolves to
+  exactly one of (a) promotion to universal behavior memory, or (b) a process-memory proposal
+  scoped to a project category or role, never a per-project behavior variant. Build the
+  process-memory store it proposes into: directive text whose changes take the B10 review path.
+  Open within it: the store's file layout and scope values, its place in directive precedence, how
+  the categories that apply to a project and the active role are determined (B7's per-agent
+  directives are a candidate for role). (SPEC §1.8; THESIS "Three kinds of memory"; ARCHITECTURE "Personalization through directive
+  accrual".)
 - [ ] **B12. Enforcement of "the LLM never touches the home's git tree".** opencode's shell reaches
   `~/.personant/`, so the statement cannot hold as written. Decide whether to enforce it (for
   example a plugin hook on shell tool calls) or restate it as intention in SPEC and ARCHITECTURE.

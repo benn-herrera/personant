@@ -6,8 +6,11 @@ Behavior tuning lives in inspectable directive files that accrue from feedback s
 - `directives/user.md` — user-wide overrides. Accrual may propose a change here only from patterns
   aggregated across projects (explicit instructions, decline categorizations and accept/decline
   statistics are inputs to the aggregate, not single-project writers).
-- `directives/prj_<n>/*.md` — project-specific tuning. A pattern seen in one project stays
-  here or in career memory; it never reaches `user.md` or the defaults.
+- `directives/prj_<n>/*.md` — project-specific tuning.
+
+A pattern seen in one project never reaches `user.md` or the defaults; it becomes a process-memory
+proposal or career memory (SPEC §1.8). Process-memory directive files do not exist yet (SPEC §1.8
+`Open:`).
 
 **The user can read what the agent learned and correct it.** Every accrual proposal goes through
 "Memory vetting", the same review and acceptance path as any other. (Spec §1.8, §2.6.)

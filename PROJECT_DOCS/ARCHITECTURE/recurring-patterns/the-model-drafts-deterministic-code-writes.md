@@ -7,7 +7,7 @@ it and writes it.
   and spine entry (SPEC §3.5).
 - **Recall:** a deterministic match scores candidates; the fetch into Layer B is an explicit
   deterministic operation (SPEC §3.4).
-- **Behavior memory:** every proposed change goes through one reviewed write path (see "Memory
+- **Behavior and process memory:** every proposed change goes through one reviewed write path (see "Memory
   vetting").
 
 A confirmation the user clears reflexively verifies nothing, so a routine closure and a recall

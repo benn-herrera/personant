@@ -25,10 +25,8 @@ User has accepted 12/15 of last cross-project recall offers; threshold tightened
 A change proposed to the defaults or user-wide directive file, by accrual or any other proposer, is
 a behavior-memory change and follows [§1.8](../../1-operating-model/1.8-memory-vetting.md); a user's direct edit is not prevented. Accrual may
 propose such a change only from patterns aggregated across projects; a pattern observed in one
-project stays project-scoped ([§1.8](../../1-operating-model/1.8-memory-vetting.md)).
-
-**Open:** whether a change to a project-scoped directive file is a behavior-memory change (the
-behavior/convention boundary of [§1.8](../../1-operating-model/1.8-memory-vetting.md)).
+project never reaches those files ([§1.8](../../1-operating-model/1.8-memory-vetting.md)). Process memory is also directive text; a change
+proposed to it follows [§1.8](../../1-operating-model/1.8-memory-vetting.md).
 
 **Directive precedence** (highest wins):
 1. Project-scoped (`directives/prj_<n>/project.md`)
