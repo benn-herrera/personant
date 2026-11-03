@@ -214,7 +214,7 @@ decisions named in them.
   `version.FrontEnd`, `test-fe` and `fe-scope-check` (**U6**); then delete the readability,
   html-to-markdown, terminal/signal and `langchaingo/llms` dependencies and CONVENTIONS "Free-API
   citizenship". The old systems are not a fallback: nothing waits on the plugin route to remove
-  them. Plan: `ROADMAP_PLANS/strip-self-built-harness.md`.
+  them. Plan: `ROADMAP_PLANS/strip-self-built-harness/entry-point.md`.
 - [ ] **B2. `recall_query_latency_*` does not measure recall.** The sim's p50/p95/p99 gauges
   (`metricRecallQueryLatencyP50/P95/P99`, `internal/scenarios/sim/workload.go`, populated in
   `sim/telemetry.go`) copy turn-duration percentiles instead of timing recall queries. (SPEC §9.4.)
@@ -441,6 +441,6 @@ Concrete, mostly single-package items; independent of the sequence above unless 
   folio entries only once the copies are sealed in a day-commit; follows the excerpt-folio plan.
   Open: whether a power-loss-torn loose copy is accepted as a residual or readers fall back to the
   folio.
-- `strip-self-built-harness.md` — removes the self-built REPL, tools, terminal and provider
+- `strip-self-built-harness/` — removes the self-built REPL, tools, terminal and provider
   handling with their tests, and reshapes config for a memory service under opencode (extends B1).
-  U5 and U6 are decided; waits on the config-migration stance and whether to strip before A5–A12.
+  Reviewed; awaiting approval.
