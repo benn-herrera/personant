@@ -96,24 +96,9 @@ PYBIN := if os() == "windows" { "Scripts" } else { "bin" }
 EXE := if os() == "windows" { ".exe" } else { "" }
 VENV_PYTHON := "\"" + VENV / PYBIN / "python" + EXE + "\""
 PIP := "\"" + VENV / PYBIN / "pip" + EXE + "\""
-DOCDICER := "\"" + VENV / PYBIN / "docdicer" + EXE + "\""
 ADJAGENT := "\"" + VENV / PYBIN / "adjagent" + EXE + "\""
 
-DOCDICER_VER := "0.7.1"
-ADJAGENT_VER := "0.13.0"
-
-[doc("split a markdown monolith by heading level into linked leaves under out (optional link map TSV), then check the leaves reassemble it and every relative link resolves")]
-dice-doc monolith out map="": _venv
-    {{DOCDICER}} dice-doc "{{monolith}}" "{{out}}" "{{map}}"
-
-[doc("dice the documents listed in a manifest TSV, read from src-dir, into linked volumes, with intermediates in work-dir, then verify all trees (docdicer)")]
-dice-docs manifest src work: _venv
-    {{DOCDICER}} dice-docs "{{manifest}}" "{{src}}" "{{work}}"
-
-[doc("check every relative link and #anchor under PROJECT_DOCS and the top-level *.md, and that each diced tree's documents are linked from their parent and reachable (docdicer)")]
-check-links: _venv
-    {{DOCDICER}} check-links PROJECT_DOCS *.md
-    {{DOCDICER}} check-tree PROJECT_DOCS
+ADJAGENT_VER := "0.13.1"
 
 agents: _venv
   {{ADJAGENT}} install "$(pwd)" --harness=claude
@@ -121,9 +106,7 @@ agents: _venv
 
 [private]
 _pip_deps:
-  @{{PIP}} install \
-    "git+https://github.com/benn-herrera/docdicer@v{{DOCDICER_VER}}" \
-    "git+https://github.com/benn-herrera/adjagent@v{{ADJAGENT_VER}}"
+  @{{PIP}} install "git+https://github.com/benn-herrera/adjagent@v{{ADJAGENT_VER}}"
 
 [private]
 _venv:
