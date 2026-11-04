@@ -531,3 +531,5 @@ integration-test: build
 # Remove the compiled binary.
 clean:
     rm -f {{ BINDIR }}/personant
+
+import? '.opencode/skills/docdicer/tools/runner-snippets/docdicer.just'
