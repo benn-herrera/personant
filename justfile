@@ -90,51 +90,56 @@ fmt-check:
       exit 1
     fi
 
-AGENTS_REPO := "https://github.com/benn-herrera/adjagent.git"
-AGENTS_DIR := "." + file_stem(AGENTS_REPO)
-AGENTS_VER := "v0.12.1"
-[doc("updates and installs agent set from adjagents public repo")]
-agents:
-  @mkdir -p "{{parent_directory(AGENTS_DIR)}}"
-  @[[ -d "{{AGENTS_DIR}}" ]] && git -C "{{AGENTS_DIR}}" fetch --tags || git -C {{parent_directory(AGENTS_DIR)}} clone "{{AGENTS_REPO}}" "{{AGENTS_DIR}}"
-  @git -c "advice.detachedHead=false" -C "{{AGENTS_DIR}}" checkout "{{AGENTS_VER}}"
-  just --justfile "{{AGENTS_DIR}}/justfile" install "$(pwd)" --harness=claude
-  just --justfile "{{AGENTS_DIR}}/justfile" install "$(pwd)" --harness=opencode --model-tier-map=default
-
 PROJECT_ROOT := justfile_dir()
 VENV := PROJECT_ROOT / ".venv"
 PYBIN := if os() == "windows" { "Scripts" } else { "bin" }
 EXE := if os() == "windows" { ".exe" } else { "" }
-VENV_PYTHON := VENV / PYBIN / "python" + EXE
+VENV_PYTHON := "\"" + VENV / PYBIN / "python" + EXE + "\""
+PIP := "\"" + VENV / PYBIN / "pip" + EXE + "\""
+DOCDICER := "\"" + VENV / PYBIN / "docdicer" + EXE + "\""
+ADJAGENT := "\"" + VENV / PYBIN / "adjagent" + EXE + "\""
+
+DOCDICER_VER := "0.7.1"
+ADJAGENT_VER := "0.13.0"
 
 [doc("split a markdown monolith by heading level into linked leaves under out (optional link map TSV), then check the leaves reassemble it and every relative link resolves")]
 dice-doc monolith out map="": _venv
-    @"{{VENV_PYTHON}}" -m docdicer dice-doc "{{monolith}}" "{{out}}" "{{map}}"
+    {{DOCDICER}} dice-doc "{{monolith}}" "{{out}}" "{{map}}"
 
 [doc("dice the documents listed in a manifest TSV, read from src-dir, into linked volumes, with intermediates in work-dir, then verify all trees (docdicer)")]
 dice-docs manifest src work: _venv
-    @"{{VENV_PYTHON}}" -m docdicer dice-docs "{{manifest}}" "{{src}}" "{{work}}"
+    {{DOCDICER}} dice-docs "{{manifest}}" "{{src}}" "{{work}}"
 
 [doc("check every relative link and #anchor under PROJECT_DOCS and the top-level *.md, and that each diced tree's documents are linked from their parent and reachable (docdicer)")]
 check-links: _venv
-    @"{{VENV_PYTHON}}" -m docdicer check-links PROJECT_DOCS *.md
-    @"{{VENV_PYTHON}}" -m docdicer check-tree PROJECT_DOCS
+    {{DOCDICER}} check-links PROJECT_DOCS *.md
+    {{DOCDICER}} check-tree PROJECT_DOCS
+
+agents: _venv
+  {{ADJAGENT}} install "$(pwd)" --harness=claude
+  {{ADJAGENT}} install "$(pwd)" --harness=opencode --model-tier-map=default
+
+[private]
+_pip_deps:
+  @{{PIP}} install \
+    "git+https://github.com/benn-herrera/docdicer@v{{DOCDICER_VER}}" \
+    "git+https://github.com/benn-herrera/adjagent@v{{ADJAGENT_VER}}"
 
 [private]
 _venv:
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "{{VENV_PYTHON}}" ]]; then
+  if [[ ! -x {{VENV_PYTHON}} ]]; then
     python3 -m venv "{{VENV}}"
-    "{{VENV_PYTHON}}" -m pip install pip --upgrade
-    "{{VENV_PYTHON}}" -m pip install git+https://github.com/benn-herrera/docdicer
+    {{PIP}} install pip --upgrade
+    just --justfile "{{justfile()}}" _pip_deps
   fi
 
 # NOT the tool for adding one dependency (see add-dependency) — this is
 # deliberate whole-graph churn.
 #
 # Upgrade every dependency to its latest version (go get -u ./...).
-update-dependencies:
+update-dependencies: _pip_deps
     go mod tidy
     go get -u ./...
     go mod tidy
