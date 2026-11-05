@@ -98,15 +98,12 @@ VENV_PYTHON := "\"" + VENV / PYBIN / "python" + EXE + "\""
 PIP := "\"" + VENV / PYBIN / "pip" + EXE + "\""
 ADJAGENT := "\"" + VENV / PYBIN / "adjagent" + EXE + "\""
 
-ADJAGENT_VER := "0.13.1"
+ADJAGENT_VER := "0.14.0"
 
 agents: _venv
-  {{ADJAGENT}} install "$(pwd)" --harness=claude
-  {{ADJAGENT}} install "$(pwd)" --harness=opencode --model-tier-map=default
-
-[private]
-_pip_deps:
   @{{PIP}} install "git+https://github.com/benn-herrera/adjagent@v{{ADJAGENT_VER}}"
+  {{ADJAGENT}} install "$(pwd)" --harness=claude
+  {{ADJAGENT}} install "$(pwd)" --harness=opencode
 
 [private]
 _venv:
@@ -115,14 +112,13 @@ _venv:
   if [[ ! -x {{VENV_PYTHON}} ]]; then
     python3 -m venv "{{VENV}}"
     {{PIP}} install pip --upgrade
-    just --justfile "{{justfile()}}" _pip_deps
   fi
 
 # NOT the tool for adding one dependency (see add-dependency) — this is
 # deliberate whole-graph churn.
 #
 # Upgrade every dependency to its latest version (go get -u ./...).
-update-dependencies: _pip_deps
+update-dependencies:
     go mod tidy
     go get -u ./...
     go mod tidy
