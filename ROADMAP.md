@@ -212,8 +212,7 @@ decisions named in them.
   `internal/shell`, `internal/tools` and `internal/tools/web`, `internal/ping`,
   `internal/modellist` and the provider pool, the `chat`, `ping` and `models` verbs (**U5**), and
   `version.FrontEnd`, `test-fe` and `fe-scope-check` (**U6**); then delete the readability,
-  html-to-markdown, terminal/signal and `langchaingo/llms` dependencies and CONVENTIONS "Free-API
-  citizenship". The old systems are not a fallback: nothing waits on the plugin route to remove
+  html-to-markdown, terminal/signal and `langchaingo/llms` dependencies. The old systems are not a fallback: nothing waits on the plugin route to remove
   them. Plan: `ACTIVE_PLAN/entry-point.md`.
 - [ ] **B2. `recall_query_latency_*` does not measure recall.** The sim's p50/p95/p99 gauges
   (`metricRecallQueryLatencyP50/P95/P99`, `internal/scenarios/sim/workload.go`, populated in

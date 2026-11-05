@@ -8,7 +8,7 @@ Shared rules:
   (`just test`), runs `just sim` where the done-line names it, and writes the commit message from
   the coder's report.
 - Each package re-runs its evidence commands at dispatch, and lands its section-2 rows.
-- Ratings follow CONVENTIONS "Plan work rating and dispatch".
+- Ratings follow the `dev-process` skill's *Dispatch* section.
 - A done-line grep must return nothing, or only the hits it names. Use `-w`, never `\b`.
 - Quoted current text ("X" → "Y") is the file's text with its line breaks removed; match it as
   it wraps in the file, and wrap the replacement to the file's width.

@@ -5,6 +5,6 @@ format are defined in SPEC §9.1. Their current values live in `internal/version
 restated in prose; `personant version` prints them. The substrate line is semver; its MINOR bumps
 are developer fiat at the milestone gates.
 
-Never report acceptance from a green run alone: an acceptance claim states its coverage (simulated,
-modeled, parked) as SPEC §9.1's honesty clause requires.
+An acceptance claim states its coverage (simulated, modeled, parked) as SPEC §9.1's honesty clause
+requires.
 

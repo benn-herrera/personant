@@ -22,15 +22,3 @@ check (ARCHITECTURE "Plugin route", "Pinned release").
   5. **Prefer in-process contention.** `go test -cpu 8,8,...` and `-count` create scheduler pressure
      inside the test process and leak nothing; external burners are a last resort and carry rules
      1–4.
-- **Free-API citizenship is a hard requirement** (origin: commit 8e62cb4). Code that talks to a
-  free, volunteer- or donor-funded API complies with all of that service's etiquette and required
-  behaviors:
-  1. **Read the service's published policy before coding against it**, and record its specific
-     obligations in the code's doc comment.
-  2. **Descriptive User-Agent with contact info**, sourced from configuration — never compiled-in
-     personal data. Code for a service that requires contact info refuses to run without it
-     configured, with a message naming the setting.
-  3. **Serial requests per host**, plus any service-specific minimum spacing.
-  4. **Honor `429`/`503` `Retry-After`**: one retry after the stated delay, then a clean error.
-  5. **A local cap on requests per run**, so a loop cannot turn one request into unbounded upstream
-     load.

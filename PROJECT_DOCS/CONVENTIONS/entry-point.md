@@ -6,17 +6,14 @@ Must-see:
 
 - No user-facing behaviors or outcomes are designed here, that belongs to SPEC
 - No project mechanisms or code structure are put forth, that belongs to ARCHITECTURE
-- Edit PROJECT_DOCS/ leaves, never the root pointer files ([Project Documents](project-documents.md))
 - Always read [Two gates](build-test/two-gates-do-not-conflate-them.md) before choosing a gate check
 
 Contents:
 
 - [Before a change](before-a-change.md)
 - [Plan & Execute Process](plan-execute-process/index.md)
-  - [Post-sprint review](plan-execute-process/post-sprint-review.md)
+  - [Simulation harness gates](plan-execute-process/sim-harness-gates.md)
   - [Probe work](plan-execute-process/probe-work.md)
-  - [Plan work rating and dispatch](plan-execute-process/plan-work-rating-and-dispatch.md)
-  - [Plan dispatchability](plan-execute-process/plan-dispatchability.md)
 - [Language constraints](language-constraints/index.md)
   - [Memory service: Go](language-constraints/memory-service-go.md)
   - [Plugin: TypeScript, in `opencode-plugin/` and nowhere else](language-constraints/typescript-usage-limited-to-plugin.md)
@@ -34,6 +31,4 @@ Contents:
   - [Match the data model](house-rules-for-agents/match-the-data-model.md)
   - [Serialization format: legible to whoever is debugging](house-rules-for-agents/serialized-data-is-debuggable.md)
   - [The opencode source clone (`../opencode`) is read-only](house-rules-for-agents/opencode-clone-referent-only.md)
-- [Project documents live in `PROJECT_DOCS/`](project-documents.md)
 - [Document conventions](document-conventions.md)
-- [Section and rule heading brevity](section-and-rule-heading-brevity.md)
