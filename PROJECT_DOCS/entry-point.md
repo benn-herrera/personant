@@ -36,9 +36,8 @@ control. The agent's precious memory space is not for filling with every revisio
 ever worked in or every document ever edited. That is what version control is for.
 
 From a project, memory keeps only lessons worth carrying forward, filed under the kind of memory
-they change. A lesson about how work is done goes to process memory; a lesson about what to reach
-for goes to career memory. A bad result is not kept for its own sake, only when it is a notable
-attractive nuisance: something that will look like a good idea again.
+they change, not the project they came from. Memory exists to steer future choices, not to record
+past ones: a failure is kept only as a warning against repeating it.
 
 ### Behavior and process change only deliberately
 
@@ -46,8 +45,7 @@ Behavior and process changes are not automatic. They are chosen deliberately, ap
 deliberately, reviewed over time, and modified as needs dictate and as the inhabiting models
 evolve.
 
-Project work never writes behavior memory, and never writes process memory directly: a project may
-propose a process change, and adopting it is a deliberate, reviewed act. Projects differ in their
+Work informs how work is done; it does not change it unexamined. Projects differ in their
 techniques and in which category heuristics apply, never in who does the work.
 
 ---
