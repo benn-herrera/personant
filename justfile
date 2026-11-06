@@ -90,29 +90,18 @@ fmt-check:
       exit 1
     fi
 
-PROJECT_ROOT := justfile_dir()
-VENV := PROJECT_ROOT / ".venv"
-PYBIN := if os() == "windows" { "Scripts" } else { "bin" }
-EXE := if os() == "windows" { ".exe" } else { "" }
-VENV_PYTHON := "\"" + VENV / PYBIN / "python" + EXE + "\""
-PIP := "\"" + VENV / PYBIN / "pip" + EXE + "\""
-ADJAGENT := "\"" + VENV / PYBIN / "adjagent" + EXE + "\""
-
-ADJAGENT_VER := "0.14.0"
-
-agents: _venv
-  @{{PIP}} install "git+https://github.com/benn-herrera/adjagent@v{{ADJAGENT_VER}}"
-  {{ADJAGENT}} install "$(pwd)" --harness=claude
-  {{ADJAGENT}} install "$(pwd)" --harness=opencode
-
-[private]
-_venv:
+ADJAGENT_VER := "0.15.0"
+VENV := justfile_dir() / ".venv"
+PYTHON := "\"" + VENV + "/bin/python" + "\""
+ADJAGENT := "\"" + VENV + "/bin/adjagent" + "\""
+agents:
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x {{VENV_PYTHON}} ]]; then
-    python3 -m venv "{{VENV}}"
-    {{PIP}} install pip --upgrade
-  fi
+  [[ -x {{PYTHON}} ]] || python3 -m venv "{{VENV}}"
+  [[ -x {{ADJAGENT}} && "$({{ADJAGENT}} --version)" == "{{ADJAGENT_VER}}" ]] || \
+    {{PYTHON}} -m pip install --upgrade pip "git+https://github.com/benn-herrera/adjagent@v{{ADJAGENT_VER}}"
+  {{ADJAGENT}} install . --harness=claude
+  {{ADJAGENT}} install . --harness=opencode
 
 # NOT the tool for adding one dependency (see add-dependency) — this is
 # deliberate whole-graph churn.
