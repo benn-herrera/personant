@@ -7,7 +7,19 @@
 Personant is a context-management and long-lived memory system designed to run under unmodified
 [opencode](https://opencode.ai) as a server plugin plus a Go memory service. It owns what enters
 every model request, so the agent keeps one continuous career across sessions and projects.
-Purpose: [`THESIS.md`](THESIS.md); operating model: [`SPEC.md`](SPEC.md) §1.
+What it is built from and what is new: [`THESIS.md`](THESIS.md); operating model:
+[`SPEC.md`](SPEC.md) §1.
+
+## Why
+
+An assistant without a past cannot be a partner. Memory must be continuous — and it must be owned
+by something that does not forget.
+
+Today's assistants live in sessions. Each conversation starts from zero, and long ones are compacted
+until what mattered is gone. Whatever the model learned about the work, the person, or the last
+project was never kept.
+
+The aim is a durable assistant with one continuous career.
 
 ## Developer
 <https://keyoxide.org/wkd/benn@bennherrera.dev>

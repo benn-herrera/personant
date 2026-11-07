@@ -86,42 +86,43 @@ never breaks a kept session's scrollback, fork or revert.
 
 ### 1.8 Memory vetting
 
-Behavior and process memory text a model will later read is reviewed before it is committed.
+Personant can review behavior- and process-memory text a model will later read before it is
+committed. Whether the review runs, what is accepted and where accrual files a lesson are the
+user's policy: Personant ships defaults and imposes none.
 
 - **Reviewer.** A model applying a fixed rubric of the kind used for prompt-engineer review:
   clarity, scope, absolutes that will be over-applied, conflicts with existing entries, and wording
   another model would misread.
 - **Behavior and process memory have one write path.** Every proposed change, whatever proposes
-  it, goes through that review. The outcome is recorded with provenance: what proposed it, what the review found,
-  and what accepted it.
-- **Acceptance is a user-configurable policy** (for example manual acceptance, auto-accept on a
-  clean review, or auto-accept everything). Personant ships a default and does not force a policy.
-  A pending proposal never blocks a turn and never prompts the user unasked.
+  it, goes through it, and the review runs there when the policy enables it. The outcome is
+  recorded with provenance: what proposed it, what the review found, and what accepted it.
+- **The policy is user-configurable:** whether the review runs, and acceptance (for example manual
+  acceptance, auto-accept on a clean review, or auto-accept everything). A pending proposal never
+  blocks a turn and never prompts the user unasked.
 - **Direct edits** to the store are not prevented; the versioned store records them.
-- **Directive accrual** may propose a behavior-memory change only from patterns aggregated across
-  projects, since behavior concerns who does the work, which THESIS makes universal. A pattern
-  observed in one project never reaches `directives/user.md` or the defaults: a way of working
-  becomes a process-memory proposal, a technique becomes career memory. An accrual proposal goes
-  through the same review and acceptance path as any other proposal.
+- **Directive accrual** files a lesson by scope by default: a behavior-memory change is proposed
+  only from patterns aggregated across projects, and a pattern observed in one project becomes a
+  process-memory proposal (a way of working) or career memory (a technique), not a change to
+  `directives/user.md` or the defaults. The user's policy can change this routing. An accrual
+  proposal takes the same write path as any other.
 - **Process memory** is directive text (§2.6): practices for every project, and heuristics
-  scoped to a project category or to a role. Unlike behavior memory, a change to it may be proposed
-  from a single project. Project work never writes it directly; a proposal takes the same review
-  and acceptance path as any other.
+  scoped to a project category or to a role. A change to it may be proposed from a single project
+  and takes the same write path as any other.
 - **Threads**, the turn-to-turn record every kind of memory is drawn from, are written every turn
   and are not reviewed per write. They are protected by
   budgeted slots (§3.1), provenance on every entry, reversibility through the versioned store (§3.11),
   mechanical checks on write (schema, length, provenance, dedup), and batch content review in the
   consolidation cycle.
-- **Standing behavior and process memory** is re-reviewed periodically, because text that was
-  sound for one model can mislead the next.
+- **Standing behavior and process memory** is re-reviewed periodically when the policy enables
+  it, because text that was sound for one model can mislead the next.
 
-THESIS's rule is a separation of stores: a lesson learned in a project is filed under the kind of
-memory it changes, never behavior memory, and the project's own state and history stay in its
-workspace. A failed approach is kept only when it is an attractive nuisance: something that will
-look like a good idea again. Beyond the review path above, no approval gate, confirmation prompt or other enforcement
-mechanism is built from it.
+A lesson is filed under the kind of memory it changes (THESIS defines the kinds), and the
+project's own state and history stay in its workspace. A failed approach is kept only when it is
+an attractive nuisance: something that will look like a good idea again. Beyond the write path and
+the policy above, no approval gate, confirmation prompt or other enforcement mechanism is built.
 
-**Open:** the default acceptance policy.
+**Open:** the default policy: whether the review runs, the acceptance mode, and the re-review
+setting.
 
 **Open:** the review rubric's exact content.
 
@@ -291,7 +292,7 @@ parameters:
   closure.ack-mode: always          # override system default of auto
   recall.ack-mode: always           # override system default of banded
 last_modified: 2026-05-08T19:42:00-07:00
-modification_source: accrual        # one of: install | user-edit | accrual (§1.8: cross-project only)
+modification_source: accrual        # one of: install | user-edit | accrual (§1.8: cross-project by default)
 ---
 
 # User directives
@@ -304,9 +305,9 @@ User has accepted 12/15 of last cross-project recall offers; threshold tightened
 ```
 
 A change proposed to the defaults or user-wide directive file, by accrual or any other proposer, is
-a behavior-memory change and follows §1.8; a user's direct edit is not prevented. Accrual may
-propose such a change only from patterns aggregated across projects; a pattern observed in one
-project never reaches those files (§1.8). Process memory is also directive text; a change
+a behavior-memory change and follows §1.8; a user's direct edit is not prevented. By default
+(§1.8), accrual proposes such a change only from patterns aggregated across projects, and a
+pattern observed in one project does not reach those files. Process memory is also directive text; a change
 proposed to it follows §1.8.
 
 **Directive precedence** (highest wins):

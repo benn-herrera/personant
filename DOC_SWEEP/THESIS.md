@@ -30,7 +30,7 @@ system the piece resembles and is not — the direction work on it must not drif
 |---|---|---|
 | The opencode plugin | A host plugin that forwards hooks and events to a local service and applies its answers; holds no state | A harness, UI or agent runtime, or a second writer of memory |
 | The memory service | A single-writer local process reached over loopback HTTP + JSON | A network server, multi-tenant service or database server |
-| The memory store | A directory of markdown files with YAML frontmatter and JSONL record files, versioned in git | A database engine; SQLite only ever as a derived index |
+| The memory store | A directory of markdown files with YAML frontmatter and JSONL record files, versioned in git | A database engine, with SQLite only ever as a derived index; or an archive of the user's work, whose artifacts and history stay in the project's own version control |
 | Durability and crash recovery | A write-ahead journal and marker file, git commits as recovery points, an idempotent reconcile at startup | A transaction manager or a replication system |
 | The spine and the symbol index | JSONL index files derived from the canonical thread files and rebuildable from them | A search engine or a catalog service |
 | Symbol extraction | A regex pass plus normalization rules over each event's text | An NLP pipeline or an entity linker |
@@ -68,3 +68,27 @@ The effect they produce together: one continuous career — work picks up across
 across projects as if there had never been a boundary.
 
 The machinery behind both is standard, and listed above. SPEC defines them.
+
+## Three kinds of memory
+
+The memory that steers the agent comes in three kinds, separated by scope.
+
+- **Behavior memory**: how the agent thinks and conducts itself. General logic, comportment, and
+  its approach to novel and to familiar situations. Universal.
+- **Process memory**: how work is done on any project, whatever its topic. Practices that hold for
+  every project, plus heuristics scoped to a category of project (a language, a platform, a kind of
+  system) or to a role in the work (designing, implementing, reviewing). Its job is to raise the
+  floor, so that human guidance is a delta on it rather than a bootstrap from scratch.
+- **Career memory**: the toolkit. Techniques and solutions developed on specific projects that may
+  serve others, grown beyond what base training supplies.
+
+From a project, memory keeps only lessons worth carrying forward, filed under the kind of memory
+they change, not the project they came from.
+
+---
+
+Volumes:
+
+- [SPEC](SPEC/entry-point.md): Consumer-facing behaviors and outcomes
+- [ARCHITECTURE](ARCHITECTURE/entry-point.md): How this projects' implementation meets requirements designated by SPEC
+- [CONVENTIONS](CONVENTIONS/entry-point.md): Project-specific process and house rules

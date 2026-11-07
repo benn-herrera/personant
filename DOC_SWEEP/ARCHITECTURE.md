@@ -1203,13 +1203,13 @@ lifelong accrual**. (See "Project metadata"; Spec §4.5.)
 Behavior tuning lives in inspectable directive files that accrue from feedback signals:
 
 - `directives/defaults.md` — system defaults, baked in.
-- `directives/user.md` — user-wide overrides. Accrual may propose a change here only from patterns
-  aggregated across projects (explicit instructions, decline categorizations and accept/decline
+- `directives/user.md` — user-wide overrides. By default, accrual proposes a change here only from
+  patterns aggregated across projects (explicit instructions, decline categorizations and accept/decline
   statistics are inputs to the aggregate, not single-project writers).
 - `directives/prj_<n>/*.md` — project-specific tuning.
 
-A pattern seen in one project never reaches `user.md` or the defaults; it becomes a process-memory
-proposal or career memory (SPEC §1.8). Process-memory directive files do not exist yet (SPEC §1.8
+By default a pattern seen in one project does not reach `user.md` or the defaults; it becomes a
+process-memory proposal or career memory. The user's policy can change this routing (SPEC §1.8). Process-memory directive files do not exist yet (SPEC §1.8
 `Open:`).
 
 **The user can read what the agent learned and correct it.** Every accrual proposal goes through
