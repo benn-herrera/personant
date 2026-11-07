@@ -2,6 +2,12 @@
 
 Why this project has the shape it has
 
+This thesis does not:
+
+- Design user-facing behaviors or outcomes, that belongs to SPEC
+- Put forth project mechanisms or code structure, that belongs to ARCHITECTURE
+- Dictate project-specific process, that belongs to CONVENTIONS
+
 ## The thesis
 
 An assistant without a past cannot be a partner. Memory must be continuous — and it must be owned
