@@ -308,6 +308,11 @@ decisions named in them.
 
 Concrete, mostly single-package items; independent of the sequence above unless noted.
 
+- [ ] **Tracked-file content in the history repository.** The day commit puts each thread's
+  tracked-file store (`files.jsonl`, `files/`) in the history repository, so the content of every
+  file the assistant read or wrote is kept permanently. SPEC §3.9.1 requires the store to live only
+  in the store working tree and the turn repository. Barrier completion's restore of the store
+  from primary HEAD depends on the current behavior (ARCHITECTURE "Tracked-file store").
 - [ ] **Wire the mid-day re-baseline arming trigger.** The default-off knob that nukes and recreates
   the daily DB when loose objects cross a threshold mid-session has recovery handling and marker
   plumbing in place; the arming trigger is not wired. Adjacent: whether intra-day derived-watermark
@@ -355,6 +360,9 @@ Concrete, mostly single-package items; independent of the sequence above unless 
 
 ## Mid-term
 
+- [ ] **Deterministic-only memory.** Replace the memory-side model judgments — the summarizer,
+  the clusterer, recall's model-judgment signal and the vetting reviewer (SPEC §8.2.1) — with
+  deterministic code, so the memory service needs no model's services at all.
 - [ ] **Archive recall.** Match `archive/index.jsonl` anchors and offer a recovery-fetch so a
   deep-cold thread resurfaces through the same opportunistic mechanism as a live one. The index
   already carries `anchors` and `spine_summary`: additive, no schema change. (SPEC §3.8.4.)

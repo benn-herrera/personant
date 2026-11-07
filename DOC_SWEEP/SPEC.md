@@ -164,18 +164,14 @@ tree, the authoritative/derived/operational classification and the storage comma
 
 #### Secret-bearing content
 
-Any file holding an API key that Personant reads (placement: Open, U5)
-is never included in any model-context artifact, log line, ack question (a question asking the user
-to confirm a step; the user's answer is an *ack*) or captured output (§8.2.1).
+Personant reads no API key and keeps no secret-bearing file: opencode holds every provider
+credential (§8.2.1).
 
 #### Outside the store directory
 
 - Personant-only settings live under `~/.config/personant/` (`config.toml`, §8.2.2).
 - opencode's data directory is never under the store directory: crash recovery quarantines
   untracked files (§4.5.8), which would include opencode's database.
-
-**Open:** U5 — whether `providers.toml` (a provider pool) and `api_keys/` exist, and where they
-are placed (§8.2.1).
 
 ### 2.2 Thread registry record schema (`spine.jsonl`)
 
@@ -346,7 +342,8 @@ closure.ack-mode: auto              # auto | always (§3.5).
                                     # auto-accepted with the summarizer's summary;
                                     # exceptions queue for a drain at a drain point.
                                     # always: every decayed thread is put to the
-                                    # user for an ack as it decays.
+                                    # user for an ack (the user's answer to a
+                                    # question confirming a step) as it decays.
 recall.symbolic-threshold: 0.4      # Jaccard threshold for opportunistic recall surfacing
 recall.cross-project-threshold: 0.5 # higher bar for cross-project surfacing
 recall.ack-mode: banded             # banded | always (§3.4).
@@ -1129,8 +1126,10 @@ its recent-excerpt window times (current size + the diff window), whatever the u
 control — commit, rebase, or no repository at all. Storage, retention and composition never
 consult the workspace repository.
 
-The bound is on the store working tree. The history repository keeps each day-commit's
-tracked-file store, as it keeps every authoritative file.
+File content is kept only as long as composition needs it. The tracked-file store is held in the
+store working tree and the turn repository, which is deleted at each day rollover; the history
+repository never holds it. **Open:** the implementation still commits the tracked-file store to the
+history repository at each day commit (ROADMAP "Tracked-file content in the history repository").
 
 **Earlier versions.** A superseded version of a file is not content evicted for budget in the
 §1.4 sense, and Personant does not keep file
@@ -2143,34 +2142,20 @@ Init writes the settings opencode must hold for the plugin integration — autom
 compaction off (`compaction.auto: false`) and the plugin entry — into opencode's own configuration,
 in opencode's own format. It adds nothing else to opencode's configuration.
 
-**Open:** U5 — whether init also writes a provider-pool template (§8.2.1).
-
 ### 8.2 Configuration sources and precedence
 
 Personant reads three kinds of configuration: its own settings (§8.2.2), directives (§8.2.4) and
 the environment (§8.2.3). opencode's configuration is read by opencode as it is; Personant writes
 only the entries named in §8.1.
 
-#### 8.2.1 Reaching Personant's own models
+#### 8.2.1 Model access through the host
 
-The memory service calls models itself: the summarizer (§5.2), the clusterer (§5.3), the embedder
-(§3.4) and model judgment on surfaced recall candidates. opencode has no embedding provider, so the
-embedder needs Personant configuration (§8.2.2) whatever else is decided.
+The memory service never calls a model. It requests each judgment it needs — the summarizer's
+draft (§5.2), the clusterer's grouping (§5.3), model judgment on surfaced recall candidates (§3.4)
+and embeddings for recall (§3.4) — from opencode, which runs the model with its own providers and
+returns the result. Personant holds no endpoint, provider configuration or API key.
 
-**Open:** U5 — how the memory service reaches the summarizer, clusterer and judgment models: (a) through
-opencode's providers, which leaves no Personant provider settings other than the embedder's; or
-(b) through a Personant provider pool under `~/.config/personant/`, which must not name an endpoint
-that opencode's providers also name. The pool format, kind and protocol fields, load-time
-validation and key resolution are specified when (b) is chosen.
-
-##### Key material (required under either choice)
-
-An API key Personant reads is **never** included
-in any LLM context, log line, ack question or captured output. A file holding such a key is
-secret-bearing (§2.1). The redactor applies to every delta Personant composes into a request
-(`tool.result`, `fs.read`, `fs.write`, `user.shell-capture`; §3.0.1), **before it reaches
-context**: per occurrence, not whole-buffer; the replacement is `[redacted: API-key content]`; the
-key set is the keys Personant has already resolved; keys under 8 bytes are not scanned for.
+**Open:** A12a — how embeddings are requested through opencode.
 
 #### 8.2.2 Personant settings: `~/.config/personant/config.toml`
 
@@ -2193,7 +2178,7 @@ vectorLength = 768
 A model reference is `"provider/model"`, split on the **first** `/` (the model portion may itself
 contain slashes, e.g. `openrouter/google/gemma-4-31b-it`).
 
-**Open:** U5 — where the embedding provider named by the reference is defined (§8.2.1), and the
+The reference names one of opencode's providers and a model it serves. **Open:** A12a — the
 startup check that it exists.
 
 #### 8.2.3 Environment variables

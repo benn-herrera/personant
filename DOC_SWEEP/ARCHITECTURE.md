@@ -716,6 +716,11 @@ A turn-excerpt file (`turns/0000024.md`):
 - **Tracked-file store.** One index and its content files per thread, written at turn close
   for the owner's file events (`store.ApplyFileEvents`) and pruned at barrier step B1c
   (`store.PruneTrackedFiles`).
+  - **Out of date — SPEC §3.9.1 governs.** Everything here that relies on the tracked-file store
+    being in primary (the day commit, and restoring `files.jsonl` and `files/` from primary HEAD
+    in barrier completion) describes the current code, not the intended design: the history
+    repository never holds the tracked-file store (ROADMAP "Tracked-file content in the history
+    repository").
   - *Index format.* `files.jsonl`, one line per path, sorted by `path`, keys in the order
     `{"path","id","size","turn","at","changes":[{"turn","at","from","to","diff","size"}]}`,
     written through `store.WriteJSONL`. `path` is the event's path as given. `id` is the git

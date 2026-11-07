@@ -15,6 +15,11 @@ Serial, one package at a time: WP1 → WP2 → WP3 → WP4 → WP5 → WP6 → W
 
 Mechanical: WP1, WP2, WP4, WP8, WP10. Expert: WP3, WP5, WP6, WP7, WP9.
 
+**Paused after WP2** until the doc sweep (`DOC_SWEEP/`) redices over `PROJECT_DOCS/`. The
+section-2 rows of WP3–WP10 cite leaves and section names the sweep changes; they are re-mapped
+onto the rediced tree before WP3 is dispatched. Contract text the strip deletes may already be
+gone, cut during the sweep; WP10's closing sweep removes what remains.
+
 | WP | State |
 |---|---|
 | WP1 | done |

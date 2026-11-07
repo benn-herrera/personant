@@ -12,8 +12,8 @@ This thesis does not:
 
 Personant is a memory system for a coding agent running under opencode. It keeps a durable record
 of the agent's work, organized by the problem being worked on, and for every model request it
-decides what of that record the model sees. A model makes only narrow judgments; deterministic code
-writes everything that is kept.
+decides what of that record the model sees. A model makes only narrow judgments, requested through
+the host; deterministic code writes everything that is kept.
 
 Almost all of that is built from well-known pieces at the scale of one person's work. A few pieces
 are new, and they are the reason the project exists. This page names both, so that work on a
@@ -43,7 +43,7 @@ system the piece resembles and is not — the direction work on it must not drif
 | Directives | Instruction files layered by precedence | A policy engine |
 | Career memory | Notes on techniques and solutions from past work, drawn from the record and recalled by relevance | A code library or package registry, or a copy of past projects' code |
 | Memory vetting | Review before commit, with a provenance record | An approval workflow system |
-| Model access | Calls made through the host | An inference client or provider configuration |
+| Model access | Judgments requested from the host, which runs the model; the memory service never calls a model | An inference client or provider configuration |
 
 Where a piece is in this table, its conventional answer is the default. A design that grows a
 piece toward its "is not" column is out of scope, however natural the next step looks.
