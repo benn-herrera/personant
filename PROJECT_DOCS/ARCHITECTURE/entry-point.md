@@ -68,7 +68,7 @@ Contents:
   - [Crash stability and the dual-repo substrate](mechanisms/crash-stability-and-the-dual-repo-substrate.md)
   - [Memory consolidation — the "sleep" cycle](mechanisms/memory-consolidation-the-sleep-cycle.md)
   - [Serving deployment](mechanisms/serving-deployment.md)
-  - [Model-family as platform {#model-family-as-platform-v10-platform-coupling}](mechanisms/model-family-as-platform/index.md)
+  - [Model-family as platform](mechanisms/model-family-as-platform/index.md)
     - [Architectural mechanism](mechanisms/model-family-as-platform/architectural-mechanism.md)
     - [Two context figures](mechanisms/model-family-as-platform/two-context-figures.md)
   - [Minimize infrastructural prompts](mechanisms/minimize-infrastructural-prompts.md)

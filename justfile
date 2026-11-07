@@ -517,4 +517,4 @@ integration-test: build
 clean:
     rm -f {{ BINDIR }}/personant
 
-import? '.opencode/skills/docdicer/tools/runner-snippets/docdicer.just'
+import? '.claude/skills/adjagent/skills/docdicer/tools/runner-snippets/docdicer.just'

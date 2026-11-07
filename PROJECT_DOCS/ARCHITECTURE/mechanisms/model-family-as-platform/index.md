@@ -1,4 +1,4 @@
-### Model-family as platform {#model-family-as-platform-v10-platform-coupling}
+### Model-family as platform
 
 **Open:** U10 — opencode lets the user run any model. Either one family is tuned for Personant's
 memory prompts, with a warning on others, or every model opencode runs is supported and the tag and

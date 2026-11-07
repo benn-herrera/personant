@@ -1,4 +1,4 @@
-### Plugin: TypeScript, in `opencode-plugin/` and nowhere else
+### TypeScript usage limited to plugin
 
-It takes no package dependency:
+The plugin is TypeScript, in `opencode-plugin/` and nowhere else. It takes no package dependency:
 it imports only what the opencode host supplies (ARCHITECTURE "Plugin route").

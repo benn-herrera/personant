@@ -1,4 +1,4 @@
-### Versioning & acceptance (read before judging "done")
+### Versioning and acceptance
 
 The version lines and the home's on-disk
 format are defined in SPEC §9.1. Their current values live in `internal/version` and are never

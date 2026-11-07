@@ -8,7 +8,7 @@ WP8 and WP10 give exact text in the package; the rest state the outcome the code
 | Leaf (under `PROJECT_DOCS/` unless noted) | Change | WP |
 |---|---|---|
 | SPEC §4.1 | delete the U5 `ping`/`models` Open; in the `version` bullet, delete the U6 Open | 1, 2 |
-| CONVENTIONS "Versioning & acceptance" | delete the U6 Open (it names `test-fe`) | 1 |
+| CONVENTIONS "Versioning and acceptance" | delete the U6 Open (it names `test-fe`) | 1 |
 | SPEC §9.1 "Version lines" | delete the U6 Open; two lines remain: the substrate semver and the home format | 2 |
 | ARCHITECTURE "Event log format" | 2: drop `frontend=` from the `system.bootstrap` row and the example. 3: drop rows emitted only by `toolloop.go`. 6: `retire` row keeps `prompt` (`inactivity=`), `complete`, `curator-error`, `load-error`, `apply-error`, `error`; drops `ack`, `pending`, `defer`, `resolver-error`, `trigger=manual\|queued`; example `retire.ack` line → `retire.complete`. 7: `recall` row drops `offer`, `decline`, `ack=` | 2, 3, 6, 7 |
 | ARCHITECTURE "Module map" | `cmd/` row: drop the `chat`/`ping`/`models` sentence. `memops` row: drop `Config`. `model` row: "LLM client surface for the in-process runtime and the live tests: `Client`, `MockClient`, the OpenAI-compatible `HTTPClient`; the binary does not link it" | 1, 5 |
@@ -35,5 +35,5 @@ WP8 and WP10 give exact text in the package; the rest state the outcome the code
 | SPEC §9.4 index; ARCHITECTURE "Home layout", "File layout — `internal/scenarios/`" | drop `last-active` and its invariant | 9 |
 | README | 1: Quick Start drops "plus the self-built chat REPL … still starts the REPL."; delete "## Chat REPL"; Build Targets drop the `test-fe` line; acknowledgements drop the `x/sys` row. 3: drop the readability, html-to-markdown and `x/net` rows. 5: Sim Knobs: "Both live toggles read `test/rundata/test.{providers,config}.toml` (user-provided, gitignored) and need" → "Both live toggles use the `reaper` endpoint from `internal/testsupport` (override with `PERSONANT_REAPER_URL`) and need"; the `toml` row's use → "`version.toml` parsing". 10: exact text in WP10 | 1, 3, 5, 10 |
 | `ROADMAP_PLANS/inference-in-loop.md` | its "Live mode reads `test/rundata/test.providers.toml`…" bullets → the testsupport endpoint | 5 |
-| SPEC §4.3.3, §4.5.8 (10); ARCHITECTURE "Invariant for the production inversion", "Start order and resume", "Event log format" (U8); CONVENTIONS "Versioning & acceptance" (PATCH rule); ROADMAP.md | exact text in WP10 | 10 |
+| SPEC §4.3.3, §4.5.8 (10); ARCHITECTURE "Invariant for the production inversion", "Start order and resume", "Event log format" (U8); CONVENTIONS "Versioning and acceptance" (PATCH rule); ROADMAP.md | exact text in WP10 | 10 |
 

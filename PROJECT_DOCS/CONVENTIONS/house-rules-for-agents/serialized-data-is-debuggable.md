@@ -1,4 +1,4 @@
-### Serialization format: legible to whoever is debugging
+### Serialized data is debuggable
 
 A human or agent chasing a problem
 reads the file raw. JSON is the format to resist — quote noise, no comments, nesting tracked by

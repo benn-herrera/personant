@@ -160,7 +160,7 @@ exercised in-process by the acceptance simulation ([`SPEC.md`](SPEC.md) §9.1). 
 listed in `ROADMAP.md` "Pending decisions"; known defects are `ROADMAP.md` items.
 
 `personant version` prints the version lines. What they are: [`SPEC.md`](SPEC.md) §9.1 "Version
-lines" and [`CONVENTIONS.md`](CONVENTIONS.md) "Versioning & acceptance".
+lines" and [`CONVENTIONS.md`](CONVENTIONS.md) "Versioning and acceptance".
 
 ## Design Principles
 

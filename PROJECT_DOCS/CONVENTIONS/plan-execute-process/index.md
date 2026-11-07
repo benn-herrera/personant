@@ -6,5 +6,5 @@
 
 Contents:
 
-- [Simulation harness gates](sim-harness-gates.md)
+- [Sim harness gates](sim-harness-gates.md)
 - [Probe work](probe-work.md)

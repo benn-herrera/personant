@@ -15,6 +15,6 @@ Contents:
 - [Crash stability and the dual-repo substrate](crash-stability-and-the-dual-repo-substrate.md)
 - [Memory consolidation — the "sleep" cycle](memory-consolidation-the-sleep-cycle.md)
 - [Serving deployment](serving-deployment.md)
-- [Model-family as platform {#model-family-as-platform-v10-platform-coupling}](model-family-as-platform/index.md)
+- [Model-family as platform](model-family-as-platform/index.md)
 - [Minimize infrastructural prompts](minimize-infrastructural-prompts.md)
 - [Concurrent sessions](concurrent-sessions.md)

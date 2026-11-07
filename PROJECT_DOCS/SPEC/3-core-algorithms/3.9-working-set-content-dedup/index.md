@@ -13,6 +13,9 @@ with how many times a file has been read or edited; this is what lets long-runni
 fixed budget. Persistent storage ([§3.9.1](3.9.1-persistent-storage-and-retention.md)) holds only what composition can render; composition
 ([§3.9.2](3.9.2-live-context-composition-working-window.md)) decides each turn which positions render content.
 
-Contents: [§3.9.1 Persistent storage and retention](3.9.1-persistent-storage-and-retention.md) ·
-[§3.9.2 Live context composition](3.9.2-live-context-composition-working-window.md) · [§3.9.3 Diff format](3.9.3-diff-format.md) ·
-[§3.9.4 Identifier-only references](3.9.4-identifier-only-references.md)
+Contents:
+
+- [§3.9.1 Persistent storage and retention](3.9.1-persistent-storage-and-retention.md)
+- [§3.9.2 Live context composition (working window)](3.9.2-live-context-composition-working-window.md)
+- [§3.9.3 Diff format](3.9.3-diff-format.md)
+- [§3.9.4 Identifier-only references](3.9.4-identifier-only-references.md)

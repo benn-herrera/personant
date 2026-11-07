@@ -1,6 +1,6 @@
-### The opencode source clone (`../opencode`) is read-only
+### opencode clone: referent only
 
-Never edit it and never move it off
+The opencode source clone at `../opencode` is read-only. Never edit it and never move it off
 the installed release's tag; it moves only in the change that updates the `sim-opencode` version
 check (ARCHITECTURE "Plugin route", "Pinned release").
 - **Open:** U11 — whether to adopt the rule: never place external state (an agent's data home,
