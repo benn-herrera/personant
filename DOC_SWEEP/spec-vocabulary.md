@@ -281,3 +281,82 @@ Not collisions (standard words pinned by context): "budget" as cost (2175), dire
 | accrual, directive accrual | feedback directive tuning; "feedback tuning" where directives are already the subject | Owner. "Tuning" alone reads as model tuning; "directive" covers behavior memory, process memory and parameters, and avoids giving "process" a second sense. |
 | assembly window, FIFO window | recent-excerpt window | Same thing: a thread's newest excerpts, up to `ThreadTurnWindow`, read into the composed request (ARCHITECTURE "Assembly window vs retention"). |
 | warm window, warm / cold excerpts | out of SPEC | A storage tier (loose files vs `folio.jsonl`; `HotExcerptTail` in `internal/store/folio.go`) is mechanism. SPEC keeps the outcome: excerpts are returned byte-exact however stored. ARCHITECTURE names the tiers as excerpt storage tiers, distinct from THESIS's cold storage. |
+
+## Apply pass
+
+### State
+
+- Applied: the whole of SPEC.md. Retired terms survive only in backticked code names, the
+  kept cross-reference title, and user-facing dialog strings (owner call).
+- Added by the §5–§9 pass: work block (a simulated working session, §9.4.1); "treated as revision
+  1" (was "adopt forward"); recall-signal scope; open acceptance requirements.
+- Left by the §5–§9 pass: "Personant" as actor where it names plugin plus service (L13–18,
+  93–96, 2137–2173); "once per process open" (~2349); "day-close", "daily record" (~2485);
+  "cross-boundary recovery" scenario (~2445).
+- Added by the §4 pass: case (was cell); format revision (was home format / format stamp);
+  format check, "exempt from the format check" (was gate / ungated); session commands; the
+  project's directory; remote identity; adoption (was local→remote promotion); project resolution
+  (was project bootstrap); turn-repository init (was morning-init); span (was rung); the nine
+  rollover steps and six named rules in §4.5.8; `<store-dir>` placeholder.
+- Left by the §4 pass: user-facing dialog strings in §4.5.3–§4.5.7 (still say "canonical
+  identity", "spine entries", "the runtime"); "recall accrual loop" (~1423, which tuning);
+  "benign morning", "stamp-only path" (~1723, ~1918); "gist" (undefined); "derived thread registry
+  record" (~1406) against "authoritative" elsewhere.
+- For the mechanism pass: the excerpt-storage rollover step (~1781) still cites a warm window
+  (§2.3), which §2.3 no longer defines.
+- Added by the §3 pass: delta, per-delta pipeline; turn buffer, staging buffer; content-id line;
+  unknown thread id; drain point; clusterer; day rollover; turn / history repository; store
+  working tree; unused-share rule; active-set order; "restore" (from cold storage); "fallback"
+  (missing-tag and empty-response re-prompts); coarse / fine level; signal (recall method).
+- Left by the §3 pass: "Slot answers" heading (~571) vs "per-slot policies" (278); "surface
+  threshold" (868, no such parameter); `idle topic thr_N:` (rendered string); "retire /
+  retirement" (not ruled); the "Two recovery surfaces" heading (~1068).
+
+### Names fixed in the pass (use these from here on)
+
+- Slots: **directives**, **registry**, **other-projects**, **active-threads**, **dormant-threads**
+  (for Layer E, A1, A2, B, C); the threads shown in full are the **active set**, those shown as
+  display lines the **dormant set**.
+- **stand-in line**: what replaces content a slot drops (was "overflow form … entry").
+- **opening line**: the `context.modified source=user.prompt` line that begins a turn (§2.8).
+- **resumed turn**: a turn with no user message (was "recovery turn").
+- **drain point**: the moment queued exception closures are put to the user; define in §3.5.
+- **ack question** / **ack**: a question asking the user to confirm a step, and the answer.
+- **provisional value calibrated in §9**: was "calibration window".
+- Rollover steps, for B0, B1, B1b, B1c, B2–B6: rollover marker, archival, excerpt-storage,
+  file-retention, day-commit, derived-rebuild, turn-repository removal, turn-repository re-init,
+  freshness-assert steps.
+- Invariants, for INV-1…6: no-reset rule, day-commit guard, capture-before-removal rule, watermark
+  rule, history-writer rule, ignore-block rule.
+- Trailers: **head turn id**, **head day number** (HEADTURN, HEADDAY). **turn repository state**
+  (DAILY); **archive entry awaiting back-fill** (ARCH); **store working tree** (WT).
+- Lowercase: **exception**, **routine**; **auto-fetch band**, **ask band**.
+
+### Settled during the pass
+
+- "claim ids": a term carried over from another project; no extraction pattern produces one
+  (`internal/memops/memops_symbols.go` extracts URLs, file paths and hex ids; hashtags in
+  `internal/turn/chain.go`). Removed from SPEC, ARCHITECTURE and the code comment.
+
+### Kept as is in the pass
+
+- Backticked code names, field names, parameter keys and event names (`spine.jsonl`,
+  `recall.ack-mode`, `modification_source: accrual`, `/topic`); `<anchor-list>` in the §5.1 grammar.
+- `recall-fire count`: defined as accepted recalls; "surfacing count" would change the meaning.
+- The cross-reference title ARCHITECTURE "Spine entries are the recognition surface", until
+  ARCHITECTURE's pass renames it.
+
+### Open for the owner
+
+- Open-item ids U3–U9 and ROADMAP B6a: rename, or keep as cross-document ids.
+- "in-run history" (§1.6, §4.3.3): which history is meant.
+- Rendered labels: ENGAGED / PAUSED / DORMANT / RECENTLY CLOSED (§4.2) and the truncation string
+  `... [Layer X truncated; budget=N bytes] ...` (§3.1) are output; lowercasing or renaming them
+  changes what users and models see.
+- "recovery" in the §9.1/§9.4 operation-latency list: crash recovery or archive restore.
+- "bootstrap carve-out" (§4.5.8 (8)) and "init" in the startup order.
+- The production day boundary and timezone: never stated (UTC only for the simulation, §9.4.1).
+- "sub-mind split and re-merge" and "Code Mode" (§1): undefined.
+- Accept suppression (§3.4, ~880): "Session-scoped" became "Service-run scoped". It fits
+  "nothing is persisted", but under concurrent sessions the two spans differ. Confirm.
+- "the next service run's startup recovery" (§3.4, ~836): crash recovery or the index cache load.

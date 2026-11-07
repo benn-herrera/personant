@@ -828,7 +828,7 @@ interface ProjectDigest {
 
 ### Symbol normalization
 
-Categories: `identifier` (pattern-extractable: file paths, URLs, code symbols, claim ids, commit
+Categories: `identifier` (pattern-extractable: file paths, URLs, code symbols, commit
 SHAs), `entity` (model-emitted named concepts), `tag` (user-emitted `#hash`).
 
 | Category | Case | Whitespace | Punctuation | Notes |
