@@ -13,8 +13,8 @@ import (
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "print version identity and the home's on-disk format",
-	Long: `Print this binary's identity — substrate version, front-end version,
-the on-disk format it writes, the build stamp, the Go toolchain — plus the
+	Long: `Print this binary's identity — substrate version, the
+on-disk format it writes, the build stamp, the Go toolchain — plus the
 resolved $PERSONANT_HOME and the format stamp actually found there.
 
 Deliberately ungated: this is the diagnostic you run precisely WHEN the

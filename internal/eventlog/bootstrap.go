@@ -15,7 +15,7 @@ import (
 // revision it found it. Emitted once per session open, after the §9.1
 // home-format gate has resolved the effective format.
 //
-//	<ts> system.bootstrap version=0.1.0 frontend=0.0.2 home-format=1 commit=abc1234 home=/home/user/.personant
+//	<ts> system.bootstrap version=0.1.0 home-format=1 commit=abc1234 home=/home/user/.personant
 //
 // homeFormat is the EFFECTIVE on-disk revision the gate resolved
 // (memops.HomeFormatDecision.Format), not version.CurrentHomeFormat: on
@@ -35,9 +35,8 @@ func LogBootstrap(paths store.PersonantPaths, homeFormat int) error {
 	if err := HealTail(filepath.Join(paths.LogsDir, dayFileName(clock.Timeline()))); err != nil {
 		return fmt.Errorf("eventlog: LogBootstrap: %w", err)
 	}
-	details := fmt.Sprintf("version=%s frontend=%s home-format=%d commit=%s home=%s",
+	details := fmt.Sprintf("version=%s home-format=%d commit=%s home=%s",
 		version.Substrate,
-		version.FrontEnd,
 		homeFormat,
 		version.ReadBuild().CommitLabel(),
 		paths.Home,

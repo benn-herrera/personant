@@ -72,7 +72,7 @@ func TestBuildCommitRendering(t *testing.T) {
 
 func TestShortForm(t *testing.T) {
 	stamped := shortForm(Build{Revision: "abc1234def", Time: "2026-07-27T00:00:00Z"})
-	for _, want := range []string{"personant " + Substrate, "front end " + FrontEnd, "commit abc1234", "home format " + strconv.Itoa(CurrentHomeFormat)} {
+	for _, want := range []string{"personant " + Substrate, "commit abc1234", "home format " + strconv.Itoa(CurrentHomeFormat)} {
 		if !strings.Contains(stamped, want) {
 			t.Errorf("stamped short form %q missing %q", stamped, want)
 		}
@@ -84,7 +84,7 @@ func TestShortForm(t *testing.T) {
 	if strings.Contains(bare, "commit") {
 		t.Errorf("unstamped short form mentions a commit: %q", bare)
 	}
-	for _, want := range []string{"personant " + Substrate, "front end " + FrontEnd, "home format " + strconv.Itoa(CurrentHomeFormat)} {
+	for _, want := range []string{"personant " + Substrate, "home format " + strconv.Itoa(CurrentHomeFormat)} {
 		if !strings.Contains(bare, want) {
 			t.Errorf("unstamped short form %q missing %q", bare, want)
 		}
@@ -94,8 +94,8 @@ func TestShortForm(t *testing.T) {
 func TestLongForm(t *testing.T) {
 	stamped := longForm(Build{Revision: "abc1234def", Dirty: true, Time: "2026-07-27T00:00:00Z"})
 	for _, want := range []string{
-		"substrate:", "front end:", "home format:", "commit:", "built:", "go:",
-		Substrate, FrontEnd, "abc1234def", "(dirty)", "2026-07-27T00:00:00Z",
+		"substrate:", "home format:", "commit:", "built:", "go:",
+		Substrate, "abc1234def", "(dirty)", "2026-07-27T00:00:00Z",
 	} {
 		if !strings.Contains(stamped, want) {
 			t.Errorf("stamped long form missing %q:\n%s", want, stamped)
@@ -106,8 +106,8 @@ func TestLongForm(t *testing.T) {
 	// the two build-derived values.
 	bare := longForm(Build{})
 	lines := strings.Split(strings.TrimSuffix(bare, "\n"), "\n")
-	if len(lines) != 6 {
-		t.Fatalf("long form has %d lines, want 6:\n%s", len(lines), bare)
+	if len(lines) != 5 {
+		t.Fatalf("long form has %d lines, want 5:\n%s", len(lines), bare)
 	}
 	if !strings.Contains(bare, "commit:      "+Unknown) || !strings.Contains(bare, "built:       "+Unknown) {
 		t.Errorf("unstamped long form does not degrade to %q:\n%s", Unknown, bare)

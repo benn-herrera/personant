@@ -9,10 +9,6 @@ gate:
 - Substrate **v0.5.0 — realism convergence.** The gate above, walked to the top rung with every
   identified realism element accounted for.
 
-**Open:** U6 — a second semver line for the layer above the substrate (the front end) is either
-retired or repurposed for the plugin, along with its milestone gate and its place in
-`personant version` and `system.bootstrap`.
-
 **A further line, not semver: the home's on-disk `format`.** `<home>/version.toml` ([§2.1](../../2-data-model/2.1-storage-layout/index.md)) carries one
 integer, `format = N`, recording the layout revision the home was written in. It advances
 independently of the semver line.

@@ -36,7 +36,6 @@ func TestLogBootstrapLine(t *testing.T) {
 	}
 	for _, want := range []string{
 		"version=" + version.Substrate,
-		"frontend=" + version.FrontEnd,
 		// The EFFECTIVE on-disk format the gate resolved, not the constant.
 		"home-format=4",
 		"commit=" + version.ReadBuild().CommitLabel(),

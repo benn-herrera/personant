@@ -17,8 +17,8 @@ Mechanical: WP1, WP2, WP4, WP8, WP10. Expert: WP3, WP5, WP6, WP7, WP9.
 
 | WP | State |
 |---|---|
-| WP1 | in progress |
-| WP2 | not started |
+| WP1 | done |
+| WP2 | done |
 | WP3 | not started |
 | WP4 | not started |
 | WP5 | not started |

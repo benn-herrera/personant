@@ -1,7 +1,6 @@
 # Strip the self-built harness
 
-Parked plan for ROADMAP.md B1. When activated it becomes the active plan (CONVENTIONS "Plan &
-Execute Process") after a prompt-engineer usability review and the architect's revision on it.
+The active plan for ROADMAP.md B1.
 
 Contents:
 

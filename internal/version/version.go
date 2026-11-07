@@ -1,13 +1,10 @@
-// Package version carries personant's version identity: the two
-// independent semver lines, the home's on-disk format revision, and the
-// build stamp Go's toolchain embeds.
+// Package version carries personant's version identity: the substrate
+// semver line, the home's on-disk format revision, and the build stamp
+// Go's toolchain embeds.
 //
-// # Three version lines (SPEC §9.1)
+// # Two version lines (SPEC §9.1)
 //
 //   - Substrate — the runtime + the MemoryOps port. Semver.
-//   - FrontEnd — U/X and feature logic. Semver. During the living-with
-//     phase every front-end feature change bumps the PATCH digit; MINOR
-//     bumps are developer fiat at milestone gates.
 //   - CurrentHomeFormat — the canonical on-disk layout revision of
 //     $PERSONANT_HOME. A plain integer, deliberately NOT semver: an
 //     on-disk layout is either readable by this binary or it is not, so
@@ -30,9 +27,6 @@ import (
 
 // Substrate is the version of the runtime + MemoryOps port.
 const Substrate = "0.2.7"
-
-// FrontEnd is the version of the U/X + feature-logic line.
-const FrontEnd = "0.0.26"
 
 // CurrentHomeFormat is the home on-disk format revision this binary
 // writes and understands. Format 2 adds optional per-thread folio.jsonl
@@ -120,13 +114,13 @@ func (b Build) CommitLabel() string {
 
 // Short returns the one-line version identity, e.g.
 //
-//	personant 0.1.0 (front end 0.0.3, commit abc1234, home format 1)
+//	personant 0.1.0 (commit abc1234, home format 1)
 //
 // The commit clause is omitted entirely when the binary is unstamped.
 func Short() string { return shortForm(ReadBuild()) }
 
 // Long returns the multi-line version identity: aligned key/value lines
-// for both version lines, the home format, the commit, the build time and
+// for the substrate version, the home format, the commit, the build time and
 // the Go toolchain/platform. Every line is newline-terminated, so it can
 // be printed as-is.
 func Long() string { return longForm(ReadBuild()) }
@@ -135,7 +129,7 @@ func Long() string { return longForm(ReadBuild()) }
 // so the formatting is testable at both the stamped and unstamped ends
 // without a linked-in VCS stamp to fake.
 func shortForm(b Build) string {
-	parts := []string{"front end " + FrontEnd}
+	var parts []string
 	if b.ShortRevision() != "" {
 		parts = append(parts, "commit "+b.CommitLabel())
 	}
@@ -157,7 +151,6 @@ func longForm(b Build) string {
 	}
 	rows := [][2]string{
 		{"substrate", Substrate},
-		{"front end", FrontEnd},
 		{"home format", fmt.Sprintf("%d", CurrentHomeFormat)},
 		{"commit", commit},
 		{"built", built},
