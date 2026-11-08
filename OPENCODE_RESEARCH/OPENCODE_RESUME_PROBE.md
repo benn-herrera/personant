@@ -17,7 +17,7 @@ resumes. The probe service does neither (§5). Under the standalone server (`ser
 and after a clean stop between turns in either mode, every model request after the restart was composed.
 
 **Conventions.** Unlabelled lines are measured facts, with their source. Lines starting **Judgment:** are
-interpretation. opencode paths are in `/Users/agent-user/projects/opencode` at tag v2.2.3, the installed binary's
+interpretation. opencode paths are in `/Users/agent-user/projects/opencode` at tag v2.2.6, the installed binary's
 version. Logs are under `.claude-temp/` (untracked); run artifacts are under `test/rundata/` (gitignored).
 
 ## 1. Runs and artifacts

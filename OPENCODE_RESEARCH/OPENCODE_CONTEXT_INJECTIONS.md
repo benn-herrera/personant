@@ -1,7 +1,7 @@
-# opencode v2.2.3: what reaches the model, and how Personant can tell
+# opencode v2.2.6: what reaches the model, and how Personant can tell
 
 Scope: everything opencode puts in a primary model request, as the plugin's `session.context` hook sees it, for
-an unmodified opencode v2.2.3 (clone at tag `v2.2.3`). Citations are repo-relative to `packages/` of that clone.
+an unmodified opencode v2.2.6 (clone at tag `v2.2.6`). Citations are repo-relative to `packages/` of that clone.
 Sections 1–4 are facts from source. Section 5 is judgment. Items not confirmed in source say **unverified**.
 
 ## 0. How the hook input is assembled
