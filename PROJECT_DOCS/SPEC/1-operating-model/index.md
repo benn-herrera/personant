@@ -1,15 +1,22 @@
 ## 1. Operating model
 
-Personant runs under unmodified opencode. Personant owns what enters every model request:
-composition, compaction and summarization, recall, and the sub-mind split and re-merge. opencode
+Personant runs under unmodified opencode as a plugin plus the **memory service**, a local process
+that holds all memory state. Personant owns what enters every model request: composition
+(assembling each request, the **composed request**, from memory, [§3.1](../3-core-algorithms/3.1-working-set-composition/index.md)), compaction (shrinking a
+long conversation to fit the context window) and summarization (condensing older content), and
+recall (surfacing older **threads** — each the durable record of one problem being worked on —
+relevant to the current work, [§3.4](../3-core-algorithms/3.4-recall-matching/index.md)). opencode
 owns everything else: the terminal UI, session storage, the message data model, the event stream,
 agents, permissions, tools, providers and configuration. Where opencode has made a choice outside
-context management, Personant uses it as it is. Personant does not define interaction modes, a
-workflow, or how much the user takes part. opencode's plugins and Code Mode work unchanged. The
+context management, Personant uses it as it is ([§1.7](1.7-opencode-storage.md)'s database cleanup is the one exception). Personant does not define interaction modes, a
+workflow, or how much the user takes part. opencode's plugins and Code Mode (opencode's way of
+letting the model call tools by writing code) work unchanged. The
 components and their wiring: ARCHITECTURE "Plugin route".
 
+An **Open:** line marks a decision not yet made; a tag such as U7, B6a or A12a names it.
+
 **Open:** U7 — plugin failure policy: fail open (opencode's own composition reaches the model;
-memory misses the step) or fail closed (the request is refused).
+the memory service misses the step) or fail closed (the request is refused).
 
 Contents:
 

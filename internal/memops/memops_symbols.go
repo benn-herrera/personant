@@ -112,7 +112,7 @@ var canonicalEntityStopWords = map[string]struct{}{
 // form per spec §2.7.2. The category determines which rule set applies.
 //
 //   - SymbolIdentifier: returned unchanged. Identifiers are file paths, code
-//     symbols, claim IDs, commit SHAs — collision requires exact match, so
+//     symbols, URLs, commit SHAs — collision requires exact match, so
 //     case, whitespace, and punctuation are all preserved.
 //   - SymbolEntity: lowercased; whitespace-separated tokens whose lowercase
 //     matches the canonical stop-word list are dropped; remaining tokens are

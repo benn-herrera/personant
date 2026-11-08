@@ -5,9 +5,7 @@ dependencies". `go.mod` is the catalog.
 - **Permanently out** (architectural conflict): `langchaingo/memory`, `langchaingo/chains`,
   `mattn/go-sqlite3`. Do not reintroduce.
 - **SQLite:** any Go SQLite need takes `modernc.org/sqlite` first.
-- **Open:** U5 — how the service reaches its own models decides whether `langchaingo/llms` is
-  needed. Until then `langchaingo/llms` stays out; the OpenAI-compatible client in
-  `internal/model` covers the need.
+- `langchaingo/llms` stays out: the memory service makes no model calls (SPEC §8.2.1).
 - **Vet adoption and maintenance before proposing a dependency — from the registry, not the
   README.** Record, measured not asserted: (1) last release date; (2) `Imported by` count on
   pkg.go.dev; (3) deprecation status; (4) transitive dep count; (5) license. For a port, verify
@@ -18,5 +16,6 @@ dependencies". `go.mod` is the catalog.
 - **Pending removal with their consumers** (ROADMAP.md B1, "Retire the self-built harness"):
   `codeberg.org/readeck/go-readability/v2` and `github.com/JohannesKaufmann/html-to-markdown/v2`
   serve only `internal/tools/web/`. Both entries go in the change that removes their consumer.
-- **Application code talks to `MemoryOps`, not to the substrate directly.** Package-level detail
-  and the substrate-free exceptions: ARCHITECTURE "Port-and-adapter at the substrate boundary".
+- **Application code talks to `MemoryOps`, not to the memory store directly.** Package-level
+  detail and the store-independent exceptions: ARCHITECTURE "Port-and-adapter at the memory store
+  boundary".

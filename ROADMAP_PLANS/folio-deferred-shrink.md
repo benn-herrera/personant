@@ -5,7 +5,7 @@ Status: partly planned, not under way. It builds on the excerpt folios, landed i
 settle, home format 2, verify checks, barrier step B1b, measurement). The folio mechanism is
 recorded in
 `PROJECT_DOCS/ARCHITECTURE/storage-and-record-formats/thread-directory-threads-thr-id.md` and in
-`PROJECT_DOCS/ARCHITECTURE/mechanisms/crash-stability-and-the-dual-repo-substrate.md`, with the B1b
+`PROJECT_DOCS/ARCHITECTURE/mechanisms/crash-recovery-and-the-turn-and-history-repositories/day-rollover.md`, with the B1b
 outcome in SPEC §4.5.8 (5).
 
 ## Problem
@@ -259,9 +259,9 @@ Steps. Each ends at `just build` plus the touched `just test-run`.
 5. **Verify.** Identical name-in-both produces no finding.
 6. **Contract documents** in the same checkpoint:
    - the thread-directory ARCHITECTURE document: retention and the drop condition;
-   - the crash-stability ARCHITECTURE document's "Mechanism names" paragraph: the ordering of
-     invariant 9;
-   - `PROJECT_DOCS/ARCHITECTURE/testing-as-the-lab-bench/event-log-format.md`: `dropped=`;
+   - `PROJECT_DOCS/ARCHITECTURE/mechanisms/crash-recovery-and-the-turn-and-history-repositories/mechanism-names.md`:
+     the ordering of invariant 9;
+   - `PROJECT_DOCS/ARCHITECTURE/testing-as-the-measurement-instrument/event-log-format.md`: `dropped=`;
    - SPEC §4.5.8 (7), only as open point 1 settles it.
 
 Tests to change or add:

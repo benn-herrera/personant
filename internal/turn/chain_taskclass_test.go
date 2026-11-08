@@ -119,7 +119,7 @@ func TestChainDecisionClassNotMinimized(t *testing.T) {
 // as a backticked row token inside §3.0.1, while the prose explanation of
 // the prune may name them.
 func TestEventTaxonomyHasNoUnroutedEvents(t *testing.T) {
-	section := readSpecSection(t, "PROJECT_DOCS/SPEC/3-core-algorithms/3.0-context-modification-events-the-architectural-primitive/3.0.1-the-event-taxonomy.md", "#### 3.0.1")
+	section := readSpecSection(t, "PROJECT_DOCS/SPEC/3-core-algorithms/3.0-all-content-enters-through-one-pipeline-deltas/3.0.1-the-delta-taxonomy.md", "#### 3.0.1")
 
 	pruned := []string{"digest.refresh", "slash.injected", "directive.reloaded"}
 	for _, ev := range pruned {

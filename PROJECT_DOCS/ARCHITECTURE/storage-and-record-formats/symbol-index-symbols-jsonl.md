@@ -9,7 +9,7 @@ interface SymbolRecord {
   threads: string[];            // thread ids where it appears anywhere (anchor or history)
   anchor_in: string[];          // subset where it is an anchor
   superseded_in: string[];      // subset where its history entry is superseded (SPEC §3.4)
-  source_dominant: SymbolSource; // most common source across emissions
+  source_dominant: SymbolSource; // highest-ranked source across emissions (see "Symbol source")
 }
 ```
 

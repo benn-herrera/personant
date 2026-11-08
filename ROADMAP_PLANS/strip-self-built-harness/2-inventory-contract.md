@@ -37,3 +37,16 @@ WP8 and WP10 give exact text in the package; the rest state the outcome the code
 | `ROADMAP_PLANS/inference-in-loop.md` | its "Live mode reads `test/rundata/test.providers.toml`…" bullets → the testsupport endpoint | 5 |
 | SPEC §4.3.3, §4.5.8 (10); ARCHITECTURE "Invariant for the production inversion", "Start order and resume", "Event log format" (U8); CONVENTIONS "Versioning and acceptance" (PATCH rule); ROADMAP.md | exact text in WP10 | 10 |
 
+### Citations to re-map at resumption
+
+The doc sweep rediced `PROJECT_DOCS/` and renamed headings to the settled vocabulary (closure →
+closing, spine → thread registry, home → store directory, and so on), so this plan's heading
+citations and the rows above are re-mapped against the current trees before any package resumes.
+Leaf paths that no longer resolve:
+
+- `4-work-packages/wp2-retire-the-front-end-version-line-mechanical.md` (done; historical):
+  `PROJECT_DOCS/SPEC/9-measurement-and-validation-regime/9.1-the-four-month-simulation-v0-1-acceptance-gate/version-lines.md`
+  (now `…/9.1-the-four-month-simulation-the-v0-5-0-acceptance-criterion/version-lines.md`) and
+  `PROJECT_DOCS/ARCHITECTURE/testing-as-the-lab-bench/event-log-format.md` (now
+  `PROJECT_DOCS/ARCHITECTURE/testing-as-the-measurement-instrument/event-log-format.md`).
+

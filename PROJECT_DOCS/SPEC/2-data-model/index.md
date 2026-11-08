@@ -8,7 +8,7 @@ here because users edit them.
 Contents:
 
 - [§2.1 Storage layout](2.1-storage-layout/index.md)
-- [§2.2 Spine record schema (`spine.jsonl`)](2.2-spine-record-schema-spine-jsonl/index.md)
+- [§2.2 Thread registry record schema (`spine.jsonl`)](2.2-thread-registry-record-schema-spine-jsonl/index.md)
 - [§2.3 Thread file format (`threads/thr_<id>/`)](2.3-thread-file-format-threads-thr-id.md)
 - [§2.4 Symbol index schema (`symbols.jsonl`)](2.4-symbol-index-schema-symbols-jsonl.md)
 - [§2.5 Project metadata schema](2.5-project-metadata-schema/index.md)

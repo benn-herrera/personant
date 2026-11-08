@@ -6,7 +6,7 @@ How the project documents (THESIS, SPEC, ARCHITECTURE, CONVENTIONS) are written 
 - **Field markings:**
   - `field: T` — required.
   - `field?: T` — optional.
-  - `[derived]` — regenerated from canonical sources; never hand-edited.
+  - `[derived]` — regenerated from authoritative files; never hand-edited.
 - **Pseudocode** is descriptive and language-neutral.
 - **Cross-references** cite SPEC by §-numbered section identifier (e.g. "see SPEC §2.2") and the
   other documents by section title.

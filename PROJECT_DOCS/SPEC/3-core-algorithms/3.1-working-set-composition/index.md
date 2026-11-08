@@ -1,33 +1,32 @@
 ### 3.1 Working-set composition
 
-The working set is rendered into the system prompt as five layers, each truncated to a byte budget
-derived from `context.token-budget` and `layer.budget.percentages` ([§2.6.1](../../2-data-model/2.6-directive-file-format-directives-md/2.6.1-recognized-parameters.md)). The token ceiling is
-the authoritative whole-request gate; the per-layer **byte** shares are derived from it (ceiling × a
-conservative ~2.5 chars/token, text-only) and drive truncation. The live-turn reserve (`live_turn`,
-15%) is carved from the byte total first; E/A1/A2/B/C partition the remainder (12/18/15/55, the 18%
-high tier split between A1 fixed and A2 residue). The whole request — system prompt + replayed
-history tail + current user input + this turn's tool results + tool definitions — is bounded
-against the token ceiling: bytes pre-flight (this composition plus the live-turn sub-policy),
-`usage.prompt_tokens` post-flight as the real-model gate. Static prompt scaffolding (orientation
-preamble, [§5.1.3](../../5-model-interaction/5.1-topic-tag-emission-format/5.1.3-prompt-template.md) topic-tag directive, recovery reminders, section headers) is charged to no layer;
-the conservative bytes/token ratio covers it.
+The **working set** — the memory content of the composed request — is rendered into the system
+prompt as five memory slots, each truncated to a byte
+budget derived from `context.token-budget` and `layer.budget.percentages` ([§2.6.1](../../2-data-model/2.6-directive-file-format-directives-md/2.6.1-recognized-parameters.md)). The token
+ceiling is the authoritative whole-request check; each slot's byte budget is derived from it
+conservatively, so the memory slots stay within their share of the ceiling. The live-turn reserve
+(`live_turn`, 15%) is carved from the byte total first; the five memory slots partition the
+remainder (directives 12, registry and other-projects together 18, active-threads 55, dormant-threads 15; the 18 is split between the registry (fixed, 10) and other-projects (the residue)). The whole request — system prompt + replayed
+transcript tail + current user input + this turn's tool results + tool definitions — is bounded
+against the token ceiling. Static prompt scaffolding (the orientation
+preamble that opens the system prompt, the [§5.1.3](../../5-model-interaction/5.1-topic-tag-emission-format/5.1.3-prompt-template.md) topic-tag directive, the [§3.3](../3.3-symbol-extraction-two-passes/index.md) fallback re-prompt reminders, section headers) is charged to no slot.
 
-**Layer order and contents** ([§2.1](../../2-data-model/2.1-storage-layout/index.md) maps these to on-disk sources):
+**Slot order and contents**:
 
-| Layer | Source | Render |
-|---|---|---|
-| E    | `directives/defaults.md`, `directives/user.md`, `directives/<active>/project.md`, plus the project's `conventions_paths` ([§2.5.1](../../2-data-model/2.5-project-metadata-schema/2.5.1-canonical-projects-prj-n-meta-json.md)) | Section-divided concatenation; YAML frontmatter is stripped from each directive file. |
-| A1   | `spine.jsonl` filtered to `project == active` | One [§2.2.2](../../2-data-model/2.2-spine-record-schema-spine-jsonl/2.2.2-display-form.md) display line per record. |
-| A2   | `projects/<id>/digest.json` for every other project (excluding `prj_default`) | One line per project: `<name> (<id>): <one_line_summary> :: <recent_anchors[:5]>`, sorted by `last_active` desc. Each line capped at `cross-project.digest-per-project-bytes`. |
-| B    | `threads/thr_<id>/` ([§2.3](../../2-data-model/2.3-thread-file-format-threads-thr-id.md)) for each id in the Layer B active set | Up to `layer.b-top-k` threads, most-recently-engaged first; each rendered as a heading + frontmatter line + body. Per-thread share = `LayerB / k`; oversized threads are individually truncated. |
-| C    | `spine.jsonl` records for each id in the dormant set | One [§2.2.2](../../2-data-model/2.2-spine-record-schema-spine-jsonl/2.2.2-display-form.md) display line per record. |
+| Slot | Content |
+|---|---|
+| directives | the defaults, user-wide and active-project directive texts plus the project's convention files, frontmatter removed |
+| registry | a display line for each thread of the active project |
+| other-projects | one line per other project (never `prj_default`) with its name, id, summary and recent anchors, most recently active first, each within `cross-project.digest-per-project-bytes` |
+| active-threads | up to `layer.b-top-k` threads, most recently engaged first, each with its metadata and recent excerpts; each thread's share is the slot's share ÷ `layer.b-top-k`, and an oversized thread is truncated on its own |
+| dormant-threads | a display line for each thread of the dormant set |
 
-The layer percentages are calibration starting points, earned by the simulation sweep ([§9.4](../../9-measurement-and-validation-regime/9.4-measurement-regime/index.md)).
+The slot percentages are calibration starting points, earned by the simulation's parameter sweep ([§9.4](../../9-measurement-and-validation-regime/9.4-measurement-regime/index.md)).
 
 Contents:
 
 - [§3.1 Slots for opencode content](slots-for-opencode-content.md)
-- [§3.1 Slot answers](slot-answers.md)
+- [§3.1 Slot policies](slot-policies.md)
 - [§3.1 Tool output in composed requests](tool-output-in-composed-requests.md)
 - [§3.1 Truncation policy](truncation-policy.md)
 - [§3.1 §5.5 mid-turn fetch](5-5-mid-turn-fetch.md)

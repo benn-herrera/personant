@@ -4,8 +4,8 @@ The opencode source clone at `../opencode` is read-only. Never edit it and never
 the installed release's tag; it moves only in the change that updates the `sim-opencode` version
 check (ARCHITECTURE "Plugin route", "Pinned release").
 - **Open:** U11 — whether to adopt the rule: never place external state (an agent's data home,
-  telemetry) inside `~/.personant/` or a test home, because crash recovery quarantines untracked
-  files. opencode's data home is already excluded (ARCHITECTURE "Single spelunking location").
+  telemetry) inside the store directory or a test memory store, because crash recovery
+  quarantines untracked files. opencode's data directory is already excluded (ARCHITECTURE "One inspection location").
 - **Spawned processes: self-limiting, or verified dead** (origin: commit 4fcb0e5). Binding on any
   background process an agent starts — load generators, watchers, servers, opencode servers,
   children of stress harnesses:
