@@ -313,8 +313,8 @@ commit's hash is recorded in the table below; P1 reads the ruling files at its p
 
 | Package | State |
 |---|---|
-| N1, N2 | not started |
-| C1, C2 | not started |
+| N1, N2 | done (`af53921`) |
+| C1, C2 | C1 done (`DOC_SWEEP/contradictions.md`); C2 under way |
 | S1 | not started |
 | M1, M2 | not started |
 | A1, A2 | not started |
