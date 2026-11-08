@@ -330,6 +330,12 @@ Concrete, mostly single-package items; independent of the sequence above unless 
   paths and hex ids up to 64 characters (`internal/turn/chain.go`), while `verify` errors on an
   anchor outside 3–50 characters (`internal/verify/verify.go`), so a thread whose top symbol is a
   long path fails the day-commit's thread registry integrity check.
+- [ ] **`digest.json` is tracked in both repositories.** The managed gitignore block
+  (`internal/store/init.go` `seedGitignoreBody`) ignores `symbols.jsonl` as derived but not
+  `projects/prj_<n>/digest.json`, so the day-commit step captures each digest before the
+  derived-rebuild step refreshes it, and a history-repository commit can pair a `spine.jsonl` with
+  a stale digest. Quarantine-and-proceed treats derived files as absent from history-repository
+  HEAD (`internal/memops/fileadapter/fileadapter_barrier.go`).
 - [ ] **`meta.json` `thread_count` is never written.** `memops.ProjectMeta.ThreadCount` is
   decoded and `personant verify` checks it is non-negative (`internal/verify/verify.go`), but no
   code assigns it, so every project reads 0; the live count is `digest.json`'s
