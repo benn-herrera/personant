@@ -65,7 +65,7 @@ content evicted from a request (and any content dropped from a **slot** — a na
 the composed request, §3.1 — whose overflow form is a stand-in line) is named in that request by a
 stand-in line, at the version it had, and can be brought back on demand. Where replay cannot
 reproduce the content, the stored bytes are what the stand-in line points to. The model can expand
-the stand-in line (ARCHITECTURE "Spine entries are the recognition surface").
+the stand-in line (ARCHITECTURE "Display lines are how the model recognizes threads").
 
 ### 1.5 Determinism
 
@@ -179,8 +179,8 @@ Unused → ARCHITECTURE «Storage and record formats». Every thread has one rec
 registry**, a single file sorted by id, so diffs stay line-grain: project, anchors, summary,
 description, state, timestamps, turn count and recall-fire count (the number of accepted recalls of
 the thread, §3.4). The `description` is the triggering utterance, set once at creation and never
-rewritten; the `summary` is drafted at retirement (§3.5) by the **summarizer** (the model call that
-drafts a closure summary, §5.2) and bounded by `spine.entry-max-chars`. The anchors are 0 to
+rewritten; the `summary` is drafted when the thread closes (§3.5) by the **summarizer** (the model call that
+drafts a thread's closing summary, §5.2) and bounded by `spine.entry-max-chars`. The anchors are 0 to
 `anchor.projection-max` (default 8, a provisional value calibrated in §9) normalized symbols
 (recall tokens, §2.7), re-derived at the close of every owner turn (a turn the thread owns, §3.2)
 from the thread's active symbol history (§2.7.4); the model never controls their count (§5.1).
@@ -208,7 +208,7 @@ A thread is in exactly one of these states:
 | `active` | `paused` | `/pause` |
 | `paused` | `active` | re-engagement or `/resume` |
 | `active` | `blocked` | summarizer detects + user confirms |
-| `active` | `wip` / `resolved` / `decided` / `abandoned` | closure question with chosen outcome |
+| `active` | `wip` / `resolved` / `decided` / `abandoned` | closing question with chosen outcome |
 | `wip` | `active` | re-engagement (model emits topic tag) |
 | `resolved` / `decided` / `abandoned` | `active` | re-engagement; rare, but allowed |
 
@@ -335,10 +335,10 @@ below is recognized and listed with its default, but is currently fixed at that 
 in a directive file has no effect.
 
 ```yaml
-engagement.decay-turns: 8           # turns of non-engagement before closure fires
+engagement.decay-turns: 8           # turns of non-engagement before a thread closes
 engagement.decay-time: 7d           # wall-clock equivalent (duration string)
 closure.ack-mode: auto              # auto | always (§3.5).
-                                    # auto (default): routine decay closures are
+                                    # auto (default): routine decay close-outs are
                                     # auto-accepted with the summarizer's summary;
                                     # exceptions queue for a drain at a drain point.
                                     # always: every decayed thread is put to the
@@ -492,9 +492,9 @@ Each delta runs the pipeline, in this order:
    path, §3.9.1) in the owner's excerpt and updates the tracked-file store (§3.9.1). Which
    positions render content is decided at composition (§3.9.2).
 4. **Budget check** (§3.1) — a delta that pushes the window over its slot caps triggers
-   bump-eviction before the next delta lands.
+   budget demotion before the next delta lands.
 
-   > **v0.1 non-goal (turn-time budget enforcement).** This step performs no eviction in v0.1. The
+   > **v0.1 non-goal (turn-time budget enforcement).** This step performs no budget demotion in v0.1. The
    > only budget protections are (a) the per-thread recent-excerpt window (§2.3) and (b)
    > render-time byte truncation of each slot (§3.1); neither acts at delta time, so an LLM whose
    > per-turn deltas outrun the slot caps can silently starve the active-threads and
@@ -511,8 +511,8 @@ logical sub-segment boundaries).
 
 - Symbol extraction runs before engagement (engagement depends on the extracted set).
 - Dedup runs after extraction (extracted identifier symbols are what dedup matches against).
-- Budget check runs last. Eviction is itself a delta, but recursive pipeline runs are
-  **capped at depth 1** — eviction emits a log line and is done.
+- Budget check runs last. Budget demotion is itself a delta, but recursive pipeline runs are
+  **capped at depth 1** — budget demotion emits a log line and is done.
 
 #### 3.0.4 Per-turn coalescing for engagement
 
@@ -572,7 +572,7 @@ Three further slots carry content opencode supplies (§1.2, §1.3):
 | opencode expectations | The todo list, the agent mode, an open question or permission request, reminders still in force, child session IDs, background-job results — rendered as current state. |
 | Tool definitions | The built-in and MCP tool definitions sent with each request. They count against the token ceiling. |
 
-#### Slot answers
+#### Slot policies
 
 Every slot — the five memory slots and the three above — defines four things before it
 ships: (1) its **budget**; (2) its **internal priority**, what is dropped first when its content
@@ -588,10 +588,10 @@ a turn boundary, so its unused share is idle and is given up. A dynamic slot —
 active-threads, dormant-threads, and the opencode-expectations slot, whose todo and background-job
 updates arrive mid-turn — varies turn to turn and does not give up share. When a slot that gave up
 share grows it takes its share back at the next composition, and the slot that received it gives
-way through the existing eviction order (oldest dormant thread first, then oldest active thread).
+way through the existing demotion order (oldest dormant thread first, then oldest active thread).
 Fixed slots are composed first, so the request keeps a stable prefix across turns.
 
-**Open:** per-slot answers — all four for the instructions and tool-definition slots (including
+**Open:** per-slot policies — all four for the instructions and tool-definition slots (including
 whether the tool-definition slot gives up unused share); budget, internal priority and overflow form for the
 opencode-expectations slot. Candidate overflow forms for tool definitions: omit rarely used tools from a request, or list them
 by name with definitions on demand (MCP tools are recognizable by the `<server>_` name prefix).
@@ -694,7 +694,7 @@ After the owner's `history_symbols` merge, the memory service
 re-derives the thread's `anchors` projection (§2.7.4) in the order **merge → project → trim**.
 **Idempotent-write guard:** the thread's registry record is changed (and `anchors_projected_at_turn`
 bumped to the owner-turn index) **only when the projected anchor set differs** from the prior set.
-**Engaged-but-not-owner threads do not re-project.** Closure (§3.5) runs a final authoritative
+**Engaged-but-not-owner threads do not re-project.** Closing a thread (§3.5) runs a final authoritative
 projection from `history_symbols`.
 
 ### 3.3 Symbol extraction (three passes)
@@ -703,7 +703,7 @@ Three passes per §3.0.2 step 1, cheapest first:
 
 1. **Deterministic** — regex over the delta (file paths, URLs, commit SHAs, hashtags).
 2. **Model-emitted** — tag symbols from the topic tag (§5.1) are folded in directly.
-3. **Summarizer** — at retirement the summarizer drafts the closure summary (§3.5). It does **not**
+3. **Summarizer** — when a thread closes the summarizer drafts its closing summary (§3.5). It does **not**
    select anchors: the anchor set is the deterministic projection of active `history_symbols`
    (§2.7.4).
 
@@ -760,7 +760,7 @@ the empty-response re-prompt.
 
 > **Recall-completeness invariant (no gaps in findability).** All **non-transient** turn content
 > MUST be locatable by recall at every stage of its lifecycle — creation, recent-excerpt-window
-> residency, scroll-out and durable storage, archival (§3.8), and later summarization/retirement
+> residency, scroll-out and durable storage, archival (§3.8), and later summarization and closing
 > (§3.5). **The ONLY content that may be unfindable is transient data deliberately discarded** per
 > §3.10 (uncited task-class symbols / raw task-bytes expired at window close, §3.10.5–§3.10.6).
 >
@@ -900,11 +900,11 @@ provisional value calibrated in §9, lowered below 1.0 only if the sim's `supers
 `symbols.jsonl.superseded_in` (§2.4) is the cheap-scan candidate-filter surface ("which threads
 abandoned premise X", O(1) per query symbol); the scorer does not consume it.
 
-### 3.5 Closure flow
+### 3.5 Closing a thread
 
 Trigger detection (engagement decay or an explicit close request, `/done`) → summarizer-drafted
 summary → outcome → frontmatter + thread registry update → demotion out of the active and dormant
-sets. Cold storage (§3.8) follows closure under thread registry size pressure.
+sets. Cold storage (§3.8) follows a close under thread registry size pressure.
 
 **Open:** U4 — the channel for every interactive step below (the exception drain, `/done`, the
 `[e]dit` choice, `always` mode, the pending-queue announcement) and the command that triggers each.
@@ -918,8 +918,8 @@ The summarizer-drafted summary targets 100–150 chars: summary + anchors must f
 slot's budget at realistic thread registry size while letting the model recognize prior engagement
 without fetching the body.
 
-**Routine closures are auto-accepted; exceptions are batched at drain points.** A **drain point**
-is a moment at which the queued exception closures are put to the user. At the decay-detection
+**Routine close-outs are auto-accepted; exceptions are batched at drain points.** A **drain point**
+is a moment at which the queued exception close-outs are put to the user. At the decay-detection
 scan each candidate is classified:
 
 - **Exception** — the summarizer draft is empty or failed, OR the thread is anchor-rich (≥ 6
@@ -927,19 +927,19 @@ scan each candidate is classified:
   values pending real-use data.
 - **Routine** — everything else.
 
-A **routine** closure is applied without asking: the summarizer's summary, `resolution=resolved`,
+A **routine** close-out is applied without asking: the summarizer's summary, `resolution=resolved`,
 the same frontmatter + thread registry write and demotion out of the active and dormant sets an
 accepted ack performs, and ONE user-visible
 line, `closed thr_N: <display name> — <summary>` (the id leads because `/back-to <thr_id>` is the
 revision path). It rides the turn transaction already open around turn close (§4.5.8) and adds no
-commit path of its own. **The revision path for a wrongly-summarized routine closure is
+commit path of its own. **The revision path for a wrongly-summarized routine close-out is
 re-engagement** (`/back-to`, §4.2): it returns the thread to `active`, and its next close re-drafts
 the summary.
 
-An **exception** closure is **queued** silently: no summarizer call, no question, one
-`retire.pending` event. The queue is **derived, never stored** — a pending closure is a
+An **exception** close-out is **queued** silently: no summarizer call, no question, one
+`retire.pending` event. The queue is **derived, never stored** — a pending close-out is a
 decay-eligible thread that classified as an exception — so it is crash-safe and correct across
-restarts. It is drained with the full interactive closure dialog at **drain points only**, and on
+restarts. It is drained with the full interactive closing dialog at **drain points only**, and on
 demand via `/closures` (§4.2). An opencode session never exits, so there is no clean-exit drain
 point; **Open:** U4 — the drain point that takes its place. A non-empty queue is ANNOUNCED in one
 user-visible line (`N closure(s) pending review — /closures`) when an opencode session starts and
@@ -947,8 +947,8 @@ never put to the user as a question.
 
 #### The offer names the thread
 
-Wherever the interactive closure dialog runs — a drain point, `/done`,
-or `always` mode — each closure offer shows `idle topic thr_N: <display name> — <gist>` above the
+Wherever the interactive closing dialog runs — a drain point, `/done`,
+or `always` mode — each offer shows `idle topic thr_N: <display name> — <gist>` above the
 summarizer's draft summary, resolved by the §2.2.2 fallback chain (description → summary → projected
 anchors).
 
@@ -965,7 +965,7 @@ persistently failing summarizer therefore leaves its thread un-closed rather tha
 
 The indicator metric is **ack-edit-rate**: the
 ack question offers an `[e]dit` choice (§4.2 `/done`, the `/closures` drain), and `retire.ack` (§2.8)
-records `edited=yes|no` for EVERY acked outcome (retire and wip) — `yes` only when the submitted
+records `edited=yes|no` for EVERY acked outcome (close and wip) — `yes` only when the submitted
 summary differs from the summarizer draft. `retire.ack` also carries `ack=human|auto`, and the rate is
 computed over `ack=human` lines only (an auto-accept is unedited by construction and would drive the
 rate toward zero). Auto-accepts are still recorded (`retire.ack ... ack=auto` plus
@@ -977,7 +977,7 @@ edit-rate while auto-accepts are corrected by hand with `/back-to`) — needs a 
 ### 3.6 Fallback dissection
 
 Budget-pressure trigger → the **clusterer** (the model call that groups the oldest content into
-threads for retirement, §5.3) clusters the oldest content → batch retirement → ack flow.
+threads to close, §5.3) clusters the oldest content → batch close → ack flow.
 
 ### 3.7 Cross-project digest maintenance
 
@@ -1002,7 +1002,7 @@ history-writer rule). Standalone archival is crash-recoverable via the same roll
 #### 3.8.1 Mechanism
 
 A thread is a **directory** (`threads/thr_<n>/` = `thread.md` + `turns/` + `folio.jsonl` + the tracked-file store, §2.3).
-Archival drains a **batch** of the coldest retired threads at once; a batch archive must achieve
+Archival drains a **batch** of the coldest closed threads at once; a batch archive must achieve
 three results:
 
 1. **Membership recorded before deletion.** One `archive/index.jsonl` entry per thread is durably
@@ -1293,7 +1293,7 @@ prerequisite for a meaningful recall-fidelity measurement (§9).
 survive on disk for §3.4 intra-thread recall — is the adjacent keep/toss decision. v0.1
 **over-retains**: all decision-class excerpts are kept, and raw task-class tool output is never an
 excerpt. The **precision stage** that trims the retained set is deferred to consolidation's
-keep/toss (ARCHITECTURE, Memory consolidation — the "sleep" cycle), with this settled mechanism:
+keep/toss (ARCHITECTURE, "Memory consolidation"), with this settled mechanism:
 
 - **Raw tool output → always transient**, deterministically, with no LLM involvement.
 - **The assistant's *re-presentation* of tool data → the durable candidate**, marked inline by the
@@ -1403,12 +1403,12 @@ user-facing word. The command names `/topic` and `/topics` keep their spelling. 
 |---|---|
 | `/topic <name>` | force a new thread with the given working name. The first word is read as a subcommand (see `/topic rename`), mirroring `/project`'s parse; a thread cannot be CREATED with a name whose first word is `rename` |
 | `/topic rename <new-name>` | rename the ACTIVE thread's §2.2.2 display name. **Display-cosmetic**: the id, the anchors, `history_symbols`, the §2.8 `thr=` details, recall matching and every stored turn excerpt are unchanged. Writes `description` (and `summary` when it duplicates `description` — the shape `/topic` creation leaves) to both the authoritative §2.3 frontmatter and the derived thread registry record. Old names are NOT aliases: `/back-to <old-name>` stops resolving. Duplicate display names are permitted; the ambiguity surfaces in the name lookup. Not a §3.11 structural change, so it rides the next checkpoint commit; logged `thread.renamed` |
-| `/topics [all]` | list the active project's threads. Grouped ENGAGED / PAUSED / DORMANT / RECENTLY CLOSED, recency-sorted within each group, one line per thread in the §3.4 thread-reference shape: `thr_N`, display name, gist, relative age. Recently-closed threads are in the default view, with the `/back-to` hint, because an auto-accepted §3.5 closure is revised that way. The default view is bounded (20 threads, then a count of what it withheld); `all` lifts the bound and the closed-window cutoff |
-| `/done` | request closure ack on the active thread (§3.5); always fully interactive |
-| `/closures` | drain the §3.5 queue of exception closures now. The same drain runs at the §3.5 drain points. An empty queue says so |
+| `/topics [all]` | list the active project's threads. Grouped ENGAGED / PAUSED / DORMANT / RECENTLY CLOSED, recency-sorted within each group, one line per thread in the §3.4 thread-reference shape: `thr_N`, display name, gist, relative age. Recently-closed threads are in the default view, with the `/back-to` hint, because an auto-accepted §3.5 close-out is revised that way. The default view is bounded (20 threads, then a count of what it withheld); `all` lifts the bound and the closed-window cutoff |
+| `/done` | request the closing ack on the active thread (§3.5); always fully interactive |
+| `/closures` | drain the §3.5 queue of exception close-outs now. The same drain runs at the §3.5 drain points. An empty queue says so |
 | `/pause` | mark active thread as `paused` (§2.2.1) |
 | `/resume` | resume a paused thread |
-| `/back-to <thr_id>` | re-engage a closed thread — the revision path for an auto-accepted closure; see `/topics` |
+| `/back-to <thr_id>` | re-engage a closed thread — the revision path for an auto-accepted close-out; see `/topics` |
 | `/no-revisit` | tighten threshold on the most recent recall candidate (§3.4) |
 | `/project` | print active project (id, name, the project's directory, remote URL if any) |
 | `/project switch <name-or-id>` | switch active project to a known one |
@@ -1821,7 +1821,7 @@ refs forbid `:`), so names are unique and sort **lexically = chronologically**. 
 **idempotent** (skip-if-exists by exact name) and **best-effort**: a read/parse/tag fault logs
 `barrier.tag-error` and is skipped, never failing the seal. `git show <tag>:spine.jsonl` (or any
 path) reads the memory store as it stood at that commit. *Day-scoping:* the day rollover for day N
-fires the next day, so created/retired/project lines are those with event day index N, while
+fires the next day, so `created`, `retired` and project lines are those with event day index N, while
 `archived` (emitted by the rollover itself) is not day-filtered; life events on earlier **idle
 gap-days** (< N) go untagged.
 
@@ -2067,16 +2067,16 @@ clarifying question. The empty-response reminder (§3.3) names the discard reaso
 restates the tag form, and asks for brief hidden reasoning. Once appended, each reminder survives
 any later same-turn recomposition (e.g. a subsequent §5.5 fetch re-prompt).
 
-### 5.2 Summarizer prompt for retirement summary
+### 5.2 Summarizer prompt for closing summary
 
-The summarizer is invoked at closure (§3.5) to draft the thread registry `summary` from the thread's
+The summarizer is invoked when a thread closes (§3.5) to draft the thread registry `summary` from the thread's
 accumulated body. The prompt instructs the model to produce a 100–150 char gist faithful to the
 thread's operational content. **Open:** U5 — how the memory service reaches the model for this call.
 
 ### 5.3 Clusterer prompt for fallback clustering
 
 The clusterer is invoked under budget pressure (§3.6) to cluster the oldest in-window content
-into proposed retirement groups. The prompt presents the candidate content and asks for a small
+into proposed groups of threads to close. The prompt presents the candidate content and asks for a small
 number of clusters with brief rationale. **Open:** U5 — how the memory service reaches the model for
 this call.
 
@@ -2215,7 +2215,7 @@ the store directory is operating outside the memory service and owns the consequ
 ## 9. Measurement and validation regime
 
 The thesis — months-long continuity, drift-resistant memory, opportunistic recall,
-retire-and-restore cycles that preserve meaning — is a behavioral claim, and it must be proven by
+close-and-restore cycles that preserve meaning — is a behavioral claim, and it must be proven by
 simulation **before** real use accumulates the state a structural defect would put at risk. This
 section defines that proof: the acceptance criterion (§9.1) and the instruments that measure it
 (§9.2–§9.4).
@@ -2228,8 +2228,8 @@ The v0.1 acceptance criterion:
   workload (§9.4) running against the real memory service with a mock LLM (§9.2) supplying canned
   responses.
 - **Memory quality maintained** throughout, measured via the metrics emitted at every event (§9.4):
-  recall hit rate, engagement accuracy, retirement timing, round-trip information-preservation
-  through retire→archive→restore.
+  recall hit rate, engagement accuracy, closing timing, round-trip information-preservation
+  through close→archive→restore.
 - **Zero out-of-context-space events.** The normative criterion is the whole-request token ceiling
   (`context.token-budget`): the fully-assembled request (every §3.1 slot, including tool definitions
   and this turn's tool results, plus injected fetches) never exceeds it, checked post-flight against
@@ -2237,7 +2237,7 @@ The v0.1 acceptance criterion:
   rendered slot stayed within its derived byte allocation (§3.1). Turn-time budget enforcement is
   deferred past v0.1 (§3.0.2 step 4).
 - **Operation runtime costs measured and within bounds.** Wall-clock P50/P95/P99 latency for:
-  engagement update, recall match, thread fetch, retirement, archival, recovery, index rebuild, index
+  engagement update, recall match, thread fetch, thread close, archival, recovery, index rebuild, index
   check. "Within bounds" means stable across the simulation, not a threshold that grows with
   accumulated state.
 - **Steady-state demonstrated.** After 120 simulated days the trajectories of working-set size,
@@ -2384,7 +2384,7 @@ The same mock serves every test level (scenario, churn, calibration, the accepta
 
 ### 9.3 Unit testing
 
-Unit testing is level 1 of the measurement stack (ARCHITECTURE, "Testing as the lab bench"); no
+Unit testing is level 1 of the measurement stack (ARCHITECTURE, "Testing as the measurement instrument"); no
 mock LLM is needed at this level.
 
 ### 9.4 Measurement regime
@@ -2408,7 +2408,7 @@ comparison.
   latency (P50/P95/P99) flat after 120 simulated days.
 - **Round-trip fidelity:** archive → restore → diff against original; information-preservation rate
   measured.
-- **Operation latency within bounds:** engagement update, recall match, thread fetch, retirement,
+- **Operation latency within bounds:** engagement update, recall match, thread fetch, thread close,
   archival, recovery, index rebuild, index check — stable as accumulated state grows.
 - **Oracle agreement with the memory service's active set:** the workload generator's own model of
   active-set membership, from which it derives expected recall matches, agrees exactly with the
@@ -2427,9 +2427,9 @@ budget. Cheap checks run every step; store-wide checks run once per sim day and 
 of run.
 
 **Named scenario set** (initial): single-thread lifecycle, multi-thread interleaving, project
-switching, heavy retirement (50 threads), same-anchor collision, transient shell-capture content,
+switching, heavy closing (50 threads), same-anchor collision, transient shell-capture content,
 cross-boundary recovery. Churn sequences are randomized but seeded (80% engage / 10% create / 5%
-retire / 5% switch); a failure dumps the operation log and seed for replay. Calibration sweeps a
+close / 5% switch); a failure dumps the operation log and seed for replay. Calibration sweeps a
 directive parameter across a range and emits a metrics matrix — the instrument by which §2.6.1
 defaults earn their values.
 
@@ -2479,6 +2479,6 @@ step's emitted time, never integrated separately, so there is exactly one clock.
   is a function of `Duration` alone. Same seed and duration → identical step stream.
 - **Clock frozen within a turn.** The simulated clock advances once per step; every read inside one
   turn returns the same instant. This is benign because the logical clock is the turn number:
-  closure/decay, staging, file-chain aging and history ordering key off turns, and the simulated
+  closing/decay, staging, file-chain aging and history ordering key off turns, and the simulated
   clock is consumed only at coarse grain (§3.5 wall-clock decay, provenance/display timestamps).
   Revisit if sub-turn logic orders events by timestamp or metrics become timestamp-grained.

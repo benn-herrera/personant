@@ -11,7 +11,7 @@ Must-see:
 ## Before a change
 
 Read THESIS and ARCHITECTURE "Applying the thesis" before a non-trivial change to this
-repository, and ARCHITECTURE "Substrate non-negotiables" before touching storage, persistence or
+repository, and ARCHITECTURE "Storage non-negotiables" before touching storage, persistence or
 derived files. Do not write the following changes; report them to whoever assigned the work, with the
 row or clause they match, and continue only on that person's direction:
 
@@ -129,8 +129,9 @@ dependencies". `go.mod` is the catalog.
 - **Pending removal with their consumers** (ROADMAP.md B1, "Retire the self-built harness"):
   `codeberg.org/readeck/go-readability/v2` and `github.com/JohannesKaufmann/html-to-markdown/v2`
   serve only `internal/tools/web/`. Both entries go in the change that removes their consumer.
-- **Application code talks to `MemoryOps`, not to the substrate directly.** Package-level detail
-  and the substrate-free exceptions: ARCHITECTURE "Port-and-adapter at the substrate boundary".
+- **Application code talks to `MemoryOps`, not to the memory store directly.** Package-level
+  detail and the store-independent exceptions: ARCHITECTURE "Port-and-adapter at the memory store
+  boundary".
 ### All clock reads use `internal/clock`
 
 Direct reads of the `time` package clock
@@ -162,7 +163,7 @@ the installed release's tag; it moves only in the change that updates the `sim-o
 check (ARCHITECTURE "Plugin route", "Pinned release").
 - **Open:** U11 — whether to adopt the rule: never place external state (an agent's data home,
   telemetry) inside `~/.personant/` or a test home, because crash recovery quarantines untracked
-  files. opencode's data home is already excluded (ARCHITECTURE "Single spelunking location").
+  files. opencode's data home is already excluded (ARCHITECTURE "One inspection location").
 - **Spawned processes: self-limiting, or verified dead** (origin: commit 4fcb0e5). Binding on any
   background process an agent starts — load generators, watchers, servers, opencode servers,
   children of stress harnesses:
