@@ -205,7 +205,8 @@ following "apply" package executes the rulings.
     understood from the document", `adjagent-architect-arch-with-volumes.md` "## 5. Terms I could
     not resolve from the documents" and `adjagent-go-coder-arch-with-volumes.md` "## 5. ARCH terms
     not understandable from the three documents": each is defined at first use, cites the SPEC or
-    THESIS definition, or is a term of art used as the field uses it.
+    THESIS definition, is a term of art used as the field uses it, no longer appears, or is
+    replaced by the term the vocabulary files settle (cite where).
   - **Done:** the dispatcher writes `DOC_SWEEP/architecture-content.md`, each item settled by the
     record (with where) or put to the owner; owner calls ruled.
 - **A2, apply** (expert; `adjagent:tech-writer`, own model). Applies every item in
