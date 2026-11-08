@@ -20,12 +20,18 @@ row or clause they match, and continue only on that person's direction:
   than SPEC §1.8's single write path, or that promotes a single-project pattern into behavior
   memory (SPEC §1.8 "Feedback directive tuning").
 
-When you propose a change, ask:
+When you propose a change or make a design decision, ask:
 
 - Does it have a measurement story? (How will we know it worked?)
 - Does it commit to a specific value, or set a provisional value to be calibrated?
 - Does it preserve or invert a recurring pattern (ARCHITECTURE "Recurring patterns")?
 - Does it create migration cost we can't recover from?
+- Could deterministic code do this without involving the model?
+- If the model is involved, is its role narrow and well-bounded?
+
+Also:
+
+- Bake metrics emission into new code from day one; bolting it on later is much more expensive.
 
 ## Plan & Execute Process
 

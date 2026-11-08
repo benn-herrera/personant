@@ -240,6 +240,7 @@ A thread is in exactly one of these states:
 Unused → ARCHITECTURE «Storage and record formats» (the display-line layout). The model sees each
 thread in its composed request as one **display line** of id, anchors, summary and state — enough
 to **recognize** the thread (tell that earlier work bears on the current work) without loading it.
+The line carries enough decision state that the model can answer most questions about a thread's outcome from the line alone.
 The line is generated from the thread registry record each time and never stored.
 
 The **human half** of a thread's display — the working name a user reads and types back — is its
@@ -779,6 +780,8 @@ the empty-response re-prompt.
 > half is **accepted only when the embedder-enabled completeness run configuration runs green**
 > (§9.1 open gate requirement).
 
+Recall guarantees findability; it does not volunteer a connection to past work that shares no symbols or embedding similarity with the current work.
+
 Three signals; signals 1 and 2 run in parallel, not as a cost cascade, and signal 3 runs on the candidates they surface:
 
 1. **Symbolic Jaccard** over the symbol index — high precision, low recall. Cheap.
@@ -961,6 +964,8 @@ edit-rate while auto-accepts are corrected by hand with `/back-to`) — needs a 
 
 Budget-pressure trigger (`dissect.pressure-threshold`, §2.6.1) → the **clusterer** (the model call that groups the oldest content into
 threads to close, §5.3) clusters the oldest content → batch close → ack flow.
+
+The grouping is best effort: under stress, thread quality degrades gracefully; content is not lost.
 
 ### 3.7 Cross-project digest maintenance
 
@@ -1523,7 +1528,7 @@ file is operational (§2.1), single-line, plain text.
 #### 4.5.8 Startup recovery after unclean shutdown
 
 The memory service may be hard-terminated (crash, SIGKILL, power loss) mid-turn, leaving derived state (the
-symbol index, working-set membership) inconsistent with the authoritative
+symbol index) inconsistent with the authoritative
 files (`spine.jsonl`, thread files, logs). (This is distinct from the restore of an archived thread,
 §3.8.3.) On startup the memory service **reconciles derived state against the authoritative files**
 and **repairs a torn in-flight turn** before the service run opens. Startup order: **format check (§9.1) → startup

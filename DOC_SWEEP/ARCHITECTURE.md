@@ -9,9 +9,7 @@ Must-see:
 ## What this is
 
 Personant is a memory system for a coding agent that runs under opencode. It owns
-what enters every model request — composition, compaction and summarization, and recall — so that an agent has **persistent working memory across arbitrary
-projects with continuity**: one continuous career, no session boundaries, no compaction-driven
-information loss, cross-project recognition (SPEC §1). opencode owns everything else: the terminal
+what enters every model request — composition, compaction and summarization, and recall — to meet SPEC §1 (the effect: THESIS "What is new"). opencode owns everything else: the terminal
 UI, session storage, agents, tools, permissions, providers and configuration.
 
 ---
@@ -40,14 +38,16 @@ design. Facts about the prototype, the throwaway implementation built to test th
 the prototype's (`opencode-plugin/index.ts`, `internal/opencodehook/`,
 `internal/turn/probe_phases.go`, `internal/scenarios/opencode/`, the `phases` and `opencode` sim
 executors, `sim-opencode`, `probe-smoke`, `probe-resume`, `probe-deps`) resolves there (probe
-results §§6–7). ROADMAP A2 brings the baseline comparator across; A3 and A5 rebuild the rest.
+results §§6–7). Carrying the baseline comparator (the `sim-baseline` and `sim-fidelity` recipes and the committed baselines) to the build branch is ROADMAP A2; rebuilding the rest is A3 and A5.
+
+An **Open:** line marks a decision not yet made, and a tag such as U7 names it (CONVENTIONS "Document conventions"); ROADMAP "Pending decisions" lists the U-tags, and ids such as A2 or B9 are ROADMAP items.
 
 Personant runs under unmodified opencode as two pieces:
 
 - **Plugin** (`opencode-plugin/`). TypeScript, loaded by opencode in its own Bun process. An
   adapter that holds no memory state: it forwards hook inputs and events to the service and applies
   the answers, and imports only what the host supplies, so all memory logic is in Go
-  (integration-options report §2.1).
+  (integration-options report §2.1). It keeps only transport counters, none of them memory: the sequence number it stamps on each forwarded event, because RPCs can reach the service out of order (see "Ordering and correlation"), and a fail-open count the opencode-in-loop harness reads (`oc_*` hook fail-open counts). The prototype also carries round-trip timings for the harness. All of it lives in the plugin process and starts at zero on a reload.
 - **Memory service** (Go). The only writer Personant provides for memory state (see "Automatic vs
   model-controlled"); it composes every model request. The plugin reaches it over loopback HTTP +
   JSON with `fetch`, because Bun's `node:net` and child-process APIs are unverified from plugin
@@ -73,24 +73,22 @@ release's tag, so the code read is the code run.
 ### Failure handling
 
 Hooks have no timeout and run sequentially (integration-options report §2.2), so every plugin RPC
-carries its own timeout. A Promise-API hook's rejection becomes an Effect defect, so the plugin
-catches every failure itself (integration-options report §2.2). The prototype plugin fails open: on
+carries its own timeout. A Promise-API hook's rejection becomes an Effect defect (a rejected Promise-API hook surfaces as an unhandled failure in opencode's Effect runtime, integration-options report §2.2), so the plugin
+catches every failure itself. The prototype plugin fails open: on
 timeout or error it leaves the hook input as opencode built it and reports a fail-open count.
 
-**Open:** U7 — the production failure policy: fail open (opencode's own composition reaches the
-model and memory misses the step) or fail closed (the request is refused). What opencode does when
-the `context` hook throws or the service refuses is unestablished (resume probe §6).
+**Open:** U7 — the production failure policy, fail open or fail closed (SPEC §1; ROADMAP U7). What opencode does when the `context` hook throws or the service refuses is unestablished (resume probe §6).
 
 ### Integration shape
 
 Each element names the opencode mechanism it rides on (integration-options report §2.3 unless
 noted).
 
-- **Composition: the `session.context` hook.** It fires on every primary step and every retry;
+- **Composition: the `session.context` hook.** It fires on every primary step (a step of the main agent's model loop, not opencode's title or compaction call) and every retry;
   `system`, `messages`, `tools` and `options` are all mutable. The plugin sends the hook input to
   the service and replaces `system` and `messages` with the answer. The service builds the answer
-  as `turn.ComposeRequest` does: the composed working set as the system prompt, the transcript
-  tail, the current user input and this turn's tool messages. Tool-call/tool-result pairs in the
+  as `turn.ComposeRequest` does: the composed working set (SPEC §3.1) as the system prompt, the transcript
+  tail (the newest messages of the service run's in-run history, bounded to 35% of the live-turn reserve; `boundHistoryTail`, `internal/turn/livebudget.go`), the current user input and this turn's tool messages. Tool-call/tool-result pairs in the
   returned `messages` stay intact (integration-options report §4, item 4). Any other model call is
   kept off the provider: the `session.title` and `session.compaction` hooks supply `result`, which
   skips the model call, so no model request reaches the provider uncomposed (SPEC §1).
@@ -107,7 +105,7 @@ noted).
   `-sim.checkpoint-cadence`). The plugin enqueues one with `session.compact` and the
   `session.compaction` hook answers with `result`. The checkpoint compaction's summary is a fixed
   placeholder that the `context` hook discards on replay. A checkpoint compaction is a read bound,
-  not a memory mechanism. `experimental.idle` only decides whether a checkpoint compaction is due:
+  not a memory mechanism. `experimental.idle` (an opencode plugin hook, integration-options report §2.3) only decides whether a checkpoint compaction is due:
   it fires before the turn's final step event and again after one, so it never closes a turn
   (probe results §6, lessons 1–2).
 - **`/compact` and `/clear`** (context-injections report §4). A user `/compact` cannot be refused;
@@ -120,7 +118,7 @@ noted).
 - **Config.** `personant init` writes the settings opencode must hold (`compaction.auto: false`,
   the plugin entry) into opencode's own config in opencode's own format. Personant-only settings
   live in `~/.config/personant/` and never overlap opencode's (see "One inspection location").
-- **Code Mode and plugins.** opencode's own server runs, so its JavaScript plugins and Code Mode
+- **Code Mode and plugins.** opencode's own server runs, so its JavaScript plugins and Code Mode (SPEC §1)
   work unchanged.
 - **Sessions and projects.** The project resolves from opencode's session directory through
   project resolution (see "Project identity"). A session reads and writes the one memory; turns
@@ -156,9 +154,7 @@ measurement probe established that opencode's `edit` exposes them, and the proto
 **Open:** fork, revert and sub-minds — how a branch's work is incorporated or discarded (SPEC
 §1.1), decided together. The events above are observed; what memory does on them is undecided.
 
-**Open:** agents and skills — whether and how opencode agent definitions and skills are supported.
-A candidate mapping: agent definitions as directives-slot content scoped per agent, skill content
-as transient task-class.
+**Open:** agents and skills — whether and how opencode agent definitions and skills are supported (ROADMAP B7).
 
 **Open:** provenance — no thread carries `derived_from` through opencode, while in-process runs do
 (probe results §5). The cause is unverified; candidates are tool deltas now applying after
@@ -219,8 +215,7 @@ turns each into state rather than history, so that nothing is stale and nothing 
 
 **Open:** per-slot policies — all four for the instructions and tool-definition slots, and budget,
 priority and overflow form for the expectations slot (SPEC §3.1). Without a tool-definition slot
-the whole-request ceiling cannot be enforced. Candidate overflow forms for tool definitions: omit
-rarely used tools from a request, or list them by name with definitions on demand.
+the whole-request ceiling cannot be enforced (ROADMAP A7).
 
 **Open:** a way to tell an MCP prompt expansion apart from a typed prompt; the hook input does
 not distinguish them (context-injections report §2). Until found, an expansion is handled as user
@@ -239,12 +234,12 @@ reached through the `MemoryOps.ComposeWorkingSet` port.
 
 | Phase | Driven by | Covers |
 |---|---|---|
-| `BeginTurn` | `session.prompt` | budget, live-turn reject, day rollover, pre-turn snapshot, `TurnNumber++`, prompt journal, expiry of staged symbols, pre-event deltas, `user.prompt` delta |
+| `BeginTurn` | `session.prompt` | budget, live-turn reject (refuse a single user prompt that exceeds its live-turn share; `internal/turn/livebudget.go`), day rollover, pre-turn snapshot, `TurnNumber++`, prompt journal, expiry of staged symbols, pre-event deltas (file deltas a step carries ahead of its prompt, `Step.PreEvents`), `user.prompt` delta |
 | `ComposeRequest` | `session.context` | working-set composition and request assembly, from this turn's messages in the hook input |
 | `IngestToolResult` | `tool.execute.after` | tool-result deltas, held and applied in call order |
-| `IngestModelResponse` | `session.execution.succeeded` | tag strip, response journal, ceiling check, `model.response` delta |
-| `CloseTurn` | `session.execution.succeeded`, after `IngestModelResponse` | engagement, closing scan, `CommitTurn`, working-set persist, transcript tail; idempotent |
-| `AbortTurn` | `session.execution.failed`, `.interrupted`, or a phase error | pre-authoritative rollback to the pre-turn snapshot |
+| `IngestModelResponse` | `session.execution.succeeded` | tag strip (remove the topic tag from the stored and shown response), response journal, ceiling check, `model.response` delta |
+| `CloseTurn` | `session.execution.succeeded`, after `IngestModelResponse` | engagement, closing scan (the decay check for threads due to close), `CommitTurn`, working-set persist, transcript tail; idempotent |
+| `AbortTurn` | `session.execution.failed`, `.interrupted`, or a phase error | pre-authoritative rollback (before any authoritative write has landed) to the pre-turn snapshot |
 
 In the prototype, the phases exist in `internal/turn/probe_phases.go`; `RunTurnInProcess`
 recomposes them into the in-process turn. `RunWithInfo` is not yet re-expressed over them. The
@@ -262,7 +257,7 @@ on a context call with no preceding prompt: the prototype service answers it wit
 (`compose`). Undecided: which `BeginTurn` steps a resumed turn runs, and what its `user.prompt`
 content is — opencode's synthetic continue text or the original prompt (resume probe §5.3, item 1).
 
-**Open:** mid-turn prompt — a `steer` prompt can arrive after tool results; whether it opens a new
+**Open:** mid-turn prompt — a `steer` prompt (a prompt the user sends while a turn is running) can arrive after tool results; whether it opens a new
 turn or joins the turn in progress (SPEC §3.0.4). `BeginTurn` is written for one prompt per turn.
 
 #### Invariant for the production phase split
@@ -275,7 +270,7 @@ altered behaviour.
 **Open:** U8 — what `AbortTurn` does with an interrupted turn. Until decided, SPEC §4.3.3 binds: a
 retracted prompt does not enter memory, and the rollback restores run-volatile state
 (`internal/turn/rollback.go`): the turn counter, the cross-turn staging buffer, active-set and
-dormant-set membership, history, recall-surfaced marks and embedding debt, all to the pre-turn
+dormant-set membership, history, recall-surfaced marks and embedding debt (excerpts scrolled out of the recent-excerpt window and not yet embedded; the cap is the unembedded backlog limit, 16), all to the pre-turn
 snapshot. The `user.prompt` delta has already run (pipeline step 1) when a retraction arrives,
 which is why staged symbols need the restore. The rollback also releases the turn's journal scope,
 the span in which the turn's journal is non-empty, so the next start opens with no turn to recover.
@@ -301,13 +296,10 @@ Failures after an authoritative write do not roll back; recovery owns them.
   "Store directory layout"). Crash recovery quarantines untracked files there, which would include
   opencode's database (see "One inspection location").
 - **Restart persistence.** Only the working set reloads (`working-set.json`). The transcript tail
-  and the turn counter, which drives checkpoint-compaction cadence, reset on every relaunch, so
-  after a restart the TUI shows the conversation while the model does not (resume probe §5.3, item
-  6). **Open:** U9 — whether the transcript tail and the turn counter are persisted, rebuilt from
+  and the turn counter, which drives checkpoint-compaction cadence and turn-based decay, reset on every relaunch
+  (resume probe §5.3, item 6). **Open:** U9 — whether the transcript tail and the turn counter are persisted, rebuilt from
   opencode's store, or left to the threads.
-- **Resume cases not exercised** (resume probe §6): a graceful stop with a turn in flight, a
-  standalone-kill claim later swept by a managed server, resume budget, background-job, subagent and shell
-  recovery, and how a real model answers a resumed request.
+- **Resume cases not exercised** (resume probe §6) are listed in ROADMAP B9.
 
 ### opencode database cleanup
 
@@ -335,7 +327,7 @@ the supported `session.remove` instead.
 
 | Path | Responsibility |
 |---|---|
-| `cmd/` | cobra subcommands: `init`, `index`, `verify`, `archive`, `version`; persistent flags `--home`, `--allow-newer-home`. Every verb that opens the memory store goes through the one `openHome` helper (format check, then Reconcile); `version` is exempt from the format check and never fails on a broken store directory. |
+| `cmd/` | cobra subcommands: `init`, `index`, `verify`, `archive`, `version`; persistent flags `--home`, `--allow-newer-home`. Every verb that opens the memory store goes through the one `openHome` helper (format check, then Reconcile); `version` is exempt from the format check. |
 | `internal/memops/` | the `MemoryOps` port: interface plus the domain types it trades in (`SpineRecord`, `Thread`, `ProjectMeta`, `Config`, the symbol enums, `Normalize`, `DominantSource`). The application layer depends only on this; it imports no internal package. |
 | `internal/memops/fileadapter/` | the memory-store adapter: JSONL + markdown + YAML + TOML + go-git on the store directory |
 | `internal/store/` | file storage for the memory store: paths, JSONL helpers, init, thread registry and project ops, thread I/O, excerpt bundles, project resolution. Depends on `memops` for the domain types. |
@@ -368,11 +360,6 @@ THESIS states why Personant exists. This implementation applies two design rules
 
 > **Deterministic state as authoritative. The model in narrow judgment roles.**
 
-When making a design decision, ask:
-
-1. Could deterministic code do this without involving the model?
-2. If the model is involved, is its role narrow and well-bounded?
-
 | Component | Role |
 |---|---|
 | Deterministic (Go service) | authoritative state holder; integrity enforcer; build/query/index operations; automatic git management of the store directory |
@@ -387,20 +374,18 @@ When making a design decision, ask:
 
 Standard pattern: THESIS "The building blocks", row "Model judgments".
 
-The model never directly mutates authoritative state. It proposes content; deterministic code
-validates it and writes it.
+The model never mutates authoritative state directly. It proposes content; deterministic code decides what of it is kept, and writes it.
 
-- **Closing a thread:** the summarizer drafts the thread's closing summary; deterministic code
-  writes the thread file and thread registry record (SPEC §3.5).
-- **Recall:** a deterministic match scores candidates; loading a thread into the active set is an
-  explicit deterministic operation (SPEC §3.4).
-- **Behavior and process memory:** every proposed change goes through one reviewed write path (see "Memory
-  vetting").
+| Judgment | Deterministic check before it is kept |
+|---|---|
+| Topic tag: which threads a turn engages, plus an anchor list (SPEC §5.1) | `prompt.Parse` accepts only a line matching the tag pattern within the preamble scan; each thread entry must match `thr_\d+` or `*new-topic*`; extra tags are ignored with a `topic.warning`. Anchors are normalized (SPEC §2.7.2) and enter the symbol history as `model`-sourced symbols, never directly as anchors: the projection picks the anchors and caps their count. An unknown or other-project thread id is resolved or declined (SPEC §3.2). Anchor length is not checked (ROADMAP Near-term, "Anchor projection can emit an anchor `personant verify` rejects"). |
+| Closing summary (the summarizer, SPEC §5.2) | Trimmed; an empty draft is not applied. The anchors written at close come from the projection, not the draft. Length is not checked before the write: `spine.entry-max-chars` is enforced only by `personant verify` at the history-repository write (ROADMAP Near-term, "Closing summaries are not length-bounded before they are written"). |
+| The clusterer's grouping (SPEC §5.3) | Not built. |
+| Model judgment on recall candidates (SPEC §3.4) | Not built: recall composes the symbolic and embedding signals only. |
+| Memory-vetting review (SPEC §1.8) | Not built. |
+| Lifetime tag (SPEC §3.10.8) | Not built (the keep/toss stage is deferred); SPEC fixes the fail-safe: a missing or malformed tag keeps the content. |
 
-A confirmation the user clears reflexively verifies nothing, so a thread closed through the routine
-path and a recall candidate in the auto-fetch band apply without asking. Each is recorded
-`ack=auto`, which keeps the accept-rate and edit-rate measures counting only outcomes a user
-actually answered.
+Recall scoring and loading a thread into the active set are deterministic (SPEC §3.4). The behavior- and process-memory (SPEC §1.8) write path is "Memory vetting"'s, which is not built.
 
 ### Automatic vs model-controlled
 
@@ -410,10 +395,10 @@ The service performs many operations the model cannot. Most notably **git**:
   go-git) at the cadence of the turn and history repositories (see "Crash recovery and the turn
   and history repositories"). No git hook: systemic checks `CheckDerivedFresh` (wraps
   `personant index check`) and `CheckSpineIntegrity` (wraps `personant verify`), parameterized
-  only by paths, are passed per call as `GitCheckFlags` (`preFlags`/`postFlags`, 64 slots) and are
+  only by paths, are passed per call as `GitCheckFlags` (`preFlags`/`postFlags`, 64 slots: a `uint64` bitmask of check functions; `internal/autogit/autogit.go:60`) and are
   applied to history-repository writes; turn-repository commits run none. Operation-tied
   verifications live in purpose-specific wrappers composing `autogit.Checkout`.
-- Commits are signed from the memory store's git config, falling back to a fixed identity
+- Commits take their author and committer identity from the memory store's git config, falling back to `personant <personant@localhost>`; they are not cryptographically signed
   (`store.CommitSignature`).
 - The service reads the user's *workspace* repository only to identify the project: its root
   (`store.FindGitRoot`) and origin URL (`store.GetGitOriginURL`).
@@ -426,8 +411,7 @@ The service performs many operations the model cannot. Most notably **git**:
 
 Personant's own state lives in two places, and it reads a third:
 
-- The store directory — memory: the authoritative files and both git repositories. Forensic
-  inspection is `cd ~/.personant && grep -r ...`.
+- The store directory — memory: the authoritative files and both git repositories.
 - `~/.config/personant/` — Personant-only settings (`config.toml`, SPEC §8.2.2). Nothing here
   overlaps opencode's configuration. `internal/store/paths.go` still places `config.toml` and
   `providers.toml` under the store directory; ROADMAP.md work moves `config.toml` and removes `providers.toml` (U5).
@@ -438,15 +422,7 @@ Personant's own state lives in two places, and it reads a third:
 
 Every loaded thread is loaded because it was recognized as needed, never guessed.
 
-**Open:** U3 — how a fetch is triggered under opencode: keep the in-band topic tag with a stream
-abort-and-re-issue, or replace it with a recall tool. The in-band tag needs a spike (read the head
-of the streaming response in the `session.http.response` hook, cancel upstream, re-issue, return
-the second stream), per-protocol wire code in the plugin, and a way to strip the tag from the
-stored transcript and the user-visible text, for which the service has no way. A recall tool is
-a registered fetch tool whose result enters context at the next step, at the cost of one extra
-model step per fetch, and rewrites SPEC §5.1/§5.5 and the tag-fidelity measures. The mid-turn
-fetch does not fire under opencode today (probe results §5). Until decided, the mechanism below
-binds:
+**Open:** U3 — how a fetch is triggered under opencode: the in-band topic tag or a recall tool (ROADMAP U3). The mid-turn fetch does not fire under opencode today (probe results §5). Until decided, the mechanism below binds:
 
 The registry slot is always in the composed request → the model recognizes a prior thread from its
 display line → emits a topic tag → the corresponding threads are loaded into the active set → the
@@ -457,7 +433,7 @@ response is generated. The thread is recognized — by the model naming it in a 
 When the cost of being wrong is far higher than the cost of being right, the bar shifts toward
 "prove it."
 
-- The architectural thesis cannot be validated by inspection. The §9 measurement regime exists
+- Whether this design meets SPEC over months of accumulated memory cannot be judged by inspection. The §9 measurement regime exists
   because "use it and find out across extended accumulated usage and then revise if it's wrong" has
   no graceful recovery — you'd have to either complex-refactor accumulated memory or lose it all.
 - Migration cost counts at decision time (e.g. YAML over TOML for thread frontmatter: the
@@ -472,14 +448,13 @@ Stdlib-first, but a dep that earns its keep is fine. Two failure modes to avoid:
 2. Implementing complex stdlib substitutes for a dep that would just work (NIH).
 
 Approved deps land *with their consumer*, not before. `go.mod` is the catalog; CONVENTIONS holds
-the project-specific dependency rules, including the SQLite choice.
+the project-specific dependency rules, including which SQLite driver a Go SQLite need takes.
 
 ### Port-and-adapter at the memory store boundary
 
 Application code (`internal/turn`, `internal/recall/measure`, `cmd/*`) depends on `memops.MemoryOps` — the conceptual operations port — not on the
-memory store directly. One adapter ships today (`internal/memops/fileadapter`: JSONL + markdown +
-YAML frontmatter + TOML + go-git on the store directory); future adapters implement the same
-interface without rewriting callers or tests.
+memory store directly. One adapter ships (`internal/memops/fileadapter`: JSONL + markdown +
+YAML frontmatter + TOML + go-git on the store directory); callers and tests depend only on the interface.
 
 Pure renderers (`internal/workset.Compose`, `internal/recall/scoring`) are **store-independent**:
 they import `memops`'s plain domain types (`SpineRecord`, `Budget`, `ThreadMeta`, ...) but never
@@ -550,7 +525,7 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
     user.md                         # user-wide overrides, including feedback directive tuning
     prj_<n>/project.md              # project-scoped directives
   logs/YYYY-MM-DD.log               # plain-text, append-only, daily rotation
-  logs/archive/YYYY-MM.tar.gz       # rotated logs older than 90 days, gzipped
+  logs/archive/                     # created empty by init; nothing writes it (log rotation is not built)
   version.toml                      # authoritative, committed; format revision `format = N` (SPEC §9.1)
   README.md                         # layout documentation for human inspection
   last-active                       # operational; prj_<n> of the most recently active project
@@ -569,7 +544,9 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
 |---|---|---|
 | Authoritative | `spine.jsonl`, `threads/*`, `directives/*.md`, `projects/*/meta.json`, `logs/*.log`, `version.toml`, `archive/index.jsonl` | Source of truth; hand-editable. `logs/*.log` is the append-only turn-grain forensic record that crash recovery preserves and re-appends. |
 | Derived | `symbols.jsonl`, `projects/*/digest.json` | Regenerable from the authoritative files; a history-repository write fails if it leaves a derived file stale; turn-repository commits are not checked; never hand-edited. |
-| Operational | `.git/`, `.git-daily/`, `last-active`, `turn-journal.jsonl`, `op-in-progress.json`, `derived-watermark`, `working-set.json`, `.recall-cache/`, `recovery/` | System-managed, not drift-checked, and gitignored: the managed gitignore block lists each, both repositories' git-dirs included, so neither repository sees the other as untracked (the ignore-block rule; see "Crash recovery and the turn and history repositories"). |
+| Operational | `.git/`, `.git-daily/`, `last-active`, `turn-journal.jsonl`, `op-in-progress.json`, `derived-watermark`, `working-set.json`, `.recall-cache/`, `recovery/` | System-managed, not drift-checked, and gitignored: the managed gitignore block (the part of the store's `.gitignore` that Personant writes and keeps current) lists each, both repositories' git-dirs included, so neither repository sees the other as untracked (the ignore-block rule; see "Crash recovery and the turn and history repositories"). |
+
+`.recall-cache/` and `working-set.json` are filed operational for different reasons. `.recall-cache/` holds derived vectors and summary trees (SPEC §3.4 *Persistence*), but regenerating it costs embedding calls, so it cannot be kept fresh at every history-repository write as derived files are. Instead each sidecar carries a content-staleness key, a stale or missing sidecar is rebuilt on load, and deleting the directory costs only re-embedding. `working-set.json` holds the active-set order and the dormant set, which no authoritative file records and nothing rebuilds. Losing it costs only recency: the next service run starts with both sets empty (`turn.LoadSession`); a malformed file fails the load.
 
 ### Thread registry record (`spine.jsonl`)
 
@@ -587,13 +564,14 @@ interface SpineRecord {
   state: ThreadState;                // the SPEC §2.2.1 states, as their lowercase names
   created: string;                   // RFC3339
   last_engaged: string;              // RFC3339; read by engagement decay, dormant order, digests
+  last_engaged_turn: number;          // service-run turn counter at last engagement; restarts each relaunch (U9); read by turn-based decay and the unknown-thread-id owner fallback
   state_changed: string;             // RFC3339
   turn_count: number;                // owner turns of this thread (SPEC §3.0.4)
   recall_fires: number;              // recall matches that led to a fetch; orders each symbol's thread lists in symbols.jsonl
 }
 ```
 
-`anchors_projected_at_turn` and `description` decode as 0 and empty on old records.
+`anchors_projected_at_turn` and `description` decode as 0 and empty on old records. `anchors` and `anchors_projected_at_turn` are derived (the anchor projection computes them from `history_symbols`) but stored in the authoritative record. The display line and the registry slot are generated from the record alone (SPEC §2.2, §2.2.2); without the stored copy, composing a request would read every `thread.md`. They are written at owner-turn close and at closing (`internal/turn/engage.go`, `internal/turn/closure.go`). `personant index rebuild` does not regenerate them, and no drift check covers them.
 
 At owner-turn close, after merge → project → trim (see "Projection"), the record is rewritten only
 when the projected anchor set differs from the prior one; `anchors_projected_at_turn` is then set
@@ -619,9 +597,6 @@ thr_<id> [<anchors joined with ", ">] — <summary> [<state>]
 
 Example: `thr_88 [trefoil, unknot] — electron body-topology conflict;
 entries trf3bd / unk0bd added; awaiting Grant resolution [WIP]`.
-
-The human half of a thread's display — the working name a user reads and types back — is its
-`description`, falling back to `summary`, falling back to the id.
 
 ### Thread directory (`threads/thr_<id>/`)
 
@@ -673,11 +648,11 @@ A turn-excerpt file (`turns/0000024.md`):
 
 - **Recent-excerpt window vs retention.** The working-set assembler reads at most 512 (default;
   calibratable) of a thread's most recent excerpts, the recent-excerpt window, sized so that at
-  `b-top-k = 3` each thread's window stays within `LayerB`/3 bytes (`LayerB` is the
+  `b-top-k = 3` (SPEC §2.6.1 `layer.b-top-k`) each thread's window stays within `LayerB`/3 bytes (`LayerB` is the
   active-threads slot's budget); the body is read newest-first up to a byte budget, then joined
   oldest to newest. Excerpts are retained past the window, remain recall-indexed, and are the
   durable source the fine-level index embeds for intra-thread recall. An excerpt is
-  decision-class content; raw task-class output is never written as one (SPEC §3.10.6). Durable
+  decision-class content; raw task-class output (SPEC §3.0.1, §3.10.1) is never written as one (SPEC §3.10.6). Durable
   turn content lives only in excerpts, never the event log. Retention trimming is the deferred
   keep/toss stage (SPEC §3.10.8); v0.1 keeps all excerpts.
 - **Excerpt storage tiers.** A thread's excerpts are split between loose files (`turns/`, the loose
@@ -688,8 +663,7 @@ A turn-excerpt file (`turns/0000024.md`):
   - *Bundle format.* JSONL, one line per bundled excerpt, keys in the order
     `{"name":"0000024.md","content":"<the file's exact bytes>"}`, sorted ascending by (turn number,
     name) with no repeated name, written and read through the generic `store.WriteJSONL` /
-    `store.ReadJSONL` (atomic write, default HTML escaping as in every JSONL file in the store
-    directory). A line is malformed if it fails to decode, its `name` is not an excerpt name, or
+    `store.ReadJSONL` (atomic write). Like every JSONL file in the store directory, bundle lines keep `encoding/json`'s default escaping: `<`, `>` and `&` are written as `\u003c`, `\u003e` and `\u0026`, and a newline as `\n`, so an excerpt cannot be read in place; any JSON reader (`jq -r .content`) returns its exact bytes. That legibility cost against SPEC §2.1's plain-text inspection is accepted so that one JSONL writer serves the whole store. A line is malformed if it fails to decode, its `name` is not an excerpt name, or
     `content` is absent.
   - *Placement rule.* A pure function of authoritative state: the thread registry record's state
     and the thread's excerpt names. A closed thread (`memops.IsRetiredState`) bundles every
@@ -717,7 +691,7 @@ A turn-excerpt file (`turns/0000024.md`):
   for the owner's file events (`store.ApplyFileEvents`) and pruned in the day rollover's
   file-retention step (`store.PruneTrackedFiles`).
   - **Out of date — SPEC §3.9.1 governs.** Everything here that relies on the tracked-file store
-    being in the history repository (the day-commit step, and restoring `files.jsonl` and `files/`
+    being in the history repository (the day-commit step, the archival capture commit, and restoring `files.jsonl` and `files/`
     from history-repository HEAD in day-rollover completion) describes the current code, not the
     intended design: the history repository never holds the tracked-file store (ROADMAP
     "Tracked-file content in the history repository").
@@ -740,11 +714,11 @@ A turn-excerpt file (`turns/0000024.md`):
     between the header and `**user:**`. Composition never parses them; which positions
     expand comes from the index.
 - **`description` vs `summary`.** `description` is a whitespace-collapsed copy of the spawning
-  prompt, truncated to the new-thread summary length bound, set deterministically (no model
+  prompt, truncated to 120 bytes (`descriptionFromNewThread`), set deterministically (no model
   paraphrase). `summary` is the summarizer's closing summary, in frontmatter and the thread registry record, never in a turn
   file; before closing it is the provisional summary set at creation.
 - **No parent thread.** No parent-thread field exists or is synthesized (the flat model, SPEC §3.2).
-  Origin provenance is per symbol (`derived_from`); thread-level provenance is reserved.
+  Origin provenance is per symbol (`derived_from`); no thread-level provenance field exists.
 
 ```typescript
 interface HistorySymbol {
@@ -763,7 +737,7 @@ type SymbolLifecycle = "active" | "superseded";  // "trimmed" is the absence of 
 ```
 
 A record decoding without the lifecycle fields is well-formed (the zero values above);
-`verify`/index rebuild regenerate the derived projection from the authoritative files on first run.
+`personant index rebuild` regenerates the symbol index from them; the anchor projection is recomputed at the thread's next owner turn.
 
 `history_symbols` is capped at `history.cap-per-thread` (default 40) over active and superseded
 entries together. Over the cap, trimming operates on the **trimmable** partition only: a symbol is
@@ -805,7 +779,7 @@ interface ProjectMeta {
   historical_remote_urls?: string[]; // de-duplication memory
   created: string;                   // RFC3339
   last_active: string;               // RFC3339; updated on any engagement
-  thread_count: number;              // [derived] threads with project == id
+  thread_count: number;              // not maintained: nothing writes it, so it reads 0; a project's thread count is digest.json's
   conventions_paths: string[];       // absolute paths to convention files loaded into the directives slot
   symbol_patterns: ProjectPattern[]; // project-specific deterministic-pass patterns
   ignore_symbols: string[];          // project-scoped stopword additions
@@ -1012,7 +986,7 @@ the mechanism.
     own.
   - *dormant-threads:* the `spine.jsonl` records of the dormant set, one display line per record.
 - **Truncation.** Each rendered slot truncates to its byte budget at a UTF-8 rune boundary and
-  appends the honest truncation notice. The dormant set is not count-capped: the dormant-threads
+  appends the honest truncation notice (SPEC §3.1 truncation policy). The dormant set is not count-capped: the dormant-threads
   slot's byte budget truncates it at composition time.
 - **Demotion order under budget pressure:** the dormant-threads slot's oldest thread, then the
   active-threads slot's oldest (compressed to summary). The directives, registry and
@@ -1051,7 +1025,7 @@ engagements commit, each engaged thread id is removed from both lists if present
 front of `ActiveThreads`; if `ActiveThreads` then exceeds `layer.b-top-k`, its tail is demoted to
 the front of `DormantThreads`. A second excerpt write for
 one turn is refused with `ErrTurnAlreadyOwned`. The unknown-thread-id owner fallback ranks tagged
-ids by `last_engaged_turn`, a service-run-scoped counter that is not in the thread registry record;
+ids by `last_engaged_turn`, which is stored in the thread registry record but counted in the service run's turn counter;
 it is deliberately not used for the no-tag owner-default, which ranks by active-set order because
 the counter inverts recency across a relaunch. Active-set order cannot rank the fallback's
 candidates: a tagged id may sit outside the active set, and a same-turn §5.5 fetch reorders the
@@ -1073,7 +1047,7 @@ list by fetch order.
 | **Delta** | one content-modifying event entering the per-delta pipeline (§3.0), with source + content + metadata + retention class | SPEC §3.0 |
 | **Retention class** | `task` (default-transient: `tool.result`, `user.shell-capture`, `fs.*`) vs `decision` (default-persistent: `user.prompt`, `model.response`, ...). Drives the two-stage transient-data lifecycle. | SPEC §3.0.1, §3.10.1 |
 | **Slot** | one named, budgeted region of a composed request (a memory slot or an opencode-content slot) with a budget, internal priority, overflow form and unused-share rule | SPEC §3.1 |
-| **`MemoryOps` port** | the conceptual operations interface (`internal/memops`) the application layer depends on. One adapter today (`fileadapter`, JSONL + markdown + go-git); future adapters swap in without rewriting callers. | port-and-adapter |
+| **`MemoryOps` port** | the conceptual operations interface (`internal/memops`) the application layer depends on. One adapter (`fileadapter`, JSONL + markdown + go-git); callers depend only on the interface. | port-and-adapter |
 
 ---
 
@@ -1099,9 +1073,7 @@ Resting points are recognized by engagement decay (Spec §3.5). Fallback dissect
 
 ### Display lines are how the model recognizes threads
 
-> The display line is the load-bearing artifact. It must encode enough decision-state that the
-> model can answer most "what was the outcome of X" questions from the line alone, without needing
-> to fetch the thread file.
+> The display line must carry the decision state SPEC §2.2.2 requires.
 
 The anchor set is what makes recall possible; the summary is what makes recognition cheap. The
 display form is in "Storage and record formats".
@@ -1175,11 +1147,7 @@ Standard pattern: THESIS "The building blocks", row "Recall".
    request; the model recognizes prior threads directly when a turn engages them. It emits the
    topic tag at turn start. Handles synonyms and paraphrases for free, since the model does the
    recognizing.
-2. **Opportunistic surfacing** (deterministic backstop). When current-turn symbols match, above threshold, the anchors and history symbols of a thread of the active project that this turn did not engage, the thread is brought forward by band (SPEC §3.4): a candidate
-   at or above its signal's auto threshold is fetched with one visible line and no question; the
-   band between the surface and auto thresholds is asked: *"We talked about X 2 days ago — pick up
-   there?"*; nothing below surfaces (rationale: "The model drafts, deterministic code writes"). With
-   no channel to the user, recall stays log-only.
+2. **Opportunistic surfacing** (deterministic backstop). When current-turn symbols match, above threshold, the anchors and history symbols of a thread of the active project that this turn did not engage, the thread is brought forward by band (SPEC §3.4).
    The symbolic scorer matches on `T(thr) = anchors ∪ {h.normalized}` over the thread's
    `history_symbols`, so a `superseded` symbol stays matchable. The Jaccard numerator is a weighted
    sum: a matched symbol counts 1.0 if `active` in that thread and `recall.superseded-weight` if
@@ -1188,20 +1156,16 @@ Standard pattern: THESIS "The building blocks", row "Recall".
    scorer. The label is read from the thread's frontmatter `lifecycle`, not from the derived index:
    `symbols.jsonl` `superseded_in` is the cheap-scan filter ("which threads abandoned premise X",
    O(1) per query symbol) and the scorer does not consume it.
-   **Open:** U4 — the channel for the auto-fetch line and the ask offer. Under opencode a plugin has
-   a yes/no question and no pick-list, so a multi-candidate offer cannot be a numbers/all/none list.
-3. **Cross-project recall** (other-projects slot → fetch). Designed, not built; a cross-project fetch is declined (SPEC §3.1, §3.2). Per-project anchor digests in the
-   other-projects slot are scanned each turn. Same opportunistic mechanism as (2), slightly higher
-   threshold.
+3. **Cross-project recall.** Not built: a cross-project fetch and cross-project engagement are declined (SPEC §3.1, §3.2; ROADMAP "Cross-project recall").
 4. **Intra-thread recall of scrolled-out early content.** For the engaged long-running thread, the
    fine-level chunk embedding index recalls early turns that have scrolled out of the
-   recent-excerpt window. The engaged thread bypasses the coarse level and runs directly against
+   recent-excerpt window. The engaged thread bypasses the coarse level (one vector per thread body) and runs directly against
    its own indexed chunks. Every thread is an indexed body: one coarse vector for the thread body
    plus per-excerpt chunk vectors. An active thread's recent-excerpt window is in the working set
    and is not embedded; excerpts scrolling out of it become index material. On threads long enough to have a built summary tree, an O(log n) beam
-   descent (`scoring.DescendChunks`) replaces the flat O(C_main) scan — consolidation builds and
+   descent (`scoring.DescendChunks`) replaces the flat O(C_main) scan (`C_main` is the engaged thread's chunk count) — consolidation builds and
    maintains the per-thread summary trees (`measure.RebuildTrees`); absent or stale trees fall back
-   to the flat scan with no correctness loss. The fine level is filled asynchronously, so it lags
+   to the flat scan with no correctness loss. The summary tree serves SPEC §3.4 *Long threads* (no performance decay as a thread's length grows into the thousands): a flat scan's per-query cost grows with the thread's chunk count (`C_main`). The descent is approximate; how often it picks a different leaf than the flat scan is measured (`recall_intra_descent_divergence`, SPEC §9.4), and exact recall stays with the lexical level (SPEC §3.4). Summary trees are built only by consolidation (see "Memory consolidation"). The fine level is filled asynchronously, so it lags
    scroll-out by up to the unembedded backlog limit; the recall-completeness invariant (SPEC §3.4)
    forbids a gap in findability there, so the automatic intra path also runs the completeness floor,
    a lexical pass over exactly that backlog (`exact.MatchExcerptsBySymbols` over
@@ -1239,30 +1203,19 @@ offers. SPEC §4.3 holds the reason enum and its effects; how a reason is captur
 
 The recall stack guarantees that durable
 content is *findable* (the §3.4 completeness invariant) and that overlapping context *surfaces
-opportunistically* (the recall paths above). It deliberately does not promise spontaneous cross-domain
-reminiscence: a connection between today's problem and years-old work in a different vocabulary
-surfaces only if anchors or embeddings overlap. A feature that tries to make the agent volunteer
-such a connection ("this reminds me of…") is out of design. State this boundary when setting user
-expectations; do not "fix" it.
+opportunistically* (the recall paths above). A connection between today's problem and years-old
+work in a different vocabulary surfaces only if anchors or embeddings overlap (SPEC §3.4).
 
 ### Closing a thread
 
 Triggers:
 
 - Engagement decay: no engagement for `engagement.decay-turns` OR `engagement.decay-time`
-  wall-clock (either threshold; OR semantics).
+  wall-clock (either threshold; OR semantics). The turn count is `TurnNumber − last_engaged_turn`, both in the service run's turn counter, which starts again at 0 on every relaunch (see "Start order and resume", U9). The stored `last_engaged_turn` therefore means nothing to a later run. A stored value above the current counter skips the turn threshold; a lower one is compared as if it came from the same run (`decayEligible`, `internal/turn/closure.go`). Across a relaunch, only the wall-clock threshold is a durable decay timer.
 - An explicit close request (`/done`; **Open:** U4 — the command).
 
-Flow (SPEC §3.5): the summarizer drafts the closing summary → the candidate is classified. A
-**routine** closing is applied without asking, with one visible line and an `ack=auto` event. An
-**exception** (anchor-rich or long-engaged) is queued silently. The queue
-is derived, never stored — a decay-eligible thread that classified as an exception. A closing applied at a drain point (SPEC §3.5) writes the
-thread file and updates the thread registry, and demotion out of the active and dormant sets follows
-(rationale for auto-applying routine closings: "The model drafts, deterministic code writes").
-
-**Open:** U4 — the channel and the drain point for the exception drain, the `[e]dit` choice,
-`always` mode and the pending-queue announcement. An opencode session never exits, so the clean-exit
-drain point has no counterpart.
+Flow (SPEC §3.5): the summarizer drafts the closing summary; a closing writes the
+thread file and updates the thread registry, and demotion out of the active and dormant sets follows.
 
 Cold storage archival (implemented; `internal/memops/fileadapter/fileadapter_archive.go`,
 `cmd/archive.go` `archive list`/`archive recover`): when thread registry size pressure builds, the
@@ -1295,7 +1248,7 @@ Restore (`RecoverThread`, `autogit.CheckoutTree`):
    entry lacking it is restored from the deletion commit's first parent (`autogit.ParentCommitHash`).
 3. Recompute the restored directory's tree hash and verify it against `tree_hash`. A mismatch
    deletes the partial restore and fails with `ErrArchiveIntegrity`, so a partial thread is never
-   written onto the thread registry.
+   written onto the thread registry (SPEC §3.8.3).
 4. Add a thread registry record reusing the same `thr_<n>` id (the registry stays sorted by id),
    with `state = wip` and `last_engaged` updated; anchors and summary come from the restored
    frontmatter, not the archive snapshot.
@@ -1310,28 +1263,14 @@ roll-forward.
 
 ### Fallback dissection (worst-case path)
 
-Designed, not built: no package implements the clusterer.
-
-When budget pressure exceeds threshold AND normal closing isn't catching up:
-
-- The clusterer (a model call) groups the oldest poorly-threaded content into semantically related
-  clusters.
-- Each cluster produces a thread file + thread registry record, identical in shape to a normally
-  closed thread.
-- Each cluster resolves through the closing flow ("Closing a thread"; **Open:** U4 — the channel for
-  its interactive step).
-
-Handles three failure modes with one mechanism: wandering user, single-thread overrun,
-never-cleanly-threaded content. **Quality is best-effort by design** — graceful degradation under
-stress, not catastrophic loss. (Spec §3.6.)
+Not built: no package implements the clusterer. SPEC §3.6 states the outcome; the work is ROADMAP B11.
 
 ### Many projects, one career
 
 One thread registry across all projects. Every thread carries a `project` tag. The registry slot
 holds the current project's thread registry as display lines, truncated to its budget (SPEC §3.1); the other-projects slot holds
-compressed cross-project digests. Cross-project recall is designed (recall path 3), not built; cross-project engagement is declined (SPEC §3.2).
-The architectural commitment: **one entity, many projects, one continuous career**. (See "Project
-metadata"; Spec §4.5.)
+compressed cross-project digests. Cross-project recall is not built (recall path 3); cross-project engagement is declined (SPEC §3.2).
+(See "Project metadata"; Spec §4.5.)
 
 ### Personalization through feedback directive tuning
 
@@ -1343,19 +1282,24 @@ Directives are inspectable files, and feedback signals tune them:
 - `directives/user.md` — user-wide overrides. By default, feedback directive tuning proposes a
   change here only from patterns aggregated across projects (explicit instructions, decline
   categorizations and accept/decline statistics are inputs to the aggregate, not single-project
-  writers).
+  writers; SPEC §1.8).
 - `directives/prj_<n>/project.md` — project-specific directives.
 
-By default a pattern seen in one project does not reach `user.md` or the defaults; it becomes a
-process-memory proposal or career memory. The user's policy can change this routing (SPEC §1.8). Process-memory directive files do not exist yet (SPEC §1.8
+Process-memory directive files do not exist yet (SPEC §1.8
 `Open:`).
 
-**The user can read what the agent learned and correct it.** Every feedback-tuning proposal goes
+Every feedback-tuning proposal goes
 through "Memory vetting", the same review and acceptance path as any other. (Spec §1.8, §2.6.)
 
 **Open:** how cross-project aggregation is computed (what counts as a pattern, how many projects,
 what threshold); no aggregator exists, and the per-project statistics the recall loop collects
 (`directive.accrual-update`, reserved) feed none of these files yet.
+
+### Career memory
+
+Standard pattern: THESIS "The building blocks", row "Career memory".
+
+No career-memory mechanism is built beyond threads and recall. No store holds technique notes. Nothing files a lesson as career memory: SPEC §1.8 routes a pattern seen in one project there, but feedback directive tuning has no aggregator. Cross-project recall, the path by which a past project's threads would surface, is not built (recall path 3).
 
 ### Memory vetting
 
@@ -1365,7 +1309,7 @@ Not built; outcomes and open items: SPEC §1.8.
 
 Mechanism: behavior- and process-memory writes pass through the `MemoryOps` port, so the review stage sits at
 one port operation. The port has no directive-write operation today (`DirectiveParam` only reads).
-Career-memory protection uses the slots, the turn and history repositories and consolidation (see
+Threads are protected (SPEC §1.8) by the slots, the turn and history repositories and consolidation (see
 "The composed request and its slots", "Crash recovery and the turn and history repositories").
 
 **Open:** which package holds the review stage and its provenance record.
@@ -1411,7 +1355,7 @@ repository.
   first append's fsync makes the signal durable. An `op=turn` marker file left by an older binary
   is still read and reconciled.
 - **Batch marker.** `op-in-progress.json` (store directory, gitignored, survives `reset --hard`)
-  covers batch operations only: `{op: archival|sleep|recovery|barrier|rebaseline, day?, orig?}`,
+  covers batch operations only: `{op: archival|sleep|recovery|barrier|rebaseline, day?, orig?}` (`rebaseline`: the mid-day turn-repository re-baseline, see "Mechanism names"),
   where `sleep` is consolidation and `barrier` is the day rollover. It is written before a batch
   operation's authoritative mutations and cleared as the last step. Its presence is the
   batch-in-flight signal, and `op=barrier` carries the target `day`.
@@ -1452,7 +1396,7 @@ The journal is `turn-journal.jsonl` in the store directory (flat, operational, g
 record per line, `{turn, kind: prompt|response, at, bytes}`, fsync per append. The truncate to
 empty at turn commit carries no fsync (`store.TruncateJournal`). A power-loss resurrection of a
 stale-but-truncated journal is the redundant-journal case, case 5 (`turn == head turn id`)
-(`TestCell5_ResurrectedTruncatedJournal`), and the next turn's first append fsync makes the
+(`TestCell5_ResurrectedTruncatedJournal`; Cell N is case N), and the next turn's first append fsync makes the
 truncate durable before any new authoritative dirt can exist. A torn append is bounded to that one
 turn's content, which is the ≤1-turn bar. A torn final line is skipped by the scan, never parsed.
 On a torn turn the journal bytes are written to a recovery artifact and surfaced to the user
@@ -1486,7 +1430,7 @@ Dual-repository operation rows:
 |---|---|
 | `op=barrier` | detect only → reported as a pending completion; the memory service runs the idempotent day-rollover completion. The turn repository state observable is irrelevant to classification. |
 | `op=rebaseline` | `rm -rf .git-daily` plus turn-repository init, unconditionally; no history-repository touch |
-| turn-repository init rows (no marker, turn repository missing or half-created) | greenfield (no watermark) → adopt if the history repository is dirty, then turn-repository init and rebuild; benign morning (turn repository missing, watermark present) → turn-repository init, rebuild iff derived is stale; interrupted init or corrupt directory → `rm -rf`, then turn-repository init. A missing turn repository is normal, never a data-loss signature. |
+| turn-repository init rows (no marker, turn repository missing or half-created) | greenfield (no watermark) → adopt if the history repository is dirty, then turn-repository init and rebuild; benign morning (a service-run open that finds the turn repository removed by the last day rollover: the normal first open of a day; turn repository missing, watermark present) → turn-repository init, rebuild iff derived is stale; interrupted init or corrupt directory → `rm -rf`, then turn-repository init. A missing turn repository is normal, never a data-loss signature. |
 
 An orthogonal heal runs on every path, before classification: an additive event-log tail-heal (last
 byte ≠ `\n` ⇒ append one `\n`, never truncate).
@@ -1505,13 +1449,12 @@ byte ≠ `\n` ⇒ append one `\n`, never truncate).
 - **Watermark rule:** the watermark tracks the turn repository's HEAD, re-set by derived rebuild and
   by turn-repository init (the re-init at day rollover, or the init of a missing repository).
 - **History-writer rule:** the history repository is written by the day rollover (its archival and
-  day-commit steps, and the lifecycle tags it derives) and by three recovery paths — case 9
+  day-commit steps, and the lifecycle tags it derives (see "Lifecycle git tags")) and by three recovery paths — case 9
   back-fill repair, case 12 adopt and archival roll-forward completion — and by nothing else; the
   checkpoint and the archive restore target the turn repository. Every such writer, day-commit and
   archival alike, validates thread registry integrity before minting, so history repository HEAD
   always passes it.
-- **Ignore-block rule:** both `.git/` and `.git-daily/` are in the managed `.gitignore` block (the
-  part of the store's `.gitignore` that Personant writes and keeps current), so neither repository
+- **Ignore-block rule:** both `.git/` and `.git-daily/` are in the managed `.gitignore` block, so neither repository
   sees the other's git directory as untracked debris.
 
 #### Day rollover
@@ -1666,7 +1609,7 @@ excerpt-bundle temp file (`tmp-folio.jsonl`) is quarantined by recovery's uncond
 debris cleanup. A hand-broken excerpt bundle is skipped by settle (`reason=unreadable`) and fails
 the day-commit step's integrity check on the live run, operation marker kept; the next open's
 completion runs `spineQuarantineRepair`, quarantining the bundle byte-exact and scoped-restoring it
-from history repository HEAD (or removing it as an orphan add), which is consistent with the
+from history repository HEAD (or removing it as a path absent from history repository HEAD), which is consistent with the
 thread's loose files because tiers change only at a day rollover. The file-retention step
 (`pruneTrackedFiles`, between the excerpt-storage step and the day-commit step) calls
 `store.PruneTrackedFiles` per thread registry record, in registry order, with the record's
@@ -1686,11 +1629,9 @@ history repository or advancing the day; recovery routes an `op=rebaseline` cras
 turn-repository init. The mid-day arming trigger is not wired (ROADMAP.md).
 Packing: after every `gcCheckEveryCommits` (64) turn-repository commits the adapter reads the turn
 repository's loose-object count and runs gc at `gcLooseObjectThreshold` (5000);
-`MemoryOps.Consolidate` (go-git `RepackObjects` + `Prune`) packs both repositories on the day-off
-idle window. Packing is safe at any time because archived blobs stay reachable through the deletion
+`MemoryOps.Consolidate` (go-git `RepackObjects` + `Prune`) packs both repositories on the simulation's day off (the harness's `SleepCycle` step). Packing is safe at any time because archived blobs stay reachable through the deletion
 commit's parent and Personant never rewrites the history repository's commits (the turn repository
-is disposable). An aggressive repack (`git gc --aggressive`) may be scheduled when pack size
-matters; none is scheduled today. Session checkpoint commits target the turn repository with a full `Add(".")` staging
+is disposable). No aggressive repack (`git gc --aggressive`) is scheduled. Session checkpoint commits target the turn repository with a full `Add(".")` staging
 pass. The open sequence runs `memops.GateHomeFormat` before Reconcile;
 `version.UnversionedHomeFormat` is pinned at 1 forever and is never an alias of
 `version.CurrentHomeFormat`, so an unmigrated legacy store directory keeps resolving to format
@@ -1703,12 +1644,7 @@ needs nothing further.
 
 ### Memory consolidation
 
-Designed, partially built. The day-off idle window already fires `MemoryOps.Consolidate` (git
-gc/repack on both git repositories, SPEC §3.11) and the within-thread summary-tree rebuild
-(`measure.RebuildTrees`). The fuller offline-reorganization vision — re-packing fragmented
-structures, compacting the thread registry, advancing archival, and the SPEC §3.10.8
-content-retention keep/toss stage (deferred), which cites this section by name — is designed, not
-built. Full design capture: **ROADMAP.md → Far-horizon, "Memory consolidation."**
+Built: `MemoryOps.Consolidate` packs both git repositories (git gc and repack, SPEC §3.11), and `measure.RebuildTrees` rebuilds the within-thread summary trees. Only the simulation's day off (the harness's `SleepCycle` step) runs both. Outside the simulation, `Consolidate` runs only from the turn-repository loose-object check (see "Mechanism names"), and nothing runs `RebuildTrees` (ROADMAP "No production trigger for consolidation"). SPEC §3.10.8's content-retention keep/toss stage, which cites this section by name, is not built (ROADMAP Far-horizon, "Memory consolidation").
 
 ### Model access and inference telemetry
 
@@ -1720,26 +1656,20 @@ of the extended inference-timing block that `model.inference-telemetry` logs (`t
 counts reach the memory service through opencode's step and usage events (`session.step.ended`); no
 source for the timing fields is established.
 
-**Open:** the source of the inference-timing block under opencode; the event is removed from the
-vocabulary if there is none.
+**Open:** the source of the inference-timing block under opencode. Only the in-process turn emits `model.inference-telemetry` today (`internal/turn/turn.go`), from its own provider response.
 
 The local provider is **oMLX**, an OpenAI-compatible endpoint, configured in opencode's own
 provider settings.
 
 The memory service's judgments go through the host (SPEC §8.2.1); text generation for the
-summarizer, clusterer and recall judgment through the plugin's `experimental.generate` over
+summarizer, clusterer and recall judgment through the plugin's `experimental.generate` (an opencode plugin hook, integration-options report §2.3) over
 opencode's providers; the embedder names an opencode provider in `[embedding]` (SPEC §8.2.2); how
-embeddings are requested through opencode is Open A12a. Where `[embedding] vectorLength` is set,
+embeddings are requested through opencode is Open A12a (SPEC §8.2.1). Where `[embedding] vectorLength` is set,
 the embeddings request carries it as the `dimensions` parameter.
 
 ### Model-family as platform
 
-**Open:** U10 — opencode lets the user run any model. Either one family is tuned for Personant's
-memory prompts (the prompts that ask the model for narrow memory judgments: topic tagging, summary
-drafting, clustering, recognition), with a warning on others, or every model opencode runs is
-supported and the tag and summarizer quality are measured per family (which grows the evaluation
-scope; a recall tool in place of the topic tag, U3, shrinks it). Until decided, the Gemma family,
-served locally via the `reaper` provider, is the tuning target for the memory prompts.
+**Open:** U10 — whether one model family is tuned for the memory prompts (the prompts that ask the model for narrow memory judgments: topic tagging, summary drafting, clustering, recognition) or every model opencode runs is supported and measured per family (ROADMAP U10). Until decided, the Gemma family, served locally via the `reaper` provider, is the tuning target for the memory prompts.
 
 Adding a model family is per-family engineering, not configuration: model families share no
 deterministic foundation to abstract over, and cross-family mismatches fail silently and
@@ -1777,14 +1707,7 @@ prompt expands both the family-tuning surface and the silent-drift surface.
 
 ### Concurrent sessions
 
-Designed, not built: multiple live opencode sessions open against one shared memory — multitasking
-one career. The plugin route makes it reachable (the memory service is already the single writer).
-Concurrent sessions interleave on *shared*
-authoritative state. Full design capture: **ROADMAP.md → "Concurrent sessions."**
-
-**Open:** two concurrent opencode sessions against one memory (SPEC §1.1). One consequence already
-visible: `session.started active=` is logged per service run, but the active project is per
-opencode session.
+Not built. Two live opencode sessions against one memory is Open (SPEC §1.1; ROADMAP B5). The memory service is the single writer either way. One consequence of today's design: `session.started active=` is logged once per service run, while the active project is per opencode session.
 
 ---
 
@@ -1816,8 +1739,7 @@ on U4).
 
 ## Testing as the measurement instrument
 
-SPEC §9 is the measurement instrument by which the architectural thesis gets proven empirically,
-and the means by which the techniques evolve iteratively.
+SPEC §9 is the measurement instrument that tests, by simulation, whether the design meets SPEC over a long career, and the means by which the techniques evolve iteratively.
 
 The simulation harness (`internal/scenarios/`, including `internal/scenarios/sim/`) is a
 load-bearing deliverable under production discipline: one owner per value, key and contract; named
@@ -1857,10 +1779,6 @@ pass.
 The mock model's generated responses carry a counter suffix or a seed-derived UUID in the body
 text, so no two responses dedup accidentally.
 
-When making technique changes (parameter tweaks, algorithm adjustments), the question is always
-"what does the simulation say?" — not "does it compile and pass invariants?" Bake metrics emission
-into new code from day one; bolting it on later is much more expensive.
-
 ### Simulation-harness structure
 
 #### File layout — `internal/scenarios/`
@@ -1877,7 +1795,7 @@ into new code from day one; bolting it on later is much more expensive.
 | `sim/workload.go` | On-demand workload generator (`generator`, `GenerateWorkload`, `runWorkDay`/`runSession`/`runDayOff`). |
 | `sim/campaign.go`, `sim/wander.go`, `sim/intra.go` | Specialized step-sequence builders for the campaign, within-thread wander, and intra-thread recall workload variants. |
 | `sim/telemetry.go` | Per-day snapshot emission and the sim daily-record schema. |
-| `sim/sim_test.go`, `sim/sim_rung_test.go` | `TestSim` (acceptance ladder entry point) and span-by-span regression guards. |
+| `sim/sim_test.go`, `sim/sim_rung_test.go` | `TestSim` (entry point of the acceptance ladder, SPEC §9.1) and span-by-span regression guards. |
 | `opencode/` | the prototype's opencode driver and executor (on `probe-path`; see "opencode-in-loop harness"). |
 
 **State-ownership map — single source for every mutable harness value**
@@ -1887,15 +1805,15 @@ Each of the following is owned in exactly one place:
 
 | Value | Owner | Rule |
 |---|---|---|
-| Simulated clock | `Harness.pinnedClock` — a **slaved copy** of `Step.At`. `stepSetClock` does `pinnedClock = Step.At`, never integrates a delta. One clock advance path; see SPEC §9.4.1 for the single-clock rationale. | Never set `pinnedClock` from a delta except as described for the execution-time refinement step (which normalises `At = pinnedClock + TimeDelta` before the set). |
+| Simulated clock | `Harness.pinnedClock` — a **slaved copy** of `Step.At`. `stepSetClock` does `pinnedClock = Step.At`, never integrates a delta. One clock advance path; see SPEC §9.4.1 for the single-clock rationale. | Never set `pinnedClock` from a delta except as described for the execution-time refinement step (a refinement turn is one the generator injects after a recall step misses), which normalises `At = pinnedClock + TimeDelta` before the set. |
 | Day index | Derived: `SimDayIndex(pinnedClock)`. Never a parallel counter. | Any code that needs "which sim-day is this?" calls `SimDayIndex(h.pinnedClock)`. |
 | Generator exec clock | `generator.execClock` — an exact generator-side **mirror** of `pinnedClock`, maintained by `reconcileAt`: every emitted step's `At` is re-anchored forward to it when execution-time refinement turns advanced the clock past the step's planned instant; an `At`-less refinement advances it by `TimeDelta`, mirroring the harness normalize. | The harness never reads it; it exists so the fix lives at the source (the generator) and `stepSetClock`'s non-monotonic warning stays a pure indicator — mirror drift is exactly what triggers it, so the indicator stays armed. |
 | Cross-seam metric keys | `metric_keys.go` — the single const block. Harness writes them; sim reads them. | A key rename is one edit; a compile error if a reference is missed. Keys owned entirely inside `sim/` are NOT mirrored here. |
 | Crash-scenario coverage | `crashScenarioCoverage` (`crash_matrix_test.go`) — the single greppable table mapping each registered `crashpoint` name to its scenario. `TestCrashPointCoverageGate` enumerates `crashpoint.RegisteredNames()` against it. | A registered crashpoint with no scenario **fails the suite** — the mechanical check that stops silent kill-point rot. The `TurnOracle` is a local immutable pre-crash baseline, not shared mutable state, so it is deliberately not mapped here. |
 | Archived thread set | `Harness.archivedThreadIDs` — **index-derived** via `refreshArchivedSet` from the authoritative archive index (`store.LoadArchiveIndex`, entries with `RecoveredAt == ""`), reassigned wholesale; refreshed when a tailed batch carries an archive or restore line (the change trigger, not the source of truth). | The archival-forgiveness filter in recall fidelity and `VerifyThreadAccounting` both read this set; a restored thread drops out the instant its index entry records the restore, and a log-emission gap can no longer under-count it. |
 | Created thread set | `Harness.createdThreadIDs` — folded incrementally from tailed `thread.created` log lines. | Same pattern as above. |
-| Recall-preservation divergence tally | Accumulated directly in `runStep` (not read from `measure.Service` atomics post-run), so the tally survives `RestartSession`-driven Service churn. | A restart installs a fresh Service whose atomics start at zero; reading post-run would lose measurement probes from prior sessions. |
-| Active-set oracle | Generator-owned. Cross-checked each step against `StepFeedback.RuntimeLayerB` in two directions, both ==0 checks on mock and live-embedding run configurations and report-only under live inference: forward (`layerb_shadow_divergence`, service-resident threads absent from the oracle: LRU agreement) and reverse (`layerb_shadow_reverse_divergence`, checked against the service mirror `rtActive`, which also replicates measurement-carrier displacement and §3.5 turn-idle decay-triggered closing). The declared exception to SPEC §9.4's event-log-only recall scoring. | The oracle's LRU is the generator's basis for expected-match sets; a divergence would corrupt recall measurements. |
+| Recall-preservation divergence tally | Accumulated directly in `runStep` (not read from `measure.Service` atomics post-run), so the tally survives `RestartSession`-driven Service churn. | A restart installs a fresh Service whose atomics start at zero; reading post-run would lose measurement probes (a measurement probe is a scripted step with `ExpectedRecallMatches` ground truth) from prior sessions. |
+| Active-set oracle | Generator-owned. Cross-checked each step against `StepFeedback.RuntimeLayerB` in two directions, both ==0 checks on mock and live-embedding run configurations and report-only under live inference: forward (`layerb_shadow_divergence`, service-resident threads absent from the oracle: LRU agreement) and reverse (`layerb_shadow_reverse_divergence`, checked against `rtActive` (the harness's mirror of the service's active set), which also replicates measurement-carrier displacement (a measurement carrier is a synthetic thread created to host a recall-measurement query, `sim/workload.go`) and §3.5 turn-idle decay-triggered closing). The declared exception to SPEC §9.4's event-log-only recall scoring. | The oracle's LRU is the generator's basis for expected-match sets; a divergence would corrupt recall measurements. |
 
 #### Generator ↔ harness protocol
 
@@ -1942,7 +1860,7 @@ harness drive loop. The protocol is:
 - Recall-fidelity series are `recall_fidelity_{precision,recall,f1}` and
   `recall_fidelity_adversarial_{precision,recall,f1}`; the intra-thread descent divergence (SPEC
   §9.4) is `recall_intra_descent_divergence`.
-- Live run configurations use `reaper.local` (gemma-4 family inference, `nomicai-modernbert-embed-base-bf16`
+- Live run configurations use `reaper.local` (`reaper.local` is the live-run host, oMLX serving the gemma-4 family, reached through `internal/testsupport`, override `PERSONANT_REAPER_URL`; gemma-4 family inference, `nomicai-modernbert-embed-base-bf16`
   embeddings). Service-in-loop raises per-turn cost from tens of milliseconds to single-digit
   seconds against roughly 20 minutes for a mock 120-day run, so the mock regime stays the default
   loop. The anchor-projection workload variants (`vague-new`, `drift`, `invert`, interleave) report
@@ -1951,7 +1869,7 @@ harness drive loop. The protocol is:
   matches through superseded symbols), `ever_central_count`/`history_len` and `projection_churn`
   through `metric_keys.go`.
 - Cadence: the generator's day functions (`sim/workload.go` `runWorkDay`/`runSession`/`runDayOff`)
-  and the harness day-close share SPEC §9.4.1's clock contract. The day-off emits a `SleepCycle`
+  and the harness day-close share SPEC §9.4.1's clock contract. The day-off (the simulated workload's day off, SPEC §9.4.1) emits a `SleepCycle`
   step the harness intercepts to drive consolidation, and a day-close is timestamped
   `simDayCloseDate(d) = SimClockStart + d·SimDayLength` (`internal/scenarios/harness.go`). All fuzz (start jitter, per-turn spans, break, work-block boundary) draws from the single seeded
   RNG in fixed order. Tests:
@@ -1969,8 +1887,7 @@ harness drive loop. The protocol is:
   turn-repository init. Each fixture asserts the full invariant suite plus
   `VerifyThreadMetaMatchesSpine`, at most one turn of loss against a pre-crash baseline, exact
   journal bytes, empty `RevertedPaths` on rollover and archival paths, exactly one day-commit, and an
-  idempotent second `Reconcile`. The matrix is unit-grade (synthetic store directories, inside the
-  30-minute check interval); `TestSimBarrier2Day` adds a 2-day run configuration that crosses a
+  idempotent second `Reconcile`. The matrix is unit-grade (synthetic store directories; it runs in `just test`); `TestSimBarrier2Day` adds a 2-day run configuration that crosses a
   rollover to the default suite.
 
 ### Event log format
@@ -2004,11 +1921,11 @@ diagnostics; §9 measurement keys off the decision events. No event carries mult
 | `system` | `bootstrap` (identity line, once per process open, after the §9.1 format check resolves: `version=` the memory service semver, `home-format=` the EFFECTIVE on-disk revision, `commit=` (`unknown` on a binary built without a build id), `home=`; distinct from `session.started`), `home-format-override` (a `--allow-newer-home` open waved a newer store directory through the §9.1 refusal — `on-disk=`, `binary=`; always paired with a stderr warning), `home-format-migrated` (an older store directory was migrated forward at open by the §9.1 format check — `from=`, `to=`), `context-ceiling-breach`, `context-ceiling-unenforceable` (the post-flight token-ceiling check could not be evaluated: no `usage.prompt_tokens` for a turn while a ceiling was configured — `reason=usage-unavailable ceiling= turn=`; one line per affected turn; the count is never estimated), `empty-response` (forensic; the final drained response carried zero visible content — `reprompted=yes\|no`, `turn=`; SPEC §3.3), `turn-aborted` (a retracted turn — `turn=` the turn's transaction id, `phase=` the labelled stage, `bytes=` the retracted input's size; SPEC §4.3.3; **never the text**; **Open:** U8 — emitted only if retraction stands), `turn-abort-release-error` (forensic; releasing a retracted turn's recovery scope failed; same Open) |
 | `thread` | `engaged`, `engaged-non-owner`, `engaged-cross-project`, `engaged-miss`, `created`, `created-meta-only`, `state-change`, `renamed` (a working name changed — `thr=`, `old=`, `new=`; same shape as `project.renamed`; unmeasured, recorded so every working name is reconstructable from the log), `fetch-miss`, `fetch-cross-project`, `anchor-projection-overflow`, `tag-defaulted` (`thr=` the bound owner, `cause=missing-tag\|empty-response`, `reprompted=yes\|no`; SPEC §3.3) |
 | `spine` | `match-fire`, `embed-match-fire`, `intra-match-fire` |
-| `recall` | `offer` (`count=N`), `accept` (`thr=`, `layers=`, `ack=human\|auto` — `auto` is an auto-fetch band candidate fetched without asking; any accept-rate measure counts `ack=human` lines only), `decline` (`thr=`, `reason=not-relevant\|wrong-project\|already-known` — `already-known` is also the memory service's own verdict on a candidate already resident in the active set under `recall.ack-mode: banded`), `net-cap-hit`, `flush-backlog`, `W1-diag`, `fire-error`, `error`, `index-error`, `embed-error`, `debt-window-error`, `tree-error` |
+| `recall` | `offer` (`count=N`), `accept` (`thr=`, `layers=`, `ack=human\|auto` — `auto` is an auto-fetch band candidate fetched without asking; any accept-rate measure counts `ack=human` lines only), `decline` (`thr=`, `reason=not-relevant\|wrong-project\|already-known` — `already-known` is also the memory service's own verdict on a candidate already resident in the active set under `recall.ack-mode: banded`), `net-cap-hit` (the intra-thread descent dropped related leaves at `scoring.NetCap`), `flush-backlog` (pending flush jobs passed the warning threshold), `W1-diag` (per-probe line for a descent-versus-flat-scan divergence: class, flat, descent, missed, substituted; `measure.go:1689`), `fire-error`, `error`, `index-error`, `embed-error`, `debt-window-error`, `tree-error` |
 | `retire` | `prompt` (`thr=` and `inactivity=`\|`trigger=manual`\|`trigger=queued`, the last for a SPEC §3.5 drain point), `ack` (every applied close-out — close or WIP — `resolution=`, `edited=yes\|no`, `ack=human\|auto`; the ack-edit-rate indicator metric (a metric watched as a ratio) counts `ack=human` lines only), `pending` (a decayed thread queued as an exception for the drain point — `thr=`, `inactivity=`, `reason=anchors=N\|turns=N`; once per idle episode, not per scan), `defer`, `complete` (`resolution=`), `curator-error`, `load-error`, `resolver-error`, `apply-error`, `error` |
-| `archive` | `archived`, `recovered`, `recovered-record`, `skip`, `under-drain`, `error` |
-| `recovery` | (startup recovery, see "Crash recovery and the turn and history repositories"; forensic) `begin`, `complete` (`cells=`, `reset=`, `stamped=`, `unrepairable=`), `pending` (`op=`, `day=` — a rollover or archival completion left pending), `rollback` (torn-turn reset — `turn=`, `reverted=`, `debris=`), `journal-recovered` (preserved in-flight bytes — `turn=`, `records=`), `morning-init` (`baseline=`, `rebuilt=`), `adopt` (case 12 greenfield/legacy), `stamp-repaired` (case 9), `unrepairable` (archive entry stays refused — `thr=`, `reason=`), `quarantined` (byte-exact preserved path), `log-tail-repaired` |
-| `barrier` | (day rollover steps, see "Day rollover"; forensic) `begin` (`day=`), `archived` (archival step — `day=`, `count=`), `folio-settled` (excerpt-storage step, once per rollover — `day=`, `threads=`, `bound=`, `unbound=`), `folio-skip` (excerpt-storage step left an excerpt where it was — `thr=`, `name=`, `reason=too-large\|conflict\|unreadable`; for `unreadable` the name is `folio.jsonl` and nothing in the thread moved), `day-committed` (day-commit step — `day=`, optional `repaired=true`), `reborn` (turn-repository re-init step — `day=`, `baseline=`), `complete` (`day=`), `re-mint` (defensive day-commit step re-mint on a non-day-shape HEAD), `quarantined` (quarantine-and-proceed — `paths=`, `dir=`, `restored=`), `tag-error` (forensic; a lifecycle-tag derivation read/parse/tag fault — never fatal to the seal) |
+| `archive` | `archived`, `recovered`, `recovered-record`, `skip`, `under-drain` (archival at a rollover could not reach the registry low-water mark), `error` |
+| `recovery` | (startup recovery, see "Crash recovery and the turn and history repositories"; forensic) `begin`, `complete` (`cells=` lists the recovery cases hit; `reset=`, `stamped=`, `unrepairable=`), `pending` (`op=`, `day=` — a rollover or archival completion left pending), `rollback` (torn-turn reset — `turn=`, `reverted=`, `debris=`), `journal-recovered` (preserved in-flight bytes — `turn=`, `records=`), `morning-init` (`baseline=`, `rebuilt=`), `adopt` (case 12 greenfield/legacy), `stamp-repaired` (case 9), `unrepairable` (archive entry stays refused — `thr=`, `reason=`), `quarantined` (byte-exact preserved path), `log-tail-repaired` |
+| `barrier` | (day rollover steps, see "Day rollover"; forensic) `begin` (`day=`), `archived` (archival step — `day=`, `count=`), `folio-settled` (excerpt-storage step, once per rollover — `day=`, `threads=`, `bound=`, `unbound=`: excerpts moved into / out of bundles), `folio-skip` (excerpt-storage step left an excerpt where it was — `thr=`, `name=`, `reason=too-large\|conflict\|unreadable`; for `unreadable` the name is `folio.jsonl` and nothing in the thread moved), `day-committed` (day-commit step — `day=`, optional `repaired=true`), `reborn` (turn-repository re-init step — `day=`, `baseline=`), `complete` (`day=`), `re-mint` (defensive day-commit step re-mint on a non-day-shape HEAD), `quarantined` (quarantine-and-proceed — `paths=`, `dir=`, `restored=`), `tag-error` (forensic; a lifecycle-tag derivation read/parse/tag fault — never fatal to the seal) |
 | `consolidate` | `sleep-cycle` |
 | `dedup` | `pruned`, `prune-skip`, `error` |
 | `fs` | `edit-no-path`, `write-error` |
@@ -2017,9 +1934,11 @@ diagnostics; §9 measurement keys off the decision events. No event carries mult
 | `topic` | `re-prompt` (`cause=missing-thread` + `fetched=` for the §5.5 fetch, `cause=missing-tag` for the §3.3 missing-tag fallback, or `cause=empty-response` for the §3.3 empty-response fallback; **Open:** U3 — `cause=missing-thread` has no producer under opencode), `tag-missing`, `tag-invalid` (forensic; a near-miss tag candidate that failed strict validation — `reason=markdown-mangled\|bad-delimiters\|bad-thread-list\|bare-new-topic` + a short sanitized `snippet=`; additive to `tag-missing`), `warning` |
 | `session` | `started` (a service run started, SPEC §1.1 — `active=`; distinct from `system.bootstrap`), `ended` (a service run ended), `working-set-save-error`, `checkpoint-error` |
 | `project` | `created`, `switched`, `renamed` |
-| `model` | `stream-close-warn`, `inference-telemetry` (the provider's extended inference-timing block, one line per turn: `ttft_ms=`, `prefill_ms=`, `gen_ms=`, `total_ms=` in MILLISECONDS, plus `prefill_tps=`, `gen_tps=` (the provider's own tokens/second), `prompt_tokens=`, `completion_tokens=`, `cached_tokens=` (prompt-cache hits), `turn=`; a de-facto extension, not OpenAI schema — when the provider sends none the line is not emitted, and absence is never an error or warning; **Open:** the source of the block under opencode, which makes the provider call — the event is retired if there is none, see "Model access and inference telemetry") |
+| `model` | `stream-close-warn`, `inference-telemetry` (the provider's extended inference-timing block, one line per turn: `ttft_ms=`, `prefill_ms=`, `gen_ms=`, `total_ms=` in MILLISECONDS, plus `prefill_tps=`, `gen_tps=` (the provider's own tokens/second), `prompt_tokens=`, `completion_tokens=`, `cached_tokens=` (prompt-cache hits), `turn=`; a de-facto extension, not OpenAI schema — when the provider sends none the line is not emitted, and absence is never an error or warning; **Open:** the source of the block under opencode, which makes the provider call; today only the in-process turn emits it (see "Model access and inference telemetry")) |
 | `workset` | `warning` (slot render failure, SPEC §3.1) |
 | `context` | `modified` (`source=`, `bytes=`; SPEC §3.0.1). The opening line of each turn is defined in SPEC §2.8. |
+
+Some category and code names predate the settled vocabulary: `spine` is the thread registry, `retire` closing, `dissect` the clusterer, `accrual` feedback directive tuning, `barrier` the day rollover and `sleep` consolidation.
 
 **Reserved names** (a mechanism that emits one follows the shape of its category):
 `system.shutdown`, `system.error`, `system.config-reload`, `spine.match-miss`,
@@ -2037,7 +1956,7 @@ opencode server; the plugin, loaded by opencode, calls back into the test proces
 
 - The workload generator emits steps to the driver, which calls opencode's HTTP API.
 - opencode's plugin calls the memory service in the test process over HTTP + JSON.
-- opencode's provider `personant-mock` calls the mock model endpoint, also in the test process,
+- opencode's provider `personant-mock` (the mock provider in the harness's isolated opencode config) calls the mock model endpoint, also in the test process,
   over the OpenAI-compatible wire.
 
 Because the memory service runs inside the test process, the harness keeps direct access to the
