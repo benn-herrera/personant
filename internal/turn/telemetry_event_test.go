@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
 )
@@ -65,7 +64,7 @@ func TestInferenceTelemetryEvent(t *testing.T) {
 				Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello world.",
 				Usage:   tc.usage,
 			}}, nil)
-			state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+			state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 
 			_, info, err := RunWithInfo(context.Background(), state, nil, "hi", &bytes.Buffer{})
 			if err != nil {

@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
 )
@@ -31,7 +30,7 @@ func TestLoadSessionRestoresWorkingSet(t *testing.T) {
 	}
 	mock := model.NewScriptedMock(nil, nil)
 
-	state := NewState(ops, meta, memops.Provider{}, mock)
+	state := NewState(ops, meta, mock)
 	for i := 0; i < 4; i++ {
 		mock.SetResponse(responses[i])
 		if _, err := Run(context.Background(), state, "prompt", io.Discard); err != nil {
@@ -48,7 +47,7 @@ func TestLoadSessionRestoresWorkingSet(t *testing.T) {
 
 	// Simulate a clean relaunch: discard the in-memory State, rebuild
 	// from the substrate exactly as a fresh process launch would.
-	rebuilt, err := LoadSession(context.Background(), ops, meta, memops.Provider{}, mock)
+	rebuilt, err := LoadSession(context.Background(), ops, meta, mock)
 	if err != nil {
 		t.Fatalf("LoadSession: %v", err)
 	}
@@ -73,7 +72,7 @@ func TestLoadSessionFreshHome(t *testing.T) {
 	paths, meta := newTestHome(t)
 	ops := fileadapter.NewFileAdapter(paths)
 
-	state, err := LoadSession(context.Background(), ops, meta, memops.Provider{}, nil)
+	state, err := LoadSession(context.Background(), ops, meta, nil)
 	if err != nil {
 		t.Fatalf("LoadSession on fresh home: %v", err)
 	}

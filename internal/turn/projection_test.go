@@ -296,7 +296,7 @@ func TestIdempotentWriteGuard(t *testing.T) {
 	if err := store.AppendSpineRecord(paths, existing); err != nil {
 		t.Fatalf("append: %v", err)
 	}
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
 	if state.coalesce == nil {

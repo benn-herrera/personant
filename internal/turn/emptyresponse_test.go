@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
 	"personant/internal/prompt"
@@ -36,7 +35,7 @@ func TestRunEmptyResponseRepromptRecovers(t *testing.T) {
 		{Content: "Recovered content, no tag."},
 	})
 	mock.RecordCalls = true
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC))
 
 	body, err := Run(context.Background(), state, "hello", io.Discard)
@@ -82,7 +81,7 @@ func TestRunEmptyResponsePersistentBindingOwnerDefault(t *testing.T) {
 		{Content: "", FinishReason: "stop"},
 	})
 	mock.RecordCalls = true
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	state.ActiveThreads = []string{"thr_42"}
 	pinClock(t, time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC))
 
@@ -147,7 +146,7 @@ func TestRunEmptyResponsePersistentConversational(t *testing.T) {
 		{Content: "", FinishReason: "stop"},
 	})
 	mock.RecordCalls = true
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC))
 
 	body, err := Run(context.Background(), state, "hello", io.Discard)
@@ -197,7 +196,7 @@ func TestRunEmptyThenFetchThenTagRepromptAllCausesCapped(t *testing.T) {
 		{Content: "*topic: thr_42 [a, b, c, d]*\nFOURTH."}, // binds
 	})
 	mock.RecordCalls = true
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	// thr_42 NOT in ActiveThreads: response 2's tag triggers the fetch.
 	pinClock(t, time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC))
 

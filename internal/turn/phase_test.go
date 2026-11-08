@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
 )
@@ -45,7 +44,7 @@ func TestRunAnnouncesPhasesAroundTheStream(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello world."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
 	var probe phaseProbe
@@ -83,7 +82,7 @@ func TestRunWithoutPhaseHook(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello world."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	if state.OnPhase != nil {
 		t.Fatal("NewState must leave OnPhase nil (progress reporting disabled)")
 	}

@@ -16,7 +16,7 @@ import (
 func extractCoalesce(t *testing.T, content string) *coalesceBuffer {
 	t.Helper()
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 	deterministicExtract(context.Background(), state, Delta{
 		Source:    "user.prompt",
 		Content:   content,
@@ -72,7 +72,7 @@ func TestDeterministicExtractHexID(t *testing.T) {
 
 func TestDeterministicExtractCoalesceWithUserPrompt(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 
 	if err := onContextDelta(context.Background(), state, Delta{
 		Source:  "user.prompt",
@@ -104,7 +104,7 @@ func TestDeterministicExtractCoalesceWithUserPrompt(t *testing.T) {
 // populated coalesce pre-B.2.
 func TestDeterministicExtract_ToolResultStagesNotCoalesces(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 
 	if err := onContextDelta(context.Background(), state, Delta{
 		Source:  "tool.result",

@@ -133,7 +133,7 @@ func TestDayBarrier_PreTurnDrainsColdestRetired(t *testing.T) {
 			retiredStates[rank%3], monotonicTS(rank))
 	}
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock([]model.Response{
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock([]model.Response{
 		{Content: "A plain reply with no topic tag."},
 	}, nil))
 	if err := state.Ops.RegenerateDerivedState(context.Background(), memops.IndexBuildOptions{Quiet: true}); err != nil {
@@ -216,7 +216,7 @@ func TestDayBarrier_EvictsFromWorkingSet(t *testing.T) {
 	const archivedDormantID = "thr_2"          // archived; seeded into DormantThreads
 	survivorID := fmt.Sprintf("thr_%d", total) // warmest retired thread, survives
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock([]model.Response{
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock([]model.Response{
 		{Content: "A plain reply with no topic tag."},
 	}, nil))
 	state.ActiveThreads = []string{archivedActiveID, survivorID}
@@ -250,7 +250,7 @@ func TestDayBarrier_EvictsFromWorkingSet(t *testing.T) {
 
 	// The turn's own SaveWorkingSet already persisted the evicted lists;
 	// reload and assert the phantom does not resurface.
-	reloaded, err := LoadSession(context.Background(), fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	reloaded, err := LoadSession(context.Background(), fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	if err != nil {
 		t.Fatalf("LoadSession: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestDayBarrier_NoOpSameDay(t *testing.T) {
 		seedArchivalThread(t, paths, meta.ID, fmt.Sprintf("thr_%d", rank+1),
 			memops.ThreadResolved, monotonicTS(rank))
 	}
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock([]model.Response{
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock([]model.Response{
 		{Content: "A plain reply with no topic tag."},
 	}, nil))
 

@@ -182,7 +182,7 @@ func newRecordingState(t *testing.T) (*State, *recordingAdapter) {
 	t.Helper()
 	paths, meta := newChainHome(t)
 	rec := &recordingAdapter{FileAdapter: fileadapter.NewFileAdapter(paths)}
-	state := NewState(rec, meta, memops.Provider{}, nil)
+	state := NewState(rec, meta, nil)
 	return state, rec
 }
 
@@ -374,7 +374,7 @@ func TestRouting_MixedTurnIsolatesByClass(t *testing.T) {
 // the day's eventlog records a staging.promoted line.
 func TestPromotion_SameTurn_DecisionCitesStaged(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 	ctx := context.Background()
 
 	if err := onContextDelta(ctx, state, Delta{
@@ -435,7 +435,7 @@ func TestPromotion_SameTurn_DecisionCitesStaged(t *testing.T) {
 // correctly in the promotion log line.
 func TestPromotion_CrossTurn_DecisionCitesStagedFromEarlierTurn(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 	ctx := context.Background()
 
 	state.TurnNumber = 1
@@ -490,7 +490,7 @@ func TestPromotion_CrossTurn_DecisionCitesStagedFromEarlierTurn(t *testing.T) {
 // eviction; B.3 only promotes via citation.
 func TestPromotion_NoCrossReference_StagedSymbolPersists(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 	ctx := context.Background()
 
 	if err := onContextDelta(ctx, state, Delta{
@@ -665,7 +665,7 @@ func TestRun_EvictsStaledStagingAtTopOfRun(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 
 	// Pre-seed: a staged entry from turn 1, and three turns already
 	// elapsed. Run will bump TurnNumber 3 -> 4; cutoff = 2; "old" evicts.
@@ -704,7 +704,7 @@ func TestRun_DoesNotEvictBeforeWindowClose(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 
 	state.staging.add(stagedSymbol{
 		Normalized: "still-fresh",

@@ -2,7 +2,6 @@ package scenarios
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -42,28 +41,6 @@ func newHarness(t *testing.T, sc Scenario) *Harness {
 		t.Fatalf("scenario %s: store.Init: %v", sc.Name, err)
 	}
 
-	// Write a minimal providers.toml so any future code path that
-	// resolves a provider has a deterministic answer. The URL is a
-	// sentinel; the mock client is the only consumer of "test" in this
-	// package.
-	providersTOML := `[test]
-baseUrl      = "http://harness.invalid"
-apiKeyUnsafe = "harness-key"
-type         = "inference"
-api          = "openai"
-`
-	if err := os.WriteFile(paths.Providers, []byte(providersTOML), 0o644); err != nil {
-		t.Fatalf("scenario %s: write providers.toml: %v", sc.Name, err)
-	}
-
-	provider := memops.Provider{
-		Name:    "test",
-		BaseURL: "http://harness.invalid",
-		APIKey:  "harness-key",
-		Type:    memops.ProviderTypeInference,
-		API:     memops.ProviderAPIOpenAI,
-	}
-
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC).Format(time.RFC3339)
 	project := memops.ProjectMeta{
 		ID:               "prj_1",
@@ -83,7 +60,7 @@ api          = "openai"
 	}
 
 	ops := fileadapter.NewFileAdapter(paths)
-	state := turn.NewState(ops, project, provider, nil)
+	state := turn.NewState(ops, project, nil)
 	// The model name rides on State, never on the provider: a pool entry
 	// names no models. A live-inference run overwrites this with
 	// Scenario.LiveModel in harness_run.
@@ -108,7 +85,6 @@ api          = "openai"
 		Paths:             paths,
 		Ops:               ops,
 		Project:           project,
-		Provider:          provider,
 		State:             state,
 		Metrics:           run,
 		T:                 t,

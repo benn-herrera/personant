@@ -702,7 +702,7 @@ func restartSession(t *testing.T, h *Harness, idx int, label string) {
 	if h.liveClient != nil {
 		client = h.liveClient
 	}
-	rebuilt, err := turn.LoadSession(context.Background(), h.Ops, h.Project, h.Provider, client)
+	rebuilt, err := turn.LoadSession(context.Background(), h.Ops, h.Project, client)
 	if err != nil {
 		t.Fatalf("scenario step %d (%s): simulated relaunch: turn.LoadSession: %v", idx+1, label, err)
 	}

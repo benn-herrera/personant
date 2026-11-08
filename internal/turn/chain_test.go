@@ -32,7 +32,7 @@ func newChainHome(t *testing.T) (store.PersonantPaths, memops.ProjectMeta) {
 
 func TestChainExtractsUserHashTags(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 
 	if err := onContextDelta(context.Background(), state, Delta{
 		Source:  "user.prompt",
@@ -56,7 +56,7 @@ func TestChainExtractsUserHashTags(t *testing.T) {
 
 func TestChainExtractsModelTopicTag(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 
 	if err := onContextDelta(context.Background(), state, Delta{
 		Source:  "model.response",
@@ -78,7 +78,7 @@ func TestChainExtractsModelTopicTag(t *testing.T) {
 
 func TestChainTopicTagAbsentIsNonFatal(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 	if err := onContextDelta(context.Background(), state, Delta{
 		Source:  "model.response",
 		Content: "no topic tag here",
@@ -108,7 +108,7 @@ func TestChainTopicTagAbsentIsNonFatal(t *testing.T) {
 // as part of that change — its failure is the signal, not a bug.
 func TestBudgetCheckIsExplicitNoOpV01(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 
 	spineBefore, err := store.ReadSpine(paths.Spine)
 	if err != nil {
@@ -163,7 +163,7 @@ func TestBudgetCheckIsExplicitNoOpV01(t *testing.T) {
 
 func TestChainLogsContextModified(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 	if err := onContextDelta(context.Background(), state, Delta{Source: "user.prompt", Content: "hello"}); err != nil {
 		t.Fatalf("onContextDelta: %v", err)
 	}

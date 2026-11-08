@@ -40,7 +40,7 @@ func TestCommandErrorVocabulary(t *testing.T) {
 	seedActiveThread(t, paths, "prj_other", "thr_9", 3, []string{"epsilon"})
 
 	newState := func() *State {
-		return NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{},
+		return NewState(fileadapter.NewFileAdapter(paths), meta,
 			model.NewScriptedMock(nil, nil))
 	}
 	ctx := context.Background()

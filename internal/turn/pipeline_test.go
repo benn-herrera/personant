@@ -124,7 +124,7 @@ func TestPipeline_JournalModelCommitOrdering(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello."},
 	}, nil)
-	state := NewState(rec, meta, memops.Provider{}, consultRecorder{Client: mock, calls: &calls})
+	state := NewState(rec, meta, consultRecorder{Client: mock, calls: &calls})
 
 	if _, err := Run(context.Background(), state, "prompt one", io.Discard); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -168,7 +168,7 @@ func TestPipeline_JournalFailureAbortsPreCanonical(t *testing.T) {
 			mock := model.NewScriptedMock([]model.Response{
 				{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello."},
 			}, nil)
-			state := NewState(rec, meta, memops.Provider{}, mock)
+			state := NewState(rec, meta, mock)
 
 			headBefore, herr := autogit.HeadHash(context.Background(), paths, autogit.Daily)
 			if herr != nil {
@@ -225,7 +225,7 @@ func TestPipeline_CommitFailureLeavesMarkerThenRecovers(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nDoomed reply body."},
 	}, nil)
-	state := NewState(rec, meta, memops.Provider{}, mock)
+	state := NewState(rec, meta, mock)
 
 	_, err := Run(context.Background(), state, "doomed user prompt", io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "commit") {
@@ -276,7 +276,7 @@ func TestPipeline_CommitFailureLeavesMarkerThenRecovers(t *testing.T) {
 	mock2 := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nBack in business."},
 	}, nil)
-	state2 := NewState(adapter, meta, memops.Provider{}, mock2)
+	state2 := NewState(adapter, meta, mock2)
 	_, info, rerr2 := RunWithInfo(context.Background(), state2, nil, "post-recovery prompt", io.Discard)
 	if rerr2 != nil {
 		t.Fatalf("post-recovery Run: %v", rerr2)
@@ -299,7 +299,7 @@ func TestPipeline_TrailerAndInfo(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 
 	_, info, err := RunWithInfo(context.Background(), state, nil, "hi", io.Discard)
 	if err != nil {
@@ -341,7 +341,7 @@ func TestPipeline_BarrierRunsBeforeTurnScope(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "plain reply, no topic tag"},
 	}, nil)
-	state := NewState(rec, meta, memops.Provider{}, mock)
+	state := NewState(rec, meta, mock)
 
 	// Cross the day boundary so the pre-turn poll fires the barrier.
 	pinClock(t, time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC))
@@ -408,7 +408,7 @@ func TestTurnID_CrossSessionCrashLandsCell6NotCell5(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello."},
 	}, nil)
-	state1 := NewState(adapter, meta, memops.Provider{}, mock)
+	state1 := NewState(adapter, meta, mock)
 	_, info, err := RunWithInfo(context.Background(), state1, nil, "session one prompt", io.Discard)
 	if err != nil {
 		t.Fatalf("session 1 Run: %v", err)

@@ -50,7 +50,7 @@ func TestChainTaskClassMinimization_LogsOnlyMetadata(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			paths, meta := newChainHome(t)
 			rec := &recordingOps{MemoryOps: fileadapter.NewFileAdapter(paths)}
-			state := NewState(rec, meta, memops.Provider{}, nil)
+			state := NewState(rec, meta, nil)
 
 			raw := "line1 " + sentinel + " line2 " + strings.Repeat("x", 4096)
 			if err := onContextDelta(context.Background(), state, Delta{
@@ -94,7 +94,7 @@ func TestChainDecisionClassNotMinimized(t *testing.T) {
 	const body = "DECISION-BODY-keep-9f3a"
 	paths, meta := newChainHome(t)
 	rec := &recordingOps{MemoryOps: fileadapter.NewFileAdapter(paths)}
-	state := NewState(rec, meta, memops.Provider{}, nil)
+	state := NewState(rec, meta, nil)
 
 	if err := onContextDelta(context.Background(), state, Delta{
 		Source:  memops.SourceModelResponse,

@@ -86,7 +86,7 @@ func TestRejectOversizeUserInput(t *testing.T) {
 	mock := model.NewScriptedMock(nil, nil)
 	cap := &captureClient{inner: mock}
 	// Small ceiling → small live-turn reserve → small userInput share.
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, cap,
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, cap,
 		WithTokenCeiling(1000))
 
 	share, _, _ := liveTurnShares(state.Budget)
@@ -147,7 +147,7 @@ func TestA4PreflightAssembledBytesWithinBudget(t *testing.T) {
 
 	mock := model.NewScriptedMock(nil, nil)
 	cap := &captureClient{inner: mock}
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, cap,
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, cap,
 		WithTokenCeiling(2000))
 
 	// The static scaffolding, measured exactly: build the system prompt
@@ -210,7 +210,7 @@ func TestA3LiveTurnAndMemoryNeverSilentlyTraded(t *testing.T) {
 		}
 		mock := model.NewScriptedMock(nil, nil)
 		cap := &captureClient{inner: mock}
-		state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, cap)
+		state := NewState(fileadapter.NewFileAdapter(paths), meta, cap)
 		mock.SetResponse(model.Response{Content: "*topic: thr_1 [alpha, beta, gamma, delta]*\nok"})
 
 		const marker = "USER-INTENT-MARKER-PRESENT"
@@ -239,7 +239,7 @@ func TestA3LiveTurnAndMemoryNeverSilentlyTraded(t *testing.T) {
 		}
 		mock := model.NewScriptedMock(nil, nil)
 		cap := &captureClient{inner: mock}
-		state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, cap,
+		state := NewState(fileadapter.NewFileAdapter(paths), meta, cap,
 			WithTokenCeiling(2000))
 		mock.SetResponse(model.Response{Content: "*topic: thr_1 [alpha, beta, gamma, delta]*\nok"})
 

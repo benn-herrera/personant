@@ -60,7 +60,7 @@ func TestPhantomOwnerFallsBackToValidEngaged(t *testing.T) {
 		{Content: "*topic: thr_1, thr_2 [alpha, beta, gamma, delta]*\nPhantom-owner reply."},
 	}, nil)
 	adapter := fileadapter.NewFileAdapter(paths)
-	state := NewState(adapter, meta, memops.Provider{}, mock)
+	state := NewState(adapter, meta, mock)
 	state.ActiveThreads = []string{"thr_2"} // suppress §5.5 fetch for the valid thread
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
@@ -104,7 +104,7 @@ func TestPhantomOwnerNoValidCreatesNewThread(t *testing.T) {
 		{Content: "*topic: thr_5 [foo, bar, baz, qux]*\nPhantom-only reply."},
 	}, nil)
 	adapter := fileadapter.NewFileAdapter(paths)
-	state := NewState(adapter, meta, memops.Provider{}, mock)
+	state := NewState(adapter, meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
 	const utterance = "turn that must not be lost"
@@ -151,7 +151,7 @@ func TestPhantomNonOwnerDropped(t *testing.T) {
 		{Content: "*topic: thr_1, thr_9 [alpha, beta, gamma, delta]*\nNon-owner phantom reply."},
 	}, nil)
 	adapter := fileadapter.NewFileAdapter(paths)
-	state := NewState(adapter, meta, memops.Provider{}, mock)
+	state := NewState(adapter, meta, mock)
 	state.ActiveThreads = []string{"thr_1"}
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
@@ -189,7 +189,7 @@ func TestCrossProjectOwnerFallsBackToValidEngaged(t *testing.T) {
 	seedActiveThread(t, paths, "prj_other", "thr_1", 8, anchors)
 	seedActiveThread(t, paths, meta.ID, "thr_2", 3, anchors)
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	state.TurnNumber = 7
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.coalesce.addThread("thr_1")
@@ -233,7 +233,7 @@ func TestCrossProjectOwnerNoValidCreatesNewThread(t *testing.T) {
 	anchors := []string{"alpha", "beta", "gamma", "delta"}
 	seedActiveThread(t, paths, "prj_other", "thr_1", 8, anchors)
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	state.TurnNumber = 4
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.coalesce.addThread("thr_1")
@@ -284,7 +284,7 @@ func TestPhantomOwnerFallbackPicksMostRecentValid(t *testing.T) {
 	stampLastEngagedTurn(t, paths, "thr_2", 3)
 	stampLastEngagedTurn(t, paths, "thr_3", 7)
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	state.TurnNumber = 9
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.coalesce.addThread("thr_1") // phantom, lowest id → would-be owner
@@ -355,7 +355,7 @@ func TestCrossProjectDeclinedAtRepromptFetch_FullRun(t *testing.T) {
 		{Content: "*topic: thr_1, thr_2 [alpha, beta, gamma, delta]*\nCross-project fetch reply."},
 	}, nil)
 	adapter := fileadapter.NewFileAdapter(paths)
-	state := NewState(adapter, meta, memops.Provider{}, mock)
+	state := NewState(adapter, meta, mock)
 	// thr_2 resident in Layer B; thr_1 absent → the tag triggers the §5.5
 	// fetch for exactly the cross-project thread.
 	state.ActiveThreads = []string{"thr_2"}
@@ -405,7 +405,7 @@ func TestCrossProjectDeclinedAtRepromptFetch_FullRun(t *testing.T) {
 func TestPhantomWithNewTopicOwnsNewThread(t *testing.T) {
 	paths, meta := newTestHome(t)
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	state.TurnNumber = 3
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.coalesce.addThread("thr_9") // phantom: not in the spine

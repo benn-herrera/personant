@@ -42,7 +42,7 @@ func runTurn(t *testing.T, paths store.PersonantPaths, state *State, content, in
 func TestCheckpoint_ThreadCreateCommitsOnce(t *testing.T) {
 	paths, meta := newTestHome(t)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 
 	before, after := runTurn(t, paths,
 		state, "*topic: *new-topic* [foo, bar, baz, qux]*\nHello.", "new thread please")
@@ -63,7 +63,7 @@ func TestCheckpoint_ThreadCreateCommitsOnce(t *testing.T) {
 func TestCheckpoint_ContentOnlyTurnCommitsOnce(t *testing.T) {
 	paths, meta := newTestHome(t)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 
 	// No topic tag → no thread created, no thread engaged → content-only.
 	before, after := runTurn(t, paths, state, "Just a plain reply, no topic.", "hi")
@@ -91,7 +91,7 @@ func TestCheckpoint_CloseCommitsOnce(t *testing.T) {
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 	// Arm decay: TurnNumber jumps past the idle threshold so the seeded
 	// thread is closure-eligible on this turn. Run increments TurnNumber, so
 	// seed one below the firing value.
@@ -128,7 +128,7 @@ func TestCheckpoint_CloseAndCreateCoalesceToOneCommit(t *testing.T) {
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 	state.TurnNumber = DecayTurns
 	state.ActiveThreads = []string{"thr_1"}
 	state.Curator = stubCurator{summary: "gist", anchors: []string{"x", "y", "z", "w"}}
@@ -163,7 +163,7 @@ func TestCheckpoint_CloseAndCreateCoalesceToOneCommit(t *testing.T) {
 func TestCheckpoint_SessionCloseBackstopIsNoOp(t *testing.T) {
 	paths, meta := newTestHome(t)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 
 	// newTestHome seeds projects/prj_1/meta.json OUTSIDE the adapter.
 	// Under scoped per-turn staging (R3-addendum item 3) out-of-band

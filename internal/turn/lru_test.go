@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
 )
@@ -27,7 +26,7 @@ func TestFetchThreadForReprompt_CrossProjectDeclined(t *testing.T) {
 	// thr_foreign belongs to another project; the active project is meta.ID.
 	seedActiveThread(t, paths, "prj_other", "thr_foreign", 3, []string{"alpha", "beta"})
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 
 	if fetchThreadForReprompt(context.Background(), state, "thr_foreign") {
 		t.Fatalf("fetchThreadForReprompt(foreign-project thread) returned true; want false (declined)")
@@ -58,7 +57,7 @@ func TestFetchThreadForReprompt_SameProjectPromotes(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedActiveThread(t, paths, meta.ID, "thr_local", 3, []string{"alpha", "beta"})
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 
 	if !fetchThreadForReprompt(context.Background(), state, "thr_local") {
 		t.Fatalf("fetchThreadForReprompt(same-project thread) returned false; want success")

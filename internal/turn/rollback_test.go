@@ -37,7 +37,7 @@ func stageSymbolTurn(t *testing.T, stagedPath string) *State {
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nSeen it."},
 		{Content: "*topic: thr_1*\nStill here."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 
 	_, err := RunWithDeltas(context.Background(), state,
 		[]Delta{{Source: memops.SourceToolResult, Content: "ran the linter over " + stagedPath}},

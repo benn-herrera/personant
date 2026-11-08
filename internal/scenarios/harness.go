@@ -725,14 +725,13 @@ type Harness struct {
 	// invariant validators can inspect canonical state without going
 	// through the port. Application code goes through Ops; invariants
 	// are test-side substrate validators and stay on store.* access.
-	Paths    store.PersonantPaths
-	Ops      memops.MemoryOps
-	Project  memops.ProjectMeta
-	Provider memops.Provider
-	Mock     *model.MockClient
-	State    *turn.State
-	Metrics  *metrics.Run
-	T        testing.TB
+	Paths   store.PersonantPaths
+	Ops     memops.MemoryOps
+	Project memops.ProjectMeta
+	Mock    *model.MockClient
+	State   *turn.State
+	Metrics *metrics.Run
+	T       testing.TB
 
 	// MetricsPath is the resolved path the metrics blob will be written
 	// to (post-Setup). Filled in before Setup runs so Setup may inspect

@@ -48,7 +48,7 @@ func TestRenameTopicIsDisplayOnly(t *testing.T) {
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
 	ctx := context.Background()
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	nameThread(t, state, "thr_1", "emulsion separating")
 	state.ActiveThreads = []string{"thr_1"}
 
@@ -119,7 +119,7 @@ func TestRenameTopicKeepsACuratorSummary(t *testing.T) {
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha"})
 	ctx := context.Background()
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	nameThread(t, state, "thr_1", "emulsion separating")
 	rec, _, err := state.Ops.FindThread(ctx, "thr_1")
 	if err != nil {
@@ -155,7 +155,7 @@ func TestRenameTopicGuards(t *testing.T) {
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_2", []string{"beta"})
 	ctx := context.Background()
 	newState := func() *State {
-		return NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+		return NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	}
 
 	if _, _, err := RenameTopic(ctx, newState(), "braid groups"); err == nil {

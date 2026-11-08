@@ -154,7 +154,7 @@ func TestSurfaceClosure_DisabledWithoutCuratorOrResolver(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 0, "")
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	state.TurnNumber = 100 // well past the decay threshold
 
 	// No curator, no resolver → no-op.
@@ -193,7 +193,7 @@ func TestSurfaceClosure_RetireWritesStateAndEvicts(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.TurnNumber = 1 + DecayTurns
 	state.ActiveThreads = []string{"thr_1"}
@@ -247,7 +247,7 @@ func TestSurfaceClosure_WIPDemotes(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.TurnNumber = 1 + DecayTurns
 	state.ActiveThreads = []string{"thr_1"}
@@ -283,7 +283,7 @@ func TestSurfaceClosure_DeferReArms(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.TurnNumber = 1 + DecayTurns
 	state.Curator = stubCurator{}
@@ -353,7 +353,7 @@ func TestSurfaceClosure_CrossProjectScanLeavesSiblingUntouched(t *testing.T) {
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
 	seedClosureThread(t, paths, other.ID, "thr_2", memops.ThreadActive, 1, "")
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.TurnNumber = 1 + DecayTurns
 	state.Curator = stubCurator{}
@@ -386,7 +386,7 @@ func TestSurfaceClosure_CrossProjectScanLeavesSiblingUntouched(t *testing.T) {
 // so a stale grace cannot suppress a future legitimate re-prompt (S2).
 func TestClosureDeferPrunedOnEngage(t *testing.T) {
 	paths, meta := newTestHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 
 	// Defer thr_1: applyClosureResolution with ClosureDefer arms the
 	// suppression grace.
@@ -415,7 +415,7 @@ func TestSurfaceClosure_CuratorErrorSwallowed(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.TurnNumber = 1 + DecayTurns
 	state.Curator = errCurator{}
@@ -515,7 +515,7 @@ func TestSurfaceClosure_VacationSurfacesNoPrompt(t *testing.T) {
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, eightDaysAgo)
 	seedClosureThread(t, paths, meta.ID, "thr_2", memops.ThreadActive, 1, eightDaysAgo)
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	pinClock(t, now)
 	// TurnNumber 1 mimics a fresh post-resume session: turn-count decay
 	// cannot fire (1 < 1+DecayTurns), so any prompt would be wall-clock.
@@ -571,7 +571,7 @@ func containsString(ss []string, v string) bool {
 func TestApplyClosureResolution_EditedSummaryPropagates(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.TurnNumber = 1
 
@@ -602,7 +602,7 @@ func TestApplyClosureResolution_EditedSummaryPropagates(t *testing.T) {
 func TestApplyClosureResolution_UneditedLogsAckNo(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.TurnNumber = 1
 
@@ -700,7 +700,7 @@ func TestSurfaceClosure_AutoAcceptsRoutine(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.TurnNumber = 1 + DecayTurns
 	state.ActiveThreads = []string{"thr_1"}
@@ -763,7 +763,7 @@ func TestSurfaceClosure_QueuesExceptions(t *testing.T) {
 			seedClosureThreadShape(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "",
 				tt.anchors, tt.turnCount)
 
-			state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+			state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 			pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 			state.TurnNumber = 1 + DecayTurns
 			state.ActiveThreads = []string{"thr_1"}
@@ -821,7 +821,7 @@ func TestPendingClosures_EmptyUnderAlwaysMode(t *testing.T) {
 	seedClosureThreadShape(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "",
 		[]string{"a", "b", "c", "d", "e", "f"}, 1)
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.TurnNumber = 1 + DecayTurns
 	state.Curator = stubCurator{}
@@ -845,7 +845,7 @@ func TestDrainClosures_ResolvesQueueInteractively(t *testing.T) {
 	seedClosureThreadShape(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "",
 		[]string{"a", "b", "c", "d", "e", "f"}, 1)
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.TurnNumber = 1 + DecayTurns
 	state.ActiveThreads = []string{"thr_1"}
@@ -893,7 +893,7 @@ func TestAutoAccept_EmptyDraftIsNotAccepted(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.TurnNumber = 1 + DecayTurns
 	state.ActiveThreads = []string{"thr_1"}

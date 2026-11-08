@@ -89,7 +89,6 @@ func emitReasoning(state *State, s string) {
 type State struct {
 	Ops           memops.MemoryOps
 	ActiveProject memops.ProjectMeta
-	Provider      memops.Provider
 	Client        model.Client
 
 	// Recaller is the §3.4 recall stack (measure.Recaller). NewState
@@ -454,11 +453,10 @@ func WithTokenCeiling(tokenCeiling int) StateOption {
 // is initialized empty; Client must be non-nil (the chat REPL passes
 // either an HTTPClient or a MockClient, never nil). Options (e.g.
 // WithTokenCeiling) override defaults after construction.
-func NewState(ops memops.MemoryOps, project memops.ProjectMeta, provider memops.Provider, client model.Client, opts ...StateOption) *State {
+func NewState(ops memops.MemoryOps, project memops.ProjectMeta, client model.Client, opts ...StateOption) *State {
 	s := &State{
 		Ops:               ops,
 		ActiveProject:     project,
-		Provider:          provider,
 		Client:            client,
 		Budget:            memops.DefaultBudget(),
 		coalesce:          newCoalesceBuffer(),
@@ -490,8 +488,8 @@ func NewState(ops memops.MemoryOps, project memops.ProjectMeta, provider memops.
 // Only the working-set membership is reloaded. TurnNumber, the
 // coalesce/staging buffers, and closureDeferUntil are session-volatile
 // and correctly start fresh.
-func LoadSession(ctx context.Context, ops memops.MemoryOps, project memops.ProjectMeta, provider memops.Provider, client model.Client, opts ...StateOption) (*State, error) {
-	state := NewState(ops, project, provider, client, opts...)
+func LoadSession(ctx context.Context, ops memops.MemoryOps, project memops.ProjectMeta, client model.Client, opts ...StateOption) (*State, error) {
+	state := NewState(ops, project, client, opts...)
 	active, dormant, err := ops.LoadWorkingSet(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("turn: load session working set: %w", err)

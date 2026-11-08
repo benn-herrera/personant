@@ -85,7 +85,7 @@ func TestMixedTagExistingOwnsNewMetaOnly(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_1, *new-topic* [alpha, beta, gamma, delta]*\nMixed reply."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	state.ActiveThreads = []string{"thr_1"} // suppress §5.5 mid-turn fetch
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
@@ -135,7 +135,7 @@ func TestMultiExistingFirstOwnsRestEngaged(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_1, thr_2 [alpha, beta, gamma, delta]*\nMulti reply."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	state.ActiveThreads = []string{"thr_1", "thr_2"} // suppress mid-turn fetch
 	pinClock(t, now)
 
@@ -187,7 +187,7 @@ func TestPureNewTopicOwnsTurn(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nGenesis reply."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
 	if _, err := Run(context.Background(), state, "brand new topic", io.Discard); err != nil {
@@ -235,7 +235,7 @@ func TestDescriptionRoundTrips(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nReply."},
 	}, nil)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
 	const utterance = "tell me about the trefoil knot"

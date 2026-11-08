@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
 )
@@ -28,7 +27,7 @@ func TestRunWithInfoSurfacesPromptTokens(t *testing.T) {
 		},
 	}, nil)
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
 	var out bytes.Buffer
@@ -57,7 +56,7 @@ func TestRunWithDeltasDropsTurnInfo(t *testing.T) {
 		},
 	}, nil)
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
 	// Two-value form must compile and run; this is the compile-time guard

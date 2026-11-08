@@ -57,7 +57,7 @@ func TestRunTagRepromptRecoversBinding(t *testing.T) {
 		{Content: "*topic: thr_42 [a, b, c, d]*\nSECOND."},
 	})
 	mock.RecordCalls = true
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	// thr_42 already in Layer B so the second response cannot also trigger
 	// a §5.5 fetch — this test isolates the missing-tag cause.
 	state.ActiveThreads = []string{"thr_42"}
@@ -121,7 +121,7 @@ func TestRunOwnerDefaultBindsMostRecentlyEngaged(t *testing.T) {
 		{Content: "Still no tag. T3-RETRY."},
 	})
 	mock.RecordCalls = true
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	// Both threads pre-populated in Layer B so turns 1-2 don't spend §5.5
 	// fetches; the queue then maps one response per consult as scripted.
 	state.ActiveThreads = []string{"thr_42", "thr_43"}
@@ -173,7 +173,7 @@ func TestRunTaglessConversationalTurnProceedsWithoutRecovery(t *testing.T) {
 		{Content: "Just chatting, no tag."},
 	}, nil)
 	mock.RecordCalls = true
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC))
 
 	body, err := Run(context.Background(), state, "hello", io.Discard)
@@ -218,7 +218,7 @@ func TestRunRepromptCapOnePerCauseBothCausesOneTurn(t *testing.T) {
 		{Content: "*topic: thr_42 [a, b, c, d]*\nTHIRD."},
 	})
 	mock.RecordCalls = true
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	// thr_42 NOT in ActiveThreads: response 2's tag triggers the fetch.
 	pinClock(t, time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC))
 
@@ -288,7 +288,7 @@ func TestRunOwnerDefaultSurvivesRestartRecency(t *testing.T) {
 	mock1 := model.NewScriptedMockPerConsult([]model.Response{
 		{Content: "*topic: thr_42 [a, b, c, d]*\nS1."},
 	})
-	state1 := NewState(ops, meta, memops.Provider{}, mock1)
+	state1 := NewState(ops, meta, mock1)
 	state1.ActiveThreads = []string{"thr_42"}
 	state1.TurnNumber = 90
 	if _, err := Run(ctx, state1, "prior-session work", io.Discard); err != nil {
@@ -307,7 +307,7 @@ func TestRunOwnerDefaultSurvivesRestartRecency(t *testing.T) {
 		{Content: "No tag. S2-T3-FIRST."},
 		{Content: "Still no tag. S2-T3-RETRY."},
 	})
-	state2, err := LoadSession(ctx, ops, meta, memops.Provider{}, mock2)
+	state2, err := LoadSession(ctx, ops, meta, mock2)
 	if err != nil {
 		t.Fatalf("LoadSession: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestRunTagRepromptRearmsAcrossTurns(t *testing.T) {
 		{Content: "*topic: thr_42 [a, b, c, d]*\nT2-RETRY."},
 	})
 	mock.RecordCalls = true
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	state.ActiveThreads = []string{"thr_42"}
 	pinClock(t, time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC))
 
@@ -409,7 +409,7 @@ func TestRunFetchFirstThenTagReprompt(t *testing.T) {
 		{Content: "*topic: thr_42 [a, b, c, d]*\nTHIRD."}, // binds
 	})
 	mock.RecordCalls = true
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, mock)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC))
 
 	body, err := RunWithDeltas(context.Background(), state,

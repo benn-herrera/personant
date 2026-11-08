@@ -54,7 +54,7 @@ func seedThreadWithBody(t *testing.T, paths store.PersonantPaths, project, thrID
 func embeddingState(t *testing.T, paths store.PersonantPaths, meta memops.ProjectMeta) *State {
 	t.Helper()
 	ops := fileadapter.NewFileAdapter(paths)
-	state := NewState(ops, meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(ops, meta, model.NewScriptedMock(nil, nil))
 	state.Recaller = measure.NewService(ops, model.NewMockEmbedder())
 	if err := state.Recaller.Prepare(context.Background()); err != nil {
 		t.Fatalf("Recaller.Prepare: %v", err)
@@ -109,7 +109,7 @@ func TestSurfaceRecall_IntraThreadFires(t *testing.T) {
 		t.Fatalf("Recaller.Prepare: %v", err)
 	}
 	t.Cleanup(func() { _ = svc.Close() })
-	state := NewState(ops, meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(ops, meta, model.NewScriptedMock(nil, nil))
 	state.Recaller = svc
 
 	// Flush the thread's chunks into the fine tier and wait for the async
@@ -168,7 +168,7 @@ func TestSurfaceRecall_AcceptedIntraHitDoesNotReOffer(t *testing.T) {
 		t.Fatalf("Recaller.Prepare: %v", err)
 	}
 	t.Cleanup(func() { _ = svc.Close() })
-	state := NewState(ops, meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(ops, meta, model.NewScriptedMock(nil, nil))
 	state.Recaller = svc
 
 	const query = "trefoil knot topology invariant chirality"
@@ -250,7 +250,7 @@ func TestSurfaceRecall_NoEmbedder(t *testing.T) {
 	seedThreadWithBody(t, paths, meta.ID, "thr_1", "trefoil knot topology")
 	ops := fileadapter.NewFileAdapter(paths)
 
-	state := NewState(ops, meta, memops.Provider{}, model.NewScriptedMock(nil, nil))
+	state := NewState(ops, meta, model.NewScriptedMock(nil, nil))
 	if err := surfaceRecallCandidates(context.Background(), state,
 		"trefoil knot topology", map[string]struct{}{}, ""); err != nil {
 		t.Fatalf("surfaceRecallCandidates: %v", err)

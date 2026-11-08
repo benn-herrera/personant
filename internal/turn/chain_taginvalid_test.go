@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/prompt"
 )
@@ -17,7 +16,7 @@ import (
 // the chain call site's wiring of prompt.ClassifyNearMiss.
 func TestChainTagInvalidLogEmission(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 
 	if err := onContextDelta(context.Background(), state, Delta{
 		Source:  "model.response",
@@ -48,7 +47,7 @@ func TestChainTagInvalidLogEmission(t *testing.T) {
 // bins ("never attempted" vs "attempted but malformed") stay disjoint.
 func TestChainNoTagInvalidWhenNeverAttempted(t *testing.T) {
 	paths, meta := newChainHome(t)
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, memops.Provider{}, nil)
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 
 	if err := onContextDelta(context.Background(), state, Delta{
 		Source:  "model.response",
