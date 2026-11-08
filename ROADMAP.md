@@ -388,12 +388,31 @@ Concrete, mostly single-package items; independent of the sequence above unless 
 - [ ] **"Six-month" phrasings in Go comments.** Comments in `internal/memops`, `internal/autogit`,
   `internal/clock`, `internal/store` and `internal/scenarios/sim` still say six-month; the
   acceptance gate is 120 days. Sweep each file when next touched. (SPEC §9.1.)
-- [ ] **Code comments cite retired document names.** Comments in `internal/memops/fileadapter/` cite INV-1…INV-6 (no longer in ARCHITECTURE), `fileadapter.go` names a `turn/archival.go` drain that does not exist, `internal/turn/projection.go` says ever-central symbols rank in the high class and that class breaks ties of equal count (`rankClass` tests only `IsHighSpecificity`, and class outranks count), `fileadapter_barrier.go` says derived files never exist in history-repository HEAD (`digest.json` does), and several files say "sleep cycle"; a comment-only pass fixes them.
+- [ ] **Code comments cite issue numbers.** About 460 comment lines in about 100 Go files cite
+  `#NNN` issue or burndown numbers (`git grep -n -E '#[0-9]+' -- '*.go'`); comments cite no
+  decision or review id, so a comment-only pass drops them and keeps the invariant each states.
+- [ ] **`last_active` is never refreshed.** `meta.json` `last_active` (ARCHITECTURE "Project
+  metadata": updated on any engagement) has no writer, so the other-projects slot's
+  most-recently-active order (`internal/workset/workset.go`, SPEC §3.1) is the creation order.
+- [ ] **Intra-thread recall finds but does not deliver.** An intra-thread match is logged as a
+  match-fire and not fetched: nothing puts a thread's earlier excerpts into the composed request
+  (SPEC §3.4 in-context exclusion; `internal/turn/recall.go`).
+- [ ] **The sim never resolves a project.** The harness seeds projects with
+  `store.SaveProjectMeta` (`internal/scenarios/harness_setup.go`), so `ResolveActiveProject`
+  (SPEC §4.5.7) runs only in unit tests.
+- [ ] **Named §9.4 scenarios and churn tests are missing.** SPEC §9.4's heavy-closing and
+  same-anchor-collision scenarios and the churn level have no test in `internal/scenarios`.
 
 ---
 
 ## Mid-term
 
+- [ ] **No metric measures recall fetches.** Recall fidelity scores match-fires, and the sim
+  oracle copies the runtime's own fetches, so the auto-fetch bar, the top-3 bound and the
+  resident skip have unit tests but no acceptance series (SPEC §9.4).
+- [ ] **Recall's model-judgment signal is not built.** SPEC §3.4 signal 3; candidates are fetched
+  on the symbolic and embedding signals alone (ARCHITECTURE "The model drafts, deterministic code
+  writes").
 - [ ] **Event-log rotation.** `personant init` creates `logs/archive/` (`internal/store/init.go`)
   and startup recovery leaves it alone (`internal/recovery/logs.go`), but nothing rotates logs
   into it. Intended layout: monthly gzipped tarballs of logs older than 90 days
