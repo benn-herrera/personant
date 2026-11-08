@@ -1,7 +1,6 @@
 # Strip the self-built harness
 
-Parked plan for ROADMAP.md B1, after WP2. It becomes the active plan again once the doc sweep
-(`ACTIVE_PLAN.md`) has rediced `PROJECT_DOCS/` (section 5).
+Active plan for ROADMAP.md B1. WP1 and WP2 are done (section 5).
 
 Contents:
 

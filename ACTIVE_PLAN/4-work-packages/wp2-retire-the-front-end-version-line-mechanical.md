@@ -11,6 +11,6 @@
 - Contract rows marked 2.
 - Done-line: `just build`; `just test-run ./internal/version`;
   `just test-run ./internal/eventlog Bootstrap`; `just test-run ./cmd Version`;
-  `git grep -n -i -E 'FrontEnd|frontend=|front[ -]end' -- internal/version internal/eventlog cmd PROJECT_DOCS/SPEC/4-user-surface/4.1-cli-command-surface.md PROJECT_DOCS/SPEC/9-measurement-and-validation-regime/9.1-the-four-month-simulation-v0-1-acceptance-gate/version-lines.md PROJECT_DOCS/ARCHITECTURE/testing-as-the-lab-bench/event-log-format.md`
+  `git grep -n -i -E 'FrontEnd|frontend=|front[ -]end' -- internal/version internal/eventlog cmd PROJECT_DOCS/SPEC/4-user-surface/4.1-cli-command-surface.md PROJECT_DOCS/SPEC/9-measurement-and-validation-regime/9.1-the-four-month-simulation-the-v0-5-0-acceptance-criterion/version-lines.md PROJECT_DOCS/ARCHITECTURE/testing-as-the-measurement-instrument/event-log-format.md`
   → empty. Checkpoint.
 

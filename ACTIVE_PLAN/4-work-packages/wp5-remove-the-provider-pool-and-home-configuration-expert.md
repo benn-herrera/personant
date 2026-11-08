@@ -49,7 +49,7 @@
   `git grep -n -E 'providers\.toml|config\.toml|api_keys|apiKeyFile|LoadProviders|LoadConfig|ParseModelRef|ReaperProvider' -- '*.go' justfile`
   → empty;
   `git grep -n -E 'providers\.toml|api_keys|test\.(providers|config)' -- PROJECT_DOCS README.md ROADMAP_PLANS`
-  → only this plan. Checkpoint; `just sim`; the dispatching session records the run directory
+  → empty (this plan lives in `ACTIVE_PLAN/`, outside the searched paths). Checkpoint; `just sim`; the dispatching session records the run directory
   (`command ls -d test/rundata/sim-workload-seed*-dur168h0m0s.* | tail -1`) as WP6's baseline.
   Operator step, needs `reaper.local`: `just LIVE_EMBEDDING=true DURATION=1d sim` and
   `just LIVE_INFERENCE=true DURATION=1d sim`.

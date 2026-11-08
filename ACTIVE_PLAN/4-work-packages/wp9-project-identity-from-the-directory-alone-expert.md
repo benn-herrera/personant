@@ -45,8 +45,8 @@
   `just test-run ./cmd`; `just test-run ./internal/scenarios`; the re-run greps → empty;
   `git grep -n -w -E 'last-active|StepNeedsConfirmation|StepNeedsFallback|StepRemoteMatch|ExplicitProject|remote_urls|historical_remote_urls|historical_root_paths|FindGitRoot|GetGitOriginURL' -- '*.go' PROJECT_DOCS`
   → only `version.go`'s format-4 doc line;
-  `git grep -n -E 'survives file moves|External canonical identity' -- PROJECT_DOCS` → empty
-  (today SPEC §4.5.2 lines 8 and 11, ARCHITECTURE "Project identity (dual-layered)" line 6);
+  `git grep -n -E 'survives file moves|Remote identity' -- PROJECT_DOCS` → empty
+  (today SPEC §4.5.2 lines 8 and 11, ARCHITECTURE "Project identity" line 6);
   `git grep -l -E 'exec\.Command\("git"' -- '*.go'` → `internal/scenarios/harness_run.go` and
   `internal/store/init_test.go` only. Checkpoint; `just sim`. The commit message tells the
   operator that existing homes open as format 4 by restamp.

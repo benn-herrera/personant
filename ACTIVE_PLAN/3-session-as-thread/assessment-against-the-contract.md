@@ -12,7 +12,7 @@
   invariant holds trivially, and its structural guard stays. Engaged-but-not-owner reduces to
   "resident in Layer B because recall fetched it". The follow-on must decide whether a fetched
   thread still takes recency and a `history_symbols` merge: merging another session's symbols
-  into it rewrites its identity. Phantom resolution and owner fallback go, because the model
+  into it rewrites its identity. Unknown thread id and owner fallback go, because the model
   supplies no IDs. Anchor projection at owner-turn close stays.
 - **SPEC §3.0.4.** Recovery turns and in-order tool results are unchanged. Union accumulation of
   the turn's symbols stays: it feeds the owner's single engagement and §3.10 staging. The fan-out

@@ -12,7 +12,7 @@
   and apply the IDs in `advanceRuntimeMirror` so the BD-4 cross-check holds (invariant 6).
 - Tests: new and rewritten tests are named `TestRecall_*`: an auto-band candidate is fetched with
   no resolver; a below-bar candidate is not fetched; a resident non-intra candidate is skipped;
-  accept suppression still holds for intra hits. Delete tests whose subject was the offer, the
+  in-context exclusion (SPEC §3.4) still holds for intra hits. Delete tests whose subject was the offer, the
   decline reason or the ack mode.
 - Re-run `git grep -l -w -E 'RecallResolver|RecallOffer|RecallResolution|RecallNotice|RecallAck|RecallAckMode|DeclineReason|DeclineNotRelevant|OnAutoRecalled|putOffer|describeCandidates|ackKind|ackHuman|ackAuto|installAckPolicy' -- '*.go'`
   (today `scenarios/{harness,harness_resolvers,harness_run,harness_setup}.go`,

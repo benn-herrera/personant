@@ -215,7 +215,7 @@ decisions named in them.
   `internal/modellist` and the provider pool, the `chat`, `ping` and `models` verbs (**U5**), and
   `version.FrontEnd`, `test-fe` and `fe-scope-check` (**U6**); then delete the readability,
   html-to-markdown, terminal/signal and `langchaingo/llms` dependencies. The old systems are not a fallback: nothing waits on the plugin route to remove
-  them. Plan: `ROADMAP_PLANS/strip-self-built-harness/entry-point.md` (parked after WP2).
+  them. Plan: `ACTIVE_PLAN/entry-point.md` (WP1 and WP2 done).
 - [ ] **B2. `recall_query_latency_*` does not measure recall.** The sim's p50/p95/p99 gauges
   (`metricRecallQueryLatencyP50/P95/P99`, `internal/scenarios/sim/workload.go`, populated in
   `sim/telemetry.go`) copy turn-duration percentiles instead of timing recall queries. (SPEC §9.4.)
@@ -498,7 +498,6 @@ Concrete, mostly single-package items; independent of the sequence above unless 
 
 `ROADMAP_PLANS/` holds designs not under way. Those that still apply:
 
-- `strip-self-built-harness/` — parked after WP2 (ROADMAP B1).
 - `OPENCODE_SERVER_REPLACEMENT.md` — the fallback if the plugin route cannot give the memory system
   the control it needs (ARCHITECTURE "Plugin route").
 - `code-mode-support.md` — applies only to that fallback.
