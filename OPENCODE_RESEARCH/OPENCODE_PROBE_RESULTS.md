@@ -5,7 +5,7 @@ Every repository path, plan, recipe and commit this report cites is on branch `p
 be gone.
 
 **What this is.** The results of the throwaway probe in ACTIVE_PLAN.md (packages P0–P7): the mock sim workload
-(seed 24095, mock inference and embedding) driven turn by turn through unmodified opencode v2.2.6, with the
+(seed 24095, mock inference and embedding) driven turn by turn through unmodified opencode v2.2.3, with the
 probe plugin (`opencode-plugin/index.ts`) and the in-process memory service (`internal/opencodehook/service.go`)
 calling the probe-local phases in `internal/turn/probe_phases.go`. Results are judged against ACTIVE_PLAN.md "Pass
 criteria for opencode-in-loop runs". Pre-probe measurements are OPENCODE_PREPROBE_RESULTS.md, cited as PP §n.
