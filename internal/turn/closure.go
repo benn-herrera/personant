@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"personant/internal/clock"
-	"personant/internal/curator"
 	"personant/internal/memops"
 )
 
@@ -18,13 +17,13 @@ import (
 // until then they are plain constants.
 //
 // DecayTurns is EXPORTED as a public contract value (like EmbeddingDebtCap):
-// the acceptance sim's BD-4 runtime-mirror Layer-B references it to replicate
+// the acceptance sim's runtime-mirror Layer-B references it to replicate
 // the §3.5 turn-idle closure eviction in its cross-check (ARCHITECTURE.md's
 // harness↔system coupling rule — a contract value the harness depends on is
 // referenced, never hand-mirrored into a second const that can silently drift).
 const (
 	// DecayTurns is the count of non-engagement turns before a thread
-	// is offered for closure.
+	// closes.
 	DecayTurns = 8
 	// decayTime is the wall-clock equivalent of DecayTurns.
 	decayTime = 7 * 24 * time.Hour
@@ -163,22 +162,22 @@ func decayCandidates(ctx context.Context, state *State) ([]closureCandidate, err
 // summary, logging the two distinct failure modes (substrate load vs.
 // curator) under their own §2.8 actions. ok=false means the caller must
 // skip this thread.
-func draftClosure(ctx context.Context, state *State, threadID string) (curator.ClosureDraft, bool) {
+func draftClosure(ctx context.Context, state *State, threadID string) (string, bool) {
 	thr, err := state.Ops.LoadThread(ctx, threadID)
 	if err != nil {
 		// Distinct from curator-error: the curator was never consulted;
 		// the substrate load failed before it.
 		_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "load-error",
 			"thr="+threadID+" err="+memops.SanitizeDetail(err.Error()))
-		return curator.ClosureDraft{}, false
+		return "", false
 	}
-	draft, err := state.Curator.DraftClosure(ctx, thr)
+	summary, err := state.Curator.DraftClosure(ctx, thr)
 	if err != nil {
 		_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "curator-error",
 			"thr="+threadID+" err="+memops.SanitizeDetail(err.Error()))
-		return curator.ClosureDraft{}, false
+		return "", false
 	}
-	return draft, true
+	return summary, true
 }
 
 // surfaceClosureCandidates runs the §3.5 decay-triggered closure scan
@@ -215,16 +214,16 @@ func surfaceClosureCandidates(ctx context.Context, state *State) error {
 			logFailures++
 			continue
 		}
-		draft, ok := draftClosure(ctx, state, c.rec.ID)
+		summary, ok := draftClosure(ctx, state, c.rec.ID)
 		if !ok {
 			continue
 		}
-		if strings.TrimSpace(draft.Summary) == "" {
+		if strings.TrimSpace(summary) == "" {
 			_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "curator-error",
 				"thr="+c.rec.ID+" err=empty draft summary")
 			continue
 		}
-		if err := closeThreadResolved(ctx, state, c.rec.ID, draft); err != nil {
+		if err := closeThreadResolved(ctx, state, c.rec.ID, summary); err != nil {
 			_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "apply-error",
 				"thr="+c.rec.ID+" err="+memops.SanitizeDetail(err.Error()))
 		}
@@ -240,7 +239,7 @@ func surfaceClosureCandidates(ctx context.Context, state *State) error {
 // a fresh state_changed, and the body unchanged; evicts the thread from
 // both Layer B (ActiveThreads) and Layer C (DormantThreads); and logs
 // retire.complete.
-func closeThreadResolved(ctx context.Context, state *State, threadID string, draft curator.ClosureDraft) error {
+func closeThreadResolved(ctx context.Context, state *State, threadID string, summary string) error {
 	rec, found, err := state.Ops.FindThread(ctx, threadID)
 	if err != nil {
 		return fmt.Errorf("closure: find topic %s: %w", threadID, err)
@@ -260,12 +259,10 @@ func closeThreadResolved(ctx context.Context, state *State, threadID string, dra
 	// a meta-only update, so ThreadWrite.TurnExcerpt is empty and the
 	// turns/ directory is left untouched.
 	//
-	// R2 (Build-Plan): closure runs a final AUTHORITATIVE projection for the
-	// STORED spine anchors (SOLUTION §2), derived from the thread's
-	// history_symbols via ProjectAnchors — the same canonical source the
-	// per-turn projection uses, so a closing thread's headline cannot
-	// silently diverge from its live headline. The curator's draft.Anchors
-	// are not stored; only the persisted anchors come from projection.
+	// Closure runs a final authoritative projection for the stored spine
+	// anchors, derived from the thread's history_symbols via ProjectAnchors —
+	// the same canonical source the per-turn projection uses, so a closing
+	// thread's headline cannot silently diverge from its live headline.
 	//
 	// Closure advances no turn; project at the thread's current turn count
 	// so LastActiveTurn stays monotone. The mutated symbols and the changed
@@ -277,14 +274,14 @@ func closeThreadResolved(ctx context.Context, state *State, threadID string, dra
 		rec.AnchorsProjectedAtTurn = rec.TurnCount
 	}
 	rec.State = memops.ThreadResolved
-	rec.Summary = draft.Summary
+	rec.Summary = summary
 	rec.Anchors = anchors
 	rec.StateChanged = now
 
 	fm.ID = rec.ID
 	fm.Project = rec.Project
 	fm.State = memops.ThreadResolved
-	fm.Summary = draft.Summary
+	fm.Summary = summary
 	fm.Anchors = append([]string(nil), anchors...)
 	fm.StateChanged = now
 	fm.LastEngaged = rec.LastEngaged
@@ -304,8 +301,7 @@ func closeThreadResolved(ctx context.Context, state *State, threadID string, dra
 	// threads a closure-storm (#82) resolved.
 	state.structuralRetires++
 
-	state.ActiveThreads = removeString(state.ActiveThreads, threadID)
-	state.DormantThreads = removeString(state.DormantThreads, threadID)
+	evictThread(state, threadID)
 
 	return state.Ops.Log(ctx, memops.LogCategoryRetire, "complete",
 		"thr="+threadID+" resolution="+string(memops.ThreadResolved))

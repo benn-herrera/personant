@@ -123,7 +123,7 @@ func TestPipeline_JournalModelCommitOrdering(t *testing.T) {
 	rec := &opsRecorder{MemoryOps: fileadapter.NewFileAdapter(paths), calls: &calls}
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello."},
-	}, nil)
+	})
 	state := NewState(rec, meta, consultRecorder{Client: mock, calls: &calls})
 
 	if _, err := Run(context.Background(), state, "prompt one", io.Discard); err != nil {
@@ -167,7 +167,7 @@ func TestPipeline_JournalFailureAbortsPreCanonical(t *testing.T) {
 			}
 			mock := model.NewScriptedMock([]model.Response{
 				{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello."},
-			}, nil)
+			})
 			state := NewState(rec, meta, mock)
 
 			headBefore, herr := autogit.HeadHash(context.Background(), paths, autogit.Daily)
@@ -224,7 +224,7 @@ func TestPipeline_CommitFailureLeavesMarkerThenRecovers(t *testing.T) {
 	rec := &opsRecorder{MemoryOps: adapter, calls: &calls, failCommit: true}
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nDoomed reply body."},
-	}, nil)
+	})
 	state := NewState(rec, meta, mock)
 
 	_, err := Run(context.Background(), state, "doomed user prompt", io.Discard)
@@ -275,7 +275,7 @@ func TestPipeline_CommitFailureLeavesMarkerThenRecovers(t *testing.T) {
 	// end-to-end and commits it with the trailer.
 	mock2 := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nBack in business."},
-	}, nil)
+	})
 	state2 := NewState(adapter, meta, mock2)
 	_, info, rerr2 := RunWithInfo(context.Background(), state2, nil, "post-recovery prompt", io.Discard)
 	if rerr2 != nil {
@@ -298,7 +298,7 @@ func TestPipeline_TrailerAndInfo(t *testing.T) {
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 
 	_, info, err := RunWithInfo(context.Background(), state, nil, "hi", io.Discard)
@@ -320,8 +320,8 @@ func TestPipeline_TrailerAndInfo(t *testing.T) {
 	}
 }
 
-// TestPipeline_BarrierRunsBeforeTurnScope asserts the R3b re-sequencing
-// (barrier-only archival, INV-5): the day barrier — and the §3.8 drain
+// TestPipeline_BarrierRunsBeforeTurnScope asserts the sequencing
+// (barrier-only archival; primary is barrier-exclusive): the day barrier — and the §3.8 drain
 // it homes — fires strictly BEFORE the turn's recovery scope opens (the
 // prompt journal append), and releases its op=barrier scope by the time
 // Run returns.
@@ -340,7 +340,7 @@ func TestPipeline_BarrierRunsBeforeTurnScope(t *testing.T) {
 	rec := &opsRecorder{MemoryOps: fileadapter.NewFileAdapter(paths), calls: &calls}
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "plain reply, no topic tag"},
-	}, nil)
+	})
 	state := NewState(rec, meta, mock)
 
 	// Cross the day boundary so the pre-turn poll fires the barrier.
@@ -407,7 +407,7 @@ func TestTurnID_CrossSessionCrashLandsCell6NotCell5(t *testing.T) {
 	// Session 1: one committed turn; HEADTURN = its id.
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello."},
-	}, nil)
+	})
 	state1 := NewState(adapter, meta, mock)
 	_, info, err := RunWithInfo(context.Background(), state1, nil, "session one prompt", io.Discard)
 	if err != nil {

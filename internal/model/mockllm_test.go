@@ -22,7 +22,7 @@ func TestMockScriptedServesCurrentResponse(t *testing.T) {
 		{Content: "second", FinishReason: "stop"},
 		{Content: "third", FinishReason: "stop"},
 	}
-	m := NewScriptedMock(nil, nil)
+	m := NewScriptedMock(nil)
 
 	for i, want := range scripted {
 		m.SetResponse(want)
@@ -40,7 +40,7 @@ func TestMockScriptedServesCurrentResponse(t *testing.T) {
 // SetResponse — the §5.5 mid-turn re-prompt case — serves that one
 // installed response.
 func TestMockScriptedReServesWithinStep(t *testing.T) {
-	m := NewScriptedMock(nil, nil)
+	m := NewScriptedMock(nil)
 	m.SetResponse(Response{Content: "step1"})
 	for c := 0; c < 3; c++ {
 		got, err := m.Consult(context.Background(), Request{})
@@ -57,7 +57,7 @@ func TestMockScriptedReServesWithinStep(t *testing.T) {
 // response installed (neither via the constructor nor SetResponse)
 // yields ErrMockExhausted on Consult.
 func TestMockScriptedExhausted(t *testing.T) {
-	m := NewScriptedMock(nil, nil)
+	m := NewScriptedMock(nil)
 	_, err := m.Consult(context.Background(), Request{})
 	if !errors.Is(err, ErrMockExhausted) {
 		t.Fatalf("expected ErrMockExhausted with no response installed, got %v", err)
@@ -224,7 +224,7 @@ func TestMockCallsAccumulates(t *testing.T) {
 
 // TestMockContextCancellation: a cancelled ctx short-circuits Consult.
 func TestMockContextCancellation(t *testing.T) {
-	m := NewScriptedMock([]Response{{Content: "ok"}}, nil)
+	m := NewScriptedMock([]Response{{Content: "ok"}})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := m.Consult(ctx, Request{})
@@ -247,7 +247,7 @@ func TestMockScriptedStreamSplitsResponse(t *testing.T) {
 	scripted := []Response{
 		{Content: "abcdefghijklmnop", FinishReason: "stop", Usage: Usage{TotalTokens: 99}},
 	}
-	m := NewScriptedMock(scripted, nil)
+	m := NewScriptedMock(scripted)
 	m.SetMockChunks(4)
 
 	sr, err := m.ConsultStream(context.Background(), Request{})
@@ -295,7 +295,7 @@ func TestMockScriptedStreamSplitsResponse(t *testing.T) {
 }
 
 func TestMockStreamCloseIdempotent(t *testing.T) {
-	m := NewScriptedMock([]Response{{Content: "x"}}, nil)
+	m := NewScriptedMock([]Response{{Content: "x"}})
 	sr, err := m.ConsultStream(context.Background(), Request{})
 	if err != nil {
 		t.Fatalf("ConsultStream: %v", err)
@@ -349,7 +349,7 @@ func TestMockGeneratedStreamMatchesConsult(t *testing.T) {
 }
 
 func TestMockStreamCtxCancelBetweenChunks(t *testing.T) {
-	m := NewScriptedMock([]Response{{Content: "abcdefgh"}}, nil)
+	m := NewScriptedMock([]Response{{Content: "abcdefgh"}})
 	m.SetMockChunks(4)
 	ctx, cancel := context.WithCancel(context.Background())
 	sr, err := m.ConsultStream(ctx, Request{})
@@ -369,7 +369,7 @@ func TestMockStreamCtxCancelBetweenChunks(t *testing.T) {
 }
 
 func TestMockStreamDefaultChunkCount(t *testing.T) {
-	m := NewScriptedMock([]Response{{Content: strings.Repeat("a", 64)}}, nil)
+	m := NewScriptedMock([]Response{{Content: strings.Repeat("a", 64)}})
 	// No SetMockChunks call → DefaultMockChunks.
 	sr, err := m.ConsultStream(context.Background(), Request{})
 	if err != nil {

@@ -1,7 +1,7 @@
 package scenarios
 
 // Metric-key registry — the single source of truth for the metric KEY
-// strings that cross the harness↔sim seam (sim-harness review burndown #1).
+// strings that cross the harness↔sim seam.
 //
 // These keys are WRITTEN by the harness (package scenarios — harness_run.go's
 // h.Metrics.Counter/Record/Set calls) and READ back by the sim summary/gate
@@ -62,7 +62,7 @@ const (
 	MetricGitDirBytesReclaimed = "git_dir_bytes_reclaimed"
 
 	// MetricRecallIntraTreeRebuildCalls counts within-thread summary-tree
-	// (re)builds across the run — the design §7.2 / fork-F-B trip-wire (#111).
+	// (re)builds across the run — the fork-F-B trip-wire.
 	MetricRecallIntraTreeRebuildCalls = "recall_intra_tree_rebuild_calls"
 
 	// §6.5 fine-tier flush cost — the embed-call rate the debt-cap + dormancy
@@ -79,8 +79,8 @@ const (
 	MetricRecallIndexFlushCalls  = "recall_index_flush_calls"
 	MetricRecallIndexFlushChunks = "recall_index_flush_chunks"
 
-	// W1 descent-vs-flat quality measure (#111 / design §7.1; gate→measure in
-	// #119). MetricRecallIntraDescentDivergence is the run-total top-Kf leaf set
+	// W1 descent-vs-flat quality measure (reported, not gated).
+	// MetricRecallIntraDescentDivergence is the run-total top-Kf leaf set
 	// difference between the summary-tree descent and the flat scan;
 	// MetricRecallIntraDescentProbes is its denominator (W1 probes evaluated).
 	MetricRecallIntraDescentDivergence = "recall_intra_descent_divergence"
@@ -152,6 +152,13 @@ const (
 	MetricEmbedRecallFidelityRecall    = "embed_recall_fidelity_recall"
 	MetricEmbedRecallFidelityF1        = "embed_recall_fidelity_f1"
 
+	// Recall opportunities whose expected set the runtime-mirror residency
+	// filter emptied (every expected thread already in the active set),
+	// counted apart from the unmeasured steps; the embedding twin counts the
+	// same steps when the embedding layer is live.
+	MetricRecallFidelityOpportunitiesResident      = "recall_fidelity_opportunities_resident"
+	MetricEmbedRecallFidelityOpportunitiesResident = "embed_recall_fidelity_opportunities_resident"
+
 	// Tag-fidelity series (A2 / SPEC §9.1) — the live-inference tag-discipline
 	// grader in sim/tagfidelity.go. They are EMITTED ONLY on a live-inference
 	// rung (a scripted mock's tags are true-by-construction, so a mock-run series
@@ -159,8 +166,8 @@ const (
 	// MetricRequestPromptTokens). Ground truth is the generator's PLAN INTENT
 	// (never a shadow thread-id, which is id-blind under live inference); the
 	// grader is hybrid: a symbolic anchor-overlap fast path plus RANK-based
-	// embedding adjudication of the non-overlapping residue (C.6: ranking is
-	// drift-invariant). They live in the registry rather than as sim-local
+	// embedding adjudication of the non-overlapping residue (corpus
+	// calibration: ranking is drift-invariant). They live in the registry rather than as sim-local
 	// literals per the A2 directive (single-source discipline; a future
 	// harness-side emitter can reference them without re-declaring a copy).
 	//

@@ -13,7 +13,6 @@ const (
 	LogCategoryDedup       = "dedup"
 	LogCategoryFS          = "fs"
 	LogCategoryModel       = "model"
-	LogCategoryPermissions = "permissions"
 	LogCategoryProject     = "project"
 	LogCategoryRecall      = "recall"
 	LogCategoryRecovery    = "recovery"
@@ -24,6 +23,5 @@ const (
 	LogCategorySystem      = "system"
 	LogCategoryThread      = "thread"
 	LogCategoryTopic       = "topic"
-	LogCategoryUser        = "user"
 	LogCategoryWorkset     = "workset"
 )

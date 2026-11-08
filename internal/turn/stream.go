@@ -15,7 +15,7 @@ import (
 // runtime can recover from per-chunk.
 //
 // A chunk's Reasoning is dropped — it never joins the body.
-func streamThroughFilter(state *State, sr model.StreamReader, filter io.Writer) error {
+func streamThroughFilter(sr model.StreamReader, filter io.Writer) error {
 	for {
 		chunk, err := sr.Next()
 		if errors.Is(err, io.EOF) {
@@ -63,7 +63,7 @@ type preambleResult struct {
 // it across subsequent sr.Next() calls. Errors other than io.EOF are
 // surfaced verbatim. Reasoning deltas are dropped; they never enter
 // head, so the preamble scan sees only committed content.
-func readPreamble(state *State, sr model.StreamReader) (preambleResult, error) {
+func readPreamble(sr model.StreamReader) (preambleResult, error) {
 	var buf []byte
 	for {
 		chunk, err := sr.Next()

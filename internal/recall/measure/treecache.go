@@ -20,8 +20,8 @@ import (
 // Layout (under the gitignored, never-canonical .recall-cache/ — I5/W5):
 //
 //	.recall-cache/
-//	  threads/thr_<id>.vec    Inc 3: coarse + chunks + chunk_hashes + watermark
-//	  threads/thr_<id>.tree   Inc C: this file — topology + node vectors + leaf
+//	  threads/thr_<id>.vec    coarse + chunks + chunk_hashes + watermark
+//	  threads/thr_<id>.tree   this file — topology + node vectors + leaf
 //	                          turn-numbers + per-node childrenHash + root hash
 //
 // Format is JSON v0.1, the same D-B reasoning as .vec: derived, not human-
@@ -29,7 +29,7 @@ import (
 // the .vec, the single source of truth (DRY); a leaf node records only its
 // turn number and chunk_hash, and its vector is rehydrated from the loaded
 // fine tier by turn number on LoadTrees. Deleting .recall-cache/ (incl every
-// .tree) costs only CPU at the next sleep cycle, never data (W5).
+// .tree) costs only CPU at the next consolidation, never data (W5).
 
 // treeFileExt is the per-thread summary-tree sidecar extension.
 const treeFileExt = ".tree"
@@ -134,7 +134,7 @@ func serializeNode(n *scoring.SummaryNode, leafHashByTurn map[int]string) *treeN
 // A tree is OMITTED (not loaded) only when it is structurally
 // unreconstructable against the current leaves — a leaf turn number with no
 // vector in the loaded fine tier — since descent could not return that leaf;
-// the thread then flat-falls-back until the next sleep cycle rebuilds it.
+// the thread then flat-falls-back until the next consolidation rebuilds it.
 // Missing or malformed sidecars are skipped, never fatal (the tree is
 // derived, rebuildable — W5).
 func (c *vecCache) LoadTrees(ctx context.Context, fine map[string][]scoring.ChunkVector) (map[string]*scoring.SummaryNode, map[string]string) {

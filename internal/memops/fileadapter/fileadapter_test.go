@@ -284,8 +284,8 @@ func TestComposeWorkingSet_PassThrough(t *testing.T) {
 	// Seed a project meta and one thread; A1 reads the project's spine
 	// records and renders display lines.
 	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha", Created: rfc3339Now(), LastActive: rfc3339Now()}
-	if err := a.CreateProject(ctx, meta); err != nil {
-		t.Fatalf("CreateProject: %v", err)
+	if err := store.SaveProjectMeta(a.paths, meta); err != nil {
+		t.Fatalf("SaveProjectMeta: %v", err)
 	}
 	rec := validSpine("thr_1", "prj_1")
 	w := memops.ThreadWrite{Spine: rec, Meta: validFrontmatter(rec)}
@@ -480,8 +480,8 @@ func TestArchiveThenRecover_RoundTrip(t *testing.T) {
 	}
 
 	// --- Archive ---
-	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
-		t.Fatalf("ArchiveThread: %v", err)
+	if _, err := a.ArchiveThreads(ctx, []string{"thr_1"}); err != nil {
+		t.Fatalf("ArchiveThreads: %v", err)
 	}
 
 	if _, found, err := store.FindSpineRecord(a.paths, "thr_1"); err != nil {
@@ -543,7 +543,7 @@ func TestArchiveThenRecover_RoundTrip(t *testing.T) {
 	}
 	// The git restore is byte-exact (the tree-hash verify in RecoverThread
 	// already proved that). Recovery then deliberately re-stamps thread.md
-	// with state=wip / last_engaged=now per design §7.2, so thread.md is NOT
+	// with state=wip / last_engaged=now, so thread.md is NOT
 	// expected to be byte-identical. Every OTHER file (the turn excerpts,
 	// files.jsonl and files/) must be byte-exact — that is the recoverable content the
 	// archival round-trip exists to preserve.
@@ -598,8 +598,8 @@ func TestArchiveThenRecover_TrackedFileStore(t *testing.T) {
 		t.Fatalf("fixture store = %d files under files/ (index present %v), want an index and two blobs", stored, ok)
 	}
 
-	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
-		t.Fatalf("ArchiveThread: %v", err)
+	if _, err := a.ArchiveThreads(ctx, []string{"thr_1"}); err != nil {
+		t.Fatalf("ArchiveThreads: %v", err)
 	}
 	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("thread dir still present after archival: err=%v", err)
@@ -689,8 +689,8 @@ func TestArchiveThenRecover_PreservesDerivedFrom(t *testing.T) {
 		{Raw: "curvature", Normalized: "curvature", FirstSeenTurn: 6, Count: 1, Source: memops.SourceDeterministic},
 	})
 
-	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
-		t.Fatalf("ArchiveThread: %v", err)
+	if _, err := a.ArchiveThreads(ctx, []string{"thr_1"}); err != nil {
+		t.Fatalf("ArchiveThreads: %v", err)
 	}
 	if _, err := a.RecoverThread(ctx, "thr_1"); err != nil {
 		t.Fatalf("RecoverThread: %v", err)
@@ -733,8 +733,8 @@ func TestArchive_DanglingDerivedFromOriginTolerated(t *testing.T) {
 	})
 
 	// Archive the origin only; Z stays live.
-	if err := a.ArchiveThread(ctx, "thr_91"); err != nil {
-		t.Fatalf("ArchiveThread origin: %v", err)
+	if _, err := a.ArchiveThreads(ctx, []string{"thr_91"}); err != nil {
+		t.Fatalf("ArchiveThreads origin: %v", err)
 	}
 	if _, found, err := store.FindSpineRecord(a.paths, "thr_91"); err != nil {
 		t.Fatalf("FindSpineRecord origin: %v", err)
@@ -795,8 +795,8 @@ func TestArchiveThenRecover_GitignoreAndMode(t *testing.T) {
 	}
 
 	// --- Archive ---
-	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
-		t.Fatalf("ArchiveThread: %v", err)
+	if _, err := a.ArchiveThreads(ctx, []string{"thr_1"}); err != nil {
+		t.Fatalf("ArchiveThreads: %v", err)
 	}
 	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("thread dir still present after archival: err=%v", err)
@@ -847,8 +847,8 @@ func TestArchive_StoresParentCommitHash_RecoveryUsesIt(t *testing.T) {
 	ctx := context.Background()
 
 	seedThread(t, a, "thr_1", "prj_1", "## Turn 1\n\nthe thread body\n")
-	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
-		t.Fatalf("ArchiveThread: %v", err)
+	if _, err := a.ArchiveThreads(ctx, []string{"thr_1"}); err != nil {
+		t.Fatalf("ArchiveThreads: %v", err)
 	}
 
 	entry, found, err := store.FindArchiveEntry(a.paths, "thr_1")
@@ -904,8 +904,8 @@ func TestRecoverDriftRecord_DistinctOutcome(t *testing.T) {
 		t.Fatalf("remove thread dir: %v", err)
 	}
 
-	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
-		t.Fatalf("ArchiveThread drift: %v", err)
+	if _, err := a.ArchiveThreads(ctx, []string{"thr_1"}); err != nil {
+		t.Fatalf("ArchiveThreads drift: %v", err)
 	}
 	entry, found, err := store.FindArchiveEntry(a.paths, "thr_1")
 	if err != nil || !found {
@@ -956,8 +956,8 @@ func TestRecoverThread_IntegrityFailure(t *testing.T) {
 	ctx := context.Background()
 
 	seedThread(t, a, "thr_1", "prj_1", "## Turn 1\n\noriginal\n")
-	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
-		t.Fatalf("ArchiveThread: %v", err)
+	if _, err := a.ArchiveThreads(ctx, []string{"thr_1"}); err != nil {
+		t.Fatalf("ArchiveThreads: %v", err)
 	}
 
 	// Corrupt the stored integrity token so the restored (correct) tree no
@@ -1000,7 +1000,7 @@ func TestRecoverThread_UnknownIDNotFound(t *testing.T) {
 // decay scan when it is idle past EITHER the turn-count threshold OR the
 // wall-clock threshold. It is replicated here (not imported) to keep this
 // adapter test decoupled from package turn; the field semantics it
-// exercises — WHICH recency fields the scan reads — are the point of BD-9.
+// exercises — WHICH recency fields the scan reads — are the point.
 // A stored turn LARGER than the current turnNumber is treated as a prior
 // session and the turn signal is skipped, exactly as decayEligible does.
 func decayTripsForTest(lastEngagedTurn int, lastEngaged string, turnNumber int, sysRef time.Time) bool {
@@ -1017,10 +1017,9 @@ func decayTripsForTest(lastEngagedTurn int, lastEngaged string, turnNumber int, 
 	return false
 }
 
-// TestRecoverThread_StampsRecencyForDecay is the BD-9 guard: recovery must
-// stamp the recovered spine record's engagement-recency fields so the §3.5
-// decay scan cannot immediately re-offer a just-recovered thread for
-// retirement, and the rebuilt spine record must agree with the restored
+// TestRecoverThread_StampsRecencyForDecay: recovery must stamp the
+// recovered spine record's engagement-recency fields so the §3.5 decay scan
+// cannot immediately close a just-recovered thread again, and the rebuilt spine record must agree with the restored
 // frontmatter on those fields (a spine↔frontmatter sync violation
 // checkThreads — which compares only id/project — would not catch).
 func TestRecoverThread_StampsRecencyForDecay(t *testing.T) {
@@ -1046,8 +1045,8 @@ func TestRecoverThread_StampsRecencyForDecay(t *testing.T) {
 		t.Fatalf("seed CreateThread: %v", err)
 	}
 
-	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
-		t.Fatalf("ArchiveThread: %v", err)
+	if _, err := a.ArchiveThreads(ctx, []string{"thr_1"}); err != nil {
+		t.Fatalf("ArchiveThreads: %v", err)
 	}
 	got, err := a.RecoverThread(ctx, "thr_1")
 	if err != nil {
@@ -1068,7 +1067,7 @@ func TestRecoverThread_StampsRecencyForDecay(t *testing.T) {
 	}
 
 	// (2) Persisted spine and frontmatter AGREE on the recency fields — the
-	// sync guarantee BD-9 requires at write time.
+	// sync guarantee required at write time.
 	spineOut, found, err := store.FindSpineRecord(a.paths, "thr_1")
 	if err != nil || !found {
 		t.Fatalf("FindSpineRecord after recovery: found=%v err=%v", found, err)
@@ -1194,22 +1193,11 @@ func TestArchiveThread_MissingFileSizeZero(t *testing.T) {
 		t.Fatalf("remove thread dir: %v", err)
 	}
 
-	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
-		t.Fatalf("ArchiveThread with missing file: %v", err)
+	if _, err := a.ArchiveThreads(ctx, []string{"thr_1"}); err != nil {
+		t.Fatalf("ArchiveThreads with missing file: %v", err)
 	}
 	if !strings.Contains(readEventLog(t, a), "archive.archived thr=thr_1 project=prj_1 bytes=0") {
 		t.Errorf("expected bytes=0 for missing thread file\n%s", readEventLog(t, a))
-	}
-}
-
-// TestArchiveThread_UnknownIDReturnsNotFound — archiving a thread with no
-// spine record returns ErrThreadNotFound (the single-thread wrapper maps the
-// batch's skip outcome back to the sentinel).
-func TestArchiveThread_UnknownIDReturnsNotFound(t *testing.T) {
-	a := newAdapter(t)
-	err := a.ArchiveThread(context.Background(), "thr_999")
-	if !errors.Is(err, memops.ErrThreadNotFound) {
-		t.Fatalf("ArchiveThread unknown id: got %v, want ErrThreadNotFound", err)
 	}
 }
 

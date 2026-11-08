@@ -114,7 +114,7 @@ func TestService_EmbeddingFires(t *testing.T) {
 }
 
 // TestService_CosineOpsMeasured: the MEASURED recall_query_cosine_ops counter
-// (#111 / design §7.2) accumulates the actual cosine comparisons the embedding
+// accumulates the actual cosine comparisons the embedding
 // recall path performs. With an embedder, a Recall that runs the coarse pass
 // bumps RecallQueries and counts at least one cosine per coarse vector; with no
 // embedder, no embedding pass runs so both stay 0 (the metric is honestly

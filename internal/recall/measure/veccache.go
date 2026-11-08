@@ -20,7 +20,7 @@ import (
 // without exporting the snapshot type or its scoring-vector plumbing across
 // a package boundary — keeping the index representation private to measure.
 //
-// Layout (design §5.1), under $PERSONANT_HOME/.recall-cache/ (gitignored,
+// Layout, under $PERSONANT_HOME/.recall-cache/ (gitignored,
 // operational, never canonical — I5):
 //
 //	.recall-cache/
@@ -84,8 +84,8 @@ type vecFile struct {
 
 // vecFileChunk is one fine-tier chunk: its turn number, its content-hash
 // staleness key, and its vector. chunk_hash is the hash of the turn-excerpt
-// bytes; a turn-excerpt is immutable once written (Inc 4 retains, never
-// rewrites), so chunk_hash is stable for the chunk's life (§5.3).
+// bytes; a turn-excerpt is immutable once written (retained, never
+// rewritten), so chunk_hash is stable for the chunk's life (§5.3).
 type vecFileChunk struct {
 	TurnNumber int       `json:"turn_number"`
 	ChunkHash  string    `json:"chunk_hash"`

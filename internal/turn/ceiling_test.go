@@ -60,7 +60,7 @@ func TestTokenCeilingGuard(t *testing.T) {
 			mock := model.NewScriptedMock([]model.Response{{
 				Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello world.",
 				Usage:   model.Usage{PromptTokens: tc.promptTokens},
-			}}, nil)
+			}})
 			state := NewState(fileadapter.NewFileAdapter(paths), meta, mock,
 				WithTokenCeiling(ceiling))
 
@@ -91,7 +91,7 @@ func TestTokenCeilingUnsetIsSilent(t *testing.T) {
 
 	mock := model.NewScriptedMock([]model.Response{{
 		Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello world.",
-	}}, nil)
+	}})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	state.Budget.TokenCeiling = 0
 

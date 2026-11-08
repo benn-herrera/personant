@@ -7,7 +7,7 @@ import (
 
 // DefaultCosineThreshold is the minimum cosine similarity for an
 // embedding-recall candidate to be surfaced (spec §3.4 layer 2). The
-// C.6 embedding calibration sweep over the Wikipedia corpus put a
+// embedding calibration sweep over the Wikipedia corpus put a
 // balanced operating point around 0.55 for nomic-style embeddings;
 // this is the provisional default until directive-driven calibration
 // tunes it per deployment.
@@ -52,7 +52,7 @@ type EmbeddingOptions struct {
 // returns the candidates at or above the threshold, top-Limit.
 //
 // Unlike symbolic Jaccard (layer 1), this is the primary recall scan,
-// not a refinement of a pre-filtered set — the C.6 calibration showed
+// not a refinement of a pre-filtered set — the corpus calibration showed
 // Jaccard's recall collapses under vocabulary drift, so gating
 // embedding behind it would discard most genuine matches. Cosine over
 // a few hundred in-memory vectors is microseconds; the cost is the one

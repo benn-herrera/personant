@@ -149,9 +149,8 @@ func Init(paths PersonantPaths, opts InitOptions) error {
 		logf("init: wrote %s", paths.Gitignore)
 	}
 
-	// Accrual file: preserve if present. user.md accumulates ack-prompt
-	// scope grants and decline categorizations; re-init cannot
-	// reconstruct it.
+	// Accrual file: preserve if present. user.md holds the user's own
+	// user-wide directives; re-init cannot reconstruct it.
 	userMD := filepath.Join(paths.DirectivesDir, "user.md")
 	createdUserMD, err := writeIfMissing(userMD, []byte(seedUserMD))
 	if err != nil {
@@ -370,7 +369,7 @@ func initGit(home string, logf func(format string, args ...any)) (created bool, 
 // The daily DB is DISPOSABLE scaffolding: nuked and reborn at each day
 // barrier; the worktree is the truth and primary (.git) is the career
 // history. Both git-dirs are covered by the seeded .gitignore block
-// (written above, before the baseline Add honors it — INV-6).
+// (written above, before the baseline Add honors it).
 func initGitDaily(paths PersonantPaths, logf func(format string, args ...any)) error {
 	if _, err := os.Stat(paths.GitDaily); err == nil {
 		return nil
@@ -502,9 +501,7 @@ modification_source: install
 
 # User directives
 
-This file accumulates user-wide overrides — both manually edited entries and
-ones accrued automatically from ack-prompt scope grants and decline
-categorizations. See spec §2.6 for precedence rules.
+This file holds user-wide overrides. See spec §2.6 for precedence rules.
 `
 
 const seedReadmeMD = "# personant home\n" +
@@ -526,7 +523,7 @@ const seedReadmeMD = "# personant home\n" +
 
 const seedGitignoreBody = `# personant home gitignore
 tmp/
-# Both git-dirs are ignored EXPLICITLY (#94 R3b, INV-6). git auto-ignores
+# Both git-dirs are ignored EXPLICITLY. git auto-ignores
 # only a repo's OWN git-dir: the daily handle (.git-daily as git-dir over
 # this worktree) would otherwise see .git/ as untracked, and primary would
 # see .git-daily/ as untracked — either could commit a sibling git DB or
@@ -534,10 +531,6 @@ tmp/
 # redundant-harmless for primary, load-bearing for daily.
 .git/
 .git-daily/
-# history is the REPL line-edit history (§4.3.1) — operational state, capped
-# and rewritten by the REPL. It is never canonical, so §3.11 checkpoints must
-# not commit it.
-history
 # working-set.json is volatile session state — Layer B/C membership
 # rewritten on every turn. Git-tracking it would dirty the home tree
 # with LRU churn every turn; it is operational state, not canonical.

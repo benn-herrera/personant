@@ -576,7 +576,7 @@ func Reconcile(ctx context.Context, paths store.PersonantPaths) (memops.Recovery
 
 // resetSequence is the marker-gated destructive repair: snapshot dirty
 // tracked bytes into quarantine, preserve log bytes beyond daily HEAD,
-// reset tracked state to DAILY HEAD (≤1 turn — never primary, INV-1),
+// reset tracked state to DAILY HEAD (≤1 turn — never primary),
 // sweep untracked in-flight debris (into the same quarantine), restore
 // the log bytes. Every step is idempotent so a crash at any point
 // re-converges through cell 11.

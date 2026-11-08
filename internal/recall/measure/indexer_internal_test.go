@@ -15,7 +15,7 @@ func vec(a, b float64) []float64 { return []float64{a, b} }
 // TestSwap_DropsStaleWatermark is the AC3 monotonicity check (I2/F5): a
 // vector whose dispatch watermark is STRICTLY LOWER than the thread's
 // recorded watermark is dropped on swap, so a stale in-flight embed never
-// overwrites a fresher vector. An EQUAL watermark PUBLISHES (BD-8): with the
+// overwrites a fresher vector. An EQUAL watermark PUBLISHES: with the
 // single FIFO indexer an equal-watermark result was loaded later — the
 // same-turn double-enqueue — so it is fresher, and dropping it lost content
 // (see TestIndexer_WatermarkTieSecondFlushPublishes for the end-to-end
@@ -51,7 +51,7 @@ func TestSwap_DropsStaleWatermark(t *testing.T) {
 		t.Errorf("stale embed overwrote fresher vector: fine=%+v", snap.fine["thr_1"])
 	}
 
-	// An equal watermark PUBLISHES (BD-8 strictly-less rule): the FIFO-later
+	// An equal watermark PUBLISHES (strictly-less drop rule): the FIFO-later
 	// same-turn job loaded fresher state, so its result replaces the prior
 	// one — here the equal-watermark chunk set wins.
 	tie := scoring.ChunkVector{TurnNumber: 6, Vector: vec(0, 1)}

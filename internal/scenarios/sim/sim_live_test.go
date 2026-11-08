@@ -1,4 +1,4 @@
-// Live-mode setup for the unified TestSim (#98). There is NO separate live
+// Live-mode setup for the unified TestSim. There is NO separate live
 // test function: TestSim is the single entry point, and these helpers supply
 // the live-vs-stand-in elements it installs per toggle. The two toggles
 // (-sim.live-embedding / -sim.live-inference, both default false) are read by
@@ -7,8 +7,7 @@
 // mock acceptance gate never reaches any live code here and never skips. When
 // a toggle is on, the usable-endpoint guard runs against the `reaper` endpoint
 // from internal/testsupport (base URL overridable via PERSONANT_REAPER_URL),
-// so live mode invoked with nothing reachable is a LOUD failure (design §2),
-// not a skip.
+// so live mode invoked with nothing reachable is a LOUD failure, not a skip.
 //
 // NEVER reads/writes/operates in ~/.personant.
 
@@ -16,7 +15,6 @@ package sim
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"testing"
 	"time"
@@ -30,7 +28,7 @@ import (
 	"personant/internal/testsupport"
 )
 
-// Live-mode runtime toggles (design §3), read by TestSim. Independent —
+// Live-mode runtime toggles, read by TestSim. Independent —
 // either, both, or neither. Default OFF; both-off IS the mock acceptance gate.
 var (
 	liveEmbedding = flag.Bool("sim.live-embedding", false,
@@ -47,8 +45,8 @@ var (
 // acceptance gate path, and it must stay a no-op here (no skip, no probe).
 //
 // When a toggle is on it runs the usable-endpoint guard against the testsupport
-// `reaper` endpoint (FAIL-not-skip on an unreachable endpoint, design §2;
-// override the URL with PERSONANT_REAPER_URL). For embedding it
+// `reaper` endpoint (FAIL-not-skip on an unreachable endpoint; override the
+// URL with PERSONANT_REAPER_URL). For embedding it
 // builds a recaller factory installing the real §3.4 embedder (the harness
 // Prepares its index and keeps it current via the per-thread-creation
 // AddThread seam); mock inference is unchanged, so the recall oracle stays
@@ -74,13 +72,13 @@ func setupLiveElements(t *testing.T, d time.Duration) (
 		return nil, nil, "", false
 	}
 
-	// Usable-endpoint guard (design §2). Runs whenever EITHER toggle is on;
+	// Usable-endpoint guard. Runs whenever EITHER toggle is on;
 	// a failure here is fatal (fail-not-skip).
 	url := testsupport.ReaperURL()
 	probeLiveEndpoint(t, url)
 
 	if *liveEmbedding {
-		log.Info("sim-live: installing live §3.4 embedder — url=%s model=%s dims=native (embedding-in-loop, Inc 2)",
+		log.Info("sim-live: installing live §3.4 embedder — url=%s model=%s dims=native (embedding-in-loop)",
 			url, testsupport.ReaperEmbeddingModel)
 		recaller = func(ops memops.MemoryOps) measure.Recaller {
 			return measure.NewService(ops,
@@ -98,7 +96,7 @@ func setupLiveElements(t *testing.T, d time.Duration) (
 		liveClient = model.NewHTTPClient(url, testsupport.ReaperAPIKey)
 		liveModel = testsupport.ReaperChatModel
 		oracleBlind = true
-		log.Info("sim-live: installing live chat model — url=%s model=%s (inference-in-loop, Inc 3; "+
+		log.Info("sim-live: installing live chat model — url=%s model=%s (inference-in-loop; "+
 			"oracle/coherence gates BLINDED, behavior-validation only)", url, liveModel)
 	}
 
@@ -115,7 +113,7 @@ func setupLiveElements(t *testing.T, d time.Duration) (
 const liveInferenceMaxDuration = 24 * time.Hour
 
 // reportInferenceBehavior logs the inference-in-loop behavior-validation
-// metrics (#98, Inc 3) from the run's event log. The recall oracle is blind
+// metrics from the run's event log. The recall oracle is blind
 // under live inference, so these — NOT any recall number — are what the mode
 // measures:
 //
@@ -341,17 +339,13 @@ const liveProbeTimeout = 10 * time.Second
 // pingLiveEndpoint reports whether the endpoint at url answers a cheap
 // GET <url>/models within liveProbeTimeout.
 func pingLiveEndpoint(ctx context.Context, url string) error {
-	client, ok := model.NewHTTPClient(url, testsupport.ReaperAPIKey).(*model.HTTPClient)
-	if !ok {
-		return errors.New("NewHTTPClient did not return *HTTPClient (cannot probe)")
-	}
 	pctx, cancel := context.WithTimeout(ctx, liveProbeTimeout)
 	defer cancel()
-	_, err := client.ListModels(pctx)
+	_, err := model.NewHTTPClient(url, testsupport.ReaperAPIKey).ListModels(pctx)
 	return err
 }
 
-// probeLiveEndpoint runs the usable-endpoint check (design §2): the endpoint
+// probeLiveEndpoint runs the usable-endpoint check: the endpoint
 // must be REACHABLE. A probe failure is FATAL (fail-not-skip), naming the URL
 // and its override so the operator knows which endpoint is down. No key
 // material appears in any log line.

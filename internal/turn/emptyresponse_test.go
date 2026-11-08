@@ -137,7 +137,7 @@ func TestRunEmptyResponsePersistentBindingOwnerDefault(t *testing.T) {
 // (no binding-required deltas) whose re-prompt also comes back empty: the
 // empty body surfaces to the caller as today (no engagement, no
 // owner-default), and system.empty-response keeps the blank turn
-// forensically visible — the REPL prints nothing for it.
+// forensically visible — the user sees nothing for it.
 func TestRunEmptyResponsePersistentConversational(t *testing.T) {
 	paths, meta := newTestHome(t)
 

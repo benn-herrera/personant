@@ -9,7 +9,7 @@ import (
 	"personant/internal/turn"
 )
 
-// B1+X4 embedder-enabled acceptance rung — anti-vacuity proofs (design §3).
+// B1+X4 embedder-enabled acceptance rung — anti-vacuity proofs.
 //
 // The two gates this rung adds (the §3.4 recall-completeness floor and the
 // whole-request token ceiling) are themselves at risk of passing vacuously — the
@@ -21,8 +21,8 @@ import (
 // (the live rung itself is the end-to-end proof; these lock in that the gate
 // cannot go green when the thing it guards is broken).
 
-// TestCompletenessFloor_MutationFailsWhenFloorDisabled is design §3 criterion 1:
-// with the debtWindowTurns floor disabled (or debtWindowBound forced to 0) the
+// TestCompletenessFloor_MutationFailsWhenFloorDisabled is the completeness
+// floor's mutation test: with the debtWindowTurns floor disabled (or debtWindowBound forced to 0) the
 // runtime cannot surface a flush-lag dead-zone target — no embedding vector
 // exists for it and the lexical pass is off — so the observed-hit count drops
 // below the dead-zone total. The completeness gate MUST fail in that case; if it
@@ -59,7 +59,8 @@ func TestCompletenessFloor_NonVacuity(t *testing.T) {
 	}
 }
 
-// TestTokenCeiling_MutationFailsOnOversizeTurn is design §3 criterion 2: an
+// TestTokenCeiling_MutationFailsOnOversizeTurn is the token ceiling's
+// mutation test: an
 // injected oversize turn — a request whose assembled prompt-token count exceeds
 // the ceiling — MUST make the token gate fail. If it passed, the assertion is
 // not reading the full request (FM3/FM4).
@@ -120,7 +121,7 @@ func TestGatePolicyPredicates(t *testing.T) {
 // the dead zone iff it has scrolled out of the assembly window
 // (depth >= ThreadTurnWindow) AND is within the most-recent (1+pending)×
 // turn.EmbeddingDebtCap below the window floor. With pending=0 (the acceptance-rung
-// case) the band is the plain 1×cap; with pending=P>0 (the slow-embedder BD-8 case)
+// case) the band is the plain 1×cap; with pending=P>0 (the slow-embedder case)
 // it widens to (1+P)×cap — the band the runtime's in-flight-widened lexical floor
 // covers. This is the band where ONLY the lexical floor can hit (the embedding fine
 // tier has no vector yet) — the exact subset the B1 completeness gate targets. Both
@@ -140,11 +141,11 @@ func TestInDebtWindowDepth(t *testing.T) {
 		{w + dcap - 1, 0, true},    // last 1×cap dead-zone excerpt
 		{w + dcap, 0, false},       // just past 1×cap — flushed, fine tier covers
 		{w + dcap + 100, 0, false}, // deep history — flushed long ago
-		// pending=1: the (1+1)×cap = 2×cap widened band (BD-8, one flush in flight).
+		// pending=1: the (1+1)×cap = 2×cap widened band (one flush in flight).
 		{w + dcap, 1, true},       // now inside the widened band — the whole point of B2
 		{w + 2*dcap - 1, 1, true}, // last 2×cap dead-zone excerpt
 		{w + 2*dcap, 1, false},    // past 2×cap even with one pending — flushed
-		// pending=2: (1+2)×cap = 3×cap — matches the measure BD-8 queued-batch case.
+		// pending=2: (1+2)×cap = 3×cap — matches the measure queued-batch case.
 		{w + 2*dcap, 2, true},
 		{w + 3*dcap - 1, 2, true},
 		{w + 3*dcap, 2, false},

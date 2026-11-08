@@ -2,7 +2,7 @@ package scenarios
 
 import "testing"
 
-// TestRuntimeEmitsThreadCreatedMarker is the BD-2 runtime-driven contract test
+// TestRuntimeEmitsThreadCreatedMarker is the runtime-driven contract test
 // for the `thread.created` log marker (companion to
 // TestRuntimeEmitsMatchFireMarker for the match-fire marker). It drives a real
 // turn that the runtime creates a thread on, then asserts the harness's

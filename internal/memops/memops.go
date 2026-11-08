@@ -206,16 +206,8 @@ type MemoryOps interface {
 	// spine record exists for threadID.
 	RecordRecallFire(ctx context.Context, threadID string) error
 
-	// ArchiveThread removes a retired thread from the active spine into
-	// deep-cold, recoverable §3.8 git archival — a thin single-thread
-	// wrapper over ArchiveThreads. The thread directory is removed from the
-	// worktree and spine but preserved in a git deletion commit, with a
-	// lookup entry written to the archive index; RecoverThread restores it.
-	// Returns ErrThreadNotFound if no spine record exists.
-	ArchiveThread(ctx context.Context, threadID string) error
-
 	// ArchiveThreads archives a batch of retired threads atomically-per-
-	// drain (design §3.2): it captures each thread directory's pre-removal
+	// drain: it captures each thread directory's pre-removal
 	// tree hash, removes every thread directory and spine record, appends
 	// sorted archive-index entries, regenerates derived state, and commits
 	// the batch as git deletion commits gated by CheckDerivedFresh |
@@ -226,8 +218,8 @@ type MemoryOps interface {
 	// adapter sorts internally.
 	ArchiveThreads(ctx context.Context, threadIDs []string) (ArchiveResult, error)
 
-	// RecoverThread restores an archived thread from its git deletion commit
-	// (design §7.2): it restores the directory subtree, verifies it against
+	// RecoverThread restores an archived thread from its git deletion
+	// commit: it restores the directory subtree, verifies it against
 	// the stored tree hash, re-adds a fresh spine record (state=wip,
 	// last_engaged=now) built from the recovered frontmatter, and commits
 	// the recovery. The archive-index entry is RETAINED as a breadcrumb with
@@ -247,40 +239,9 @@ type MemoryOps interface {
 
 	// ---------- Project operations ----------
 
-	// CreateProject persists a new ProjectMeta. The caller is
-	// responsible for allocating meta.ID — typically via NextProjectID
-	// on the port. Folds in store.SaveProjectMeta in the not-yet-existed
-	// case.
-	//
-	// ALT: a unified Upsert may be cleaner; v0.1 splits Create vs.
-	// Save to keep the distinction between first-write and
-	// drift-update visible at call sites. Revisit when project
-	// lifecycle commands land.
-	CreateProject(ctx context.Context, meta ProjectMeta) error
-
-	// NextProjectID returns the next available prj_<n> id, scanning the
-	// known project set so a new id never collides with an existing
-	// project. Folds in store.NextProjectID (which today takes a
-	// pre-read meta slice; the port pushes the read into the adapter).
-	NextProjectID(ctx context.Context) (string, error)
-
-	// LoadProject returns the meta for the given project ID. Folds in
-	// store.LoadProjectMeta, including the synthetic prj_default
-	// fallback. ErrProjectNotFound is returned (via errors.Is) for
-	// any non-default project whose meta.json is absent.
-	LoadProject(ctx context.Context, projectID string) (ProjectMeta, error)
-
-	// SaveProject overwrites the meta for an existing project. Folds
-	// in store.SaveProjectMeta on the drift-update path.
-	SaveProject(ctx context.Context, meta ProjectMeta) error
-
 	// ListProjects returns every known project, sorted by ID. Folds
 	// in store.ListProjects.
 	ListProjects(ctx context.Context) ([]ProjectMeta, error)
-
-	// FindProjectByPath returns the project whose CurrentRootPath is
-	// absPath (after filepath.Clean). Folds in store.FindProjectByPath.
-	FindProjectByPath(ctx context.Context, absPath string) (ProjectMeta, bool, error)
 
 	// ---------- Symbol index operations ----------
 
@@ -337,7 +298,7 @@ type MemoryOps interface {
 	// engaged-first; the adapter persists them verbatim, order included.
 	//
 	// Only these two lists are persisted. Session-volatile state
-	// (turn counter, coalesce/staging buffers, closure-defer grace) is
+	// (turn counter, coalesce/staging buffers) is
 	// deliberately not persisted — it correctly resets on restart. The
 	// active project is not persisted: it is resolved from the directory.
 	//
@@ -391,44 +352,41 @@ type MemoryOps interface {
 	// ---------- Substrate recovery points ----------
 
 	// Checkpoint creates a durable recovery point on the substrate — in the
-	// file adapter, a git commit of the current working tree. It is the
-	// §3.11 commit-on-structural-change cadence's single mutation: the
-	// application layer calls it at turn close when a structural change
-	// occurred (thread create / close-retire, project create) and at session
-	// close, never per content write. `reason` is folded into the commit
-	// message for forensics (the caller builds it from event counts, never
-	// from user content).
+	// file adapter, a git commit of the current working tree. Nothing in
+	// production calls it: every turn commits through CommitTurn, and the
+	// clean-stop checkpoint belongs to the plugin route's service. `reason`
+	// is folded into the commit message for forensics (the caller builds it
+	// from event counts, never from user content).
 	//
 	// A clean tree is a benign no-op: when there is nothing to commit the
-	// method returns nil (no error, no recovery point) — e.g. a structural
-	// change whose bytes were already committed this turn by archival, or a
-	// session close after the last structural commit already flushed
-	// everything. A non-file adapter (SQLite, network) implements this as
-	// its own transaction/snapshot boundary; the application never sees git.
+	// method returns nil (no error, no recovery point) — e.g. a stop after
+	// the last per-turn commit already flushed everything. A non-file
+	// adapter (SQLite, network) implements this as its own
+	// transaction/snapshot boundary; the application never sees git.
 	Checkpoint(ctx context.Context, reason string) error
 
-	// Consolidate runs an offline consolidation pass over the substrate —
-	// the ARCHITECTURE.md "sleep cycle." Today it runs substrate gc
+	// Consolidate runs an offline consolidation pass over the substrate.
+	// Today it runs substrate gc
 	// (autogit.GC: RepackObjects + Prune), folding the session's
 	// accumulated loose git objects into a packfile and pruning garbage so
 	// the substrate's on-disk footprint stays bounded across long-lived
 	// sessions. It is extensible to spine compaction / archival advance /
-	// derived-state recomputation as the sleep cycle grows.
+	// derived-state recomputation as consolidation grows.
 	//
 	// `reason` is folded into the consolidation event log line for
 	// forensics (the caller builds it from schedule context, never from
 	// user content). Consolidation is a pure optimization: a gc failure is
-	// non-fatal — the adapter logs it and returns nil — because a sleep
-	// cycle that cannot reclaim space must never abort the session it runs
+	// non-fatal — the adapter logs it and returns nil — because a
+	// consolidation that cannot reclaim space must never abort the session it runs
 	// inside. Production does not yet schedule this; only the sim triggers
 	// it, on its day-off idle window.
 	Consolidate(ctx context.Context, reason string) error
 
-	// MaybeGC runs the loose-object PRESSURE gc trigger (#94 R3-addendum
-	// item 4) — the per-turn counterpart to Consolidate's CADENCE trigger.
+	// MaybeGC runs the loose-object PRESSURE gc trigger — the per-turn
+	// counterpart to Consolidate's CADENCE trigger.
 	// The turn pipeline calls it once after each CommitTurn (outside the
 	// turn's recovery scope, which CommitTurn already released), so a long
-	// session that never crosses a day-off sleep cycle cannot grow .git
+	// session that never crosses a day-off consolidation cannot grow .git
 	// unboundedly. Counting loose objects is a readdir sweep, so the check
 	// is throttled internally and the gc (a Consolidate pass, op=sleep)
 	// fires only past a threshold. Deliberately called from the pipeline

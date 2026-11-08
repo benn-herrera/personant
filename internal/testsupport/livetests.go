@@ -132,7 +132,7 @@ type ModelLister func(ctx context.Context) (ids []string, err error)
 
 // RequireModelPresent fails the test if the named model is not in the
 // provider's served model list. It guards the stale-model-name failure mode
-// (Inc 3 hit a 404 at turn 1 from a model ref the server no longer served):
+// (a 404 at turn 1 from a model ref the server no longer serves):
 // catch it up front with a clear message instead of deep in the run. A
 // ListModels error is itself a failure (the endpoint is opted-in but not
 // answering).

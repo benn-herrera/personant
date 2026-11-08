@@ -8,7 +8,7 @@ import (
 	"personant/internal/model"
 )
 
-// §5.5 mid-turn reprompt cross-project hole (wave-2 fixup, BD-7 follow-up).
+// §5.5 mid-turn reprompt cross-project hole.
 // fetchThreadForReprompt must apply the SAME §3.2 cross-project policy the
 // turn-close engagement resolver (resolveEngagedThread) applies: a mid-turn
 // fetch of a thread belonging to another project is declined, never promoted
@@ -26,7 +26,7 @@ func TestFetchThreadForReprompt_CrossProjectDeclined(t *testing.T) {
 	// thr_foreign belongs to another project; the active project is meta.ID.
 	seedActiveThread(t, paths, "prj_other", "thr_foreign", 3, []string{"alpha", "beta"})
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil))
 
 	if fetchThreadForReprompt(context.Background(), state, "thr_foreign") {
 		t.Fatalf("fetchThreadForReprompt(foreign-project thread) returned true; want false (declined)")
@@ -57,7 +57,7 @@ func TestFetchThreadForReprompt_SameProjectPromotes(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedActiveThread(t, paths, meta.ID, "thr_local", 3, []string{"alpha", "beta"})
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil))
 
 	if !fetchThreadForReprompt(context.Background(), state, "thr_local") {
 		t.Fatalf("fetchThreadForReprompt(same-project thread) returned false; want success")

@@ -17,37 +17,31 @@ import (
 )
 
 // stubCurator is a deterministic Curator for the closure tests: a fixed
-// summary and a fixed anchor set, no model round-trip.
+// summary, no model round-trip.
 type stubCurator struct {
 	summary string
-	anchors []string
 }
 
-func (s stubCurator) DraftClosure(_ context.Context, thread memops.Thread) (curator.ClosureDraft, error) {
-	summary := s.summary
-	if summary == "" {
-		summary = "stub summary for " + thread.Meta.ID
+func (s stubCurator) DraftClosure(_ context.Context, thread memops.Thread) (string, error) {
+	if s.summary == "" {
+		return "stub summary for " + thread.Meta.ID, nil
 	}
-	anchors := s.anchors
-	if anchors == nil {
-		anchors = thread.Meta.Anchors
-	}
-	return curator.ClosureDraft{Summary: summary, Anchors: anchors}, nil
+	return s.summary, nil
 }
 
 // errCurator is a Curator whose DraftClosure always fails.
 type errCurator struct{}
 
-func (errCurator) DraftClosure(_ context.Context, _ memops.Thread) (curator.ClosureDraft, error) {
-	return curator.ClosureDraft{}, errors.New("synthetic curator failure")
+func (errCurator) DraftClosure(_ context.Context, _ memops.Thread) (string, error) {
+	return "", errors.New("synthetic curator failure")
 }
 
 // emptyDraftCurator drafts a blank summary — the model returned nothing
 // usable, without erroring.
 type emptyDraftCurator struct{}
 
-func (emptyDraftCurator) DraftClosure(_ context.Context, _ memops.Thread) (curator.ClosureDraft, error) {
-	return curator.ClosureDraft{Summary: "   "}, nil
+func (emptyDraftCurator) DraftClosure(_ context.Context, _ memops.Thread) (string, error) {
+	return "   ", nil
 }
 
 // seedClosureThread writes a thread + spine record with explicit
@@ -180,7 +174,7 @@ func TestClosure_NothingClosesWithoutCurator(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 0, "")
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil))
 	state.TurnNumber = 100 // well past the decay threshold
 
 	if err := surfaceClosureCandidates(context.Background(), state); err != nil {
@@ -217,12 +211,12 @@ func TestClosure_DecayedThreadClosesResolved(t *testing.T) {
 			seedClosureThreadShape(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "",
 				tt.anchors, tt.turnCount)
 
-			state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
+			state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil))
 			pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 			state.TurnNumber = 1 + DecayTurns
 			state.ActiveThreads = []string{"thr_1"}
 			state.DormantThreads = []string{"thr_1"}
-			state.Curator = stubCurator{summary: "the thread's gist", anchors: []string{"x", "y", "z", "w"}}
+			state.Curator = stubCurator{summary: "the thread's gist"}
 
 			if err := surfaceClosureCandidates(context.Background(), state); err != nil {
 				t.Fatalf("surfaceClosureCandidates: %v", err)
@@ -239,7 +233,7 @@ func TestClosure_DecayedThreadClosesResolved(t *testing.T) {
 				t.Errorf("spine summary = %q, want curator draft", rec.Summary)
 			}
 			if got := strings.Join(rec.Anchors, ","); got != tt.want {
-				t.Errorf("spine anchors = %s, want %s (projected from history_symbols, not the draft)", got, tt.want)
+				t.Errorf("spine anchors = %s, want %s (projected from history_symbols)", got, tt.want)
 			}
 			if containsString(state.ActiveThreads, "thr_1") || containsString(state.DormantThreads, "thr_1") {
 				t.Errorf("closed thread still in the working set: B=%v C=%v",
@@ -253,6 +247,34 @@ func TestClosure_DecayedThreadClosesResolved(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestClosure_FlushesOnClose — an active thread closing with embedding debt
+// outstanding leaves the working set the way a demoted thread does: its
+// flush is requested and its debt cleared.
+func TestClosure_FlushesOnClose(t *testing.T) {
+	paths, meta := newTestHome(t)
+	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
+
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil))
+	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
+	rec := &recordingRecaller{}
+	state.Recaller = rec
+	state.TurnNumber = 1 + DecayTurns
+	state.ActiveThreads = []string{"thr_1"}
+	state.embeddingDebt = map[string]int{"thr_1": EmbeddingDebtCap - 1}
+	state.Curator = stubCurator{}
+
+	if err := surfaceClosureCandidates(context.Background(), state); err != nil {
+		t.Fatalf("surfaceClosureCandidates: %v", err)
+	}
+
+	if len(rec.calls) != 1 || rec.calls[0] != (flushCall{threadID: "thr_1", dispatchTurncount: 1 + DecayTurns}) {
+		t.Errorf("flush calls = %+v, want one for thr_1 @ %d", rec.calls, 1+DecayTurns)
+	}
+	if _, ok := state.embeddingDebt["thr_1"]; ok {
+		t.Errorf("closed thread's debt not cleared: %d", state.embeddingDebt["thr_1"])
 	}
 }
 
@@ -272,7 +294,7 @@ func TestClosure_EmptyDraftIsRetried(t *testing.T) {
 			paths, meta := newTestHome(t)
 			seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
 
-			state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
+			state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil))
 			pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 			state.TurnNumber = 1 + DecayTurns
 			state.ActiveThreads = []string{"thr_1"}
@@ -311,7 +333,7 @@ func TestClosure_EmptyDraftIsRetried(t *testing.T) {
 
 // TestClosure_CrossProjectScanLeavesSiblingUntouched — the decay scan is
 // active-project-scoped: an idle, decay-eligible active thread in a
-// SIBLING project must not be touched (S1).
+// SIBLING project must not be touched.
 func TestClosure_CrossProjectScanLeavesSiblingUntouched(t *testing.T) {
 	paths, meta := newTestHome(t)
 	other := memops.ProjectMeta{ID: "prj_2", Name: "beta", CurrentRootPath: paths.Home}
@@ -321,7 +343,7 @@ func TestClosure_CrossProjectScanLeavesSiblingUntouched(t *testing.T) {
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, "")
 	seedClosureThread(t, paths, other.ID, "thr_2", memops.ThreadActive, 1, "")
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil))
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.TurnNumber = 1 + DecayTurns
 	state.Curator = stubCurator{}
@@ -425,7 +447,7 @@ func TestClosure_VacationClosesNothing(t *testing.T) {
 	seedClosureThread(t, paths, meta.ID, "thr_1", memops.ThreadActive, 1, eightDaysAgo)
 	seedClosureThread(t, paths, meta.ID, "thr_2", memops.ThreadActive, 1, eightDaysAgo)
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil))
 	pinClock(t, now)
 	// TurnNumber 1 mimics a fresh post-resume session: turn-count decay
 	// cannot fire (1 < 1+DecayTurns), so any close would be wall-clock.

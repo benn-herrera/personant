@@ -135,7 +135,7 @@ func TestDayBarrier_PreTurnDrainsColdestRetired(t *testing.T) {
 
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock([]model.Response{
 		{Content: "A plain reply with no topic tag."},
-	}, nil))
+	}))
 	if err := state.Ops.RegenerateDerivedState(context.Background(), memops.IndexBuildOptions{Quiet: true}); err != nil {
 		t.Fatalf("seed RegenerateDerivedState: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestDayBarrier_EvictsFromWorkingSet(t *testing.T) {
 
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock([]model.Response{
 		{Content: "A plain reply with no topic tag."},
-	}, nil))
+	}))
 	state.ActiveThreads = []string{archivedActiveID, survivorID}
 	state.DormantThreads = []string{archivedDormantID}
 
@@ -250,7 +250,7 @@ func TestDayBarrier_EvictsFromWorkingSet(t *testing.T) {
 
 	// The turn's own SaveWorkingSet already persisted the evicted lists;
 	// reload and assert the phantom does not resurface.
-	reloaded, err := LoadSession(context.Background(), fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
+	reloaded, err := LoadSession(context.Background(), fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil))
 	if err != nil {
 		t.Fatalf("LoadSession: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestDayBarrier_NoOpSameDay(t *testing.T) {
 	}
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock([]model.Response{
 		{Content: "A plain reply with no topic tag."},
-	}, nil))
+	}))
 
 	// SAME day as the daily's birth: nothing completed, no barrier.
 	if _, err := RunWithDeltas(context.Background(), state, nil, "hello", io.Discard); err != nil {

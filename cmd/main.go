@@ -72,16 +72,16 @@ func checkHomeFormat(ctx context.Context, ops memops.MemoryOps) (memops.HomeForm
 // Reconcile is crash recovery — it resets the worktree to a recovery
 // point. Running it against a layout this binary does not understand would
 // rearrange bytes it cannot interpret.
-func openHome() (*fileadapter.FileAdapter, store.PersonantPaths, error) {
+func openHome() (*fileadapter.FileAdapter, error) {
 	ctx := context.Background()
 	paths, err := resolvePaths()
 	if err != nil {
-		return nil, store.PersonantPaths{}, err
+		return nil, err
 	}
 	ops := fileadapter.NewFileAdapter(paths)
 	decision, err := checkHomeFormat(ctx, ops)
 	if err != nil {
-		return nil, store.PersonantPaths{}, err
+		return nil, err
 	}
 
 	// Greenfield: no home on disk yet. There is no layout to adopt forward
@@ -89,12 +89,12 @@ func openHome() (*fileadapter.FileAdapter, store.PersonantPaths, error) {
 	// and scaffolding belongs to `personant init`. The gate above still ran; an absent stamp cannot be newer than this
 	// binary, so nothing is waved through.
 	if _, serr := os.Stat(paths.Home); errors.Is(serr, os.ErrNotExist) {
-		return ops, paths, nil
+		return ops, nil
 	}
 
 	if decision.StampFormat != 0 {
 		if err := ops.StampHomeFormat(ctx, decision.StampFormat); err != nil {
-			return nil, store.PersonantPaths{}, fmt.Errorf("stamp home format: %w", err)
+			return nil, fmt.Errorf("stamp home format: %w", err)
 		}
 	}
 	// LogBootstrap FIRST among the event writes: it carries the log-tail
@@ -115,7 +115,7 @@ func openHome() (*fileadapter.FileAdapter, store.PersonantPaths, error) {
 	if decision.NewerAccepted {
 		warnNewerHomeAccepted(paths, decision.Format)
 	}
-	return ops, paths, nil
+	return ops, nil
 }
 
 // warnNewerHomeAccepted records a knowingly-unsafe open: --allow-newer-home
@@ -150,7 +150,7 @@ func warnNewerHomeAccepted(paths store.PersonantPaths, onDisk int) {
 // A non-routine reconcile prints one terse stderr note; the full detail
 // is in the event log.
 func reconciledOps() (*fileadapter.FileAdapter, error) {
-	ops, _, err := openHome()
+	ops, err := openHome()
 	if err != nil {
 		return nil, err
 	}

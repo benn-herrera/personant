@@ -54,7 +54,7 @@ func unstampedEntries(paths store.PersonantPaths) ([]memops.ArchiveEntry, error)
 // recovery precedes validity (see autogit.ResetHard's flag rationale).
 //
 // R3b: the stamp commit targets PRIMARY (archival lives there) under
-// the recovery-repair exemption of INV-5, and carries the Personant-Day
+// the recovery-repair exemption to primary's barrier exclusivity, and carries the Personant-Day
 // trailer = HEADDAY-at-repair-time (F3) — a standalone stamp-repair
 // never advances the day; on a trailerless (pre-R3b) primary it falls
 // back to the current day, the bootstrap carve-out.

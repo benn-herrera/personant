@@ -43,7 +43,7 @@ func newHookState(t *testing.T) (*State, *recordingRecaller) {
 	t.Helper()
 	paths, meta := newTestHome(t)
 	ops := fileadapter.NewFileAdapter(paths)
-	state := NewState(ops, meta, model.NewScriptedMock(nil, nil))
+	state := NewState(ops, meta, model.NewScriptedMock(nil))
 	rec := &recordingRecaller{}
 	state.Recaller = rec
 	return state, rec
@@ -169,7 +169,7 @@ func TestTouchActiveLRU_DemotionFlushes(t *testing.T) {
 func TestFlushHooks_SymbolicOnlyCountsButNoDispatch(t *testing.T) {
 	paths, meta := newTestHome(t)
 	ops := fileadapter.NewFileAdapter(paths)
-	state := NewState(ops, meta, model.NewScriptedMock(nil, nil))
+	state := NewState(ops, meta, model.NewScriptedMock(nil))
 	state.Recaller = symbolicOnlyRecaller{} // a Recaller, deliberately NOT a flushEnqueuer
 	state.TurnNumber = 3
 	state.Budget = memops.Budget{BTopK: 1}

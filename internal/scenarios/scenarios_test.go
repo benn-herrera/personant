@@ -345,9 +345,7 @@ func TestScenario_ProjectSwitching(t *testing.T) {
 // initial Steps, it switches to prj_2, engages a new thread there,
 // switches back, and re-engages thr_1. The dedicated helper avoids
 // burdening the general-purpose RunScenario API with mid-sequence
-// project-switch hooks for a single scenario; once /project switch
-// lands in the runtime (Phase 5), the generic RunScenario will drive
-// it via a slash-injected Step and this helper goes away.
+// project-switch hooks for a single scenario.
 func runProjectSwitchScenario(t *testing.T, sc Scenario) {
 	t.Helper()
 	h := newHarness(t, sc)
@@ -374,7 +372,7 @@ func runProjectSwitchScenario(t *testing.T, sc Scenario) {
 	// each step's response with SetResponse before driving the turn, so
 	// a §5.5 mid-turn re-prompt — a second consult within one turn —
 	// re-serves that step's response.
-	h.Mock = model.NewScriptedMock(nil, nil)
+	h.Mock = model.NewScriptedMock(nil)
 	h.State.Client = h.Mock
 
 	if sc.Setup != nil {
@@ -394,6 +392,9 @@ func runProjectSwitchScenario(t *testing.T, sc Scenario) {
 	if err := h.SwitchProject("prj_2"); err != nil {
 		t.Fatalf("SwitchProject prj_2: %v", err)
 	}
+	if err := VerifyActiveSetInActiveProject(h); err != nil {
+		t.Fatalf("after SwitchProject prj_2: %v", err)
+	}
 
 	// Step 3: create thr_3 in prj_2.
 	runStep(t, h, len(sc.Steps), additional[0])
@@ -410,6 +411,9 @@ func runProjectSwitchScenario(t *testing.T, sc Scenario) {
 	// Switch back to prj_1.
 	if err := h.SwitchProject("prj_1"); err != nil {
 		t.Fatalf("SwitchProject prj_1: %v", err)
+	}
+	if err := VerifyActiveSetInActiveProject(h); err != nil {
+		t.Fatalf("after SwitchProject prj_1: %v", err)
 	}
 
 	// Step 4: re-engage thr_1 (in prj_1).
@@ -589,7 +593,7 @@ func TestScenarioMetricsBlobShapeIsStable(t *testing.T) {
 	if counters["threads_created"] == nil {
 		t.Errorf("counters.threads_created missing")
 	}
-	// Phase C.1 recall-fidelity accounting: every Step is either
+	// Recall-fidelity accounting: every Step is either
 	// measured (ExpectedRecallMatches != nil) or unmeasured. The
 	// shape test's steps leave the field nil → unmeasured_steps
 	// must be present.
@@ -860,9 +864,8 @@ func TestScenario_TransientDataPollutionPrevention(t *testing.T) {
 //   - The runtime's §3.0 chain currently no-ops on `tool.result` and
 //     `user.shell-capture` events; only `user.prompt` and
 //     `model.response` are processed substantively.
-//   - The chat REPL stubs `$` / `#` shell escape with a "not yet
-//     implemented" message; the long-lived `$SHELL -i` subprocess
-//     specified in §4.4 hasn't landed.
+//   - The §4.4 shell escape and its long-lived `$SHELL -i` subprocess
+//     are not built.
 //   - Layer-B/C eviction under budget pressure is a Phase 2.e
 //     deliverable; without it, the "evicts cleanly" assertion has
 //     nothing to validate.
@@ -1034,7 +1037,7 @@ func TestScenario_DecayTriggeredClosure(t *testing.T) {
 	RunScenario(t, sc)
 }
 
-// TestStepSetClock_RefinementNormalizesToPriorClock pins burndown #3: there is
+// TestStepSetClock_RefinementNormalizesToPriorClock pins that there is
 // exactly ONE clock-advance path. A step carrying an absolute At sets
 // pinnedClock = At; the execution-time refinement step (zero At, nonzero
 // TimeDelta) is NORMALIZED to prior-pinnedClock + TimeDelta — the prior

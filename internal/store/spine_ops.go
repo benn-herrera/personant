@@ -82,7 +82,7 @@ func RemoveSpineRecord(paths PersonantPaths, id string) error {
 // spine.jsonl ONCE with the remaining records (order preserved). This is
 // the batch counterpart to RemoveSpineRecord: a drain that archives K
 // threads pays one read + one filtered WriteSpine instead of K full
-// rewrites (design §3.2 step 3 / §4). An empty ids set is a no-op (no
+// rewrites. An empty ids set is a no-op (no
 // write). Ids not present in the spine are silently ignored — the batch
 // archival path reports per-thread "no spine record" outcomes itself, so
 // this op never fails on a missing id (unlike single-id RemoveSpineRecord,

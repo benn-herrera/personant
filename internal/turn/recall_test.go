@@ -14,6 +14,7 @@ import (
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/model"
+	"personant/internal/recall/measure"
 	"personant/internal/store"
 )
 
@@ -89,7 +90,7 @@ func TestSurfaceRecallCandidates_LogsMatchFire(t *testing.T) {
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_2", []string{"alpha", "beta", "zeta", "eta"})
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil))
 	state.coalesce.addSymbol("alpha", "alpha", memops.SourceUser)
 	state.coalesce.addSymbol("beta", "beta", memops.SourceUser)
 
@@ -119,7 +120,7 @@ func TestSurfaceRecallCandidates_ExcludesEngaged(t *testing.T) {
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_2", []string{"alpha", "beta", "zeta", "eta"})
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil))
 	state.coalesce.addSymbol("alpha", "alpha", memops.SourceUser)
 	state.coalesce.addSymbol("beta", "beta", memops.SourceUser)
 
@@ -146,7 +147,7 @@ func TestSurfaceRecallCandidates_NoCandidatesIsQuiet(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil))
 	state.coalesce.addSymbol("nope1", "nope1", memops.SourceUser)
 	state.coalesce.addSymbol("nope2", "nope2", memops.SourceUser)
 
@@ -187,7 +188,7 @@ func TestRunFiresRecallAtTurnClose(t *testing.T) {
 
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [alpha, beta, gamma, delta]*\nNew thread."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
@@ -225,7 +226,7 @@ func TestRunNoRecallWhenNoSymbols(t *testing.T) {
 
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "Just a plain reply, nothing to see."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
@@ -259,7 +260,7 @@ func recallBandState(t *testing.T) (store.PersonantPaths, *State) {
 	paths, meta := newTestHome(t)
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta"})
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_2", []string{"alpha", "beta", "gamma", "delta"})
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil))
 	state.coalesce.addSymbol("alpha", "alpha", memops.SourceUser)
 	state.coalesce.addSymbol("beta", "beta", memops.SourceUser)
 	return paths, state
@@ -362,5 +363,58 @@ func TestRecall_ResidentCandidateIsSkipped(t *testing.T) {
 	}
 	if logBody := readDayLog(t, paths); strings.Contains(logBody, "recall.accept") {
 		t.Errorf("resident candidate logged recall.accept; log:\n%s", logBody)
+	}
+}
+
+// TestRecall_AutoFetchBarPerSignal — each signal is judged on its own
+// scale: symbolic at 0.65, cosine (embedding or a scored intra hit) at 0.75,
+// inclusive at the bar. A Score-0 completeness-only intra hit never clears.
+func TestRecall_AutoFetchBarPerSignal(t *testing.T) {
+	sym := &measure.SymbolicHit{}
+	emb := &measure.EmbeddingHit{}
+	tests := []struct {
+		name string
+		r    measure.Result
+		want bool
+	}{
+		{"symbolic at bar", measure.Result{Score: 0.65, Symbolic: sym}, true},
+		{"symbolic below bar", measure.Result{Score: 0.64, Symbolic: sym}, false},
+		{"embedding at bar", measure.Result{Score: 0.75, Embedding: emb}, true},
+		{"embedding below bar", measure.Result{Score: 0.74, Embedding: emb}, false},
+		{"embedding between bars is cosine-judged", measure.Result{Score: 0.70, Embedding: emb, Symbolic: sym}, false},
+		{"scored intra at bar", measure.Result{Score: 0.75, IntraThread: &measure.IntraThreadHit{Score: 0.75}}, true},
+		{"scored intra below bar", measure.Result{Score: 0.74, IntraThread: &measure.IntraThreadHit{Score: 0.74}}, false},
+		{"completeness-only intra", measure.Result{IntraThread: &measure.IntraThreadHit{Turns: []int{3}}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := autoAccepts(tt.r); got != tt.want {
+				t.Errorf("autoAccepts(%+v) = %v, want %v", tt.r, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRecall_FetchesAtMostThree — four candidates clear the bar; only the
+// top three are fetched.
+func TestRecall_FetchesAtMostThree(t *testing.T) {
+	paths, meta := newTestHome(t)
+	for _, id := range []string{"thr_1", "thr_2", "thr_3", "thr_4"} {
+		seedThreadWithAnchors(t, paths, meta.ID, id, []string{"alpha", "beta"})
+	}
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil))
+	state.coalesce.addSymbol("alpha", "alpha", memops.SourceUser)
+	state.coalesce.addSymbol("beta", "beta", memops.SourceUser)
+
+	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
+		t.Fatalf("surfaceRecallCandidates: %v", err)
+	}
+
+	logBody := readDayLog(t, paths)
+	if got := strings.Count(logBody, "spine.match-fire "); got != 4 {
+		t.Fatalf("precondition: %d match-fires, want 4; log:\n%s", got, logBody)
+	}
+	if got := strings.Count(logBody, "recall.accept "); got != 3 {
+		t.Errorf("fetched %d candidates, want 3; log:\n%s", got, logBody)
 	}
 }

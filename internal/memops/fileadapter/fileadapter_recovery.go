@@ -222,7 +222,7 @@ func (a *FileAdapter) CommitTurn(ctx context.Context, turnID, reason string) err
 	// The Add/Commit gap: staged-but-uncommitted is a distinct on-disk
 	// state (the index moved, HEAD did not) the R4 matrix must kill in.
 	crashpoint.At(cpCommitPostAdd)
-	// Target: DAILY (#94 R3b, INV-5) — the per-turn recovery point lives
+	// Target: DAILY — the per-turn recovery point lives
 	// in the disposable daily DB; primary is barrier-exclusive. No
 	// verification flags: daily commits always pass 0,0 (a disposable
 	// per-turn snapshot; integrity gating moved to the once-a-day
@@ -249,7 +249,7 @@ func (a *FileAdapter) CommitTurn(ctx context.Context, turnID, reason string) err
 	return nil
 }
 
-// Count-triggered gc (R3-addendum item 4). The day-off sleep cycle is
+// Count-triggered gc. The day-off consolidation is
 // the CADENCE gc trigger; this is the PRESSURE trigger — per-turn
 // commits accrue a few loose objects each, and a session that never
 // crosses a day-off would otherwise grow .git unboundedly. Counting

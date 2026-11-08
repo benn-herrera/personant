@@ -59,6 +59,7 @@ var DefaultInvariants = append(append([]InvariantCheck{}, cheapDefaultInvariants
 // suspenders on the mock-rung byte budget).
 var cheapDefaultInvariants = []InvariantCheck{
 	VerifyNoBudgetOverflow,
+	VerifyActiveSetInActiveProject,
 }
 
 // heavyDefaultInvariants are the substrate-scale checks: each one does
@@ -306,7 +307,7 @@ func VerifyClosedThreadConsistency(h *Harness) error {
 //   - Both → the thread is on the spine yet recorded as archived — ID
 //     reuse or archival corruption.
 //
-// It is TWO-DIRECTIONAL (BD-2):
+// It is TWO-DIRECTIONAL:
 //
 //   - Forward (created ⟶ spine⊎archived): every created ID ends in exactly one
 //     of {on-spine, archived}. Neither = unexplained loss; both = ID reuse /
@@ -532,6 +533,31 @@ func VerifyNoBudgetOverflow(h *Harness) error {
 		return fmt.Errorf("VerifyNoBudgetOverflow: %s (§3.1 truncation contract bypassed)", strings.Join(over, "; "))
 	}
 	return verifyFileExpansions(h, ws, layerBPlanThreads(h.Paths, h.State.ActiveThreads, budget.BTopK))
+}
+
+// VerifyActiveSetInActiveProject checks that every active-set thread belongs
+// to the active project (SPEC §3.2): composition renders the active set
+// unfiltered, so a foreign id there is another project's content in the
+// request. It reads one thread meta file per active id, bounded by BTopK.
+func VerifyActiveSetInActiveProject(h *Harness) error {
+	if h.State == nil || h.Ops == nil {
+		return nil
+	}
+	var foreign []string
+	for _, id := range h.State.ActiveThreads {
+		fm, err := h.Ops.LoadThreadMeta(context.Background(), id)
+		if err != nil {
+			return fmt.Errorf("VerifyActiveSetInActiveProject: load %s: %w", id, err)
+		}
+		if fm.Project != "" && fm.Project != h.State.ActiveProject.ID {
+			foreign = append(foreign, id+"@"+fm.Project)
+		}
+	}
+	if len(foreign) > 0 {
+		return fmt.Errorf("VerifyActiveSetInActiveProject: active project %s holds foreign threads %s",
+			h.State.ActiveProject.ID, strings.Join(foreign, ", "))
+	}
+	return nil
 }
 
 // layerBPlanThreads loads the Layer B threads, ids capped at bTopK, in

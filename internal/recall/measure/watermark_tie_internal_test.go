@@ -11,7 +11,7 @@ import (
 	"personant/internal/store"
 )
 
-// TestIndexer_WatermarkTieSecondFlushPublishes is the BD-8 watermark-tie
+// TestIndexer_WatermarkTieSecondFlushPublishes is the watermark-tie
 // regression proof: two flush jobs for the same thread enqueued with the SAME
 // dispatch watermark (the structurally reachable same-turn double-enqueue —
 // cap-flush at the scroll-out hook, then dormancy flush at demotion, both

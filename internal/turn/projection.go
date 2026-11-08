@@ -8,14 +8,13 @@ import (
 
 // ProjectAnchors re-derives a thread's headline anchor set as a
 // deterministic projection of its history_symbols by current salience
-// (spec §2.2 / §2.7.4; anchor-lifecycle Inc 2 / C1). It ranks ALL retained
-// symbols, takes the top-max as the projected anchor set, latches lifecycle
-// state on the mutated symbol slice, and reports whether the projected SET
-// changed.
+// (spec §2.2 / §2.7.4). It ranks ALL retained symbols, takes the top-max as
+// the projected anchor set, latches lifecycle state on the mutated symbol
+// slice, and reports whether the projected SET changed.
 //
 // Ranking discipline (shared with topByWeight via symbolRankLess):
-//   - class: B11 high-specificity OR ever-central symbols rank above
-//     ordinary symbols (the retention discriminator);
+//   - class: high-specificity symbols rank above every ordinary symbol,
+//     whatever the counts (ever-central is not a class; see symbolRankLess);
 //   - then Count descending;
 //   - then recency — most-recent LastActiveTurn, then FirstSeenTurn, both
 //     descending (newest first);
@@ -153,8 +152,9 @@ func symbolRankLess(a, b *memops.HistorySymbol) bool {
 
 // rankClass returns the projection priority class of a symbol: 1 if it is a
 // B11 high-specificity identifier (intrinsically discriminative — a URL,
-// file path, git SHA), 0 otherwise. A high-class symbol wins the projection
-// contest against an ordinary symbol of equal Count.
+// file path, git SHA), 0 otherwise. Class outranks Count: a high-class
+// symbol wins the projection contest against an ordinary symbol of any
+// Count.
 func rankClass(s *memops.HistorySymbol) int {
 	if memops.IsHighSpecificity(s.Raw) {
 		return 1

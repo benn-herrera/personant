@@ -42,10 +42,6 @@ func (c *captureClient) ConsultStream(ctx context.Context, req model.Request) (m
 	return c.inner.ConsultStream(ctx, req)
 }
 
-func (c *captureClient) ListModels(ctx context.Context) ([]model.ModelInfo, error) {
-	return c.inner.ListModels(ctx)
-}
-
 func (c *captureClient) assembledBytes() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -83,7 +79,7 @@ func TestRejectOversizeUserInput(t *testing.T) {
 	paths, meta := newTestHome(t)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
-	mock := model.NewScriptedMock(nil, nil)
+	mock := model.NewScriptedMock(nil)
 	cap := &captureClient{inner: mock}
 	// Small ceiling → small live-turn reserve → small userInput share.
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, cap,
@@ -145,7 +141,7 @@ func TestA4PreflightAssembledBytesWithinBudget(t *testing.T) {
 		seedThread(t, paths, meta.ID, itoaThreadID(i))
 	}
 
-	mock := model.NewScriptedMock(nil, nil)
+	mock := model.NewScriptedMock(nil)
 	cap := &captureClient{inner: mock}
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, cap,
 		WithTokenCeiling(2000))
@@ -208,7 +204,7 @@ func TestA3LiveTurnAndMemoryNeverSilentlyTraded(t *testing.T) {
 		for i := 1; i <= 10; i++ {
 			seedThread(t, paths, meta.ID, itoaThreadID(i))
 		}
-		mock := model.NewScriptedMock(nil, nil)
+		mock := model.NewScriptedMock(nil)
 		cap := &captureClient{inner: mock}
 		state := NewState(fileadapter.NewFileAdapter(paths), meta, cap)
 		mock.SetResponse(model.Response{Content: "*topic: thr_1 [alpha, beta, gamma, delta]*\nok"})
@@ -237,7 +233,7 @@ func TestA3LiveTurnAndMemoryNeverSilentlyTraded(t *testing.T) {
 		for i := 1; i <= 6; i++ {
 			seedThread(t, paths, meta.ID, itoaThreadID(i))
 		}
-		mock := model.NewScriptedMock(nil, nil)
+		mock := model.NewScriptedMock(nil)
 		cap := &captureClient{inner: mock}
 		state := NewState(fileadapter.NewFileAdapter(paths), meta, cap,
 			WithTokenCeiling(2000))

@@ -64,14 +64,13 @@ func RunScenario(t *testing.T, sc Scenario) *Harness {
 	// same request; once the missing thread is fetched the topic tag
 	// drains cleanly. No pre-queue, so an on-demand StepSource needs no
 	// up-front step count.
-	h.Mock = model.NewScriptedMock(nil, nil)
+	h.Mock = model.NewScriptedMock(nil)
 	if h.liveClient != nil {
-		// Inference-in-loop (#98, Inc 3): drive turns against a real chat
-		// endpoint instead of the scripted mock. The mock is still constructed
-		// (some helpers reference it) but never installed on State; runStep
-		// skips SetResponse and restartSession rebuilds against the live client.
-		// State.Model names the real chat model so the request does not carry
-		// the sentinel harness DefaultModel.
+		// Inference-in-loop: drive turns against a real chat endpoint
+		// instead of the scripted mock. The mock is still constructed (some
+		// helpers reference it) but never installed on State; runStep skips
+		// SetResponse and restartSession rebuilds against the live client.
+		// State.Model names the real chat model.
 		h.State.Client = h.liveClient
 		h.State.Model = h.liveModel
 	} else {
@@ -129,7 +128,7 @@ func RunScenario(t *testing.T, sc Scenario) *Harness {
 	// the accrual since the last sleep-cycle gc, the gc-cadence watch metric.
 	h.Metrics.Set(metricGitLooseObjectsFinal, float64(looseObjectCount(h.Paths.Home)))
 
-	// Recovery-fetch gauge (design §6.3, AC1): the honest "recoverable,
+	// Recovery-fetch gauge (AC1): the honest "recoverable,
 	// measured" signal. Runs ONCE here — AFTER the measured run and AFTER the
 	// final invariant sweep — because it mutates the substrate (it recovers
 	// threads back onto the spine), so it must not perturb any measured series
@@ -359,9 +358,9 @@ func stepExecTurn(t *testing.T, h *Harness, idx int, label string, step Step) (s
 // counterpart (the turn's two fsynced appends); turn_gc_ms is the
 // post-commit pressure-gc cost (MaybeGC), split out of turn_commit_ms so a
 // repack no longer contaminates the commit gauge; git_loose_objects_{pre,post}_gc
-// gauge loose-object accrual at each sleep cycle — the gc-interplay watch
+// gauge loose-object accrual at each consolidation — the gc-interplay watch
 // metric (per-turn commits make loose-object growth ~turns/day, and the
-// sleep gc is the stated hard dependency that bounds it).
+// consolidation gc is the stated hard dependency that bounds it).
 const (
 	metricTurnJournalMs        = "turn_journal_ms"
 	metricTurnGCMs             = "turn_gc_ms"
@@ -437,7 +436,15 @@ type stepRecall struct {
 func stepMeasureRecall(t *testing.T, h *Harness, idx int, label string, step Step, stepLines []string, livePost map[string]struct{}) stepRecall {
 	t.Helper()
 	matchFires := matchFireSet(stepLines)
-	keptExpected, expectedForgiven := recordRecallFidelity(t, h, idx, label, step.RecallMode, step.ExpectedRecallMatches, matchFires, livePost)
+	// An opportunity the active set already answered has no expected set,
+	// but it is not an unmeasured step: it gets counters of its own.
+	var keptExpected []string
+	var expectedForgiven int
+	if step.RecallOpportunityResident {
+		h.Metrics.Counter(MetricRecallFidelityOpportunitiesResident, 1)
+	} else {
+		keptExpected, expectedForgiven = recordRecallFidelity(t, h, idx, label, step.RecallMode, step.ExpectedRecallMatches, matchFires, livePost)
+	}
 
 	// Embedding-in-loop head-to-head (#98): when an embedder is installed the
 	// turn-close path logs spine.embed-match-fire alongside spine.match-fire,
@@ -449,7 +456,11 @@ func stepMeasureRecall(t *testing.T, h *Harness, idx int, label string, step Ste
 	// — apples-to-apples on one workload, one forgiven ground truth.
 	embedFires := embedMatchFireSet(stepLines)
 	if h.indexer != nil {
-		recordEmbedRecallFidelity(h, keptExpected, embedFires, step.ExpectedRecallMatches != nil)
+		if step.RecallOpportunityResident {
+			h.Metrics.Counter(MetricEmbedRecallFidelityOpportunitiesResident, 1)
+		} else {
+			recordEmbedRecallFidelity(h, keptExpected, embedFires, step.ExpectedRecallMatches != nil)
+		}
 	}
 
 	// Intra-thread (#109) fine-tier match set: which engaged threads the
@@ -475,8 +486,8 @@ func stepMeasureRecall(t *testing.T, h *Harness, idx int, label string, step Ste
 	}
 }
 
-// stepMeasureW1 records the W1 recall-preservation QUALITY MEASURE (#111 /
-// design §7.1; gate→measure in #119): on an intra-probe step (W1Engaged set)
+// stepMeasureW1 records the W1 recall-preservation QUALITY MEASURE
+// (reported, not gated): on an intra-probe step (W1Engaged set)
 // on an embedding-live run, ask the recaller for the descent-vs-flat top-Kf
 // set difference for the engaged main thread and accumulate it. The sim
 // summary REPORTS this as an approximation-drift canary (no longer a hard
@@ -816,10 +827,10 @@ func (h *Harness) refreshArchivedSet() {
 const recoveryGaugeSample = 5
 
 // recordW1Class bumps the harness's run-total W1 classification tally for one
-// divergent probe (#111 §7.1). class is the per-probe verdict the recaller
+// divergent probe. class is the per-probe verdict the recaller
 // returned; the empty string (a non-divergent probe) bumps nothing. The
 // recognized verdicts are the exported measure-package labels (measure.W1Class),
-// referenced directly rather than mirrored as local literals (burndown BD-3) so
+// referenced directly rather than mirrored as local literals so
 // a label rename in measure is a single-edit compile-checked change.
 //
 // An UNKNOWN non-empty class is a seam break — the recaller returned a verdict
@@ -842,7 +853,7 @@ func recordW1Class(h *Harness, class string) {
 	}
 }
 
-// runSleepCycle drives one ARCHITECTURE.md sleep cycle (#108): it measures
+// runSleepCycle drives one consolidation: it measures
 // the substrate .git footprint, calls h.Ops.Consolidate (substrate gc), and
 // re-measures, recording the before/after sizes so the run proves gc
 // reclamation. Consolidate is non-fatal by contract (a gc failure is logged

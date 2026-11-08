@@ -34,7 +34,6 @@ func (r *chunkReader) Final() model.Response { return model.Response{} }
 // Reasoning, including reasoning-only chunks interleaved with content,
 // never reaches the body.
 func TestStreamThroughFilter_ReasoningNeverReachesBody(t *testing.T) {
-	state := &State{}
 	sr := &chunkReader{chunks: []model.Chunk{
 		{Reasoning: "let me "},
 		{Reasoning: "think"},
@@ -43,7 +42,7 @@ func TestStreamThroughFilter_ReasoningNeverReachesBody(t *testing.T) {
 		{Content: "here."},
 	}}
 	var body bytes.Buffer
-	if err := streamThroughFilter(state, sr, &body); err != nil {
+	if err := streamThroughFilter(sr, &body); err != nil {
 		t.Fatalf("streamThroughFilter: %v", err)
 	}
 	if got, want := body.String(), "answer here."; got != want {
@@ -57,13 +56,12 @@ func TestStreamThroughFilter_ReasoningNeverReachesBody(t *testing.T) {
 // §5.1.2 tag scan runs over head, so a reasoning leak would corrupt
 // topic-tag detection.
 func TestReadPreamble_ReasoningKeepsHeadClean(t *testing.T) {
-	state := &State{}
 	sr := &chunkReader{chunks: []model.Chunk{
 		{Reasoning: "*topic: thr_9 [x]*"}, // a tag-shaped decoy inside reasoning
 		{Content: "*topic: thr_1 [alpha, beta]*\n"},
 		{Content: "body"},
 	}}
-	pre, err := readPreamble(state, sr)
+	pre, err := readPreamble(sr)
 	if err != nil {
 		t.Fatalf("readPreamble: %v", err)
 	}

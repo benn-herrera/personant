@@ -17,7 +17,7 @@ func TestScenarioValidate(t *testing.T) {
 	// stubSource is a minimal non-nil StepSource for the precedence cases; it
 	// is never driven (validate does not call Next).
 	stub := stepSourceFunc(func(StepFeedback) (Step, bool) { return Step{}, false })
-	liveClient := model.NewScriptedMock(nil, nil)
+	liveClient := model.NewScriptedMock(nil)
 
 	cases := []struct {
 		name    string

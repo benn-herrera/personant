@@ -58,7 +58,7 @@ func TestRunNewTopicCreatesSpineRecord(t *testing.T) {
 		{
 			Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello world.",
 		},
-	}, nil)
+	})
 
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
@@ -128,7 +128,7 @@ func TestRunUpdatesExistingThread(t *testing.T) {
 		{
 			Content: "*topic: thr_42 [trefoil, unknot, body-topology, electron-shape]*\nMore on the trefoil.",
 		},
-	}, nil)
+	})
 
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
@@ -173,7 +173,7 @@ func TestRunCoalescesEngagement(t *testing.T) {
 	// that both reference thr_42 (one user.prompt with #-tags, one
 	// model.response with the topic tag), then close the turn. The
 	// engagement update must fire exactly once.
-	mock := model.NewScriptedMock(nil, nil) // unused
+	mock := model.NewScriptedMock(nil) // unused
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
@@ -201,7 +201,7 @@ func TestRunNoTopicTagIsNonFatal(t *testing.T) {
 
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "Just a plain response with no topic tag."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
@@ -221,8 +221,8 @@ func TestRunNoTopicTagIsNonFatal(t *testing.T) {
 	}
 }
 
-// TestRunNewTopicZeroAnchorsCreatesThread — anchor-lifecycle Inc 1
-// deletes the 4-floor cardinality contract. A *new-topic* emission whose
+// TestRunNewTopicZeroAnchorsCreatesThread — there is no anchor floor.
+// A *new-topic* emission whose
 // anchor list is empty (a vague-start thread, spec §5.1 / §2.7.x) is now
 // legal: the turn succeeds, a spine record is written with 0 anchors, and
 // no error is returned. The anchor count is advisory — the projection
@@ -235,7 +235,7 @@ func TestRunNewTopicZeroAnchorsCreatesThread(t *testing.T) {
 	// thread list (*new-topic*) is valid; anchors normalize to empty.
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* []*\nBrief reply."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
@@ -270,7 +270,7 @@ func TestRunPopulatesActiveThreadsOnNewTopic(t *testing.T) {
 	paths, meta := newTestHome(t)
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHi."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	if _, err := Run(context.Background(), state, "hello", io.Discard); err != nil {
@@ -297,7 +297,7 @@ func TestRunActiveThreadsRefreshOnRepeatEngagement(t *testing.T) {
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.Client = model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_1 [a, b, c, d]*\nFollow-up."},
-	}, nil)
+	})
 	if _, err := Run(context.Background(), state, "more", io.Discard); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestRunActiveThreadsLRUInsert(t *testing.T) {
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.Client = model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_2 [a, b, c, d]*\nNow on thr_2."},
-	}, nil)
+	})
 	if _, err := Run(context.Background(), state, "switch", io.Discard); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestRunActiveThreadsBTopKOverflow(t *testing.T) {
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state.Client = model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_4 [a, b, c, d]*\nFourth thread."},
-	}, nil)
+	})
 	if _, err := Run(context.Background(), state, "fourth", io.Discard); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -383,9 +383,8 @@ func TestUpdateLayerLRUDormantPromotionDeduplication(t *testing.T) {
 	}
 }
 
-// TestUpdateLayerLRUDormantNoCountCap — #127 dropped the v0.1
-// dormantThreadsCap in favor of Layer C byte truncation (design §4 / Q2):
-// the dormant slice is NOT count-capped, so it accumulates every demoted
+// TestUpdateLayerLRUDormantNoCountCap — there is no dormant count cap,
+// only Layer C byte truncation: the dormant slice is NOT count-capped, so it accumulates every demoted
 // thread. The real bound is Layer C's byte budget at workset.Compose
 // render time. This is the A5 / m3 contract on the LRU side: no silent
 // count-cap drop. (Demotion past BTopK pushes the previous active head to
@@ -438,7 +437,7 @@ func TestRunHistoryCapTurnPairFIFO(t *testing.T) {
 		t.Fatalf("append: %v", err)
 	}
 
-	mock := model.NewScriptedMock(nil, nil)
+	mock := model.NewScriptedMock(nil)
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
@@ -518,7 +517,7 @@ func TestRunNewTopicWritesThreadFile(t *testing.T) {
 
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nA brief greeting."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
@@ -615,7 +614,7 @@ func TestRunExistingThreadAppendsExcerpt(t *testing.T) {
 
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_42 [trefoil, unknot, body-topology, electron-shape]*\nFollow-up reply."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	// Pre-populate ActiveThreads so the §5.5 mid-turn fetch does not
 	// fire — this test is about the close-time engagement-update path,
@@ -677,7 +676,7 @@ func TestRunHistorySymbolsAccumulation(t *testing.T) {
 	// new-topic flow accepts the cardinality).
 	mock1 := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [alpha, beta, gamma, delta]*\nFirst."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock1)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	if _, err := Run(context.Background(), state, "first", io.Discard); err != nil {
@@ -687,7 +686,7 @@ func TestRunHistorySymbolsAccumulation(t *testing.T) {
 	// Turn 2: user supplies #alpha (source=user), model also tags alpha.
 	state.Client = model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_1 [alpha, beta, gamma, delta]*\nSecond."},
-	}, nil)
+	})
 	pinClock(t, time.Date(2026, 5, 9, 12, 5, 0, 0, time.UTC))
 	if _, err := Run(context.Background(), state, "more on #alpha", io.Discard); err != nil {
 		t.Fatalf("turn 2: %v", err)
@@ -745,8 +744,8 @@ func TestMergeHistorySymbolsCapAndEvict(t *testing.T) {
 		{Normalized: "new1", Raw: "new1", Source: memops.SourceModel},
 		{Normalized: "new2", Raw: "new2", Source: memops.SourceModel},
 	}
-	// Merge no longer caps internally (anchor-lifecycle Inc 2: the owner-turn
-	// sequence is merge → project → evict); capHistorySymbols is the eviction
+	// Merge does not cap internally (the owner-turn sequence is merge →
+	// project → evict); capHistorySymbols is the eviction
 	// step. Compose the two to exercise the cap-and-evict rule directly.
 	merged := capHistorySymbols(mergeHistorySymbols(existing, turn, 41))
 	if len(merged) != historyCapPerThread {
@@ -964,7 +963,7 @@ func TestRunRePromptFiresForMissingThread(t *testing.T) {
 
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_42 [a, b, c, d]*\nBODY."},
-	}, nil)
+	})
 	mock.RecordCalls = true
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
@@ -1007,7 +1006,7 @@ func TestRunRePromptSkippedWhenFetchFails(t *testing.T) {
 
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_99 [a, b, c, d]*\nFIRST."},
-	}, nil)
+	})
 	mock.RecordCalls = true
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
@@ -1071,7 +1070,7 @@ func TestRunNoRePromptWhenTagThreadsAlreadyActive(t *testing.T) {
 
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_42 [a, b, c, d]*\nbody."},
-	}, nil)
+	})
 	mock.RecordCalls = true
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	state.ActiveThreads = []string{"thr_42"}
@@ -1099,7 +1098,7 @@ func TestRunRePromptLogsThreadFetchedDelta(t *testing.T) {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_42 [a, b, c, d]*\nFIRST."},
 		{Content: "*topic: thr_42 [a, b, c, d]*\nSECOND."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 
@@ -1148,7 +1147,7 @@ func TestRunPreambleBeforeTagDrivesFetchSuppressEngage(t *testing.T) {
 
 			base := model.Response{Content: "*topic: thr_42 [a, b, c, d]*\nANSWER-BODY."}
 			mock := model.NewScriptedMock(
-				[]model.Response{model.WithPreamble(base, tc.preamble)}, nil)
+				[]model.Response{model.WithPreamble(base, tc.preamble)})
 			mock.RecordCalls = true
 			state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 			now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
@@ -1220,7 +1219,7 @@ func TestRunBuffersFileEditsIntoThreadStore(t *testing.T) {
 
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_42, thr_43 [a, b, c, d]*\nDone."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	state.ActiveThreads = []string{"thr_42", "thr_43"}
 	pinClock(t, time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
@@ -1280,7 +1279,7 @@ func TestRunFileCommitUntrackedIsNonFatal(t *testing.T) {
 
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_42 [a, b, c, d]*\nDone."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
 
@@ -1315,7 +1314,7 @@ func TestRunFileEditNewlineInPathIsRejected(t *testing.T) {
 
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_42 [a, b, c, d]*\nDone."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
 
@@ -1349,7 +1348,7 @@ func TestRunFileEditInvalidUTF8PathIsRejected(t *testing.T) {
 
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_42 [a, b, c, d]*\nDone."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
 
@@ -1388,7 +1387,7 @@ func TestRunFileCommitBadHashIsRejected(t *testing.T) {
 
 			mock := model.NewScriptedMock([]model.Response{
 				{Content: "*topic: thr_42 [a, b, c, d]*\nDone."},
-			}, nil)
+			})
 			state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 			pinClock(t, time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
 
@@ -1430,7 +1429,7 @@ func TestRunFileEditStoreErrorLoggedOnce(t *testing.T) {
 
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_42 [a, b, c, d]*\nDone."},
-	}, nil)
+	})
 	state := NewState(failRecordOps{fileadapter.NewFileAdapter(paths)}, meta, mock)
 	pinClock(t, time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))
 
@@ -1464,7 +1463,7 @@ func TestRunFileEditWithoutTopicTagOwnerDefaultsToNewThread(t *testing.T) {
 
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "Just a plain response with no topic tag."},
-	}, nil)
+	})
 	mock.RecordCalls = true
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC))
@@ -1527,7 +1526,7 @@ func TestRunFileEditWithTopicTagSucceeds(t *testing.T) {
 
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: thr_42 [a, b, c, d]*\nDone."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC))
 

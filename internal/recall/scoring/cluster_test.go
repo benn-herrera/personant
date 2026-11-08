@@ -81,7 +81,7 @@ func TestBuildTree_Deterministic(t *testing.T) {
 }
 
 // TestBuildTree_DepthAndFanIn checks the structural-health properties: depth
-// ≈ log_B(n) and fan-in ≤ B (design §3 / §7.2).
+// ≈ log_B(n) and fan-in ≤ B.
 func TestBuildTree_DepthAndFanIn(t *testing.T) {
 	cases := []struct{ axes, perAxis int }{
 		{8, 16},  // 128 leaves
@@ -109,7 +109,7 @@ func TestBuildTree_DepthAndFanIn(t *testing.T) {
 	}
 }
 
-// TestBuildTree_W1_MatchesFlat is the headline W1 end-to-end (design §7.1):
+// TestBuildTree_W1_MatchesFlat is the headline W1 end-to-end:
 // build a tree from N leaves, then DescendChunks over it returns the SAME
 // top-Kf leaf set the flat ProposeChunks scan returns, for every cluster's
 // query — divergence 0. Centroid summary keys + semantic clustering preserve

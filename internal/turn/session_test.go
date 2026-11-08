@@ -28,7 +28,7 @@ func TestLoadSessionRestoresWorkingSet(t *testing.T) {
 		{Content: "*topic: *new-topic* [iota, kappa, lambda, mu]*\nThird."},
 		{Content: "*topic: *new-topic* [nu, xi, omicron, pi]*\nFourth."},
 	}
-	mock := model.NewScriptedMock(nil, nil)
+	mock := model.NewScriptedMock(nil)
 
 	state := NewState(ops, meta, mock)
 	for i := 0; i < 4; i++ {

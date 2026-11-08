@@ -20,7 +20,7 @@ import (
 // (paths.Home) at different cadences:
 //
 //   - Primary (<Home>/.git) — career history: one day-grain commit per
-//     day barrier plus archival anchors. Barrier-exclusive (INV-5), with
+//     day barrier plus archival anchors. Barrier-exclusive, with
 //     the recovery-repair exemption (cell-9 stamp, cell-12 adopt, F1
 //     roll-forward).
 //   - Daily (<Home>/.git-daily) — today's microscope: per-turn commits,

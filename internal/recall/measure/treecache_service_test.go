@@ -100,7 +100,7 @@ func TestTreeCache_Service_LoadNotRebuild(t *testing.T) {
 }
 
 // TestTreeCache_Service_DeleteRebuilds is W5/WA4: deleting the entire
-// .recall-cache (incl every .tree) costs only CPU — the next sleep cycle
+// .recall-cache (incl every .tree) costs only CPU — the next consolidation
 // rebuilds an equivalent tree from the canonical leaves, and the intra-pass
 // recall (the leaves descent returns) is unchanged before and after.
 func TestTreeCache_Service_DeleteRebuilds(t *testing.T) {

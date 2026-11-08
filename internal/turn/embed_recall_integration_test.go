@@ -32,10 +32,7 @@ func TestEmbeddingRecall_Live(t *testing.T) {
 
 	// Fail fast if the configured embedding model is not actually served —
 	// a stale model ref otherwise surfaces as an opaque mid-run error.
-	client, ok := model.NewHTTPClient(url, testsupport.ReaperAPIKey).(*model.HTTPClient)
-	if !ok {
-		t.Fatalf("NewHTTPClient did not return *HTTPClient (cannot verify model presence)")
-	}
+	client := model.NewHTTPClient(url, testsupport.ReaperAPIKey)
 	testsupport.RequireModelPresent(t, func(ctx context.Context) ([]string, error) {
 		infos, err := client.ListModels(ctx)
 		if err != nil {

@@ -85,7 +85,7 @@ type ArchiveEntry struct {
 }
 
 // ArchiveOutcome is the per-thread result of a batch archival, so a
-// partial failure is visible to the caller (design §3.1). Exactly one of
+// partial failure is visible to the caller. Exactly one of
 // the success/skip/error states is meaningful per entry.
 type ArchiveOutcome struct {
 	ThrID string `json:"thr_id"`

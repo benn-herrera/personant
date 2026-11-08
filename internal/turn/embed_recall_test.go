@@ -54,7 +54,7 @@ func seedThreadWithBody(t *testing.T, paths store.PersonantPaths, project, thrID
 func embeddingState(t *testing.T, paths store.PersonantPaths, meta memops.ProjectMeta) *State {
 	t.Helper()
 	ops := fileadapter.NewFileAdapter(paths)
-	state := NewState(ops, meta, model.NewScriptedMock(nil, nil))
+	state := NewState(ops, meta, model.NewScriptedMock(nil))
 	state.Recaller = measure.NewService(ops, model.NewMockEmbedder())
 	if err := state.Recaller.Prepare(context.Background()); err != nil {
 		t.Fatalf("Recaller.Prepare: %v", err)
@@ -109,7 +109,7 @@ func TestSurfaceRecall_IntraThreadFires(t *testing.T) {
 		t.Fatalf("Recaller.Prepare: %v", err)
 	}
 	t.Cleanup(func() { _ = svc.Close() })
-	state := NewState(ops, meta, model.NewScriptedMock(nil, nil))
+	state := NewState(ops, meta, model.NewScriptedMock(nil))
 	state.Recaller = svc
 
 	// Flush the thread's chunks into the fine tier and wait for the async
@@ -146,17 +146,11 @@ func TestSurfaceRecall_IntraThreadFires(t *testing.T) {
 	}
 }
 
-// TestRecall_FetchedIntraHitIsNotFetchedAgain is the §3.4 in-context
-// exclusion for intra-thread hits. The intra pass targets the ENGAGED thread
-// by id, so neither the thread-level exclusion set nor Layer-B residency can
-// suppress it: only the fetched excerpts' mark does. Without it the same
-// early chunk would be fetched again every turn the topic continued.
-//
-// It drives the real stack with no resolver: the first pass fetches the
-// early chunk (an exact-text mock-embedder match clears the cosine auto
-// bar), the second, same query, fetches nothing, and a query for a
-// different early chunk of the now-resident thread is fetched again.
-func TestRecall_FetchedIntraHitIsNotFetchedAgain(t *testing.T) {
+// TestRecall_IntraHitIsNotFetched — an intra-thread hit names the engaged
+// thread, already active, so even above its auto-fetch bar it is not
+// fetched: no recall.accept, no recall_fires bump; its intra-match-fire line
+// stays.
+func TestRecall_IntraHitIsNotFetched(t *testing.T) {
 	paths, meta := newTestHome(t)
 	body := "## Turn 1\ntrefoil knot topology invariant chirality\n\n" +
 		"## Turn 2\nmonsoon humidity precipitation tropics\n\n" +
@@ -169,13 +163,14 @@ func TestRecall_FetchedIntraHitIsNotFetchedAgain(t *testing.T) {
 		t.Fatalf("Recaller.Prepare: %v", err)
 	}
 	t.Cleanup(func() { _ = svc.Close() })
-	state := NewState(ops, meta, model.NewScriptedMock(nil, nil))
+	state := NewState(ops, meta, model.NewScriptedMock(nil))
 	state.Recaller = svc
 
 	const query = "trefoil knot topology invariant chirality"
 	// Publish the fine tier and wait for the async indexer, as the other
 	// intra tests do — a stuck indexer is a defect, not flakiness.
 	svc.EnqueueFlush("thr_1", 3)
+	var hit measure.Result
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		results, err := svc.Recall(context.Background(), measure.Request{
@@ -186,40 +181,30 @@ func TestRecall_FetchedIntraHitIsNotFetchedAgain(t *testing.T) {
 			t.Fatalf("Recall: %v", err)
 		}
 		if r, ok := findResultByID(results, "thr_1"); ok && r.IntraThread != nil {
+			hit = r
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-
-	fetches := func() int {
-		return strings.Count(readDayLog(t, paths), "recall.accept thr=thr_1 ")
-	}
-	engaged := map[string]struct{}{"thr_1": {}}
-	if err := surfaceRecallCandidates(context.Background(), state, query, engaged, "thr_1"); err != nil {
-		t.Fatalf("surfaceRecallCandidates (turn 1): %v", err)
-	}
-	if got := fetches(); got != 1 {
-		t.Fatalf("turn 1: want the intra hit fetched once, got %d", got)
+	if hit.IntraThread == nil || !autoAccepts(hit) {
+		t.Fatalf("precondition: want an intra hit above its bar, got %+v", hit)
 	}
 
-	// Turn 2: same query, same engaged thread. The fetched excerpts are in
-	// the window now, so there is nothing left to fetch.
-	if err := surfaceRecallCandidates(context.Background(), state, query, engaged, "thr_1"); err != nil {
-		t.Fatalf("surfaceRecallCandidates (turn 2): %v", err)
-	}
-	if got := fetches(); got != 1 {
-		t.Errorf("fetched intra hit was fetched again on the next turn (%d total)", got)
+	state.ActiveThreads = []string{"thr_1"}
+	if err := surfaceRecallCandidates(context.Background(), state, query,
+		map[string]struct{}{"thr_1": {}}, "thr_1"); err != nil {
+		t.Fatalf("surfaceRecallCandidates: %v", err)
 	}
 
-	// The exclusion is scoped to the fetched turns, not to the thread: a
-	// query for a DIFFERENT early chunk is still fetched, though thr_1 is
-	// now resident in Layer B.
-	if err := surfaceRecallCandidates(context.Background(), state,
-		"monsoon humidity precipitation tropics", engaged, "thr_1"); err != nil {
-		t.Fatalf("surfaceRecallCandidates (turn 3): %v", err)
+	log := readDayLog(t, paths)
+	if !strings.Contains(log, "spine.intra-match-fire thr_1 ") {
+		t.Errorf("intra hit left no match-fire line; log:\n%s", log)
 	}
-	if got := fetches(); got != 2 {
-		t.Errorf("a different early chunk must still be fetched; total=%d", got)
+	if strings.Contains(log, "recall.accept") {
+		t.Errorf("intra hit was fetched; log:\n%s", log)
+	}
+	if got := recallFires(t, paths, "thr_1"); got != 0 {
+		t.Errorf("thr_1 recall_fires = %d, want 0", got)
 	}
 }
 
@@ -241,7 +226,7 @@ func TestSurfaceRecall_NoEmbedder(t *testing.T) {
 	seedThreadWithBody(t, paths, meta.ID, "thr_1", "trefoil knot topology")
 	ops := fileadapter.NewFileAdapter(paths)
 
-	state := NewState(ops, meta, model.NewScriptedMock(nil, nil))
+	state := NewState(ops, meta, model.NewScriptedMock(nil))
 	if err := surfaceRecallCandidates(context.Background(), state,
 		"trefoil knot topology", map[string]struct{}{}, ""); err != nil {
 		t.Fatalf("surfaceRecallCandidates: %v", err)

@@ -36,7 +36,7 @@ package sim
 //     overlap the prompted topic's symbol set → hit, no embed call.
 //  2. embedding adjudication of the NON-OVERLAPPING RESIDUE only — embed the
 //     prompted content measurement-side (the grader's OWN embedder handle, never
-//     the runtime recall stack) and judge RANK-based (C.6: ranking is
+//     the runtime recall stack) and judge RANK-based (corpus calibration: ranking is
 //     drift-invariant, absolute thresholds are not): the tagged thread is a hit
 //     iff it is the top/near-top (rank ≤ tagFidelityRankK) cosine match among
 //     live threads for the prompted content. A rank sitting on the k/(k+1)
@@ -62,7 +62,7 @@ import (
 )
 
 // tagFidelityRankK is the near-top rank band for the residue rank adjudication
-// (C.6 embedding-ranking finding: the true topic is the #1 cosine match ~73% of
+// (corpus calibration's embedding-ranking finding: the true topic is the #1 cosine match ~73% of
 // the time and within top-3 ~92%). A tagged thread ranking within the top-K
 // cosine matches for the prompted content is a HIT: "top or near-top". K=3
 // captures the ~92% near-top mass without letting a mid-pack match pass.
@@ -70,7 +70,7 @@ const tagFidelityRankK = 3
 
 // tagFidelityBorderlineEps is the cosine gap, at the k/(k+1) rank boundary,
 // below which a residue adjudication is BORDERLINE rather than a decided
-// hit/miss. C.6 says the RANK is drift-invariant, but a near-tie AT the boundary
+// hit/miss. The calibration says the RANK is drift-invariant, but a near-tie AT the boundary
 // is exactly where rank is not decisive, so a boundary gap under this epsilon is
 // escalated to the borderline bin (logged with ranks) instead of trusted. 0.01
 // is a conservative near-tie margin on cosine.

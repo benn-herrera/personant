@@ -16,7 +16,7 @@ func TestCaptureTagMissWritesRawBody(t *testing.T) {
 	h := &Harness{
 		T:          t,
 		RunHome:    t.TempDir(),
-		liveClient: model.NewScriptedMock(nil, nil), // fake live client: non-nil gates the live-only path
+		liveClient: model.NewScriptedMock(nil), // fake live client: non-nil gates the live-only path
 	}
 	const rawBody = "Sure — here's the answer.\n**topic:** thr_1 [trefoil]"
 	lines := []string{"2026-07-15T08:00:00Z topic.tag-missing source=model.response bytes=52"}
@@ -39,7 +39,7 @@ func TestCaptureTagMissTriggeredByTagInvalid(t *testing.T) {
 	h := &Harness{
 		T:          t,
 		RunHome:    t.TempDir(),
-		liveClient: model.NewScriptedMock(nil, nil),
+		liveClient: model.NewScriptedMock(nil),
 	}
 	lines := []string{"2026-07-15T08:00:00Z topic.tag-invalid source=model.response reason=markdown-mangled snippet=**topic:**"}
 
@@ -75,7 +75,7 @@ func TestCaptureTagMissCleanTurnNoCapture(t *testing.T) {
 	h := &Harness{
 		T:          t,
 		RunHome:    t.TempDir(),
-		liveClient: model.NewScriptedMock(nil, nil),
+		liveClient: model.NewScriptedMock(nil),
 	}
 	lines := []string{"2026-07-15T08:00:00Z thread.engaged thr_1 turn_count=3"}
 

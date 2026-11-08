@@ -11,7 +11,7 @@ import "sort"
 const DefaultChunkLimit = 3
 
 // ChunkVector pairs a turn-excerpt's number with its content embedding —
-// one entry of the fine tier (spec §3.4 / design §11.1). One chunk
+// one entry of the fine tier (spec §3.4). One chunk
 // vector per scrolled-out turn-excerpt of a thread.
 type ChunkVector struct {
 	TurnNumber int

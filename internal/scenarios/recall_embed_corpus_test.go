@@ -1,7 +1,7 @@
 // Embedding-recall measurement — the head-to-head counterpart of the
 // symbolic-Jaccard calibration sweep (TestRecallMadlibs_CorpusCalibration).
 //
-// The C.6 Jaccard sweep showed symbolic recall collapsing to ~10% under
+// The Jaccard calibration sweep showed symbolic recall collapsing to ~10% under
 // synonym drift. This file scores the SAME 152-topic corpus and the
 // SAME depth-stratified query sets with cosine similarity over
 // `nomicai-embed` vectors, so the two matrices are directly comparable.

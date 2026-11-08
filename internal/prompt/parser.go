@@ -280,7 +280,7 @@ func Parse(response string) (ParseResult, error) {
 			}
 		}
 
-		// R1 reconciliation (anchor-lifecycle Inc 1): an anchor list that
+		// An anchor list that
 		// normalizes to empty is NOT a tag-validity failure. 0 anchors is
 		// legal (a vague-start emission, spec §5.1 / §2.7.x) — the tag's
 		// job is thread binding, which the valid thread list above already

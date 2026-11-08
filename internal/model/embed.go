@@ -24,7 +24,7 @@ const embedBatch = 64
 // (0 → the model's native dimension). The same *HTTPClient type
 // satisfies both Client and Embedder.
 func NewHTTPEmbedder(baseURL, apiKey, model string, dimensions int) Embedder {
-	c := NewHTTPClient(baseURL, apiKey).(*HTTPClient)
+	c := NewHTTPClient(baseURL, apiKey)
 	c.embeddingModel = model
 	c.embeddingDimensions = dimensions
 	return c

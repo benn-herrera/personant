@@ -664,7 +664,7 @@ func TestRun_EvictsStaledStagingAtTopOfRun(t *testing.T) {
 	paths, meta := newTestHome(t)
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 
 	// Pre-seed: a staged entry from turn 1, and three turns already
@@ -703,7 +703,7 @@ func TestRun_DoesNotEvictBeforeWindowClose(t *testing.T) {
 	paths, meta := newTestHome(t)
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 
 	state.staging.add(stagedSymbol{

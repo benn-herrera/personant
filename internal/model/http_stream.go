@@ -123,7 +123,7 @@ func (r *httpStreamReader) Next() (Chunk, error) {
 // 48 of 50 payloads were reasoning against 1 byte of content, so
 // unconditional accumulation would buy every turn a second full-size
 // buffer for data nearly every caller discards. A caller that wants the
-// whole text (a REPL rendering it) is already iterating chunks and can
+// whole text (a renderer) is already iterating chunks and can
 // accumulate what it chooses to keep.
 func (r *httpStreamReader) Final() Response {
 	return Response{

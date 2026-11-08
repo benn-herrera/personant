@@ -151,7 +151,7 @@ func closeTurnAndUpdateEngagement(ctx context.Context, state *State, userInput, 
 	// Resolve every referenced thr_<n> against the spine FIRST. Per spec
 	// §3.2 ownership assignment is a runtime decision and the topic tag is
 	// advisory — this resolution pass is the runtime exercising that
-	// authority (BD-7 / decision D2): an id that does not resolve — not in
+	// authority: an id that does not resolve — not in
 	// the spine (engaged-miss) or belonging to another project
 	// (cross-project decline) — is a phantom. It is logged for forensics
 	// and dropped here, so it can never enter `engaged`, ActiveThreads, or
@@ -467,7 +467,7 @@ func threadIDNum(id string) (int, bool) {
 // ok=true carries the spine record for an existing thread in the active
 // project. Per spec §3.2 the topic tag is advisory — ownership and
 // engagement are runtime decisions — so an id that fails to resolve is a
-// phantom the runtime refuses to engage (BD-7 / D2):
+// phantom the runtime refuses to engage:
 //   - not in the spine → thread.engaged-miss (the model named a thread
 //     that does not exist; kept forensically visible — future phases may
 //     surface it as a recall miss or a hallucination signal);

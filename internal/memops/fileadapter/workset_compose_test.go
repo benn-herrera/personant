@@ -30,8 +30,8 @@ func TestComposeWorkingSet_LayerE_DirectivesAndConventions(t *testing.T) {
 	ctx := context.Background()
 
 	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha", Created: rfc3339Now(), LastActive: rfc3339Now()}
-	if err := a.CreateProject(ctx, meta); err != nil {
-		t.Fatalf("CreateProject: %v", err)
+	if err := store.SaveProjectMeta(a.paths, meta); err != nil {
+		t.Fatalf("SaveProjectMeta: %v", err)
 	}
 	// store.Init seeds defaults.md and user.md with template content;
 	// rewrite them with marker bodies so the test asserts on known data.
@@ -58,8 +58,8 @@ func TestComposeWorkingSet_LayerE_DirectivesAndConventions(t *testing.T) {
 		t.Fatalf("write conventions: %v", err)
 	}
 	meta.ConventionsPaths = []string{convPath}
-	if err := a.SaveProject(ctx, meta); err != nil {
-		t.Fatalf("SaveProject: %v", err)
+	if err := store.SaveProjectMeta(a.paths, meta); err != nil {
+		t.Fatalf("SaveProjectMeta: %v", err)
 	}
 
 	out, err := a.ComposeWorkingSet(ctx, memops.WorksetInput{ActiveProject: meta})
@@ -89,8 +89,8 @@ func TestComposeWorkingSet_LayerE_MissingConventionsLogsWarning(t *testing.T) {
 		ID: "prj_1", Name: "alpha", Created: rfc3339Now(), LastActive: rfc3339Now(),
 		ConventionsPaths: []string{"/nonexistent/path/CONVENTIONS.md"},
 	}
-	if err := a.CreateProject(ctx, meta); err != nil {
-		t.Fatalf("CreateProject: %v", err)
+	if err := store.SaveProjectMeta(a.paths, meta); err != nil {
+		t.Fatalf("SaveProjectMeta: %v", err)
 	}
 
 	if _, err := a.ComposeWorkingSet(ctx, memops.WorksetInput{ActiveProject: meta}); err != nil {
@@ -107,15 +107,15 @@ func TestComposeWorkingSet_LayerA2_DigestsSortedByLastActive(t *testing.T) {
 	ctx := context.Background()
 
 	active := memops.ProjectMeta{ID: "prj_1", Name: "active", Created: rfc3339Now(), LastActive: rfc3339Now()}
-	if err := a.CreateProject(ctx, active); err != nil {
+	if err := store.SaveProjectMeta(a.paths, active); err != nil {
 		t.Fatalf("create active: %v", err)
 	}
 	older := memops.ProjectMeta{ID: "prj_2", Name: "older", Created: rfc3339Now(), LastActive: "2026-04-01T00:00:00Z"}
-	if err := a.CreateProject(ctx, older); err != nil {
+	if err := store.SaveProjectMeta(a.paths, older); err != nil {
 		t.Fatalf("create older: %v", err)
 	}
 	newer := memops.ProjectMeta{ID: "prj_3", Name: "newer", Created: rfc3339Now(), LastActive: "2026-05-01T00:00:00Z"}
-	if err := a.CreateProject(ctx, newer); err != nil {
+	if err := store.SaveProjectMeta(a.paths, newer); err != nil {
 		t.Fatalf("create newer: %v", err)
 	}
 	writeDigest(t, a.paths, memops.ProjectDigest{
@@ -513,8 +513,8 @@ func TestComposeWorkingSet_LayerB_MissingThreadLogsWarning(t *testing.T) {
 	ctx := context.Background()
 
 	meta := memops.ProjectMeta{ID: "prj_1", Name: "alpha", Created: rfc3339Now(), LastActive: rfc3339Now()}
-	if err := a.CreateProject(ctx, meta); err != nil {
-		t.Fatalf("CreateProject: %v", err)
+	if err := store.SaveProjectMeta(a.paths, meta); err != nil {
+		t.Fatalf("SaveProjectMeta: %v", err)
 	}
 
 	out, err := a.ComposeWorkingSet(ctx, memops.WorksetInput{

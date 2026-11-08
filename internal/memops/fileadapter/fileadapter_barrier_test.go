@@ -32,10 +32,9 @@ import (
 // the ADAPTER's Reconcile (the completion owner), asserting the
 // worktree-as-truth invariants: no reset ever (RevertedPaths ALWAYS
 // empty on barrier/archival fixtures), ScopedRestored non-empty ONLY on
-// the §2.7 persistent-failure fixture, exactly one day-commit per day
-// (INV-2), batch completion never half-archived (F1), daily reborn with
-// watermark == daily HEAD (INV-4), derived fresh, idempotent second
-// Reconcile.
+// the §2.7 persistent-failure fixture, exactly one day-commit per day,
+// batch completion never half-archived (F1), daily reborn with
+// watermark == daily HEAD, derived fresh, idempotent second Reconcile.
 
 // pinBarrierClock pins Timeline at an explicit instant (the multi-day
 // counterpart to pinClock's fixed value).
@@ -130,7 +129,7 @@ func assertBarrierTerminal(t *testing.T, a *FileAdapter, day int) {
 	t.Helper()
 	ctx := context.Background()
 	if n := dayCommitCount(t, a, day); n != 1 {
-		t.Errorf("day-commit count for day %d = %d, want exactly 1 (INV-2)", day, n)
+		t.Errorf("day-commit count for day %d = %d, want exactly 1", day, n)
 	}
 	if got, ok, err := autogit.HeadDay(ctx, a.paths, autogit.Primary); err != nil || !ok {
 		t.Errorf("HEADDAY undefined after barrier: ok=%v err=%v (F3)", ok, err)
@@ -146,7 +145,7 @@ func assertBarrierTerminal(t *testing.T, a *FileAdapter, day int) {
 	}
 	wm, present, err := store.ReadDerivedWatermark(a.paths)
 	if err != nil || !present || wm != dailyHead {
-		t.Errorf("watermark = (%q,%v,%v), want daily HEAD %s (INV-4)", wm, present, err, dailyHead)
+		t.Errorf("watermark = (%q,%v,%v), want daily HEAD %s", wm, present, err, dailyHead)
 	}
 	if check, err := index.Check(a.paths, index.Options{Quiet: true}); err != nil || !check.OK() {
 		t.Errorf("derived not fresh after barrier: err=%v drifts=%+v (F5)", err, check.Drifts)
@@ -267,7 +266,7 @@ func TestBarrier_CrashWalk(t *testing.T) {
 				t.Errorf("port Reconcile leaked a non-nil Pending")
 			}
 			if rep.ResetPerformed || len(rep.RevertedPaths) != 0 {
-				t.Errorf("barrier recovery performed a reset (reverted=%v) — roll-forward only (F1/INV-1)", rep.RevertedPaths)
+				t.Errorf("barrier recovery performed a reset (reverted=%v) — roll-forward only (F1)", rep.RevertedPaths)
 			}
 			if len(rep.ScopedRestored) != 0 {
 				t.Errorf("ScopedRestored = %v, want empty on the normal path", rep.ScopedRestored)
@@ -887,7 +886,7 @@ func TestBarrier_LifecycleTags(t *testing.T) {
 // TestBarrier_MorningCompletionThenNextDay is kill-timing walk 1
 // (§2.3): a day-N barrier interrupted mid-B1 is completed the NEXT
 // morning (clock at N+1). Roll-forward lands trailered-but-non-day-shape
-// commits for N, so the INV-2 shape guard still mints the real
+// commits for N, so the day-commit shape guard still mints the real
 // day-commit N; the subsequent poll then seals N+1. Two distinct
 // day-commits, no fork, exactly one each.
 func TestBarrier_MorningCompletionThenNextDay(t *testing.T) {
@@ -918,7 +917,7 @@ func TestBarrier_MorningCompletionThenNextDay(t *testing.T) {
 		t.Fatalf("DaysSealed = %v, want [%d]", res.DaysSealed, dayN1)
 	}
 	if n := dayCommitCount(t, b, dayN); n != 1 {
-		t.Errorf("day %d re-sealed (count %d) — INV-2 fork", dayN, n)
+		t.Errorf("day %d re-sealed (count %d) — a second day-commit", dayN, n)
 	}
 	if n := dayCommitCount(t, b, dayN1); n != 1 {
 		t.Errorf("day %d count = %d, want 1", dayN1, n)
@@ -927,7 +926,7 @@ func TestBarrier_MorningCompletionThenNextDay(t *testing.T) {
 
 // TestBarrier_NoRefireAfterSeal — §2.1 poll semantics: after sealing,
 // the poll is a no-op for the same day (targets advance strictly
-// forward), and the INV-2 guard skips a re-driven B2.
+// forward), and the one-day-commit guard skips a re-driven B2.
 func TestBarrier_NoRefireAfterSeal(t *testing.T) {
 	a := newBarrierHome(t, 3)
 	ctx := context.Background()
@@ -1357,7 +1356,7 @@ func TestBarrier_PersistentSpineBreak(t *testing.T) {
 
 	// F1: the completed barrier must leave primary HEAD as the day-commit
 	// for N — a trailered-but-non-day-shape HEAD (the old trailing repair
-	// commit) satisfies detection while failing the INV-2 shape guard,
+	// commit) satisfies detection while failing the day-commit shape guard,
 	// re-firing runBarrier(N) on the next same-day open (second
 	// day-commit, mid-day nuke of the live daily).
 	if isDay, derr := autogit.HeadIsDayCommit(ctx, b.paths, autogit.Primary, day); derr != nil || !isDay {
@@ -1372,7 +1371,7 @@ func TestBarrier_PersistentSpineBreak(t *testing.T) {
 		t.Errorf("same-day re-poll re-fired the barrier: %v (F1)", res.DaysSealed)
 	}
 	if n := dayCommitCount(t, b, day); n != 1 {
-		t.Errorf("day-commit count after re-poll = %d, want exactly 1 (INV-2)", n)
+		t.Errorf("day-commit count after re-poll = %d, want exactly 1", n)
 	}
 }
 
@@ -1421,9 +1420,9 @@ func TestBarrier_PersistentDerivedBreak(t *testing.T) {
 	// Unlike a spine break (fixture i, where B2's gate fails and NO day-commit
 	// lands), a derived break lets B2's spine-good day-commit land — derived
 	// is not checked until B6 — so exactly one day-commit exists, and the
-	// INV-2 guard must not duplicate it across the refused re-drives.
+	// one-day-commit guard must not duplicate it across the refused re-drives.
 	if n := dayCommitCount(t, a, day); n != 1 {
-		t.Errorf("day-commit count while derived-broken = %d, want exactly 1 (spine-good day-commit lands once; no INV-2 duplicate)", n)
+		t.Errorf("day-commit count while derived-broken = %d, want exactly 1 (spine-good day-commit lands once; no duplicate)", n)
 	}
 	// The offending derived bytes are preserved byte-exact in quarantine
 	// (this is exactly the derived-quarantine path the findingRel abs-path
@@ -1533,7 +1532,7 @@ func TestBarrier_RefusedOpensDoNotAccrete(t *testing.T) {
 		t.Fatalf("post-unwedge Reconcile: %v", err)
 	}
 	if n := dayCommitCount(t, b, day); n != 1 {
-		t.Errorf("day-commit count after completion = %d, want exactly 1 (no accretion, INV-2)", n)
+		t.Errorf("day-commit count after completion = %d, want exactly 1 (no accretion)", n)
 	}
 	if isDay, derr := autogit.HeadIsDayCommit(ctx, b.paths, autogit.Primary, day); derr != nil || !isDay {
 		t.Errorf("primary HEAD not day-shape after completion (isDay=%v err=%v)", isDay, derr)

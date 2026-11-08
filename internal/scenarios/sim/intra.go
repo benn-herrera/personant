@@ -47,7 +47,7 @@ const (
 	mainThreadProbeEvery = 16
 
 	// convoTransientPct / toolTransientPct are the PRNG keep/toss model's
-	// transient RATES (#111 / design §7.3): the sim's deterministic stand-in for
+	// transient RATES: the sim's deterministic stand-in for
 	// the production §3.10.8 `lifetime:` marker. Per retained-excerpt-to-be, a
 	// fixed-seed PRNG (g.trimRng, derived from cfg.Seed) marks the excerpt
 	// transient with this probability; a transient excerpt is TRIMMED — it is
@@ -151,7 +151,7 @@ func depthOrZero(cur, target int) int {
 // assertion target. depth must be the predicted-target depth (>=1); 0 (no
 // predicted target) is never in the dead zone.
 //
-// THE (1+P)×cap WIDENING (B2 / BD-8). pending is the runtime's per-thread
+// THE (1+P)×cap WIDENING. pending is the runtime's per-thread
 // pending-flush depth P at the measurement instant: the runtime's lexical floor
 // widens its scan to (1+P)×cap while P flush jobs are enqueued-but-unpublished
 // (Recall multiplies EngagedDebtWindow by 1+pendingFlushDepth — see
@@ -467,7 +467,7 @@ func (g *generator) buildIntraProbeStep() (bufStep, bool) {
 		UserInput:    probeUserInput,
 		MockResponse: scenarios.NewMockResponseWithTag([]string{thr.threadID()}, anchorTags, "intra-thread probe."),
 		Annotation:   fmt.Sprintf("turn %d: intra-probe %s hop=%d", g.stepIndex+1, thr.threadID(), hop),
-		// W1 recall-preservation gate (#111 / design §7.1): the harness evaluates
+		// W1 recall-preservation measure: the harness evaluates
 		// IntraThreadDivergence for the engaged main thread on this step (on an
 		// embedding-live run with a usable tree) and accumulates
 		// recall_intra_descent_divergence. The intra probe is exactly the

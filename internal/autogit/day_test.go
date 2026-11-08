@@ -37,7 +37,7 @@ func TestDayTrailer_ShapeGuardRejectsTraileredNonDayShape(t *testing.T) {
 			t.Errorf("detection lost the trailer on %q: (%d,%v)", msg, day, ok)
 		}
 		if isDayCommitMessage(msg, 42) {
-			t.Errorf("non-day-shape message satisfied the INV-2 guard: %q", msg)
+			t.Errorf("non-day-shape message satisfied the day-commit guard: %q", msg)
 		}
 	}
 }
@@ -177,7 +177,7 @@ func TestDualHandles_ShareOneWorktree(t *testing.T) {
 	if err := Commit(ctx, paths, Primary, "primary-capture", 0, 0); err != nil {
 		t.Fatalf("primary Commit: %v", err)
 	}
-	// Neither repo sees the other's git-dir as tracked or dirty (INV-6).
+	// Neither repo sees the other's git-dir as tracked or dirty.
 	for _, which := range []Repo{Primary, Daily} {
 		wt, err := Worktree(ctx, paths, which)
 		if err != nil {
@@ -186,7 +186,7 @@ func TestDualHandles_ShareOneWorktree(t *testing.T) {
 		for _, p := range append(append([]string{}, wt.DirtyPaths...), wt.Untracked...) {
 			if p == ".git" || p == ".git-daily" ||
 				len(p) > 9 && (p[:5] == ".git/" || p[:11] == ".git-daily/") {
-				t.Errorf("%v status leaked a git-dir path: %s (INV-6)", which, p)
+				t.Errorf("%v status leaked a git-dir path: %s", which, p)
 			}
 		}
 	}

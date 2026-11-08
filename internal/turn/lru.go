@@ -10,7 +10,7 @@ import (
 const EmbeddingDebtCap = memops.EmbeddingDebtCap
 
 // flushEnqueuer is the narrow optional interface a Recaller may satisfy to
-// receive §3.4 index-flush signals (design §11.3, I7). The embedding
+// receive §3.4 index-flush signals (I7). The embedding
 // measure.Service implements EnqueueFlush; the symbolic-only default does
 // not — so with no embedder installed the debt/dormancy hooks below are
 // inert and behavior is byte-identical to today (the type assertion
@@ -35,7 +35,7 @@ type flushEnqueuer interface {
 // live per-thread debt depth, because a debt-cap flush resets the live counter
 // to 0 while its embed is still in flight — a live-count bound would re-open
 // the dead zone for the in-flight batch. The cap alone does not span that
-// window either once scroll-outs continue past the flush (BD-8): the recall
+// window either once scroll-outs continue past the flush: the recall
 // Service, which alone knows a flush is unpublished, widens the lexical scan
 // by its per-thread pending-flush depth — this side always passes the plain
 // cap (see measure.Request.EngagedDebtWindow).
@@ -251,14 +251,23 @@ func touchActiveLRU(state *State, thrID string) {
 		state.ActiveThreads = state.ActiveThreads[:len(state.ActiveThreads)-1]
 		state.DormantThreads = append([]string{demoted}, state.DormantThreads...)
 		flushOnDormancy(state, demoted)
-		// The thread has left the working window, so the §3.4 accept marks
-		// that said "these excerpts are already in it" no longer hold: drop
-		// them, and its early content can legitimately surface again.
-		delete(state.recallWindowTurns, demoted)
 	}
 	// DormantThreads is not count-capped (#127): Layer C's byte budget
 	// truncates the rendered dormant set at workset.Compose time, which is
 	// the real bound and avoids the m3 silent-drop of the count cap.
+}
+
+// evictThread removes id from both the active and dormant sets. A thread
+// leaving the active set this way leaves the working set as a demoted one
+// does, so it gets the same dormancy flush: its content is indexed by the
+// time it is gone.
+func evictThread(state *State, id string) {
+	before := len(state.ActiveThreads)
+	state.ActiveThreads = removeString(state.ActiveThreads, id)
+	state.DormantThreads = removeString(state.DormantThreads, id)
+	if len(state.ActiveThreads) < before {
+		flushOnDormancy(state, id)
+	}
 }
 
 // updateLayerLRU applies the §3.1 Layer B/C eviction policy after a

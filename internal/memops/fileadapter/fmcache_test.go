@@ -173,11 +173,11 @@ func TestFMCache_AntiStalenessCoherence(t *testing.T) {
 
 	// Archive: ProposeRecall must no longer return it, and a fresh LoadAll
 	// must drop it from the live set.
-	if err := a.ArchiveThread(ctx, "thr_1"); err != nil {
-		t.Fatalf("ArchiveThread: %v", err)
+	if _, err := a.ArchiveThreads(ctx, []string{"thr_1"}); err != nil {
+		t.Fatalf("ArchiveThreads: %v", err)
 	}
 	if proposeContains(t, a, []string{"newsym"}, "thr_1") {
-		t.Fatal("after ArchiveThread, ProposeRecall still found thr_1")
+		t.Fatal("after ArchiveThreads,ProposeRecall still found thr_1")
 	}
 	metas, err := a.fmCache.LoadAll(a.paths, nil)
 	if err != nil {
@@ -185,7 +185,7 @@ func TestFMCache_AntiStalenessCoherence(t *testing.T) {
 	}
 	for _, m := range metas {
 		if m.ID == "thr_1" {
-			t.Fatal("after ArchiveThread, LoadAll still returned thr_1")
+			t.Fatal("after ArchiveThreads,LoadAll still returned thr_1")
 		}
 	}
 }

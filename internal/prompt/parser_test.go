@@ -131,8 +131,8 @@ func TestParseAnchorNormalization(t *testing.T) {
 	}
 }
 
-// TestParseHighAnchorCountNoWarning — anchor-lifecycle Inc 1 deletes the
-// out-of-range cardinality warning. An over-AnchorProjectionMax anchor
+// TestParseHighAnchorCountNoWarning — there is no out-of-range
+// cardinality warning. An over-AnchorProjectionMax anchor
 // list parses cleanly with no warning: the projection owns the ceiling
 // deterministically (the strongest fold in), so the parser does not gate
 // or warn on count.
@@ -229,7 +229,7 @@ func TestParseEmptyThreadList(t *testing.T) {
 	}
 }
 
-// TestParseEmptyAnchorListIsValid — anchor-lifecycle Inc 1 / Risk R1: a
+// TestParseEmptyAnchorListIsValid — a
 // tag whose anchor list normalizes to empty is now a VALID tag, not
 // ErrNoTopicTag. The tag's job is thread binding (the valid thr_42 list
 // satisfies it); anchors are an advisory per-turn contribution, and 0

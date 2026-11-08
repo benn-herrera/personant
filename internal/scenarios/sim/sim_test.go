@@ -286,10 +286,10 @@ func TestParseSimDuration(t *testing.T) {
 //   - -sim.live-embedding on: install the real §3.4 embedder as the recaller
 //     (live config load from test/rundata + endpoint guard, FAIL-not-skip on
 //     missing/unreachable). Mock inference stays, so the recall oracle stays
-//     valid → the symbolic-vs-embedding head-to-head (Inc 2).
+//     valid → the symbolic-vs-embedding head-to-head.
 //   - -sim.live-inference on: install the live chat client and set oracleBlind
 //     (downgrade the oracle/plan-dependent gates to logs, keep the storage
-//     invariants hard — Inc 3); behavior-validation metrics; the SHORT
+//     invariants hard); behavior-validation metrics; the SHORT
 //     duration cap applies (a too-long span is refused, not silently run).
 //
 // The live config-load / endpoint-guard / duration-cap / oracle-blind are all
@@ -321,7 +321,7 @@ func TestSim(t *testing.T) {
 	// what distinguishes a 74 s mock dir from a live run's.
 	t.Logf("rundata: %s (manifest.json binds mode/seed/duration/git-head)", h.RunHome)
 
-	// Inference-in-loop behavior-validation summary (#98, Inc 3). These are the
+	// Inference-in-loop behavior-validation summary. These are the
 	// real-model behaviors the mock structurally cannot exercise, derived from
 	// the runtime's OWN event log (never the canned plan) — honest about the
 	// live model even though the recall oracle is blind. Skipped on the mock
@@ -380,7 +380,7 @@ func withRunTimestampSuffix(name string) string {
 // sleepCycleDayOffPeriod is the day index modulus the workload uses to
 // schedule a day-off (every 7th day, index 6/13/…). A run spanning at
 // least this many calendar days crosses ≥1 day-off and must therefore fire
-// ≥1 sleep cycle (#108).
+// ≥1 consolidation.
 const sleepCycleDayOffPeriod = 7
 
 // reportSleepCycles logs the sleep-cycle (#108) summary — count fired and
@@ -392,13 +392,13 @@ func reportSleepCycles(t *testing.T, m metricsBlob, d time.Duration) {
 	t.Helper()
 	// Metric keys come from the cross-seam registry in package scenarios
 	// (metric_keys.go) — one source of truth shared with the harness emitter,
-	// so a writer-side rename cannot silently zero these reads (burndown #1).
+	// so a writer-side rename cannot silently zero these reads.
 	cycles := m.Counters[scenarios.MetricSleepCycles]
 	pre := m.Histograms[scenarios.MetricGitDirBytesPreGC]
 	post := m.Histograms[scenarios.MetricGitDirBytesPostGC]
 	reclaimed := m.Counters[scenarios.MetricGitDirBytesReclaimed]
 
-	t.Logf("=== sleep cycles (#108) ===")
+	t.Logf("=== sleep cycles ===")
 	t.Logf("sleep_cycles:     %d", cycles)
 	t.Logf("git_dir_bytes:    pre-gc mean=%.0f post-gc mean=%.0f reclaimed total=%d",
 		mean(pre), mean(post), reclaimed)
@@ -423,7 +423,7 @@ func reportSleepCycles(t *testing.T, m metricsBlob, d time.Duration) {
 // is unexported; if that default changes, update this in lockstep.
 const historyCapForReport = 40
 
-// recordLifecycleMetrics folds the anchor-lifecycle (Inc 5) §9.4 metrics
+// recordLifecycleMetrics folds the anchor-lifecycle §9.4 metrics
 // into the run's metrics blob. It draws from two sources, both
 // metrics-package-free at the generator boundary:
 //
@@ -941,7 +941,7 @@ func TestDayStartWithinBucket(t *testing.T) {
 }
 
 // TestKeepTossTrim_DeterministicAndShrinksLeafSet exercises the PRNG keep/toss
-// model (#111 / design §7.3): the durable (kept) leaf count must (a) be
+// model: the durable (kept) leaf count must (a) be
 // deterministic for a given seed — two generators draw the identical
 // classification — and (b) shrink the emitted excerpt set toward the
 // (1-rate) keep fraction. The SYMBOL union (emittedSyms) and the full shadow
@@ -1312,7 +1312,7 @@ func recordWanderMetrics(h *scenarios.Harness, gen *generator) {
 	}
 	h.Metrics.Set(metricWanderCoherenceDivergence, float64(divergence))
 
-	// Layer-B shadow cross-check (burndown #8): the run-total count of
+	// Layer-B shadow cross-check: the run-total count of
 	// runtime-resident threads the generator's shadow LRU failed to predict.
 	// The gate lives in evalRungGates (hard == 0 when the runtime follows the
 	// canned plan).
@@ -1407,8 +1407,8 @@ func recordIntraThreadMetrics(h *scenarios.Harness, gen *generator, liveThreads 
 }
 
 // TestMetricKeyTagsMatchRegistry pins the dailyStats JSON struct tags that
-// encode a cross-seam metric key to their scenarios-package registry const
-// (burndown #1). A Go struct tag cannot reference a const, so a registry
+// encode a cross-seam metric key to their scenarios-package registry const.
+// A Go struct tag cannot reference a const, so a registry
 // rename that forgets to update the matching tag here would otherwise pass
 // silently — the daily-record JSON key and the live metric key would drift
 // apart. This test fails loudly on that drift: it walks dailyStats by field
@@ -1515,8 +1515,8 @@ func assertThreadIDsWellFormed(t *testing.T, h *scenarios.Harness) {
 	}
 }
 
-// TestNonLooseTagsNeverPads — anchor-lifecycle Inc 5 deleted the §5.1
-// 4-anchor floor and its stub-padding scaffold. Every emission now carries
+// TestNonLooseTagsNeverPads — there is no anchor floor and no stub
+// padding. Every emission now carries
 // nonLooseTags verbatim (new-thread, engagement, refinement alike); 0
 // anchors is legal (vague start) and the runtime's projection owns the
 // AnchorProjectionMax ceiling. This test pins that nonLooseTags drops the
@@ -1968,7 +1968,7 @@ func TestDayOffThroughHarness(t *testing.T) {
 		t.Errorf("found %d zero-turn day records, want exactly 1 (the single weekly day-off)", zeroTurnDays)
 	}
 
-	// One sleep cycle fired (the day-off's SleepCycle consolidation). The
+	// One consolidation fired (the day-off's SleepCycle step). The
 	// run-to-date counter is monotonic and ends at the run's total; a 9-day run
 	// crosses exactly one Sunday.
 	last := recs[len(recs)-1].RunToDate

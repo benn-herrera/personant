@@ -39,13 +39,13 @@ import (
 const maxEmbedChars = 28000
 
 // Kc is the coarse top-K: the number of threads the coarse pass selects
-// for the fine pass (design §4.2). Ten captures essentially all genuine
-// thread matches (C.6: true topic in top-10 by cosine) while bounding
+// for the fine pass. Ten captures essentially all genuine
+// thread matches (corpus calibration: true topic in top-10 by cosine) while bounding
 // the fine-pass fan-out. A §9 calibration window, not a frozen constant.
 const Kc = 10
 
 // Kf is the fine top-K: the number of chunks the fine pass keeps per
-// selected thread (design §4.2). Three surfaces the relevant passage
+// selected thread. Three surfaces the relevant passage
 // plus immediate neighbours without flooding the merge. A §9 calibration
 // window. It is the SAME constant as the pure scoring layer's default
 // chunk limit — scoring.DefaultChunkLimit is the single source, referenced
@@ -54,7 +54,7 @@ const Kf = scoring.DefaultChunkLimit
 
 // indexSnapshot is the immutable hierarchical embedding index. Once
 // published into Service.cur it is never mutated; the indexer builds a
-// fresh snapshot and atomically swaps the pointer (design §6.3). Readers
+// fresh snapshot and atomically swaps the pointer. Readers
 // load the pointer once and scan a consistent whole — never a torn one
 // (I1).
 type indexSnapshot struct {
@@ -90,7 +90,7 @@ type indexSnapshot struct {
 	// is usable iff treeHash[threadID] equals the hash composed from the
 	// thread's CURRENT fineHash leaves (composeLeafHash): trimming/adding a
 	// leaf moves the composed hash, marking the tree stale → flat fallback
-	// (W8) until the next sleep cycle rebuilds and re-stamps it.
+	// (W8) until the next consolidation rebuilds and re-stamps it.
 	treeHash map[string]string
 }
 
@@ -182,8 +182,7 @@ type cacheEntry struct {
 
 // IntraThreadHit is the intra-thread (fine-tier) detail for a recalled
 // thread: the matched scrolled-out turn-excerpt number(s) of the engaged
-// thread and the best chunk score. Sibling of SymbolicHit / EmbeddingHit
-// (design §7).
+// thread and the best chunk score. Sibling of SymbolicHit / EmbeddingHit.
 type IntraThreadHit struct {
 	Turns []int
 	Score float64
@@ -222,8 +221,8 @@ type Request struct {
 	Project string
 	// Exclude is the set of thread IDs to omit at the thread level —
 	// typically threads engaged this turn. The engaged thread named in
-	// Engaged is still admitted to the fine pass by ID (design §4.1 step
-	// 3) even when it is in Exclude.
+	// Engaged is still admitted to the fine pass by ID even when it is in
+	// Exclude.
 	Exclude map[string]struct{}
 	// Engaged is the thread the user is currently in. When set and an
 	// embedder is configured, its fine-tier (scrolled-out) chunks are
@@ -243,7 +242,7 @@ type Request struct {
 	// It is the CAP, not the live count, on purpose: a debt-cap flush resets
 	// the live counter to 0 and embeds asynchronously, so a live-count bound
 	// would re-open the dead zone for exactly the cap-sized batch during the
-	// flush's in-flight window. The cap alone is NOT sufficient either (BD-8):
+	// flush's in-flight window. The cap alone is NOT sufficient either:
 	// while a flush is in flight, further scroll-outs push the in-flight
 	// batch's oldest excerpts below the newest-cap band, so the Service
 	// widens the scan internally to (1 + its pending-flush depth) × this
@@ -253,23 +252,6 @@ type Request struct {
 	// excerpts, de-duped in the union). 0 → no debt pass (byte-identical prior
 	// behaviour). Sourced from the runtime's own debt-cap constant.
 	EngagedDebtWindow int
-
-	// EngagedInWindow is the set of the engaged thread's turn-excerpt numbers
-	// the CALLER considers already in the working window — content the user
-	// has in front of them, which the intra-thread pass must therefore not
-	// propose again. The runtime populates it from accepted intra-thread
-	// recalls (turn.State.recallWindowTurns): the engaged thread is admitted
-	// to the fine pass BY ID, so the thread-level Exclude set cannot express
-	// "the user already took this", and without it an accepted hit re-fires
-	// identically every following turn.
-	//
-	// It filters the intra-thread pass ONLY (fine tier + the #123 lexical
-	// completeness floor), and only for the engaged thread. It is not a
-	// recall-completeness exception: the excluded content is in the window,
-	// which is the one place §3.4 says recall need not reach it, and the
-	// caller drops the set the moment the thread leaves that window. nil/empty
-	// → byte-identical prior behaviour.
-	EngagedInWindow map[int]struct{}
 }
 
 // SymbolicHit is the layer-1 detail for a recalled thread.
@@ -315,7 +297,7 @@ func (r Result) Layers() []string {
 type Service struct {
 	ops      memops.MemoryOps
 	embedder model.Embedder // nil → symbolic-only recall, no indexer goroutine
-	cache    vectorCache    // §5 persisted cache; nil → no cache (Inc 2 stub)
+	cache    vectorCache    // §5 persisted cache; nil → no cache
 
 	// cur is the live index snapshot, read lock-free by Recall (I1). It is
 	// always non-nil after construction. There are TWO CAS publishers since
@@ -384,7 +366,7 @@ type Service struct {
 	w1DiagTreeMismatch atomic.Int64
 
 	// pendingFlush counts, per thread, flush jobs enqueued but not yet
-	// FINISHED by the indexer (BD-8). It is the in-flight-window signal the
+	// FINISHED by the indexer. It is the in-flight-window signal the
 	// §3.4 lexical completeness floor widens by: after a cap-flush fires, the
 	// runtime resets its per-thread debt counter while the flush job is still
 	// unpublished, so new scroll-outs accrue ON TOP of the in-flight batch and
@@ -422,7 +404,7 @@ func (s *Service) addPendingFlush(threadID string, d int) int {
 // in flight. Bounded by the jobs channel: at most jobQueueDepth queued, plus
 // one being processed, plus one blocked sender — EnqueueFlush increments the
 // count BEFORE the channel send, so a sender blocked on a full queue is
-// already counted. Worst case jobQueueDepth+2 (BD-8).
+// already counted. Worst case jobQueueDepth+2.
 func (s *Service) pendingFlushDepth(threadID string) int {
 	s.pendingMu.Lock()
 	defer s.pendingMu.Unlock()
@@ -473,7 +455,7 @@ func NewService(ops memops.MemoryOps, embedder model.Embedder) *Service {
 // (a port that does not expose a cache dir, or a test) it falls back to
 // the from-scratch coarse build (embed every thread's body). Either way
 // the fine tier for un-cached threads is then filled by EnqueueFlush jobs
-// as threads scroll out (Inc 4 drives those).
+// as threads scroll out (the runtime's debt and dormancy hooks drive those).
 func (s *Service) Prepare(ctx context.Context) error {
 	if s.embedder == nil {
 		return nil
@@ -508,7 +490,7 @@ func (s *Service) Prepare(ctx context.Context) error {
 	s.cur.Store(snap)
 
 	// Start the single indexer goroutine for runtime upkeep (EnqueueFlush /
-	// AddThread driven by Inc 4's debt/dormancy hooks). Startup misses were
+	// AddThread driven by the runtime's debt/dormancy hooks). Startup misses were
 	// already filled synchronously by the reconcile above.
 	s.jobs = make(chan indexJob, jobQueueDepth)
 	s.stop = make(chan struct{})
@@ -552,13 +534,13 @@ func (s *Service) buildCoarse(ctx context.Context) (*indexSnapshot, error) {
 }
 
 // jobQueueDepth bounds the indexer's pending-job buffer. Flush triggers
-// (debt cap + dormancy, Inc 4) enqueue well under one job per turn even
+// (debt cap + dormancy) enqueue well under one job per turn even
 // on a continuously active thread; this depth absorbs bursts without the
 // turn loop blocking on a busy indexer.
 const jobQueueDepth = 256
 
 // pendingFlushWarnThreshold is the per-thread pending-flush depth above which
-// EnqueueFlush emits a flush-backlog log line (BD-8 backlog forensic). In the
+// EnqueueFlush emits a flush-backlog log line (backlog forensic). In the
 // steady state pending is 0-1; a depth past a handful means the indexer is
 // falling behind the flush triggers (slow embedder, stalled endpoint) — the
 // widened §3.4 lexical band keeps completeness intact, but the backlog is a
@@ -589,7 +571,7 @@ func (s *Service) AddThread(ctx context.Context, threadID string) error {
 	return nil
 }
 
-// EnqueueFlush is the public entry the turn loop calls (Inc 4) at a debt-
+// EnqueueFlush is the public entry the turn loop calls at a debt-
 // cap or dormancy trigger to (re)index a thread. A no-op when no embedder is
 // configured or before Prepare started the indexer. dispatchTurncount is the
 // thread's turncount at dispatch — the monotonicity watermark (I2).
@@ -626,7 +608,7 @@ func (s *Service) EnqueueFlush(threadID string, dispatchTurncount int) {
 	}
 	// Count the job as pending BEFORE it is visible to the indexer, so the
 	// §3.4 lexical floor is already widened by the time the job could race a
-	// concurrent Recall (BD-8). The matching decrement is processJob's defer.
+	// concurrent Recall. The matching decrement is processJob's defer.
 	if n := s.addPendingFlush(threadID, 1); n > pendingFlushWarnThreshold {
 		_ = s.ops.Log(context.Background(), memops.LogCategoryRecall, "flush-backlog",
 			fmt.Sprintf("thread=%s pending=%d threshold=%d", threadID, n, pendingFlushWarnThreshold))
@@ -729,7 +711,7 @@ func (s *Service) processJob(ctx context.Context, job indexJob) {
 	// The pending count drops only when the job is DONE (published or
 	// abandoned), never at pickup: while the embed is in flight the flushed
 	// excerpts are in neither the fine tier nor, necessarily, the newest-cap
-	// lexical band, and the widened floor is what keeps them findable (BD-8).
+	// lexical band, and the widened floor is what keeps them findable.
 	defer s.addPendingFlush(job.threadID, -1)
 	thr, err := s.ops.LoadThread(ctx, job.threadID)
 	if err != nil {
@@ -772,7 +754,7 @@ func (s *Service) processJob(ctx context.Context, job indexJob) {
 	texts := append([]string{bodyText}, embedTexts...)
 
 	// One batched embed call for the coarse body + the EMBED-partition chunks
-	// (design §6.1 batch efficiency, now over the delta only).
+	// (batch efficiency, now over the delta only).
 	vecs, err := s.embedder.Embed(ctx, texts)
 	if err != nil {
 		_ = s.ops.Log(ctx, memops.LogCategoryRecall, "index-error", fmt.Sprintf("embed %s: %v", job.threadID, err))
@@ -894,7 +876,7 @@ func (s *Service) priorChunkVectors(threadID string) map[string][]float64 {
 func (s *Service) swap(threadID string, dispatchTurncount int, coarse scoring.ThreadVector, chunks []scoring.ChunkVector, chunkHashes []string) {
 	for {
 		old := s.cur.Load()
-		// STRICTLY-LESS only (BD-8). The guard exists to stop a STALE
+		// STRICTLY-LESS only. The guard exists to stop a STALE
 		// in-flight embed overwriting fresher vectors across a
 		// re-activate/re-decay cycle — a cycle that spans turns, so a
 		// genuinely stale job always carries a strictly LOWER watermark. An
@@ -969,7 +951,7 @@ func (s *indexSnapshot) with(threadID string, coarse scoring.ThreadVector, chunk
 	// here may leave a stale tree for threadID, which treeUsable handles — a
 	// tree whose stored treeHash no longer matches the composed hash of the
 	// CURRENT fineHash[threadID] leaves falls back to the flat scan (W8) until
-	// the next sleep cycle rebuilds and re-stamps it. nil chunkHashes (an
+	// the next consolidation rebuilds and re-stamps it. nil chunkHashes (an
 	// empty fine entry was just deleted) leaves no leaf hashes, so any prior
 	// tree for it is unconditionally stale on the next read.
 	newTree := make(map[string]*scoring.SummaryNode, len(s.tree))
@@ -994,7 +976,7 @@ func (s *indexSnapshot) with(threadID string, coarse scoring.ThreadVector, chunk
 // Recall runs the recall layers and returns merged candidates ranked
 // for the experience layer.
 //
-// Layers run as parallel signals, not a cascade — the C.6 calibration
+// Layers run as parallel signals, not a cascade — the corpus calibration
 // showed symbolic Jaccard recall collapses under vocabulary drift, so
 // it must not gate the embedding scan. Layer 1 failure (a substrate
 // error) is returned. Layer 2 failure (an embedding call) is logged
@@ -1002,7 +984,7 @@ func (s *indexSnapshot) with(threadID string, coarse scoring.ThreadVector, chunk
 //
 // The embedding layer reads the live index via a single atomic load
 // (s.cur.Load) and never takes a lock the indexer holds (I1). It runs the
-// coarse→fine algorithm (design §4.1): a coarse thread-selection pass,
+// coarse→fine algorithm: a coarse thread-selection pass,
 // a fine chunk pass over the selected threads, and an engaged-thread
 // intra-thread pass that bypasses the coarse gate (step 3).
 //
@@ -1013,7 +995,7 @@ func (s *indexSnapshot) with(threadID string, coarse scoring.ThreadVector, chunk
 func (s *Service) Recall(ctx context.Context, req Request) ([]Result, error) {
 	merged := map[string]*Result{}
 
-	// BD-8: capture the engaged thread's in-flight flush depth BEFORE the
+	// Capture the engaged thread's in-flight flush depth BEFORE the
 	// index snapshot is loaded below, and widen the §3.4 lexical floor by it
 	// (bound derivation at debtWindowTurns). The ordering is load-bearing: a
 	// flush that completes between these two reads is covered either way —
@@ -1079,7 +1061,7 @@ func (s *Service) Recall(ctx context.Context, req Request) ([]Result, error) {
 		// related candidate, the scorer bumps this and we log it once so the
 		// degenerate tail is VISIBLE (it is never the normal path).
 		netCapHits := 0
-		if hit := s.intraThread(q, snap, req.Engaged, req.EngagedInWindow, counter, &netCapHits); hit != nil {
+		if hit := s.intraThread(q, snap, req.Engaged, counter, &netCapHits); hit != nil {
 			r := merged[req.Engaged]
 			if r == nil {
 				r = &Result{ThreadID: req.Engaged}
@@ -1112,7 +1094,7 @@ func (s *Service) Recall(ctx context.Context, req Request) ([]Result, error) {
 	// outside the q != nil block on purpose: completeness must not depend on a
 	// query embedding being produced. No-op unless there is an engaged thread,
 	// known debt, and query symbols to match against.
-	if turns := dropInWindow(s.debtWindowTurns(ctx, req.Engaged, debtWindow, req.QuerySymbols), req.EngagedInWindow); len(turns) > 0 {
+	if turns := s.debtWindowTurns(ctx, req.Engaged, debtWindow, req.QuerySymbols); len(turns) > 0 {
 		r := merged[req.Engaged]
 		if r == nil {
 			r = &Result{ThreadID: req.Engaged}
@@ -1138,8 +1120,8 @@ func (s *Service) Recall(ctx context.Context, req Request) ([]Result, error) {
 	return out, nil
 }
 
-// rankTier assigns a result to one of three ranking tiers so the offer
-// top-recallOfferK cut (turn/recall.go, which takes the leading slice of this
+// rankTier assigns a result to one of three ranking tiers so the auto-fetch
+// top-recallFetchK cut (turn/recall.go, which takes the leading slice of this
 // ordering) can never let a completeness-only signal displace a genuinely
 // scored candidate:
 //
@@ -1147,13 +1129,13 @@ func (s *Service) Recall(ctx context.Context, req Request) ([]Result, error) {
 //	    intra-thread hit carrying a real (positive) cosine score;
 //	1 — a symbolic-only Jaccard hit (scored, but the weaker relevance signal);
 //	2 — a lexical-floor completeness hit ONLY: an intra-thread hit with Score 0
-//	    and no embedding or symbolic signal — the #123 debt-window guarantee
+//	    and no embedding or symbolic signal — the debt-window guarantee
 //	    that durable-but-unembedded content stays FINDABLE, not a relevance
 //	    ranking. It sits below every scored candidate so a Score-0 lexical hit
-//	    cannot bump a high-cosine (or any scored) candidate out of the offered
-//	    top-recallOfferK — yet it stays IN the result set (completeness
+//	    cannot bump a high-cosine (or any scored) candidate out of the
+//	    top-recallFetchK — yet it stays IN the result set (completeness
 //	    preserved), surfacing only when there are fewer scored candidates than
-//	    the offer cut.
+//	    the fetch cut.
 //
 // The distinguishing key is IntraThread.Score: a real intra embedding hit
 // scores its best chunk's positive cosine, whereas a pure lexical debt-window
@@ -1274,38 +1256,24 @@ func exhaustiveIntraScan(q []float64, snap *indexSnapshot, threadID string, thre
 // snap.fine (only scrolled-out chunks are indexed, I6), so the bypass is
 // automatically window-excluded.
 //
-// It chooses between two paths (design §4 / W8): the O(log n) summary-tree
+// It chooses between two paths (W8): the O(log n) summary-tree
 // descent when a usable tree is present, else the flat O(C_main)
 // ProposeChunks scan over all of snap.fine[engaged]. See intraChunks for
 // the path-selection rule.
-//
-// inWindow (Request.EngagedInWindow) drops chunks the caller has already
-// pulled into the working window. The filter runs on the RESULT rather
-// than on the leaves: the descent path reads a prebuilt tree whose leaves
-// cannot be filtered without rebuilding it, and the set is tiny, so
-// dropping matched turns after the rank is both cheaper and identical in
-// outcome for the top hit. A hit whose every chunk is in the window
-// returns nil — the whole point is that there is nothing left to offer.
-func (s *Service) intraThread(q []float64, snap *indexSnapshot, engaged string, inWindow map[int]struct{}, counter *scoring.CosineCounter, netCapHits *int) *IntraThreadHit {
+func (s *Service) intraThread(q []float64, snap *indexSnapshot, engaged string, counter *scoring.CosineCounter, netCapHits *int) *IntraThreadHit {
 	if engaged == "" {
 		return nil
 	}
 	chunks := s.intraChunks(q, snap, engaged, counter, netCapHits)
-	turns := make([]int, 0, len(chunks))
-	best := 0.0
-	for _, c := range chunks {
-		if _, skip := inWindow[c.TurnNumber]; skip {
-			continue
-		}
-		if len(turns) == 0 {
-			best = c.Score // chunks are score-ordered; the first survivor is the best
-		}
-		turns = append(turns, c.TurnNumber)
-	}
-	if len(turns) == 0 {
+	if len(chunks) == 0 {
 		return nil
 	}
-	return &IntraThreadHit{Turns: turns, Score: best}
+	turns := make([]int, len(chunks))
+	for i, c := range chunks {
+		turns[i] = c.TurnNumber
+	}
+	// Chunks are score-ordered, so the first is the best.
+	return &IntraThreadHit{Turns: turns, Score: chunks[0].Score}
 }
 
 // debtWindowTurns is the §3.4 recall-completeness floor (#123): a BOUNDED
@@ -1316,7 +1284,7 @@ func (s *Service) intraThread(q []float64, snap *indexSnapshot, engaged string, 
 // even during the async-flush lag, with no dead zone (completeness is
 // continuous, not eventual).
 //
-// IN-FLIGHT WIDENING (BD-8). window is the §6.5 debt cap ALREADY widened by
+// IN-FLIGHT WIDENING. window is the §6.5 debt cap ALREADY widened by
 // Recall to (1 + pending flushes) × cap — the plain cap covers only the
 // accrual since the last flush enqueue, NOT a flush that has fired but not
 // yet published: the runtime resets its debt counter at enqueue, so new
@@ -1347,8 +1315,8 @@ func (s *Service) intraThread(q []float64, snap *indexSnapshot, engaged string, 
 //
 // KNOWN GAP (accepted, pre-existing): the ONLY decrement-without-publish
 // path is a flush job that genuinely FAILS (load or embed error) — the
-// former equal-watermark drop no longer exists (swap publishes on ties,
-// BD-8). A SINGLE transient embed failure opens a gap for that job's batch
+// former equal-watermark drop no longer exists (swap publishes on ties).
+// A SINGLE transient embed failure opens a gap for that job's batch
 // lasting until the NEXT SUCCESSFUL flush for the thread republishes the
 // full retained set: for an engaged-but-idle thread that can span the rest
 // of the session (the next cap-flush needs more scroll-out), healed by the
@@ -1367,25 +1335,6 @@ func (s *Service) debtWindowTurns(ctx context.Context, engaged string, window in
 		return nil
 	}
 	return exact.MatchExcerptsBySymbols(excerpts, symbols)
-}
-
-// dropInWindow removes turn numbers the caller has already pulled into the
-// working window (Request.EngagedInWindow) from a lexical debt-window result.
-// The completeness floor and the fine tier answer the same question about the
-// same thread, so they honour the same filter — otherwise an accepted excerpt
-// would keep re-surfacing through the lexical path alone. An empty filter
-// returns the input unchanged (no allocation).
-func dropInWindow(turns []int, inWindow map[int]struct{}) []int {
-	if len(turns) == 0 || len(inWindow) == 0 {
-		return turns
-	}
-	out := turns[:0:0]
-	for _, n := range turns {
-		if _, skip := inWindow[n]; !skip {
-			out = append(out, n)
-		}
-	}
-	return out
 }
 
 // unionIntraTurns merges the lexical debt-window turns into the (possibly nil)
@@ -1449,7 +1398,7 @@ func (s *Service) intraChunks(q []float64, snap *indexSnapshot, engaged string, 
 }
 
 // treeUsable reports whether the engaged thread's summary tree should drive
-// the intra-pass (design §4 fallback predicate / W8). It returns false — the
+// the intra-pass (fallback predicate, W8). It returns false — the
 // caller flat-scans — for any of:
 //
 //   - no tree built for the thread (nil entry);
@@ -1459,7 +1408,7 @@ func (s *Service) intraChunks(q []float64, snap *indexSnapshot, engaged string, 
 //     treeHash — the composed childrenHash of the leaf set it was built
 //     against — no longer equals the hash composed from the thread's CURRENT
 //     leaf chunk hashes. Adding, trimming, or changing a leaf moves the
-//     composed hash, so the tree is stale until the next sleep cycle rebuilds
+//     composed hash, so the tree is stale until the next consolidation rebuilds
 //     and re-stamps it (G8).
 //
 // The staleness key reuses the existing per-chunk chunk_hash as the leaf
@@ -1571,8 +1520,7 @@ const w1Epsilon = 1e-9
 // It is EXPORTED as the single source of truth for the per-probe class label
 // strings that cross the harness↔measure seam: IntraThreadDivergence returns
 // the string form and the scenarios harness maps it to the recall_intra_w1_*
-// counters by referencing W1StrictMiss/W1Tie/W1TreeMismatch directly (burndown
-// BD-3), rather than mirroring the literals with a comment-only "must match".
+// counters by referencing W1StrictMiss/W1Tie/W1TreeMismatch directly, rather than mirroring the literals with a comment-only "must match".
 type W1Class string
 
 const (
@@ -1776,7 +1724,7 @@ func turnSetDifference(a, b []scoring.ChunkCandidate) int {
 }
 
 // IntraThreadDivergence is the exported W1 recall-preservation measure seam
-// (design §7.1) the sim/harness calls per intra-thread probe: embed the
+// the sim/harness calls per intra-thread probe: embed the
 // query, load the live index snapshot, and return the descent-vs-flat
 // top-Kf set difference for the engaged thread. The sim REPORTS
 // recall_intra_descent_divergence as an approximation-drift quality measure
@@ -1794,7 +1742,7 @@ func turnSetDifference(a, b []scoring.ChunkCandidate) int {
 // string form of the exported W1Class labels — W1StrictMiss / W1Tie /
 // W1TreeMismatch, empty when div==0). It is a bare string, not W1Class, to keep
 // the scenarios-side probe interface free of a measure-type dependency; the
-// harness maps it back through the exported W1Class consts (BD-3). The harness
+// harness maps it back through the exported W1Class consts. The harness
 // accumulates the run-total class tally at the SAME call site it accumulates the
 // divergence counter. That co-location is what makes the two metrics survive
 // the per-session Service instance churn a RestartSession causes: the
@@ -1811,8 +1759,8 @@ func (s *Service) IntraThreadDivergence(ctx context.Context, queryText, engaged 
 }
 
 // CosineOps returns the run-total count of cosine comparisons the embedding
-// recall path has performed — the MEASURED numerator of recall_query_cosine_ops
-// (design §7.2). RecallQueries returns the number of embedding-recall queries
+// recall path has performed — the MEASURED numerator of
+// recall_query_cosine_ops. RecallQueries returns the number of embedding-recall queries
 // that performed them (the denominator). The per-query average
 // CosineOps()/RecallQueries() is the empirical perf-bend metric: with a flat
 // scan the engaged term tracks C_main; with a usable descent tree it collapses

@@ -52,11 +52,6 @@ type MockClient struct {
 	genOpts GeneratedMockOpts
 	counter int
 
-	// Models is returned verbatim from ListModels. Settable at
-	// construction (NewScriptedMock) or directly on the returned
-	// *MockClient. nil → ListModels returns an empty slice.
-	Models []ModelInfo
-
 	calls []MockCall
 
 	// RecordCalls — when true, every Consult call is appended to the
@@ -148,17 +143,11 @@ const (
 // are ignored — a multi-turn caller installs each subsequent turn's
 // response with SetResponse. A nil/empty `responses` leaves the slot
 // empty; the first Consult before any SetResponse yields ErrMockExhausted.
-//
-// models is returned verbatim from ListModels; nil yields an empty list.
-func NewScriptedMock(responses []Response, models []ModelInfo) *MockClient {
+func NewScriptedMock(responses []Response) *MockClient {
 	m := &MockClient{scripted: true}
 	if len(responses) > 0 {
 		m.current = responses[0]
 		m.hasCurrent = true
-	}
-	if models != nil {
-		m.Models = make([]ModelInfo, len(models))
-		copy(m.Models, models)
 	}
 	return m
 }
@@ -279,22 +268,6 @@ func (m *MockClient) SetResponse(resp Response) {
 		m.hasCurrent = true
 	}
 	m.mu.Unlock()
-}
-
-// ListModels returns a copy of the Models field, or an empty slice if
-// none are configured. ctx is honored for cancellation.
-func (m *MockClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.Models == nil {
-		return []ModelInfo{}, nil
-	}
-	out := make([]ModelInfo, len(m.Models))
-	copy(out, m.Models)
-	return out, nil
 }
 
 // Calls returns a snapshot of every Consult invocation observed so far.

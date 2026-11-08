@@ -156,7 +156,7 @@ func Worktree(ctx context.Context, paths store.PersonantPaths, which Repo) (Work
 // Reset PRECEDES validity; validation is the recovery orchestrator's
 // job, after normalization.
 //
-// Dual-repo note (INV-1): ResetHard is only ever CALLED against Daily —
+// Dual-repo note: ResetHard is only ever CALLED against Daily —
 // resetting the worktree to primary HEAD (which lags by up to a day)
 // would silently destroy the day. The selector exists for uniformity
 // and greppability, not because a Primary reset is ever legitimate.

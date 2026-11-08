@@ -63,7 +63,7 @@ func TestInferenceTelemetryEvent(t *testing.T) {
 			mock := model.NewScriptedMock([]model.Response{{
 				Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello world.",
 				Usage:   tc.usage,
-			}}, nil)
+			}})
 			state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 
 			_, info, err := RunWithInfo(context.Background(), state, nil, "hi", &bytes.Buffer{})

@@ -35,7 +35,7 @@ type HTTPClient struct {
 // NewHTTPClient constructs an HTTPClient for the endpoint at baseURL. An
 // empty baseURL yields a client whose first call will produce a clear
 // error; an empty apiKey sends no Authorization header.
-func NewHTTPClient(baseURL, apiKey string) Client {
+func NewHTTPClient(baseURL, apiKey string) *HTTPClient {
 	return &HTTPClient{
 		baseURL: baseURL,
 		apiKey:  apiKey,

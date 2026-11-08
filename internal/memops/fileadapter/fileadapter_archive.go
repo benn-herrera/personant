@@ -39,10 +39,9 @@ var (
 	cpBatchPostStamp          = crashpoint.Register("archiveBatch.postStamp")
 )
 
-// §3.8 recoverable git-based archival (task #99, design §3.2 / §7.2). This
-// file holds the batch ArchiveThreads and RecoverThread — the first
-// callers of internal/autogit from the adapter. Single-thread ArchiveThread
-// is a thin wrapper in fileadapter.go.
+// §3.8 recoverable git-based archival. This file holds the batch
+// ArchiveThreads and RecoverThread — the first callers of internal/autogit
+// from the adapter.
 //
 // Archival event vocabulary on the substrate event log:
 const (
@@ -79,9 +78,8 @@ func threadRelDir(threadID string) string {
 // caller drives the cadence (mid-session structural change, session close);
 // this method is the mechanism, not the policy.
 //
-// Target: DAILY, for EVERY Checkpoint — mid-session structural AND the
-// session-close backstop (#94 R3b, F2). Primary is barrier-exclusive
-// (INV-5): the day barrier's B2 is the only worktree→primary capture, so
+// Target: DAILY, for EVERY Checkpoint (F2). Primary is barrier-exclusive:
+// the day barrier's B2 is the only worktree→primary capture, so
 // this method needs no Repo argument and no caller split. The full
 // Add(".") sweep is also what absorbs hand-edits (recovery cell 3) into
 // the daily record; the barrier's own B1/B2 sweep folds them into the
@@ -132,7 +130,7 @@ func (a *FileAdapter) Checkpoint(ctx context.Context, reason string) error {
 // home tree's on-disk footprint across long-lived sessions. It is
 // extensible to spine compaction / archival advance later.
 //
-// gc failure is NON-FATAL: a sleep cycle is a pure optimization, so a gc
+// gc failure is NON-FATAL: consolidation is a pure optimization, so a gc
 // error is logged (and recorded as gc=err on the event line) but does not
 // propagate — the method returns nil so a failed reclamation never aborts
 // the session it runs inside. An event-log write failure, by contrast,
@@ -187,7 +185,7 @@ func (a *FileAdapter) Consolidate(ctx context.Context, reason string) error {
 	return nil
 }
 
-// ArchiveThreads archives a batch of retired threads (design §3.2) —
+// ArchiveThreads archives a batch of retired threads —
 // the PUBLIC standalone contract: no-in-flight-scope check, op=archival
 // marker, the batch body, marker clear. Under R3b the routine drain is
 // barrier-homed (B1 calls archiveBatch directly inside the op=barrier
@@ -275,8 +273,8 @@ func (a *FileAdapter) absorbIntoDaily(ctx context.Context, reason string) error 
 //
 //  1. CAPTURE commit — stage the whole worktree (Add(".")) and commit.
 //     This pins every to-be-archived directory into a committed tree —
-//     and, at the barrier, it is what makes B4's daily nuke safe
-//     (INV-3): after it lands, primary already holds the day's
+//     and, at the barrier, it is what makes B4's daily nuke safe:
+//     after it lands, primary already holds the day's
 //     cumulative content. This commit becomes the PARENT of the deletion
 //     commit and is where the archived bytes live. If the worktree is
 //     already clean, go-git rejects the empty commit; we tolerate that
@@ -297,8 +295,8 @@ func (a *FileAdapter) absorbIntoDaily(ctx context.Context, reason string) error 
 //  4. STAMP commit — rewrite the index entries with CommitHash = H and
 //     commit that single-file change.
 //
-// Crash-safety per sub-window (design §2.3 F1 — each boundary carries a
-// registered crashpoint): every window either has no deletion begun
+// Crash-safety per sub-window (F1 — each boundary carries a registered
+// crashpoint): every window either has no deletion begun
 // (membership may simply re-form) or has the unstamped worklist +
 // capture commit, from which the adapter's completion routine
 // (completeArchivalBatch) rolls FORWARD — ensure-removed →
@@ -378,13 +376,12 @@ func (a *FileAdapter) archiveBatch(ctx context.Context, threadIDs []string, day 
 	// CAPTURE commit → PRIMARY: pin the to-be-archived directories into a
 	// committed tree so the deletion commit's parent holds their bytes.
 	// At the barrier this is also the worktree-capture that makes the
-	// daily nuke safe (INV-3).
+	// daily nuke safe.
 	if err := autogit.Add(ctx, a.paths, autogit.Primary, "."); err != nil {
 		return memops.ArchiveResult{}, fmt.Errorf("fileadapter: archive batch: stage capture: %w", err)
 	}
 	// The capture commit's pre-flag CheckSpineIntegrity validates the OLD
-	// (pre-mutation) state — don't archive on a broken spine (design §3.2
-	// step 6). It runs BEFORE any destructive mutation (the RemoveAll /
+	// (pre-mutation) state — don't archive on a broken spine. It runs BEFORE any destructive mutation (the RemoveAll /
 	// RemoveSpineRecords below), so a broken spine aborts cleanly with
 	// nothing removed. The deletion commit then carries no pre-flag (we are
 	// mid-transaction) and validates the END state in its post-flag.
@@ -540,7 +537,7 @@ func (a *FileAdapter) archiveBatch(ctx context.Context, threadIDs []string, day 
 }
 
 // RecoverThread restores an archived thread from its deletion commit and
-// re-adds it to the spine (design §7.2).
+// re-adds it to the spine.
 func (a *FileAdapter) RecoverThread(ctx context.Context, thrID string) (memops.SpineRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return memops.SpineRecord{}, err
@@ -610,8 +607,8 @@ func (a *FileAdapter) RecoverThread(ctx context.Context, thrID string) (memops.S
 		return memops.SpineRecord{}, fmt.Errorf("fileadapter: recover thread %s: load recovered frontmatter: %w", thrID, err)
 	}
 	now := clock.Timeline().Format(time.RFC3339)
-	// BD-9: stamp BOTH engagement-recency fields the §3.5 decay scan reads so a
-	// just-recovered thread cannot be immediately re-offered for retirement, and
+	// Stamp BOTH engagement-recency fields the §3.5 decay scan reads so a
+	// just-recovered thread cannot immediately decay and close again, and
 	// so the rebuilt spine record does not silently diverge from the restored
 	// frontmatter (a spine↔frontmatter sync violation checkThreads would not
 	// catch — it compares only id/project).

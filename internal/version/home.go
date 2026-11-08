@@ -6,7 +6,7 @@ import (
 )
 
 // Rendering shared by every surface that prints version identity:
-// `personant version`, the REPL's /version, and Long() itself. One
+// `personant version` and Long() itself. One
 // alignment width and one home-format rendering, so the surfaces cannot
 // drift apart.
 

@@ -2,8 +2,11 @@ package turn
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"maps"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,7 +39,7 @@ func stageSymbolTurn(t *testing.T, stagedPath string) *State {
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nSeen it."},
 		{Content: "*topic: thr_1*\nStill here."},
-	}, nil)
+	})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 
 	_, err := RunWithDeltas(context.Background(), state,
@@ -118,6 +121,51 @@ func TestPreCanonicalAbort_NoSessionResidue(t *testing.T) {
 				got.flushCalls, got.flushChunks, want.flushCalls, want.flushChunks)
 		}
 	})
+}
+
+// failOnConsult is a provider whose every stream fails before a byte
+// arrives — a pre-canonical abort that no user caused.
+type failOnConsult struct{ model.Client }
+
+func (failOnConsult) ConsultStream(context.Context, model.Request) (model.StreamReader, error) {
+	return nil, errors.New("synthetic provider outage")
+}
+
+// TestPreCanonicalAbort_LogsTurnAborted — every pre-canonical abort,
+// retraction and provider error alike, logs system.turn-aborted naming the
+// turn and the prompt's byte count.
+func TestPreCanonicalAbort_LogsTurnAborted(t *testing.T) {
+	const prompt = "what changed in internal/widget/gadget.go?"
+	tests := []struct {
+		name   string
+		client func(base model.Client, cancel context.CancelFunc) model.Client
+	}{
+		{"retraction", func(base model.Client, cancel context.CancelFunc) model.Client {
+			return cancelOnConsult{Client: base, cancel: cancel}
+		}},
+		{"provider error", func(base model.Client, _ context.CancelFunc) model.Client {
+			return failOnConsult{Client: base}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			paths, meta := newTestHome(t)
+			pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
+			state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil))
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			state.Client = tt.client(state.Client, cancel)
+
+			_, info, err := RunWithInfo(ctx, state, nil, prompt, io.Discard)
+			if err == nil {
+				t.Fatal("the aborted turn reported success")
+			}
+			want := fmt.Sprintf("system.turn-aborted turn=%s bytes=%d\n", info.TurnID, len(prompt))
+			if log := readDayLog(t, paths); !strings.Contains(log, want) {
+				t.Errorf("log missing %q\n%s", want, log)
+			}
+		})
+	}
 }
 
 func assertStringsEqual(t *testing.T, name string, got, want []string) {

@@ -30,7 +30,7 @@ var (
 // and the daily DB is disposable by construction, §9), init the daily
 // storage, baseline-commit the whole worktree (Personant-Turn-less,
 // AllowEmptyCommits so even a bare home mints a valid HEAD), and stamp
-// the derived watermark = baseline hash (INV-4).
+// the derived watermark = baseline hash.
 //
 // Watermark honesty: the watermark claims "derived was built against
 // this daily commit", so MorningInit stamps directly only when derived

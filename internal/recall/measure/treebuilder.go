@@ -26,8 +26,8 @@ import (
 // cache sweep so the trees summarize a settled leaf set (§5.3 ordering).
 //
 // It returns the number of trees (re)built this pass — the
-// recall_intra_tree_rebuild_calls trip-wire metric (design §7.2, fork F-B):
-// the sleep-cycle owner records it so unbounded semantic rebalancing churn
+// recall_intra_tree_rebuild_calls trip-wire metric (fork F-B): the
+// consolidation owner records it so unbounded semantic rebalancing churn
 // on a multi-year thread is measurable and escalates to the F-B hybrid MAD.
 //
 // A no-op (0, nil) when no embedder is configured — nil embedder → no fine

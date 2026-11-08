@@ -7,7 +7,7 @@ import "sort"
 // substrate-free, LLM-free, deterministic clustering + tree assembly that
 // turns a thread's flat leaf set (its fine-tier ChunkVectors) into the
 // balanced summary tree DescendChunks walks. It knows nothing of threads,
-// the FIFO, the cache, the sleep cycle, or how summary vectors are
+// the FIFO, the cache, consolidation, or how summary vectors are
 // produced — the summary-key strategy is injected by the caller as a
 // Summarizer (the §2.2 / fork-F-A seam; see ExemplarSummarizer for the v0.1
 // exemplar-spread impl). Pure: no I/O.
@@ -48,7 +48,7 @@ import "sort"
 type Summarizer func(children []*SummaryNode) [][]float64
 
 // BuildTree assembles a balanced summary tree over leaves by semantic
-// agglomerative bottom-up clustering with a capped fan-in B (design §3):
+// agglomerative bottom-up clustering with a capped fan-in B:
 // group the leaf vectors into ~B-sized clusters by cosine proximity,
 // summarize each group via the injected Summarizer → level-1 internal
 // nodes, then repeat over the level-1 node vectors → level-2, up to a
@@ -81,7 +81,7 @@ func BuildTree(leaves []ChunkVector, b int, summarize Summarizer) *SummaryNode {
 	// Level 0: one leaf node per chunk vector. A leaf's exemplar set is its
 	// own chunk vector (one element, no spread) — Vector and Vectors[0] both
 	// mirror Leaf.Vector, the descent key and the rank key being the same
-	// embedding at the leaf (the W1-cheap identity, design §2.1).
+	// embedding at the leaf (the W1-cheap identity).
 	level := make([]*SummaryNode, len(leaves))
 	for i, lv := range leaves {
 		level[i] = &SummaryNode{Vector: lv.Vector, Vectors: [][]float64{lv.Vector}, Leaf: lv}
@@ -117,8 +117,8 @@ func newInternalNode(g []*SummaryNode, summarize Summarizer) *SummaryNode {
 }
 
 // clusterByCosine partitions nodes into semantically-coherent groups of at
-// most b by greedy agglomeration (design §3, the deterministic single-pass
-// B-capped clusterer). It is the heart of W4: same input → same grouping.
+// most b by greedy agglomeration (the deterministic single-pass B-capped
+// clusterer). It is the heart of W4: same input → same grouping.
 //
 // Nodes are seeded in turn-number order (each node's seed turn is its
 // subtree's smallest leaf turn-number — a stable, content-independent key).

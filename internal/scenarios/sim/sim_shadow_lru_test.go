@@ -10,7 +10,7 @@ import (
 )
 
 // TestShadowLayerB_ReverseDivergence drives a mock workload through the real
-// harness and asserts the BD-4 reverse cross-check (shadow-held /
+// harness and asserts the reverse cross-check (shadow-held /
 // runtime-evicted) sits at 0 — the generator's runtime-mirror Layer-B now
 // models the two documented legitimate eviction sources (measurement-carrier
 // displacement and §3.5 decay closure) that the plain engage()-only shadow
@@ -47,11 +47,11 @@ func TestShadowLayerB_ReverseDivergence(t *testing.T) {
 				gen.layerBShadowDivergence, gen.layerBShadowReverseDivergence)
 
 			if gen.layerBShadowDivergence != 0 {
-				t.Errorf("forward Layer-B shadow divergence = %d, want 0 (burndown #8)",
+				t.Errorf("forward Layer-B shadow divergence = %d, want 0",
 					gen.layerBShadowDivergence)
 			}
 			if gen.layerBShadowReverseDivergence != 0 {
-				t.Errorf("reverse Layer-B shadow divergence = %d, want 0 (BD-4 B3)",
+				t.Errorf("reverse Layer-B shadow divergence = %d, want 0",
 					gen.layerBShadowReverseDivergence)
 			}
 		})

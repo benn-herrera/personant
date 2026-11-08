@@ -1,6 +1,6 @@
-// Package curator drafts the closure artifacts for a retiring thread
-// (spec §3.5 / §5.2): a short faithful summary of the thread's
-// operational content plus a final anchor set.
+// Package curator drafts the closing summary for a retiring thread
+// (spec §3.5 / §5.2): a short faithful gist of the thread's operational
+// content.
 //
 // The package mirrors internal/recall's shape — an interface the
 // experience layer depends on, plus a concrete model-backed
@@ -13,36 +13,21 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 
 	"personant/internal/memops"
 	"personant/internal/model"
 )
 
-// ClosureDraft is the curator's output for a closing thread.
-type ClosureDraft struct {
-	Summary string   // 100–150 char gist of the thread's operational content (spec §5.2)
-	Anchors []string // final anchor set (0..AnchorProjectionMax — no floor; the projection owns the ceiling)
-}
-
-// Curator drafts the closure artifacts for a retiring thread.
+// Curator drafts the closing summary for a retiring thread: a 100–150
+// char gist of its operational content (spec §5.2).
 type Curator interface {
-	DraftClosure(ctx context.Context, thread memops.Thread) (ClosureDraft, error)
+	DraftClosure(ctx context.Context, thread memops.Thread) (string, error)
 }
 
-// closureAnchorMax bounds the deterministic anchor selection at
-// retirement. It aliases the §2.2 projection ceiling
-// memops.AnchorProjectionMax so the curator's selection respects the
-// single port-level invariant rather than restating it locally. There is
-// no minimum: the 4-floor is deleted (anchor-lifecycle Inc 1), so a thin
-// thread legitimately yields fewer than the ceiling.
-const closureAnchorMax = memops.AnchorProjectionMax
-
-// HTTPCurator is the model-backed Curator. The summary is drafted by
-// the LLM; the anchors are selected deterministically from the
-// thread's history symbols (the model is never asked for anchors —
-// §5.2 keeps anchor selection mechanical so it stays auditable).
+// HTTPCurator is the model-backed Curator. The model is never asked for
+// anchors: a closing thread's anchors come from the deterministic
+// projection.
 type HTTPCurator struct {
 	client model.Client
 	model  string
@@ -62,12 +47,10 @@ Write a single faithful gist of the thread's operational content — what was
 worked on and where it landed. Target 100 to 150 characters. Output only the
 gist, no preamble, no quotes, no markdown.`
 
-// DraftClosure asks the model for a faithful gist of thread.Body and
-// selects the final anchor set deterministically from the thread's
-// history symbols.
-func (c *HTTPCurator) DraftClosure(ctx context.Context, thread memops.Thread) (ClosureDraft, error) {
+// DraftClosure asks the model for a faithful gist of thread.Body.
+func (c *HTTPCurator) DraftClosure(ctx context.Context, thread memops.Thread) (string, error) {
 	if c.client == nil {
-		return ClosureDraft{}, errors.New("curator: nil model client")
+		return "", errors.New("curator: nil model client")
 	}
 	req := model.DefaultRequest(c.model, []model.Message{
 		{Role: "system", Content: curatorPrompt},
@@ -75,12 +58,9 @@ func (c *HTTPCurator) DraftClosure(ctx context.Context, thread memops.Thread) (C
 	})
 	summary, err := c.consult(ctx, req)
 	if err != nil {
-		return ClosureDraft{}, fmt.Errorf("curator: draft summary: %w", err)
+		return "", fmt.Errorf("curator: draft summary: %w", err)
 	}
-	return ClosureDraft{
-		Summary: strings.TrimSpace(summary),
-		Anchors: SelectAnchors(thread.Meta),
-	}, nil
+	return strings.TrimSpace(summary), nil
 }
 
 // consult runs one round-trip. Consult is the blocking flavor and the
@@ -114,45 +94,4 @@ func (c *HTTPCurator) consult(ctx context.Context, req model.Request) (string, e
 		}
 	}
 	return sr.Final().Content, nil
-}
-
-// SelectAnchors picks the final anchor set for a closing thread from
-// fm.HistorySymbols: rank by Count descending, tie-break by
-// FirstSeenTurn ascending (older first), take up to closureAnchorMax.
-// When HistorySymbols is empty (no symbol history to project from), fall
-// back to the thread's existing fm.Anchors. There is no minimum floor —
-// the 4-floor is deleted (anchor-lifecycle Inc 1), so a thin history
-// legitimately yields fewer than the ceiling.
-//
-// Exported so the deterministic selection can be unit-tested without a
-// live model.
-func SelectAnchors(fm memops.ThreadMeta) []string {
-	if len(fm.HistorySymbols) == 0 {
-		// No symbol history to project from — fall back to whatever
-		// anchors the thread already holds.
-		return append([]string(nil), fm.Anchors...)
-	}
-
-	syms := append([]memops.HistorySymbol(nil), fm.HistorySymbols...)
-	sort.SliceStable(syms, func(i, j int) bool {
-		if syms[i].Count != syms[j].Count {
-			return syms[i].Count > syms[j].Count
-		}
-		if syms[i].FirstSeenTurn != syms[j].FirstSeenTurn {
-			return syms[i].FirstSeenTurn < syms[j].FirstSeenTurn
-		}
-		return syms[i].Normalized < syms[j].Normalized
-	})
-
-	out := make([]string, 0, closureAnchorMax)
-	for _, s := range syms {
-		if s.Normalized == "" {
-			continue
-		}
-		out = append(out, s.Normalized)
-		if len(out) == closureAnchorMax {
-			break
-		}
-	}
-	return out
 }

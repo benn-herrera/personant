@@ -23,7 +23,7 @@
 //     isolation, clock pinning, telemetry wiring).
 //   - harness_run.go: RunScenario, runStep, restartSession, and the
 //     final-gauge helpers (foldEventLines, peakHistorySymbols).
-//   - harness_resolvers.go: the invariant-cadence policy
+//   - harness_invariants.go: the invariant-cadence policy
 //     (perStepInvariants, runInvariants).
 package scenarios
 
@@ -59,7 +59,7 @@ type threadIndexer interface {
 
 // cacheSweeper is the narrow optional interface a Recaller may satisfy to
 // drop persisted recall-cache (.vec) files for archived/absent threads — the
-// design §6.4 sleep-cycle hook. measure.Service implements it (SweepCache).
+// consolidation hook. measure.Service implements it (SweepCache).
 // The harness drives it from runSleepCycle, alongside the substrate gc the
 // MemoryOps.Consolidate call performs: the recall cache is operational state
 // the adapter's Consolidate cannot reach, so the sweep is invoked on the
@@ -84,7 +84,7 @@ type treeRebuilder interface {
 }
 
 // intraDivergenceProbe is the narrow optional interface a Recaller may satisfy
-// to expose the W1 recall-preservation differential (#111 / design §7.1):
+// to expose the W1 recall-preservation differential:
 // IntraThreadDivergence runs BOTH the summary-tree descent and the flat scan
 // over the engaged thread's leaves and returns the size of their top-Kf leaf
 // set difference plus, when that size is >0, the per-probe classification
@@ -107,7 +107,7 @@ type intraDivergenceProbe interface {
 }
 
 // cosineOpsReporter is the narrow optional interface a Recaller may satisfy to
-// expose the MEASURED recall_query_cosine_ops instrument (#111 / design §7.2):
+// expose the MEASURED recall_query_cosine_ops instrument:
 // CosineOps is the run-total cosine comparisons the embedding recall path
 // performed, RecallQueries the number of queries that performed them. The
 // harness reads them post-run and emits the per-query average — the empirical
@@ -222,6 +222,12 @@ type Step struct {
 	// when ExpectedRecallMatches is nil.
 	RecallMode RecallFidelityMode
 
+	// RecallOpportunityResident marks a recall opportunity whose every
+	// expected thread was already in the active set when the step ran, so
+	// ExpectedRecallMatches is nil. The harness counts it apart from the
+	// unmeasured steps.
+	RecallOpportunityResident bool
+
 	// At is the absolute simulated instant of this step's turn — the
 	// turn's position on the one simulated clock. It is the AUTHORITATIVE wire field: runStep SETS
 	// pinnedClock = At (a slaved copy of the generator's re-anchored
@@ -242,7 +248,7 @@ type Step struct {
 	// running base (SimClockStart + Σ TimeDelta). So whether At arrives on the
 	// wire or is derived from TimeDelta, stepSetClock has exactly one
 	// clock-advance path (pinnedClock = At) — there is no rival integrate
-	// branch (burndown #3).
+	// branch.
 	At time.Time
 
 	// TimeDelta is the relative advance: the simulated span between this
@@ -270,7 +276,7 @@ type Step struct {
 	RestartSession bool
 
 	// W1Engaged names the engaged thread whose intra-thread recall-preservation
-	// QUALITY MEASURE (#111 / design §7.1; gate→measure in #119) the harness
+	// QUALITY MEASURE (reported, not gated) the harness
 	// should evaluate on this step. When non-empty AND an embedding recaller is
 	// live, the harness calls the recaller's IntraThreadDivergence(ctx,
 	// UserInput, W1Engaged) and accumulates recall_intra_descent_divergence — the
@@ -282,8 +288,7 @@ type Step struct {
 	// the turn, the canonical step stream, or determinism.
 	W1Engaged string
 
-	// SleepCycle marks a deterministic ARCHITECTURE.md "sleep cycle" step
-	// (task #108): the sim's day-off generator emits one such step per
+	// SleepCycle marks a deterministic consolidation step: the sim's day-off generator emits one such step per
 	// day-off idle window. It carries no turn — UserInput is empty and no
 	// LLM consult runs. Instead the harness intercepts it before any turn
 	// machinery and drives h.Ops.Consolidate (substrate gc), measuring the
@@ -307,7 +312,7 @@ const (
 
 	// RecallMeasureOnly records precision/recall/F1 into the
 	// recall_fidelity_adversarial_* series and never fails the test.
-	// For C.3 adversarial probes (vocabulary drift, stop-word leak,
+	// For adversarial probes (vocabulary drift, stop-word leak,
 	// false friends) whose underperformance is the measurement, not a
 	// defect — the §9.4 baseline comparison is where regressions in
 	// these numbers surface.
@@ -403,7 +408,7 @@ type StepFeedback struct {
 	// engaged first, capped at Budget.BTopK. It is the §2.6.1 layer.b set
 	// the runtime actually holds, exposed so a StepSource that keeps its own
 	// shadow model of Layer-B residency can cross-check the shadow against
-	// the real thing (sim-harness review burndown #8). Before this field the
+	// the real thing. Before this field the
 	// generator's shadow LRU and the runtime LRU were never cross-checked;
 	// an eviction-order or tie-break divergence would silently make the
 	// recall oracle compute wrong expected-sets. nil on the zero-feedback
@@ -576,7 +581,7 @@ type Scenario struct {
 	Recaller func(ops memops.MemoryOps) measure.Recaller
 
 	// LiveClient, when non-nil, is installed on turn.State.Client INSTEAD of
-	// the scripted mock — the inference-in-loop seam (#98, Inc 3). With it set,
+	// the scripted mock — the inference-in-loop seam. With it set,
 	// every turn's ConsultStream hits a real chat endpoint, so the per-step
 	// MockResponse is NOT served (runStep skips SetResponse) and the workload's
 	// canned bodies are ignored by the runtime. This is a BEHAVIOR-VALIDATION
@@ -589,8 +594,7 @@ type Scenario struct {
 	LiveClient model.Client
 
 	// LiveModel is the model name set on turn.State.Model when LiveClient is
-	// installed, overriding the sentinel harness provider's DefaultModel so the
-	// live request names the real chat model. Ignored when LiveClient is nil.
+	// installed, so the live request names the real chat model. Ignored when LiveClient is nil.
 	LiveModel string
 
 	// RungLabel / RungSeed / RungSpan are OPTIONAL run-provenance fields for
@@ -674,9 +678,8 @@ func (sc Scenario) validate() error {
 
 	// LiveClient drives real turns against a chat endpoint and sets State.Model
 	// = LiveModel; an empty model name would issue requests naming no model
-	// (silent wrong-mode against a real provider). The field doc frames
-	// LiveModel as the override that keeps the request off the sentinel
-	// harness DefaultModel — so under a live client it must be supplied.
+	// (silent wrong-mode against a real provider) — so under a live client
+	// it must be supplied.
 	if sc.LiveClient != nil && sc.LiveModel == "" {
 		return fmt.Errorf("LiveClient is set but LiveModel is empty: " +
 			"a live inference run sets State.Model = LiveModel, so an empty model " +
@@ -867,9 +870,8 @@ func (h *Harness) PinnedClock() time.Time {
 }
 
 // SwitchProject swaps the harness's active project to targetID,
-// updating the in-memory turn.State. Used by
-// scenarios that exercise project switching ahead of /project switch
-// landing in the runtime.
+// updating the in-memory turn.State and scoping its working set to the
+// new project. It is the only in-run project change.
 //
 // Returns an error if the target project's meta.json is missing
 // (callers must seed the second project via Setup before switching).
@@ -880,6 +882,9 @@ func (h *Harness) SwitchProject(targetID string) error {
 	}
 	h.Project = meta
 	h.State.ActiveProject = meta
+	if err := turn.ScopeWorkingSet(context.Background(), h.State); err != nil {
+		return fmt.Errorf("SwitchProject %s: %w", targetID, err)
+	}
 	// History is per-session-and-cross-project (the model still needs
 	// to see the prior turn even after a project switch); leave it.
 	return nil

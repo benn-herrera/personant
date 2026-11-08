@@ -44,13 +44,13 @@ import (
 //	B2  day-commit worktree → PRIMARY (`Personant-Day: N`,
 //	    AllowEmptyCommits — F3; spine-integrity gate on the staged tree
 //	    BEFORE the mint, structural errors only — F5/F1: a spine-broken
-//	    day-commit can never land), guarded by the INV-2
-//	    day-commit-shape predicate
+//	    day-commit can never land), guarded by the one-day-commit-per-day
+//	    shape predicate
 //	B3  rebuild derived from the now-committed worktree (absorbs
 //	    overnight hand-edits and B1's removals — F5)
 //	B4  nuke .git-daily
 //	B5  re-init daily + Personant-Turn-less baseline commit → H_d
-//	B6  stamp watermark = H_d (INV-4); assert derived-fresh (the
+//	B6  stamp watermark = H_d; assert derived-fresh (the
 //	    once-a-day index.Check, moved off B2 per F5); clear marker
 //
 // Only B1/B2 mutate primary; B4/B5 are pure daily-DB lifecycle; B3/B6
@@ -59,7 +59,7 @@ import (
 // first) by B1's removals, only rearranged (no byte lost) by B1b, and
 // pruned by B1c of tracked files no kept index entry names.
 
-// Crashpoints (#94 R3b §7) — one per step boundary; R4 exhausts them.
+// Crashpoints — one per step boundary; the crash matrix exhausts them.
 var (
 	cpBarrierPreArchival   = crashpoint.Register("barrier.preArchival")
 	cpBarrierPostArchival  = crashpoint.Register("barrier.postArchival.preDayCommit")
@@ -79,7 +79,8 @@ var (
 // HEADDAY — the Personant-Day trailer of primary HEAD. The poll seals
 // only COMPLETED days; its target is the most recent completed day
 // (cur-1), so after sealing it the only unsatisfiable target advances
-// with the clock and re-fire is impossible (INV-2 guards B2 besides).
+// with the clock and re-fire is impossible (the one-day-commit guard
+// covers B2 besides).
 //
 // Multi-day gaps: a poll after several absent days seals ONE barrier for
 // the most recent completed day — the day-commit captures the whole
@@ -124,7 +125,7 @@ func (a *FileAdapter) MaybeDayBarrier(ctx context.Context) (memops.DayBarrierRes
 		return res, nil
 	case ok && head == target:
 		// HEADDAY reached the target via SOME primary commit — sealed only
-		// if that commit is the day-commit itself (INV-2 shape guard).
+		// if that commit is the day-commit itself (day-commit shape guard).
 		isDay, derr := autogit.HeadIsDayCommit(ctx, a.paths, autogit.Primary, target)
 		if derr != nil {
 			return res, fmt.Errorf("fileadapter: day barrier: shape guard: %w", derr)
@@ -296,7 +297,7 @@ func (a *FileAdapter) pruneTrackedFiles(ctx context.Context) error {
 // (recovering=true, which arms the §2.7 quarantine-and-proceed posture
 // on the persistent B2/B6 verify failures).
 func (a *FileAdapter) barrierTail(ctx context.Context, day int, res *memops.DayBarrierResult, recovering bool) error {
-	// B2 — day-commit, INV-2 guarded.
+	// B2 — day-commit, guarded to one per day.
 	if err := a.dayCommit(ctx, day, res, recovering); err != nil {
 		return err
 	}
@@ -338,7 +339,7 @@ func (a *FileAdapter) barrierTail(ctx context.Context, day int, res *memops.DayB
 	}
 	crashpoint.At(cpBarrierPostInit)
 
-	// B6 — stamp watermark = baseline (INV-4; cross-barrier continuity:
+	// B6 — stamp watermark = baseline (cross-barrier continuity:
 	// without this every post-barrier open would see daily HEAD !=
 	// watermark and spuriously full-rebuild), then assert derived-fresh
 	// (the once-a-day index.Check, moved off B2 per F5).
@@ -354,8 +355,8 @@ func (a *FileAdapter) barrierTail(ctx context.Context, day int, res *memops.DayB
 
 	// F1 tail guard: EVERY completed barrier must end with primary HEAD
 	// being the day-commit for `day`. A trailered-but-non-day-shape HEAD
-	// satisfies new-day DETECTION (HEADDAY == N) while failing the INV-2
-	// shape GUARD, so the next same-day open would re-fire runBarrier(N)
+	// satisfies new-day DETECTION (HEADDAY == N) while failing the
+	// day-commit shape GUARD, so the next same-day open would re-fire runBarrier(N)
 	// — a second day-commit, a mid-day nuke of the live daily, and
 	// day-N+1 content sealed under trailer N. No current writer commits
 	// primary between B2 and here (dayCommit's §2.7 repair is a pure
@@ -400,7 +401,7 @@ func (a *FileAdapter) barrierTail(ctx context.Context, day int, res *memops.DayB
 // dayCommit is B2: stage EVERYTHING (including overnight hand-edits
 // Reconcile's cell 3 deferred — F5) and mint the trailered day-commit
 // with AllowEmptyCommits (F3: an empty day still seals, so HEADDAY is
-// always defined and there is no tag path). Guarded (INV-2): a HEAD
+// always defined and there is no tag path). Guarded to one per day: a HEAD
 // that is already a DayCommitMessage-shape commit for `day` skips the
 // mint — the guard is the shape match, NOT the trailer (every primary
 // commit is trailered, so a roll-forward stamp or an adopt must not
@@ -415,7 +416,7 @@ func (a *FileAdapter) barrierTail(ctx context.Context, day int, res *memops.DayB
 // post-flag would, with the stronger consequence that a spine-broken
 // day-commit can NEVER land: "primary HEAD is always spine-good" (§2.7)
 // holds for B2 too, which makes HEAD the universal scoped-restore
-// source and keeps INV-2's exactly-one-day-commit true even across a
+// source and keeps exactly-one-day-commit true even across a
 // §2.7 repair (F1: the one mint happens only after the worktree is
 // proven good, so no repair/re-mint commits ever fork or trail it).
 //
@@ -589,9 +590,10 @@ func trackedStoreThread(rel string) (string, bool) {
 // §2.7 posture scoped to derived artifacts: quarantine the offending
 // derived paths (byte-exact), rebuild once, re-check; still failing →
 // error with the op=barrier marker intact (refuse-to-open). Derived
-// artifacts are gitignored (never in primary HEAD), so the "absent from
-// HEAD's tree ⇒ orphan add ⇒ quarantine + remove" arm applies and the
-// rebuild is what restores consistency.
+// artifacts are never restored from primary HEAD — symbols.jsonl is
+// gitignored and absent there, and a tracked digest.json is a derivation
+// HEAD may hold stale — so the offending bytes are quarantined and removed
+// and the rebuild is what restores consistency.
 func (a *FileAdapter) assertDerivedFresh(ctx context.Context, recovering bool) error {
 	check, err := index.Check(a.paths, index.Options{Quiet: true})
 	if err != nil {
@@ -628,8 +630,7 @@ func (a *FileAdapter) assertDerivedFresh(ctx context.Context, recovering bool) e
 	}
 	// The quarantined derived paths have now been REPLACED by the
 	// rebuild — regeneration is the scoped-restore equivalent for
-	// gitignored derived artifacts, which never exist in primary HEAD
-	// (see the ScopedRestored field doc). Recorded only after the
+	// derived artifacts (see the ScopedRestored field doc). Recorded only after the
 	// re-check proves the replacement is good, so the field never names
 	// a path the posture failed to make whole.
 	a.scopedRestored = append(a.scopedRestored, q.moved...)

@@ -115,7 +115,7 @@ func TestSurfacedSymbolSets_MirrorsScorerSet(t *testing.T) {
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta"})
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_self", []string{"omega"})
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil))
 	state.recallSurfaced = map[string]struct{}{"thr_1": {}, "thr_self": {}}
 	// Both must be Layer-B resident to be eligible (residency gate).
 	state.ActiveThreads = []string{"thr_1", "thr_self"}
@@ -145,7 +145,7 @@ func TestSurfacedSymbolSets_EvictedFromLayerB_NotEligible(t *testing.T) {
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_resident", []string{"alpha"})
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_evicted", []string{"beta"})
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil))
 	// Both were recalled at some point this session...
 	state.recallSurfaced = map[string]struct{}{"thr_resident": {}, "thr_evicted": {}}
 	// ...but only thr_resident remains in Layer B; thr_evicted was displaced.
@@ -182,7 +182,7 @@ func TestFetchThreadForReprompt_SameTurnDerivedFrom(t *testing.T) {
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_X", []string{"shared_sym"})
 	seedThreadWithAnchors(t, paths, meta.ID, "thr_engaged", []string{"engaged_own"})
 
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
+	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil))
 
 	// §5.5 mid-turn fetch of X. This is the path that calls promoteToLayerB:
 	// it both pulls X into ActiveThreads AND marks it recallSurfaced — all

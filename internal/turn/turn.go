@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -55,7 +56,8 @@ type State struct {
 	// deterministic stub.
 	Curator curator.Curator
 
-	// Model overrides the provider's DefaultModel when non-empty.
+	// Model names the chat model every request carries (see Step 3 in
+	// RunWithInfo).
 	Model string
 
 	// Temperature / MaxTokens — when 0, the provider's default is used.
@@ -74,8 +76,8 @@ type State struct {
 	// user/assistant cleanly. Per MAD architecture review burn-down item
 	// B1 (= T1-2): before this cap, History grew unbounded → linear input
 	// growth per turn → production context-window exhaustion in long
-	// sessions. The turn-pair count caps PERSISTENCE; #127 additionally
-	// bounds the REPLAYED tail per request — boundHistoryTail recency-bounds
+	// sessions. The turn-pair count caps PERSISTENCE; the request budget
+	// additionally bounds the REPLAYED tail per request — boundHistoryTail recency-bounds
 	// the slice sent to the model to its live-turn share (pair-aligned), so
 	// a long session's replayed history stays within the whole-request
 	// budget independent of the count cap.
@@ -91,8 +93,8 @@ type State struct {
 	// renders as spine display lines. Index 0 is the most-recently
 	// demoted (or independently engaged) thread. The slice is bounded
 	// solely by Layer C's byte budget at render time (workset.Compose);
-	// the v0.1 count cap was dropped in #127 in favor of byte truncation
-	// (design §4 / Q2), which removes the m3 silent-drop behavior.
+	// there is no count cap, which would silently drop threads the byte
+	// budget could still render.
 	DormantThreads []string
 
 	// Budget is the token-denominated whole-request budget (#127).
@@ -194,43 +196,6 @@ type State struct {
 	// nil is the well-formed empty case (no recall ever accepted).
 	recallSurfaced map[string]struct{}
 
-	// recallWindowTurns maps a thread ID to the turn-excerpt numbers an
-	// ACCEPTED §3.4 intra-thread recall has pulled into the working window
-	// (user ruling 2026-08-05, the accept-suppression fix). The §4.1 step-3
-	// intra pass targets the ENGAGED thread by id, so the thread-level
-	// Exclude set cannot suppress it: before this, an accepted intra hit
-	// re-fired identically on every following turn while the topic
-	// continued — the user accepted, and was asked the same question again.
-	//
-	// The fix is at the state level rather than a cooldown timer because
-	// the intra pass's subject is "content not already in the window":
-	// accepting says those excerpts have been dealt with, so recording that
-	// is what makes the re-offer stop, and it stops for exactly as long as
-	// the thread is in the window. Residency ends the mark: touchActiveLRU
-	// drops a thread's entry when the thread is demoted out of Layer B, so a
-	// thread that has decayed back out of the working set can legitimately
-	// surface its early content again.
-	//
-	// HONEST LIMIT (pre-existing, NOT introduced here). An accept promotes
-	// the THREAD — fetchThroughChain fires a thread.fetched delta and lifts
-	// it to the front of Layer B — and Layer B renders each thread's body
-	// newest-first under a per-thread byte budget (workset.PerThreadBudget).
-	// So accepting an intra hit on an OLD excerpt does not put that excerpt's
-	// text in front of the model; there is no excerpt-level promotion in the
-	// working set today. What this mark records is therefore the USER'S
-	// DECISION, not a proof of residency. It is the right suppression either
-	// way — re-asking a question already answered is the defect — but the
-	// missing half (promote the matched excerpts, not just the thread) is a
-	// real gap in what an intra accept delivers, and it is worth closing
-	// before intra-thread recall is called done.
-	//
-	// Session-scoped and deliberately NOT persisted (it is a statement
-	// about THIS session's window, which a relaunch rebuilds) and NOT part
-	// of the §4.3.3 rollback snapshot: recall runs post-canonical at turn
-	// close, so a retracted turn never reaches it. nil is the well-formed
-	// empty case.
-	recallWindowTurns map[string]map[int]struct{}
-
 	// embeddingDebt accrues per thread the count of turn-excerpts that have
 	// scrolled out of the *assembly* window (ThreadTurnWindow) but are not
 	// yet in the §3.4 fine-tier embedding index. It is the trigger for the
@@ -290,12 +255,10 @@ const sessionHistoryCapTurns = 20
 // State, so an option overrides the default.
 type StateOption func(*State)
 
-// WithTokenCeiling overrides the whole-request token ceiling (#127),
+// WithTokenCeiling overrides the whole-request token ceiling,
 // recomputing Budget from it via memops.BudgetForCeiling — the single
 // source of truth for the partition (I7). A non-positive ceiling is
-// ignored (keeps the default). This is path (b) of design §3.4: the
-// ceiling is settable at the constructor today; the directive-file
-// parser that feeds context.token-budget here lands in a later task.
+// ignored (keeps the default).
 func WithTokenCeiling(tokenCeiling int) StateOption {
 	return func(s *State) {
 		if tokenCeiling > 0 {
@@ -304,9 +267,9 @@ func WithTokenCeiling(tokenCeiling int) StateOption {
 	}
 }
 
-// NewState constructs a State for a chat session. The coalesce buffer
-// is initialized empty; Client must be non-nil (the chat REPL passes
-// either an HTTPClient or a MockClient, never nil). Options (e.g.
+// NewState constructs a State for a session. The coalesce buffer is
+// initialized empty; Client must be non-nil before a turn runs (RunWithInfo
+// refuses a nil client). Options (e.g.
 // WithTokenCeiling) override defaults after construction.
 func NewState(ops memops.MemoryOps, project memops.ProjectMeta, client model.Client, opts ...StateOption) *State {
 	s := &State{
@@ -337,9 +300,9 @@ func NewState(ops memops.MemoryOps, project memops.ProjectMeta, client model.Cli
 // never completed a turn) leaves ActiveThreads/DormantThreads nil — the
 // same state NewState produces — and is not an error.
 //
-// Only the working-set membership is reloaded. TurnNumber and the
-// coalesce/staging buffers are session-volatile and correctly start
-// fresh.
+// Only the working-set membership is reloaded, scoped to project
+// (ScopeWorkingSet). TurnNumber and the coalesce/staging buffers are
+// session-volatile and correctly start fresh.
 func LoadSession(ctx context.Context, ops memops.MemoryOps, project memops.ProjectMeta, client model.Client, opts ...StateOption) (*State, error) {
 	state := NewState(ops, project, client, opts...)
 	active, dormant, err := ops.LoadWorkingSet(ctx)
@@ -348,7 +311,37 @@ func LoadSession(ctx context.Context, ops memops.MemoryOps, project memops.Proje
 	}
 	state.ActiveThreads = active
 	state.DormantThreads = dormant
+	if err := ScopeWorkingSet(ctx, state); err != nil {
+		return nil, fmt.Errorf("turn: load session: %w", err)
+	}
 	return state, nil
+}
+
+// ScopeWorkingSet drops from the active and dormant sets every thread whose
+// registry record belongs to a project other than state's active one: the
+// saved working set is global, so a session opening (or switching) into a
+// project must not compose another project's threads. A dropped active
+// thread leaves through evictThread. It writes nothing; the next
+// working-set save persists the result.
+func ScopeWorkingSet(ctx context.Context, state *State) error {
+	recs, err := state.Ops.ListThreads(ctx, memops.ThreadFilter{})
+	if err != nil {
+		return fmt.Errorf("scope working set: %w", err)
+	}
+	project := make(map[string]string, len(recs))
+	for _, rec := range recs {
+		project[rec.ID] = rec.Project
+	}
+	foreign := func(id string) bool {
+		p := project[id]
+		return p != "" && p != state.ActiveProject.ID
+	}
+	for _, id := range slices.Concat(state.ActiveThreads, state.DormantThreads) {
+		if foreign(id) {
+			evictThread(state, id)
+		}
+	}
+	return nil
 }
 
 // Mid-turn re-prompt bound (§5.5 + D6). A turn allows AT MOST ONE
@@ -401,6 +394,30 @@ func newTurnID(turnNumber int) string {
 	return "t" + strconv.Itoa(turnNumber) + "-" + strconv.FormatInt(clock.Profiling().UnixNano(), 10)
 }
 
+// abortPreCanonical unwinds a turn that failed BEFORE its first canonical
+// write — a retraction and a provider error alike — in this order:
+//
+//  1. Roll the SESSION back to its pre-turn snapshot (rollback.go). The
+//     §4.3.3 retraction rule: a turn the user abandoned — or one a
+//     provider outage killed — must not shape the next turn's symbols,
+//     working set or recall. Pure in-memory work, so it cannot perturb
+//     the journal ordering that follows.
+//  2. Log system.turn-aborted with the turn id and the prompt's byte
+//     count, the abort's only trace in the event log.
+//  3. Release the turn's crash-recovery scope (releaseAbortedTurn).
+//
+// Post-canonical failures never come here: they leave the scope open AND
+// keep their session mutations, because canonical writes exist and
+// recovery owns the reconciliation.
+func abortPreCanonical(ctx context.Context, state *State, turnID string, promptBytes int, preTurn sessionState) {
+	preTurn.restore(state)
+	// The abort may itself be a context cancellation; the log line must
+	// still land.
+	_ = state.Ops.Log(context.WithoutCancel(ctx), memops.LogCategorySystem, "turn-aborted",
+		"turn="+turnID+" bytes="+strconv.Itoa(promptBytes))
+	releaseAbortedTurn(ctx, state, turnID)
+}
+
 // releaseAbortedTurn releases the turn's crash-recovery scope after a
 // PRE-CANONICAL abort (journal failure, model-consult failure, stream
 // failure): nothing canonical was written, so ReleaseTurn truncates the
@@ -422,24 +439,6 @@ func newTurnID(turnNumber int) string {
 // release failure — is cleanup that must still run. A release failure
 // is logged, never propagated — the abort's original error is the one
 // the caller needs, and an unreleased scope heals at the next Reconcile.
-// abortPreCanonical unwinds a turn that failed BEFORE its first canonical
-// write. Two halves, in this order:
-//
-//  1. Roll the SESSION back to its pre-turn snapshot (rollback.go). The
-//     §4.3.3 retraction rule: a turn the user abandoned — or one a
-//     provider outage killed — must not shape the next turn's symbols,
-//     working set or recall. Pure in-memory work, so it cannot perturb
-//     the #94 ordering that follows.
-//  2. Release the turn's crash-recovery scope (releaseAbortedTurn).
-//
-// Post-canonical failures never come here: they leave the scope open AND
-// keep their session mutations, because canonical writes exist and
-// recovery owns the reconciliation.
-func abortPreCanonical(ctx context.Context, state *State, turnID string, preTurn sessionState) {
-	preTurn.restore(state)
-	releaseAbortedTurn(ctx, state, turnID)
-}
-
 func releaseAbortedTurn(ctx context.Context, state *State, turnID string) {
 	rctx := context.WithoutCancel(ctx)
 	if err := state.Ops.ReleaseTurn(rctx, turnID); err != nil {
@@ -453,8 +452,8 @@ func releaseAbortedTurn(ctx context.Context, state *State, turnID string) {
 // signal (a CommitTurn failure: canonical writes
 // exist that no recovery point covers). Retrying in-session cannot
 // succeed — every subsequent JournalTurn refuses the conflicting scope
-// — so callers (the chat REPL) key on this to advise a restart, and to
-// warn that prompts typed in the wedged window are not captured.
+// — so callers key on this to advise a restart, and to warn that prompts
+// typed in the wedged window are not captured.
 var ErrMarkerRetained = errors.New("turn recovery marker retained")
 
 // TurnInfo carries cheaply-available per-turn measurements a caller may
@@ -593,7 +592,7 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	if state.Budget.Total == 0 {
 		state.Budget = memops.DefaultBudget()
 	}
-	// #127 live-turn reject (design §3.4 / Q3): a single user-authored
+	// Live-turn reject: a single user-authored
 	// userInput that exceeds its live-turn reserve is rejected with a
 	// user-facing message BEFORE any chain step fires — rejecting after
 	// staging GC / delta emission would leave half-applied side effects.
@@ -617,8 +616,7 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		return "", TurnInfo{}, fmt.Errorf("turn: day barrier: %w", berr)
 	}
 	for _, id := range bres.ArchivedThreads {
-		state.ActiveThreads = removeString(state.ActiveThreads, id)
-		state.DormantThreads = removeString(state.DormantThreads, id)
+		evictThread(state, id)
 	}
 	if state.coalesce == nil {
 		state.coalesce = newCoalesceBuffer()
@@ -684,7 +682,7 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	if jerr != nil {
 		err = fmt.Errorf("turn: journal prompt: %w", jerr)
 		// The deferred handler below is not yet armed — abort directly.
-		abortPreCanonical(ctx, state, turnID, preTurn)
+		abortPreCanonical(ctx, state, turnID, len(userInput), preTurn)
 		return "", TurnInfo{}, err
 	}
 	// Pre-canonical abort handler: any error return between here and the
@@ -697,7 +695,7 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	canonicalStarted := false
 	defer func() {
 		if err != nil && !canonicalStarted {
-			abortPreCanonical(ctx, state, turnID, preTurn)
+			abortPreCanonical(ctx, state, turnID, len(userInput), preTurn)
 		}
 	}()
 
@@ -715,11 +713,11 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	// they share the same TurnNumber as the user.prompt that follows and
 	// can stage task-class symbols for that prompt to cite.
 	//
-	// #127: bound current-turn task-class result content
+	// Bound current-turn task-class result content
 	// (truncate-with-marker) before it enters the chain so a single verbose
-	// tool result or a §4.4 `# cat bigfile` capture (design m1) cannot
+	// tool result or a §4.4 `# cat bigfile` capture cannot
 	// balloon the request via staging/memory. Non-user-authored, so
-	// truncated rather than rejected (design §3.4).
+	// truncated rather than rejected.
 	preEvents = boundTaskResultDeltas(preEvents, state.Budget)
 	for _, pre := range preEvents {
 		if err := onContextDelta(ctx, state, pre); err != nil {
@@ -810,7 +808,7 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 			return "", TurnInfo{}, fmt.Errorf("turn: model consult: %w", err)
 		}
 
-		pre, err := readPreamble(state, sr)
+		pre, err := readPreamble(sr)
 		if err != nil {
 			_ = sr.Close()
 			return "", TurnInfo{}, fmt.Errorf("turn: read preamble: %w", err)
@@ -903,7 +901,7 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		}
 		var streamErr error
 		if !pre.ended {
-			streamErr = streamThroughFilter(state, sr, filter)
+			streamErr = streamThroughFilter(sr, filter)
 		}
 		// Always flush the filter (even on error) so any buffered non-tag
 		// content reaches the user before we surface the failure.
@@ -956,7 +954,7 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	}
 	crashpoint.At(cpPostJournalPreCanonical)
 
-	// #127 post-flight integrity gate (I1, design §3.3): the provider's
+	// Post-flight integrity gate (I1): the provider's
 	// usage.prompt_tokens is the only modality-agnostic authoritative
 	// count of the fully-assembled request. A count above Budget.TokenCeiling
 	// means the byte-driven pre-flight bounding under-estimated tokens (or
@@ -1007,10 +1005,9 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	// D6 persistent-empty forensic line: the FINAL drained response carries
 	// zero visible content — either the empty-response re-prompt also came
 	// back empty, or a pathological over-bound all-whitespace shape slipped
-	// the preamble trigger (see preambleIsEmpty's bound note). The REPL
-	// prints nothing for an empty body (chat.runOneTurn only re-aligns the
-	// prompt line), so without this line a blank turn would be forensically
-	// invisible.
+	// the preamble trigger (see preambleIsEmpty's bound note). An empty
+	// body shows the user nothing, so without this line a blank turn would
+	// be forensically invisible.
 	if strings.TrimSpace(full.Content) == "" {
 		reprompted := "no"
 		if state.emptyReprompted {
@@ -1044,15 +1041,14 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "error", memops.SanitizeDetail(err.Error()))
 	}
 
-	// Step 5c: CommitTurn — the per-turn durability recovery point (#94,
-	// SOLUTION principle 1). Every turn commits: the turn's canonical
-	// writes (content + any §3.5 structural changes from 5b) land in ONE
-	// commit carrying the Personant-Turn trailer, and the journal
-	// truncates (the scope release). This supersedes the former §3.11
-	// commit-on-structural-change Checkpoint (structural commits are
-	// absorbed — the reason string still reports the counts forensically);
-	// the session-close Checkpoint in chat.go survives only as a
-	// belt-and-braces backstop, normally a no-op. It MUST run after 5b:
+	// Step 5c: CommitTurn — the per-turn durability recovery point. Every
+	// turn commits: the turn's canonical writes (content + any §3.5
+	// structural changes from 5b) land in ONE commit carrying the
+	// Personant-Turn trailer, and the journal truncates (the scope
+	// release). Structural changes ride this commit — the reason string
+	// still reports their counts forensically. Nothing in production calls
+	// Checkpoint; the clean-stop checkpoint belongs to the plugin route's
+	// service. It MUST run after 5b:
 	// closure is a structural mutator and its writes must be on disk when
 	// CommitTurn stages Add(".").
 	//
@@ -1084,10 +1080,9 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	state.Ops.MaybeGC(ctx)
 	gcDur := clock.Since(gcStart)
 
-	// Step 5d (RETIRED under #94 R3b): the §3.8 cardinality-pressure
-	// archival drain no longer fires at turn close — archival is
-	// BARRIER-ONLY (the day barrier's B1, INV-5: primary is
-	// barrier-exclusive). The pressure policy itself survives as
+	// Step 5d (retired): the §3.8 cardinality-pressure archival drain no
+	// longer fires at turn close — archival is BARRIER-ONLY (the day
+	// barrier's B1; primary is barrier-exclusive). The pressure policy itself survives as
 	// memops.SelectArchivalCandidates, applied by the adapter at B1; the
 	// pre-turn MaybeDayBarrier call at the top of this function is where
 	// a drain's working-set evictions reach this State.

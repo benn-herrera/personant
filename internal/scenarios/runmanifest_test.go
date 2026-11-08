@@ -64,7 +64,7 @@ func TestRunManifestStartAndCompletion(t *testing.T) {
 // TestRunManifestModeDerivation pins the mode string to what the harness
 // actually installed, so a mock dir cannot pass for a live run's.
 func TestRunManifestModeDerivation(t *testing.T) {
-	fakeClient := model.NewScriptedMock(nil, nil)
+	fakeClient := model.NewScriptedMock(nil)
 	cases := []struct {
 		name string
 		h    *Harness

@@ -79,7 +79,7 @@ func corpusQuerySymbols(q madlibsQuery) []string {
 // TestRecallMadlibs_CorpusReport measures §3.4 symbolic recall over the
 // whole Wikipedia-corpus query set and prints a per-topic
 // precision/recall/F1 table. It asserts nothing — corpus templates are
-// measure-only — it is the recall-fidelity readout that C.6's
+// measure-only — it is the recall-fidelity readout that the corpus
 // calibration sweep and §9.4 baseline comparison build on. Run with -v
 // to see the table.
 func TestRecallMadlibs_CorpusReport(t *testing.T) {
@@ -160,7 +160,7 @@ func TestRecallMadlibs_CorpusReport(t *testing.T) {
 	t.Logf("metrics blob: %s", mPath)
 }
 
-// calibThresholds and calibDepths are the C.6 sweep axes.
+// calibThresholds and calibDepths are the calibration sweep axes.
 var (
 	calibDepths     = []int{1, 2, 3, 4}
 	calibThresholds = []float64{0.2, 0.3, 0.4, 0.5, 0.6}
@@ -178,7 +178,7 @@ type calibCell struct{ p, r, f float64 }
 // swept directly through scoring.Options. Each cell aggregates
 // precision/recall/F1 over that depth's query set at that threshold.
 //
-// The sweep answers the questions C.5 deferred: whether 0.4 is the
+// The sweep answers two questions: whether 0.4 is the
 // right default threshold, and where symbolic Jaccard's drift floor
 // sits. It asserts nothing — it is a measurement; §9.4 baseline
 // comparison is where regressions in this matrix would surface. Run

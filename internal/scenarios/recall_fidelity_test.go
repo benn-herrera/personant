@@ -280,7 +280,29 @@ func TestMatchFireSet(t *testing.T) {
 	}
 }
 
-// TestScenario_RecallFidelity_Smoke exercises the Phase C.1 harness
+// TestRecallFetchedIDs: the recall.accept scraper keeps log order and
+// repeats (the Layer-B mirror replays promotions in order) and ignores
+// match-fire lines and accept lines without a thr= id.
+func TestRecallFetchedIDs(t *testing.T) {
+	lines := []string{
+		"ts spine.match-fire thr_1 score=0.9",
+		"ts recall.accept thr=thr_7 layers=symbolic",
+		"ts recall.accept thr=thr_2 layers=embedding+symbolic",
+		"ts recall.accept layers=symbolic",
+		"ts recall.accept thr=thr_7 layers=symbolic",
+		"ts recall.fire-error thr=thr_3 err=x",
+	}
+	got := recallFetchedIDs(lines)
+	want := []string{"thr_7", "thr_2", "thr_7"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("recallFetchedIDs: got %v want %v", got, want)
+	}
+	if got := recallFetchedIDs(nil); got != nil {
+		t.Errorf("recallFetchedIDs(nil) = %v, want nil", got)
+	}
+}
+
+// TestScenario_RecallFidelity_Smoke exercises the recall-fidelity harness
 // surface end-to-end: three steps with explicit ExpectedRecallMatches.
 // Mirrors TestScenario_OpportunisticRecall_Surfaces but uses the new
 // per-step ground-truth field instead of a global match-fire invariant.

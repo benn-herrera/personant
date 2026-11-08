@@ -1,7 +1,7 @@
 package sim
 
-// B2 — sim slow-embedder mode + the first observation of the BD-8 (1+P)×cap
-// dead-zone bound OUTSIDE measure's unit tests.
+// B2 — sim slow-embedder mode + the first observation of the in-flight
+// (1+P)×cap dead-zone bound OUTSIDE measure's unit tests.
 //
 // slowEmbedder is the deterministic embed-blocking injection B2 asks for: a
 // wrapping model.Embedder that gates multi-text (flush) batches on a release
@@ -77,7 +77,7 @@ func (s *slowEmbedder) InFlight() int { return int(s.inFlight.Load()) }
 func (s *slowEmbedder) release() { close(s.gate) }
 
 // TestSimSlowEmbedder_DeadZoneWidenedBand is the B2 first-observation test. It
-// reproduces the measure BD-8 single-in-flight timeline at the sim level via the
+// reproduces the measure single-in-flight timeline at the sim level via the
 // public measure API, then ties the runtime's widened lexical floor to the sim
 // oracle's widened inDebtWindowDepth classifier.
 func TestSimSlowEmbedder_DeadZoneWidenedBand(t *testing.T) {
@@ -151,7 +151,7 @@ func TestSimSlowEmbedder_DeadZoneWidenedBand(t *testing.T) {
 	// (3) The recall query the runtime issues: EngagedDebtWindow is the plain debt
 	//     CAP; Recall widens it internally to (1+P)×cap. The target has no vector
 	//     (flush unpublished) and sits below the 1×cap band, so ONLY the widened
-	//     lexical floor can surface it — the BD-8 bound, observed at the sim level.
+	//     lexical floor can surface it — the in-flight bound, observed at the sim level.
 	results, err := s.Recall(context.Background(), measure.Request{
 		QuerySymbols:      []string{probeToken},
 		QueryText:         texts[probeTurn],
@@ -164,7 +164,7 @@ func TestSimSlowEmbedder_DeadZoneWidenedBand(t *testing.T) {
 	}
 	if !intraHitContainsTurn(results, "thr_1", probeTurn) {
 		t.Fatalf("turn %d (depth %d, pending %d, in the (1×cap,%d×cap] widened band) is unfindable while a flush is "+
-			"in flight — the runtime's in-flight-widened lexical floor did not surface it (SPEC §3.4 / BD-8). results=%+v",
+			"in flight — the runtime's in-flight-widened lexical floor did not surface it (SPEC §3.4). results=%+v",
 			probeTurn, depth, pending, 1+pending, results)
 	}
 }

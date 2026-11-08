@@ -8,7 +8,7 @@ import (
 	"personant/internal/memops"
 )
 
-// Archive index store ops (§3.8 / design §3.3). The archive index is
+// Archive index store ops (§3.8). The archive index is
 // canonical (spec §2.1), one memops.ArchiveEntry per line, sorted by
 // thr_id for line-grain diffs. It is never a derived file and is never
 // rewritten on recovery except to stamp RecoveredAt.

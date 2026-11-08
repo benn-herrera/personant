@@ -142,9 +142,7 @@ func checkSpine(report *memops.VerifyReport, spine []memops.SpineRecord, entryMa
 		// anchors are a [derived] projection in range 0..AnchorProjectionMax.
 		// 0 is legal (a vague-start thread); only an over-ceiling count is a
 		// violation (the projection owns the bound — an over count signals a
-		// substrate bug, not a model contract breach). The fuller §5.1 verify
-		// loosening + SPEC deltas land in anchor-lifecycle Inc 4; this is the
-		// cardinality rule that the Inc 2 projection forces.
+		// substrate bug, not a model contract breach).
 		if len(rec.Anchors) > memops.AnchorProjectionMax {
 			report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "anchors",
 				Message: fmt.Sprintf("anchors length %d > %d", len(rec.Anchors), memops.AnchorProjectionMax)})
@@ -518,7 +516,7 @@ func checkProjectMeta(report *memops.VerifyReport, dirName string, meta memops.P
 
 	if !memops.ValidProjectName(meta.Name) {
 		report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "name",
-			Message: fmt.Sprintf("name %q is not a directory base name (empty, \".\", \"..\", \"/\" or a control character)", meta.Name)})
+			Message: fmt.Sprintf("name %q is not a valid project name", meta.Name)})
 	}
 
 	// current_root_path: must be present. We do not check disk existence:

@@ -99,7 +99,7 @@ func TestInitFreshHome(t *testing.T) {
 		t.Fatalf("read gitignore: %v", err)
 	}
 	for _, want := range []string{
-		"tmp/", "history", ".recall-cache/",
+		"tmp/", ".recall-cache/",
 		"op-in-progress.json", "turn-journal.jsonl", "derived-watermark",
 	} {
 		if !strings.Contains(string(gi), want) {
@@ -158,8 +158,8 @@ func TestInitIdempotent(t *testing.T) {
 
 // TestInitPreservesAccruedState: the file that accrues canonical state
 // (user.md) survives re-init with its custom contents intact. Re-init
-// cannot reconstruct ack-prompt scope grants or decline categorizations;
-// preserving them is the point.
+// cannot reconstruct the user's own directives; preserving them is the
+// point.
 func TestInitPreservesAccruedState(t *testing.T) {
 	hasGit(t)
 	home := t.TempDir()

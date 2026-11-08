@@ -263,8 +263,7 @@ func capHistorySymbols(syms []memops.HistorySymbol) []memops.HistorySymbol {
 // file path, URL, git SHA) appears once (low Count) but nowhere else
 // (maximal discrimination). Pure Count-eviction therefore discards exactly
 // the symbols that make THIS thread recallable. The protection predicate is
-// the UNION EverCentral || IsHighSpecificity(Raw) (anchor-lifecycle Inc 2,
-// SOLUTION §2 A5+C3): a once-central premise (the abandoned-premise recall
+// the UNION EverCentral || IsHighSpecificity(Raw): a once-central premise (the abandoned-premise recall
 // handle) is retained alongside intrinsically discriminative identifiers.
 // IsHighSpecificity is re-derived from the persisted Raw, NOT Source (see
 // that function's doc — authority is not specificity). The evictable set is

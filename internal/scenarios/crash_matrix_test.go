@@ -86,7 +86,8 @@ var crashScenarioCoverage = map[string]string{
 	"morninginit.postBaseline.preWatermark": "scenarios.TestCrashMatrix_MorningInit",
 
 	// Barrier top-level + archiveBatch sub-windows — TestBarrier_CrashWalk
-	// arms every one and asserts the roll-forward terminal (F1/INV-2).
+	// arms every one and asserts the roll-forward terminal (F1, one
+	// day-commit per day).
 	"barrier.preArchival":                      "fileadapter.TestBarrier_CrashWalk",
 	"barrier.postArchival.preDayCommit":        "fileadapter.TestBarrier_CrashWalk",
 	"barrier.postSettle.preDayCommit":          "fileadapter.TestBarrier_CrashWalk",
@@ -122,8 +123,7 @@ var crashScenarioCoverage = map[string]string{
 	"recovery.adopt.preCommit":       "recovery.TestCell12_VerifyGateRefusesThenRetryConverges (idempotent adopt re-drive)",
 }
 
-// TestCrashPointCoverageGate is the mechanical coverage gate (design §7,
-// crash-stability-implementation.md R4): it fails the suite if any
+// TestCrashPointCoverageGate is the mechanical coverage gate: it fails the suite if any
 // registered crashpoint lacks a crash scenario, or if the coverage map
 // names a point that is not registered (a stale entry that would silently
 // stop protecting anything). Enumeration is complete because the scenarios

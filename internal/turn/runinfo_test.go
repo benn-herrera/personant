@@ -25,7 +25,7 @@ func TestRunWithInfoSurfacesPromptTokens(t *testing.T) {
 			Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello world.",
 			Usage:   model.Usage{PromptTokens: wantTokens, CompletionTokens: 2, TotalTokens: wantTokens + 2},
 		},
-	}, nil)
+	})
 
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
@@ -54,7 +54,7 @@ func TestRunWithDeltasDropsTurnInfo(t *testing.T) {
 			Content: "*topic: *new-topic* [foo, bar, baz, qux]*\nHello world.",
 			Usage:   model.Usage{PromptTokens: 4242},
 		},
-	}, nil)
+	})
 
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))

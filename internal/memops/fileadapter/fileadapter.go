@@ -388,80 +388,7 @@ func (a *FileAdapter) RecordRecallFire(ctx context.Context, threadID string) err
 	return nil
 }
 
-// ArchiveThread archives one retired thread — a thin wrapper over the batch
-// ArchiveThreads (design §3.1). It preserves the single-thread seam and the
-// ErrThreadNotFound contract: a thread with no spine record is reported by
-// the batch as a skip, which this wrapper maps back to ErrThreadNotFound.
-//
-// The drain (turn/archival.go) still calls this per-thread in I2, so each
-// call commits its own batch of one. The drain's rewire to call
-// ArchiveThreads ONCE is I3.
-func (a *FileAdapter) ArchiveThread(ctx context.Context, threadID string) error {
-	res, err := a.ArchiveThreads(ctx, []string{threadID})
-	if err != nil {
-		return err
-	}
-	for _, o := range res.Outcomes {
-		if o.ThrID == threadID && o.Skipped {
-			return fmt.Errorf("fileadapter: archive thread %s: %w", threadID, memops.ErrThreadNotFound)
-		}
-	}
-	return nil
-}
-
 // ---------- Project operations ----------
-
-// CreateProject persists a new ProjectMeta. Today this delegates to
-// SaveProjectMeta (no first-write vs. drift distinction at the substrate
-// layer); the split exists on the port so caller intent is visible.
-func (a *FileAdapter) CreateProject(ctx context.Context, meta memops.ProjectMeta) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := store.SaveProjectMeta(a.paths, meta); err != nil {
-		return fmt.Errorf("fileadapter: create project: %w", err)
-	}
-	a.touchTurnScope(store.ProjectMetaRel(meta.ID))
-	return nil
-}
-
-// NextProjectID returns the next available prj_<n> id, scanning the
-// full set of known projects so the new id never collides with an
-// existing one.
-func (a *FileAdapter) NextProjectID(ctx context.Context) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	metas, err := store.ListProjects(a.paths)
-	if err != nil {
-		return "", fmt.Errorf("fileadapter: list projects: %w", err)
-	}
-	return store.NextProjectID(metas), nil
-}
-
-// LoadProject returns the meta for the given project ID.
-func (a *FileAdapter) LoadProject(ctx context.Context, projectID string) (memops.ProjectMeta, error) {
-	if err := ctx.Err(); err != nil {
-		return memops.ProjectMeta{}, err
-	}
-	meta, err := store.LoadProjectMeta(a.paths, projectID)
-	if err != nil {
-		return memops.ProjectMeta{}, fmt.Errorf("fileadapter: load project: %w", err)
-	}
-	return meta, nil
-}
-
-// SaveProject overwrites the meta for an existing project.
-func (a *FileAdapter) SaveProject(ctx context.Context, meta memops.ProjectMeta) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := store.SaveProjectMeta(a.paths, meta); err != nil {
-		return fmt.Errorf("fileadapter: save project: %w", err)
-	}
-	a.touchTurnScope(store.ProjectMetaRel(meta.ID))
-	return nil
-}
 
 // ListProjects returns every known project, sorted by ID.
 func (a *FileAdapter) ListProjects(ctx context.Context) ([]memops.ProjectMeta, error) {
@@ -473,18 +400,6 @@ func (a *FileAdapter) ListProjects(ctx context.Context) ([]memops.ProjectMeta, e
 		return nil, fmt.Errorf("fileadapter: list projects: %w", err)
 	}
 	return metas, nil
-}
-
-// FindProjectByPath returns the project whose current root path is absPath.
-func (a *FileAdapter) FindProjectByPath(ctx context.Context, absPath string) (memops.ProjectMeta, bool, error) {
-	if err := ctx.Err(); err != nil {
-		return memops.ProjectMeta{}, false, err
-	}
-	meta, found, err := store.FindProjectByPath(a.paths, absPath)
-	if err != nil {
-		return memops.ProjectMeta{}, false, fmt.Errorf("fileadapter: find project by path: %w", err)
-	}
-	return meta, found, nil
 }
 
 // ---------- Session working set ----------

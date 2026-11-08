@@ -37,7 +37,7 @@ func CurrentDay() int {
 // Detection vs. idempotence guard — deliberately NOT conflated:
 //   - New-day DETECTION reads the trailer off HEAD regardless of commit
 //     shape (HeadDay works on any trailered commit).
-//   - The INV-2 idempotence GUARD is stricter: it fires only on a
+//   - The one-day-commit-per-day idempotence GUARD is stricter: it fires only on a
 //     DayCommitMessage-shape HEAD whose trailer equals the target day
 //     (HeadIsDayCommit). A trailered-but-non-day-shape HEAD (an archival
 //     stamp, an adopt, a roll-forward repair) advances HEADDAY for
@@ -49,7 +49,7 @@ func CurrentDay() int {
 const DayTrailerKey = "Personant-Day"
 
 // daySubjectPrefix is the day-commit subject shape ("day <N>"). The
-// INV-2 guard matches the SHAPE, not just the trailer — every primary
+// one-day-commit guard matches the SHAPE, not just the trailer — every primary
 // commit is trailered (F3), so a trailer-only guard would let a
 // roll-forward stamp or an adopt falsely satisfy day-commit idempotence.
 const daySubjectPrefix = "day "
@@ -129,8 +129,9 @@ func HeadDay(ctx context.Context, paths store.PersonantPaths, which Repo) (day i
 	return day, ok, nil
 }
 
-// HeadIsDayCommit is the INV-2 idempotence guard: it reports whether
-// `which`'s HEAD is a DayCommitMessage-shape commit for exactly `day`.
+// HeadIsDayCommit is the one-day-commit-per-day idempotence guard: it
+// reports whether `which`'s HEAD is a DayCommitMessage-shape commit for
+// exactly `day`.
 // See the package comment above for why this is stricter than HeadDay.
 func HeadIsDayCommit(ctx context.Context, paths store.PersonantPaths, which Repo, day int) (bool, error) {
 	if err := ctx.Err(); err != nil {

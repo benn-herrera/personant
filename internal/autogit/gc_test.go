@@ -101,7 +101,7 @@ func TestGC_PacksLooseObjects(t *testing.T) {
 // storer it would resolve reachable objects through the stale (deleted)
 // pack and fail "packfile not found". GC re-opens the repo before pruning,
 // so the second pass stays clean — this guards that re-open fix. (The sim's
-// first sleep cycle hit this exact path: store.Init leaves an initial pack,
+// first consolidation hit this exact path: store.Init leaves an initial pack,
 // so the very first gc is a repack-against-existing-pack.)
 func TestGC_RepeatedGCNoStalePackError(t *testing.T) {
 	paths := scaffoldHome(t)

@@ -27,7 +27,7 @@ func headHash(t *testing.T, paths store.PersonantPaths) string {
 // returns the substrate HEAD before and after the turn.
 func runTurn(t *testing.T, paths store.PersonantPaths, state *State, content, input string) (before, after string) {
 	t.Helper()
-	state.Client = model.NewScriptedMock([]model.Response{{Content: content}}, nil)
+	state.Client = model.NewScriptedMock([]model.Response{{Content: content}})
 	before = headHash(t, paths)
 	var out bytes.Buffer
 	if _, err := Run(context.Background(), state, input, &out); err != nil {
@@ -55,7 +55,7 @@ func TestCheckpoint_ThreadCreateCommitsOnce(t *testing.T) {
 	}
 }
 
-// TestCheckpoint_ContentOnlyTurnCommitsOnce is the core #94 cadence
+// TestCheckpoint_ContentOnlyTurnCommitsOnce is the core cadence
 // assertion (per-turn commit supersedes the structural-only cadence): a
 // turn with NO structural change still lands exactly one per-turn commit
 // — the durability recovery point that bounds crash loss to ≤1 turn —
@@ -97,7 +97,7 @@ func TestCheckpoint_CloseCommitsOnce(t *testing.T) {
 	// seed one below the firing value.
 	state.TurnNumber = DecayTurns
 	state.ActiveThreads = []string{"thr_1"}
-	state.Curator = stubCurator{summary: "gist", anchors: []string{"x", "y", "z", "w"}}
+	state.Curator = stubCurator{summary: "gist"}
 
 	// Content-only model output: the structural change is the closure, not
 	// a create. The closure write and the turn's content ride the SAME
@@ -130,7 +130,7 @@ func TestCheckpoint_CloseAndCreateCoalesceToOneCommit(t *testing.T) {
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 	state.TurnNumber = DecayTurns
 	state.ActiveThreads = []string{"thr_1"}
-	state.Curator = stubCurator{summary: "gist", anchors: []string{"x", "y", "z", "w"}}
+	state.Curator = stubCurator{summary: "gist"}
 
 	// New-topic create on the same turn the decayed thr_1 retires.
 	before, after := runTurn(t, paths,
@@ -153,18 +153,18 @@ func TestCheckpoint_CloseAndCreateCoalesceToOneCommit(t *testing.T) {
 	}
 }
 
-// TestCheckpoint_SessionCloseBackstopIsNoOp: with the #94 per-turn commit
-// every turn's writes are already durable at session close, so the
-// session-close Checkpoint (chat.go's post-loop() safety net, demoted to
-// a belt-and-braces backstop by SOLUTION principle 1) normally commits
-// nothing — HEAD does not move.
+// TestCheckpoint_SessionCloseBackstopIsNoOp: with the per-turn commit
+// every turn's writes are already durable at a clean stop, so a Checkpoint
+// there normally commits nothing — HEAD does not move. Nothing in
+// production calls Checkpoint; the clean-stop checkpoint belongs to the
+// plugin route's service.
 func TestCheckpoint_SessionCloseBackstopIsNoOp(t *testing.T) {
 	paths, meta := newTestHome(t)
 	pinClock(t, time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC))
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, nil)
 
 	// newTestHome seeds projects/prj_1/meta.json OUTSIDE the adapter.
-	// Under scoped per-turn staging (R3-addendum item 3) out-of-band
+	// Under scoped per-turn staging out-of-band
 	// writes are absorbed only by a FULL sweep, never by a turn commit —
 	// so baseline-checkpoint the fixture before measuring, exactly as a
 	// real home's `personant init`/first backstop would have.
@@ -177,8 +177,8 @@ func TestCheckpoint_SessionCloseBackstopIsNoOp(t *testing.T) {
 	runTurn(t, paths, state, "plain reply two", "again")
 	before := headHash(t, paths)
 
-	// Session-close backstop (mirrors chat.go's post-loop() call): the
-	// per-turn commits left a clean tree, so this must be a no-op.
+	// Clean-stop checkpoint: the per-turn commits left a clean tree, so
+	// this must be a no-op.
 	if err := state.Ops.Checkpoint(context.Background(), "session-close"); err != nil {
 		t.Fatalf("session-close Checkpoint: %v", err)
 	}

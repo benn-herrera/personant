@@ -12,7 +12,7 @@ import (
 )
 
 // handcraftedQueriesPath is the derived query artifact for the
-// hand-crafted C.2/C.3 templates, produced by `make recall-madlibs`.
+// hand-crafted strict and adversarial templates, produced by `just recall-madlibs`.
 // It is .gitignore'd; absent → the calling test skips with a
 // regeneration hint rather than hard-failing.
 //
@@ -135,15 +135,15 @@ func runMadlibsQuerySet(t *testing.T, doc madlibsDoc) {
 	}
 }
 
-// TestScenario_RecallMadlibs drives the hand-crafted C.2 (strict) and
-// C.3 (adversarial, measure-only) mad-libs query set end-to-end. The
+// TestScenario_RecallMadlibs drives the hand-crafted strict and
+// adversarial (measure-only) mad-libs query set end-to-end. The
 // Wikipedia-corpus set is exercised separately by the build-tagged
 // TestScenario_RecallMadlibsCorpus.
 func TestScenario_RecallMadlibs(t *testing.T) {
 	runMadlibsQuerySet(t, loadMadlibsQueries(t, handcraftedQueriesPath))
 }
 
-// TestRecallMadlibs_AdversarialBehavior locks in that each C.3
+// TestRecallMadlibs_AdversarialBehavior locks in that each
 // adversarial template actually probes the failure mode its
 // description claims — a guard against a template edit silently
 // turning an adversarial probe into a trivially-passing query.

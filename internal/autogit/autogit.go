@@ -557,7 +557,7 @@ func TreeHashAt(ctx context.Context, paths store.PersonantPaths, which Repo, com
 // encoding — so the result is directly comparable to TreeHashAt and to
 // the integrity token captured at archival.
 //
-// This is the verify primitive (design §5 E3 / invariant 2): after
+// This is the verify primitive (E3): after
 // recovery restores a subtree to disk, the caller re-hashes it here and
 // compares against the stored tree hash. Symlinks and submodules are not
 // part of a personant thread directory (thread.md + turns/ + folio.jsonl +
@@ -671,7 +671,7 @@ func Tag(ctx context.Context, paths store.PersonantPaths, which Repo, name, comm
 
 // GC runs an offline garbage-collection pass over the home tree, packing
 // reachable loose objects and pruning unreachable ones — the substrate op
-// behind the ARCHITECTURE.md "sleep cycle" (task #108). It is a pure
+// behind consolidation. It is a pure
 // space optimization: a personant session writes one loose object per
 // commit and never packs during the session, so the loose-object pile
 // grows unbounded until a gc folds it into a packfile. The triad runs in
@@ -691,7 +691,7 @@ func Tag(ctx context.Context, paths store.PersonantPaths, which Repo, name, comm
 // in-memory or empty repo — is a clean no-op: logged at debug, returns
 // nil. PackRefs failure is likewise logged and swallowed. Only a genuinely
 // unexpected repack/prune error propagates; the caller (Consolidate) must
-// also treat any returned error as non-fatal — a sleep cycle that cannot
+// also treat any returned error as non-fatal — a consolidation that cannot
 // gc must not abort the run.
 func GC(ctx context.Context, paths store.PersonantPaths, which Repo) error {
 	if err := ctx.Err(); err != nil {

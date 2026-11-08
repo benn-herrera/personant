@@ -71,8 +71,8 @@ func seedDeadZoneThread(t *testing.T, paths store.PersonantPaths, threadID strin
 	return texts
 }
 
-// TestRecall_CompletenessContinuousAcrossInFlightFlush is the BD-8 (§3.4)
-// dead-zone proof. INVARIANT UNDER TEST (SPEC §3.4): recall completeness
+// TestRecall_CompletenessContinuousAcrossInFlightFlush is the in-flight
+// flush dead-zone proof. INVARIANT UNDER TEST (SPEC §3.4): recall completeness
 // holds CONTINUOUSLY — durable on-disk content must be findable at every
 // instant, including while an asynchronous fine-tier flush is in flight.
 //

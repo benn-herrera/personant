@@ -8,7 +8,7 @@ import (
 	"personant/internal/model"
 )
 
-// Live-turn budget sub-policy (#127, design §3.2).
+// Live-turn budget sub-policy.
 //
 // The whole-request token ceiling (I1) is enforced by bounding every
 // component the request is assembled from. workset.Compose bounds the
@@ -19,7 +19,7 @@ import (
 // to borrow space (I2): the live turn and memory are reserved against
 // each other, never silently traded.
 //
-// Bounding policy differs by component authorship (design §3.4 / Q3):
+// Bounding policy differs by component authorship:
 //   - userInput is USER-AUTHORED → an oversized paste is REJECTED with a
 //     user-facing message, never silently truncated (the user decides
 //     what to keep).
@@ -32,7 +32,7 @@ import (
 
 // ErrInputExceedsBudget is returned by RunWithInfo when a single
 // user-authored userInput exceeds the live-turn reserve. Its message is
-// user-facing (surfaced verbatim to the REPL); callers present it rather
+// user-facing (surfaced verbatim to the user); callers present it rather
 // than treating it as an internal fault.
 type inputExceedsBudgetError struct {
 	inputBytes  int
@@ -46,8 +46,8 @@ func (e *inputExceedsBudgetError) Error() string {
 }
 
 // IsInputExceedsBudget reports whether err is the oversize-user-input
-// rejection (the §3.4/Q3 reject path). The REPL uses this to present the
-// message as user guidance rather than a crash.
+// rejection. A caller uses this to present the message as user guidance
+// rather than a crash.
 func IsInputExceedsBudget(err error) bool {
 	_, ok := err.(*inputExceedsBudgetError)
 	return ok
@@ -120,7 +120,7 @@ func isBudgetedTaskDelta(source string) bool {
 
 // boundTaskResultDeltas truncates-with-marker the content of current-turn
 // task-class result deltas — tool.result and §4.4 user.shell-capture — so
-// a single verbose tool result or a `# cat bigfile` (design §1 m1) cannot
+// a single verbose tool result or a `# cat bigfile` cannot
 // balloon the request via the chain. It is bounded truncation, not
 // rejection: the content is non-user-authored (the user cannot split a
 // tool's or a command's output), so honesty-with-marker beats

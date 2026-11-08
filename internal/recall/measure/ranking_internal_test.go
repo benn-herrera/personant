@@ -40,14 +40,14 @@ func TestRankTier(t *testing.T) {
 // TestRecall_LexicalFloorRanksAfterScored is the end-to-end guard for the
 // Score-0 lexical ranking fix: a lexical-floor debt-window hit (a §3.4
 // completeness guarantee, not a relevance signal) must rank AFTER every scored
-// candidate so it cannot displace one out of the offered top-recallOfferK — yet
+// candidate so it cannot displace one out of the fetched top-recallFetchK — yet
 // it must stay IN the result set (completeness preserved). With three symbolic
 // candidates and one engaged lexical-floor hit, the three scored candidates
 // take the first three slots and the lexical hit lands last.
 //
 // Pre-fix the lexical hit sorted into the intra-flagged-first group and
 // outranked the scored symbolic candidates, bumping one of them out of the
-// offer's top-3 cut.
+// fetch's top-3 cut.
 func TestRecall_LexicalFloorRanksAfterScored(t *testing.T) {
 	paths := store.PathsForHome(t.TempDir())
 	if err := store.Init(paths, store.InitOptions{Quiet: true}); err != nil {
@@ -126,15 +126,15 @@ func TestRecall_LexicalFloorRanksAfterScored(t *testing.T) {
 		t.Errorf("thr_1 should be lexical-floor-only (intra Score 0, no symbolic/embedding); got %+v", last)
 	}
 
-	// The offered top-K cut must be exactly the three scored candidates — the
-	// lexical hit does not displace any of them. offerK mirrors turn.recallOfferK
-	// (the consumer's offer cut, out of this package); the ordering contract is
+	// The fetched top-K cut must be exactly the three scored candidates — the
+	// lexical hit does not displace any of them. fetchK mirrors turn.recallFetchK
+	// (the consumer's fetch cut, out of this package); the ordering contract is
 	// what makes that cut safe.
-	const offerK = 3
-	offer := results[:min(len(results), offerK)]
-	for _, r := range offer {
+	const fetchK = 3
+	fetched := results[:min(len(results), fetchK)]
+	for _, r := range fetched {
 		if r.ThreadID == "thr_1" {
-			t.Errorf("lexical-floor hit displaced a scored candidate into the top-%d offer: %v", offerK, ids(results))
+			t.Errorf("lexical-floor hit displaced a scored candidate into the top-%d fetch: %v", fetchK, ids(results))
 		}
 	}
 

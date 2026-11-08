@@ -171,7 +171,7 @@ func TestRunTaglessConversationalTurnProceedsWithoutRecovery(t *testing.T) {
 
 	mock := model.NewScriptedMock([]model.Response{
 		{Content: "Just chatting, no tag."},
-	}, nil)
+	})
 	mock.RecordCalls = true
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, mock)
 	pinClock(t, time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC))

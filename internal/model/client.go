@@ -22,14 +22,13 @@ import (
 //   - Consult: blocking, returns the full Response. Right for programmatic
 //     flows that don't surface tokens to a user.
 //   - ConsultStream: returns a StreamReader; callers iterate chunks as
-//     they arrive. Right for interactive flows (chat REPL, ping).
+//     they arrive. Right for interactive flows.
 //
 // Both methods consume the same Request and produce equivalent final
 // content; ConsultStream additionally exposes per-chunk deltas.
 type Client interface {
 	Consult(ctx context.Context, req Request) (Response, error)
 	ConsultStream(ctx context.Context, req Request) (StreamReader, error)
-	ListModels(ctx context.Context) ([]ModelInfo, error)
 }
 
 // Embedder produces embedding vectors for text, against an

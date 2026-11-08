@@ -24,14 +24,14 @@ import (
 //
 // This is sound only because FileAdapter is the SOLE mutator of thread.md
 // frontmatter in production and sim. The four FileAdapter write sites
-// (CreateThread, EngageThread, RecordRecallFire, ArchiveThread) each call
+// (CreateThread, EngageThread, RecordRecallFire, ArchiveThreads) each call
 // Put or Invalidate after a successful store write. Out-of-band writers
-// (store.SeedThread in tests, future submind git-merge per #94) MUST call
+// (store.SeedThread in tests, any future submind git-merge) MUST call
 // FileAdapter.InvalidateThread / InvalidateAll to preserve coherence —
 // there is no other path that corrects a stale entry.
 //
 // A stale cache that returned wrong recall results already burned this
-// project once (the reverted "Inc 6" symbols.jsonl candidate filter read a
+// project once (a reverted symbols.jsonl candidate filter read a
 // stale on-disk index and regressed recall); this design exists to make
 // that class of bug impossible by construction.
 //

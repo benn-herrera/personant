@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"personant/internal/clock"
-	"personant/internal/curator"
 	"personant/internal/memops"
 	"personant/internal/memops/fileadapter"
 	"personant/internal/metrics"
@@ -163,13 +162,9 @@ func installCurator(state *turn.State) {
 }
 
 // scriptedCurator is the harness's deterministic Curator: it returns a
-// fixed summary and reuses the thread's existing anchors, so closure
-// scenarios run without a live model.
+// fixed summary, so closure scenarios run without a live model.
 type scriptedCurator struct{}
 
-func (scriptedCurator) DraftClosure(_ context.Context, thread memops.Thread) (curator.ClosureDraft, error) {
-	return curator.ClosureDraft{
-		Summary: "scripted closure summary for " + thread.Meta.ID,
-		Anchors: append([]string(nil), thread.Meta.Anchors...),
-	}, nil
+func (scriptedCurator) DraftClosure(_ context.Context, thread memops.Thread) (string, error) {
+	return "scripted closure summary for " + thread.Meta.ID, nil
 }

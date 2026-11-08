@@ -67,8 +67,7 @@ func TestSaveLoadFrontmatterRoundTrip(t *testing.T) {
 	}
 }
 
-// TestNewLifecycleFieldsRoundTrip — anchor-lifecycle Inc 1 acceptance
-// gate. The new HistorySymbol fields (Lifecycle/EverCentral/
+// TestNewLifecycleFieldsRoundTrip — the HistorySymbol lifecycle fields (Lifecycle/EverCentral/
 // LastActiveTurn) survive the YAML frontmatter round-trip with non-zero
 // values, and the new SpineRecord.AnchorsProjectedAtTurn survives the
 // JSONL round-trip. The fields are inert this increment — the test only

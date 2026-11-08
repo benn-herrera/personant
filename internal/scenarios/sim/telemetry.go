@@ -411,7 +411,7 @@ func (w *dailySnapshotWriter) appendRecord(h *scenarios.Harness, simDate time.Ti
 }
 
 // cosineOpsReporter is the recaller surface the MEASURED recall_query_cosine_ops
-// metric reads (#111 / design §7.2). measure.Service satisfies it; the
+// metric reads. measure.Service satisfies it; the
 // symbolic-only default does not (no embedding recall ran), so the metric is 0
 // on the mock acceptance path — honestly, the perf bend is measurable only on
 // an embedding-live run. Mirrors the harness's optional-interface discipline.

@@ -27,8 +27,8 @@ const largeInputRungEveryN = 3
 // gatePolicy is the single source of truth for which §9.4 acceptance gates
 // fire as hard t.Errorf asserts versus downgrade to logged observations on a
 // given rung. It replaces the scatter of inline `oracleBlind` / `*liveEmbedding`
-// branches that the gate-evaluation code used to re-test at each decision point
-// (sim-harness burndown #6): every gate now consults this object once, by
+// branches that the gate-evaluation code used to re-test at each decision
+// point: every gate now consults this object once, by
 // intent-named predicate, so the live-vs-mock policy is decided in one place and
 // read everywhere.
 //
@@ -101,7 +101,7 @@ func (p gatePolicy) tokenCeilingAsserts() bool { return p.oracleBlind }
 func (p gatePolicy) completenessFloorAsserts() bool { return p.liveEmbedding }
 
 // rungReport is the write-once-read-many owner of a rung's materialized
-// telemetry (sim-harness burndown #6). runSimRung used to write→re-read→mutate→
+// telemetry. runSimRung used to write→re-read→mutate→
 // re-write→re-read the metrics blob three times, interleaving the folds with the
 // scalar derivations; materializeRungMetrics now folds every series into
 // h.Metrics in memory, writes the blob ONCE, reads it back ONCE, and derives the
@@ -141,7 +141,7 @@ type rungReport struct {
 // measure.NewService(ops, embedder); the harness installs it, Prepares the
 // index, and keeps it current via the per-thread-creation AddThread seam.
 //
-// oracleBlind is the inference-in-loop guard (#98, Inc 3). When true (set
+// oracleBlind is the inference-in-loop guard. When true (set
 // only by TestSim under -sim.live-inference), every gate whose ground truth is
 // the deterministic generator's CANNED responses is downgraded from a t.Errorf
 // failure to a logged observation; see gatePolicy for the full rationale. With
@@ -185,7 +185,7 @@ func runSimRung(t *testing.T, label string, d time.Duration, corpus []CorpusSlot
 	sc.RungSeed = cfg.Seed
 	sc.RungSpan = d
 	sc.Recaller = recaller
-	// Inference-in-loop (#98, Inc 3): when a live chat client is supplied the
+	// Inference-in-loop: when a live chat client is supplied the
 	// harness drives turns against it instead of the scripted mock, and
 	// oracleBlind is set in lockstep (every caller pairs them). nil keeps the
 	// mock path.
@@ -333,7 +333,7 @@ func materializeRungMetrics(t *testing.T, h *scenarios.Harness, gen *generator, 
 		h.Metrics.Counter("workload_user_dictated_turns", int64(gen.userDictatedCount))
 	}
 
-	// Fold the anchor-lifecycle (Inc 5) metrics, the within-session interleaving
+	// Fold the anchor-lifecycle metrics, the within-session interleaving
 	// telemetry, the within-thread wander telemetry, and the synthesis-thread
 	// telemetry. All generator-owned, metrics-package-free at the seam; these set
 	// counters/histograms/gauges on the live in-memory *metrics.Run.
@@ -453,7 +453,7 @@ func logRungSummary(t *testing.T, label string, rep rungReport, gen *generator) 
 		t.Logf("recall episodes:  no closed episodes this run")
 	}
 
-	// Anchor-lifecycle (Inc 5) metric summary — the redesign's instrument.
+	// Anchor-lifecycle metric summary.
 	t.Logf("=== anchor-lifecycle metrics ===")
 	t.Logf("drift_recall_origin:      %.3f (%d obs) — abandoned origin premise still matchable",
 		m.Gauges["drift_recall_origin"], int(m.Gauges["drift_recall_origin_obs"]))
@@ -532,12 +532,12 @@ func logRungSummary(t *testing.T, label string, rep rungReport, gen *generator) 
 	divergence := int(m.Gauges[metricWanderCoherenceDivergence])
 	t.Logf("wander coherence divergence: %d (criterion b PASS = 0; decay is expected, divergence is the failure)",
 		divergence)
-	t.Logf("layerb shadow divergence:   %d (burndown #8 PASS = 0 when runtime follows the plan; shadow LRU vs runtime ActiveThreads)",
+	t.Logf("layerb shadow divergence:   %d (PASS = 0 when runtime follows the plan; shadow LRU vs runtime ActiveThreads)",
 		int(m.Gauges[metricLayerBShadowDivergence]))
-	// BD-4 / B3: the runtime-mirror (rtActive) now models §3.5 closure/decay AND
+	// The runtime-mirror (rtActive) now models §3.5 closure/decay AND
 	// measurement-carrier displacement, so the reverse direction is a hard ==0
 	// gate on mock rungs (evalRungGates), no longer report-only over-retention.
-	t.Logf("layerb shadow reverse div:  %d (BD-4 PASS = 0 when runtime follows the plan; runtime-mirror rtActive vs runtime ActiveThreads)",
+	t.Logf("layerb shadow reverse div:  %d (PASS = 0 when runtime follows the plan; runtime-mirror rtActive vs runtime ActiveThreads)",
 		int(m.Gauges[metricLayerBShadowReverseDivergence]))
 
 	// Intra-thread recall (#109, §9.2). The §4.3 perf-decay series (the I3/I4
@@ -656,8 +656,8 @@ func logRungSummary(t *testing.T, label string, rep rungReport, gen *generator) 
 	t.Logf("intra-thread coherence divergence: %d (#109 mock PASS = 0; the decay curve is the deliverable, divergence is the failure)",
 		intraDivergence)
 
-	// W1 recall-preservation QUALITY MEASURE (#111 / design §7.1, the
-	// approximation-drift canary). REPORTED, NOT GATED (#119): a nonzero
+	// W1 recall-preservation QUALITY MEASURE (the approximation-drift
+	// canary). REPORTED, NOT GATED: a nonzero
 	// divergence means the heuristic substituted a within-top-Kf leaf, NOT
 	// necessarily lost recall. On the symbolic mock run no W1 probe runs.
 	descentDivergence := int(m.Counters[scenarios.MetricRecallIntraDescentDivergence])
@@ -676,7 +676,7 @@ func logRungSummary(t *testing.T, label string, rep rungReport, gen *generator) 
 			int(m.Counters[scenarios.MetricRecallIntraW1TreeMismatch]))
 	}
 
-	// F-B rebuild trip-wire (#111 / design §7.2, fork F-B). A WATCH metric, NOT a
+	// F-B rebuild trip-wire. A WATCH metric, NOT a
 	// hard gate: if it trends up with main-thread length on the long rungs,
 	// semantic rebalancing is not staying bounded.
 	t.Logf("recall_intra_tree_rebuild_calls: %d (F-B trip-wire — semantic-rebalance churn; watch, no gate; escalates to the hybrid MAD if it trends with main-thread length)",
@@ -753,7 +753,7 @@ func evalRungGates(t *testing.T, label string, rep rungReport, gen *generator, p
 			divergence, totalProbeObs)
 	}
 
-	// Layer-B shadow cross-check (burndown #8): the generator's shadow LRU vs
+	// Layer-B shadow cross-check: the generator's shadow LRU vs
 	// the runtime's authoritative ActiveThreads. The comparison is purely
 	// structural (LRU membership), independent of the embedder — it holds on
 	// the mock and the live-EMBEDDING run (both follow the canned plan), so it
@@ -761,7 +761,7 @@ func evalRungGates(t *testing.T, label string, rep rungReport, gen *generator, p
 	// Under live INFERENCE the real model engages a different thread set than
 	// the plan, so the shadow legitimately diverges → report only.
 	layerBDivergence := int(m.Gauges[metricLayerBShadowDivergence])
-	// Reverse direction (BD-4 / B3): threads the runtime-mirror (rtActive) holds
+	// Reverse direction: threads the runtime-mirror (rtActive) holds
 	// that the runtime EVICTED. The mirror now models the two documented
 	// legitimate eviction sources (measurement-carrier displacement and §3.5
 	// turn-idle decay closure — see crossCheckLayerB / the rtActive field doc), so
@@ -773,14 +773,14 @@ func evalRungGates(t *testing.T, label string, rep rungReport, gen *generator, p
 	layerBReverseDivergence := int(m.Gauges[metricLayerBShadowReverseDivergence])
 	if policy.oracleGatesAssert() {
 		if layerBDivergence != 0 {
-			t.Errorf("burndown #8 FAILURE: Layer-B shadow divergence %d != 0 — the generator's shadow LRU and the "+
+			t.Errorf("FAILURE: Layer-B shadow divergence %d != 0 — the generator's shadow LRU and the "+
 				"runtime's ActiveThreads disagree (a runtime-resident thread the shadow did not predict). The recall "+
 				"oracle's expected-sets are computed off the shadow, so a divergence silently corrupts them. Root-cause "+
 				"the shadow engage()/eviction model against the runtime LRU (see the forensic log for the offending ids).",
 				layerBDivergence)
 		}
 		if layerBReverseDivergence != 0 {
-			t.Errorf("BD-4 FAILURE: Layer-B shadow reverse divergence %d != 0 — the runtime-mirror (rtActive) holds a "+
+			t.Errorf("FAILURE: Layer-B shadow reverse divergence %d != 0 — the runtime-mirror (rtActive) holds a "+
 				"thread the runtime EVICTED (mirror-retained / runtime-evicted). The mirror now models §3.5 decay "+
 				"closure and measurement-carrier displacement, so a residual is a REAL mirror/runtime LRU disagreement, "+
 				"not modeled over-retention. Root-cause the mirror engage/decay model against the runtime LRU (see the "+
@@ -920,7 +920,7 @@ func assertTokenCeiling(t *testing.T, label string, m metricsBlob, policy gatePo
 }
 
 // checkTokenCeiling is the PURE B1+X4 token-ceiling predicate (testable in
-// isolation — design §3 criterion 2 mutation test): given the per-turn
+// isolation by a mutation test): given the per-turn
 // request_prompt_tokens samples from a live-inference run, it returns a failure
 // message if the gate should fail, or "" if it passes. An empty series is a
 // wiring defect (the gate cannot observe the assembled request); a max above the
@@ -962,7 +962,7 @@ func checkTokenCeiling(samples []float64) string {
 // This is the anti-vacuity proof's target: with the debtWindowTurns floor
 // disabled (or debtWindowBound forced to 0) the runtime cannot surface a
 // dead-zone target (no vector, no lexical pass), so _hit < _total and this gate
-// FAILS — exactly the mutation test in design §3 criterion 1. It is OFF on the
+// FAILS — exactly what its mutation test checks. It is OFF on the
 // mock run (no embedder → no intra layer → 0/0) and report-only nowhere: under
 // live embedding it is the HARD B1 assertion (the report-only #96 coherence
 // tripwire is a different, whole-range measure — see completenessFloorAsserts).
@@ -1047,7 +1047,7 @@ func qualifyingCompletenessSpan(span time.Duration, mainThreadTurns, threshold i
 }
 
 // checkCompletenessFloor is the PURE B1 §3.4 completeness-floor predicate
-// (testable in isolation — design §3 criterion 1 mutation test): given the
+// (testable in isolation by a mutation test): given the
 // flush-lag dead-zone (hit, total) tally from a live-embedding run, it returns a
 // failure message if the gate should fail, or "" if it passes. total==0 is the
 // non-vacuity failure (design invariant 3 — no dead-zone probe was exercised, so

@@ -283,7 +283,7 @@ func leafNodes(leaves []ChunkVector) []*SummaryNode {
 }
 
 // TestDescendChunks_FrontierBound asserts the descent's leaf frontier is
-// bounded (design §4.1, W2). With the #111 Finding A relevance net the
+// bounded (W2). With the relevance net the
 // per-level beam keeps the top-Beam branches PLUS any clearly-related ones,
 // so the frontier is bounded by NetCap (the backstop), not strictly by
 // LeafFrontierCap. This fixture's clusters are near-orthogonal (only the

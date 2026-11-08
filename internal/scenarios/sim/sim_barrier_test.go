@@ -21,10 +21,10 @@ import (
 // leave the dual-repo evidence behind:
 //
 //   - exactly one DayCommitMessage-shape commit on PRIMARY for the
-//     sealed day (INV-2), with HEADDAY defined and no tag path (F3);
+//     sealed day, with HEADDAY defined and no tag path (F3);
 //   - the DAILY DB reborn at the barrier: its history holds only day-1
 //     turns + the baseline, far shallower than the run's total turns;
-//   - watermark == daily HEAD (INV-4) and a clean terminal Reconcile;
+//   - watermark == daily HEAD and a clean terminal Reconcile;
 //   - the §6.3 gauges recorded (barrier_count, barrier/day-commit/
 //     morning-init durations, day_commit_bytes, daily loose objects).
 //
@@ -178,7 +178,7 @@ func TestSimBarrier2Day(t *testing.T) {
 	if dailyCommits >= turns {
 		t.Errorf("daily history depth %d >= total turns %d — the barrier did not evaporate day-0 per-turn history", dailyCommits, turns)
 	}
-	// INV-4: the watermark is DAILY-anchored. Mid-day it legitimately
+	// The watermark is DAILY-anchored. Mid-day it legitimately
 	// lags daily HEAD (per-turn commits advance HEAD; only rebuilds
 	// stamp), so the assertion is the OPEN contract: a fresh Reconcile
 	// converges with no crash cells and leaves watermark == daily HEAD.
@@ -211,7 +211,7 @@ func TestSimBarrier2Day(t *testing.T) {
 		t.Fatalf("daily HEAD: %v", err)
 	}
 	if wm != dh {
-		t.Errorf("watermark %s != daily HEAD %s after open (INV-4)", wm, dh)
+		t.Errorf("watermark %s != daily HEAD %s after open", wm, dh)
 	}
 
 	t.Logf("barrier rung: barriers=%d primary_commits=%d day_commits=%d daily_depth=%d turns=%d barrier_ms=%v morning_init_ms=%v day_commit_bytes=%v",

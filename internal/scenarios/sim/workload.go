@@ -248,7 +248,7 @@ type WorkloadConfig struct {
 	FamilySize int
 
 	// LargeInputEveryN and LargeInputBytes are the B1+X4 token-ceiling stress
-	// knobs (X4-PROD fix 2 / design §2.3). DEFAULT OFF (LargeInputEveryN == 0):
+	// knobs. DEFAULT OFF (LargeInputEveryN == 0):
 	// no inflation, so the mock acceptance gate's step stream stays BYTE-IDENTICAL
 	// (rung invariant 8 / TestGenerateWorkload_Deterministic) and the symbolic
 	// recall oracle is untouched. The rung turns them on to push the assembled
@@ -363,8 +363,8 @@ func (m corpusModel) slotFor(order int) int {
 // all-tags-are-anchors binding. If every position is loose (vanishingly
 // rare under Binomial(5, 1/5)) the result is nil.
 //
-// This is the raw drift set; it is NEVER padded (anchor-lifecycle Inc 5
-// deleted the §5.1 4-anchor floor and its stub-padding scaffold). Every
+// This is the raw drift set; it is NEVER padded (there is no anchor floor
+// to pad to). Every
 // emission — new-thread, engagement, refinement — carries this set
 // verbatim. 0 anchors is legal (vague start); the runtime's projection
 // owns the AnchorProjectionMax ceiling and latches EverCentral, so the
@@ -621,8 +621,7 @@ const (
 	// actNew spawns a brand-new thread.
 	actNew
 	// actCampaign advances the generator's active lifecycle campaign —
-	// the vague-new / drift / invert ground-truth program (anchor-lifecycle
-	// Inc 5). One actCampaign draw services one campaign turn; the campaign
+	// the vague-new / drift / invert ground-truth program. One actCampaign draw services one campaign turn; the campaign
 	// state machine (campaign.go region below) owns the dedicated thread and
 	// the phase progression. When no campaign is active the draw starts the
 	// next one (kind rotates deterministically); buildStep dispatches it
@@ -819,11 +818,11 @@ func dayHasTurn(day dayBuf) bool {
 // (Seed, Duration, Corpus) — the determinism contract drainSteps
 // relies on.
 func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool) {
-	// Apply the just-run turn to the runtime mirror, then cross-check the
-	// shadow Layer-B model and the mirror against the runtime's
-	// authoritative set (burndown #8, BD-4). Observational only — it reads
-	// feedback and bumps a counter; it draws no rng and emits no step, so
-	// the canonical stream stays byte-identical at a fixed seed.
+	// Apply the just-run turn to the runtime mirror (rtActive), then
+	// cross-check the mirror against the runtime's authoritative set in both
+	// directions. Observational only — it reads feedback and bumps a
+	// counter; it draws no rng and emits no step, so the canonical stream
+	// stays byte-identical at a fixed seed.
 	g.lastRtSnapshot = nil
 	if g.rtPending != nil {
 		g.lastRtSnapshot = g.advanceRuntimeMirror(*g.rtPending, feedback.RecallFetchedIDs)
@@ -1068,6 +1067,7 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 	// mirror as it stands before this turn: every observed fetch is in it.
 	if bs.recallCandidates != nil {
 		bs.step.ExpectedRecallMatches = withoutIDs(bs.recallCandidates, g.rtActive)
+		bs.step.RecallOpportunityResident = bs.step.ExpectedRecallMatches == nil
 	}
 	// Arm the runtime-mirror turn for the active-set cross-check. A sleep-
 	// cycle step is not a turn (the runtime routes it off the turn path, no
@@ -1497,8 +1497,7 @@ func (g *generator) runWorkDay() {
 // wall-clock decay threshold so the longer rungs exercise decay/closure,
 // without any additive DayOffGap constant.
 //
-// The day-off idle window is also where the ARCHITECTURE.md sleep cycle
-// runs (#108): runDayOff appends one deterministic SleepCycle marker step
+// The day-off idle window is also where consolidation runs: runDayOff appends one deterministic SleepCycle marker step
 // (no turn, no LLM consult). The harness intercepts the marker and drives
 // h.Ops.Consolidate (substrate gc) — the generator is a stateless
 // StepSource and cannot reach Ops, so the marker is the seam. The marker
@@ -1593,7 +1592,7 @@ const (
 
 	// metricLayerBShadowDivergence is the run-total count of cross-check
 	// failures between the generator's shadow Layer-B model and the runtime's
-	// authoritative ActiveThreads (sim-harness review burndown #8): a
+	// authoritative ActiveThreads: a
 	// runtime-resident thread (minus the carrier) the shadow did not predict.
 	// 0 is the pass; hard-gated == 0 when the runtime follows the canned plan
 	// (oracleGatesAssert). Defined here (not the cross-seam registry) because
@@ -1602,8 +1601,8 @@ const (
 	// cross the harness↔sim writer/reader seam.
 	metricLayerBShadowDivergence = "layerb_shadow_divergence"
 
-	// metricLayerBShadowReverseDivergence is the OPPOSITE-direction cross-check
-	// (BD-4 / B3): the run-total count of threads the RUNTIME-MIRROR (rtActive)
+	// metricLayerBShadowReverseDivergence is the OPPOSITE-direction cross-check:
+	// the run-total count of threads the RUNTIME-MIRROR (rtActive)
 	// holds that the runtime EVICTED (mirror-retained / runtime-evicted) — the
 	// class the forward subset metric structurally cannot see. The mirror
 	// replicates the two documented legitimate eviction sources — measurement-
@@ -1633,8 +1632,8 @@ const (
 	metricRecallIndexFineChunks     = "recall_index_fine_chunks"
 	metricRecallIndexFineChunksMain = "recall_index_fine_chunks_main"
 
-	// metricRecallQueryCosineOps is the MEASURED per-query cosine-op count
-	// (#111 / design §7.2): the recaller's run-total cosine comparisons divided
+	// metricRecallQueryCosineOps is the MEASURED per-query cosine-op count:
+	// the recaller's run-total cosine comparisons divided
 	// by the queries that performed them, COUNTED at the scoring call sites
 	// (scoring.CosineCounter) — coarse pass over T vectors + the population fine
 	// pass + the engaged-thread path (flat O(C_main) scan OR k·B·log_B(n)
@@ -1744,7 +1743,7 @@ const (
 	// _tie / _tree_mismatch) are WRITTEN by the harness (package scenarios) and
 	// read here, so they are owned by the cross-seam registry
 	// (scenarios.MetricRecallIntraW1*) rather than re-declared — see
-	// scenarios/metric_keys.go (burndown #1). Likewise the descent
+	// scenarios/metric_keys.go. Likewise the descent
 	// divergence/probe counters, the tree-rebuild trip-wire, and the
 	// sleep-cycle / git-dir-bytes keys.
 )
@@ -1865,8 +1864,8 @@ type generator struct {
 	// layerBShadowDivergence and layerBShadowReverseDivergence are the run
 	// totals of the SPEC §9.4 oracle-agreement check (crossCheckLayerB) between
 	// the runtime mirror (rtActive) and the runtime's active set: threads the
-	// runtime holds that the mirror lacks (forward, burndown #8) and threads
-	// the mirror holds that the runtime evicted (reverse, BD-4). Either means
+	// runtime holds that the mirror lacks (forward) and threads the mirror
+	// holds that the runtime evicted (reverse). Either means
 	// the recall oracle's expected sets are computed off a wrong active set.
 	// Hard-gated == 0 when the runtime follows the canned plan
 	// (oracleGatesAssert); report-only under live inference. Each divergent
@@ -1874,7 +1873,7 @@ type generator struct {
 	layerBShadowDivergence        int
 	layerBShadowReverseDivergence int
 
-	// Runtime-mirror Layer-B (BD-4 / B3 reverse cross-check). An INDEPENDENT,
+	// Runtime-mirror Layer-B (reverse cross-check). An INDEPENDENT,
 	// execution-order model of the runtime's ActiveThreads that — unlike the
 	// engage()-only `layerB` shadow — replicates the two documented eviction
 	// sources the reverse check otherwise reports as legitimate over-retention:
@@ -2129,12 +2128,12 @@ type generator struct {
 	// shadowChunks[idx] is the generator's ordered shadow of thread idx's
 	// fine tier: one chunkRecord per emitted owner-excerpt (§8.2) that the
 	// PRNG keep/toss model RETAINED (transient-marked excerpts are trimmed and
-	// never appended — design §7.3). Appended by recordEmission; the
+	// never appended). Appended by recordEmission; the
 	// intra-thread oracle scores it, never a runtime index (F6).
 	shadowChunks map[int][]chunkRecord
 
-	// trimRng is the PRNG keep/toss model's dedicated, fixed-seed source
-	// (#111 / design §7.3): the sim's deterministic stand-in for the production
+	// trimRng is the PRNG keep/toss model's dedicated, fixed-seed source:
+	// the sim's deterministic stand-in for the production
 	// §3.10.8 `lifetime:` marker. Seeded from cfg.Seed (a derived seed) so the
 	// transient/durable classification is part of the canonical, byte-stable
 	// step stream for a given seed, and so it draws INDEPENDENTLY of g.rng (the
@@ -2342,7 +2341,7 @@ type rtTurnStep struct {
 }
 
 // advanceRuntimeMirror models one EXECUTED turn in the runtime-mirror Layer-B
-// (rtActive) and returns the post-turn snapshot for the BD-4 reverse
+// (rtActive) and returns the post-turn snapshot for the reverse
 // cross-check. Next() calls it when the turn's feedback arrives, with the ids
 // that turn's recall fetched (StepFeedback.RecallFetchedIDs, in log order).
 // Draws no rng; pure observability.
@@ -2426,8 +2425,8 @@ func withoutString(ss []string, v string) []string {
 // stands after the just-run turn (lastRtSnapshot) — must equal the runtime's
 // authoritative active set (StepFeedback.RuntimeLayerB, turn.State.
 // ActiveThreads after that turn), in both directions, nothing excluded.
-// Forward (burndown #8): a runtime-resident thread the mirror lacks. Reverse
-// (BD-4): a mirror-held thread the runtime evicted.
+// Forward: a runtime-resident thread the mirror lacks. Reverse: a
+// mirror-held thread the runtime evicted.
 //
 // Observational only: it bumps a counter and routes a forensic warn; it draws
 // no rng and emits no step, so the canonical stream stays byte-identical.
@@ -2439,12 +2438,12 @@ func (g *generator) crossCheckLayerB(feedback scenarios.StepFeedback) {
 	}
 	if missing := withoutIDs(feedback.RuntimeLayerB, g.lastRtSnapshot); len(missing) > 0 {
 		g.layerBShadowDivergence += len(missing)
-		pnlog.Warn("sim step %d: Layer-B shadow divergence: runtime-resident %v absent from mirror %v — burndown #8 LRU drift",
+		pnlog.Warn("sim step %d: Layer-B shadow divergence: runtime-resident %v absent from mirror %v — LRU drift",
 			feedback.Index, missing, g.lastRtSnapshot)
 	}
 	if extra := withoutIDs(g.lastRtSnapshot, feedback.RuntimeLayerB); len(extra) > 0 {
 		g.layerBShadowReverseDivergence += len(extra)
-		pnlog.Warn("sim step %d: Layer-B reverse divergence: mirror-held %v absent from runtime %v — BD-4 runtime-mirror LRU drift",
+		pnlog.Warn("sim step %d: Layer-B reverse divergence: mirror-held %v absent from runtime %v — runtime-mirror LRU drift",
 			feedback.Index, extra, feedback.RuntimeLayerB)
 	}
 }
@@ -2719,8 +2718,7 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 	slot := g.model.slots[thr.cur]
 
 	// anchorTags drops loose-cell positions on every step regardless of
-	// action (anchor-lifecycle Inc 5: the §5.1 4-floor and its stub-padding
-	// are gone). It emits the thread's CURRENT slot's tags (post-wander), so
+	// action (there is no anchor floor to pad to). It emits the thread's CURRENT slot's tags (post-wander), so
 	// a wandering thread's earlier topics stop being re-emitted and fall out
 	// of the active projection into superseded-retained (§3.3). A new-topic
 	// turn carries nonLooseTags verbatim — 0 anchors is legal (vague start),
@@ -2886,7 +2884,7 @@ func extractedSymbolsFor(userInput string, modelAnchors []string) []string {
 // the trajectory-spanning retained set the recall oracle scores against.
 //
 // transientRate is the PRNG keep/toss transient probability for THIS
-// excerpt (design §7.3): convoTransientPct for a conversation turn,
+// excerpt: convoTransientPct for a conversation turn,
 // toolTransientPct for a tool/work turn. The whole-thread SYMBOL union
 // (emittedSyms) is ALWAYS updated — keep/toss trims fine-tier leaves, not
 // history_symbols.

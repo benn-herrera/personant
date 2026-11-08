@@ -238,7 +238,7 @@ const DefaultProjectID = "prj_default"
 // The bound is a runtime self-assertion the projection owns
 // deterministically, not a contract on the model's §5.1 emission.
 //
-// §9 calibration window: 8 inherits the Phase C.6 Jaccard dilution
+// §9 calibration window: 8 inherits the corpus calibration's Jaccard dilution
 // ceiling and is re-confirmed under drift in the simulation — the value
 // is not final.
 const AnchorProjectionMax = 8
@@ -285,7 +285,7 @@ var (
 	// distinguish "fresh thread about to be created" from a parse
 	// failure.
 	ErrThreadFileNotFound = errors.New("store: thread file not found")
-	// ErrProjectNotFound is returned by LoadProject when a
+	// ErrProjectNotFound is returned by store.LoadProjectMeta when a
 	// non-default project's meta.json is absent.
 	ErrProjectNotFound = errors.New("store: project not found")
 )

@@ -9,11 +9,11 @@ import "sort"
 // the PURE topology + descent math only: cosine over a tree of
 // {vector, children} + leaf ChunkVectors. It knows nothing of how the
 // summaries are generated (LLM), how the embeddings are produced, the
-// derived cache, the sleep cycle, threads, or the FIFO — those live in
-// measure / turn / the sleep-cycle builder (§9.1 negative constraint).
+// derived cache, consolidation, threads, or the FIFO — those live in
+// measure / turn / the consolidation tree builder.
 
-// Tree-shape and beam knobs (design §4.1; §9 calibration windows — start
-// values, tuned by the §7 recall-preservation gate, not invented here).
+// Tree-shape and beam knobs (§9 calibration windows — start values, tuned
+// by the recall-preservation measure, not invented here).
 const (
 	// TreeBranchingFactor B is the summary-tree fan-in: each internal
 	// node summarizes ~B children, so depth ≈ log_B(n). Wide enough that
@@ -42,7 +42,7 @@ const (
 	BeamWidth = 8
 
 	// LeafFrontierCap bounds the leaf set the terminal ProposeChunks
-	// ranks: k·B, independent of total n (design §4.1). The frontier
+	// ranks: k·B, independent of total n. The frontier
 	// after the last internal level is the children of the k surviving
 	// branches — at most k·B of them.
 	LeafFrontierCap = BeamWidth * TreeBranchingFactor
@@ -84,7 +84,7 @@ const (
 	NetCap = 4 * LeafFrontierCap
 
 	// NodeExemplars N is the size of an internal node's EXEMPLAR SET — the
-	// descent key (design §9 calibration window). The #111 Finding A fix:
+	// descent key (§9 calibration window). Why a set and not a centroid:
 	// a single centroid is a meaningless point in the middle of a
 	// heterogeneous cluster's spread, and a query near the cluster's EDGE
 	// cosine-misses it — the centroid prunes the branch and the relevant
@@ -101,7 +101,7 @@ const (
 	NodeExemplars = 4
 )
 
-// SummaryNode is one node of a per-thread summary tree (design §2.1).
+// SummaryNode is one node of a per-thread summary tree.
 // It is a pure topology of {exemplar-set, children}: an internal node
 // carries a small EXEMPLAR SET in Vectors (the descent key) and its child
 // summary nodes in Children; a leaf node carries a single ChunkVector in
@@ -177,9 +177,9 @@ func maxCosine(query []float64, n *SummaryNode, counter *CosineCounter) float64 
 }
 
 // DescendOptions governs DescendChunks. Zero-valued fields fall back to
-// the documented design §4.1 defaults.
+// the documented defaults.
 type DescendOptions struct {
-	// Beam is the per-level branch MINIMUM-floor count k (#111 Finding A) —
+	// Beam is the per-level branch MINIMUM-floor count k —
 	// no longer a hard cap. Each level keeps the top-Beam branches PLUS every
 	// additional branch whose max-exemplar-cosine is at or above
 	// ClearlyRelated, so a clearly-related branch is never pruned for losing
@@ -233,7 +233,7 @@ type DescendOptions struct {
 // the flat scan would have ranked top-Limit.
 //
 // Cost is O(Beam · B · log_B(n) · D) descent + O(LeafFrontierCap · D)
-// terminal rank (design §4.1, W2) — bounded by tree depth, independent
+// terminal rank (W2) — bounded by tree depth, independent
 // of total n beyond the log.
 //
 // A nil root yields nil (the caller falls back to the flat scan, W8). A

@@ -284,7 +284,7 @@ func underDir(p, root string) bool {
 func sweepUntrackedDebris(ctx context.Context, paths store.PersonantPaths, q *quarantine) ([]string, error) {
 	// Untracked-ness is a DAILY observable: turns commit to daily, so
 	// in-flight turn debris is whatever daily HEAD does not know. Both
-	// git-dirs are gitignored (INV-6), so neither can appear here.
+	// git-dirs are gitignored, so neither can appear here.
 	wt, err := autogit.Worktree(ctx, paths, autogit.Daily)
 	if err != nil {
 		return nil, err
@@ -366,7 +366,7 @@ func preserveLogs(ctx context.Context, paths store.PersonantPaths) error {
 
 // trackedLogFiles enumerates the DAILY HEAD tree's files under logs/, as
 // home-relative slash paths. These are exactly the files a reset will
-// revert — resets target daily (INV-1) — so daily HEAD is the right
+// revert — resets target daily, never primary — so daily HEAD is the right
 // tree (untracked log files are untouched by reset and exempt from
 // the debris sweep, so they need no preservation).
 func trackedLogFiles(ctx context.Context, paths store.PersonantPaths) ([]string, error) {
