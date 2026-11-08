@@ -26,7 +26,7 @@ WP3–WP10's contract rows are mapped onto the documents as rediced by the doc s
 | WP5 | done; `just sim` run `test/rundata/sim-workload-seed24095-dur168h0m0s.261108021131` is WP6's baseline. Operator live runs not passed: reaper no longer serves `nomicai-embed` or `gemma-4-main` (`internal/testsupport` constants); the replacement model ids are the owner's choice |
 | WP6 | done; `just sim` run `test/rundata/sim-workload-seed24095-dur168h0m0s.261108030931` is WP7's baseline |
 | WP7 | done; `just sim` run `test/rundata/sim-workload-seed24095-dur168h0m0s.261108040155` |
-| WP8 | not started |
+| WP8 | done |
 | WP9 | not started |
 | WP10 | not started |
 | Post-sprint review | not started |

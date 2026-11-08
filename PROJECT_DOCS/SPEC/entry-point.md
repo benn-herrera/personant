@@ -97,7 +97,6 @@ Contents:
 - [§4 User surface](4-user-surface/index.md)
   - [§4.1 CLI command surface](4-user-surface/4.1-cli-command-surface.md)
   - [§4.2 Session commands](4-user-surface/4.2-session-commands/index.md)
-    - [§4.2 Vocabulary bridge](4-user-surface/4.2-session-commands/vocabulary-bridge.md)
   - [§4.3 Decline categorization](4-user-surface/4.3-decline-categorization/index.md)
   - [§4.3.3 Interrupted turns](4-user-surface/4.3.3-interrupted-turns/index.md)
     - [§4.3.3 The retraction rule](4-user-surface/4.3.3-interrupted-turns/the-retraction-rule.md)

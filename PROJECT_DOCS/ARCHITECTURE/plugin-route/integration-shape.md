@@ -34,6 +34,8 @@ noted).
   to, and whether a TUI plugin can replace or disable them (context-injections report §6).
 - **Tools.** Any memory tool registers through `tool.transform`; a tool invented inside the
   `context` hook is dropped.
+- **No commands.** The plugin registers no command and asks the user nothing; memory work
+  runs automatically (SPEC §4).
 - **Config.** `personant init` writes the settings opencode must hold (`compaction.auto: false`,
   the plugin entry) into opencode's own config in opencode's own format. Personant-only settings
   live in `~/.config/personant/` and never overlap opencode's (see "One inspection location").

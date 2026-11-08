@@ -1,9 +1,9 @@
 ## 4. User surface
 
-Personant's user interface has two parts: the `personant` command line, which runs outside
-opencode, and **session commands** — slash commands typed inside an opencode session — where U4 keeps them. Everything else the user touches —
-the terminal UI, line editing, shell escape, permissions, tools, model and provider selection — is
-opencode's.
+Personant's user interface is the `personant` command line, which runs outside opencode. Inside an
+opencode session Personant registers no command, asks the user nothing and offers nothing; memory
+work runs automatically. Everything the user touches in a session — the terminal UI, line editing,
+shell escape, permissions, tools, model and provider selection — is opencode's.
 
 Contents:
 

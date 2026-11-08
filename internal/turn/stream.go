@@ -14,10 +14,7 @@ import (
 // immediately — a sink that fails to accept bytes is not something the
 // runtime can recover from per-chunk.
 //
-// A chunk's Reasoning is handed to State.OnReasoning and then dropped —
-// it never joins the body. On a thinking model most chunks are
-// reasoning-only (empty Content), so the emit precedes the empty-Content
-// skip.
+// A chunk's Reasoning is dropped — it never joins the body.
 func streamThroughFilter(state *State, sr model.StreamReader, filter io.Writer) error {
 	for {
 		chunk, err := sr.Next()
@@ -27,7 +24,6 @@ func streamThroughFilter(state *State, sr model.StreamReader, filter io.Writer) 
 		if err != nil {
 			return err
 		}
-		emitReasoning(state, chunk.Reasoning)
 		if chunk.Content == "" {
 			continue
 		}
@@ -65,9 +61,8 @@ type preambleResult struct {
 //
 // Returned head points into a freshly allocated buffer — the caller owns
 // it across subsequent sr.Next() calls. Errors other than io.EOF are
-// surfaced verbatim. Reasoning deltas are emitted to State.OnReasoning
-// and dropped; they never enter head, so the preamble scan sees only
-// committed content.
+// surfaced verbatim. Reasoning deltas are dropped; they never enter
+// head, so the preamble scan sees only committed content.
 func readPreamble(state *State, sr model.StreamReader) (preambleResult, error) {
 	var buf []byte
 	for {
@@ -78,7 +73,6 @@ func readPreamble(state *State, sr model.StreamReader) (preambleResult, error) {
 		if err != nil {
 			return preambleResult{}, err
 		}
-		emitReasoning(state, chunk.Reasoning)
 		if chunk.Content == "" {
 			continue
 		}

@@ -31,20 +31,10 @@ func (r *chunkReader) Next() (model.Chunk, error) {
 func (r *chunkReader) Close() error          { return nil }
 func (r *chunkReader) Final() model.Response { return model.Response{} }
 
-// reasoningSink collects the deltas handed to State.OnReasoning.
-type reasoningSink struct {
-	deltas []string
-}
-
-func (s *reasoningSink) emit(d string) { s.deltas = append(s.deltas, d) }
-
-// The load-bearing separation: reasoning reaches the hook per-chunk and
-// NEVER reaches the body sink. A reasoning-only chunk carries empty
-// Content, so the emit must precede the empty-Content skip — this is the
-// regression that would silently disable the whole feature.
-func TestStreamThroughFilter_ReasoningGoesToHookNotBody(t *testing.T) {
-	sink := &reasoningSink{}
-	state := &State{OnReasoning: sink.emit}
+// Reasoning, including reasoning-only chunks interleaved with content,
+// never reaches the body.
+func TestStreamThroughFilter_ReasoningNeverReachesBody(t *testing.T) {
+	state := &State{}
 	sr := &chunkReader{chunks: []model.Chunk{
 		{Reasoning: "let me "},
 		{Reasoning: "think"},
@@ -59,37 +49,15 @@ func TestStreamThroughFilter_ReasoningGoesToHookNotBody(t *testing.T) {
 	if got, want := body.String(), "answer here."; got != want {
 		t.Errorf("body = %q, want %q — reasoning must never join the body", got, want)
 	}
-	if got, want := strings.Join(sink.deltas, "|"), "let me |think|wait,"; got != want {
-		t.Errorf("reasoning deltas = %q, want %q", got, want)
-	}
-}
-
-// The default path: no hook installed (the scenario harness, every
-// non-interactive caller). Reasoning is dropped at the chunk loop without
-// a nil-deref and without leaking into the body.
-func TestStreamThroughFilter_NilHookDropsReasoning(t *testing.T) {
-	state := &State{}
-	sr := &chunkReader{chunks: []model.Chunk{
-		{Reasoning: "scratch"},
-		{Content: "visible"},
-	}}
-	var body bytes.Buffer
-	if err := streamThroughFilter(state, sr, &body); err != nil {
-		t.Fatalf("streamThroughFilter: %v", err)
-	}
-	if got := body.String(); got != "visible" {
-		t.Errorf("body = %q, want %q", got, "visible")
-	}
 }
 
 // The preamble pump is the other chunk loop, and on a thinking model it
 // is where most reasoning arrives (it runs before the first content byte
-// resolves the scan). Reasoning must reach the hook there too, and must
-// not enter the accumulated head — the §5.1.2 tag scan runs over head, so
-// a reasoning leak would corrupt topic-tag detection.
-func TestReadPreamble_EmitsReasoningAndKeepsHeadClean(t *testing.T) {
-	sink := &reasoningSink{}
-	state := &State{OnReasoning: sink.emit}
+// resolves the scan). Reasoning must not enter the accumulated head — the
+// §5.1.2 tag scan runs over head, so a reasoning leak would corrupt
+// topic-tag detection.
+func TestReadPreamble_ReasoningKeepsHeadClean(t *testing.T) {
+	state := &State{}
 	sr := &chunkReader{chunks: []model.Chunk{
 		{Reasoning: "*topic: thr_9 [x]*"}, // a tag-shaped decoy inside reasoning
 		{Content: "*topic: thr_1 [alpha, beta]*\n"},
@@ -104,8 +72,5 @@ func TestReadPreamble_EmitsReasoningAndKeepsHeadClean(t *testing.T) {
 	}
 	if pre.tag == nil || len(pre.tag.Threads) != 1 || pre.tag.Threads[0] != "thr_1" {
 		t.Errorf("tag = %+v, want the content tag thr_1", pre.tag)
-	}
-	if len(sink.deltas) != 1 || sink.deltas[0] != "*topic: thr_9 [x]*" {
-		t.Errorf("reasoning deltas = %v, want the one reasoning chunk", sink.deltas)
 	}
 }

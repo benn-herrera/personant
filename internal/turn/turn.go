@@ -33,56 +33,6 @@ var (
 	cpBetweenCanonicalRenames = crashpoint.Register("turn.betweenCanonicalRenames")
 )
 
-// Phase names a stage of the turn pipeline for the optional progress
-// indicator (State.OnPhase). The vocabulary is deliberately small, and
-// the constant VALUES are the user-facing labels themselves — the front
-// end renders them verbatim, so the wording lives in exactly one place.
-//
-// Phases are a UX signal only: they are never journaled, logged, or
-// committed, and nothing in the pipeline branches on them.
-type Phase string
-
-const (
-	// PhaseComposing covers everything between the prompt landing and the
-	// request going out: the §3.0 delta chain and working-set composition.
-	PhaseComposing Phase = "composing context"
-	// PhaseWaiting is the model round-trip — first-token latency.
-	PhaseWaiting Phase = "waiting on the model"
-	// PhaseReissuing is a mid-turn re-issue (the §5.5 missing-thread fetch,
-	// or a D6 tag / empty-response re-prompt): the in-flight stream was
-	// aborted and the request goes out again. Without a label the user just
-	// sees the stream stall.
-	PhaseReissuing Phase = "re-issuing request"
-	// PhaseRecall is the §3.4 recall stack, which runs at turn CLOSE (see
-	// engage.go) — with a live embedding provider this is where the
-	// embedding network round-trip happens.
-	PhaseRecall Phase = "searching memory"
-	// PhaseClosing is turn close: response journal, engagement updates, the
-	// §3.5 closure scan, CommitTurn, and the working-set save. This is the
-	// second silent wait, after the response body has finished streaming.
-	PhaseClosing Phase = "closing turn"
-)
-
-// emitPhase reports a pipeline stage to the optional State.OnPhase hook.
-// The nil check lives here and nowhere else, so every emit site is a
-// single unconditional call.
-func emitPhase(state *State, p Phase) {
-	if state.OnPhase != nil {
-		state.OnPhase(p)
-	}
-}
-
-// emitReasoning forwards one chunk's thinking-mode delta to the optional
-// State.OnReasoning hook. Same discipline as emitPhase: the nil (and
-// empty-delta) check lives here and nowhere else. Nothing accumulates —
-// the delta is handed straight to the hook and dropped.
-func emitReasoning(state *State, s string) {
-	if s == "" || state.OnReasoning == nil {
-		return
-	}
-	state.OnReasoning(s)
-}
-
 // State is the per-session mutable runtime state passed to Run. Most
 // fields are stable across a session; the coalesce buffer is reset at
 // the start of every Run.
@@ -104,29 +54,6 @@ type State struct {
 	// curator nothing closes; the scenario harness installs a
 	// deterministic stub.
 	Curator curator.Curator
-
-	// OnPhase receives a Phase each time the pipeline enters a stage a
-	// user could be left waiting on. nil → no progress signal is emitted
-	// (progress reporting disabled). The chat REPL installs a terminal
-	// indicator; the scenario harness leaves it nil. It is a presentation
-	// seam only — the hook must not block and must not mutate State, and
-	// nothing in the pipeline observes it.
-	OnPhase func(Phase)
-
-	// OnReasoning receives each streamed thinking-mode delta
-	// (model.Chunk.Reasoning) as it arrives. nil → reasoning is dropped
-	// at the chunk loop and never leaves the turn (the default: the
-	// scenario harness and every non-interactive caller). The chat REPL
-	// installs a dimmed live renderer.
-	//
-	// Presentation seam only, and a deliberately LOSSY one: reasoning is
-	// model scratch, not its committed answer, so it is handed over
-	// per-chunk and never accumulated. It must not reach the response
-	// body, the turn journal, §3.3 symbol extraction, or replayed
-	// history — which is why there is no field for it on model.Response
-	// and none here. Like OnPhase, the hook must not block and must not
-	// mutate State, and nothing in the pipeline observes it.
-	OnReasoning func(string)
 
 	// Model overrides the provider's DefaultModel when non-empty.
 	Model string
@@ -800,9 +727,7 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		}
 	}
 
-	// Step 1: user.prompt delta. From here to the first streamed token the
-	// user has no feedback, so this is where the progress indicator starts.
-	emitPhase(state, PhaseComposing)
+	// Step 1: user.prompt delta.
 	if err := onContextDelta(ctx, state, Delta{Source: memops.SourceUserPrompt, Content: userInput}); err != nil {
 		return "", TurnInfo{}, err
 	}
@@ -880,7 +805,6 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 			req.MaxTokens = state.MaxTokens
 		}
 
-		emitPhase(state, PhaseWaiting)
 		sr, err := state.Client.ConsultStream(ctx, req)
 		if err != nil {
 			return "", TurnInfo{}, fmt.Errorf("turn: model consult: %w", err)
@@ -908,7 +832,6 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 			_ = sr.Close()
 			_ = state.Ops.Log(ctx, memops.LogCategoryTopic, "re-prompt",
 				"cause=empty-response attempt="+strconv.Itoa(attempt+1))
-			emitPhase(state, PhaseReissuing)
 			systemPrompt, err = buildSystemPrompt()
 			if err != nil {
 				return "", TurnInfo{}, fmt.Errorf("turn: recompose working set: %w", err)
@@ -932,7 +855,6 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 				_ = sr.Close()
 				_ = state.Ops.Log(ctx, memops.LogCategoryTopic, "re-prompt",
 					"cause=missing-thread fetched="+strconv.Itoa(fetched)+" attempt="+strconv.Itoa(attempt+1))
-				emitPhase(state, PhaseReissuing)
 				systemPrompt, err = buildSystemPrompt()
 				if err != nil {
 					return "", TurnInfo{}, fmt.Errorf("turn: recompose working set: %w", err)
@@ -963,7 +885,6 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 			_ = sr.Close()
 			_ = state.Ops.Log(ctx, memops.LogCategoryTopic, "re-prompt",
 				"cause=missing-tag attempt="+strconv.Itoa(attempt+1))
-			emitPhase(state, PhaseReissuing)
 			systemPrompt, err = buildSystemPrompt()
 			if err != nil {
 				return "", TurnInfo{}, fmt.Errorf("turn: recompose working set: %w", err)
@@ -1021,10 +942,6 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	if strings.TrimSpace(body) == "" {
 		fmt.Fprint(out, "\n[personant: the model returned no reply text this turn]\n")
 	}
-
-	// The body has finished streaming; everything below is the second
-	// silent wait the user would otherwise sit through with no feedback.
-	emitPhase(state, PhaseClosing)
 
 	// Crash-stability (#94 R3): journal the response — durably, BEFORE any
 	// canonical write — so the journal holds the full (prompt, response)
@@ -1123,12 +1040,6 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	// regardless of this turn's activity, so the scan must NOT sit
 	// behind closeTurnAndUpdateEngagement's no-engagement early return.
 	// Opportunistic, like recall: a failure is logged and swallowed.
-	//
-	// Re-emitted (not a new phase): step 5's recall surface may have taken
-	// the terminal to ask the user about a recall offer, which retires the
-	// indicator. Re-announcing the phase here brings it back for the wait
-	// that follows.
-	emitPhase(state, PhaseClosing)
 	if err := surfaceClosureCandidates(ctx, state); err != nil {
 		_ = state.Ops.Log(ctx, memops.LogCategoryRetire, "error", memops.SanitizeDetail(err.Error()))
 	}
@@ -1155,10 +1066,6 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 		reason = fmt.Sprintf("structural: +%d thread, -%d retired",
 			state.structuralCreates, state.structuralRetires)
 	}
-	// Re-emitted for the same reason as above: 5b's closure offer may have
-	// taken the terminal. The commit is also the heaviest close-time op, so
-	// it is the one most worth labelling.
-	emitPhase(state, PhaseClosing)
 	commitStart := clock.Profiling()
 	if cerr := state.Ops.CommitTurn(ctx, turnID, reason); cerr != nil {
 		// Both %w verbs wrap: callers match the cause with errors.Is/As as

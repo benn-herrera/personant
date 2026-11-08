@@ -12,8 +12,8 @@ the mechanism.
   `session.step.ended`; see "Model access and inference telemetry"); the byte
   shares drive pre-flight truncation. A slot's byte share is the ceiling times a conservative
   ~2.5 bytes per token, counting text bytes only; the pre-flight check covers this composition plus
-  the live-turn sub-policy. Of the §2.6.1 parameters only `closure.ack-mode` and
-  `recall.ack-mode` are served by the directive files; the rest are compiled-in defaults.
+  the live-turn sub-policy. No §2.6.1 parameter is served by the directive files; all are
+  compiled-in defaults.
 - **Slot sources and rendering** (`internal/workset`):
   - *directives:* `directives/defaults.md`, `directives/user.md` and
     `directives/prj_<n>/project.md` of the active project, plus the project's `conventions_paths`;
