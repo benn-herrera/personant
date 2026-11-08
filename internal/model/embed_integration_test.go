@@ -1,7 +1,7 @@
 // Live integration tests for the embeddings client. They ALWAYS COMPILE
 // (no build tag) and gate EXECUTION at runtime: without the live opt-in
-// (testsupport.LiveTestsEnv) they skip, so bare `make test` compiles and
-// skips them, hitting no endpoint. Run them via `make integration-test`,
+// (testsupport.LiveTestsEnv) they skip, so bare `just test` compiles and
+// skips them, hitting no endpoint. Run them via `just integration-test`,
 // which sets the opt-in; they require the `reaper` provider reachable.
 // Under the opt-in an unreachable/misconfigured endpoint is a FAILURE, not
 // a skip — you explicitly asked for the live path.

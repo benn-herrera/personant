@@ -3,13 +3,14 @@ package sim
 // Embedding-in-loop head-to-head machinery test (#98). This is the
 // UNTAGGED, network-free proof that the symbolic-vs-embedding head-to-head
 // plumbing computes and emits its metrics correctly — it runs under
-// `make test` and gates CI. It uses model.MockEmbedder (deterministic
+// `just test` and gates CI. It uses model.MockEmbedder (deterministic
 // feature-hashing, no network), so it validates the WIRING and the METRIC
 // MATH, NOT recall QUALITY: a feature-hashing vectorizer is not semantic,
 // so it cannot demonstrate the drift-robustness #96 is about. The REAL
 // gap-closure measurement is run by the user via
-// `make sim LIVE_EMBEDDING=true DURATION=…` against the live nomic
-// embedder on reaper — this test cannot and does not claim that result.
+// `just sim LIVE_EMBEDDING=true DURATION=…` against the live
+// Qwen3-Embedding-8B embedder on reaper — this test cannot and does not
+// claim that result.
 //
 // What it proves:
 //   - the Scenario.Recaller seam installs an embedding measure.Service and
@@ -52,8 +53,8 @@ func TestSimEmbeddingHeadToHead_Machinery(t *testing.T) {
 	// SUITE BUDGET (#94 R4): this rung drives a fixed 24h sim profile whose
 	// hard gates arm only under live flags; under the mock default it just
 	// re-proves plumbing TestSim already covers. Opt it out of the default
-	// suite so `make test` stays inside the sim-package timeout budget; run
-	// it via `make sim-shadow-slow-test`.
+	// suite so `just test` stays inside the sim-package timeout budget; run
+	// it via `just sim-shadow-slow-test`.
 	testsupport.RequireSlowSim(t)
 	corpus := loadCorpusSlots(t)
 	h := runSimRung(t, "sim-embed-machinery", simDayDuration, corpus, mockEmbedderRecaller, false, nil, "")
@@ -206,7 +207,7 @@ func TestSimNoEmbedder_HeadToHeadAbsent(t *testing.T) {
 	// SUITE BUDGET (#94 R4): the negative-control companion to
 	// TestSimEmbeddingHeadToHead_Machinery — same fixed 24h profile, moved
 	// out of the default suite for the same reason. Run via
-	// `make sim-shadow-slow-test`.
+	// `just sim-shadow-slow-test`.
 	testsupport.RequireSlowSim(t)
 	corpus := loadCorpusSlots(t)
 	h := runSimRung(t, "sim-embed-absent", simDayDuration, corpus, nil, false, nil, "")

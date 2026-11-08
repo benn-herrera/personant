@@ -20,7 +20,7 @@ import (
 // (corpus_queries.json) consumed only by the corpus tests, which
 // always compile but skip at runtime unless the corpus opt-in is set
 // — see recall_madlibs_corpus_test.go. The split keeps the
-// heavyweight corpus run out of the default `make test`.
+// heavyweight corpus run out of the default `just test`.
 var handcraftedQueriesPath = filepath.Join("testdata", "recall_madlibs", "queries.json")
 
 type madlibsTopic struct {
@@ -45,13 +45,13 @@ type madlibsDoc struct {
 
 // loadMadlibsQueries reads a generated query set from path. When the
 // artifact is absent the calling test is skipped with a regeneration
-// hint — `go test ./...` run without `make` degrades gracefully
+// hint — `go test ./...` run without `just` degrades gracefully
 // rather than hard-failing.
 func loadMadlibsQueries(t *testing.T, path string) madlibsDoc {
 	t.Helper()
 	body, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		t.Skipf("recall-madlibs artifact %s absent — run `make recall-madlibs`", path)
+		t.Skipf("recall-madlibs artifact %s absent — run `just recall-madlibs`", path)
 	}
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

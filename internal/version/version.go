@@ -57,7 +57,7 @@ const Unknown = "unknown"
 const shortRevisionLen = 7
 
 // Build is the VCS/build stamp Go records at link time. Under
-// `make build` the toolchain fills vcs.revision / vcs.modified / vcs.time
+// `just build` the toolchain fills vcs.revision / vcs.modified / vcs.time
 // automatically — there are no git tags and no ldflags in this repo.
 //
 // The zero Build is the legitimate UNSTAMPED state: `go test` binaries

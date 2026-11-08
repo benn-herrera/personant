@@ -21,7 +21,7 @@
 // The probe is RESUMABLE: every completed call is appended to
 // test/rundata/elicitation_probe/calls_seed<seed>.jsonl keyed
 // (seed, model, fixture, variant); a re-run skips calls already recorded.
-// This lets the ~250-call run survive `make test-run`'s fixed 30m
+// This lets the ~250-call run survive `just test-run`'s fixed 30m
 // timeout — invoke repeatedly until the summary reports complete=true.
 // The aggregate summary JSON and a rendered results table are rewritten
 // after every fixture, so partial progress is always inspectable without
@@ -84,8 +84,9 @@ const (
 	probeCallTimeout = 10 * time.Minute
 
 	// probeInvocationBudget makes one test invocation stop issuing calls
-	// and exit cleanly (PASS, summary complete=false) before `make
-	// test-run`'s fixed 30m -timeout would panic-kill it mid-call. The
+	// and exit cleanly (PASS, summary complete=false) before the
+	// GOTESTTIMEOUT -timeout of `just test-run` would panic-kill it
+	// mid-call; keep it below that ceiling. The
 	// full ~250-call matrix is collected by re-invoking until the summary
 	// reports complete=true; the resumable call log carries the state.
 	probeInvocationBudget = 25 * time.Minute

@@ -12,7 +12,7 @@ import (
 // TestTagMissReplay at a rundata tagmiss/ capture directory (the raw
 // model-response bodies a live-inference rung retained for its tag-miss
 // turns — see scenarios.stepCaptureTagMiss). Unset → the test skips clean,
-// so `make test` is unaffected.
+// so `just test` is unaffected.
 const TagMissReplayDirEnv = "PERSONANT_TAGMISS_REPLAY_DIR"
 
 // TestTagMissReplay is the cheap-instrument acceptance harness for parser

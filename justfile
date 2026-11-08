@@ -31,8 +31,8 @@ GOSRCDIRS := "cmd internal"
 # plus the env vars it calls os.Getenv on. `just test-cache-why <pkg>`
 # names the input behind a miss.
 # Override for one call with `just GOTESTCOUNT=--count=1 test` (or the same
-# spelling as an env var — this variable is a plain default, not
-# env-sourced, matching the Makefile's `:=` semantics it replaces). The
+# spelling as an env var — this variable is a plain `:=` default, not
+# env-sourced). The
 # forced-clean path is `just test-nocache`, not a manual override; it is not
 # applied to test-race/test-run/sim*/integration-test/recall-corpus-test/
 # cover, which keep --count=1 hard-coded because a cached result from those

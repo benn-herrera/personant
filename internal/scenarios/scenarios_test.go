@@ -1214,7 +1214,7 @@ func hasTrackedPath(t *testing.T, paths store.PersonantPaths, threadID, path str
 }
 
 // TestScenario_TagOmissionRepromptRecovers drives the D6 stage-1 recovery
-// end-to-end under `make test` via the mock OmitTagEveryN knob (A1
+// end-to-end under `just test` via the mock OmitTagEveryN knob (A1
 // acceptance): with N=2, step 2's first consult (counter 2) omits the tag on
 // a binding-required turn, the runtime fires the missing-tag re-prompt, and
 // the re-issued consult (counter 3) tags — the turn binds normally with no

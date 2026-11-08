@@ -24,7 +24,7 @@ func TestShadowLayerB_ReverseDivergence(t *testing.T) {
 		span := span
 		t.Run(span.String(), func(t *testing.T) {
 			// The 14d arm runs ~20 min — on its own it pushes the sim package
-			// past `make test`'s 30m per-package timeout budget (the suite is
+			// past `just test`'s 30m per-package timeout budget (the suite is
 			// the CHECKPOINT GATE; a whole package must finish inside 30m). So
 			// it ALWAYS COMPILES but only EXECUTES under the slow-sim opt-in;
 			// the 1d arm (~1 min) always runs and catches a regression in

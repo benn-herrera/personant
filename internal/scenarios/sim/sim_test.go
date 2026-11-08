@@ -182,8 +182,8 @@ const simMemoryCapBytes = 8 * 1024 * 1024 * 1024
 const simHeavyInvariantCadence = 24 * time.Hour
 
 // simDuration selects the simulation span at run time. The default
-// `1d` keeps `make test` (which passes no flag) on the ~27 s 1-day
-// smoke rung; longer rungs are run via `make sim DURATION=…`.
+// `1d` keeps `just test` (which passes no flag) on the ~27 s 1-day
+// smoke rung; longer rungs are run via `just DURATION=… sim`.
 var simDuration = flag.String("sim.duration", "1d",
 	"simulation span: 1d|1w, or `<N>d` calendar days like 30d, or a Go duration like 168h")
 
@@ -277,7 +277,7 @@ func TestParseSimDuration(t *testing.T) {
 //
 // The two live toggles select live-vs-stand-in PER element, independently:
 //
-//   - both off (the default — bare `make test` / `make sim`): the full
+//   - both off (the default — bare `just test` / `just sim`): the full
 //     deterministic MOCK ACCEPTANCE GATE. nil embedder (symbolic-only
 //     stand-in), scripted mock client (canned-response stand-in), EVERY hard
 //     gate active (recall_unexplained_absence==0, wander coherence, criteria
@@ -293,7 +293,7 @@ func TestParseSimDuration(t *testing.T) {
 //     duration cap applies (a too-long span is refused, not silently run).
 //
 // The live config-load / endpoint-guard / duration-cap / oracle-blind are all
-// CONDITIONAL branches gated on the flags, so the both-false `make test` path
+// CONDITIONAL branches gated on the flags, so the both-false `just test` path
 // never reaches them.
 func TestSim(t *testing.T) {
 	d, err := parseSimDuration(*simDuration)

@@ -36,7 +36,7 @@ mad-design/
 
 # Phase C recall-fidelity: derived query artifacts. Canonical sources
 # are madlibs_generate.py + the template dirs; regenerate with
-# `make recall-madlibs`.
+# `just recall-madlibs`.
 internal/scenarios/testdata/recall_madlibs/queries.json
 internal/scenarios/testdata/recall_madlibs/corpus_queries.json
 internal/scenarios/testdata/recall_madlibs/corpus_queries_m*.json

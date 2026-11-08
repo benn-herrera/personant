@@ -8,9 +8,9 @@ the same discipline used for #47/#92.
 ## Execution rules (every increment)
 
 - Go work goes to **go-coder** agents, given CONVENTIONS.md + the design doc. Never `go build`/`go
-  test` directly — `make build` / `make test` / `make sim`. `internal/log` only; DRY; named
+  test` directly — `just build` / `just test` / `just sim`. `internal/log` only; DRY; named
   constants.
-- Each increment: implement → `make test` green → **commit a checkpoint** → next. A failing gate or
+- Each increment: implement → `just test` green → **commit a checkpoint** → next. A failing gate or
   a broken design assumption is a **STOP-and-surface**, not a barrel-on (esp. the AC2 perf-decay
   gates and the AC5 determinism gate).
 - **H2 honesty (carry through):** the sim's symbolic shadow-chunk oracle is a **coherence gate**
@@ -43,7 +43,7 @@ the same discipline used for #47/#92.
   []ChunkCandidate` (cosine fine-pass, reuses `cosineSimilarity`, mirrors `ProposeEmbedding`). Pure,
   substrate-free.
 - Negative constraint: `scoring` knows nothing of debt/dormancy/snapshots/cache/FIFO.
-- Gate: unit tests (ranking, threshold, empty) green; `make test`. Commit.
+- Gate: unit tests (ranking, threshold, empty) green; `just test`. Commit.
 - Deps: none.
 
 ### Inc 2 — `measure`: snapshot + atomic indexer + coarse→fine Recall
@@ -59,7 +59,7 @@ the same discipline used for #47/#92.
   flush.
 - Gate: unit tests incl. **AC3** (forced re-activation-mid-job → stale embed dropped;
   lock-free-by-construction = single atomic load, no read lock) and **AC5** (nil embedder → no-op,
-  byte-identical symbolic path; existing `match-fire`/`embed-match-fire` unchanged). `make test`.
+  byte-identical symbolic path; existing `match-fire`/`embed-match-fire` unchanged). `just test`.
   Commit.
 - Deps: Inc 1.
 
@@ -71,7 +71,7 @@ the same discipline used for #47/#92.
   state, not a port concept — like `SaveWorkingSet`). Wire into `Prepare`.
 - Gate: **AC4** (restart re-embeds only changed chunks; unchanged thread = 0 embed calls —
   measurable) + **AC6** (delete `.recall-cache/` → rebuild identical index
-  + identical recall). `make test`. Commit.
+  + identical recall). `just test`. Commit.
 - Deps: Inc 2.
 
 ### Inc 4 — `turn`: dormancy + debt hooks (no new recall logic)
@@ -80,7 +80,7 @@ the same discipline used for #47/#92.
 - FIFO scroll-out point → per-thread debt counter on `State`; debt hits N (=16 const) →
   `EnqueueFlush`. Passes dispatch `turn_count` for the watermark (I2).
 - Negative constraint: `turn` does not embed/touch vectors/know coarse-fine.
-- Gate: unit tests (dormancy enqueues; debt-cap enqueues at N; symbolic-only unaffected). `make
+- Gate: unit tests (dormancy enqueues; debt-cap enqueues at N; symbolic-only unaffected). `just
   test`. Commit.
 - Deps: Inc 2 (+ D-A resolved).
 
@@ -96,17 +96,17 @@ the same discipline used for #47/#92.
   `recall_index_flush_calls/_chunks`, `recall_intra_blindspot_misses`,
   `recall_intra_hop_recall[hop]`).
 - Negative constraint: oracle scores the generator's own shadow, never a runtime index read (F6).
-- Gate: `make test` (incl. determinism: `TestGenerateWorkload_Deterministic` green — main thread +
-  probes are rng-free/deterministic) + a short `make sim` showing the new series populate and
-  `recall_unexplained_absence==0` + intra-thread coherence divergence == 0. `make test`. Commit.
+- Gate: `just test` (incl. determinism: `TestGenerateWorkload_Deterministic` green — main thread +
+  probes are rng-free/deterministic) + a short `just sim` showing the new series populate and
+  `recall_unexplained_absence==0` + intra-thread coherence divergence == 0. `just test`. Commit.
 - Deps: Inc 2–4.
 
 ### Inc 6 — validation runs + SPEC as-built + commit
-- `make sim DURATION=15d` then the ladder (30/60/120 as feasible in the window): confirm **AC2**
+- `just DURATION=15d sim` then the ladder (30/60/120 as feasible in the window): confirm **AC2**
   decay gates (`latency_p99` flat, `coarse_size==T`, `cosine_ops` flat in non-engaged length) and
   **AC1** intra-thread coherence (zero divergence)
   + report `recall_intra_hop_recall` curve.
-- `make sim LIVE_EMBEDDING=true DURATION=14d` (the #98 path): the **embedding** intra-thread
+- `just LIVE_EMBEDDING=true DURATION=14d sim` (the #98 path): the **embedding** intra-thread
   head-to-head — the H2 quality validation (symbolic vs embedding intra-thread hop-recall). Report;
   this is the honest "recall works" evidence.
 - Update SPEC §3.4 to as-built (D-C); update ARCHITECTURE if needed; update tasks #102/#109 → done;

@@ -17,7 +17,7 @@ import (
 // proofs that the gates are real: each drives the PURE gate predicate
 // (checkCompletenessFloor / checkTokenCeiling) with the mutated input a broken
 // runtime would produce and asserts the gate FAILS. They are unit tests over the
-// predicate, not the full live sim, so they run in `make test` with no endpoint
+// predicate, not the full live sim, so they run in `just test` with no endpoint
 // (the live rung itself is the end-to-end proof; these lock in that the gate
 // cannot go green when the thing it guards is broken).
 

@@ -956,7 +956,7 @@ func checkTokenCeiling(samples []float64) string {
 // the 24h head-to-head machinery rungs) whose main thread cannot reach
 // ThreadTurnWindow+EmbeddingDebtCap is SKIPPED with a logged note (not t.Skip —
 // the enclosing test keeps its other assertions), naming the qualifying span. This
-// is what keeps `make sim LIVE_EMBEDDING=true` green when the actual completeness
+// is what keeps `just LIVE_EMBEDDING=true sim` green when the actual completeness
 // rung passes but a co-resident fixed-span machinery test cannot probe.
 //
 // This is the anti-vacuity proof's target: with the debtWindowTurns floor

@@ -56,15 +56,15 @@ The two toggles are INDEPENDENT (either/both/neither). They map onto seams that 
 > The live mode is now toggles on the SINGLE `TestSim`.
 
 - **One `TestSim`, two runtime flags, default off:** `-sim.live-embedding` and `-sim.live-inference`
-  (independent — either/both/neither). The live code ALWAYS COMPILES (part of `make test`), so it
+  (independent — either/both/neither). The live code ALWAYS COMPILES (part of `just test`), so it
   can't rot; EXECUTION is gated by the flags.
 - **both-false IS the mock acceptance gate** — symbolic-only (nil-embedder stand-in) + scripted mock
   responses, all hard gates active (`recall_unexplained_absence == 0`, wander coherence,
-  steady-state). It RUNS under `make test` (1d) and `make sim`; it does NOT skip. A flag on installs
+  steady-state). It RUNS under `just test` (1d) and `just sim`; it does NOT skip. A flag on installs
   that live element; both off touches no config/endpoint.
-- **`make sim` is the single target**, parametrized by `LIVE_EMBEDDING` / `LIVE_INFERENCE` Makefile
-  vars (both default false → mock gate) passed as the `-sim.live-*=<bool>` form, e.g. `make sim
-  LIVE_EMBEDDING=true DURATION=1d`. No separate `sim-live` target.
+- **`just sim` is the single target**, parametrized by `LIVE_EMBEDDING` / `LIVE_INFERENCE` justfile
+  vars (both default false → mock gate) passed as the `-sim.live-*=<bool>` form, e.g. `just
+  LIVE_EMBEDDING=true DURATION=1d sim`. No separate `sim-live` target.
 - Span via `-sim.duration` (`DURATION` var); inference-in-loop is refused past a 1-sim-day cap (§6),
   so `LIVE_INFERENCE=true` needs a cap-safe `DURATION` (default is 1w).
 
@@ -114,14 +114,14 @@ memory.
 ## 7. Increments (checkpoint per increment)
 
 > **As-built note:** Inc 1 used a `//go:build live_sim` tag + `make sim-live`; a later pass
-> de-tagged everything to runtime-skip and folded the live test into the single `TestSim` / `make
+> de-tagged everything to runtime-skip and folded the live test into the single `TestSim` / `just
 > sim` (§3). The increment descriptions below are the original plan; the gating they describe was
 > superseded.
 
 1. **Config plumbing + gating scaffold** — entry point + config load: read
    `test/rundata/test.{providers,config}.toml`; provider/model selection; usable-endpoint check;
    fail-with-suggestion guard; the two runtime flags parsed but wired as NO-OPS (default mock/nil
-   path unchanged). No live recall yet. Gate: `make test` unaffected; live invocation with no flags
+   path unchanged). No live recall yet. Gate: `just test` unaffected; live invocation with no flags
    runs the mock path; missing/unusable config fails with the message.
 2. **Embedding-in-loop** (THE critical path) — install the real embedder + `Prepare`; mock
    inference; symbolic-vs-embedding recall-fidelity head-to-head (§5), incl. the #96 hop buckets.
@@ -138,5 +138,5 @@ memory.
 - Never read/write/operate in `~/.personant`; never read `apiKeyFile` targets into agent context.
 - No provider/endpoint info in version-controlled files (config lives in gitignored
   `test/rundata/`).
-- `make test` stays mock-only and green by DEFAULT; the live path always compiles (no build tag) but
+- `just test` stays mock-only and green by DEFAULT; the live path always compiles (no build tag) but
   its EXECUTION is gated off unless `-sim.live-*` is set (§3).

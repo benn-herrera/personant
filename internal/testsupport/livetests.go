@@ -7,10 +7,10 @@
 // The live-test convention these helpers enforce:
 //
 //   - Tests ALWAYS COMPILE (no //go:build tag). They are part of the
-//     normal `go vet ./...` / `make test` compile, so a refactor that
+//     normal `go vet ./...` / `just test` compile, so a refactor that
 //     breaks them is caught immediately instead of rotting silently.
 //   - EXECUTION is gated at runtime on an explicit opt-in (LiveTestsEnv).
-//     Not opted in → the test t.Skips: bare `make test` compiles and skips
+//     Not opted in → the test t.Skips: bare `just test` compiles and skips
 //     it, hitting no endpoint and staying fast.
 //   - Opted in but the endpoint is unreachable / misconfigured → FAIL,
 //     not skip. You explicitly asked for the live path; nothing live is a
@@ -30,30 +30,30 @@ import (
 )
 
 // LiveTestsEnv is the opt-in environment variable for live-endpoint tests.
-// Set it to any non-empty value (the Makefile entry points set it to "1")
+// Set it to any non-empty value (the justfile recipes set it to "1")
 // to RUN the live tests; leave it unset to SKIP them. One constant so the
-// helpers, the Makefile, and any future caller share one name (DRY).
+// helpers, the justfile, and any future caller share one name (DRY).
 const LiveTestsEnv = "PERSONANT_LIVE_TESTS"
 
 // CorpusTestsEnv is the opt-in environment variable for the slow,
 // artifact-dependent recall-corpus measurement tests. Set it to any
-// non-empty value (the Makefile's recall-corpus-test target sets it) to RUN
+// non-empty value (the justfile's recall-corpus-test recipe sets it) to RUN
 // them; leave it unset to SKIP them. Distinct from LiveTestsEnv: these
 // tests are gated on cost + derived-artifact presence, not a live endpoint.
 const CorpusTestsEnv = "PERSONANT_CORPUS_TESTS"
 
 // SlowSimTestsEnv is the opt-in environment variable for the slow, in-suite
-// sim mock rungs whose wall-clock would blow the `make test` per-package
-// timeout budget. Set it to any non-empty value (the Makefile's
-// sim-shadow-slow-test target sets it) to RUN them; leave it unset to SKIP
+// sim mock rungs whose wall-clock would blow the `just test` per-package
+// timeout budget. Set it to any non-empty value (the justfile's
+// sim-shadow-slow-test recipe sets it) to RUN them; leave it unset to SKIP
 // them. Distinct from the other two: these are gated purely on wall-clock
 // cost within the normal (non-live, non-corpus) mock suite — the fast arm of
-// the same test still runs in the default `make test`.
+// the same test still runs in the default `just test`.
 const SlowSimTestsEnv = "PERSONANT_SLOW_SIM_TESTS"
 
 // ReaperEmbeddingModel is the embedding model id served by the local,
 // non-metered `reaper` endpoint.
-const ReaperEmbeddingModel = "nomicai-embed"
+const ReaperEmbeddingModel = "Qwen3-Embedding-8B"
 
 // ReaperChatModel is the chat model id served by the `reaper` endpoint.
 const ReaperChatModel = "gemma-4-main"
@@ -77,17 +77,17 @@ func ReaperURL() string {
 
 // RequireLive skips the calling test unless the live opt-in is set. Call it
 // first in every live-endpoint test: with the opt-in unset, the test
-// compiles (caught by `make test`) and skips without touching the network.
+// compiles (caught by `just test`) and skips without touching the network.
 func RequireLive(t *testing.T) {
 	t.Helper()
 	if os.Getenv(LiveTestsEnv) == "" {
-		t.Skipf("live test skipped — set %s=1 (or run `make integration-test`) to exercise the live endpoint", LiveTestsEnv)
+		t.Skipf("live test skipped — set %s=1 (or run `just integration-test`) to exercise the live endpoint", LiveTestsEnv)
 	}
 }
 
 // RequireCorpus skips the calling test unless the corpus opt-in is set.
 // Call it first in every recall-corpus measurement test: with the opt-in
-// unset, the test compiles (caught by `make test`) and skips without doing
+// unset, the test compiles (caught by `just test`) and skips without doing
 // the slow corpus work. When opted in but the required derived artifact is
 // absent, the test still skips with a regeneration hint (the artifact
 // loaders handle that) — the corpus artifacts are .gitignore'd, so absence
@@ -95,18 +95,18 @@ func RequireLive(t *testing.T) {
 func RequireCorpus(t *testing.T) {
 	t.Helper()
 	if os.Getenv(CorpusTestsEnv) == "" {
-		t.Skipf("corpus measurement skipped — run `make recall-corpus-test` (sets %s) to exercise it", CorpusTestsEnv)
+		t.Skipf("corpus measurement skipped — run `just recall-corpus-test` (sets %s) to exercise it", CorpusTestsEnv)
 	}
 }
 
 // RequireSlowSim skips the calling test (or subtest) unless the slow-sim
 // opt-in is set. Call it first in the slow arm of an in-suite sim rung: with
-// the opt-in unset, the arm compiles (caught by `make test`) and skips, so the
+// the opt-in unset, the arm compiles (caught by `just test`) and skips, so the
 // default suite stays within its per-package timeout budget; opted in, it runs.
 func RequireSlowSim(t *testing.T) {
 	t.Helper()
 	if os.Getenv(SlowSimTestsEnv) == "" {
-		t.Skipf("slow sim rung skipped — run `make sim-shadow-slow-test` (sets %s) to exercise it", SlowSimTestsEnv)
+		t.Skipf("slow sim rung skipped — run `just sim-shadow-slow-test` (sets %s) to exercise it", SlowSimTestsEnv)
 	}
 }
 

@@ -1,8 +1,8 @@
 // Live integration test for embedding recall through the Recaller. It
 // ALWAYS COMPILES (no build tag) and gates EXECUTION at runtime: without
-// the live opt-in (testsupport.LiveTestsEnv) it skips, so bare `make test`
+// the live opt-in (testsupport.LiveTestsEnv) it skips, so bare `just test`
 // compiles and skips it, hitting no endpoint. Run it via
-// `make integration-test`, which sets the opt-in; it needs the `reaper`
+// `just integration-test`, which sets the opt-in; it needs the `reaper`
 // provider reachable. Under the opt-in an unreachable/misconfigured
 // endpoint is a FAILURE, not a skip.
 //

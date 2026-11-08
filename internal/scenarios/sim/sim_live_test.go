@@ -2,7 +2,7 @@
 // test function: TestSim is the single entry point, and these helpers supply
 // the live-vs-stand-in elements it installs per toggle. The two toggles
 // (-sim.live-embedding / -sim.live-inference, both default false) are read by
-// TestSim; with NEITHER set (bare `make test` / `make sim`) setupLiveElements
+// TestSim; with NEITHER set (bare `just test` / `just sim`) setupLiveElements
 // returns zero values immediately — no endpoint touch — so the deterministic
 // mock acceptance gate never reaches any live code here and never skips. When
 // a toggle is on, the usable-endpoint guard runs against the `reaper` endpoint
@@ -65,8 +65,8 @@ func setupLiveElements(t *testing.T, d time.Duration) (
 ) {
 	t.Helper()
 	if !*liveEmbedding && !*liveInference {
-		// The mock acceptance gate (bare `make test` / `make sim`, or
-		// `make sim LIVE_EMBEDDING=false LIVE_INFERENCE=false`). No live element to
+		// The mock acceptance gate (bare `just test` / `just sim`, or
+		// `just LIVE_EMBEDDING=false LIVE_INFERENCE=false sim`). No live element to
 		// install: return zero values and touch no endpoint. The gate
 		// RUNS — this is not a skip.
 		return nil, nil, "", false
