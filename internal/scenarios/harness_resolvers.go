@@ -43,20 +43,6 @@ func recallResolverFor(t *testing.T, idx int, label string, ack *RecallAck) turn
 	}
 }
 
-// closureResolverFor builds a turn.ClosureResolver from a step's
-// scripted ClosureAck. A nil ack yields a nil resolver — closure stays
-// detection-disabled for the step (mirrors recallResolverFor). A
-// non-nil ack applies its Outcome to every closure offer the step
-// surfaces.
-func closureResolverFor(ack *ClosureAck) turn.ClosureResolver {
-	if ack == nil {
-		return nil
-	}
-	return func(_ context.Context, _ turn.ClosureOffer) (turn.ClosureResolution, error) {
-		return turn.ClosureResolution{Outcome: ack.Outcome}, nil
-	}
-}
-
 // perStepInvariants resolves the invariant list to run after a step,
 // applying the derived-day-tick heavy-cadence policy when the scenario
 // opted into it (§3.5/M1).

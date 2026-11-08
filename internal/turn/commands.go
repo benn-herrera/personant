@@ -2,12 +2,11 @@ package turn
 
 // commands.go is the exported seam the chat REPL drives for user-initiated
 // slash commands (§4.2) that must reach turn-package internals: the Layer
-// B/C working-set primitives (touchActiveLRU / promoteToLayerB), the §3.5
-// closure flow (applyClosureResolution), and the thread state-write pattern
-// that mirrors spine + frontmatter. Slash commands run BETWEEN turns (not
-// inside Run), so each function here owns its own persistence: it saves the
-// working set, and takes a §3.11 structural checkpoint only when it created
-// or retired a thread. State transitions that are not §3.11-structural
+// B/C working-set primitives (touchActiveLRU / promoteToLayerB) and the
+// thread state-write pattern that mirrors spine + frontmatter. Slash
+// commands run BETWEEN turns (not inside Run), so each function here owns
+// its own persistence: it saves the working set, and takes a §3.11
+// structural checkpoint only when it created a thread. State transitions that are not §3.11-structural
 // (pause / resume / re-engage) ride the session-close commit like any other
 // content-only change.
 
@@ -229,73 +228,6 @@ func reEngage(ctx context.Context, state *State, ref, via string) (string, error
 	return id, nil
 }
 
-// ManualClosure implements /done: it runs the §3.5 closure flow on demand
-// for one thread — curator draft, interactive resolution, and the same
-// apply path as the decay-triggered scan (applyClosureResolution). ref is
-// the thread id/name, or "" for the current owner. Requires a Curator and
-// ClosureResolver to be installed (as the decay scan does).
-//
-// /done is ALWAYS fully interactive, in both §2.6.1 ack modes: the user
-// typed the command, so they have opted into the conversation. The
-// 2026-08-04 auto-accept ruling is about closures the runtime raises on
-// its own, not ones the user asks for.
-//
-// A retire or WIP outcome is a §3.11 structural change: this takes a
-// checkpoint when applyClosureResolution advanced the structural counters.
-func ManualClosure(ctx context.Context, state *State, ref string) error {
-	if state.Curator == nil || state.ClosureResolver == nil {
-		return errors.New("done: closure unavailable (no curator/resolver configured)")
-	}
-	id, err := targetThread(ctx, state, ref)
-	if err != nil {
-		return err
-	}
-	rec, found, err := state.Ops.FindThread(ctx, id)
-	if err != nil {
-		return fmt.Errorf("done: find topic %s: %w", id, err)
-	}
-	if !found {
-		return fmt.Errorf("done: topic %s not in spine", id)
-	}
-	thr, err := state.Ops.LoadThread(ctx, id)
-	if err != nil {
-		return fmt.Errorf("done: load topic %s: %w", id, err)
-	}
-	draft, err := state.Curator.DraftClosure(ctx, thr)
-	if err != nil {
-		return fmt.Errorf("done: draft closure for %s: %w", id, err)
-	}
-	if err := state.Ops.Log(ctx, memops.LogCategoryRetire, "prompt",
-		"thr="+id+" trigger=manual"); err != nil {
-		return err
-	}
-	offer := ClosureOffer{
-		ThreadID: id,
-		Display:  threadDisplay(rec),
-		Gist:     threadGist(rec),
-		Summary:  draft.Summary,
-		Anchors:  draft.Anchors,
-		State:    rec.State,
-	}
-	res, err := state.ClosureResolver(ctx, offer)
-	if err != nil {
-		return fmt.Errorf("done: resolve closure for %s: %w", id, err)
-	}
-
-	before := state.structuralRetires + state.structuralWIPs
-	if err := applyClosureResolution(ctx, state, id, draft, res, ackHuman); err != nil {
-		return fmt.Errorf("done: apply closure for %s: %w", id, err)
-	}
-	// applyClosureResolution evicts a retired/WIP thread from the working
-	// set; persist it. Checkpoint only when a structural (retire/WIP)
-	// transition actually happened — a defer reaches no write.
-	persistWorkingSet(ctx, state)
-	if state.structuralRetires+state.structuralWIPs > before {
-		checkpointCommand(ctx, state, "structural: /done closure")
-	}
-	return nil
-}
-
 // SwitchProject changes the active project mid-session (/project switch,
 // §4.5.6). The Layer B/C working set is thread membership for the OUTGOING
 // project — closure and recall are project-scoped — so it is reset to empty
@@ -344,7 +276,7 @@ func writeThreadState(ctx context.Context, state *State, threadID string, newSta
 // writeThreadRecord is the ONE canonical+derived write a between-turns slash
 // command takes: load the spine record, let mutate revise it, mirror the
 // result into the thread's frontmatter, and write both through the
-// updateExistingThread / applyClosureResolution pattern (EngageThread with
+// updateExistingThread / closeThreadResolved pattern (EngageThread with
 // an empty TurnExcerpt — a meta-only update that leaves turns/ untouched).
 //
 // The mirror is total rather than field-by-field per caller, which is what
@@ -409,7 +341,7 @@ func persistWorkingSet(ctx context.Context, state *State) {
 }
 
 // checkpointCommand takes a §3.11 structural checkpoint for a command that
-// created or retired a thread. Non-fatal (log and continue): the
+// created a thread. Non-fatal (log and continue): the
 // session-close commit is the backstop, matching the turn-close cadence.
 func checkpointCommand(ctx context.Context, state *State, reason string) {
 	if err := state.Ops.Checkpoint(ctx, reason); err != nil {

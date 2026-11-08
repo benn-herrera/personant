@@ -117,44 +117,17 @@ type State struct {
 	// OnAutoRecalled receives one RecallNotice per §3.4 auto-band recall
 	// the runtime fetched without asking. nil → the fetch is silent (the
 	// scenario harness and every non-interactive caller). Presentation
-	// seam only, with the same contract as OnPhase and OnAutoClosed: it
+	// seam only, with the same contract as OnPhase: it
 	// must not block and must not mutate State, and nothing in the
 	// pipeline observes it. The durable record is recall.accept ack=auto,
 	// not this.
 	OnAutoRecalled func(RecallNotice)
 
 	// Curator drafts the §3.5 closure summary + anchors for a thread
-	// that has decayed into idleness. NewState leaves it nil (closure
-	// disabled); the chat REPL installs a model-backed curator and the
-	// scenario harness installs a deterministic stub.
+	// that has decayed into idleness. NewState leaves it nil, and with no
+	// curator nothing closes; the scenario harness installs a
+	// deterministic stub.
 	Curator curator.Curator
-
-	// ClosureResolver resolves the §3.5 closure offer surfaced at turn
-	// close into a retire / wip / defer outcome. nil → closure stays
-	// detection-disabled (no offer surfaced, no decay scan). The chat
-	// REPL installs an interactive resolver; the scenario harness
-	// installs a scripted one. Both Curator and ClosureResolver must be
-	// non-nil for closure detection to run.
-	//
-	// Under the default AckModeAuto the resolver handles the EXCEPTION
-	// queue only (drained at a session boundary), never a routine decay.
-	ClosureResolver ClosureResolver
-
-	// ClosureAckMode is the §2.6.1 closure.ack-mode policy. The zero
-	// value is AckModeAuto — routine decay closures auto-accept and
-	// exceptions queue for a boundary drain. AckModeAlways restores the
-	// per-decay interactive prompt. The chat REPL reads the directive;
-	// the scenario harness pins AckModeAlways (its scripted ClosureAck
-	// IS a human ack).
-	ClosureAckMode ClosureAckMode
-
-	// OnAutoClosed receives one ClosureNotice per §3.5 routine closure the
-	// runtime applied without asking. nil → the closure is silent (the
-	// scenario harness and every non-interactive caller). Presentation
-	// seam only, with the same contract as OnPhase: it must not block and
-	// must not mutate State, and nothing in the pipeline observes it. The
-	// durable record is the retire.ack / retire.complete pair, not this.
-	OnAutoClosed func(ClosureNotice)
 
 	// OnPhase receives a Phase each time the pipeline enters a stage a
 	// user could be left waiting on. nil → no progress signal is emitted
@@ -283,23 +256,6 @@ type State struct {
 	// at window close.
 	staging *stagingBuffer
 
-	// closureDeferUntil maps a thread ID to the turn index until which a
-	// §3.5 closure re-prompt is suppressed. Populated when the user
-	// defers a closure offer; not persisted (session-scoped).
-	closureDeferUntil map[string]int
-
-	// closurePendingQueued marks the threads already announced as queued
-	// for §3.5 review this session, so retire.pending stays a decision
-	// event instead of becoming a per-turn heartbeat: the queue is
-	// derived, so without this every scan would re-log the same fact for
-	// as long as the thread waits. Cleared when the thread is closed or
-	// re-engaged, so a second idle episode announces itself again.
-	//
-	// Deliberately NOT part of the §4.3.3 rollback snapshot: the closure
-	// scan runs post-canonical (turn close), so a retracted turn never
-	// reaches it and there is nothing to restore.
-	closurePendingQueued map[string]bool
-
 	// recallSurfaced marks thread IDs that arrived in context via recall
 	// (§2.7.3 origin-provenance attribution source) — as opposed to direct
 	// engagement or switch. Both recall paths mark here through their shared
@@ -368,8 +324,8 @@ type State struct {
 	// Session-scoped and deliberately NOT persisted (it is a statement
 	// about THIS session's window, which a relaunch rebuilds) and NOT part
 	// of the §4.3.3 rollback snapshot: recall runs post-canonical at turn
-	// close, so a retracted turn never reaches it — the same reasoning that
-	// keeps closurePendingQueued out. nil is the well-formed empty case.
+	// close, so a retracted turn never reaches it. nil is the well-formed
+	// empty case.
 	recallWindowTurns map[string]map[int]struct{}
 
 	// embeddingDebt accrues per thread the count of turn-excerpts that have
@@ -399,23 +355,19 @@ type State struct {
 	flushCalls  int
 	flushChunks int
 
-	// structuralCreates / structuralRetires / structuralWIPs count the §3.11
-	// structural changes that occurred during the in-flight turn: thread
-	// creations (createNewThread), §3.5 retire writes, and §3.5 WIP
-	// demotions (both in applyClosureResolution). They are the turn-close
-	// commit-cadence trigger — a turn with (creates+retires+wips) > 0 yields
-	// EXACTLY ONE Checkpoint at Run close, never one per mutation, so a
-	// close+create switch or a vacation closure-storm (#82, many closes in
-	// one turn) coalesces to a single commit (§3.11). All three reset to 0
-	// at the top of every Run; the counts also build the commit reason
-	// string (e.g. "+1 thread, -2 retired, ~1 wip"). Retirements and WIP
-	// demotions are counted SEPARATELY: a WIP demotion keeps the thread open
-	// (state=wip), so folding it into a "retired" tally would misreport the
-	// commit's forensic reason. Archival commits via its own §3.8 batch and
-	// is deliberately NOT counted here.
+	// structuralCreates / structuralRetires count the §3.11 structural
+	// changes that occurred during the in-flight turn: thread creations
+	// (createNewThread) and §3.5 closure writes (closeThreadResolved).
+	// They are the turn-close commit-cadence trigger — a turn with
+	// (creates+retires) > 0 yields EXACTLY ONE Checkpoint at Run close,
+	// never one per mutation, so a close+create switch or a vacation
+	// closure-storm (#82, many closes in one turn) coalesces to a single
+	// commit (§3.11). Both reset to 0 at the top of every Run; the counts
+	// also build the commit reason string (e.g. "+1 thread, -2 retired").
+	// Archival commits via its own §3.8 batch and is deliberately NOT
+	// counted here.
 	structuralCreates int
 	structuralRetires int
-	structuralWIPs    int
 }
 
 // sessionHistoryCapTurns bounds State.History to N user/assistant turn
@@ -455,15 +407,12 @@ func WithTokenCeiling(tokenCeiling int) StateOption {
 // WithTokenCeiling) override defaults after construction.
 func NewState(ops memops.MemoryOps, project memops.ProjectMeta, client model.Client, opts ...StateOption) *State {
 	s := &State{
-		Ops:               ops,
-		ActiveProject:     project,
-		Client:            client,
-		Budget:            memops.DefaultBudget(),
-		coalesce:          newCoalesceBuffer(),
-		staging:           newStagingBuffer(),
-		closureDeferUntil: make(map[string]int),
-
-		closurePendingQueued: make(map[string]bool),
+		Ops:           ops,
+		ActiveProject: project,
+		Client:        client,
+		Budget:        memops.DefaultBudget(),
+		coalesce:      newCoalesceBuffer(),
+		staging:       newStagingBuffer(),
 		// Default to symbolic-only recall; callers with an embedding
 		// provider replace this with an embedding-enabled Service.
 		Recaller: measure.NewService(ops, nil),
@@ -485,9 +434,9 @@ func NewState(ops memops.MemoryOps, project memops.ProjectMeta, client model.Cli
 // never completed a turn) leaves ActiveThreads/DormantThreads nil — the
 // same state NewState produces — and is not an error.
 //
-// Only the working-set membership is reloaded. TurnNumber, the
-// coalesce/staging buffers, and closureDeferUntil are session-volatile
-// and correctly start fresh.
+// Only the working-set membership is reloaded. TurnNumber and the
+// coalesce/staging buffers are session-volatile and correctly start
+// fresh.
 func LoadSession(ctx context.Context, ops memops.MemoryOps, project memops.ProjectMeta, client model.Client, opts ...StateOption) (*State, error) {
 	state := NewState(ops, project, client, opts...)
 	active, dormant, err := ops.LoadWorkingSet(ctx)
@@ -788,10 +737,9 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	state.tagReprompted = false
 	state.emptyReprompted = false
 	// §3.11 structural-change counters are per-turn — clear them so the
-	// turn-close cadence check sees only this turn's creates/retires/wips.
+	// turn-close cadence check sees only this turn's creates/retires.
 	state.structuralCreates = 0
 	state.structuralRetires = 0
-	state.structuralWIPs = 0
 	// Bump the turn counter BEFORE any chain step fires so the user.prompt
 	// delta and the model.response delta both observe the same
 	// TurnNumber. The transient-data lifecycle B.4 window-close GC keys
@@ -1227,9 +1175,9 @@ func RunWithInfo(ctx context.Context, state *State, preEvents []Delta, userInput
 	// the next Reconcile rolls back to the last committed turn and
 	// preserves this turn's journaled content.
 	reason := ""
-	if n := state.structuralCreates + state.structuralRetires + state.structuralWIPs; n > 0 {
-		reason = fmt.Sprintf("structural: +%d thread, -%d retired, ~%d wip",
-			state.structuralCreates, state.structuralRetires, state.structuralWIPs)
+	if n := state.structuralCreates + state.structuralRetires; n > 0 {
+		reason = fmt.Sprintf("structural: +%d thread, -%d retired",
+			state.structuralCreates, state.structuralRetires)
 	}
 	// Re-emitted for the same reason as above: 5b's closure offer may have
 	// taken the terminal. The commit is also the heaviest close-time op, so

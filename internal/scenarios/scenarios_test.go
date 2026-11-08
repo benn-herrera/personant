@@ -984,9 +984,9 @@ func seedActiveThread(h *Harness, threadID string, lastEngagedTurn int, lastEnga
 
 // TestScenario_DecayTriggeredClosure drives §3.5 end-to-end: an active
 // thread seeded with an old last-engaged-turn decays as idle turns
-// accumulate, the curator drafts a closure summary, the scripted
-// ClosureAck retires it, and the thread leaves the working set with a
-// non-empty summary.
+// accumulate, the curator drafts a closure summary, the runtime closes it
+// as resolved, and the thread leaves the working set with a non-empty
+// summary.
 func TestScenario_DecayTriggeredClosure(t *testing.T) {
 	closureInvariants := append(append([]InvariantCheck{},
 		DefaultInvariants...),
@@ -1000,9 +1000,8 @@ func TestScenario_DecayTriggeredClosure(t *testing.T) {
 
 	steps := make([]Step, 0, scenarioDecayTurns)
 	// Idle turns: the seeded thread (last_engaged_turn=0) is engaged by
-	// none of them, so it crosses the turn-based threshold. No
-	// ClosureAck on the idle steps before the threshold → closure is
-	// detection-disabled for them.
+	// none of them, so it crosses the turn-based threshold; the closure
+	// scan runs on each and finds nothing eligible yet.
 	for i := 0; i < scenarioDecayTurns-1; i++ {
 		steps = append(steps, Step{
 			UserInput:    fmt.Sprintf("idle chatter %d", i+1),
@@ -1012,12 +1011,11 @@ func TestScenario_DecayTriggeredClosure(t *testing.T) {
 		})
 	}
 	// The threshold turn: TurnNumber reaches decayTurns, the seeded
-	// thread is decay-eligible, and the scripted ClosureAck retires it.
+	// thread is decay-eligible, and the runtime closes it.
 	steps = append(steps, Step{
 		UserInput:    "one more idle turn — should trigger closure",
 		MockResponse: model.Response{Content: "Another plain reply."},
-		Annotation:   "decay threshold crossed → closure offered + retired",
-		ClosureAck:   &ClosureAck{Outcome: turn.ClosureResolved},
+		Annotation:   "decay threshold crossed → closed as resolved",
 		Invariants: append(append([]InvariantCheck{},
 			closureInvariants...),
 			assertThreadRetired("thr_1", memops.ThreadResolved),
@@ -1130,12 +1128,11 @@ func TestScenario_WallClockDecayTriggeredClosure(t *testing.T) {
 				// (the sliceSource shim integrates this TimeDelta onto the
 				// anchor → At 2026-05-12T00:00:00Z). turn-idle is still 2
 				// (< turn threshold 8), so only the wall-clock branch (8d >=
-				// decayTime 7d) can fire. The scripted ClosureAck retires it.
+				// decayTime 7d) can fire, and the runtime closes it.
 				UserInput:    "much later — wall-clock decay should trigger closure",
 				MockResponse: model.Response{Content: "Another plain reply."},
-				Annotation:   "turn 2 — wall-clock decay crossed → closure offered + retired",
+				Annotation:   "turn 2 — wall-clock decay crossed → closed as resolved",
 				TimeDelta:    8 * 24 * time.Hour,
-				ClosureAck:   &ClosureAck{Outcome: turn.ClosureResolved},
 				Invariants: append(append([]InvariantCheck{},
 					closureInvariants...),
 					assertThreadRetired("thr_1", memops.ThreadResolved),

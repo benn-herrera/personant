@@ -1,6 +1,6 @@
 # Strip the self-built harness
 
-Active plan for ROADMAP.md B1. WP1 and WP2 are done (section 5).
+Active plan for ROADMAP.md B1. Package state is in section 5.
 
 Contents:
 

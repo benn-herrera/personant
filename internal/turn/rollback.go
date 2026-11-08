@@ -43,16 +43,15 @@ import (
 // these fields use nil as the well-formed empty case, so restoring an
 // empty-but-non-nil container would not be a faithful rollback.
 type sessionState struct {
-	turnNumber        int
-	staging           map[string]stagedSymbol
-	activeThreads     []string
-	dormantThreads    []string
-	history           []model.Message
-	recallSurfaced    map[string]struct{}
-	embeddingDebt     map[string]int
-	closureDeferUntil map[string]int
-	flushCalls        int
-	flushChunks       int
+	turnNumber     int
+	staging        map[string]stagedSymbol
+	activeThreads  []string
+	dormantThreads []string
+	history        []model.Message
+	recallSurfaced map[string]struct{}
+	embeddingDebt  map[string]int
+	flushCalls     int
+	flushChunks    int
 }
 
 // snapshotSession captures the session-volatile state. Every value in
@@ -60,15 +59,14 @@ type sessionState struct {
 // level of copying is a full separation.
 func snapshotSession(state *State) sessionState {
 	s := sessionState{
-		turnNumber:        state.TurnNumber,
-		flushCalls:        state.flushCalls,
-		flushChunks:       state.flushChunks,
-		activeThreads:     slices.Clone(state.ActiveThreads),
-		dormantThreads:    slices.Clone(state.DormantThreads),
-		history:           slices.Clone(state.History),
-		recallSurfaced:    maps.Clone(state.recallSurfaced),
-		embeddingDebt:     maps.Clone(state.embeddingDebt),
-		closureDeferUntil: maps.Clone(state.closureDeferUntil),
+		turnNumber:     state.TurnNumber,
+		flushCalls:     state.flushCalls,
+		flushChunks:    state.flushChunks,
+		activeThreads:  slices.Clone(state.ActiveThreads),
+		dormantThreads: slices.Clone(state.DormantThreads),
+		history:        slices.Clone(state.History),
+		recallSurfaced: maps.Clone(state.recallSurfaced),
+		embeddingDebt:  maps.Clone(state.embeddingDebt),
 	}
 	if state.staging != nil {
 		s.staging = maps.Clone(state.staging.entries)
@@ -88,7 +86,6 @@ func (s sessionState) restore(state *State) {
 	state.History = slices.Clone(s.history)
 	state.recallSurfaced = maps.Clone(s.recallSurfaced)
 	state.embeddingDebt = maps.Clone(s.embeddingDebt)
-	state.closureDeferUntil = maps.Clone(s.closureDeferUntil)
 	if state.staging != nil {
 		entries := maps.Clone(s.staging)
 		if entries == nil {

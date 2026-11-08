@@ -14,7 +14,7 @@
 // File layout within the package:
 //
 //   - harness.go (this file): core types (Step, Scenario, Harness,
-//     StepSource, RecallAck, ClosureAck, RecallFidelityMode,
+//     StepSource, RecallAck, RecallFidelityMode,
 //     StepFeedback), the NewMockResponseWithTag constructor, the
 //     SwitchProject API, and thin index wrappers.
 //   - harness_paths.go: rundata-directory resolution (runDataHome,
@@ -24,7 +24,7 @@
 //   - harness_run.go: RunScenario, runStep, restartSession, and the
 //     final-gauge helpers (foldEventLines, peakHistorySymbols).
 //   - harness_resolvers.go: per-step resolver builders
-//     (recallResolverFor, closureResolverFor) and the invariant-cadence
+//     (recallResolverFor) and the invariant-cadence
 //     policy (perStepInvariants, runInvariants).
 package scenarios
 
@@ -230,13 +230,6 @@ type Step struct {
 	// resolver — recall stays log-only (the pre-Part-B behavior).
 	RecallAck *RecallAck
 
-	// ClosureAck scripts how this step resolves a §3.5 closure offer
-	// surfaced at turn close. Its Outcome is applied to every closure
-	// offer the step surfaces. A nil ClosureAck means the step installs
-	// no ClosureResolver — closure stays detection-disabled for the
-	// step (mirrors a nil RecallAck yielding a nil recall resolver).
-	ClosureAck *ClosureAck
-
 	// At is the absolute simulated instant of this step's turn — the
 	// turn's position on the one simulated clock. It is the AUTHORITATIVE wire field: runStep SETS
 	// pinnedClock = At (a slaved copy of the generator's re-anchored
@@ -307,14 +300,6 @@ type Step struct {
 	// is seed-independent (fires every day-off) so it does not perturb the
 	// workload's (Seed, Duration) determinism contract.
 	SleepCycle bool
-}
-
-// ClosureAck scripts how a step resolves a §3.5 closure offer surfaced
-// at turn close. Outcome is applied to every closure offer the step
-// surfaces. A nil ClosureAck means the step installs no resolver —
-// closure stays detection-disabled for that step.
-type ClosureAck struct {
-	Outcome turn.ClosureOutcome
 }
 
 // RecallAck scripts how a step resolves a recall offer surfaced at

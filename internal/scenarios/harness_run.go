@@ -251,7 +251,6 @@ func stepSetup(t *testing.T, h *Harness, idx int, label string, step Step) {
 	}
 
 	h.State.RecallResolver = recallResolverFor(t, idx, label, step.RecallAck)
-	h.State.ClosureResolver = closureResolverFor(step.ClosureAck)
 }
 
 // stepSetClock slaves the pinned clock to the step's simulated instant.
@@ -710,13 +709,12 @@ func restartSession(t *testing.T, h *Harness, idx int, label string) {
 	if h.liveClient != nil {
 		rebuilt.Model = h.liveModel
 	}
-	// Re-install the ack policy — the scripted curator and the pinned §3.5
-	// closure / §3.4 recall ack modes. newHarness installs them on the
-	// original State, and turn.LoadSession carries none of them, so a
-	// relaunch that skipped this would silently run the rest of the scenario
-	// under a different ack regime (the bug the sim caught on the closure
-	// half). The per-step RecallResolver/ClosureResolver are installed by
-	// runStep below, so they need no handling here.
+	// Re-install the ack policy — the scripted curator and the pinned §3.4
+	// recall ack mode. newHarness installs them on the original State, and
+	// turn.LoadSession carries none of them, so a relaunch that skipped this
+	// would silently run the rest of the scenario with closure disabled and
+	// under a different recall ack regime. The per-step RecallResolver is
+	// installed by runStep below, so it needs no handling here.
 	installAckPolicy(rebuilt)
 
 	// Re-install the scenario's custom recaller — turn.LoadSession built

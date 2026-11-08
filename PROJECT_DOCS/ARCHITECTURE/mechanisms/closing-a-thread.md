@@ -1,13 +1,18 @@
 ### Closing a thread
 
-Triggers:
+Trigger:
 
 - Engagement decay: no engagement for `engagement.decay-turns` OR `engagement.decay-time`
   wall-clock (either threshold; OR semantics). The turn count is `TurnNumber − last_engaged_turn`, both in the service run's turn counter, which starts again at 0 on every relaunch (see "Start order and resume", U9). The stored `last_engaged_turn` therefore means nothing to a later run. A stored value above the current counter skips the turn threshold; a lower one is compared as if it came from the same run (`decayEligible`, `internal/turn/closure.go`). Across a relaunch, only the wall-clock threshold is a durable decay timer.
-- An explicit close request (`/done`; **Open:** U4 — the command).
 
-Flow (SPEC §3.5): the summarizer drafts the closing summary; a closing writes the
-thread file and updates the thread registry, and demotion out of the active and dormant sets follows.
+Flow (SPEC §3.5): `surfaceClosureCandidates` (`internal/turn/closure.go`) runs at turn close,
+gated on `State.Curator` alone. For each decayed thread of the active project, in thread-ID order,
+it logs `retire.prompt`, asks the summarizer for a draft, and hands a non-empty draft to
+`closeThreadResolved`, the single closure write: state `resolved`, the draft summary, anchors from
+the final projection of `history_symbols`, the thread file and thread registry record written
+together, demotion out of the active and dormant sets, and `retire.complete`. A failed or empty
+draft logs `retire.curator-error` and writes nothing; the thread stays decay-eligible, so the next
+scan retries it.
 
 Cold storage archival (`internal/memops/fileadapter/fileadapter_archive.go`;
 `cmd/archive.go` `archive list`/`archive recover`): when thread registry size pressure builds, the

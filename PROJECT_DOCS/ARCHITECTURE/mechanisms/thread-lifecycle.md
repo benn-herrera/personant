@@ -4,8 +4,7 @@ Standard pattern: THESIS "The building blocks", row "Thread lifecycle".
 
 A thread's life moves through five stages (SPEC §2.2.1 holds the states):
 
-1. **Created** when the model emits `*new-topic*` in a topic tag, or by an explicit user act
-   (**Open:** U4 — the command).
+1. **Created** when the model emits `*new-topic*` in a topic tag.
 2. **Active**, in the active set, while engaged (the model tags it in the per-turn topic list).
 3. **Dormant**, in the dormant set, once more recently engaged threads push it out of the active set (SPEC §3.1 LRU update rule).
 4. **Closed** at a resting point: it leaves the active and dormant sets and remains in the registry

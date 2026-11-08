@@ -98,7 +98,6 @@ func TestCheckpoint_CloseCommitsOnce(t *testing.T) {
 	state.TurnNumber = DecayTurns
 	state.ActiveThreads = []string{"thr_1"}
 	state.Curator = stubCurator{summary: "gist", anchors: []string{"x", "y", "z", "w"}}
-	state.ClosureResolver = fixedOutcomeResolver(ClosureResolved)
 
 	// Content-only model output: the structural change is the closure, not
 	// a create. The closure write and the turn's content ride the SAME
@@ -132,7 +131,6 @@ func TestCheckpoint_CloseAndCreateCoalesceToOneCommit(t *testing.T) {
 	state.TurnNumber = DecayTurns
 	state.ActiveThreads = []string{"thr_1"}
 	state.Curator = stubCurator{summary: "gist", anchors: []string{"x", "y", "z", "w"}}
-	state.ClosureResolver = fixedOutcomeResolver(ClosureResolved)
 
 	// New-topic create on the same turn the decayed thr_1 retires.
 	before, after := runTurn(t, paths,

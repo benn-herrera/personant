@@ -136,24 +136,3 @@ func TestReadParameter_CompositeValueRefused(t *testing.T) {
 		t.Error("ReadParameter accepted a composite value as a scalar")
 	}
 }
-
-// TestReadParameter_SeededDefaultsCarryAckMode: the install-shipped
-// defaults.md is a real input to this reader — a rename or reformat there
-// must not silently strand the directive.
-func TestReadParameter_SeededDefaultsCarryAckMode(t *testing.T) {
-	paths := PathsForHome(t.TempDir())
-	if err := os.MkdirAll(paths.DirectivesDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	path := filepath.Join(paths.DirectivesDir, DirectiveDefaultsFile)
-	if err := os.WriteFile(path, []byte(seedDefaultsMD), 0o644); err != nil {
-		t.Fatalf("write defaults.md: %v", err)
-	}
-	got, ok, err := ReadParameter(paths, "", "closure.ack-mode")
-	if err != nil || !ok {
-		t.Fatalf("ReadParameter = (%q, %v, %v), want the seeded value", got, ok, err)
-	}
-	if got != "auto" {
-		t.Errorf("seeded closure.ack-mode = %q, want auto", got)
-	}
-}

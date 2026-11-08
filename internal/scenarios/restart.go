@@ -199,9 +199,9 @@ func AssertPostRecovery(t testing.TB, paths store.PersonantPaths, ops memops.Mem
 //   - DormantThreads — Layer C membership, equal as ordered slices.
 //   - ActiveProject.ID — the active project, equal.
 //
-// What it deliberately does NOT check: TurnNumber, the coalesce/staging
-// buffers, and closureDeferUntil are session-volatile — they legitimately
-// reset on restart and asserting on them would be wrong.
+// What it deliberately does NOT check: TurnNumber and the coalesce/staging
+// buffers are session-volatile — they legitimately reset on restart and
+// asserting on them would be wrong.
 //
 // On a mismatch it returns a descriptive error naming the differing field
 // and both values; on full congruence it returns nil. The error is

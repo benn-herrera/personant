@@ -110,9 +110,6 @@ func TestPreCanonicalAbort_NoSessionResidue(t *testing.T) {
 		if !maps.Equal(got.embeddingDebt, want.embeddingDebt) {
 			t.Errorf("embeddingDebt = %v, want %v", got.embeddingDebt, want.embeddingDebt)
 		}
-		if !maps.Equal(got.closureDeferUntil, want.closureDeferUntil) {
-			t.Errorf("closureDeferUntil = %v, want %v", got.closureDeferUntil, want.closureDeferUntil)
-		}
 		if len(got.recallSurfaced) != len(want.recallSurfaced) {
 			t.Errorf("recallSurfaced = %v, want %v", got.recallSurfaced, want.recallSurfaced)
 		}

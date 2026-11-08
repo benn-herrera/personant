@@ -91,7 +91,7 @@ const (
 
 // DirectiveRecallAckMode is the §2.6.1 parameter name the front end reads
 // to select a RecallAckMode. Named beside the modes so the key and its
-// meaning cannot drift apart (the DirectiveClosureAckMode pattern).
+// meaning cannot drift apart.
 const DirectiveRecallAckMode = "recall.ack-mode"
 
 // ParseRecallAckMode maps a directive value to a mode. An unrecognized
@@ -180,7 +180,7 @@ type RecallOffer struct {
 // RecallNotice is the one-line record of a recall the runtime applied
 // without asking (§3.4 auto-accept band), handed to the optional
 // State.OnAutoRecalled presentation hook. The runtime renders nothing
-// itself — the front end owns the wording. Sibling of ClosureNotice.
+// itself — the front end owns the wording.
 type RecallNotice struct {
 	ThreadID string // thr_<n>
 	Display  string // the thread's working name
@@ -419,7 +419,7 @@ func describeCandidates(ctx context.Context, state *State, results []measure.Res
 // chokepoint, the counter, or the suppression mark. ack records WHO
 // accepted (§2.8 recall.accept ack=human|auto), by parameter rather than
 // by a resolution field so no experience layer can claim a human ack the
-// human never gave (the applyClosureResolution precedent).
+// human never gave.
 //
 // A recall-accept promotion is a working-window mutation, so it goes
 // through the SAME §3.0.5 fetch chokepoint every other Layer-B fetch does

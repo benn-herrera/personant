@@ -367,7 +367,6 @@ func (g *generator) buildWanderProbeStep() (bufStep, bool) {
 		UserInput:    probeUserInput,
 		MockResponse: scenarios.NewMockResponseWithTag([]string{carrierTag}, Q, "abandoned-topic probe."),
 		Annotation:   fmt.Sprintf("turn %d: wander-probe %s hop=%d", g.stepIndex+1, target.threadID(), hop),
-		ClosureAck:   &scenarios.ClosureAck{Outcome: turn.ClosureResolved},
 		RecallAck:    &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
 	}
 	// The carrier is deliberately NOT entered into the generator's Layer-B

@@ -90,18 +90,6 @@ func TestCommandErrorVocabulary(t *testing.T) {
 			_, _, err := RenameTopic(ctx, s, "  ")
 			return err
 		}},
-		{"done without curator", func(s *State) error {
-			return ManualClosure(ctx, s, "thr_1")
-		}},
-		{"done on unknown id", func(s *State) error {
-			// With the flow installed, /done's failure comes from the shared
-			// ref resolver — the path a user actually hits.
-			s.Curator = stubCurator{summary: "gist"}
-			s.ClosureResolver = func(context.Context, ClosureOffer) (ClosureResolution, error) {
-				return ClosureResolution{Outcome: ClosureDefer}, nil
-			}
-			return ManualClosure(ctx, s, "thr_404")
-		}},
 	}
 
 	for _, tt := range tests {

@@ -352,7 +352,6 @@ func (g *generator) buildMainThreadStep() bufStep {
 		UserInput:    userInput,
 		MockResponse: scenarios.NewMockResponseWithTag(threads, anchorTags, fmt.Sprintf("main thread — %s.", slot.Topic)),
 		Annotation:   fmt.Sprintf("turn %d: main-thread engage %s (%s)", g.stepIndex+1, thr.threadID(), slot.Topic),
-		ClosureAck:   &scenarios.ClosureAck{Outcome: turn.ClosureResolved},
 		RecallAck:    &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
 	}
 	g.engage(idx, g.stepIndex)
@@ -469,7 +468,6 @@ func (g *generator) buildIntraProbeStep() (bufStep, bool) {
 		UserInput:    probeUserInput,
 		MockResponse: scenarios.NewMockResponseWithTag([]string{thr.threadID()}, anchorTags, "intra-thread probe."),
 		Annotation:   fmt.Sprintf("turn %d: intra-probe %s hop=%d", g.stepIndex+1, thr.threadID(), hop),
-		ClosureAck:   &scenarios.ClosureAck{Outcome: turn.ClosureResolved},
 		RecallAck:    &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
 		// W1 recall-preservation gate (#111 / design §7.1): the harness evaluates
 		// IntraThreadDivergence for the engaged main thread on this step (on an

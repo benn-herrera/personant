@@ -1263,8 +1263,7 @@ func (g *generator) buildRefinementStep() scenarios.Step {
 		),
 		Annotation: fmt.Sprintf("refinement attempt %d (%s)",
 			g.recallAttempts, slot.Topic),
-		ClosureAck: &scenarios.ClosureAck{Outcome: turn.ClosureResolved},
-		RecallAck:  &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
+		RecallAck: &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
 	}
 	if len(recallIDs) > 0 {
 		step.ExpectedRecallMatches = recallIDs
@@ -2817,14 +2816,11 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 		UserInput:    userInput,
 		MockResponse: buildMockResponse(isNew, thr.threadID(), anchorTags, slot),
 		Annotation:   annotation,
-		// Closure is set on EVERY step: any thread that decay-closes
-		// during the run is resolved, and a nil ClosureAck would
-		// disable closure detection that step. RecallAck is always
-		// decline-all (the generator cannot predict the runtime's
-		// offer set, so accepting nothing is the only contract-safe
-		// choice — recall is *measured* here, not acted on).
-		ClosureAck: &scenarios.ClosureAck{Outcome: turn.ClosureResolved},
-		RecallAck:  &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
+		// RecallAck is always decline-all (the generator cannot
+		// predict the runtime's offer set, so accepting nothing is the
+		// only contract-safe choice — recall is *measured* here, not
+		// acted on).
+		RecallAck: &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
 	}
 
 	if tt == turnWork {

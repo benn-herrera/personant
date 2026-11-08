@@ -281,14 +281,6 @@ func touchActiveLRU(state *State, thrID string) {
 // is capped by count to keep the slice bounded across a long session.
 func updateLayerLRU(state *State, engaged []string) {
 	for _, id := range engaged {
-		// An engaged thread has started a fresh idle clock; any
-		// §3.5 defer-suppression grace from a prior idle episode is
-		// now meaningless, so prune it to avoid wrongly suppressing a
-		// future legitimate re-prompt.
-		delete(state.closureDeferUntil, id)
-		// Same reasoning for the §3.5 queued-announcement mark: this is a
-		// fresh idle episode, so a later decay announces itself again.
-		delete(state.closurePendingQueued, id)
 		touchActiveLRU(state, id)
 	}
 }
