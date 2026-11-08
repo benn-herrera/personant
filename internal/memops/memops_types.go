@@ -1,13 +1,10 @@
 package memops
 
-import "io"
-
 // This file holds the operation-supporting types referenced by the
 // MemoryOps interface — filters, options, working-set inputs, bootstrap
 // and verification result shapes. The domain data-model types
-// (SpineRecord, ThreadMeta, Thread, ProjectMeta, Provider, the
-// symbol/state enums, the sentinel errors, ParseModelRef/ValidateConfig)
-// are real definitions in memops_model.go: the port owns its domain
+// (SpineRecord, ThreadMeta, Thread, ProjectMeta, the symbol/state enums,
+// the sentinel errors) are real definitions in memops_model.go: the port owns its domain
 // types outright. internal/store and the adapters depend on memops for
 // them — the dependency arrow runs substrate → port, the correct
 // direction for ports-and-adapters.
@@ -536,15 +533,10 @@ func (s BootstrapStep) String() string {
 
 // InitOptions configures Init. Promoted from store.InitOptions.
 type InitOptions struct {
-	// Quiet suppresses logger and Out writes regardless of either.
+	// Quiet suppresses logger writes.
 	Quiet bool
 	// Logger receives one log line per scaffold step. nil → silent.
 	Logger func(format string, args ...any)
-	// Out receives the small subset of init's report that the user must
-	// see even with logging turned down — today, the [user] identity
-	// step, whose absence disables the Wikimedia-backed tools. nil → no
-	// stdout echo, which is what every embedded caller wants.
-	Out io.Writer
 }
 
 // FileEventKind is the operation a FileEvent records.

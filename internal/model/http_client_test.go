@@ -9,20 +9,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"personant/internal/memops"
 	"time"
 )
 
 const testAPIKey = "sk-TEST-MUST-NOT-LEAK-1234567890abcdef"
-
-func newTestProvider(baseURL string) memops.Provider {
-	return memops.Provider{
-		Name:    "test",
-		BaseURL: baseURL,
-		APIKey:  testAPIKey,
-	}
-}
 
 // TestHTTPClientHappyPath: verify the request body shape, the auth header,
 // the User-Agent header, and the response decode round-trip.
@@ -50,7 +40,7 @@ func TestHTTPClientHappyPath(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewHTTPClient(newTestProvider(srv.URL))
+	c := NewHTTPClient(srv.URL, testAPIKey)
 	resp, err := c.Consult(context.Background(), Request{
 		Model: "test-model",
 		Messages: []Message{
@@ -103,8 +93,7 @@ func TestHTTPClientBaseURLTrailingSlash(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := newTestProvider(srv.URL + "/")
-	c := NewHTTPClient(p)
+	c := NewHTTPClient(srv.URL+"/", testAPIKey)
 	if _, err := c.Consult(context.Background(), Request{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}}); err != nil {
 		t.Fatalf("Consult: %v", err)
 	}
@@ -123,8 +112,7 @@ func TestHTTPClientNoAPIKeyOmitsAuthHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := memops.Provider{Name: "nokey", BaseURL: srv.URL}
-	c := NewHTTPClient(p)
+	c := NewHTTPClient(srv.URL, "")
 	if _, err := c.Consult(context.Background(), Request{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}}); err != nil {
 		t.Fatalf("Consult: %v", err)
 	}
@@ -145,7 +133,7 @@ func TestHTTPClientHTTPErrorWraps(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewHTTPClient(newTestProvider(srv.URL))
+	c := NewHTTPClient(srv.URL, testAPIKey)
 	_, err := c.Consult(context.Background(), Request{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
 	if err == nil {
 		t.Fatal("expected error from 500, got nil")
@@ -183,7 +171,7 @@ func TestHTTPClientContextCancellation(t *testing.T) {
 		cancel()
 	}()
 
-	c := NewHTTPClient(newTestProvider(srv.URL))
+	c := NewHTTPClient(srv.URL, testAPIKey)
 	_, err := c.Consult(ctx, Request{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
 	if err == nil {
 		t.Fatal("expected error from cancellation, got nil")
@@ -203,7 +191,7 @@ func TestHTTPClientErrorScrubsAPIKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewHTTPClient(newTestProvider(srv.URL))
+	c := NewHTTPClient(srv.URL, testAPIKey)
 	_, err := c.Consult(context.Background(), Request{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -219,7 +207,7 @@ func TestHTTPClientErrorScrubsAPIKey(t *testing.T) {
 // TestHTTPClientEmptyBaseURLErrors: an empty BaseURL must produce a clear
 // error rather than an HTTP attempt against a malformed URL.
 func TestHTTPClientEmptyBaseURLErrors(t *testing.T) {
-	c := NewHTTPClient(memops.Provider{Name: "x"})
+	c := NewHTTPClient("", "")
 	_, err := c.Consult(context.Background(), Request{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
 	if err == nil {
 		t.Fatal("expected error on empty BaseURL, got nil")
@@ -241,7 +229,7 @@ func TestHTTPClientWiresSamplingDefaults(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewHTTPClient(newTestProvider(srv.URL))
+	c := NewHTTPClient(srv.URL, testAPIKey)
 	req := DefaultRequest("test-model", []Message{{Role: "user", Content: "hi"}})
 	if _, err := c.Consult(context.Background(), req); err != nil {
 		t.Fatalf("Consult: %v", err)
@@ -295,7 +283,7 @@ func TestHTTPClientChatTemplateKwargsOmittedWhenEmpty(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewHTTPClient(newTestProvider(srv.URL))
+	c := NewHTTPClient(srv.URL, testAPIKey)
 	// Build directly (not via DefaultRequest) so ChatTemplateKwargs stays nil.
 	req := Request{Model: "m", Messages: []Message{{Role: "user", Content: "hi"}}}
 	if _, err := c.Consult(context.Background(), req); err != nil {
@@ -334,7 +322,7 @@ data: [DONE]
 	}))
 	defer srv.Close()
 
-	c := NewHTTPClient(newTestProvider(srv.URL))
+	c := NewHTTPClient(srv.URL, testAPIKey)
 	req := DefaultRequest("test-model", []Message{{Role: "user", Content: "hi"}})
 	sr, err := c.ConsultStream(context.Background(), req)
 	if err != nil {
@@ -391,7 +379,7 @@ func TestHTTPClientStreamErrorWraps(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewHTTPClient(newTestProvider(srv.URL))
+	c := NewHTTPClient(srv.URL, testAPIKey)
 	_, err := c.ConsultStream(context.Background(), DefaultRequest("m", []Message{{Role: "user", Content: "x"}}))
 	if err == nil {
 		t.Fatal("expected error from 500, got nil")
@@ -424,7 +412,7 @@ data: {"choices":[{"delta":{"content":"b"}}]}
 	}))
 	defer srv.Close()
 
-	c := NewHTTPClient(newTestProvider(srv.URL))
+	c := NewHTTPClient(srv.URL, testAPIKey)
 	sr, err := c.ConsultStream(context.Background(), DefaultRequest("m", []Message{{Role: "user", Content: "x"}}))
 	if err != nil {
 		t.Fatalf("ConsultStream: %v", err)
@@ -463,7 +451,7 @@ func TestHTTPClientStreamCtxCancellation(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewHTTPClient(newTestProvider(srv.URL))
+	c := NewHTTPClient(srv.URL, testAPIKey)
 	ctx, cancel := context.WithCancel(context.Background())
 	sr, err := c.ConsultStream(ctx, DefaultRequest("m", []Message{{Role: "user", Content: "x"}}))
 	if err != nil {

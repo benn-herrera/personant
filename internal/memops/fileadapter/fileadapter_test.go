@@ -36,7 +36,7 @@ func pinClock(t *testing.T) time.Time {
 
 // newAdapter returns a FileAdapter rooted at t.TempDir(), with the
 // substrate scaffolded via store.Init. The init pass writes seed
-// directives, providers.toml template, README, and runs `git init` on
+// directives, README, and runs `git init` on
 // the home tree — that mirrors the production first-run state.
 func newAdapter(t *testing.T) *FileAdapter {
 	t.Helper()

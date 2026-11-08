@@ -250,7 +250,7 @@ func TestExcerptGenreProbe_Live(t *testing.T) {
 	t.Logf("fixtures: n=%d seed=%d system bytes min/mean/max = %d/%d/%d",
 		n, probeSeed, fstats.SystemBytesMin, fstats.SystemBytesMean, fstats.SystemBytesMax)
 
-	client := model.NewHTTPClient(testsupport.ReaperProvider())
+	client := model.NewHTTPClient(testsupport.ReaperURL(), testsupport.ReaperAPIKey)
 	testsupport.RequireModelPresent(t, func(ctx context.Context) ([]string, error) {
 		infos, err := client.ListModels(ctx)
 		if err != nil {

@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"personant/internal/memops"
 )
 
 // userAgent is the User-Agent header value sent with every request.
@@ -20,27 +18,27 @@ const userAgent = "personant/0.1"
 // HTTPClient is a thin OpenAI-compatible chat-completions client.
 //
 // Construction is intentionally cheap: the underlying http.Client is
-// reused across calls so connection pooling works. Provider holds the
-// resolved configuration (BaseURL, APIKey, DefaultModel) — APIKey is
+// reused across calls so connection pooling works. apiKey is
 // secret-bearing and is never logged or returned in error strings.
 type HTTPClient struct {
-	provider memops.Provider
-	http     *http.Client
+	baseURL string
+	apiKey  string
+	http    *http.Client
 
 	// embeddingModel / embeddingDimensions are set by NewHTTPEmbedder
-	// and used by Embed. They are not part of the provider config —
-	// the embedding model is a config.toml choice, not a provider
-	// property.
+	// and used by Embed. They are not endpoint properties — the
+	// embedding model is a caller's choice.
 	embeddingModel      string
 	embeddingDimensions int
 }
 
-// NewHTTPClient constructs an HTTPClient for the given provider. A
-// nil-equivalent zero Provider yields a client whose first call will
-// produce a clear error.
-func NewHTTPClient(p memops.Provider) Client {
+// NewHTTPClient constructs an HTTPClient for the endpoint at baseURL. An
+// empty baseURL yields a client whose first call will produce a clear
+// error; an empty apiKey sends no Authorization header.
+func NewHTTPClient(baseURL, apiKey string) Client {
 	return &HTTPClient{
-		provider: p,
+		baseURL: baseURL,
+		apiKey:  apiKey,
 		http: &http.Client{
 			// Per-request timeouts are honored via ctx; this is a hard
 			// upper bound that keeps a runaway handshake from hanging
@@ -57,8 +55,8 @@ func NewHTTPClient(p memops.Provider) Client {
 // echoed back. The APIKey itself is never written into an error string
 // constructed by this client.
 func (c *HTTPClient) Consult(ctx context.Context, req Request) (Response, error) {
-	if c.provider.BaseURL == "" {
-		return Response{}, fmt.Errorf("provider BaseURL is empty")
+	if c.baseURL == "" {
+		return Response{}, fmt.Errorf("BaseURL is empty")
 	}
 
 	body, err := encodeRequest(req, false)
@@ -101,7 +99,7 @@ func (c *HTTPClient) Consult(ctx context.Context, req Request) (Response, error)
 // reading and closing it (the streaming caller hands the Body off to a
 // StreamReader instead of reading it here).
 func (c *HTTPClient) doRequest(ctx context.Context, method, path, accept string, body []byte) (*http.Response, error) {
-	url := joinURL(c.provider.BaseURL, path)
+	url := joinURL(c.baseURL, path)
 	var rdr io.Reader
 	if body != nil {
 		rdr = bytes.NewReader(body)
@@ -115,8 +113,8 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path, accept string,
 	}
 	httpReq.Header.Set("Accept", accept)
 	httpReq.Header.Set("User-Agent", userAgent)
-	if c.provider.APIKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+c.provider.APIKey)
+	if c.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 
 	resp, err := c.http.Do(httpReq)
@@ -131,7 +129,7 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path, accept string,
 		// body in the error after scrubbing.
 		respBody, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("http %d: %s", resp.StatusCode, scrubAuthorization(string(respBody), c.provider.APIKey))
+		return nil, fmt.Errorf("http %d: %s", resp.StatusCode, scrubAuthorization(string(respBody), c.apiKey))
 	}
 	return resp, nil
 }
@@ -152,8 +150,8 @@ func (c *HTTPClient) doRequest(ctx context.Context, method, path, accept string,
 // On 2xx the response body is owned by the returned StreamReader; the
 // caller MUST Close it.
 func (c *HTTPClient) ConsultStream(ctx context.Context, req Request) (StreamReader, error) {
-	if c.provider.BaseURL == "" {
-		return nil, fmt.Errorf("provider BaseURL is empty")
+	if c.baseURL == "" {
+		return nil, fmt.Errorf("BaseURL is empty")
 	}
 
 	body, err := encodeRequest(req, true)
@@ -174,8 +172,8 @@ func (c *HTTPClient) ConsultStream(ctx context.Context, req Request) (StreamRead
 // list in the order the server provided. Errors are wrapped with status +
 // body, with the API key scrubbed.
 func (c *HTTPClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
-	if c.provider.BaseURL == "" {
-		return nil, fmt.Errorf("provider BaseURL is empty")
+	if c.baseURL == "" {
+		return nil, fmt.Errorf("BaseURL is empty")
 	}
 
 	resp, err := c.doRequest(ctx, http.MethodGet, "models", "application/json", nil)

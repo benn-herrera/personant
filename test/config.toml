@@ -1,8 +1,0 @@
-[embedding]
-model = "dummy-embedding/dummy-creator/dummy-emb-model"
-
-[chat]
-defaultModel = "dummy-router/gemma-26B-A4B-it"
-
-[search]
-provider = "dummy-search"

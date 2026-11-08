@@ -36,20 +36,15 @@ The two toggles are INDEPENDENT (either/both/neither). They map onto seams that 
 
 ## 2. Config source + provider selection (reqs 2–4)
 
-- Live mode reads `test/rundata/test.providers.toml` + `test/rundata/test.config.toml`
-  (USER-provided, gitignored — `test/rundata*/` is in .gitignore; confirmed present). NEVER touch
-  `~/.personant` (no read, no write, no operate).
-- `store.LoadProviders(test/rundata/test.providers.toml)` + parse `test.config.toml` `[chat]` /
-  `[embedding]` model refs (`memops.ParseModelRef`) → select chat provider/model and embedding
-  provider/model. `NewHTTPClient(provider)` / `NewHTTPEmbedder(provider, model, dims)`. The runtime
-  loader resolves `apiKeyFile` targets — the agent NEVER reads those key files into context.
-- **Usable-endpoint definition:** provider resolves (BaseURL + key) AND the endpoint is reachable
-  (cheap reachability check — a models-list/ping or a trivial request).
-- **FAIL (not skip) with a helpful message** when: the files are MISSING → `"test.providers.toml and
-  test.config.toml are required in test/rundata/. Suggestion: copy
-  ~/.personant/{config,providers}.toml to test/rundata/test.{config,providers}.toml (apiKeyFile
-  paths may need to be absolute)."`; or present but NO usable endpoint → a clear
-  endpoint-unreachable/unconfigured failure. Asking for live with nothing live = loud failure.
+- Live mode uses the `reaper` endpoint from `internal/testsupport` (`ReaperURL()`, overridable with
+  `PERSONANT_REAPER_URL`; placeholder key `ReaperAPIKey`). NEVER touch `~/.personant` (no read, no
+  write, no operate).
+- Models come from `internal/testsupport` too: `ReaperChatModel` for chat, `ReaperEmbeddingModel`
+  at native dimensions for embedding. `NewHTTPClient(url, key)` /
+  `NewHTTPEmbedder(url, key, model, dims)`.
+- **Usable-endpoint definition:** the endpoint is reachable (cheap `GET /models` probe).
+- **FAIL (not skip) with a helpful message** when the endpoint is unreachable, naming the URL and
+  `PERSONANT_REAPER_URL`. Asking for live with nothing live = loud failure.
 
 ## 3. Gating (runtime flags on a single TestSim — NOT build tags)
 

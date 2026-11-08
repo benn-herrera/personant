@@ -3,7 +3,7 @@
 | Path | Responsibility |
 |---|---|
 | `cmd/` | Standard pattern: THESIS "The building blocks", row "The CLI". cobra subcommands: `init`, `index`, `verify`, `archive`, `version`; persistent flags `--home`, `--allow-newer-home`. Every verb that opens the memory store goes through the one `openHome` helper (format check, then Reconcile); `version` is exempt from the format check. |
-| `internal/memops/` | the `MemoryOps` port: interface plus the domain types it trades in (`SpineRecord`, `Thread`, `ProjectMeta`, `Config`, the symbol enums, `Normalize`, `DominantSource`). The application layer depends only on this; it imports no internal package. |
+| `internal/memops/` | the `MemoryOps` port: interface plus the domain types it trades in (`SpineRecord`, `Thread`, `ProjectMeta`, the symbol enums, `Normalize`, `DominantSource`). The application layer depends only on this; it imports no internal package. |
 | `internal/memops/fileadapter/` | the memory-store adapter: JSONL + markdown + YAML + TOML + go-git on the store directory |
 | `internal/store/` | file storage for the memory store: paths, JSONL helpers, init, thread registry and project ops, thread I/O, excerpt bundles, project resolution. Depends on `memops` for the domain types. |
 | `internal/autogit/` | go-git-backed automatic git wrapper with bitflag systemic-validation policy |
@@ -18,7 +18,7 @@
 | `internal/curator/` | the summarizer's closing-summary drafting (SPEC §3.5, §5.2) |
 | `internal/workset/` | context composition into slots (directives, registry, other-projects, active-threads, dormant-threads); a pure renderer |
 | `internal/prompt/` | system-prompt template, topic-tag parser, stream filter |
-| `internal/model/` | model client surface: OpenAI-compatible `HTTPClient`, scripted and generated `MockClient`, `MockServer` (the mock served as an OpenAI-compatible endpoint), SSE streaming |
+| `internal/model/` | model client surface for the in-process runtime and the live tests: `Client`, `MockClient`, the OpenAI-compatible `HTTPClient`; the binary does not link it |
 | `internal/opencodehook/` | Not in this tree (on `probe-path`): prototype memory service: the loopback handlers the plugin calls, each driving one `internal/turn` phase |
 | `opencode-plugin/` | Not in this tree (on `probe-path`): prototype plugin: forwards hooks and events, applies answers, per-RPC timeout and fail-open count |
 | `internal/scenarios/` | scenario harness, invariants, metrics; `sim/` the acceptance simulation (the prototype's `opencode/` driver and executor is on `probe-path`) |

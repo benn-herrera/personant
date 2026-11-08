@@ -251,7 +251,7 @@ func runStream(t *testing.T, sse string) ([]Chunk, Response, error) {
 	}))
 	defer srv.Close()
 
-	c := NewHTTPClient(newTestProvider(srv.URL))
+	c := NewHTTPClient(srv.URL, testAPIKey)
 	sr, err := c.ConsultStream(context.Background(), DefaultRequest("m", []Message{{Role: "user", Content: "go"}}))
 	if err != nil {
 		t.Fatalf("ConsultStream: %v", err)

@@ -28,11 +28,11 @@ import (
 // a knot-theory query recalls the knot thread as the top candidate.
 func TestEmbeddingRecall_Live(t *testing.T) {
 	testsupport.RequireLive(t)
-	provider := testsupport.ReaperProvider()
+	url := testsupport.ReaperURL()
 
 	// Fail fast if the configured embedding model is not actually served —
 	// a stale model ref otherwise surfaces as an opaque mid-run error.
-	client, ok := model.NewHTTPClient(provider).(*model.HTTPClient)
+	client, ok := model.NewHTTPClient(url, testsupport.ReaperAPIKey).(*model.HTTPClient)
 	if !ok {
 		t.Fatalf("NewHTTPClient did not return *HTTPClient (cannot verify model presence)")
 	}
@@ -57,7 +57,7 @@ func TestEmbeddingRecall_Live(t *testing.T) {
 			"changes lepton flavor as it propagates, implying nonzero neutrino mass.")
 	ops := fileadapter.NewFileAdapter(paths)
 
-	svc := measure.NewService(ops, model.NewHTTPEmbedder(provider, testsupport.ReaperEmbeddingModel, 0))
+	svc := measure.NewService(ops, model.NewHTTPEmbedder(url, testsupport.ReaperAPIKey, testsupport.ReaperEmbeddingModel, 0))
 	err := svc.Prepare(context.Background())
 	testsupport.FailOnErr(t, "embedding recall prepare", err)
 

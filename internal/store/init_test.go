@@ -72,7 +72,6 @@ func TestInitFreshHome(t *testing.T) {
 		paths.Symbols,
 		filepath.Join(paths.DirectivesDir, "defaults.md"),
 		filepath.Join(paths.DirectivesDir, "user.md"),
-		paths.Providers,
 		paths.Readme,
 		paths.Gitignore,
 		paths.HomeVersion,
@@ -100,7 +99,7 @@ func TestInitFreshHome(t *testing.T) {
 		t.Fatalf("read gitignore: %v", err)
 	}
 	for _, want := range []string{
-		"tmp/", "history", "providers.toml", ".recall-cache/",
+		"tmp/", "history", ".recall-cache/",
 		"op-in-progress.json", "turn-journal.jsonl", "derived-watermark",
 	} {
 		if !strings.Contains(string(gi), want) {
@@ -157,11 +156,10 @@ func TestInitIdempotent(t *testing.T) {
 	}
 }
 
-// TestInitPreservesAccruedState: files that accrue canonical state
-// (user.md, providers.toml) survive re-init with their custom contents
-// intact. Re-init cannot reconstruct ack-prompt scope grants, decline
-// categorizations, or hand-entered API keys; preserving these is the
-// point.
+// TestInitPreservesAccruedState: the file that accrues canonical state
+// (user.md) survives re-init with its custom contents intact. Re-init
+// cannot reconstruct ack-prompt scope grants or decline categorizations;
+// preserving them is the point.
 func TestInitPreservesAccruedState(t *testing.T) {
 	hasGit(t)
 	home := t.TempDir()
@@ -177,11 +175,6 @@ func TestInitPreservesAccruedState(t *testing.T) {
 		t.Fatalf("write custom user.md: %v", err)
 	}
 
-	customProviders := []byte("[openai]\nbaseUrl = \"https://api.openai.com/v1\"\napiKey = \"sk-fake-but-mine\"\n")
-	if err := os.WriteFile(paths.Providers, customProviders, 0o644); err != nil {
-		t.Fatalf("write custom providers.toml: %v", err)
-	}
-
 	if err := Init(paths, InitOptions{Quiet: true}); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -192,14 +185,6 @@ func TestInitPreservesAccruedState(t *testing.T) {
 	}
 	if string(gotUser) != string(customUser) {
 		t.Errorf("user.md was overwritten\nwant: %q\n got: %q", customUser, gotUser)
-	}
-
-	gotProviders, err := os.ReadFile(paths.Providers)
-	if err != nil {
-		t.Fatalf("read providers.toml: %v", err)
-	}
-	if string(gotProviders) != string(customProviders) {
-		t.Errorf("providers.toml was overwritten\nwant: %q\n got: %q", customProviders, gotProviders)
 	}
 }
 

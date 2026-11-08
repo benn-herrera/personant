@@ -2,10 +2,8 @@ package store
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,18 +22,11 @@ import (
 // InitOptions controls the behavior of Init.
 //
 // Logger receives one log line per scaffold step, formatted printf-style.
-// A nil Logger is silent. Quiet, when true, suppresses logger and Out
-// writes regardless of whether either is set.
-//
-// Out receives the small subset of the report the user must see even with
-// logging turned down — today, the [user] identity step, whose absence
-// disables the Wikimedia-backed §6.1 tools. nil → no echo, which is what
-// every embedded caller (tests, the chat bootstrap's idempotent re-init)
-// wants; `personant init` passes os.Stdout.
+// A nil Logger is silent. Quiet, when true, suppresses logger writes even
+// when a Logger is set.
 type InitOptions struct {
 	Quiet  bool
 	Logger func(format string, args ...any)
-	Out    io.Writer
 }
 
 // Init scaffolds $PERSONANT_HOME according to spec §2.1.
@@ -50,9 +41,8 @@ type InitOptions struct {
 //     snapshots, not user content. .gitignore is the hybrid: its seeded
 //     block is rewritten to match the binary, user lines outside the
 //     block are preserved (see writeGitignoreMerged).
-//   - Files that accrue canonical state (directives/user.md,
-//     providers.toml) are *preserved* if present; re-init cannot
-//     reconstruct them.
+//   - Files that accrue canonical state (directives/user.md) are
+//     *preserved* if present; re-init cannot reconstruct them.
 //   - Canonical/derived data files (spine.jsonl, symbols.jsonl) are
 //     created empty if missing and never truncated.
 //   - The §9.1 home format stamp (version.toml) is written only when
@@ -70,15 +60,6 @@ func Init(paths PersonantPaths, opts InitOptions) error {
 			return
 		}
 		opts.Logger(format, args...)
-	}
-	// reportf goes to BOTH the log and stdout: a step the user must act on
-	// cannot be conditional on their log level.
-	reportf := func(format string, args ...any) {
-		logf(format, args...)
-		if opts.Quiet || opts.Out == nil {
-			return
-		}
-		fmt.Fprintf(opts.Out, format+"\n", args...)
 	}
 
 	if paths.Home == "" {
@@ -168,34 +149,16 @@ func Init(paths PersonantPaths, opts InitOptions) error {
 		logf("init: wrote %s", paths.Gitignore)
 	}
 
-	// Accrual / hand-edited files: preserve if present. user.md
-	// accumulates ack-prompt scope grants and decline categorizations;
-	// providers.toml and config.toml are hand-edited. Re-init cannot
-	// reconstruct any of them.
-	preserveFiles := []struct {
-		path    string
-		content string
-	}{
-		{filepath.Join(paths.DirectivesDir, "user.md"), seedUserMD},
-		{paths.Providers, seedProvidersTOML},
-		{paths.Config, seedConfigTOML},
+	// Accrual file: preserve if present. user.md accumulates ack-prompt
+	// scope grants and decline categorizations; re-init cannot
+	// reconstruct it.
+	userMD := filepath.Join(paths.DirectivesDir, "user.md")
+	createdUserMD, err := writeIfMissing(userMD, []byte(seedUserMD))
+	if err != nil {
+		return fmt.Errorf("init: write %s: %w", filepath.Base(userMD), err)
 	}
-	for _, s := range preserveFiles {
-		created, err := writeIfMissing(s.path, []byte(s.content))
-		if err != nil {
-			return fmt.Errorf("init: write %s: %w", filepath.Base(s.path), err)
-		}
-		if created {
-			logf("init: wrote %s", s.path)
-		}
-	}
-
-	// [user] identity (§8.2.2). Runs AFTER config.toml exists and BEFORE
-	// the initial commit, so a greenfield home commits a populated
-	// section. Field-level and textual, so a hand-edited config keeps its
-	// comments and ordering.
-	if err := ensureUserIdentity(paths.Config, reportf); err != nil {
-		return err
+	if createdUserMD {
+		logf("init: wrote %s", userMD)
 	}
 
 	createdPrimary, err := initGit(paths.Home, logf)
@@ -222,56 +185,6 @@ func Init(paths PersonantPaths, opts InitOptions) error {
 
 	logf("init: ok")
 	return nil
-}
-
-// ensureUserIdentity is Init's [user] step: add whatever the section is
-// missing, seeded from the git global identity, and say what happened.
-//
-// The report is not decoration. An empty [user] means the Wikimedia-
-// backed tools will REFUSE to run (they may not send anonymous requests
-// to a donor-funded service), and a user who is never told that
-// experiences it later as an unexplained tool failure — so the message
-// names the consequence and both fixes.
-func ensureUserIdentity(configPath string, reportf func(string, ...any)) error {
-	git, gitFound := GitGlobalIdentity(context.Background())
-	res, err := EnsureUserSection(configPath, git, gitFound)
-	if err != nil {
-		return fmt.Errorf("init: config.toml [user]: %w", err)
-	}
-
-	switch {
-	case len(res.Added) == 0:
-		reportf("init: existing [user] name=%q email=%q", res.Identity.Name, res.Identity.Email)
-	case res.Identity.Complete():
-		reportf("init: created [user] name=%q email=%q (from git config)",
-			res.Identity.Name, res.Identity.Email)
-	default:
-		reportf("init: created [user] name=%q email=%q — %s",
-			res.Identity.Name, res.Identity.Email, missingIdentityCause(res, gitFound))
-		reportf("init: until [user] name and email are set, web.wikipedia and every other Wikimedia-backed " +
-			"tool WILL BE UNAVAILABLE (Wikimedia's User-Agent policy requires contact information, and " +
-			"personant does not send anonymous requests to donor-funded services)")
-		reportf("init: two fixes — edit %s directly, or run `git config --global user.name \"…\"` and "+
-			"`git config --global user.email \"…\"` and re-run `personant init`", configPath)
-	}
-	return nil
-}
-
-// missingIdentityCause names WHICH half of the identity was unavailable
-// and why, so the fixes that follow are read as applicable rather than
-// generic.
-func missingIdentityCause(res UserSectionResult, gitFound bool) string {
-	if !gitFound {
-		return "no git binary on PATH to read defaults from"
-	}
-	var unset []string
-	if res.Identity.Name == "" {
-		unset = append(unset, "user.name")
-	}
-	if res.Identity.Email == "" {
-		unset = append(unset, "user.email")
-	}
-	return "git global " + strings.Join(unset, " and ") + " unset"
 }
 
 // mkdirIfMissing returns (true, nil) if it created the directory, (false, nil)
@@ -541,8 +454,8 @@ func CommitSignature(repo *git.Repository) *object.Signature {
 // Seed content. Verbatim from the implementation spec for the init step.
 // See Init for the per-file rewrite-vs-preserve policy: install-shipped
 // templates (defaults.md, README.md) are rewritten on every init; the
-// .gitignore seeded block is rewritten with user lines preserved; accrual
-// files (user.md, providers.toml) are preserved if present.
+// .gitignore seeded block is rewritten with user lines preserved; the
+// accrual file user.md is preserved if present.
 
 const seedDefaultsMD = `---
 scope: defaults
@@ -595,87 +508,6 @@ ones accrued automatically from ack-prompt scope grants and decline
 categorizations. See spec §2.6 for precedence rules.
 `
 
-const seedProvidersTOML = `# personant provider configuration — the endpoint POOL.
-#
-# One TOML table per provider; the bracket header is the lookup key.
-# This file lists what is AVAILABLE. The CHOICES that draw from this
-# pool live in config.toml. See spec §8.2.1.
-#
-# Each entry MUST declare what the endpoint is and how to talk to it:
-#   type = "inference"   an LLM endpoint (chat, embeddings, /models)
-#   type = "search"      a web.search backend (spec §6.1.1)
-#   api  = "openai"      OpenAI-compatible HTTP  (inference)
-#   api  = "exa"         Exa search protocol     (search)
-# Neither has a default — an entry missing one, or pairing a type with an
-# api it does not speak, is dropped from the pool with a named warning
-# rather than being guessed at.
-#
-# Providers deliberately name NO model: catalogues rotate constantly, so
-# a model id pinned here is a field that goes stale. Models are chosen in
-# config.toml (or --model); ` + "`personant models --provider <name>`" + ` lists
-# what an endpoint currently serves.
-#
-# API keys: prefer apiKeyFile — a path to a file holding the key, kept
-# out of this file so providers.toml stays safe to scan and git-track.
-# apiKeyFile paths resolve relative to this file's directory. Keep the
-# key files themselves out of the personant home (or git-ignore them).
-# apiKeyUnsafe is the inline form — discouraged; it places a secret
-# directly in this file.
-#
-# Example:
-#
-# [openai]
-# baseUrl    = "https://api.openai.com/v1"
-# apiKeyFile = "../.api_keys/openai.txt"
-# type       = "inference"
-# api        = "openai"
-#
-# [reaper]
-# baseUrl    = "http://reaper.local:4000/v1"
-# apiKeyFile = "../.api_keys/reaper.txt"
-# type       = "inference"
-# api        = "openai"
-#
-# [exa]
-# baseUrl    = "https://api.exa.ai/search"
-# apiKeyFile = "../.api_keys/exa.txt"
-# type       = "search"
-# api        = "exa"
-`
-
-const seedConfigTOML = `# personant configuration — the CHOICES.
-#
-# These select from the endpoint POOL in providers.toml. Model
-# references are "<provider>/<model>". See spec §8.2.
-#
-# [user] is who personant says it is acting for when it reaches a third
-# party. ` + "`personant init`" + ` writes it below, seeded from your global git
-# user.name / user.email; edit it here freely. It is NOT secret — the
-# values go out in an HTTP User-Agent header. Free-API citizenship (spec
-# §6.1) depends on it: Wikimedia REQUIRES contact information and
-# web.wikipedia / web.wikidata refuse to run without it, while Crossref
-# and arXiv strongly prefer it.
-#
-# Example:
-#
-# [chat]
-# defaultModel = "reaper/gemma-4-main"
-#
-# [embedding]
-# model = "reaper/nomicai-embed"
-# # vectorLength = 768   # optional: Matryoshka-truncated dimension
-#
-# [search] tunes the optional web.search tool (spec §6.1.1). The backend
-# itself is a ` + "`type = \"search\"`" + ` entry in providers.toml, which is where
-# its key lives; with no such entry, web.search is simply not offered to
-# the model. web.fetch needs no key and is always available.
-#
-# [search]
-# # provider = "exa"   # only needed to pick among several search entries
-# # maxPerTurn = 5     # local query caps, enforced by personant itself
-# # maxPerDay  = 100
-`
-
 const seedReadmeMD = "# personant home\n" +
 	"\n" +
 	"This directory is managed by the **personant** runtime. It holds the\n" +
@@ -687,8 +519,6 @@ const seedReadmeMD = "# personant home\n" +
 	"- `projects/prj_<n>/` — per-project metadata and digests, keyed by stable handle.\n" +
 	"- `directives/` — tunable behavior (defaults, user-wide, per-project).\n" +
 	"- `logs/` — daily plain-text event logs.\n" +
-	"- `providers.toml` — LLM provider pool (safe to scan when apiKeyFile is used).\n" +
-	"- `config.toml` — chat/embedding choices drawn from the provider pool.\n" +
 	"- `tmp/` — agent drafting scratch (not git-committed).\n" +
 	"\n" +
 	"Layout details and schemas are in the project's `SPEC.md` and `outline.md`.\n" +
@@ -749,7 +579,4 @@ recovery/
 # rebuild it on open (queued: explicit rebuild-on-open hook for the
 # submind clone case).
 symbols.jsonl
-# providers.toml and config.toml are safe to git-track when apiKeyFile
-# is used (no inline secrets). Keep the API-key files themselves out of
-# this directory; if you place any here, git-ignore them explicitly.
 `

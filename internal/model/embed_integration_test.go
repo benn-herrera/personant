@@ -21,7 +21,7 @@ import (
 
 func TestHTTPEmbedder_Live(t *testing.T) {
 	testsupport.RequireLive(t)
-	emb := NewHTTPEmbedder(testsupport.ReaperProvider(), testsupport.ReaperEmbeddingModel, 0)
+	emb := NewHTTPEmbedder(testsupport.ReaperURL(), testsupport.ReaperAPIKey, testsupport.ReaperEmbeddingModel, 0)
 	vecs, err := emb.Embed(context.Background(), []string{
 		"how does shear thinning affect emulsion viscosity",
 		"rheology of emulsions, pseudoplastic flow and droplet coalescence",

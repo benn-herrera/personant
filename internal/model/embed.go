@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-
-	"personant/internal/memops"
 )
 
 // embedBatch caps how many texts go in one /embeddings request.
@@ -19,25 +17,25 @@ import (
 // request bounded.
 const embedBatch = 64
 
-// NewHTTPEmbedder constructs an Embedder backed by the provider's
-// OpenAI-compatible /embeddings endpoint. The embedding model is a
-// config.toml choice (not a provider property), so it is passed
-// explicitly; dimensions > 0 requests a Matryoshka-truncated vector of
-// that length (0 → the model's native dimension). The same *HTTPClient
-// type satisfies both Client and Embedder.
-func NewHTTPEmbedder(p memops.Provider, model string, dimensions int) Embedder {
-	c := NewHTTPClient(p).(*HTTPClient)
+// NewHTTPEmbedder constructs an Embedder backed by the OpenAI-compatible
+// /embeddings endpoint at baseURL. The embedding model is a caller's
+// choice (not an endpoint property), so it is passed explicitly;
+// dimensions > 0 requests a Matryoshka-truncated vector of that length
+// (0 → the model's native dimension). The same *HTTPClient type
+// satisfies both Client and Embedder.
+func NewHTTPEmbedder(baseURL, apiKey, model string, dimensions int) Embedder {
+	c := NewHTTPClient(baseURL, apiKey).(*HTTPClient)
 	c.embeddingModel = model
 	c.embeddingDimensions = dimensions
 	return c
 }
 
-// Embed implements Embedder against the provider's /embeddings
-// endpoint, using the model set by NewHTTPEmbedder. Texts are sent in
-// batches of embedBatch; the returned vectors are in input order.
+// Embed implements Embedder against the /embeddings endpoint, using the
+// model set by NewHTTPEmbedder. Texts are sent in batches of embedBatch;
+// the returned vectors are in input order.
 func (c *HTTPClient) Embed(ctx context.Context, texts []string) ([][]float64, error) {
-	if c.provider.BaseURL == "" {
-		return nil, fmt.Errorf("provider BaseURL is empty")
+	if c.baseURL == "" {
+		return nil, fmt.Errorf("BaseURL is empty")
 	}
 	if c.embeddingModel == "" {
 		return nil, fmt.Errorf("no embedding model configured")

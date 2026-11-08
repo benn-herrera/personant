@@ -1,5 +1,0 @@
-[embedding]
-model = "no-such-emb-provider/dummy-emb-model"
-
-[chat]
-defaultModel = "no-such-provider/gemma-main"

@@ -57,7 +57,7 @@ const (
 )
 
 var benchMiscFiles = []string{
-	"README.md", "config.toml", "providers.toml", "version.toml", ".gitignore",
+	"README.md", "version.toml", ".gitignore",
 	"directives/defaults.md", "directives/user.md", "projects/prj_1/meta.json",
 	"projects/prj_1/digest.json", "archive/index.jsonl",
 }

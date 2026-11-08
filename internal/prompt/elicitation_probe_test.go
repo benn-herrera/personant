@@ -67,9 +67,8 @@ const (
 	probeN = 50
 
 	// probeChatModel is the reaper-served chat model under test — the
-	// same model the live sim uses (test/rundata/test.config.toml
-	// defaultModel = "reaper/gemma-4-main").
-	probeChatModel = "gemma-4-main"
+	// same model the live sim uses.
+	probeChatModel = testsupport.ReaperChatModel
 
 	// probeMaxTokens mirrors the production response cap
 	// (model.DefaultRequest). It must NOT be lowered to save wall-clock:
@@ -774,7 +773,7 @@ func TestElicitationProbe_Live(t *testing.T) {
 		n, probeSeed, fstats.SystemBytesMin, fstats.SystemBytesMean, fstats.SystemBytesMax,
 		fstats.SpineLinesMin, fstats.SpineLinesMax)
 
-	client := model.NewHTTPClient(testsupport.ReaperProvider())
+	client := model.NewHTTPClient(testsupport.ReaperURL(), testsupport.ReaperAPIKey)
 	testsupport.RequireModelPresent(t, func(ctx context.Context) ([]string, error) {
 		infos, err := client.ListModels(ctx)
 		if err != nil {

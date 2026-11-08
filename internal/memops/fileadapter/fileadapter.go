@@ -755,7 +755,7 @@ func (a *FileAdapter) Init(ctx context.Context, opts memops.InitOptions) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := store.Init(a.paths, store.InitOptions{Quiet: opts.Quiet, Logger: opts.Logger, Out: opts.Out}); err != nil {
+	if err := store.Init(a.paths, store.InitOptions{Quiet: opts.Quiet, Logger: opts.Logger}); err != nil {
 		return fmt.Errorf("fileadapter: init: %w", err)
 	}
 	return nil
@@ -786,37 +786,6 @@ func (a *FileAdapter) ResolveActiveProject(ctx context.Context, hints memops.Boo
 }
 
 // ---------- Configuration ----------
-
-// LoadProviders reads providers.toml. A nonexistent file yields an
-// empty map and no error. A provider with an unreadable apiKeyFile is
-// omitted from the map and returned as a ProviderFault; the error is
-// reserved for file-level failures.
-func (a *FileAdapter) LoadProviders(ctx context.Context) (map[string]memops.Provider, []memops.ProviderFault, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, nil, err
-	}
-	providers, faults, err := store.LoadProviders(a.paths.Providers)
-	if err != nil {
-		return nil, nil, fmt.Errorf("fileadapter: load providers: %w", err)
-	}
-	// store.LoadProviders returns memops.Providers (map[string]memops.Provider)
-	// and []memops.ProviderFault directly — the domain types are owned by
-	// memops — so no element-by-element bridging is needed.
-	return providers, faults, nil
-}
-
-// LoadConfig reads config.toml — the chat/embedding choices. A
-// nonexistent file yields a zero Config and no error.
-func (a *FileAdapter) LoadConfig(ctx context.Context) (memops.Config, error) {
-	if err := ctx.Err(); err != nil {
-		return memops.Config{}, err
-	}
-	cfg, err := store.LoadConfig(a.paths.Config)
-	if err != nil {
-		return memops.Config{}, fmt.Errorf("fileadapter: load config: %w", err)
-	}
-	return cfg, nil
-}
 
 // DirectiveParam implements the port's §2.6.1 parameter read: walk the
 // directive precedence chain and return the first value set for key.

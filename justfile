@@ -8,19 +8,16 @@ all: build
 BINDIR := "bin"
 
 # GOPKGS is the set of Go package roots. All packages live under cmd/ and
-# internal/; test/ holds NO Go code (rundata, python tools, and the
-# perms-restricted api_keys dir). A bare `./...` makes the go toolchain
-# readdir() every directory for package discovery — including test/api_keys
-# (mode 0700, benn-owned), which fails the walk for any non-owner before a
-# single package compiles. Scoping to the real roots covers 100% of the code
-# and never descends into test/, so the keys stay locked down with no perms
-# relaxation. Use GOPKGS, not ./..., in every vet/test/cover recipe.
+# internal/; test/ holds no Go code of its own, but the gitignored sim run
+# directories under test/rundata/ hold Go files that make a bare `./...` fail.
+# Scoping to the real roots covers 100% of the code and never descends into
+# test/. Use GOPKGS, not ./..., in every vet/test/cover recipe.
 GOPKGS := "./cmd/... ./internal/..."
 
 # GOSRCDIRS scopes directory WALKS to the Go source roots, mirroring the
 # GOPKGS rationale: gofmt (and git's untracked-file scan) walk directory
-# trees, so pointing either at test/ would descend into test/api_keys (mode
-# 0700, benn-owned) and fail the walk for a non-owner. cmd/ and internal/
+# trees, so pointing either at test/ would descend into the sim run
+# directories under test/rundata/, which hold Go files of their own. cmd/ and internal/
 # hold 100% of the Go code; test/ holds none. Used by fmt/fmt-check and by
 # test-changed's untracked-file scan. The pinned toolchain in
 # go.mod keeps gofmt output identical across machines/agents.
@@ -271,7 +268,6 @@ test-cache-why pkg run='.': build recall-madlibs
 #     the packages above under their concurrent tests.
 #   internal/turn, internal/store, internal/index, internal/crashpoint:
 #     checked and rejected — no non-test goroutine, no concurrent test.
-# Never point this at test/ — test/api_keys is mode 0700 and benn-owned.
 RACEPKGS := "./internal/recall/measure/... ./internal/model/... \
              ./internal/eventlog/... ./internal/metrics/... ./internal/log/... \
              ./internal/scenarios"
@@ -316,7 +312,7 @@ test-race: build recall-madlibs
 #     file there (non-test .go, testdata, embedded files) keeps the closure.
 #   - changed path outside cmd/internal -> selects nothing, but is LISTED
 #     (.md as ignored, anything else as not a selector: justfile,
-#     test/config.toml, tools/test/*, .gitignore). Untracked files outside
+#     tools/test/*, .gitignore). Untracked files outside
 #     cmd/internal are not scanned.
 # `just LIST=1 test-changed` prints the selected set without running it.
 #
@@ -449,9 +445,9 @@ LIVE_INFERENCE := env_var_or_default("LIVE_INFERENCE", "false")
 #   just sim LIVE_EMBEDDING=true                      # embedding-in-loop
 #   just sim LIVE_INFERENCE=true DURATION=1d          # inference-in-loop
 #   just sim LIVE_EMBEDDING=true LIVE_INFERENCE=true DURATION=1d
-# (env-var form works too: `DURATION=1d just sim`.) A live run reads the
-# user-provided, gitignored test/rundata/test.{providers,config}.toml and
-# FAILS (not skips) if missing or unreachable. Embedding-in-loop keeps the
+# (env-var form works too: `DURATION=1d just sim`.) A live run uses the
+# `reaper` endpoint from internal/testsupport (override with
+# PERSONANT_REAPER_URL) and FAILS (not skips) if it is unreachable. Embedding-in-loop keeps the
 # recall oracle valid; inference-in-loop is a SHORT behavior-validation mode
 # (oracle gates relaxed) REFUSED past a 1-sim-day cap — pass DURATION=1d
 # alongside it. SIM_WRAP wraps Darwin runs with caffeinate + taskpolicy

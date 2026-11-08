@@ -24,10 +24,8 @@ type PersonantPaths struct {
 	ArchiveIndex  string // Home/archive/index.jsonl          (canonical: archive lookup, sorted by thr_id)
 	TmpDir        string // Home/tmp/                         (agent drafting scratch; not git-committed)
 	Readme        string // Home/README.md                    (layout doc for human inspection)
-	Providers     string // Home/providers.toml               (provider pool; apiKeyFile keeps it scannable)
-	Config        string // Home/config.toml                  (chat/embedding choices drawn from the pool)
 	HomeVersion   string // Home/version.toml                 (canonical: on-disk format revision, `format = N`; §9.1)
-	Gitignore     string // Home/.gitignore                   (excludes tmp/, key files)
+	Gitignore     string // Home/.gitignore                   (excludes tmp/ and operational state)
 	LastActive    string // Home/last-active                  (operational; one line: prj_<n>; gitignored)
 	WorkingSet    string // Home/working-set.json             (operational; Layer B/C membership; rewritten per turn; gitignored)
 	RecallCache   string // Home/.recall-cache/               (operational; derived embedding-vector cache; gitignored; never canonical, §5/I5)
@@ -67,8 +65,6 @@ func makePaths(home string) PersonantPaths {
 		ArchiveIndex:  filepath.Join(home, "archive", "index.jsonl"),
 		TmpDir:        filepath.Join(home, "tmp"),
 		Readme:        filepath.Join(home, "README.md"),
-		Providers:     filepath.Join(home, "providers.toml"),
-		Config:        filepath.Join(home, "config.toml"),
 		HomeVersion:   filepath.Join(home, homeVersionFileName),
 		Gitignore:     filepath.Join(home, ".gitignore"),
 		LastActive:    filepath.Join(home, "last-active"),

@@ -290,7 +290,7 @@ func TestHistoryPrecedentProbe_Live(t *testing.T) {
 	t.Logf("fixtures: n=%d seed=%d system bytes min/mean/max = %d/%d/%d, history-tail share=%d bytes",
 		n, probeSeed, fstats.SystemBytesMin, fstats.SystemBytesMean, fstats.SystemBytesMax, historyShareBytes())
 
-	client := model.NewHTTPClient(testsupport.ReaperProvider())
+	client := model.NewHTTPClient(testsupport.ReaperURL(), testsupport.ReaperAPIKey)
 	testsupport.RequireModelPresent(t, func(ctx context.Context) ([]string, error) {
 		infos, err := client.ListModels(ctx)
 		if err != nil {

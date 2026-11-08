@@ -16,8 +16,8 @@
 //     not skip. You explicitly asked for the live path; nothing live is a
 //     real failure, not a reason to pass quietly.
 //
-// This package imports only memops + stdlib. It deliberately does NOT
-// import internal/model: the model package's own *_test.go files are in
+// This package imports only stdlib. It deliberately does NOT import
+// internal/model: the model package's own *_test.go files are in
 // `package model` and import this package, so a model import here would be
 // an import cycle. The model-presence check therefore takes a small
 // locally-defined lister interface instead of a concrete model client.
@@ -27,8 +27,6 @@ import (
 	"context"
 	"os"
 	"testing"
-
-	"personant/internal/memops"
 )
 
 // LiveTestsEnv is the opt-in environment variable for live-endpoint tests.
@@ -54,26 +52,27 @@ const CorpusTestsEnv = "PERSONANT_CORPUS_TESTS"
 const SlowSimTestsEnv = "PERSONANT_SLOW_SIM_TESTS"
 
 // ReaperEmbeddingModel is the embedding model id served by the local,
-// non-metered `reaper` provider.
+// non-metered `reaper` endpoint.
 const ReaperEmbeddingModel = "nomicai-embed"
+
+// ReaperChatModel is the chat model id served by the `reaper` endpoint.
+const ReaperChatModel = "gemma-4-main"
+
+// ReaperAPIKey is the `reaper` endpoint's local non-metered placeholder
+// key (no secret involved).
+const ReaperAPIKey = "dummy"
 
 // reaperDefaultURL is the dev-machine reaper endpoint, overridable via the
 // PERSONANT_REAPER_URL environment variable.
 const reaperDefaultURL = "http://reaper.local:4000/v1"
 
-// ReaperProvider builds the `reaper` provider used by the live tests. The
-// base URL is overridable via PERSONANT_REAPER_URL; the API key is the
-// local non-metered placeholder `dummy` (no secret involved).
-func ReaperProvider() memops.Provider {
-	url := os.Getenv("PERSONANT_REAPER_URL")
-	if url == "" {
-		url = reaperDefaultURL
+// ReaperURL returns the base URL of the `reaper` endpoint used by the live
+// tests: PERSONANT_REAPER_URL when set, else the dev-machine default.
+func ReaperURL() string {
+	if url := os.Getenv("PERSONANT_REAPER_URL"); url != "" {
+		return url
 	}
-	return memops.Provider{
-		Name:    "reaper",
-		BaseURL: url,
-		APIKey:  "dummy",
-	}
+	return reaperDefaultURL
 }
 
 // RequireLive skips the calling test unless the live opt-in is set. Call it

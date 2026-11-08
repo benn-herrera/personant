@@ -127,8 +127,8 @@ just sim-tokenceiling-rung                        # live inference, 1 sim-day
 | `B1X4_COMPLETENESS_DURATION` | same forms as `DURATION`; default `4d` | span of `sim-completeness-rung` |
 
 Knobs are `just` variables (`just DURATION=1d sim`; overrides go before the recipe name) or environment variables (`DURATION=1d just
-sim`). Both live toggles read `test/rundata/test.{providers,config}.toml` (user-provided,
-gitignored) and need a reachable `reaper.local` endpoint; a missing or unreachable endpoint is a
+sim`). Both live toggles use the `reaper` endpoint from `internal/testsupport` (override with
+`PERSONANT_REAPER_URL`) and need a reachable `reaper.local` endpoint; a missing or unreachable endpoint is a
 hard failure, not a skip. On macOS, sim runs are wrapped in `caffeinate` and `taskpolicy` against
 idle sleep and background-QoS demotion.
 
@@ -183,7 +183,7 @@ writes" and "Storage non-negotiables".
 
 | Package | Author / Org | License | Use |
 |---|---|---|---|
-| `github.com/BurntSushi/toml` | BurntSushi | MIT | `providers.toml` and `config.toml` parsing |
+| `github.com/BurntSushi/toml` | BurntSushi | MIT | `version.toml` parsing |
 | `github.com/go-git/go-git/v5` | go-git contributors | Apache 2.0 | `internal/autogit` — automatic git operations on `~/.personant/` |
 | `github.com/go-git/go-billy/v5` | go-git contributors | Apache 2.0 | `internal/autogit`, `internal/store` — filesystem layer under go-git |
 | `github.com/spf13/cobra` | Steve Francia | Apache 2.0 | CLI subcommand dispatch (`cmd/`) |
