@@ -318,7 +318,7 @@ commit's hash is recorded in the table below; P1 reads the ruling files at its p
 | S1 | done |
 | M1, M2 | done |
 | A1, A2 | done |
-| X1 | not started |
+| X1 | reads done, triage in `DOC_SWEEP/cold-read-2.md`; C reopened for R2-C1–R2-C40 |
 | R1, R2 | not started |
 | P1 | not started |
 

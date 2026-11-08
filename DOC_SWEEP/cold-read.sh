@@ -29,6 +29,7 @@ for f in CLAUDE.md AGENTS.md; do
 done
 
 mkdir -p "$(dirname "$out")"
+out="$(cd "$(dirname "$out")" && pwd)/$(basename "$out")"
 cd "$cold_dir"
 claude -p --tools "" --agent "$agent" < "$brief" > "$out"
 echo "$out"
