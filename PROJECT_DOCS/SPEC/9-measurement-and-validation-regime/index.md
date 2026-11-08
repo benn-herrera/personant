@@ -1,6 +1,6 @@
 ## 9. Measurement and validation regime
 
-Personant's behavioral claims — months-long continuity, drift-resistant memory, opportunistic recall,
+Personant's behavioral claims — months-long continuity, drift-resistant memory, automatic recall,
 close-and-restore cycles that preserve meaning — must be proven by
 simulation **before** real use accumulates the state a structural defect would put at risk. This
 section defines that proof: the acceptance criterion ([§9.1](9.1-the-four-month-simulation-the-v0-5-0-acceptance-criterion/index.md)) and the instruments that measure it

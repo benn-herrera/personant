@@ -50,9 +50,10 @@ pass. The open sequence runs `memops.GateHomeFormat` before Reconcile;
 `version.UnversionedHomeFormat` is pinned at 1 forever and is never an alias of
 `version.CurrentHomeFormat`, so an unmigrated legacy store directory keeps resolving to format
 revision 1. `GateHomeFormat` migrates an older store directory by walking the table
-`homeFormatMigrations` (steps keyed by from-revision; 1→2 and 2→3 change only the format revision:
+`homeFormatMigrations` (steps keyed by from-revision; 1→2, 2→3 and 3→4 change only the format revision:
 revision 2 adds optional excerpt bundles, revision 3 the tracked-file store, whose legacy
-`files.json` the file-retention step removes), the caller writes the format revision before
+`files.json` the file-retention step removes, revision 4 drops `remote_urls`,
+`historical_remote_urls` and `historical_root_paths` from `meta.json`), the caller writes the format revision before
 Reconcile, and a crash between that write and the log leaves a current-revision store directory that
 needs nothing further.
 

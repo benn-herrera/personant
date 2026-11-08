@@ -29,5 +29,5 @@ WP3–WP10's contract rows are mapped onto the documents as rediced by the doc s
 | WP8 | done |
 | WP9 | done |
 | WP10 | done |
-| Post-sprint review | reviews done; burndown `review-burndown.md`: K done (`0c2eac0`), R done (`576ae0a`), D under way |
+| Post-sprint review | reviews done; burndown `review-burndown.md`: K done (`0c2eac0`), R done (`576ae0a`), D done |
 

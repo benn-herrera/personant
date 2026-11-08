@@ -32,7 +32,7 @@ noted).
   that separates the two. `/clear` is client-side only; it discards nothing because memory is not
   keyed on the session. This is how SPEC §1.1 holds. **Open:** what the two commands eventually map
   to, and whether a TUI plugin can replace or disable them (context-injections report §6).
-- **Tools.** Any memory tool registers through `tool.transform`; a tool invented inside the
+- **Tools.** If U3 adds a recall tool, it registers through `tool.transform`; a tool invented inside the
   `context` hook is dropped.
 - **No commands.** The plugin registers no command and asks the user nothing; memory work
   runs automatically (SPEC §4).

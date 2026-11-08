@@ -5,7 +5,7 @@
 | `harness.go` | Core types: `Step`, `Scenario`, `Harness`, `StepSource`, `StepFeedback`, `RecallFidelityMode`. Narrow optional interfaces (`threadIndexer`, `cacheSweeper`, `treeRebuilder`, `intraDivergenceProbe`, `cosineOpsReporter`). The `sliceSource` shim that adapts a fixed `[]Step` to `StepSource`. `SimClockStart`, `SimDayLength`, `SimWorkdayStart`, `SimDayIndex`. |
 | `harness_setup.go` | `newHarness` (per-scenario isolation, clock default, telemetry wiring) and `scriptedCurator`. |
 | `harness_run.go` | `RunScenario`, `runStep` (the seven named phase helpers: `stepSetup` / `stepSetClock` / `stepExecTurn` / `stepScrapeEventLog` / `stepMeasureRecall` / `stepRecordMetrics` / `stepCloseDays`), `restartSession`, and the final-gauge helpers (`foldEventLines`, `peakHistorySymbols`). |
-| `harness_resolvers.go` | The invariant-cadence policy (`perStepInvariants`, `runInvariants`). |
+| `harness_invariants.go` | The invariant-cadence policy (`perStepInvariants`, `runInvariants`). |
 | `recall_fidelity.go` | Recall-fidelity measurement (`recordRecallFidelity`), the incremental log-tailer (`logTailer`), and `classifyRecoverability`. |
 | `invariants.go` | The invariant validator set (thread registry integrity, index drift, project refs, frontmatter-registry sync, engagement consistency, thread accounting, closed-thread consistency, archive resolvability, dedup consistency, budget overflow: the `Verify*` functions). `DefaultInvariants` = `cheapDefaultInvariants` (per-step: `VerifyNoBudgetOverflow`) + `heavyDefaultInvariants` (store-scale: once per sim day and once at end of run). |
 | `metric_keys.go` | Cross-seam metric-key table (see "State-ownership map" below). |

@@ -30,24 +30,19 @@ in a list is checked, the **list is disposed of**: removed from this file, its h
 SPEC and ARCHITECTURE tag clauses that wait on a decision with `Open: Un`. Once a decision is made,
 the tagged clauses get a follow-up pass. Each entry states when it must be decided.
 
-- [ ] **U3 Model-supplied anchors.** Sessions set thread boundaries (**U12**), so
-  the topic tag's thread list has no job. Open: whether the model still contributes per-turn
+- [ ] **U3 Model-supplied anchors.** Under **U12**, sessions will set thread boundaries, so
+  the topic tag's thread list will have no job. Open: whether the model still contributes per-turn
   anchors (`source = model`), in band at response start (which needs the stream
   abort-and-re-issue and transcript stripping) or through a tool, or not at all; and whether a
   recall tool the model calls replaces the §5.5 fetch trigger. Tagged at SPEC §3.0.1, §3.1,
   §5.1, §5.5, §9.1. **Decide in A10.**
 - [x] **U4 Memory-native commands and the ack channel: none.** Personant registers
-  no command in opencode and asks the user nothing: no ack channel, offers, review queue, project
-  prompts or recovery banner. The memory work runs automatically (SPEC §3.4, §3.5, §4.5).
+  no command in opencode and asks the user nothing; memory work runs automatically (SPEC §4).
 - [x] **U5 Inference for Personant's internal calls** (summarizer, clusterer, embedder,
   memory-vetting reviewer). Personant has no inference path or provider configuration of its own:
   every call goes through opencode, text generation through the plugin's `experimental.generate`,
-  embeddings per A12a (forking opencode if it has no route). The provider pool, `providers.toml`,
-  the `ping` and `models` verbs and the `langchaingo/llms` dependency go. Follow-up pass: SPEC
-  §1.8, §2.1, §5.2–§5.3, §8.1, §8.2.
-- [x] **U6 Front-end version line: retired.** `version.FrontEnd`, its bump contract, `test-fe` and
-  `fe-scope-check` go with the REPL; the memory store and home-format lines stay. Follow-up pass: SPEC
-  §9.1 "Version lines", CONVENTIONS "Versioning and acceptance", README Status and the justfile.
+  embeddings per A12a (forking opencode if it has no route).
+- [x] **U6 Front-end version line: retired.** The memory store and home-format lines stay.
 - [ ] **U7 Plugin failure policy.** Fail open (leave the hook input unmodified; opencode's own
   composition reaches the model and memory silently misses the step) or fail closed (refuse the
   request; the session stops while the service is down). What opencode does when the `context` hook
@@ -55,9 +50,7 @@ the tagged clauses get a follow-up pass. Each entry states when it must be decid
   ARCHITECTURE "Plugin route". A5 ships fail-open as the interim; **decide before A9 finalises.**
 - [x] **U8 Interrupted prompts and retraction: Personant's rule.** A retracted prompt
   never enters memory, whatever opencode's transcript shows: Personant composes its own context,
-  and the transcript does not decide what enters it. Follow-up pass: SPEC §4.3.3, §4.5.8 (10);
-  ARCHITECTURE 'Invariant for the production phase split', 'Start order and resume', 'Event log
-  format'.
+  and the transcript does not decide what enters it.
 - [ ] **U9 Restart persistence.** After a service restart the model sees no earlier conversation
   while the TUI shows all of it (`OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md` §3); today only the working set
   reloads. (a) Persist in-run history and the turn counter. (b) Rebuild them from opencode's stored
@@ -71,7 +64,7 @@ the tagged clauses get a follow-up pass. Each entry states when it must be decid
   on others. (b) Support whatever opencode runs and measure tag and summarizer quality per family,
   which grows the eval surface (U3's recall-tool option shrinks it). Gates no item below.
 - [ ] **U11 CONVENTIONS rule, not adopted.** External state (an agent's data home, telemetry) never
-  lives inside `~/.personant/` or a test home, because crash recovery quarantines untracked files.
+  lives inside `~/.personant/` or a test store directory, because crash recovery quarantines untracked files.
   The requirement for opencode's data home holds either way (`OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md` §5,
   ARCHITECTURE "Start order and resume"); the question is whether it becomes a general CONVENTIONS
   rule. Yes or no; adopt into CONVENTIONS if yes.
@@ -81,7 +74,8 @@ the tagged clauses get a follow-up pass. Each entry states when it must be decid
   thread boundaries: a returned-to session keeps its thread, and a new session on an old topic
   relies on recall. Follow-up pass: SPEC §1.1, §3.0.4, §3.2, §3.3, §5.1, §5.5, §9.1, and an
   optional opencode session ID on the thread (frontmatter and thread registry) with a store
-  format-revision bump.
+  format-revision bump. THESIS "What is new" item 2 and SPEC §1.1 ("by the problem it concerns,
+  never by session") change with A10.
   Plan: A10.
 
 ---
@@ -143,7 +137,7 @@ decisions named in them.
   Settles whether `conventions_paths` (SPEC §2.5.1) overlaps the instructions slot, and the
   stable-prefix claim for the now-dynamic expectations slot. (SPEC §3.1 "Slot policies".)
 - [ ] **A8. Resume and recovery.** First: `newHarness` (`internal/scenarios/harness_setup.go`)
-  does not run the startup reconcile that production runs, so a harness home's files stay
+  does not run the startup reconcile that production runs, so a harness store directory's files stay
   uncommitted and crash recovery quarantines them; crash scenarios through the shared harness are
   not evidence until it does. Then: a recovery turn on a context call with no preceding prompt;
   reconcile against opencode's stored messages at service start; start order (service listening
@@ -162,7 +156,7 @@ decisions named in them.
   the plugin (A5). Re-check the missing `derived_from` lineage under opencode
   (`OPENCODE_RESEARCH/OPENCODE_PROBE_RESULTS.md` §11) now that recall fetches automatically. The
   parser and tag-fidelity residuals of the old topic-tag item apply only if U3 keeps an in-band
-  tag. (SPEC §1.1, §3.2, §5.1, §5.5, §9.1.)
+  tag. (SPEC §1.1, §3.0.4, §3.2, §3.3, §5.1, §5.5, §9.1.)
 - [ ] **A11. Commit-cost growth: fixed; opencode-in-loop re-measure remains.** Single-load staging
   (`793890f`) and excerpt bundles (`1cecf0c`–`631cd48`) hold per-turn commit cost flat (13–21 ms/turn
   over 54 mock sim-days, `test/rundata/sim-workload-seed24095-dur2880h0m0s.261101104107`, stopped at
@@ -210,7 +204,7 @@ decisions named in them.
   `internal/modellist` and the provider pool, the `chat`, `ping` and `models` verbs (**U5**), and
   `version.FrontEnd`, `test-fe` and `fe-scope-check` (**U6**); then delete the readability,
   html-to-markdown, terminal/signal and `langchaingo/llms` dependencies. The old systems are not a fallback: nothing waits on the plugin route to remove
-  them. Plan: `ACTIVE_PLAN/entry-point.md` (WP1 and WP2 done).
+  them. Done.
 - [ ] **B2. `recall_query_latency_*` does not measure recall.** The sim's p50/p95/p99 gauges
   (`metricRecallQueryLatencyP50/P95/P99`, `internal/scenarios/sim/workload.go`, populated in
   `sim/telemetry.go`) copy turn-duration percentiles instead of timing recall queries. (SPEC §9.4.)
@@ -295,10 +289,10 @@ decisions named in them.
 - [ ] **Career memory has no store or write path.** SPEC §1.8 routes a pattern seen in one project
   to career memory (a technique); nothing writes one and no layout exists, so B10's career-memory
   write checks and batch review have no subject yet (ARCHITECTURE "Career memory").
-- [ ] **B12. Enforcement of "the LLM never touches the home's git tree".** opencode's shell reaches
+- [ ] **B12. Enforcement of "the service is the only writer of the store directory" (ARCHITECTURE "Automatic vs model-controlled").** opencode's shell reaches
   `~/.personant/`, so the statement cannot hold as written. Decide whether to enforce it (for
   example a plugin hook on shell tool calls) or restate it as intention in SPEC and ARCHITECTURE.
-- [ ] **B13. `personant init` refuses an existing home.** `init` creates a home and nothing else: it
+- [ ] **B13. `personant init` refuses an existing store directory.** `init` creates a store directory and nothing else: it
   succeeds on an absent or empty directory and otherwise exits non-zero, naming the path and
   pointing to `personant verify`. Drops "idempotent" from SPEC §4.1 and §8.1; touches
   `cmd/init.go`, `store.Init` and the init tests.
@@ -319,7 +313,7 @@ Concrete, mostly single-package items; independent of the sequence above unless 
   commit pins it there too, so the content of every file the assistant read or wrote is kept
   permanently. SPEC §3.9.1 requires the store to live only
   in the store working tree and the turn repository. Day-rollover completion's restore of the store
-  from primary HEAD depends on the current behavior (ARCHITECTURE "Tracked-file store").
+  from history repository HEAD depends on the current behavior (ARCHITECTURE "Tracked-file store").
 - [ ] **Anchor projection can emit an anchor `personant verify` rejects.** `turn.ProjectAnchors`
   ranks high-specificity identifiers first with no length bound, and extraction admits URLs, file
   paths and hex ids up to 64 characters (`internal/turn/chain.go`), while `verify` errors on an
@@ -349,11 +343,8 @@ Concrete, mostly single-package items; independent of the sequence above unless 
   the turn repository when loose objects cross a threshold mid-session has recovery handling and marker
   plumbing in place; the arming trigger is not wired. Adjacent: whether intra-day derived-watermark
   staleness needs finer handling. (SPEC §3.11, §4.5.8 "Intra-day derived staleness".)
-- [x] **Banded/auto-mode sim rung.** The `closure.ack-mode` amendment (§3.5) and recall banding
-  amendment (§3.4) are unit-covered, not sim-covered. Waits on **U4**. (SPEC §3.4, §3.5.)
-  Covered: the mock gate runs the automatic closing and recall paths.
 - [ ] **Directive-file plumbing for the §2.6.1 parameters.** No §2.6.1 parameter is read from directive files; every
-  key (`context.token-budget`, `staging.window-turns`, `history.cap-per-thread`,
+  key (`context.token-budget`, `history.cap-per-thread`,
   `anchor.projection-max`, `spine.entry-max-chars`, and so on) is a compiled-in constant. The
   reader is built with its first consumer. (SPEC §2.6.1, §3.10.3, §3.1.)
 - [ ] **Intra-thread recall-preservation follow-ups.** Re-verify
@@ -422,7 +413,7 @@ Concrete, mostly single-package items; independent of the sequence above unless 
   but no recall path scans it, and a cross-project fetch or engagement is declined
   (`internal/turn/lru.go` `crossProjectDecline`; SPEC §3.1, §3.2), though SPEC §2.6.1 names
   `recall.cross-project-threshold`. Intended design: the digests scanned each turn
-  by the opportunistic-surfacing path, at a higher threshold.
+  by the automatic-fetch path, at a higher threshold.
 - [ ] **No production trigger for consolidation.** `MemoryOps.Consolidate` runs only from the
   turn-repository loose-object check (`internal/memops/fileadapter/fileadapter_recovery.go`) and
   the scenario harness's day-off step, and `measure.RebuildTrees` only from that step
@@ -431,8 +422,8 @@ Concrete, mostly single-package items; independent of the sequence above unless 
 - [ ] **Deterministic-only memory.** Replace the memory-side model judgments — the summarizer,
   the clusterer, recall's model-judgment signal and the vetting reviewer (SPEC §8.2.1) — with
   deterministic code, so the memory service needs no model's services at all.
-- [ ] **Archive recall.** Match `archive/index.jsonl` anchors and offer a recovery-fetch so a
-  cold-storage thread resurfaces through the same opportunistic mechanism as a live one. The index
+- [ ] **Archive recall.** Match `archive/index.jsonl` anchors and fetch on restore so a
+  cold-storage thread resurfaces through the same automatic mechanism as a live one. The index
   already carries `anchors` and `spine_summary`: additive, no schema change. (SPEC §3.8.4.)
 - [ ] **Synthesis-attribution residual.** When a thread synthesizes a prior thread's idea by
   paraphrase with no recall hit, `derived_from` is left empty. Attributing it is a fuzzy judgment

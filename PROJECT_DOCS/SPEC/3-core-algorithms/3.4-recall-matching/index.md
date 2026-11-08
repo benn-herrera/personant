@@ -35,7 +35,10 @@ Three signals; signals 1 and 2 run in parallel, not as a cost cascade, and signa
    left its recent-excerpt window; the recent-excerpt window, already in the request, is never a
    candidate.
 3. **Model judgment** on surfaced candidates — expensive confirmation that cuts false positives
-   before a recall is offered.
+   before a candidate is fetched.
+
+Signal 3 is not built (ROADMAP "Recall's model-judgment signal is not built"); candidates are
+fetched on signals 1 and 2 alone.
 
 Symbolic (Jaccard) is never a pre-filter for the embedding scan (under realistic vocabulary drift it
 would discard most genuine matches).

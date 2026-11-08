@@ -14,7 +14,7 @@ Staging is scoped to the turn's recorded write set (`spine.jsonl`, touched threa
 day's event log, recorded at each write site and never guessed) through `autogit.AddPaths` with no
 integrity flags, so it costs O(write set) with no tree walk and turn-repository commits are not
 validated. Creating or closing a thread rides the per-turn
-commit and folds into the day at rollover; creating a project takes a checkpoint (SPEC §3.11). A hand-edit is therefore absorbed at the next full
+commit and folds into the day at rollover; the plugin route's service takes a checkpoint after creating a project (not built; SPEC §3.11). A hand-edit is therefore absorbed at the next full
 staging pass: a checkpoint, or the archival and day-commit steps of the day rollover.
 The §5.5 re-prompt caps live entirely inside a turn, ahead of step 3.
 

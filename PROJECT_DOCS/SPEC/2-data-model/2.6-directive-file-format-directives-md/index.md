@@ -1,12 +1,12 @@
 ### 2.6 Directive file format (`directives/*.md`)
 
-Directive files are markdown documents with YAML frontmatter for parameter overrides.
+Directive files are markdown documents with YAML frontmatter. The `parameters` field is reserved: no §2.6.1 key is read from it ([§2.6.1](2.6.1-recognized-parameters.md)).
 
 ```markdown
 ---
 scope: user                         # one of: defaults | user | project
 project: null                       # null for defaults/user; the project's id (prj_<n>) for project-scoped
-parameters: {}                      # §2.6.1 key: value overrides
+parameters: {}                      # reserved; not read (§2.6.1)
 last_modified: 2026-05-08T19:42:00-07:00
 modification_source: accrual        # one of: install | user-edit | accrual (accrual = feedback directive tuning, §1.8: cross-project by default)
 ---
@@ -30,8 +30,7 @@ proposed to it follows [§1.8](../../1-operating-model/1.8-memory-vetting.md).
 2. User-wide (`directives/user.md`)
 3. System defaults (`directives/defaults.md`)
 
-A parameter read walks the precedence chain and returns the first match; missing parameters fall
-through to defaults.
+The precedence list orders directive text only.
 
 Contents:
 

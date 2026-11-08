@@ -4,7 +4,7 @@ Format → ARCHITECTURE «Storage and record formats» (the record layout and fi
 inspecting the store finds every thread as one record in the **thread registry**, a single file
 sorted by id, so a change to one thread shows as a one-line diff. A record carries the thread's
 project, **anchors** (the few **symbols** that currently identify it), summary, description, state,
-timestamps, turn count and recall-fire count (the number of accepted recalls of the thread, [§3.4](../../3-core-algorithms/3.4-recall-matching/index.md)).
+timestamps, turn count and recall-fire count (the number of automatic fetches of the thread, [§3.4](../../3-core-algorithms/3.4-recall-matching/index.md)).
 Names beginning `spine` (`spine.jsonl`, `spine.entry-max-chars`, the `spine.*`
 events) are the thread registry's. The `description` is the triggering utterance, set once at creation and never
 rewritten; the `summary` is set from the thread's first response at creation and replaced when the thread closes ([§3.5](../../3-core-algorithms/3.5-closing-a-thread/index.md)) by the **summarizer**'s draft (the model call that

@@ -24,7 +24,7 @@ runs surface new gaps.
   registry slot saturates in the low hundreds of threads; a multi-year career accrues thousands,
   beyond what the 120-day span reaches. A stress run configuration with a synthetic pre-seeded
   multi-thousand-thread thread registry measures (a) recognition quality across the registry slot's
-  truncation boundary, (b) whether opportunistic recall picks up recognition for threads that fell
+  truncation boundary, (b) whether automatic recall picks up recognition for threads that fell
   out of the rendered registry slot, and (c) [§3.8](../../3-core-algorithms/3.8-cold-storage/index.md) archival
   onset under genuine cardinality pressure.
 

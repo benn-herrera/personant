@@ -26,7 +26,7 @@ The aim is a durable assistant with one continuous career.
 
 ## Requirements and Supported Platforms
 
-- Go 1.26.1+ (`go.mod`)
+- Go 1.27.3+ (`go.mod`)
 - macOS or Linux
 - Development only: Python 3, standard library only. `just recall-madlibs` runs it, and every
   test and sim recipe depends on that recipe. Running Personant does not need Python.
@@ -46,11 +46,12 @@ What the current tree builds and runs:
 git clone <repo>
 cd personant
 just build          # compiles every package and produces bin/personant
+./bin/personant init      # creates the memory store at ~/.personant/
 ./bin/personant version
 ```
 
 `bin/personant` carries the memory-store commands (`init`, `index`, `verify`, `archive`, `version`;
-[`SPEC.md`](SPEC.md) §4.1). Memory initializes at `~/.personant/` as a git repository; override with
+the full command surface: [`SPEC.md`](SPEC.md) §4.1). Memory initializes at `~/.personant/` as a git repository; override with
 `$PERSONANT_HOME` or `--home`.
 
 ## How an opencode Session Relates to Memory
@@ -60,7 +61,7 @@ open items: [`SPEC.md`](SPEC.md) §1.1.
 
 ## Where Settings Live
 
-opencode's configuration, Personant's own settings and the memory home: [`SPEC.md`](SPEC.md) §8.1,
+opencode's configuration, Personant's own settings and the store directory: [`SPEC.md`](SPEC.md) §8.1,
 §8.2.2 and §2.1; [`ARCHITECTURE.md`](ARCHITECTURE.md) "One inspection location". The current
 code does not match them yet (ROADMAP A12, A12a).
 
