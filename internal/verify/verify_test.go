@@ -371,7 +371,7 @@ func TestVerifyProjectMetaIDMismatch(t *testing.T) {
 
 func TestVerifyProjectMetaName(t *testing.T) {
 	paths := initFreshHome(t)
-	writeMeta(t, paths, "prj_3", validMeta("prj_3", "Bad Name With Spaces"))
+	writeMeta(t, paths, "prj_3", validMeta("prj_3", "bad\nname"))
 	rec := validRecord("thr_1")
 	rec.Project = "prj_3"
 	writeSpine(t, paths, []memops.SpineRecord{rec})

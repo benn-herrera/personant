@@ -41,8 +41,8 @@ noted).
   live in `~/.config/personant/` and never overlap opencode's (see "One inspection location").
 - **Code Mode and plugins.** opencode's own server runs, so its JavaScript plugins and Code Mode (SPEC §1)
   work unchanged.
-- **Sessions and projects.** The project resolves from opencode's session directory through
-  project resolution (see "Project identity"). A session reads and writes the one memory; turns
+- **Sessions and projects.** The project resolves from opencode's session directory alone (see
+  "Project identity"). A session reads and writes the one memory; turns
   are assigned to threads, never to sessions; deleting a session does not touch memory
   (SPEC §1.1).
 

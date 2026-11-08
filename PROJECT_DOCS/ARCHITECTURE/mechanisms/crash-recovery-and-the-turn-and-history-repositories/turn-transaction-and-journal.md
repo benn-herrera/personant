@@ -25,7 +25,7 @@ stale-but-truncated journal is the redundant-journal case, case 5 (`turn == head
 (`TestCell5_ResurrectedTruncatedJournal`; Cell N is case N), and the next turn's first append fsync makes the
 truncate durable before any new authoritative dirt can exist. A torn append is bounded to that one
 turn's content, which is the ≤1-turn bar. A torn final line is skipped by the scan, never parsed.
-On a torn turn the journal bytes are written to a recovery artifact and surfaced to the user
-(**Open:** U4 — the channel). They are never auto-replayed into the authoritative files, because a
+On a torn turn the journal bytes are written to a recovery artifact and reported in the event log
+(`recovery.journal-recovered`). They are never auto-replayed into the authoritative files, because a
 turn's derivation (tag parse, symbol extraction, engagement) is not replayable.
 

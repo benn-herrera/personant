@@ -516,14 +516,13 @@ func checkProjectMeta(report *memops.VerifyReport, dirName string, meta memops.P
 			Message: fmt.Sprintf("id %q does not match directory name %q", meta.ID, dirName)})
 	}
 
-	// name regex.
-	if !memops.ProjectNamePattern.MatchString(meta.Name) {
+	if !memops.ValidProjectName(meta.Name) {
 		report.Errors = append(report.Errors, memops.VerifyFinding{Path: loc, Field: "name",
-			Message: fmt.Sprintf("name %q does not match %s", meta.Name, memops.ProjectNamePattern.String())})
+			Message: fmt.Sprintf("name %q is not a directory base name (empty, \".\", \"..\", \"/\" or a control character)", meta.Name)})
 	}
 
-	// current_root_path: must be present. We do not check disk existence
-	// (file-move detection is /cd-project's domain — spec §4.5.5).
+	// current_root_path: must be present. We do not check disk existence:
+	// a moved directory is a new project (spec §4.5.2), not a broken one.
 	// prj_default carries an empty path by reservation (spec §2.5.1);
 	// allow that special case.
 	if meta.CurrentRootPath == "" && meta.ID != memops.DefaultProjectID {

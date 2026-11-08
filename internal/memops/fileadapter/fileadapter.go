@@ -475,21 +475,7 @@ func (a *FileAdapter) ListProjects(ctx context.Context) ([]memops.ProjectMeta, e
 	return metas, nil
 }
 
-// FindProjectByRemote returns the project whose remote URLs contain the
-// given URL (after normalization on both sides — store.FindProjectByRemote
-// does it internally, so callers may pass a raw URL).
-func (a *FileAdapter) FindProjectByRemote(ctx context.Context, remoteURL string) (memops.ProjectMeta, bool, error) {
-	if err := ctx.Err(); err != nil {
-		return memops.ProjectMeta{}, false, err
-	}
-	meta, found, err := store.FindProjectByRemote(a.paths, remoteURL)
-	if err != nil {
-		return memops.ProjectMeta{}, false, fmt.Errorf("fileadapter: find project by remote: %w", err)
-	}
-	return meta, found, nil
-}
-
-// FindProjectByPath returns the project whose root paths contain absPath.
+// FindProjectByPath returns the project whose current root path is absPath.
 func (a *FileAdapter) FindProjectByPath(ctx context.Context, absPath string) (memops.ProjectMeta, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return memops.ProjectMeta{}, false, err
@@ -499,29 +485,6 @@ func (a *FileAdapter) FindProjectByPath(ctx context.Context, absPath string) (me
 		return memops.ProjectMeta{}, false, fmt.Errorf("fileadapter: find project by path: %w", err)
 	}
 	return meta, found, nil
-}
-
-// SetLastActiveProject records projectID for next-launch bootstrap.
-func (a *FileAdapter) SetLastActiveProject(ctx context.Context, projectID string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := store.WriteLastActive(a.paths, projectID); err != nil {
-		return fmt.Errorf("fileadapter: set last active: %w", err)
-	}
-	return nil
-}
-
-// GetLastActiveProject returns the recorded last-active project ID.
-func (a *FileAdapter) GetLastActiveProject(ctx context.Context) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	id, err := store.ReadLastActive(a.paths)
-	if err != nil {
-		return "", fmt.Errorf("fileadapter: get last active: %w", err)
-	}
-	return id, nil
 }
 
 // ---------- Session working set ----------
@@ -773,7 +736,8 @@ func (a *FileAdapter) Verify(ctx context.Context) (memops.VerifyReport, error) {
 	return report, nil
 }
 
-// ResolveActiveProject runs the spec §4.5.7 bootstrap waterfall.
+// ResolveActiveProject resolves the active project from the directory
+// alone (spec §4.5.7) and logs project.created when it creates one.
 func (a *FileAdapter) ResolveActiveProject(ctx context.Context, hints memops.BootstrapHints) (memops.BootstrapResult, error) {
 	if err := ctx.Err(); err != nil {
 		return memops.BootstrapResult{}, err
@@ -781,6 +745,13 @@ func (a *FileAdapter) ResolveActiveProject(ctx context.Context, hints memops.Boo
 	res, err := store.ResolveActiveProject(a.paths, hints)
 	if err != nil {
 		return memops.BootstrapResult{}, fmt.Errorf("fileadapter: resolve active project: %w", err)
+	}
+	if res.Step == memops.StepCreated {
+		a.touchTurnScope(store.ProjectMetaRel(res.Project.ID))
+		details := "id=" + res.Project.ID + " name=" + res.Project.Name
+		if err := a.Log(ctx, memops.LogCategoryProject, "created", details); err != nil {
+			return memops.BootstrapResult{}, fmt.Errorf("fileadapter: resolve active project: %w", err)
+		}
 	}
 	return res, nil
 }

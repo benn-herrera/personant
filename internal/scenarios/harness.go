@@ -867,7 +867,7 @@ func (h *Harness) PinnedClock() time.Time {
 }
 
 // SwitchProject swaps the harness's active project to targetID,
-// updating last-active and the in-memory turn.State. Used by
+// updating the in-memory turn.State. Used by
 // scenarios that exercise project switching ahead of /project switch
 // landing in the runtime.
 //
@@ -877,9 +877,6 @@ func (h *Harness) SwitchProject(targetID string) error {
 	meta, err := store.LoadProjectMeta(h.Paths, targetID)
 	if err != nil {
 		return fmt.Errorf("SwitchProject %s: %w", targetID, err)
-	}
-	if err := store.WriteLastActive(h.Paths, targetID); err != nil {
-		return fmt.Errorf("SwitchProject %s: WriteLastActive: %w", targetID, err)
 	}
 	h.Project = meta
 	h.State.ActiveProject = meta

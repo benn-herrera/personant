@@ -58,7 +58,6 @@ var DefaultInvariants = append(append([]InvariantCheck{}, cheapDefaultInvariants
 // length; it belongs with the cheap tier per D1 (a per-step belt-and-
 // suspenders on the mock-rung byte budget).
 var cheapDefaultInvariants = []InvariantCheck{
-	VerifyLastActiveValid,
 	VerifyNoBudgetOverflow,
 }
 
@@ -147,26 +146,6 @@ func VerifyProjectReferences(h *Harness) error {
 			return fmt.Errorf("VerifyProjectReferences: spine[%d] %s references unknown project %q",
 				i+1, r.ID, r.Project)
 		}
-	}
-	return nil
-}
-
-// VerifyLastActiveValid reads <Home>/last-active and asserts it is
-// either empty (fresh install) or names a known project (prj_default
-// counts).
-func VerifyLastActiveValid(h *Harness) error {
-	id, err := store.ReadLastActive(h.Paths)
-	if err != nil {
-		return fmt.Errorf("VerifyLastActiveValid: %w", err)
-	}
-	if id == "" {
-		return nil
-	}
-	if id == store.DefaultProjectID {
-		return nil
-	}
-	if _, err := store.LoadProjectMeta(h.Paths, id); err != nil {
-		return fmt.Errorf("VerifyLastActiveValid: %s: %w", id, err)
 	}
 	return nil
 }

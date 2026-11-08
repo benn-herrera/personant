@@ -27,7 +27,6 @@ func TestSaveLoadProjectMetaRoundTrip(t *testing.T) {
 		ID:               "prj_1",
 		Name:             "alpha",
 		CurrentRootPath:  "/tmp/alpha",
-		RemoteURLs:       []string{"https://github.com/foo/alpha"},
 		Created:          "2026-05-01T00:00:00Z",
 		LastActive:       "2026-05-08T00:00:00Z",
 		ThreadCount:      0,
@@ -47,9 +46,6 @@ func TestSaveLoadProjectMetaRoundTrip(t *testing.T) {
 	}
 	if got.CurrentRootPath != in.CurrentRootPath {
 		t.Errorf("path mismatch: got %q, want %q", got.CurrentRootPath, in.CurrentRootPath)
-	}
-	if len(got.RemoteURLs) != 1 || got.RemoteURLs[0] != in.RemoteURLs[0] {
-		t.Errorf("remote_urls mismatch: %+v", got.RemoteURLs)
 	}
 }
 
@@ -140,71 +136,13 @@ func TestListProjectsMissingDir(t *testing.T) {
 	}
 }
 
-func TestFindProjectByRemote(t *testing.T) {
-	paths := projectFixturePaths(t)
-
-	current := memops.ProjectMeta{
-		ID:         "prj_1",
-		Name:       "alpha",
-		RemoteURLs: []string{"https://github.com/foo/alpha"},
-	}
-	historical := memops.ProjectMeta{
-		ID:                   "prj_2",
-		Name:                 "beta",
-		RemoteURLs:           []string{"https://github.com/foo/beta-new"},
-		HistoricalRemoteURLs: []string{"https://github.com/foo/beta-old"},
-	}
-	for _, m := range []memops.ProjectMeta{current, historical} {
-		if err := SaveProjectMeta(paths, m); err != nil {
-			t.Fatalf("save %s: %v", m.ID, err)
-		}
-	}
-
-	// SSH form must collide with HTTPS form after normalization.
-	got, ok, err := FindProjectByRemote(paths, "git@github.com:foo/alpha.git")
-	if err != nil {
-		t.Fatalf("FindProjectByRemote: %v", err)
-	}
-	if !ok || got.ID != "prj_1" {
-		t.Errorf("ssh→https collision lookup failed: ok=%v rec=%+v", ok, got)
-	}
-
-	// Match in historical_remote_urls.
-	got, ok, err = FindProjectByRemote(paths, "https://github.com/foo/beta-old")
-	if err != nil {
-		t.Fatalf("FindProjectByRemote historical: %v", err)
-	}
-	if !ok || got.ID != "prj_2" {
-		t.Errorf("historical lookup failed: ok=%v rec=%+v", ok, got)
-	}
-
-	// No match.
-	_, ok, err = FindProjectByRemote(paths, "https://github.com/foo/zeta")
-	if err != nil {
-		t.Fatalf("FindProjectByRemote miss: %v", err)
-	}
-	if ok {
-		t.Error("expected no match")
-	}
-
-	// Empty input is a clean miss, not an error.
-	_, ok, err = FindProjectByRemote(paths, "")
-	if err != nil {
-		t.Fatalf("FindProjectByRemote empty: %v", err)
-	}
-	if ok {
-		t.Error("expected ok=false on empty input")
-	}
-}
-
 func TestFindProjectByPath(t *testing.T) {
 	paths := projectFixturePaths(t)
 
 	if err := SaveProjectMeta(paths, memops.ProjectMeta{
-		ID:                  "prj_1",
-		Name:                "alpha",
-		CurrentRootPath:     "/projects/alpha",
-		HistoricalRootPaths: []string{"/old/alpha"},
+		ID:              "prj_1",
+		Name:            "alpha",
+		CurrentRootPath: "/projects/alpha",
 	}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -216,7 +154,6 @@ func TestFindProjectByPath(t *testing.T) {
 		wantID string
 	}{
 		{name: "current", query: "/projects/alpha", wantOK: true, wantID: "prj_1"},
-		{name: "historical", query: "/old/alpha", wantOK: true, wantID: "prj_1"},
 		{name: "trailing slash equivalent", query: "/projects/alpha/", wantOK: true, wantID: "prj_1"},
 		{name: "miss", query: "/elsewhere", wantOK: false},
 		{name: "empty", query: "", wantOK: false},
@@ -265,46 +202,5 @@ func TestNextProjectID(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestNormalizeRemoteURL(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{name: "https plain", in: "https://github.com/foo/bar", want: "https://github.com/foo/bar"},
-		{name: "https with .git", in: "https://github.com/foo/bar.git", want: "https://github.com/foo/bar"},
-		{name: "uppercase host", in: "https://GitHub.COM/foo/bar", want: "https://github.com/foo/bar"},
-		{name: "ssh form with .git", in: "git@github.com:foo/bar.git", want: "https://github.com/foo/bar"},
-		{name: "ssh form no .git", in: "git@github.com:foo/bar", want: "https://github.com/foo/bar"},
-		{name: "ssh url scheme", in: "ssh://git@github.com/foo/bar.git", want: "https://github.com/foo/bar"},
-		{name: "git scheme", in: "git://github.com/foo/bar.git", want: "https://github.com/foo/bar"},
-		{name: "http (not https)", in: "http://example.com/x/y", want: "http://example.com/x/y"},
-		{name: "with whitespace", in: "  https://github.com/foo/bar  ", want: "https://github.com/foo/bar"},
-
-		{name: "empty", in: "", want: ""},
-		{name: "no scheme no colon", in: "github.com/foo/bar", want: ""},
-		{name: "scheme without host", in: "https://", want: ""},
-		{name: "ssh-like no path", in: "git@github.com:", want: ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := NormalizeRemoteURL(tc.in); got != tc.want {
-				t.Errorf("NormalizeRemoteURL(%q) = %q, want %q", tc.in, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestNormalizeRemoteURLSSHvsHTTPSCollide(t *testing.T) {
-	a := NormalizeRemoteURL("git@github.com:foo/bar.git")
-	b := NormalizeRemoteURL("https://github.com/foo/bar")
-	if a == "" || b == "" {
-		t.Fatalf("normalized empties: a=%q b=%q", a, b)
-	}
-	if a != b {
-		t.Errorf("ssh and https forms must collide; got a=%q b=%q", a, b)
 	}
 }

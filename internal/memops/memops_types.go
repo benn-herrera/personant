@@ -455,75 +455,45 @@ type Drift struct {
 
 // BootstrapHints feeds ResolveActiveProject.
 type BootstrapHints struct {
-	// ExplicitProject, if non-empty, short-circuits the waterfall.
-	// The resolver tries to interpret it first as a prj_<n> id,
-	// then as a ProjectMeta.Name.
-	ExplicitProject string
-	// CWD is the directory used as the basis for the heuristic
-	// waterfall (git-remote match, path match). Callers typically
-	// pass os.Getwd(); the field is explicit so tests can pin a
-	// fixture path.
-	CWD string
+	// Dir is opencode's project directory, absolute. Empty means no
+	// directory was given and resolution yields prj_default.
+	Dir string
 }
 
-// BootstrapResult conveys the outcome of the resolve waterfall.
-// Exactly one of:
-//   - Resolved is non-nil (waterfall succeeded; last-active and meta
-//     drift have been persisted).
-//   - Step == StepNeedsConfirmation and Candidate is non-nil (caller
-//     asks the user about resuming the last-active project).
-//   - Step == StepNeedsFallback (caller offers create/switch/none).
+// BootstrapResult is the outcome of ResolveActiveProject.
 type BootstrapResult struct {
-	// Step identifies which branch of the waterfall produced the
-	// result.
+	// Step identifies how Project was reached.
 	Step BootstrapStep
-	// Resolved is non-nil when the waterfall completed and the
-	// active project is determined.
-	Resolved *ProjectMeta
-	// Candidate is non-nil when Step == StepNeedsConfirmation; the
-	// caller prompts the user to resume this project.
-	Candidate *ProjectMeta
+	// Project is the active project.
+	Project ProjectMeta
 }
 
-// BootstrapStep identifies which branch of the bootstrap waterfall
-// produced a result.
+// BootstrapStep identifies how ResolveActiveProject reached its project.
 type BootstrapStep int
 
 const (
 	// StepUnset is the zero value; should not appear in successful
 	// returns.
 	StepUnset BootstrapStep = iota
-	// StepExplicit indicates --project (or the equivalent hint)
-	// matched a known project.
-	StepExplicit
-	// StepRemoteMatch indicates the CWD's git remote matched a
-	// known project.
-	StepRemoteMatch
-	// StepPathMatch indicates the CWD itself matched a project's
-	// current/historical root paths.
+	// StepPathMatch: a project's current_root_path is the directory.
 	StepPathMatch
-	// StepNeedsConfirmation indicates last-active resolved but the
-	// caller should confirm before resuming.
-	StepNeedsConfirmation
-	// StepNeedsFallback indicates the caller must offer
-	// create/switch/no-project.
-	StepNeedsFallback
+	// StepCreated: no project was rooted at the directory, so a new
+	// one was created there.
+	StepCreated
+	// StepDefault: no directory was given; the project is prj_default.
+	StepDefault
 )
 
 // String returns a human-readable form of the step (for log lines, not
 // user-facing UI).
 func (s BootstrapStep) String() string {
 	switch s {
-	case StepExplicit:
-		return "explicit"
-	case StepRemoteMatch:
-		return "remote-match"
 	case StepPathMatch:
 		return "path-match"
-	case StepNeedsConfirmation:
-		return "needs-confirmation"
-	case StepNeedsFallback:
-		return "needs-fallback"
+	case StepCreated:
+		return "created"
+	case StepDefault:
+		return "default"
 	default:
 		return "unset"
 	}

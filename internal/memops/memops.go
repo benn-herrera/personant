@@ -278,26 +278,9 @@ type MemoryOps interface {
 	// in store.ListProjects.
 	ListProjects(ctx context.Context) ([]ProjectMeta, error)
 
-	// FindProjectByRemote returns the project whose remote_urls or
-	// historical_remote_urls contains the given (normalized) URL.
-	// The adapter normalizes both sides; callers can pass a raw URL.
-	// Folds in store.FindProjectByRemote.
-	FindProjectByRemote(ctx context.Context, remoteURL string) (ProjectMeta, bool, error)
-
-	// FindProjectByPath returns the project whose CurrentRootPath or
-	// HistoricalRootPaths contains absPath (after filepath.Clean).
-	// Folds in store.FindProjectByPath.
+	// FindProjectByPath returns the project whose CurrentRootPath is
+	// absPath (after filepath.Clean). Folds in store.FindProjectByPath.
 	FindProjectByPath(ctx context.Context, absPath string) (ProjectMeta, bool, error)
-
-	// SetLastActiveProject records projectID as the most-recently used
-	// project for next-launch bootstrap. Folds in store.WriteLastActive.
-	SetLastActiveProject(ctx context.Context, projectID string) error
-
-	// GetLastActiveProject returns the recorded last-active project
-	// ID, or empty string when none has been recorded (fresh install).
-	// A malformed marker yields ("", err). Folds in
-	// store.ReadLastActive.
-	GetLastActiveProject(ctx context.Context) (string, error)
 
 	// ---------- Symbol index operations ----------
 
@@ -356,7 +339,7 @@ type MemoryOps interface {
 	// Only these two lists are persisted. Session-volatile state
 	// (turn counter, coalesce/staging buffers, closure-defer grace) is
 	// deliberately not persisted — it correctly resets on restart. The
-	// active project is persisted separately via SetLastActiveProject.
+	// active project is not persisted: it is resolved from the directory.
 	//
 	// The artifact is volatile session state, rewritten every turn; the
 	// adapter keeps it out of any substrate version control so per-turn
@@ -368,8 +351,7 @@ type MemoryOps interface {
 	// ID lists, in most-recently-engaged-first order.
 	//
 	// A missing artifact returns (nil, nil, nil): the fresh-launch state,
-	// not an error — mirroring how GetLastActiveProject treats an absent
-	// last-active marker. The error return is reserved for a present but
+	// not an error. The error return is reserved for a present but
 	// unreadable or malformed artifact.
 	LoadWorkingSet(ctx context.Context) (activeThreads, dormantThreads []string, err error)
 
@@ -584,12 +566,11 @@ type MemoryOps interface {
 	// from completing. Folds in verify.Verify.
 	Verify(ctx context.Context) (VerifyReport, error)
 
-	// ResolveActiveProject runs the spec §4.5.7 bootstrap waterfall
-	// and returns its outcome. Folds in store.ResolveActiveProject.
-	// On a resolved branch the adapter persists last-active and any
-	// project-meta drift updates; on the NeedsConfirmation /
-	// NeedsFallback branches the adapter writes nothing — the caller
-	// confirms via subsequent SaveProject / SetLastActiveProject
-	// calls.
+	// ResolveActiveProject resolves the active project from the
+	// directory alone (spec §4.5.7): the project rooted there, else a
+	// new project rooted there and named for the directory's base name,
+	// else prj_default when no directory is given. It reads nothing
+	// inside the directory. On StepCreated the adapter logs
+	// project.created. Folds in store.ResolveActiveProject.
 	ResolveActiveProject(ctx context.Context, hints BootstrapHints) (BootstrapResult, error)
 }

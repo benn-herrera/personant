@@ -21,7 +21,6 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
   logs/archive/                     # created empty by init; nothing writes it (moving old day files there is not built)
   version.toml                      # authoritative, committed; format revision `format = N` (SPEC §9.1)
   README.md                         # layout documentation for human inspection
-  last-active                       # operational; prj_<n> of the most recently active project
   turn-journal.jsonl                # operational, gitignored; in-flight-turn journal (SPEC §4.5.8)
   op-in-progress.json               # operational, gitignored; operation marker, survives reset
   derived-watermark                 # operational, gitignored; turn-repository HEAD the derived files match
@@ -37,7 +36,7 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
 |---|---|---|
 | Authoritative | `spine.jsonl`, `threads/*`, `directives/*.md`, `projects/*/meta.json`, `logs/*.log`, `version.toml`, `archive/index.jsonl` | Source of truth; hand-editable (`directives/defaults.md` is rewritten by every `personant init`). `logs/*.log` is the append-only turn-grain forensic record that crash recovery preserves and re-appends. |
 | Derived | `symbols.jsonl`, `projects/*/digest.json` | Regenerable from the authoritative files; a day rollover or archival batch fails if it leaves a derived file stale; turn-repository commits are not checked; never hand-edited. |
-| Operational | `.git-daily/`, `last-active`, `turn-journal.jsonl`, `op-in-progress.json`, `derived-watermark`, `working-set.json`, `.recall-cache/`, `recovery/` | System-managed, not drift-checked, and gitignored: the managed gitignore block (the part of the store's `.gitignore` that Personant writes and keeps current) lists each, `.git/` and `.git-daily/` included, so neither repository sees the other as untracked (the ignore-block rule; see "Crash recovery and the turn and history repositories"). |
+| Operational | `.git-daily/`, `turn-journal.jsonl`, `op-in-progress.json`, `derived-watermark`, `working-set.json`, `.recall-cache/`, `recovery/` | System-managed, not drift-checked, and gitignored: the managed gitignore block (the part of the store's `.gitignore` that Personant writes and keeps current) lists each, `.git/` and `.git-daily/` included, so neither repository sees the other as untracked (the ignore-block rule; see "Crash recovery and the turn and history repositories"). |
 
 `.git/`, the history repository, is in no row: system-managed and gitignored like the operational files, it is the only home of archived threads (SPEC §3.8.1) and so irreplaceable; a missing one is refuse-to-open.
 

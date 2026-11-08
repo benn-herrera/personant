@@ -26,7 +26,6 @@ type PersonantPaths struct {
 	Readme        string // Home/README.md                    (layout doc for human inspection)
 	HomeVersion   string // Home/version.toml                 (canonical: on-disk format revision, `format = N`; §9.1)
 	Gitignore     string // Home/.gitignore                   (excludes tmp/ and operational state)
-	LastActive    string // Home/last-active                  (operational; one line: prj_<n>; gitignored)
 	WorkingSet    string // Home/working-set.json             (operational; Layer B/C membership; rewritten per turn; gitignored)
 	RecallCache   string // Home/.recall-cache/               (operational; derived embedding-vector cache; gitignored; never canonical, §5/I5)
 	// Crash-stability substrate (#94, SPEC §4.5.8). All operational,
@@ -67,7 +66,6 @@ func makePaths(home string) PersonantPaths {
 		Readme:        filepath.Join(home, "README.md"),
 		HomeVersion:   filepath.Join(home, homeVersionFileName),
 		Gitignore:     filepath.Join(home, ".gitignore"),
-		LastActive:    filepath.Join(home, "last-active"),
 		WorkingSet:    filepath.Join(home, "working-set.json"),
 		RecallCache:   filepath.Join(home, ".recall-cache"),
 

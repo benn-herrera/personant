@@ -249,11 +249,7 @@ type ProjectMeta struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 
-	CurrentRootPath     string   `json:"current_root_path"`
-	HistoricalRootPaths []string `json:"historical_root_paths,omitempty"`
-
-	RemoteURLs           []string `json:"remote_urls,omitempty"`
-	HistoricalRemoteURLs []string `json:"historical_remote_urls,omitempty"`
+	CurrentRootPath string `json:"current_root_path"`
 
 	Created     string `json:"created"`
 	LastActive  string `json:"last_active"`

@@ -125,6 +125,33 @@ func TestDominantSource(t *testing.T) {
 	}
 }
 
+func TestValidProjectName(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"lowercase", "personant", true},
+		{"mixed case with space and underscore", "My App_2", true},
+		{"leading dot", ".dotfiles", true},
+		{"unicode", "résumé", true},
+		{"empty", "", false},
+		{"dot", ".", false},
+		{"dotdot", "..", false},
+		{"slash", "a/b", false},
+		{"root", "/", false},
+		{"newline", "a\nb", false},
+		{"tab", "a\tb", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ValidProjectName(tc.in); got != tc.want {
+				t.Errorf("ValidProjectName(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestIsHighSpecificity(t *testing.T) {
 	tests := []struct {
 		name string

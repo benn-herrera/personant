@@ -55,9 +55,6 @@ func newHarness(t *testing.T, sc Scenario) *Harness {
 	if err := store.SaveProjectMeta(paths, project); err != nil {
 		t.Fatalf("scenario %s: SaveProjectMeta: %v", sc.Name, err)
 	}
-	if err := store.WriteLastActive(paths, project.ID); err != nil {
-		t.Fatalf("scenario %s: WriteLastActive: %v", sc.Name, err)
-	}
 
 	ops := fileadapter.NewFileAdapter(paths)
 	state := turn.NewState(ops, project, nil)

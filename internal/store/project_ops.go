@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
-	"strings"
 
 	"personant/internal/memops"
 )
@@ -30,7 +28,7 @@ const ProjectMetaFileName = "meta.json"
 //
 // The prj_default project is special: if its meta.json is absent on disk,
 // LoadProjectMeta returns a synthetic memops.ProjectMeta with Name: "default" and
-// empty path/remote fields. This mirrors §2.5.1's reservation: prj_default
+// an empty path. This mirrors §2.5.1's reservation: prj_default
 // is always available even when no file has been written for it.
 //
 // For any other project, a missing directory or meta.json yields
@@ -123,40 +121,9 @@ func ListProjects(paths PersonantPaths) ([]memops.ProjectMeta, error) {
 	return out, nil
 }
 
-// FindProjectByRemote returns the project whose remote_urls or
-// historical_remote_urls contains the given URL after both are normalized
-// per §2.5.1. The input is normalized inside this function; callers do not
-// have to pre-normalize, though they may.
-//
-// Returns (zero, false, nil) if no match is found. Errors only on i/o
-// failures during the project listing.
-func FindProjectByRemote(paths PersonantPaths, remoteURL string) (memops.ProjectMeta, bool, error) {
-	target := NormalizeRemoteURL(remoteURL)
-	if target == "" {
-		return memops.ProjectMeta{}, false, nil
-	}
-	metas, err := ListProjects(paths)
-	if err != nil {
-		return memops.ProjectMeta{}, false, err
-	}
-	for _, m := range metas {
-		for _, u := range m.RemoteURLs {
-			if NormalizeRemoteURL(u) == target {
-				return m, true, nil
-			}
-		}
-		for _, u := range m.HistoricalRemoteURLs {
-			if NormalizeRemoteURL(u) == target {
-				return m, true, nil
-			}
-		}
-	}
-	return memops.ProjectMeta{}, false, nil
-}
-
-// FindProjectByPath returns the project whose CurrentRootPath or
-// HistoricalRootPaths contains absPath. Path comparison is byte-exact
-// after filepath.Clean — symlink resolution is the caller's responsibility.
+// FindProjectByPath returns the project whose CurrentRootPath is absPath.
+// Path comparison is byte-exact after filepath.Clean — symlink resolution
+// is the caller's responsibility.
 //
 // Returns (zero, false, nil) if no match is found.
 func FindProjectByPath(paths PersonantPaths, absPath string) (memops.ProjectMeta, bool, error) {
@@ -171,11 +138,6 @@ func FindProjectByPath(paths PersonantPaths, absPath string) (memops.ProjectMeta
 	for _, m := range metas {
 		if m.CurrentRootPath != "" && filepath.Clean(m.CurrentRootPath) == target {
 			return m, true, nil
-		}
-		for _, p := range m.HistoricalRootPaths {
-			if filepath.Clean(p) == target {
-				return m, true, nil
-			}
 		}
 	}
 	return memops.ProjectMeta{}, false, nil
@@ -196,85 +158,4 @@ func NextProjectID(metas []memops.ProjectMeta) string {
 		}
 	}
 	return "prj_" + strconv.Itoa(max+1)
-}
-
-// NormalizeRemoteURL canonicalizes a git remote URL per §2.5.1:
-//   - host is lowercased
-//   - trailing ".git" stripped
-//   - "git@host:owner/name" rewritten to "https://host/owner/name"
-//
-// Returns "" for input that is empty, has no host, or cannot be parsed.
-// Callers may treat "" as "unidentifiable" rather than an error.
-func NormalizeRemoteURL(rawURL string) string {
-	raw := strings.TrimSpace(rawURL)
-	if raw == "" {
-		return ""
-	}
-
-	// SCP-style SSH: user@host:path. The colon-separator distinguishes this
-	// from a real URL like "ssh://user@host/path"; net/url cannot parse it.
-	if host, path, ok := splitSCPSSH(raw); ok {
-		host = strings.ToLower(host)
-		path = strings.TrimPrefix(path, "/")
-		path = strings.TrimSuffix(path, ".git")
-		if host == "" || path == "" {
-			return ""
-		}
-		return "https://" + host + "/" + path
-	}
-
-	u, err := url.Parse(raw)
-	if err != nil {
-		return ""
-	}
-	if u.Host == "" {
-		return ""
-	}
-	scheme := strings.ToLower(u.Scheme)
-	if scheme == "" {
-		// "github.com/foo/bar" without scheme — unparseable as a remote URL
-		// for our purposes (no host can be identified deterministically).
-		return ""
-	}
-	host := strings.ToLower(u.Host)
-	path := strings.TrimSuffix(u.Path, ".git")
-	if path == "" || path == "/" {
-		return ""
-	}
-	// SSH and Git protocol normalize to the canonical HTTPS form so that
-	// "git@host:owner/name", "ssh://git@host/owner/name", and
-	// "https://host/owner/name" collide on lookup.
-	if scheme == "ssh" || scheme == "git" {
-		scheme = "https"
-		// ssh URLs may carry a userinfo (git@) we do not want in the
-		// canonical form.
-		return scheme + "://" + host + path
-	}
-	return scheme + "://" + host + path
-}
-
-// splitSCPSSH detects the "user@host:path" SCP-style git URL form and
-// returns its host and path components. Returns ok=false for inputs that
-// are not in this form (notably anything with "://", or that lacks a colon
-// before the first slash).
-func splitSCPSSH(raw string) (host, path string, ok bool) {
-	if strings.Contains(raw, "://") {
-		return "", "", false
-	}
-	colon := strings.Index(raw, ":")
-	if colon < 0 {
-		return "", "", false
-	}
-	if firstSlash := strings.Index(raw, "/"); firstSlash >= 0 && firstSlash < colon {
-		return "", "", false
-	}
-	hostPart := raw[:colon]
-	pathPart := raw[colon+1:]
-	if at := strings.LastIndex(hostPart, "@"); at >= 0 {
-		hostPart = hostPart[at+1:]
-	}
-	if hostPart == "" || pathPart == "" {
-		return "", "", false
-	}
-	return hostPart, pathPart, true
 }

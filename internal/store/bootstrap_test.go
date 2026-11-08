@@ -1,9 +1,9 @@
 package store
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"personant/internal/memops"
@@ -20,343 +20,123 @@ func bootstrapPaths(t *testing.T) PersonantPaths {
 	return paths
 }
 
-// pathsEqual returns true if a and b refer to the same file after
-// filepath.Clean and EvalSymlinks (macOS $TMPDIR is symlinked).
-func pathsEqual(t *testing.T, a, b string) bool {
+func mkdir(t *testing.T, dir string) string {
 	t.Helper()
-	ea, err := filepath.EvalSymlinks(filepath.Clean(a))
-	if err != nil {
-		ea = filepath.Clean(a)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
 	}
-	eb, err := filepath.EvalSymlinks(filepath.Clean(b))
-	if err != nil {
-		eb = filepath.Clean(b)
-	}
-	return ea == eb
+	return dir
 }
 
-func TestResolveActiveProject_ExplicitByID(t *testing.T) {
+func TestResolveActiveProject_PathMatch(t *testing.T) {
 	paths := bootstrapPaths(t)
-	if err := SaveProjectMeta(paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha"}); err != nil {
+	dir := t.TempDir()
+	if err := SaveProjectMeta(paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha", CurrentRootPath: dir}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
-	res, err := ResolveActiveProject(paths, memops.BootstrapHints{ExplicitProject: "prj_1"})
+	res, err := ResolveActiveProject(paths, memops.BootstrapHints{Dir: dir + "/"})
 	if err != nil {
 		t.Fatalf("ResolveActiveProject: %v", err)
 	}
-	if res.Step != memops.StepExplicit {
-		t.Errorf("step: got %v, want memops.StepExplicit", res.Step)
+	if res.Step != memops.StepPathMatch || res.Project.ID != "prj_1" {
+		t.Fatalf("got step=%v project=%s, want path-match prj_1", res.Step, res.Project.ID)
 	}
-	if res.Resolved == nil || res.Resolved.ID != "prj_1" {
-		t.Fatalf("Resolved: %+v", res.Resolved)
-	}
-	got, err := ReadLastActive(paths)
+	metas, err := ListProjects(paths)
 	if err != nil {
-		t.Fatalf("ReadLastActive: %v", err)
+		t.Fatalf("ListProjects: %v", err)
 	}
-	if got != "prj_1" {
-		t.Errorf("last-active: got %q, want %q", got, "prj_1")
+	if len(metas) != 1 {
+		t.Errorf("path match created a project: %d projects", len(metas))
 	}
 }
 
-func TestResolveActiveProject_ExplicitByName(t *testing.T) {
+// A directory not seen before is a new project, even when its base name
+// matches a project rooted elsewhere (a moved or copied directory).
+func TestResolveActiveProject_Create(t *testing.T) {
 	paths := bootstrapPaths(t)
-	if err := SaveProjectMeta(paths, memops.ProjectMeta{ID: "prj_7", Name: "gamma"}); err != nil {
+	parent := t.TempDir()
+	old := mkdir(t, filepath.Join(parent, "old", "My App_1"))
+	if err := SaveProjectMeta(paths, memops.ProjectMeta{ID: "prj_1", Name: "My App_1", CurrentRootPath: old}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
+	dir := mkdir(t, filepath.Join(parent, "new", "My App_1"))
 
-	res, err := ResolveActiveProject(paths, memops.BootstrapHints{ExplicitProject: "gamma"})
+	res, err := ResolveActiveProject(paths, memops.BootstrapHints{Dir: dir})
 	if err != nil {
 		t.Fatalf("ResolveActiveProject: %v", err)
 	}
-	if res.Step != memops.StepExplicit {
-		t.Errorf("step: got %v, want memops.StepExplicit", res.Step)
+	if res.Step != memops.StepCreated {
+		t.Fatalf("step: got %v, want created", res.Step)
 	}
-	if res.Resolved == nil || res.Resolved.ID != "prj_7" {
-		t.Fatalf("Resolved: %+v", res.Resolved)
+	if res.Project.ID != "prj_2" || res.Project.Name != "My App_1" || res.Project.CurrentRootPath != dir {
+		t.Fatalf("project: %+v", res.Project)
 	}
-}
-
-func TestResolveActiveProject_ExplicitUnknown(t *testing.T) {
-	paths := bootstrapPaths(t)
-	_, err := ResolveActiveProject(paths, memops.BootstrapHints{ExplicitProject: "ghost"})
-	if !errors.Is(err, memops.ErrProjectNotFound) {
-		t.Fatalf("expected memops.ErrProjectNotFound, got %v", err)
-	}
-	// last-active must remain unwritten on a failed explicit resolution.
-	if _, statErr := os.Stat(paths.LastActive); statErr == nil {
-		t.Error("last-active should not have been written on failed explicit resolution")
-	}
-}
-
-func TestResolveActiveProject_RemoteMatch(t *testing.T) {
-	hasGit(t)
-	paths := bootstrapPaths(t)
-
-	repo := t.TempDir()
-	gitInit(t, repo)
-	gitRun(t, repo, "remote", "add", "origin", "git@github.com:foo/bar.git")
-
-	// memops.ProjectMeta with the canonical (https) form of the same remote, and a
-	// stored CurrentRootPath that differs from the test repo to verify the
-	// drift-update.
-	staleRoot := filepath.Join(t.TempDir(), "stale-root")
-	if err := os.MkdirAll(staleRoot, 0o755); err != nil {
-		t.Fatalf("mkdir stale: %v", err)
-	}
-	if err := SaveProjectMeta(paths, memops.ProjectMeta{
-		ID:              "prj_1",
-		Name:            "alpha",
-		CurrentRootPath: staleRoot,
-		RemoteURLs:      []string{"https://github.com/foo/bar"},
-	}); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-
-	res, err := ResolveActiveProject(paths, memops.BootstrapHints{CWD: repo})
-	if err != nil {
-		t.Fatalf("ResolveActiveProject: %v", err)
-	}
-	if res.Step != memops.StepRemoteMatch {
-		t.Errorf("step: got %v, want memops.StepRemoteMatch", res.Step)
-	}
-	if res.Resolved == nil || res.Resolved.ID != "prj_1" {
-		t.Fatalf("Resolved: %+v", res.Resolved)
-	}
-
-	// Drift-update verification: stored meta should now point at repo,
-	// and staleRoot should be in historical_root_paths.
-	stored, err := LoadProjectMeta(paths, "prj_1")
+	stored, err := LoadProjectMeta(paths, "prj_2")
 	if err != nil {
 		t.Fatalf("LoadProjectMeta: %v", err)
 	}
-	if !pathsEqual(t, stored.CurrentRootPath, repo) {
-		t.Errorf("CurrentRootPath: got %q, want %q", stored.CurrentRootPath, repo)
-	}
-	if len(stored.HistoricalRootPaths) != 1 || !pathsEqual(t, stored.HistoricalRootPaths[0], staleRoot) {
-		t.Errorf("HistoricalRootPaths: got %v, want [%q]", stored.HistoricalRootPaths, staleRoot)
+	if stored.CurrentRootPath != dir || stored.Created == "" || stored.LastActive == "" {
+		t.Errorf("stored meta: %+v", stored)
 	}
 
-	// last-active must be written.
-	last, err := ReadLastActive(paths)
+	again, err := ResolveActiveProject(paths, memops.BootstrapHints{Dir: dir})
 	if err != nil {
-		t.Fatalf("ReadLastActive: %v", err)
+		t.Fatalf("second ResolveActiveProject: %v", err)
 	}
-	if last != "prj_1" {
-		t.Errorf("last-active: got %q, want %q", last, "prj_1")
+	if again.Step != memops.StepPathMatch || again.Project.ID != "prj_2" {
+		t.Errorf("second resolve: step=%v project=%s, want path-match prj_2", again.Step, again.Project.ID)
 	}
 }
 
-func TestResolveActiveProject_RemoteMatch_Historical(t *testing.T) {
-	hasGit(t)
+// The resolver reads nothing inside the directory: a git remote there
+// does not identify the project.
+func TestResolveActiveProject_IgnoresGitRemote(t *testing.T) {
 	paths := bootstrapPaths(t)
-
-	repo := t.TempDir()
-	gitInit(t, repo)
-	gitRun(t, repo, "remote", "add", "origin", "https://github.com/foo/bar.git")
-
-	if err := SaveProjectMeta(paths, memops.ProjectMeta{
-		ID:                   "prj_1",
-		Name:                 "alpha",
-		CurrentRootPath:      repo,
-		RemoteURLs:           []string{"https://github.com/foo/renamed"},
-		HistoricalRemoteURLs: []string{"https://github.com/foo/bar"},
-	}); err != nil {
-		t.Fatalf("save: %v", err)
+	dir := t.TempDir()
+	mkdir(t, filepath.Join(dir, ".git"))
+	gitConfig := "[remote \"origin\"]\n\turl = git@github.com:foo/bar.git\n"
+	if err := os.WriteFile(filepath.Join(dir, ".git", "config"), []byte(gitConfig), 0o644); err != nil {
+		t.Fatalf("write .git/config: %v", err)
 	}
 
-	res, err := ResolveActiveProject(paths, memops.BootstrapHints{CWD: repo})
+	res, err := ResolveActiveProject(paths, memops.BootstrapHints{Dir: dir})
 	if err != nil {
 		t.Fatalf("ResolveActiveProject: %v", err)
 	}
-	if res.Step != memops.StepRemoteMatch {
-		t.Errorf("step: got %v, want memops.StepRemoteMatch", res.Step)
+	if res.Step != memops.StepCreated || res.Project.CurrentRootPath != dir {
+		t.Fatalf("got step=%v project=%+v, want a new project rooted at %s", res.Step, res.Project, dir)
 	}
-	if res.Resolved == nil || res.Resolved.ID != "prj_1" {
-		t.Fatalf("Resolved: %+v", res.Resolved)
+	raw, err := os.ReadFile(filepath.Join(paths.ProjectsDir, res.Project.ID, ProjectMetaFileName))
+	if err != nil {
+		t.Fatalf("read meta.json: %v", err)
+	}
+	if strings.Contains(string(raw), "github.com") {
+		t.Errorf("meta.json carries the directory's remote: %s", raw)
 	}
 }
 
-func TestResolveActiveProject_PathMatch_Current(t *testing.T) {
+func TestResolveActiveProject_NoDirIsDefault(t *testing.T) {
 	paths := bootstrapPaths(t)
-
-	cwd := t.TempDir()
-	if err := SaveProjectMeta(paths, memops.ProjectMeta{
-		ID:              "prj_1",
-		Name:            "alpha",
-		CurrentRootPath: cwd,
-	}); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-
-	res, err := ResolveActiveProject(paths, memops.BootstrapHints{CWD: cwd})
+	res, err := ResolveActiveProject(paths, memops.BootstrapHints{})
 	if err != nil {
 		t.Fatalf("ResolveActiveProject: %v", err)
 	}
-	if res.Step != memops.StepPathMatch {
-		t.Errorf("step: got %v, want memops.StepPathMatch", res.Step)
-	}
-	if res.Resolved == nil || res.Resolved.ID != "prj_1" {
-		t.Fatalf("Resolved: %+v", res.Resolved)
+	if res.Step != memops.StepDefault || res.Project.ID != DefaultProjectID {
+		t.Fatalf("got step=%v project=%s, want default %s", res.Step, res.Project.ID, DefaultProjectID)
 	}
 }
 
-func TestResolveActiveProject_PathMatch_Historical_DriftUpdate(t *testing.T) {
+func TestResolveActiveProject_RejectsRelativeDir(t *testing.T) {
 	paths := bootstrapPaths(t)
-
-	oldCWD := t.TempDir() // simulates the historical path on disk
-	newCWD := t.TempDir() // simulates "today" — user moved the project here
-	if err := SaveProjectMeta(paths, memops.ProjectMeta{
-		ID:                  "prj_1",
-		Name:                "alpha",
-		CurrentRootPath:     oldCWD,
-		HistoricalRootPaths: []string{newCWD},
-	}); err != nil {
-		t.Fatalf("save: %v", err)
+	if _, err := ResolveActiveProject(paths, memops.BootstrapHints{Dir: "relative/dir"}); err == nil {
+		t.Fatal("relative directory resolved; want an error")
 	}
-
-	res, err := ResolveActiveProject(paths, memops.BootstrapHints{CWD: newCWD})
+	metas, err := ListProjects(paths)
 	if err != nil {
-		t.Fatalf("ResolveActiveProject: %v", err)
+		t.Fatalf("ListProjects: %v", err)
 	}
-	if res.Step != memops.StepPathMatch {
-		t.Errorf("step: got %v, want memops.StepPathMatch", res.Step)
-	}
-
-	stored, err := LoadProjectMeta(paths, "prj_1")
-	if err != nil {
-		t.Fatalf("LoadProjectMeta: %v", err)
-	}
-	if !pathsEqual(t, stored.CurrentRootPath, newCWD) {
-		t.Errorf("CurrentRootPath: got %q, want %q", stored.CurrentRootPath, newCWD)
-	}
-	// oldCWD must now appear somewhere in HistoricalRootPaths (the older
-	// historical entry, the previous current, or both).
-	foundOld := false
-	for _, p := range stored.HistoricalRootPaths {
-		if pathsEqual(t, p, oldCWD) {
-			foundOld = true
-			break
-		}
-	}
-	if !foundOld {
-		t.Errorf("expected oldCWD %q to appear in HistoricalRootPaths %v", oldCWD, stored.HistoricalRootPaths)
-	}
-}
-
-func TestResolveActiveProject_LastActiveConfirmation(t *testing.T) {
-	paths := bootstrapPaths(t)
-
-	if err := SaveProjectMeta(paths, memops.ProjectMeta{ID: "prj_1", Name: "alpha"}); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-	if err := WriteLastActive(paths, "prj_1"); err != nil {
-		t.Fatalf("WriteLastActive: %v", err)
-	}
-
-	// CWD that does not match any project.
-	bareCWD := t.TempDir()
-	res, err := ResolveActiveProject(paths, memops.BootstrapHints{CWD: bareCWD})
-	if err != nil {
-		t.Fatalf("ResolveActiveProject: %v", err)
-	}
-	// On machines whose $TMPDIR ancestors carry .git, FindGitRoot may walk
-	// up and the test could match a project we did not configure with that
-	// remote. We guard by ensuring there is no memops.ProjectMeta with the
-	// developer's project remote — but the cleanest assertion here is that
-	// either NeedsConfirmation fired (the documented branch) or the
-	// remote-match silently passed without any configured remote (which
-	// shouldn't happen in this fixture).
-	if res.Step != memops.StepNeedsConfirmation {
-		t.Fatalf("step: got %v, want memops.StepNeedsConfirmation; resolved=%+v", res.Step, res.Resolved)
-	}
-	if res.Candidate == nil || res.Candidate.ID != "prj_1" {
-		t.Errorf("Candidate: %+v", res.Candidate)
-	}
-}
-
-func TestResolveActiveProject_LastActiveStaleFallsThrough(t *testing.T) {
-	paths := bootstrapPaths(t)
-
-	// Write a last-active pointing at a project whose meta.json does not
-	// exist — drag-and-drop'd home, hand-edit, etc.
-	if err := WriteLastActive(paths, "prj_99"); err != nil {
-		t.Fatalf("WriteLastActive: %v", err)
-	}
-
-	bareCWD := t.TempDir()
-	res, err := ResolveActiveProject(paths, memops.BootstrapHints{CWD: bareCWD})
-	if err != nil {
-		t.Fatalf("ResolveActiveProject: %v", err)
-	}
-	if res.Step != memops.StepNeedsFallback {
-		t.Errorf("step: got %v, want memops.StepNeedsFallback", res.Step)
-	}
-}
-
-func TestResolveActiveProject_FreshHomeNeedsFallback(t *testing.T) {
-	paths := bootstrapPaths(t)
-	bareCWD := t.TempDir()
-	res, err := ResolveActiveProject(paths, memops.BootstrapHints{CWD: bareCWD})
-	if err != nil {
-		t.Fatalf("ResolveActiveProject: %v", err)
-	}
-	if res.Step != memops.StepNeedsFallback {
-		t.Errorf("step: got %v, want memops.StepNeedsFallback", res.Step)
-	}
-	if res.Resolved != nil || res.Candidate != nil {
-		t.Errorf("expected no resolved/candidate, got resolved=%+v candidate=%+v", res.Resolved, res.Candidate)
-	}
-}
-
-func TestResolveActiveProject_ExplicitDoesNotDriftPath(t *testing.T) {
-	paths := bootstrapPaths(t)
-	staleRoot := "/some/stored/path"
-	if err := SaveProjectMeta(paths, memops.ProjectMeta{
-		ID:              "prj_1",
-		Name:            "alpha",
-		CurrentRootPath: staleRoot,
-	}); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-
-	someCWD := t.TempDir()
-	res, err := ResolveActiveProject(paths, memops.BootstrapHints{
-		ExplicitProject: "prj_1",
-		CWD:             someCWD, // should be ignored on the explicit path
-	})
-	if err != nil {
-		t.Fatalf("ResolveActiveProject: %v", err)
-	}
-	if res.Step != memops.StepExplicit {
-		t.Fatalf("step: got %v, want memops.StepExplicit", res.Step)
-	}
-
-	// stored meta must not have been rewritten — the explicit path
-	// deliberately skips drift-update.
-	stored, err := LoadProjectMeta(paths, "prj_1")
-	if err != nil {
-		t.Fatalf("LoadProjectMeta: %v", err)
-	}
-	if stored.CurrentRootPath != staleRoot {
-		t.Errorf("CurrentRootPath was modified by explicit resolution: got %q, want %q", stored.CurrentRootPath, staleRoot)
-	}
-	if len(stored.HistoricalRootPaths) != 0 {
-		t.Errorf("HistoricalRootPaths was modified by explicit resolution: %v", stored.HistoricalRootPaths)
-	}
-}
-
-func TestResolveActiveProject_DefaultProjectIDExplicit(t *testing.T) {
-	paths := bootstrapPaths(t)
-	res, err := ResolveActiveProject(paths, memops.BootstrapHints{ExplicitProject: DefaultProjectID})
-	if err != nil {
-		t.Fatalf("ResolveActiveProject default: %v", err)
-	}
-	if res.Step != memops.StepExplicit {
-		t.Errorf("step: got %v, want memops.StepExplicit", res.Step)
-	}
-	if res.Resolved == nil || res.Resolved.ID != DefaultProjectID {
-		t.Fatalf("Resolved: %+v", res.Resolved)
+	if len(metas) != 0 {
+		t.Errorf("rejected directory created a project: %+v", metas)
 	}
 }

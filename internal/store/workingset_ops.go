@@ -41,8 +41,7 @@ func SaveWorkingSet(paths PersonantPaths, activeThreads, dormantThreads []string
 }
 
 // LoadWorkingSet reads <Home>/working-set.json. A nonexistent file yields
-// (nil, nil, nil) — the fresh-launch state — mirroring how
-// ReadLastActive treats an absent marker. A present but malformed file
+// (nil, nil, nil) — the fresh-launch state. A present but malformed file
 // yields an error.
 func LoadWorkingSet(paths PersonantPaths) (activeThreads, dormantThreads []string, err error) {
 	data, err := os.ReadFile(paths.WorkingSet)

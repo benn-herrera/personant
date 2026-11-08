@@ -32,8 +32,10 @@ const Substrate = "0.2.7"
 // writes and understands. Format 2 adds optional per-thread folio.jsonl
 // files to format 1. Format 3 adds the per-thread tracked-file store
 // (files.jsonl, files/); a format-2 home's legacy files.json is removed by
-// its first day barrier.
-const CurrentHomeFormat = 3
+// its first day barrier. Format 4 drops `remote_urls`,
+// `historical_remote_urls` and `historical_root_paths` from `meta.json`;
+// an older `meta.json` keeps them and they are ignored.
+const CurrentHomeFormat = 4
 
 // UnversionedHomeFormat is the format a home is ASSUMED to be when it
 // carries no format stamp — i.e. a home written before versioning

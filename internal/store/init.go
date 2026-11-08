@@ -526,7 +526,6 @@ const seedReadmeMD = "# personant home\n" +
 
 const seedGitignoreBody = `# personant home gitignore
 tmp/
-last-active
 # Both git-dirs are ignored EXPLICITLY (#94 R3b, INV-6). git auto-ignores
 # only a repo's OWN git-dir: the daily handle (.git-daily as git-dir over
 # this worktree) would otherwise see .git/ as untracked, and primary would

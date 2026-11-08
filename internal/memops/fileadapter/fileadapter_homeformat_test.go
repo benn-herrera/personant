@@ -68,10 +68,10 @@ func TestHomeFormat_CorruptStampErrors(t *testing.T) {
 	}
 }
 
-// TestHomeFormat_Migrate2To3RemovesLegacySidecar: a format-2 home holding
-// a legacy files.json passes the gate as a 2→3 migration, is restamped to
-// 3, and loses the sidecar at its first day barrier.
-func TestHomeFormat_Migrate2To3RemovesLegacySidecar(t *testing.T) {
+// TestHomeFormat_Migrate2RemovesLegacySidecar: a format-2 home holding
+// a legacy files.json passes the gate as a migration from 2, is restamped
+// to the current format, and loses the sidecar at its first day barrier.
+func TestHomeFormat_Migrate2RemovesLegacySidecar(t *testing.T) {
 	a := newBarrierHome(t, 1)
 	ctx := context.Background()
 	if err := a.StampHomeFormat(ctx, 2); err != nil {
@@ -90,14 +90,14 @@ func TestHomeFormat_Migrate2To3RemovesLegacySidecar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GateHomeFormat: %v", err)
 	}
-	if d.StampFormat != 3 || d.MigratedFrom != 2 {
-		t.Fatalf("gate decision = %+v, want StampFormat 3, MigratedFrom 2", d)
+	if d.StampFormat != version.CurrentHomeFormat || d.MigratedFrom != 2 {
+		t.Fatalf("gate decision = %+v, want StampFormat %d, MigratedFrom 2", d, version.CurrentHomeFormat)
 	}
 	if err := a.StampHomeFormat(ctx, d.StampFormat); err != nil {
 		t.Fatalf("StampHomeFormat: %v", err)
 	}
-	if found, format, err := a.HomeFormat(ctx); err != nil || !found || format != 3 {
-		t.Fatalf("HomeFormat after stamp = (%v, %d, %v), want (true, 3)", found, format, err)
+	if found, format, err := a.HomeFormat(ctx); err != nil || !found || format != version.CurrentHomeFormat {
+		t.Fatalf("HomeFormat after stamp = (%v, %d, %v), want (true, %d)", found, format, err, version.CurrentHomeFormat)
 	}
 	if _, err := a.Reconcile(ctx); err != nil {
 		t.Fatalf("Reconcile: %v", err)

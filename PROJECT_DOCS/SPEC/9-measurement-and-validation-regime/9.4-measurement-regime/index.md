@@ -30,7 +30,7 @@ comparison.
 
 **Invariant validators** run after every operation in churn sequences and at key checkpoints in
 scenario tests. They cover thread registry integrity, index freshness, project references,
-last-active validity, thread-metadata/thread-registry agreement, engagement consistency, thread
+thread-metadata/thread-registry agreement, engagement consistency, thread
 accounting, closed-thread consistency, archive resolvability, dedup consistency, and per-slot
 budget.
 

@@ -304,6 +304,47 @@ func TestComposeWorkingSet_PassThrough(t *testing.T) {
 	}
 }
 
+func TestResolveActiveProject_LogsProjectCreated(t *testing.T) {
+	a := newAdapter(t)
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "My App")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	for range 2 {
+		if _, err := a.ResolveActiveProject(ctx, memops.BootstrapHints{Dir: dir}); err != nil {
+			t.Fatalf("ResolveActiveProject: %v", err)
+		}
+	}
+
+	entries, err := os.ReadDir(a.paths.LogsDir)
+	if err != nil {
+		t.Fatalf("read logs dir: %v", err)
+	}
+	created := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(a.paths.LogsDir, e.Name()))
+		if err != nil {
+			t.Fatalf("read log: %v", err)
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.Contains(line, " project.created ") {
+				created++
+				if !strings.HasSuffix(line, "id=prj_1 name=My App") {
+					t.Errorf("project.created line: %q", line)
+				}
+			}
+		}
+	}
+	if created != 1 {
+		t.Fatalf("project.created lines: got %d, want 1 (create, then path match)", created)
+	}
+}
+
 func TestEmitDelta_WritesEventLog(t *testing.T) {
 	a := newAdapter(t)
 	ctx := context.Background()

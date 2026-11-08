@@ -9,7 +9,7 @@ day rollover or archival batch, which writes the **history repository** (the mem
 fails if it leaves a derived file stale ([§8.3](../../8-bootstrap-and-lifecycle/8.3-memory-store-validation-in-automatic-git-operations/index.md)); between **day rollovers** (the once-a-day
 maintenance sequence, [§4.5.8](../../4-user-surface/4.5-project-identity-and-the-project-s-directory/4.5.8-startup-recovery-after-unclean-shutdown.md) (5)) derived files may lag by design ([§4.5.8](../../4-user-surface/4.5-project-identity-and-the-project-s-directory/4.5.8-startup-recovery-after-unclean-shutdown.md) (7)). **Operational**
 files are the gitignored runtime state the memory service manages to run (the turn journal, the
-last-active record, the working-set record), neither authoritative nor derived. The file
+working-set record), neither authoritative nor derived. The file
 tree, the authoritative/derived/operational classification and the storage commands: ARCHITECTURE
 "Storage and record formats"; the commands are listed in [§4.1](../../4-user-surface/4.1-cli-command-surface.md).
 

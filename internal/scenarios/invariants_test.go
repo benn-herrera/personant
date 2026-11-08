@@ -1,7 +1,6 @@
 package scenarios
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,9 +37,6 @@ func invariantHarness(t *testing.T) *Harness {
 	}
 	if err := store.SaveProjectMeta(paths, meta); err != nil {
 		t.Fatalf("SaveProjectMeta: %v", err)
-	}
-	if err := store.WriteLastActive(paths, meta.ID); err != nil {
-		t.Fatalf("WriteLastActive: %v", err)
 	}
 	if err := store.WriteSpine(paths.Spine, nil); err != nil {
 		t.Fatalf("WriteSpine: %v", err)
@@ -190,43 +186,6 @@ func TestVerifyProjectReferences_AllowsDefault(t *testing.T) {
 	seedThread(t, h, rec)
 	if err := VerifyProjectReferences(h); err != nil {
 		t.Fatalf("prj_default reference should pass: %v", err)
-	}
-}
-
-func TestVerifyLastActiveValid_PassEmpty(t *testing.T) {
-	h := invariantHarness(t)
-	if err := os.Remove(h.Paths.LastActive); err != nil && !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("remove: %v", err)
-	}
-	if err := VerifyLastActiveValid(h); err != nil {
-		t.Fatalf("empty last-active should pass: %v", err)
-	}
-}
-
-func TestVerifyLastActiveValid_PassKnownProject(t *testing.T) {
-	h := invariantHarness(t)
-	if err := VerifyLastActiveValid(h); err != nil {
-		t.Fatalf("known prj_1 should pass: %v", err)
-	}
-}
-
-func TestVerifyLastActiveValid_FailsOnUnknownProject(t *testing.T) {
-	h := invariantHarness(t)
-	if err := os.WriteFile(h.Paths.LastActive, []byte("prj_99\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if err := VerifyLastActiveValid(h); err == nil {
-		t.Fatalf("expected fail; passed")
-	}
-}
-
-func TestVerifyLastActiveValid_FailsOnMalformed(t *testing.T) {
-	h := invariantHarness(t)
-	if err := os.WriteFile(h.Paths.LastActive, []byte("not-a-pid\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if err := VerifyLastActiveValid(h); err == nil {
-		t.Fatalf("expected fail; passed")
 	}
 }
 

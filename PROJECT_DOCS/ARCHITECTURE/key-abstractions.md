@@ -4,7 +4,7 @@
 |---|---|---|
 | **Thread registry record** | one line of `spine.jsonl`; authoritative thread bookkeeping (id, project, anchors, summary, state, timestamps, turn_count, recall_fires) | "Storage and record formats" |
 | **Thread** | the turns, not necessarily consecutive, that work on one specific problem (SPEC §1.1, §3.2); identified by `thr_<n>` (stable forever); a directory holding `thread.md` (YAML frontmatter), serial turn excerpts and a tracked-file store | "Storage and record formats" |
-| **Project** | three identity levels: stable handle `prj_<n>`, mutable display name, optional remote identity (normalized git remote URL) | "Project metadata", SPEC §4.5 |
+| **Project** | stable handle `prj_<n>` plus display name, rooted at one directory | "Project metadata", SPEC §4.5 |
 | **Anchor symbol** | 0..8 normalized symbols, projected from retained `history_symbols` (see "Symbol extraction") and stored in the record; drive recall and appear in the display line | "Symbol lifecycle and anchor projection" |
 | **History symbol** | per-thread accumulated symbol (`raw`, `normalized`, `first_seen_turn`, `count`, `source`) plus a `lifecycle` (`active`/`superseded`) and an `ever_central` latch; the thread's evolving identity and the recall match set; capped per `history.cap-per-thread`, trimmed with ever-central + high-specificity protection | "Storage and record formats" |
 | **Symbol category** | `identifier` (preserve case), `entity` (lowercase + hyphenate), `tag` (lowercase, leading `#` stripped) | "Symbol normalization" |

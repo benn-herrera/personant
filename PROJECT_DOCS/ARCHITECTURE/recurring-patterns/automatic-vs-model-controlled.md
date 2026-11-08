@@ -11,8 +11,8 @@ The service performs many operations the model cannot. Most notably **git**:
   verifications live in purpose-specific wrappers composing `autogit.Checkout`.
 - Commits take their author and committer identity from the memory store's git config, falling back to `personant <personant@localhost>`; they are not cryptographically signed
   (`store.CommitSignature`).
-- The service reads the user's *workspace* repository only to identify the project: its root
-  (`store.FindGitRoot`) and origin URL (`store.GetGitOriginURL`).
+- The service never reads the user's workspace repository; its only git is the store directory's
+  turn and history repositories.
 - The memory service exposes no git tool for the store directory. The agent has opencode's shell,
   which can reach it, and nothing blocks it; crash recovery treats a broken hand-edit as legitimate
   (quarantine, never delete). The service is the only writer of the store directory by

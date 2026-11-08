@@ -15,10 +15,19 @@ import (
 // ID format patterns. RE2-compiled once at package init for reuse by JSONL
 // readers/writers and the future `personant verify` command.
 var (
-	ThreadIDPattern    = regexp.MustCompile(`^thr_\d+$`)
-	ProjectIDPattern   = regexp.MustCompile(`^prj_\d+$`)
-	ProjectNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	ThreadIDPattern  = regexp.MustCompile(`^thr_\d+$`)
+	ProjectIDPattern = regexp.MustCompile(`^prj_\d+$`)
 )
+
+// ValidProjectName reports whether name can be a project's display
+// name: a directory's base name, so non-empty, not "." or "..", with no
+// "/" and no control characters (the event log is one line per event).
+func ValidProjectName(name string) bool {
+	if name == "" || name == "." || name == ".." || strings.Contains(name, "/") {
+		return false
+	}
+	return !strings.ContainsFunc(name, unicode.IsControl)
+}
 
 // High-specificity identifier patterns. These are the §2.7.1 /
 // §3.3-pass-1 deterministic identifier shapes — URLs, file paths, and
