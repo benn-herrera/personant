@@ -9,8 +9,7 @@ Must-see:
 ## What this is
 
 Personant is a memory system for a coding agent that runs under opencode. It owns
-what enters every model request — composition, compaction and summarization, recall, and the
-sub-mind split and re-merge — so that an agent has **persistent working memory across arbitrary
+what enters every model request — composition, compaction and summarization, and recall — so that an agent has **persistent working memory across arbitrary
 projects with continuity**: one continuous career, no session boundaries, no compaction-driven
 information loss, cross-project recognition (SPEC §1). opencode owns everything else: the terminal
 UI, session storage, agents, tools, permissions, providers and configuration.
@@ -18,6 +17,8 @@ UI, session storage, agents, tools, permissions, providers and configuration.
 ---
 
 ## Plugin route
+
+Standard pattern: THESIS "The building blocks", rows "The opencode plugin" and "The memory service".
 
 This section cites six research reports, all under `OPENCODE_RESEARCH/` at the repository root:
 
@@ -63,10 +64,7 @@ Outside context management, Personant uses what opencode has chosen, as it is. W
 opencode's machinery would decide what the model sees (compaction, history replay), the plugin
 takes that decision over through a hook; it does not reimplement the machinery. The host is
 opencode, not Charm's Crush: Crush reads provider API keys from environment variables and runs
-its TUI in-process with its backend, so there is no protocol to sit under. The alternative route, if
-this one cannot give the memory system the control it needs, is a full Go port of opencode's
-server (`ROADMAP_PLANS/OPENCODE_SERVER_REPLACEMENT.md`).
-
+its TUI in-process with its backend, so there is no protocol to sit under.
 ### Pinned release
 
 The supported opencode release is stated in one place: the version check in
@@ -124,7 +122,7 @@ noted).
   the plugin entry) into opencode's own config in opencode's own format. Personant-only settings
   live in `~/.config/personant/` and never overlap opencode's (see "One inspection location").
 - **Code Mode and plugins.** opencode's own server runs, so its JavaScript plugins and Code Mode
-  work unchanged. `ROADMAP_PLANS/code-mode-support.md` applies only to the alternative route.
+  work unchanged.
 - **Sessions and projects.** The project resolves from opencode's session directory through
   project resolution (see "Project identity"). A session reads and writes the one memory; turns
   are assigned to threads, never to sessions; deleting a session does not touch memory
@@ -398,6 +396,8 @@ When making a design decision, ask:
 
 ### The model drafts, deterministic code writes
 
+Standard pattern: THESIS "The building blocks", row "Model judgments".
+
 The model never directly mutates authoritative state. It proposes content; deterministic code
 validates it and writes it.
 
@@ -441,12 +441,9 @@ Personant's own state lives in three places:
   inspection is `cd ~/.personant && grep -r ...`.
 - `~/.config/personant/` — Personant-only settings (`config.toml`, SPEC §8.2.2). Nothing here
   overlaps opencode's configuration. `internal/store/paths.go` still places `config.toml` and
-  `providers.toml` under the store directory; moving them is ROADMAP.md work (install and config).
+  `providers.toml` under the store directory; ROADMAP.md work moves `config.toml` and removes `providers.toml` (U5).
 - opencode's data home — never inside the store directory (see "Start order and resume"); no
   Personant state, read by the database cleanup and reconcile.
-
-**Open:** U5 — whether `providers.toml` and `api_keys/` exist and where they are placed (SPEC
-§2.1, §8.2.1).
 
 ### No speculative prefetch
 
@@ -508,32 +505,16 @@ exception.
 
 ## Storage non-negotiables
 
+Standard pattern: THESIS "The building blocks", row "The memory store".
+
 | Decision | What | Why |
 |---|---|---|
 | Storage | text files in git | inspectability, history, recoverability, free `git log` / `diff` / `grep` |
 | Structured records | JSONL, sorted by id | line-grain diffs, not record-grain reformat |
 | Thread bodies | markdown + YAML frontmatter | hand-readable; standard tooling (Obsidian, Pandoc) |
-| Configuration | TOML (`config.toml` under `~/.config/personant/`; `providers.toml`: Open, U5) + markdown directives | hand-editable; secret-bearing files separated |
+| Configuration | TOML (`config.toml` under `~/.config/personant/`) + markdown directives | hand-editable; no secret-bearing file (SPEC §2.1) |
 | Derived files | regenerable from authoritative files | drift cannot accumulate; `autogit.CheckDerivedFresh` fails any state-changing git op on stale |
 | Git management | automatic on the store directory, never on user's workspace | the service owns the store's git; the user owns the workspace's |
-
-### Storage evolution: if/when scale forces it
-
-The storage non-negotiables above are constraints on the *authoritative* files — the source of
-truth that humans inspect, git tracks, and `cat`/`grep` operate on. They do **not** preclude a fast
-read-optimized **derived index** alongside them, accessed through the same `MemoryOps` port
-(an additional adapter or an internal optimization within the file adapter).
-
-If the markdown/JSONL authoritative files ever hit a critical speed ceiling — most plausibly under
-long-span simulation acceleration (especially inference-/embedding-in-loop runs), not interactive
-use — the option to reach for is **[bbolt](https://github.com/etcd-io/bbolt)** as a derived KV
-index, with the markdown-graph remaining authoritative. Choice: bbolt (read-heavy B+ tree, pure Go,
-etcd-proven), rebuildable via `MemoryOps.RegenerateDerivedState` and drift-checked like any derived
-file. Rejected: Pebble (write-optimized), LMDB (CGo); SQLite only if queries become SQL-shaped.
-
-This is **not** a planned upgrade. The asymmetric-cost discipline says: wait for simulation data
-that shows storage I/O dominates the sim's wall-clock per simulated month. The `MemoryOps` port
-makes the eventual decision local to one adapter.
 
 ### Port abstraction policy
 
@@ -929,10 +910,9 @@ reads it.
 
 ## The per-delta pipeline (§3.0)
 
-Personant treats the working window as a sequence of **deltas** (SPEC §3.0: each is one content
-addition to the window), not user-agent turns. The "turn" is a logging convenience; the
-load-bearing primitive is the per-delta pipeline, the fixed sequence of steps every delta runs.
-The principle: **no gaps**.
+The memory service takes content in as **deltas** (SPEC §3.0: each is one content addition to the
+window); a turn groups deltas. Every delta runs the per-delta pipeline, a fixed sequence of steps,
+so no content entering the window skips a step (**no gaps**).
 
 **Delta taxonomy** (SPEC §3.0.1; the opencode mechanism behind each is in "Event observation"):
 
@@ -994,6 +974,8 @@ lifecycle does not govern.
 ---
 
 ## The composed request and its slots
+
+Standard pattern: THESIS "The building blocks", row "Context composition".
 
 SPEC §3.1 states the outcomes: the token ceiling, the slot table and percentages, the live-turn
 reserve, the four slot policies (budget, internal priority, overflow form, unused-share rule), the
@@ -1072,6 +1054,8 @@ list by fetch order.
 
 ### Thread lifecycle
 
+Standard pattern: THESIS "The building blocks", row "Thread lifecycle".
+
 A thread's life moves through five stages (SPEC §2.2.1 holds the states):
 
 1. **Created** when the model emits `*new-topic*` in a topic tag, or by an explicit user act
@@ -1097,6 +1081,8 @@ The anchor set is what makes recall possible; the summary is what makes recognit
 display form is in "Storage and record formats".
 
 ### Symbol extraction (three passes ordered cheapest-first)
+
+Standard pattern: THESIS "The building blocks", row "Symbol extraction".
 
 1. **Deterministic** (every turn) — regex/parser scan over turn content extracts identifiers (file
    paths, URLs, code symbols, project-configured patterns, user `#tags`). Free, reliable, narrow.
@@ -1136,6 +1122,8 @@ read-only turn pays the full missing-tag fallback; whether such a turn should co
 conversational is an open calibration question.
 
 ### Recall paths (four, ordered by cost)
+
+Standard pattern: THESIS "The building blocks", row "Recall".
 
 1. **Model-native recognition** (default; cheapest). The registry slot is always in the composed
    request; the model recognizes prior threads directly when a turn engages them. It emits the
@@ -1251,6 +1239,8 @@ metadata"; Spec §4.5.)
 
 ### Personalization through feedback directive tuning
 
+Standard pattern: THESIS "The building blocks", row "Directives".
+
 Directives are inspectable files, and feedback signals tune them:
 
 - `directives/defaults.md` — system defaults, baked in.
@@ -1273,6 +1263,8 @@ what threshold); no aggregator exists, and the per-project statistics the recall
 
 ### Memory vetting
 
+Standard pattern: THESIS "The building blocks", row "Memory vetting".
+
 Not built; outcomes and open items: SPEC §1.8.
 
 Mechanism: behavior- and process-memory writes pass through the `MemoryOps` port, so the review stage sits at
@@ -1283,6 +1275,8 @@ Career-memory protection uses the slots, the turn and history repositories and c
 **Open:** which package holds the review stage and its provenance record.
 
 ### Crash recovery and the turn and history repositories
+
+Standard pattern: THESIS "The building blocks", row "Durability and crash recovery".
 
 The memory service can be hard-killed (SIGKILL, power loss) at any instant, so recovery is designed
 as a **deterministic cold-start reconciliation** — no signal handler doing teardown work, no model
@@ -1381,6 +1375,8 @@ built. Full design capture: **ROADMAP.md → Far-horizon, "Memory consolidation.
 
 ### Model access and inference telemetry
 
+Standard pattern: THESIS "The building blocks", row "Model access".
+
 opencode makes the provider call, so the memory service sees no provider response and receives none
 of the extended inference-timing block that `model.inference-telemetry` logs (`ttft_ms`,
 `prefill_ms`, `gen_ms`, `total_ms`, tokens/second and token counts; see "Event log format"). Token
@@ -1393,11 +1389,10 @@ vocabulary if there is none.
 The local provider is **oMLX**, an OpenAI-compatible endpoint, configured in opencode's own
 provider settings.
 
-**Open:** U5 — how the memory service reaches its own models (the summarizer, the clusterer, the
-embedder and recall judgment). (a) Through the plugin's `experimental.generate` over opencode's
-providers, which leaves no overlap; the embedder still needs Personant configuration because
-opencode has no embedding provider. (b) Through a Personant provider pool under
-`~/.config/personant/`, which must not name an endpoint opencode's providers also name.
+The memory service's judgments go through the host (SPEC §8.2.1); text generation for the
+summarizer, clusterer and recall judgment through the plugin's `experimental.generate` over
+opencode's providers; the embedder names an opencode provider in `[embedding]` (SPEC §8.2.2); how
+embeddings are requested through opencode is Open A12a.
 
 ### Model-family as platform
 
@@ -1446,7 +1441,7 @@ prompt expands both the family-tuning surface and the silent-drift surface.
 
 Designed, not built: multiple live opencode sessions open against one shared memory — multitasking
 one career. The plugin route makes it reachable (the memory service is already the single writer).
-Distinguished from multi-user (v2.0, locked): concurrent sessions interleave on *shared*
+Concurrent sessions interleave on *shared*
 authoritative state. Full design capture: **ROADMAP.md → "Concurrent sessions."**
 
 **Open:** two concurrent opencode sessions against one memory (SPEC §1.1). One consequence already
@@ -1631,6 +1626,8 @@ harness drive loop. The protocol is:
 
 ### Event log format
 
+Standard pattern: THESIS "The building blocks", row "The event log".
+
 The memory service↔harness measurement contract (`logs/YYYY-MM-DD.log`, `internal/eventlog`). SPEC §2.8
 states the requirement that every decision the §9 regime measures is recorded; this is the format
 and vocabulary. Plain text, append-only, one event per line; no JSON schema in v0.1:
@@ -1749,7 +1746,7 @@ If you see one of these proposed (or are about to write it), stop and surface th
 | "Let the model decide where to put state" | Pushes authoritative state into the model | Deterministic code holds state; the model drafts, deterministic code validates and writes |
 | "Re-implement something opencode owns" (tools, permissions, UI, session storage, providers) | Wheel re-invention; the project's one hard problem is context | Conform to opencode; take over only what enters the request, through a hook. Elsewhere, borrow existing designs and use well-maintained imports |
 | "Put memory logic in the plugin" | Splits the single writer; the plugin cannot be tested with the sim | The plugin forwards and applies; all state and logic stay in Go |
-| "Use SQLite for the thread registry" | Storage violation; loses inspectability + git-diffability | Text + git; SQLite stays in reserve as a *derived* index if scale forces it |
+| "Use SQLite for the thread registry" | Storage violation; loses inspectability + git-diffability | Text + git; a derived index only, if scale forces one (ROADMAP Far-horizon). |
 | "Have the model run `git commit` on the store working tree" | Mixes model-controlled with automatic git | The service commits automatically |
 | "Add this dep speculatively" | Approved-when-earned violation | Wait until consumer is real; bring dep in *with* consumer |
 | "Tests can come later" | Asymmetric-cost violation | Measurement infrastructure built alongside features, not after |

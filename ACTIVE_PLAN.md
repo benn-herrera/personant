@@ -188,9 +188,8 @@ following "apply" package executes the rulings.
   - each unstated departure in `architecture-cold-read.md` "Unstated departures": state it with
     its reason in the section covering the piece, or list it as a ROADMAP item where the design
     should conform instead;
-  - future intent in ARCHITECTURE. Known instance, ARCHITECTURE "Boundary": "The alternative
-    route, if this one cannot give the memory system the control it needs, is a full Go port of
-    opencode's server (`ROADMAP_PLANS/OPENCODE_SERVER_REPLACEMENT.md`)." It leaves; other
+  - future intent in ARCHITECTURE. N2 already removes the "Boundary" fallback sentence, the
+    Code Mode pointer and "Storage evolution" (`novelty-report.md` NV16, NV21); other
     future-tense passages A1 finds move to ROADMAP if not already there;
   - user-facing outcomes in ARCHITECTURE, from `adjagent-architect-arch-alone.md` "## 4. Passages
     stating user-facing behavior or outcomes" and `adjagent-go-coder-arch-alone.md` "## 4.

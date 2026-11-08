@@ -393,6 +393,12 @@ Concrete, mostly single-package items; independent of the sequence above unless 
 
 ## Far-horizon
 
+- [ ] **Derived index if scale forces it.** bbolt first (a read-heavy, pure-Go B+ tree); SQLite
+  only if queries become SQL-shaped; Pebble (write-optimized) and LMDB (CGo) rejected. Trigger:
+  simulation data showing storage I/O dominates the sim's wall-clock per simulated month, most
+  plausibly in long inference- or embedding-in-loop runs; not a planned upgrade. The index sits
+  beside the authoritative text files, which stay authoritative, behind the `MemoryOps` port, and
+  is rebuilt by `MemoryOps.RegenerateDerivedState` and drift-checked like any derived file.
 - [ ] **Transient-data event-log compaction and class-aware tool-output budget.** Compaction of the
   event log's transient data, and a budget on tool output that differs by data class. Builds on A7,
   which sets per-slot budgets and the whole-request bound but does not classify tool output by

@@ -11,8 +11,8 @@ Must-see:
 ## 1. Operating model
 
 Personant runs under unmodified opencode. Personant owns what enters every model request:
-composition (assembling each request from memory, §3.1), compaction and summarization, recall
-(surfacing older threads relevant to the current work, §3.4), and the sub-mind split and re-merge. opencode
+composition (assembling each request from memory, §3.1), compaction and summarization, and recall
+(surfacing older threads relevant to the current work, §3.4). opencode
 owns everything else: the terminal UI, session storage, the message data model, the event stream,
 agents, permissions, tools, providers and configuration. Where opencode has made a choice outside
 context management, Personant uses it as it is. Personant does not define interaction modes, a
@@ -446,7 +446,7 @@ turn (§3.0.4) has no user message and so no such line. **Open:** the opening li
 
 ## 3. Core algorithms
 
-### 3.0 Deltas (the architectural primitive)
+### 3.0 All content enters through one pipeline (deltas)
 
 The working window is a sequence of **deltas** — each one content addition to the window, with a
 source (§3.0.1); a "turn" only groups deltas into human-readable spans. **No gaps:** every path by
@@ -710,7 +710,7 @@ Three passes per §3.0.2 step 1, cheapest first:
 Symbols from task-class deltas (§3.10.1) enter the staging buffer (§3.10.2) instead of the turn
 buffer; they reach `symbols.jsonl` only on citation-window promotion (§3.10.4).
 
-#### Missing-tag protocol fallback (violation → fallback, never abort)
+#### A response without a topic tag never aborts the turn (missing-tag fallback)
 
 A response with no valid
 topic tag never aborts the turn. Two regimes, split by whether the turn's deltas require owner
@@ -887,7 +887,7 @@ question, and nothing is fetched without an ack.
 Every candidate the memory service touches is logged: `recall.accept` (with `ack=human|auto`, §2.8) or
 `recall.decline` (with a §4.3 reason).
 
-#### Lifecycle-aware symbolic scorer
+#### Superseded symbols still match in recall (lifecycle-aware symbolic scorer)
 
 The match target is `T(thr) = anchors ∪ {h.normalized}`, so a
 `superseded` symbol (retained in `history_symbols`, §2.7.4) stays matchable. The Jaccard *numerator*
@@ -2215,8 +2215,8 @@ the store directory is operating outside the memory service and owns the consequ
 
 ## 9. Measurement and validation regime
 
-The thesis — months-long continuity, drift-resistant memory, opportunistic recall,
-close-and-restore cycles that preserve meaning — is a behavioral claim, and it must be proven by
+Personant's behavioral claims — months-long continuity, drift-resistant memory, opportunistic recall,
+close-and-restore cycles that preserve meaning — must be proven by
 simulation **before** real use accumulates the state a structural defect would put at risk. This
 section defines that proof: the acceptance criterion (§9.1) and the instruments that measure it
 (§9.2–§9.4).

@@ -61,7 +61,7 @@ open items: [`SPEC.md`](SPEC.md) §1.1.
 ## Where Settings Live
 
 opencode's configuration, Personant's own settings and the memory home: [`SPEC.md`](SPEC.md) §8.1,
-§8.2.2 and §2.1; [`ARCHITECTURE.md`](ARCHITECTURE.md) "Single spelunking location". The current
+§8.2.2 and §2.1; [`ARCHITECTURE.md`](ARCHITECTURE.md) "One inspection location". The current
 code does not match them yet (ROADMAP A12).
 
 ## Build Targets
@@ -157,12 +157,12 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) "Module map".
 ## Storage Layout
 
 Memory is plain text in git under `~/.personant/` (override with `$PERSONANT_HOME` or `--home`).
-The tree: [`ARCHITECTURE.md`](ARCHITECTURE.md) "Home layout"; outcomes: [`SPEC.md`](SPEC.md) §2.
+The tree: [`ARCHITECTURE.md`](ARCHITECTURE.md) "Store directory layout"; outcomes: [`SPEC.md`](SPEC.md) §2.
 
 ## Crash Recovery
 
 Contract: [`SPEC.md`](SPEC.md) §4.5.8, and §1.6 for turns opencode itself interrupted. Mechanism:
-[`ARCHITECTURE.md`](ARCHITECTURE.md) "Crash stability and the dual-repo substrate".
+[`ARCHITECTURE.md`](ARCHITECTURE.md) "Crash recovery and the turn and history repositories".
 
 ## Status
 
@@ -177,7 +177,7 @@ lines" and [`CONVENTIONS.md`](CONVENTIONS.md) "Versioning and acceptance".
 ## Design Principles
 
 [`ARCHITECTURE.md`](ARCHITECTURE.md) "Applying the thesis", "The model drafts, deterministic code
-writes" and "Substrate non-negotiables".
+writes" and "Storage non-negotiables".
 
 ## Third Party Acknowledgements
 
