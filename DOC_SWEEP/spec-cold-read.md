@@ -2,7 +2,7 @@
 
 Readers: adjagent:architect and adjagent:go-coder, each on SPEC alone and on THESIS + SPEC, run by
 `DOC_SWEEP/cold-read.sh` against `DOC_SWEEP/SPEC.md` at `cf0b53a`. Answers:
-`.claude-temp/cold-read/adjagent-*-spec-*.md` (scratch; this file holds what was ruled).
+`DOC_SWEEP/cold-read-answers/adjagent-*-spec-*.md` (this file holds what was ruled).
 
 ## "Is not" crossings (both readers)
 

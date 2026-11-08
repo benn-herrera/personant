@@ -2,7 +2,7 @@
 
 Readers: adjagent:architect and adjagent:go-coder, each on ARCHITECTURE alone and on THESIS + SPEC
 + ARCHITECTURE, run by `DOC_SWEEP/cold-read.sh` against `5543a75`. Answers:
-`.claude-temp/cold-read/adjagent-*-arch-*.md` (scratch).
+`DOC_SWEEP/cold-read-answers/adjagent-*-arch-*.md`.
 
 Each finding was checked against the written record first (process notes, "Before putting a
 cold-read finding to the owner"). None needed a ruling.
