@@ -20,6 +20,13 @@ row or clause they match, and continue only on that person's direction:
   than SPEC §1.8's single write path, or that promotes a single-project pattern into behavior
   memory (SPEC §1.8 "Feedback directive tuning").
 
+When you propose a change, ask:
+
+- Does it have a measurement story? (How will we know it worked?)
+- Does it commit to a specific value, or set a provisional value to be calibrated?
+- Does it preserve or invert a recurring pattern (ARCHITECTURE "Recurring patterns")?
+- Does it create migration cost we can't recover from?
+
 ## Plan & Execute Process
 
 - active plan: `ACTIVE_PLAN.md` at the repo root, or `ACTIVE_PLAN/entry-point.md` when the plan is

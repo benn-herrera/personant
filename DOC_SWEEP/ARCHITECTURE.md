@@ -55,20 +55,19 @@ Personant runs under unmodified opencode as two pieces:
   "Concurrent sessions".
 
 Data flow: opencode's session runner calls the plugin's hooks and emits events; the plugin forwards
-each to `internal/opencodehook` over loopback HTTP + JSON; the handler drives an `internal/turn`
+each to the memory service over loopback HTTP + JSON; the handler drives an `internal/turn`
 phase, which reaches storage through the `memops` port; the answer returns the same way.
 
 ### Boundary
 
-Outside context management, Personant uses what opencode has chosen, as it is. Where
+Outside context management, Personant uses what opencode has chosen, as it is; the one exception is cleaning up the rows its checkpoint compactions leave in opencode's database (SPEC §1.7; see "opencode database cleanup"). Where
 opencode's machinery would decide what the model sees (compaction, history replay), the plugin
 takes that decision over through a hook; it does not reimplement the machinery. The host is
 opencode, not Charm's Crush: Crush reads provider API keys from environment variables and runs
 its TUI in-process with its backend, so there is no protocol to sit under.
 ### Pinned release
 
-The supported opencode release is stated in one place: the version check in
-the `sim-opencode` recipe (`justfile`). The source clone at `../opencode` is kept on the installed
+The supported opencode release is not yet stated: the production plugin and service are not built. The prototype states it in the version check of its `sim-opencode` recipe, on `probe-path`. The source clone at `../opencode` is kept on the installed
 release's tag, so the code read is the code run.
 
 ### Failure handling
@@ -94,7 +93,7 @@ noted).
   tail, the current user input and this turn's tool messages. Tool-call/tool-result pairs in the
   returned `messages` stay intact (integration-options report §4, item 4). Any other model call is
   kept off the provider: the `session.title` and `session.compaction` hooks supply `result`, which
-  skips the model call.
+  skips the model call, so no model request reaches the provider uncomposed (SPEC §1).
 - **Wire shape.** A composed request carries one non-empty system part, no empty parts and no
   mid-conversation system messages. Under that shape prompt text reaches the model byte-exact
   (pre-probe results §5; probe results §6, lesson 8). The hook also resets `options.maxTokens`:
@@ -127,22 +126,6 @@ noted).
   project resolution (see "Project identity"). A session reads and writes the one memory; turns
   are assigned to threads, never to sessions; deleting a session does not touch memory
   (SPEC §1.1).
-- **Session commands.** A command that survives is a plugin-registered command
-  (`CommandDomain.transform` → `CommandEditor.add`, whose `execute` runs server-side code), not a
-  `commands/*.md` file, which only expands into a prompt to the model that cannot be told apart
-  from a typed one (context-injections report §2).
-
-**Open:** U4 — which session commands survive (`/topic*`, `/topics`, `/done`, `/closures`,
-`/pause`, `/resume`, `/back-to`, `/no-revisit`, `/keep`, `/threads`, `/spine`, `/index-rebuild`,
-`/project*`, `/stats`): each is a plugin-registered command, made automatic, or dropped. Unverified:
-how the TUI shows a command whose `execute` sends no prompt, and how `execute` reports a result.
-
-**Open:** U4 — how ack questions reach the user. An ack question asks the user to confirm a step,
-and the answer is the ack. The recall offer, the review queue for closing threads and the
-project-resolution questions at startup all ask one. A plugin has only yes/no `permission.assert`;
-opencode's form service is not exposed to plugins (integration-options report §2.3). The
-alternative is to hand the question to the model through the opencode-expectations slot and read
-the answer on the next turn.
 
 ### Event observation
 
@@ -260,7 +243,7 @@ reached through the `MemoryOps.ComposeWorkingSet` port.
 | `ComposeRequest` | `session.context` | working-set composition and request assembly, from this turn's messages in the hook input |
 | `IngestToolResult` | `tool.execute.after` | tool-result deltas, held and applied in call order |
 | `IngestModelResponse` | `session.execution.succeeded` | tag strip, response journal, ceiling check, `model.response` delta |
-| `CloseTurn` | `session.execution.succeeded`, after `IngestModelResponse` | engagement, closing scan, `CommitTurn`, expiry of staged symbols, working-set persist, transcript tail; idempotent |
+| `CloseTurn` | `session.execution.succeeded`, after `IngestModelResponse` | engagement, closing scan, `CommitTurn`, working-set persist, transcript tail; idempotent |
 | `AbortTurn` | `session.execution.failed`, `.interrupted`, or a phase error | pre-authoritative rollback to the pre-turn snapshot |
 
 In the prototype, the phases exist in `internal/turn/probe_phases.go`; `RunTurnInProcess`
@@ -355,7 +338,7 @@ the supported `session.remove` instead.
 | `internal/crashpoint/` | named kill-point hooks, test-armed and a no-op in production |
 | `internal/eventlog/` | daily-rotated plain-text event log |
 | `internal/dedup/` | content identifiers, write-time diffs, excerpt identifier lines and the composition plan; pure; depends only on go-git `plumbing` |
-| `internal/turn/` | the per-delta pipeline, the turn loop, per-turn coalescing (the turn buffer), the staging buffer, recall candidates, the decay-triggered flow for closing a thread, and the phase entry points (`probe_phases.go`) |
+| `internal/turn/` | the per-delta pipeline, the turn loop, per-turn coalescing (the turn buffer), the staging buffer, recall candidates and the decay-triggered flow for closing a thread |
 | `internal/recall/scoring/` | pure Jaccard and cosine recall primitives, store-independent; fine level (per-excerpt chunk vectors), beam descent, and the summary-tree build (a per-thread index for long threads, searched by beam descent) |
 | `internal/recall/measure/` | application-side recall stack: `Service`, `Recaller`, the single async indexer and its index snapshot, `.recall-cache` sidecars, the consolidation tree builder |
 | `internal/recall/exact/` | the exact lexical (flat-scan) recall level |
@@ -363,9 +346,9 @@ the supported `session.remove` instead.
 | `internal/workset/` | context composition into slots (directives, registry, other-projects, active-threads, dormant-threads); a pure renderer |
 | `internal/prompt/` | system-prompt template, topic-tag parser, stream filter |
 | `internal/model/` | model client surface: OpenAI-compatible `HTTPClient`, scripted and generated `MockClient`, `MockServer` (the mock served as an OpenAI-compatible endpoint), SSE streaming |
-| `internal/opencodehook/` | prototype memory service: the loopback handlers the plugin calls, each driving one `internal/turn` phase |
-| `opencode-plugin/` | prototype plugin: forwards hooks and events, applies answers, per-RPC timeout and fail-open count |
-| `internal/scenarios/` | scenario harness, invariants, metrics; `sim/` the acceptance simulation; `opencode/` the opencode driver and executor |
+| `internal/opencodehook/` | Not in this tree (on `probe-path`): prototype memory service: the loopback handlers the plugin calls, each driving one `internal/turn` phase |
+| `opencode-plugin/` | Not in this tree (on `probe-path`): prototype plugin: forwards hooks and events, applies answers, per-RPC timeout and fail-open count |
+| `internal/scenarios/` | scenario harness, invariants, metrics; `sim/` the acceptance simulation (the prototype's `opencode/` driver and executor is on `probe-path`) |
 | `internal/{metrics,clock,index,verify,version,log,testsupport}/` | supporting subsystems: metrics emission, the single clock, derived-file rebuild, structural validation, version identity, logging, live-endpoint test helpers |
 | `justfile` | build, test and dependency-vetting recipes; the target inventory lives there |
 
@@ -435,7 +418,7 @@ The service performs many operations the model cannot. Most notably **git**:
 
 ### One inspection location
 
-Personant's own state lives in three places:
+Personant's own state lives in two places, and it reads a third:
 
 - The store directory — memory: the authoritative files and both git repositories. Forensic
   inspection is `cd ~/.personant && grep -r ...`.
@@ -461,7 +444,7 @@ binds:
 
 The registry slot is always in the composed request → the model recognizes a prior thread from its
 display line → emits a topic tag → the corresponding threads are loaded into the active set → the
-response is generated. The model recognizes the thread; the choice is not a heuristic guess.
+response is generated. The thread is recognized — by the model naming it in a topic tag, or by recall scoring it in the auto-fetch band (SPEC §3.4) — never prefetched on speculation.
 
 ### Asymmetric cost: prove ahead of time
 
@@ -487,19 +470,14 @@ the project-specific dependency rules, including the SQLite choice.
 
 ### Port-and-adapter at the memory store boundary
 
-Application code (`internal/turn`, `internal/opencodehook`, `internal/recall/measure`, `cmd/*`,
-scenarios harness) depends on `memops.MemoryOps` — the conceptual operations port — not on the
+Application code (`internal/turn`, `internal/recall/measure`, `cmd/*`) depends on `memops.MemoryOps` — the conceptual operations port — not on the
 memory store directly. One adapter ships today (`internal/memops/fileadapter`: JSONL + markdown +
 YAML frontmatter + TOML + go-git on the store directory); future adapters implement the same
 interface without rewriting callers or tests.
 
 Pure renderers (`internal/workset.Compose`, `internal/recall/scoring`) are **store-independent**:
 they import `memops`'s plain domain types (`SpineRecord`, `Budget`, `ThreadMeta`, ...) but never
-the `MemoryOps` port itself, operating only on data the caller already fetched. What stays direct
-from `internal/store` for the same reason: pure helpers (`Normalize`, `DominantSource`) and
-data-type aliases (`ThreadFrontmatter`, ...). Tests inspect the memory store directly via
-`h.Paths` in invariants — that's the test-side validator pattern, not an application-code
-exception.
+the `MemoryOps` port itself, operating only on data the caller already fetched. They import nothing from `internal/store`; the pure helpers they use (`Normalize`, `DominantSource`) are in `memops`. The scenario harness and its invariants read the memory store directly (`h.Paths`; `store.LoadArchiveIndex` for the archived thread set) — the test-side validator pattern, not an application-code exception.
 
 ---
 
@@ -513,7 +491,7 @@ Standard pattern: THESIS "The building blocks", row "The memory store".
 | Structured records | JSONL, sorted by id | line-grain diffs, not record-grain reformat |
 | Thread bodies | markdown + YAML frontmatter | hand-readable; standard tooling (Obsidian, Pandoc) |
 | Configuration | TOML (`config.toml` under `~/.config/personant/`) + markdown directives | hand-editable; no secret-bearing file (SPEC §2.1) |
-| Derived files | regenerable from authoritative files | drift cannot accumulate; `autogit.CheckDerivedFresh` fails any state-changing git op on stale |
+| Derived files | regenerable from authoritative files | drift cannot accumulate; `autogit.CheckDerivedFresh` fails a history-repository write that leaves a derived file stale |
 | Git management | automatic on the store directory, never on user's workspace | the service owns the store's git; the user owns the workspace's |
 
 ### Port abstraction policy
@@ -576,16 +554,16 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
   working-set.json                  # operational, gitignored; active-set order + dormant set
   .recall-cache/                    # operational, gitignored; derived recall indexes
   archive/index.jsonl               # authoritative; cold storage index (SPEC §3.8)
-  recovery/quarantine/<stamp>/      # operational; byte-exact bytes preserved by recovery
-  .git/                             # history repository: permanent, one day-grain commit per day
+  recovery/quarantine/<stamp>/      # operational, gitignored; byte-exact bytes preserved by recovery
+  .git/                             # history repository: permanent; one day-commit per day plus archival commits (SPEC §3.11)
   .git-daily/                       # operational, gitignored: turn repository, per-turn, deleted and recreated each day
 ```
 
 | Type | Examples | Drift policy |
 |---|---|---|
 | Authoritative | `spine.jsonl`, `threads/*`, `directives/*.md`, `projects/*/meta.json`, `logs/*.log`, `version.toml`, `archive/index.jsonl` | Source of truth; hand-editable. `logs/*.log` is the append-only turn-grain forensic record that crash recovery preserves and re-appends. |
-| Derived | `symbols.jsonl`, `projects/*/digest.json` | Regenerable from the authoritative files; a state-changing git operation on the store directory fails while any derived file is stale; never hand-edited. |
-| Operational | `.git/`, `.git-daily/`, `last-active`, `turn-journal.jsonl`, `op-in-progress.json`, `derived-watermark`, `working-set.json`, `.recall-cache/`, `recovery/` | System-managed, not drift-checked. All but `.git/`, `recovery/` and the shipped files are gitignored; the turn and history repositories are both in the managed gitignore block so neither sees the other as untracked (the ignore-block rule, SPEC §4.5.8). |
+| Derived | `symbols.jsonl`, `projects/*/digest.json` | Regenerable from the authoritative files; a history-repository write fails if it leaves a derived file stale; turn-repository commits are not checked; never hand-edited. |
+| Operational | `.git/`, `.git-daily/`, `last-active`, `turn-journal.jsonl`, `op-in-progress.json`, `derived-watermark`, `working-set.json`, `.recall-cache/`, `recovery/` | System-managed, not drift-checked, and gitignored: the managed gitignore block lists each, both repositories' git-dirs included, so neither repository sees the other as untracked (the ignore-block rule, SPEC §4.5.8). |
 
 ### Thread registry record (`spine.jsonl`)
 
@@ -598,14 +576,14 @@ interface SpineRecord {
   project: string;                   // /^prj_\d+$/; "prj_default" for unscoped threads
   anchors: string[];                 // [derived] 0..anchor.projection-max (8)
   anchors_projected_at_turn: number; // [derived] owner turn of last projection change (SPEC §3.2)
-  summary: string;                   // 100-150 char closing summary, ≤ spine.entry-max-chars; drafted at close
+  summary: string;                   // 100-150 char closing summary, ≤ spine.entry-max-chars; set from the first response at creation; replaced by the closing summary
   description: string;               // triggering utterance; set once, never rewritten
   state: ThreadState;                // the SPEC §2.2.1 states, as their lowercase names
   created: string;                   // RFC3339
   last_engaged: string;              // RFC3339; read by engagement decay, dormant order, digests
   state_changed: string;             // RFC3339
-  turn_count: number;                // total turns this thread has been engaged in
-  recall_fires: number;              // recall matches that led to a fetch; orders symbols.jsonl
+  turn_count: number;                // owner turns of this thread (SPEC §3.0.4)
+  recall_fires: number;              // recall matches that led to a fetch; orders each symbol's thread lists in symbols.jsonl
 }
 ```
 
@@ -629,17 +607,15 @@ interface SpineRecord {
 thr_<id> [<anchors joined with ", ">] — <summary> [<state>]
 ```
 
-Example: `thr_88 [trefoil, unknot, body-topology, electron-shape] — electron body-topology conflict;
+Example: `thr_88 [trefoil, unknot] — electron body-topology conflict;
 entries trf3bd / unk0bd added; awaiting Grant resolution [WIP]`.
 
 The human half of a thread's display — the working name a user reads and types back — is its
-`description`, falling back to `summary`, falling back to the id. A rename rewrites that name and
-nothing else: the id, the anchors, `history_symbols` and everything recall matches on are
-untouched. The user-facing rendering is `thr_N: display — gist` (SPEC §3.4).
+`description`, falling back to `summary`, falling back to the id.
 
 ### Thread directory (`threads/thr_<id>/`)
 
-- **`thread.md`** — YAML frontmatter (authoritative for metadata) and a single `# <title>` line; no
+- **`thread.md`** — YAML frontmatter (authoritative for metadata except the derived `anchors`) and a single `# <title>` line; no
   accumulating body, rewritten in full on every engagement.
 - **`turns/`** — the loose tier of excerpt storage: one terse excerpt file per owner turn, named by
   the thread's turn number zero-padded to 7 digits (`turns/0000024.md`). Appending a turn writes
@@ -755,8 +731,8 @@ A turn-excerpt file (`turns/0000024.md`):
     expand comes from the index.
 - **`description` vs `summary`.** `description` is a whitespace-collapsed copy of the spawning
   prompt, truncated to the new-thread summary length bound, set deterministically (no model
-  paraphrase). `summary` is the summarizer's closing summary, in frontmatter only (never in a turn
-  file); a thread that is not closed has no `summary`.
+  paraphrase). `summary` is the summarizer's closing summary, in frontmatter and the thread registry record, never in a turn
+  file; before closing it is the provisional summary set at creation.
 - **No parent thread.** No parent-thread field exists or is synthesized (the flat model, SPEC §3.2).
   Origin provenance is per symbol (`derived_from`); thread-level provenance is reserved.
 
@@ -811,7 +787,7 @@ when the tree first acquires one) and the display name `name`.
 
 ```typescript
 interface ProjectMeta {
-  id: string;                        // /^prj_\d+$/
+  id: string;                        // /^prj_\d+$/, or the reserved prj_default
   name: string;                      // /^[a-z][a-z0-9-]*$/; mutable
   current_root_path: string;         // absolute
   historical_root_paths?: string[];  // appended on a root move; never rewritten
@@ -882,9 +858,9 @@ parent's id.
 A thread's evolving identity lives in `history_symbols`; `anchors` is a deterministic re-derived
 projection of it, with no model involved.
 
-- `active` — currently in a top-`anchor.projection-max` slot (the zero value).
+- `active` — not superseded: in the projection now, or never yet central (the zero value).
 - `superseded` — once central, now ranked out. A label, not a candidacy gate: it competes on equal
-  footing every turn. Retained, not trimmed, so an abandoned premise remains a findable handle.
+  footing every turn. Retained, and protected from trimming while the protected set fits the cap, so an abandoned premise remains a findable handle.
 - *trimmed* — the absence of the entry (capacity trimming above).
 
 #### Projection
@@ -921,7 +897,7 @@ so no content entering the window skips a step (**no gaps**).
 - `fs.read`, `fs.write`, `fs.commit`
 - `thread.fetched` (**Open:** U3 — how a fetch is triggered under opencode)
 
-Other-projects slot digest content, session-command effects and directive reloads are not deltas:
+Other-projects slot digest content and directive reloads are not deltas:
 they change what the composer (`workset.Compose`) assembles.
 
 **Every delta runs the pipeline in this fixed order:**
@@ -938,8 +914,7 @@ they change what the composer (`workset.Compose`) assembles.
 Delta order and turn attribution: see "Ordering and correlation".
 
 **Implementation contract** (§3.0.5): a single internal `onContextDelta(source, content, metadata)`
-entry point. **No path mutates the working window without going through it.** Code review treats any
-direct mutation as a bug.
+entry point. **No delta reaches the working window without going through it.**
 
 Step 4 (budget check) is a documented no-op in v0.1 (`internal/turn/chain.go`,
 `TODO(phase-2-budget)`); `TestBudgetCheckIsExplicitNoOpV01` trips if it is half-enabled without a
@@ -968,8 +943,8 @@ spurious matches. The lifecycle prevents this at the source:
 The principle: **raw task-class bytes are always discardable; only the symbols that crossed over
 into a decision delta survive.** The persistent symbol index never sees transient symbols
 because they are filtered at insert time, not removed retroactively. File content is kept
-separately and persistently in the per-thread tracked-file store (SPEC §3.9.1), which this
-lifecycle does not govern.
+separately, in the per-thread tracked-file store, only as long as composition needs it (SPEC
+§3.9.1); this lifecycle does not govern it.
 
 ---
 
@@ -985,8 +960,7 @@ the mechanism.
 - **Derivation.** `context.token-budget` is a const (`memops.DefaultTokenCeiling`) plus a
   constructor override. The post-flight `usage.prompt_tokens` count is the real check; the byte
   shares drive pre-flight truncation. Of the §2.6.1 parameters only `closure.ack-mode` and
-  `recall.ack-mode` are served by the directive files (resolved by directive precedence at the
-  start of a service run); the rest are compiled-in defaults.
+  `recall.ack-mode` are served by the directive files; the rest are compiled-in defaults.
 - **Truncation.** Each rendered slot truncates to its byte budget at a UTF-8 rune boundary and
   appends the honest truncation notice. The dormant set is not count-capped: the dormant-threads
   slot's byte budget truncates it at composition time.
@@ -1037,9 +1011,9 @@ list by fetch order.
 | Concept | Definition | Spec |
 |---|---|---|
 | **Thread registry record** | one line of `spine.jsonl`; authoritative thread bookkeeping (id, project, anchors, summary, state, timestamps, turn_count, recall_fires) | "Storage and record formats" |
-| **Thread** | contiguous run of turns united by working on one specific problem; identified by `thr_<n>` (stable forever); a directory holding `thread.md` (YAML frontmatter), serial turn excerpts and a tracked-file store | "Storage and record formats" |
+| **Thread** | the turns, not necessarily consecutive, that work on one specific problem (SPEC §1.1, §3.2); identified by `thr_<n>` (stable forever); a directory holding `thread.md` (YAML frontmatter), serial turn excerpts and a tracked-file store | "Storage and record formats" |
 | **Project** | three identity levels: stable handle `prj_<n>`, mutable display name, optional remote identity (normalized git remote URL) | "Project metadata", SPEC §4.5 |
-| **Anchor symbol** | `[derived]` 0..8 normalized symbols, projected from active `history_symbols` (see "Symbol extraction"); drive recall and appear in the display line | "Symbol lifecycle and anchor projection" |
+| **Anchor symbol** | `[derived]` 0..8 normalized symbols, projected from retained `history_symbols` (see "Symbol extraction"); drive recall and appear in the display line | "Symbol lifecycle and anchor projection" |
 | **History symbol** | per-thread accumulated symbol (`raw`, `normalized`, `first_seen_turn`, `count`, `source`) plus a `lifecycle` (`active`/`superseded`) and an `ever_central` latch; the thread's evolving identity and the recall match set; capped per `history.cap-per-thread`, trimmed with ever-central + high-specificity protection | "Storage and record formats" |
 | **Symbol category** | `identifier` (preserve case), `entity` (lowercase + hyphenate), `tag` (lowercase, leading `#` stripped) | "Symbol normalization" |
 | **Symbol source** | `deterministic` / `model` / `user` / `curator`; dominance: `curator > user > model > deterministic` | "Symbol source" |
@@ -1061,15 +1035,14 @@ A thread's life moves through five stages (SPEC §2.2.1 holds the states):
 1. **Created** when the model emits `*new-topic*` in a topic tag, or by an explicit user act
    (**Open:** U4 — the command).
 2. **Active**, in the active set, while engaged (the model tags it in the per-turn topic list).
-3. **Dormant**, in the dormant set, as engagement decays (no longer in the model's recent topic
-   tags).
+3. **Dormant**, in the dormant set, once more recently engaged threads push it out of the active set (SPEC §3.1 LRU update rule).
 4. **Closed** at a resting point: it leaves the active and dormant sets and remains in the registry
    slot as a display line, with full content preserved in `threads/thr_<n>/`.
 5. **Archived**, in cold storage, only if thread registry size pressure builds — restorable by
    explicit fetch through git.
 
 A thread is closed when the work reaches a resting point, not under "context window pressure."
-Resting points are recognized by engagement decay (Spec §3.5).
+Resting points are recognized by engagement decay (Spec §3.5). Fallback dissection is the one path that closes threads under budget pressure; it is not built (see "Fallback dissection").
 
 ### Display lines are how the model recognizes threads
 
@@ -1088,9 +1061,7 @@ Standard pattern: THESIS "The building blocks", row "Symbol extraction".
    paths, URLs, code symbols, project-configured patterns, user `#tags`). Free, reliable, narrow.
 2. **Model-emitted** (every turn) — the topic tag's anchor list provides named-entity coverage the
    deterministic pass can't reach.
-3. **Summarizer** (at close) — the model drafts the closing summary (§3.5). A routine decayed thread
-   takes the draft as written; an anchor-rich or long-engaged thread, or one whose draft failed, is
-   queued as an exception for review (see "Closing a thread"). Anchors are not summarizer-picked
+3. **Summarizer** (at close) — the model drafts the closing summary (§3.5). Anchors are not summarizer-picked
    (below).
 
 #### Anchors and symbol history
@@ -1098,11 +1069,10 @@ Standard pattern: THESIS "The building blocks", row "Symbol extraction".
 `history_symbols` is the authoritative, accreting, weighted per-thread symbol history (capped at 40
 by default) and the recall match set. `anchors` is **not** a separately stored set — it is the
 deterministic top-`AnchorProjectionMax` (computed by `ProjectAnchors`) **projection** of the
-thread's *active* history symbols, re-derived each owner turn. `memops.AnchorProjectionMax` is a
+thread's *retained* history symbols, re-derived each owner turn. `memops.AnchorProjectionMax` is a
 compiled constant (8), not a config key: the SPEC §2.6.1 `anchor.projection-max` directive is not
-read. A symbol that falls out of the projection flips to **superseded** but is **retained, not
-trimmed** — an abandoned premise stays a findable recall handle, protected from capacity trimming
-by its `ever_central` latch. 0 anchors is legal (a vague-start thread that hasn't accreted a
+read. A symbol that falls out of the projection flips to **superseded** but is **retained** — an abandoned premise stays a findable recall handle, protected from capacity trimming
+by its `ever_central` latch while the protected set fits the cap. 0 anchors is legal (a vague-start thread that hasn't accreted a
 headline yet). (Spec §3.4; "Symbol lifecycle and anchor projection".)
 
 ### Topic-tag mechanics
@@ -1129,15 +1099,14 @@ Standard pattern: THESIS "The building blocks", row "Recall".
    request; the model recognizes prior threads directly when a turn engages them. It emits the
    topic tag at turn start. Handles synonyms and paraphrases for free, since the model does the
    recognizing.
-2. **Opportunistic surfacing** (deterministic backstop). When current-turn symbols match a closed
-   thread's anchors above threshold, the thread is brought forward by band (SPEC §3.4): a candidate
+2. **Opportunistic surfacing** (deterministic backstop). When current-turn symbols match, above threshold, the anchors and history symbols of a thread of the active project that this turn did not engage, the thread is brought forward by band (SPEC §3.4): a candidate
    at or above its signal's auto threshold is fetched with one visible line and no question; the
    band between the surface and auto thresholds is asked: *"We talked about X 2 days ago — pick up
    there?"*; nothing below surfaces (rationale: "The model drafts, deterministic code writes"). With
    no channel to the user, recall stays log-only.
    **Open:** U4 — the channel for the auto-fetch line and the ask offer. Under opencode a plugin has
    a yes/no question and no pick-list, so a multi-candidate offer cannot be a numbers/all/none list.
-3. **Cross-project recall** (other-projects slot → fetch). Per-project anchor digests in the
+3. **Cross-project recall** (other-projects slot → fetch). Designed, not built; a cross-project fetch is declined (SPEC §3.1, §3.2). Per-project anchor digests in the
    other-projects slot are scanned each turn. Same opportunistic mechanism as (2), slightly higher
    threshold.
 4. **Intra-thread recall of scrolled-out early content.** For the engaged long-running thread, the
@@ -1150,7 +1119,7 @@ Standard pattern: THESIS "The building blocks", row "Recall".
    scroll-out by up to the unembedded backlog limit; the recall-completeness invariant (SPEC §3.4)
    forbids a gap in findability there, so the automatic intra path also runs the completeness floor,
    a lexical pass over exactly that backlog (`exact.MatchExcerptsBySymbols` over
-   `MemoryOps.LoadDebtWindowExcerpts`, ≤ the limit, query-symbol match), and unions the hits.
+   `MemoryOps.LoadDebtWindowExcerpts`, (1 + pending) × the limit (below), query-symbol match), and unions the hits.
 
    The index is maintained by a single background indexer that swaps an `atomic.Pointer` index
    snapshot, so recall reads never block; an embed sequence guard (the per-thread turn count each
@@ -1187,9 +1156,8 @@ Triggers:
 
 Flow (SPEC §3.5): the summarizer drafts the closing summary → the candidate is classified. A
 **routine** closing is applied without asking, with one visible line and an `ack=auto` event. An
-**exception** (anchor-rich, long-engaged, or a failed or empty draft) is queued silently. The queue
-is derived, never stored — a decay-eligible thread that classified as an exception — so it is
-crash-safe and correct across restarts. A closing applied at a drain point (SPEC §3.5) writes the
+**exception** (anchor-rich or long-engaged) is queued silently. The queue
+is derived, never stored — a decay-eligible thread that classified as an exception. A closing applied at a drain point (SPEC §3.5) writes the
 thread file and updates the thread registry, and demotion out of the active and dormant sets follows
 (rationale for auto-applying routine closings: "The model drafts, deterministic code writes").
 
@@ -1199,14 +1167,14 @@ drain point has no counterpart.
 
 Cold storage archival (implemented; `internal/memops/fileadapter/fileadapter_archive.go`,
 `cmd/archive.go` `archive list`/`archive recover`): when thread registry size pressure builds, the
-memory service archives the oldest closed threads into cold storage, out of the thread registry, via
-`git rm` + `git commit` + an `archive/index.jsonl` entry. (Spec §3.8.)
+memory service archives the oldest closed threads into cold storage, out of the thread registry, by
+removing their directories, committing the removal and recording an `archive/index.jsonl` entry. (Spec §3.8.)
 
 A batch meets SPEC §3.8.1's three results as follows: each `threads/thr_<n>/` is confirmed tracked
 at HEAD before its tree hash is taken; the capture commit is `Add(".")` of the full store working
 tree into the history repository and precedes the membership append; removals are staged by
 `os.RemoveAll` plus `autogit.Add(".")`, and `RemoveSpineRecords` performs the single thread registry
-rewrite; the deletion commit runs `CheckSpineIntegrity` before and `CheckDerivedFresh` after.
+rewrite; the capture commit runs `CheckSpineIntegrity` before; the deletion commit runs `CheckDerivedFresh` and `CheckSpineIntegrity` after.
 Restore (`RecoverThread`, `autogit.CheckoutTree`) refuses with `ErrArchiveEntryNotFound` or
 `ErrArchiveIntegrity` and never writes a partial thread. `RecoverThread` and `ArchiveThreads` remain
 public port operations; a standalone `ArchiveThreads` is crash-recoverable through the same
@@ -1232,8 +1200,8 @@ stress, not catastrophic loss. (Spec §3.6.)
 ### Many projects, one career
 
 One thread registry across all projects. Every thread carries a `project` tag. The registry slot
-holds the current project's full thread registry as display lines; the other-projects slot holds
-compressed cross-project digests. Cross-project recall is designed (recall path 3), not emergent.
+holds the current project's thread registry as display lines, truncated to its budget (SPEC §3.1); the other-projects slot holds
+compressed cross-project digests. Cross-project recall is designed (recall path 3), not built; cross-project engagement is declined (SPEC §3.2).
 The architectural commitment: **one entity, many projects, one continuous career**. (See "Project
 metadata"; Spec §4.5.)
 
@@ -1248,7 +1216,7 @@ Directives are inspectable files, and feedback signals tune them:
   change here only from patterns aggregated across projects (explicit instructions, decline
   categorizations and accept/decline statistics are inputs to the aggregate, not single-project
   writers).
-- `directives/prj_<n>/*.md` — project-specific directives.
+- `directives/prj_<n>/project.md` — project-specific directives.
 
 By default a pattern seen in one project does not reach `user.md` or the defaults; it becomes a
 process-memory proposal or career memory. The user's policy can change this routing (SPEC §1.8). Process-memory directive files do not exist yet (SPEC §1.8
@@ -1282,8 +1250,7 @@ The memory service can be hard-killed (SIGKILL, power loss) at any instant, so r
 as a **deterministic cold-start reconciliation** — no signal handler doing teardown work, no model
 in the loop, no user acknowledgement. On-disk state alone determines the outcome. The load-bearing
 property: **the store working tree is the truth; git is a recovery-point index over it.** No
-authoritative byte ever lives *only* in git, so either git repository can be recreated from the
-store working tree and losing one is never losing content. (Spec §4.5.8.)
+authoritative byte of the store working tree lives only in the turn repository, so the turn repository can be recreated from the store working tree and losing it is never losing content. Archived threads live only in the history repository (cold storage, SPEC §3.8), so a missing history repository is refuse-to-open. (Spec §4.5.8.)
 
 Two git repositories track the one store working tree: the turn repository, per-turn and
 disposable, and the history repository, day-grain and permanent (cadence, cost bar and ≤1-turn
@@ -1465,7 +1432,6 @@ session directory:
    `historical_remote_urls`.
 2. Session directory path → known project's `current_root_path` / `historical_root_paths`.
 3. `last-active` confirmation.
-4. Final fallback: create / switch / no project (`prj_default`).
 
 **Open:** U4 — the channel for the interactive steps (the last-active confirmation, the final
 fallback, the remote-adoption and collision questions, the file-move question) and the command for
@@ -1484,9 +1450,8 @@ and the means by which the techniques evolve iteratively.
 
 The simulation harness (`internal/scenarios/`, including `internal/scenarios/sim/`) is a
 load-bearing deliverable under production discipline: one owner per value, key and contract; named
-constants; designed in these
-documents before coding; changed through CONVENTIONS review. A seam failure (a renamed metric key,
-a drifted log line name or a second clock path) makes a check pass vacuously, and the v0.1
+constants. A seam failure (a renamed metric key,
+a drifted log line name or a second clock path) makes a check pass vacuously, and the
 acceptance criterion is only as sound as the harness.
 
 ### Harness ↔ system-under-test coupling rule
@@ -1514,7 +1479,7 @@ one like the embedding flush-batching cap is.)
 7. **Acceptance simulation harness** — synthetic workload, logical-clock acceleration, steady-state
    assertions; the longest span is 120 days / four months (§9.1).
 
-v0.1 acceptance is the SPEC §9.1 acceptance criterion, run as a converging loop, not a one-shot
+Acceptance is the SPEC §9.1 criterion, run as a converging loop, not a one-shot
 pass.
 
 When making technique changes (parameter tweaks, algorithm adjustments), the question is always
@@ -1538,7 +1503,7 @@ into new code from day one; bolting it on later is much more expensive.
 | `sim/campaign.go`, `sim/wander.go`, `sim/intra.go` | Specialized step-sequence builders for the campaign, within-thread wander, and intra-thread recall workload variants. |
 | `sim/telemetry.go` | Per-day snapshot emission and the sim daily-record schema. |
 | `sim/sim_test.go`, `sim/sim_rung_test.go` | `TestSim` (acceptance ladder entry point) and span-by-span regression guards. |
-| `opencode/` | the opencode driver and executor (see "opencode-in-loop harness"). |
+| `opencode/` | the prototype's opencode driver and executor (on `probe-path`; see "opencode-in-loop harness"). |
 
 **State-ownership map — single source for every mutable harness value**
 
@@ -1642,14 +1607,12 @@ a new decision event adds its entry here. Actions ending in `-error` (and `warni
 diagnostics; §9 measurement keys off the decision events. No event carries multi-line content.
 
 ```
-2026-05-08T02:55:44-07:00 system.bootstrap version=0.1.0 home-format=1 commit=abc1234
+2026-05-08T02:55:44-07:00 system.bootstrap version=0.1.0 home-format=1 commit=abc1234 home=/Users/u/.personant
 2026-05-08T02:55:45-07:00 session.started active=prj_3
 2026-05-08T02:55:50-07:00 thread.engaged thr_42 turn_count=1247
 2026-05-08T02:55:51-07:00 spine.match-fire thr_88 score=0.62 matched=trefoil,unknot query_size=5
 2026-05-08T02:55:51-07:00 spine.embed-match-fire thr_88 score=0.610 query_chars=140
 2026-05-08T03:12:00-07:00 retire.prompt thr=thr_42 inactivity=12
-2026-05-08T03:12:45-07:00 retire.ack thr=thr_42 resolution=resolved edited=no
-2026-05-08T03:14:30-07:00 dissect.fire reason=budget-pressure clusters=4
 ```
 
 | Category | Events |
@@ -1739,8 +1702,6 @@ the catalog, including the design capture for consolidation and concurrent sessi
 
 ## Anti-patterns to push back on
 
-If you see one of these proposed (or are about to write it), stop and surface the concern:
-
 | Anti-pattern | Why it's wrong | Reach for instead |
 |---|---|---|
 | "Let the model decide where to put state" | Pushes authoritative state into the model | Deterministic code holds state; the model drafts, deterministic code validates and writes |
@@ -1750,7 +1711,7 @@ If you see one of these proposed (or are about to write it), stop and surface th
 | "Have the model run `git commit` on the store working tree" | Mixes model-controlled with automatic git | The service commits automatically |
 | "Add this dep speculatively" | Approved-when-earned violation | Wait until consumer is real; bring dep in *with* consumer |
 | "Tests can come later" | Asymmetric-cost violation | Measurement infrastructure built alongside features, not after |
-| "Mock model is too narrow; let's use a real model in tests" | Adds non-determinism, network dependency, cost | Mock with scripted/generated responses; real model for `just integration-test` only |
+| "Mock model is too narrow; let's use a real model in tests" | Adds non-determinism, network dependency, cost | Mock with scripted/generated responses as the default loop; a real model or embedder only in the opt-in live runs (`just integration-test`, the `sim` live toggles, `just sim-completeness-rung`, `just sim-tokenceiling-rung`) |
 | "Speculatively prefetch threads we *might* need" | Violates "every loaded thread is needed" | Model emits topic tag; memory service fetches what was named |
 | "Shorten the topic-tag instruction to save tokens" | While the in-band tag stands (Open: U3), emission is the load-bearing recognition signal | The system prompt's topic-tag directive is non-optional |
 | "Reset the store working tree when it's dirty on startup" | A markerless-dirty tree is a legitimate hand-edit; resetting on dirtiness destroys user work (and, when it is not yet in the history repository, a whole day) | Make `reset --hard` conditional on the operation marker/journal signal, never on dirtiness; absorb hand-edits forward (Spec §4.5.8 case 3) |
@@ -1767,7 +1728,7 @@ If you see one of these proposed (or are about to write it), stop and surface th
 | Where a package lives and what it does | "Module map" (this document) |
 | Record and file formats | "Storage and record formats" (this document) |
 | Storage constraints | ARCHITECTURE §"Storage non-negotiables" |
-| v0.1 acceptance criteria | SPEC §9.1 |
+| The acceptance criterion | SPEC §9.1 |
 | opencode facts the route rests on | the reports in `OPENCODE_RESEARCH/`, listed under "Plugin route" |
 
 ---
@@ -1782,18 +1743,11 @@ Personant evolves by:
 3. **Empirical pressure on watch items** — known weak spots (categorized below) surface via
    instrumentation; targeted work follows the data.
 
-When you propose a change, ask:
-
-- Does it have a measurement story? (How will we know it worked?)
-- Does it commit to a specific value, or set a provisional value to be calibrated?
-- Does it preserve or invert a recurring pattern (above)?
-- Does it create migration cost we can't recover from?
-
 **Categories of known weakness** the simulation regime is designed to surface and quantify:
 
 - **Symbol-extraction noise** — synonym fragmentation, low-information leakage, model emission
   drift.
-- **Recall precision** — cross-thread symbol collision, anchor selection quality at close.
+- **Recall precision** — cross-thread symbol collision, anchor projection quality (SPEC §2.7.4).
 - **Deterministic-pass coverage** — per-project regex curation needs.
 
 ---

@@ -315,6 +315,15 @@ Concrete, mostly single-package items; independent of the sequence above unless 
   permanently. SPEC §3.9.1 requires the store to live only
   in the store working tree and the turn repository. Barrier completion's restore of the store
   from primary HEAD depends on the current behavior (ARCHITECTURE "Tracked-file store").
+- [ ] **Anchor projection can emit an anchor `personant verify` rejects.** `turn.ProjectAnchors`
+  ranks high-specificity identifiers first with no length bound, and extraction admits URLs, file
+  paths and hex ids up to 64 characters (`internal/turn/chain.go`), while `verify` errors on an
+  anchor outside 3–50 characters (`internal/verify/verify.go`), so a thread whose top symbol is a
+  long path fails the day-commit's thread registry integrity check.
+- [ ] **Tag-less conversational turns are not kept.** `internal/turn/engage.go` returns before
+  writing any excerpt for a turn with no topic tag and no file edits, so its prompt and response
+  are unfindable, against SPEC §3.4's completeness invariant. Session-as-thread routing (A10)
+  gives every turn its session's thread as owner.
 - [ ] **Wire the mid-day re-baseline arming trigger.** The default-off knob that nukes and recreates
   the daily DB when loose objects cross a threshold mid-session has recovery handling and marker
   plumbing in place; the arming trigger is not wired. Adjacent: whether intra-day derived-watermark
