@@ -274,7 +274,13 @@ altered behaviour.
 
 **Open:** U8 — what `AbortTurn` does with an interrupted turn. Until decided, SPEC §4.3.3 binds: a
 retracted prompt does not enter memory, and the rollback restores run-volatile state
-(`internal/turn/rollback.go`).
+(`internal/turn/rollback.go`): the turn counter, the cross-turn staging buffer, active-set and
+dormant-set membership, history, recall-surfaced marks and embedding debt, all to the pre-turn
+snapshot. The `user.prompt` delta has already run (pipeline step 1) when a retraction arrives,
+which is why staged symbols need the restore. The rollback also releases the turn's journal scope,
+the span in which the turn's journal is non-empty, so the next start opens with no turn to recover.
+It happens in memory only and must not perturb the write ordering crash recovery depends on.
+Failures after an authoritative write do not roll back; recovery owns them.
 
 ### Start order and resume
 
@@ -563,7 +569,7 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
 |---|---|---|
 | Authoritative | `spine.jsonl`, `threads/*`, `directives/*.md`, `projects/*/meta.json`, `logs/*.log`, `version.toml`, `archive/index.jsonl` | Source of truth; hand-editable. `logs/*.log` is the append-only turn-grain forensic record that crash recovery preserves and re-appends. |
 | Derived | `symbols.jsonl`, `projects/*/digest.json` | Regenerable from the authoritative files; a history-repository write fails if it leaves a derived file stale; turn-repository commits are not checked; never hand-edited. |
-| Operational | `.git/`, `.git-daily/`, `last-active`, `turn-journal.jsonl`, `op-in-progress.json`, `derived-watermark`, `working-set.json`, `.recall-cache/`, `recovery/` | System-managed, not drift-checked, and gitignored: the managed gitignore block lists each, both repositories' git-dirs included, so neither repository sees the other as untracked (the ignore-block rule, SPEC §4.5.8). |
+| Operational | `.git/`, `.git-daily/`, `last-active`, `turn-journal.jsonl`, `op-in-progress.json`, `derived-watermark`, `working-set.json`, `.recall-cache/`, `recovery/` | System-managed, not drift-checked, and gitignored: the managed gitignore block lists each, both repositories' git-dirs included, so neither repository sees the other as untracked (the ignore-block rule; see "Crash recovery and the turn and history repositories"). |
 
 ### Thread registry record (`spine.jsonl`)
 
@@ -588,6 +594,10 @@ interface SpineRecord {
 ```
 
 `anchors_projected_at_turn` and `description` decode as 0 and empty on old records.
+
+At owner-turn close, after merge → project → trim (see "Projection"), the record is rewritten only
+when the projected anchor set differs from the prior one; `anchors_projected_at_turn` is then set
+to the current owner-turn index.
 
 #### Constraints enforced by `personant verify`
 
@@ -840,8 +850,11 @@ multi-word entities; a single-token entity that is a stop word is preserved. Sto
 ### Symbol source
 
 When several sources emit a symbol, `source_dominant` is the most frequent across its
-symbol-history entries; ties break `curator > user > model > deterministic`. `source` records how a symbol was
-emitted; `derived_from` records which thread it came from; the two are orthogonal.
+symbol-history entries; ties break `curator > user > model > deterministic`. In the symbol index a
+thread's anchor counts as `curator`-sourced (`internal/index/symbols.go`): a stored label for
+anchors, not summarizer output, since the summarizer contributes no symbols (see "Symbol extraction").
+`source` records how a symbol was emitted; `derived_from` records which thread it came from; the
+two are orthogonal.
 
 **`derived_from` population** is deterministic (no model, no human). At each turn's symbol-history
 merge, for every symbol emitted into the engaged thread: if that normalized symbol also belongs to
@@ -882,6 +895,22 @@ trim, so a symbol entering the projection has `ever_central` latched before the 
 reads it.
 `history_len` and `ever_central_count` staying flat over a run is a SPEC §9 sim obligation.
 
+### Archive index (`archive/index.jsonl`)
+
+[Authoritative] One JSON line per archived thread, sorted by `thr_id`; SPEC §3.8.1 states what it
+must hold. The completed entry:
+
+```jsonl
+{"thr_id":"thr_42","commit_hash":"<H>","parent_commit_hash":"<capture commit; H's parent>","tree_hash":"<tree sha of threads/thr_42/ at the capture commit>","archived_at":"<RFC3339>","original_path":"threads/thr_42/","spine_summary":"<summary at archival time>","anchors":["..."],"project":"prj_3","recovered_at":""}
+```
+
+`spine_summary` and `anchors` are copied verbatim from the thread registry record at archival time.
+`parent_commit_hash` is the capture commit whose tree still holds the thread bytes; a restore reads
+from it directly rather than walking `commit_hash`'s first parent, which picks the wrong lineage on
+a merge commit. An entry whose `commit_hash` is still empty is an **archive entry awaiting
+back-fill**. `recovered_at` is empty until the thread is restored. Losing the index loses no data:
+the thread bytes stay reachable from the capture commit's tree.
+
 ---
 
 ## The per-delta pipeline (§3.0)
@@ -909,6 +938,7 @@ they change what the composer (`workset.Compose`) assembles.
 3. **Dedup decision** (§3.9) — buffered; identifier lines and the tracked-file store update at
    turn close; replacement at composition.
 4. **Budget check** (§3.1) — budget demotion so the budget is honored before the next delta lands.
+   Demotion adds no delta: it emits a log line and ends.
 5. **Logging** (SPEC §2.8; see "Event log format").
 
 Delta order and turn attribution: see "Ordering and correlation".
@@ -936,9 +966,12 @@ spurious matches. The lifecycle prevents this at the source:
    buffer into the turn buffer (where source-dominance merge folds it with the citing delta's
    contribution) and is removed from the staging buffer.
 3. **Expiry.** At the top of each turn (after `TurnNumber++`, before any pipeline step), staged
-   entries older than `stagingWindowTurns` (default 3) expire (`pruneStaging`). Their symbols
+   entries staged before turn `currentTurn − K + 1` expire (`pruneStaging`: `cutoff :=
+   TurnNumber − stagingWindowTurns + 1`, with `stagingWindowTurns` = K, default 3). Their symbols
    never reach the persistent symbol index. The window is a compiled-in constant; a staging entry
-   holds the normalized form, raw form, source, and the turn it was staged.
+   holds the normalized form, raw form, source, and the turn it was staged. A later task-class
+   delta carrying the same normalized form overwrites the entry and refreshes its staged turn,
+   which restarts the window.
 
 The principle: **raw task-class bytes are always discardable; only the symbols that crossed over
 into a decision delta survive.** The persistent symbol index never sees transient symbols
@@ -958,9 +991,26 @@ unused-share reallocation, the opencode-content slots and the tool-output cap. T
 the mechanism.
 
 - **Derivation.** `context.token-budget` is a const (`memops.DefaultTokenCeiling`) plus a
-  constructor override. The post-flight `usage.prompt_tokens` count is the real check; the byte
-  shares drive pre-flight truncation. Of the §2.6.1 parameters only `closure.ack-mode` and
+  constructor override. The post-flight prompt token count is the real check (opencode reports it in
+  `session.step.ended`; see "Model access and inference telemetry"); the byte
+  shares drive pre-flight truncation. A slot's byte share is the ceiling times a conservative
+  ~2.5 bytes per token, counting text bytes only; the pre-flight check covers this composition plus
+  the live-turn sub-policy. Of the §2.6.1 parameters only `closure.ack-mode` and
   `recall.ack-mode` are served by the directive files; the rest are compiled-in defaults.
+- **Slot sources and rendering** (`internal/workset`):
+  - *directives:* `directives/defaults.md`, `directives/user.md` and
+    `directives/prj_<n>/project.md` of the active project, plus the project's `conventions_paths`;
+    a section-divided concatenation with each directive file's YAML frontmatter stripped.
+  - *registry:* `spine.jsonl` filtered to `project == active`, one display line per record (see
+    "Display lines are how the model recognizes threads").
+  - *other-projects:* `projects/<id>/digest.json` of every other project except `prj_default`, one
+    line each, `<name> (<id>): <one_line_summary> :: <recent_anchors[:5]>`, sorted by `last_active`
+    descending, each line capped at `cross-project.digest-per-project-bytes`.
+  - *active-threads:* `threads/thr_<id>/` for each id in the active set, up to `layer.b-top-k`,
+    most recently engaged first, each rendered as a heading, a frontmatter line and the body; a
+    thread's share is the slot's share ÷ `layer.b-top-k` and an oversized thread is truncated on its
+    own.
+  - *dormant-threads:* the `spine.jsonl` records of the dormant set, one display line per record.
 - **Truncation.** Each rendered slot truncates to its byte budget at a UTF-8 rune boundary and
   appends the honest truncation notice. The dormant set is not count-capped: the dormant-threads
   slot's byte budget truncates it at composition time.
@@ -996,7 +1046,10 @@ active-threads slot is active engagement (fetch flow: "No speculative prefetch")
 
 The active-set order and the dormant set are the memory service's `ActiveThreads` and
 `DormantThreads` lists (most-recently-engaged first), persisted each turn to `working-set.json` in
-the store directory (gitignored) so recency survives a relaunch. A second excerpt write for
+the store directory (gitignored) so recency survives a relaunch. At turn close, after the turn's
+engagements commit, each engaged thread id is removed from both lists if present and placed at the
+front of `ActiveThreads`; if `ActiveThreads` then exceeds `layer.b-top-k`, its tail is demoted to
+the front of `DormantThreads`. A second excerpt write for
 one turn is refused with `ErrTurnAlreadyOwned`. The unknown-thread-id owner fallback ranks tagged
 ids by `last_engaged_turn`, a service-run-scoped counter that is not in the thread registry record;
 it is deliberately not used for the no-tag owner-default, which ranks by active-set order because
@@ -1091,6 +1144,29 @@ the missing-tag reminder. `fs.read` deltas buffer a write entry like `fs.write`,
 read-only turn pays the full missing-tag fallback; whether such a turn should count as
 conversational is an open calibration question.
 
+The parser (`internal/prompt/parser.go`) recognizes a tag with this RE2 pattern, compiled with
+`(?m)`:
+
+```
+^\s*\*topic:\s*([^\[]+?)\s*\[([^\]]*)\]\s*\*\s*$
+```
+
+Group 1 is the thread list: comma-split, whitespace-trimmed, each entry validated against
+`thr_\d+|\*new-topic\*`. Group 2 is the anchor list: comma-split, whitespace-trimmed, then run
+through the SPEC §2.7.2 normalization. The bare alias is the line-anchored pattern
+`^\s*\*new-topic\*\s*\[([^\]]*)\]\s*$`; a bare `*new-topic*` with no bracket pair stays invalid and
+is classified `bare-new-topic` (see "Event log format").
+
+**Mid-turn fetch (SPEC §5.5).** When the tag names a `thr_<n>` outside the active set, the service
+parses the tag before it consumes any response body and aborts the in-flight stream. For each such
+thread it reads `threads/thr_<n>/` (frontmatter from `thread.md`; body assembled from the
+recent-excerpt window and, when needed, from `folio.jsonl`), truncates it to its active-threads
+allowance, fires a `thread.fetched` delta (SPEC §3.0.1) and loads the thread at the front of the
+active set, where overflow past `layer.b-top-k` demotes the tail to the dormant set. It then
+re-issues the request with the recomposed system prompt, and the second stream's body is the
+user-visible response. The re-prompt is capped at one per turn; a thread of another project is
+declined at the fetch seam (`thread.fetch-cross-project`).
+
 ### Recall paths (four, ordered by cost)
 
 Standard pattern: THESIS "The building blocks", row "Recall".
@@ -1104,6 +1180,14 @@ Standard pattern: THESIS "The building blocks", row "Recall".
    band between the surface and auto thresholds is asked: *"We talked about X 2 days ago — pick up
    there?"*; nothing below surfaces (rationale: "The model drafts, deterministic code writes"). With
    no channel to the user, recall stays log-only.
+   The symbolic scorer matches on `T(thr) = anchors ∪ {h.normalized}` over the thread's
+   `history_symbols`, so a `superseded` symbol stays matchable. The Jaccard numerator is a weighted
+   sum: a matched symbol counts 1.0 if `active` in that thread and `recall.superseded-weight` if
+   `superseded`, and a symbol that is also a projected anchor counts as active. The denominator
+   (union size) is unchanged, and at weight 1.0 the score is byte-identical to the plain-count
+   scorer. The label is read from the thread's frontmatter `lifecycle`, not from the derived index:
+   `symbols.jsonl` `superseded_in` is the cheap-scan filter ("which threads abandoned premise X",
+   O(1) per query symbol) and the scorer does not consume it.
    **Open:** U4 — the channel for the auto-fetch line and the ask offer. Under opencode a plugin has
    a yes/no question and no pick-list, so a multi-candidate offer cannot be a numbers/all/none list.
 3. **Cross-project recall** (other-projects slot → fetch). Designed, not built; a cross-project fetch is declined (SPEC §3.1, §3.2). Per-project anchor digests in the
@@ -1112,7 +1196,9 @@ Standard pattern: THESIS "The building blocks", row "Recall".
 4. **Intra-thread recall of scrolled-out early content.** For the engaged long-running thread, the
    fine-level chunk embedding index recalls early turns that have scrolled out of the
    recent-excerpt window. The engaged thread bypasses the coarse level and runs directly against
-   its own indexed chunks. On threads long enough to have a built summary tree, an O(log n) beam
+   its own indexed chunks. Every thread is an indexed body: one coarse vector for the thread body
+   plus per-excerpt chunk vectors. An active thread's recent-excerpt window is in the working set
+   and is not embedded; excerpts scrolling out of it become index material. On threads long enough to have a built summary tree, an O(log n) beam
    descent (`scoring.DescendChunks`) replaces the flat O(C_main) scan — consolidation builds and
    maintains the per-thread summary trees (`measure.RebuildTrees`); absent or stale trees fall back
    to the flat scan with no correctness loss. The fine level is filled asynchronously, so it lags
@@ -1125,12 +1211,25 @@ Standard pattern: THESIS "The building blocks", row "Recall".
    snapshot, so recall reads never block; an embed sequence guard (the per-thread turn count each
    flush carries) stops a stale in-flight embed from overwriting a fresher vector, and a flush
    arriving at an *equal* count (the same-turn limit-flush plus dormancy-flush double enqueue)
-   always publishes. The completeness floor scans `(1 + pending) × limit` excerpts: `limit` is the
+   always publishes. Two triggers enqueue a flush: the unembedded backlog limit (16 turns of
+   accumulated scrolled-out content, a provisional value calibrated in SPEC §9) and the dormancy
+   transition, which flushes a thread's remaining backlog when it decays out of the working set so
+   its whole body is indexed before it becomes a pure recall target. The completeness floor scans `(1 + pending) × limit` excerpts: `limit` is the
    unembedded backlog limit (16) and `pending` counts enqueued-but-unpublished flush jobs — 0 at
    steady state and at most 258 at the v0.1 queue depth of 256 (queue plus one in process plus one
    blocked enqueue). Only a genuinely failed flush drops a pending job without publishing.
    Persisted vectors and summary trees are `.vec`/`.tree` sidecars under `.recall-cache/` in the
-   store directory (`internal/recall/measure/veccache.go`, `treecache.go`).
+   store directory (`internal/recall/measure/veccache.go`, `treecache.go`). Each is keyed by a
+   content-staleness marker (a body or chunk hash), written through by the indexer and loaded at
+   startup; a miss is rebuilt, so a service run re-embeds only what changed, O(changed) rather than
+   O(all).
+
+   In-context exclusion: when an intra-thread candidate is accepted, the service records its
+   turn-excerpts as in-window for the engaged thread (`recallWindowTurns` in `internal/turn`), and
+   the recall stack drops them from both the intra-thread scan and the lexical completeness floor.
+   The mark ends when the thread is demoted out of the active set. It is held in memory only:
+   `working-set.json` restores the active set after a restart, but the composed request then no
+   longer holds the accepted excerpts, and the marks and the window are rebuilt together.
 
 **Decline categorization** is an input to feedback directive tuning (cross-project aggregate only;
 see "Personalization through feedback directive tuning") so that a bad match does not suppress good
@@ -1170,14 +1269,43 @@ Cold storage archival (implemented; `internal/memops/fileadapter/fileadapter_arc
 memory service archives the oldest closed threads into cold storage, out of the thread registry, by
 removing their directories, committing the removal and recording an `archive/index.jsonl` entry. (Spec §3.8.)
 
-A batch meets SPEC §3.8.1's three results as follows: each `threads/thr_<n>/` is confirmed tracked
-at HEAD before its tree hash is taken; the capture commit is `Add(".")` of the full store working
-tree into the history repository and precedes the membership append; removals are staged by
-`os.RemoveAll` plus `autogit.Add(".")`, and `RemoveSpineRecords` performs the single thread registry
-rewrite; the capture commit runs `CheckSpineIntegrity` before; the deletion commit runs `CheckDerivedFresh` and `CheckSpineIntegrity` after.
-Restore (`RecoverThread`, `autogit.CheckoutTree`) refuses with `ErrArchiveEntryNotFound` or
-`ErrArchiveIntegrity` and never writes a partial thread. `RecoverThread` and `ArchiveThreads` remain
-public port operations; a standalone `ArchiveThreads` is crash-recoverable through the same
+A batch meets the three results of SPEC §3.8.1 as follows:
+
+- *Membership recorded before deletion.* One entry per thread (see "Archive index") is durably
+  appended to `archive/index.jsonl` with an empty `commit_hash` but full `parent_commit_hash`,
+  `tree_hash`, `original_path` and thread registry snapshot, before any thread directory is
+  removed. That entry set is the worklist a crash completion consumes. Each `threads/thr_<n>/` is
+  confirmed tracked at HEAD before its tree hash is taken.
+- *Bytes reachable after.* The capture commit is `Add(".")` of the full store working tree into the
+  history repository and precedes the membership append. It lands the day's cumulative content,
+  which makes removing the turn repository at rollover safe, and becomes the parent of the deletion
+  commit whatever the turn repository's commit cadence. Each directory's git tree hash is captured
+  there, and a restore verifies against it. Removals are staged by `os.RemoveAll` plus
+  `autogit.Add(".")`, and `RemoveSpineRecords` performs the single thread registry rewrite, with
+  derived state regenerated once for the batch. The capture commit runs `CheckSpineIntegrity`
+  before; the deletion commit runs `CheckDerivedFresh` and `CheckSpineIntegrity` after.
+- *Bounded commits.* A final back-fill commit records the deletion commit's hash as `commit_hash`
+  in the entries awaiting back-fill, so a batch adds a bounded number of commits.
+
+Restore (`RecoverThread`, `autogit.CheckoutTree`):
+
+1. Look up the entry by `thr_id`; refuse with `ErrArchiveEntryNotFound` if absent, and refuse an
+   entry whose `commit_hash` is empty.
+2. Restore the full `threads/thr_<n>/` subtree from the entry's `parent_commit_hash` commit; an
+   entry lacking it is restored from the deletion commit's first parent (`autogit.ParentCommitHash`).
+3. Recompute the restored directory's tree hash and verify it against `tree_hash`. A mismatch
+   deletes the partial restore and fails with `ErrArchiveIntegrity`, so a partial thread is never
+   written onto the thread registry.
+4. Add a thread registry record reusing the same `thr_<n>` id (the registry stays sorted by id),
+   with `state = wip` and `last_engaged` updated; anchors and summary come from the restored
+   frontmatter, not the archive snapshot.
+5. Set `recovered_at` on the entry and commit the restored files, the registry and the archive
+   index to the turn repository (`autogit.Daily`, message `archive: recover …`), which folds them
+   into the day at the next rollover.
+
+Archived threads are off live recall because the §3.4 scan covers the thread registry and
+per-thread frontmatter, and an archived thread has neither. `RecoverThread` and `ArchiveThreads`
+remain public port operations; a standalone `ArchiveThreads` is crash-recoverable through the same
 roll-forward.
 
 ### Fallback dissection (worst-case path)
@@ -1272,19 +1400,255 @@ Under opencode the bar is judged against turns the user saw complete (SPEC §4.5
 opencode recorded as terminal that memory rolled back is lost until reconcile re-ingests it (see
 "Start order and resume").
 
-Mechanism names. A turn is two journal appends (`JournalTurn`, kinds `prompt` and `response`)
-followed by `CommitTurn`, which stages only the recorded write set through `autogit.AddPaths` with
-no integrity flags; `store.JournalOwner` reads the turn id from the journal's first record, and a
-legacy `op=turn` operation marker is still read. Core recovery (`internal/recovery`) only detects
+#### Observables
+
+Recovery reads the following on-disk signals and classifies them into exactly one case, numbered
+1–12 under "Recovery cases". No signal is trusted transitively; each is read against the correct
+repository.
+
+- **Journal as turn signal.** A non-empty `turn-journal.jsonl` is the in-flight-turn signal; there
+  is no separate marker file. Its first record carries the turn id (`store.JournalOwner`), and the
+  first append's fsync makes the signal durable. An `op=turn` marker file left by an older binary
+  is still read and reconciled.
+- **Batch marker.** `op-in-progress.json` (store directory, gitignored, survives `reset --hard`)
+  covers batch operations only: `{op: archival|sleep|recovery|barrier|rebaseline, day?, orig?}`,
+  where `sleep` is consolidation and `barrier` is the day rollover. It is written before a batch
+  operation's authoritative mutations and cleared as the last step. Its presence is the
+  batch-in-flight signal, and `op=barrier` carries the target `day`.
+- **Watermark.** `derived-watermark` (gitignored) holds the turn repository HEAD hash the derived
+  files were last built from. Turn repository HEAD equal to the watermark, with the store working
+  tree clean against that HEAD, means derived files are fresh: the O(1) clean-open certificate.
+- **Trailers.** Every turn-repository commit carries `Personant-Turn: <id>`, read as the head turn
+  id; every history-repository commit carries `Personant-Day: <N>`, read as the head day number.
+  The head turn id discriminates the torn-turn cases (4, 5, 6); the head day number drives
+  new-day detection and the day-commit guard. The head day number is undefined only for a bare,
+  never-committed history repository.
+- **Turn repository state** — present, missing or half-created — is evaluated defensively and
+  first, before any turn-repository read. A failure to open a corrupt or partial `.git-daily`
+  classifies as half-created and is never a propagated error, so a corrupt turn repository is
+  recreated from the store working tree and never wedges an open.
+
+#### Turn transaction and journal
+
+A turn is written to the turn repository in three ordered steps:
+
+1. Append the prompt record to the journal (`JournalTurn`, kind `prompt`, fsync) before the model
+   call. The first append arms the in-flight signal.
+2. Append the response record (kind `response`, fsync) before any authoritative write. A
+   journal-append failure aborts the turn before any authoritative write.
+3. At turn close, `CommitTurn` commits the turn's scoped write set to the turn repository with the
+   `Personant-Turn: <id>` trailer, then truncates the journal; the truncate is the scope release.
+   A commit failure leaves the journal non-empty and fails loudly into recovery.
+
+Staging is scoped to the turn's recorded write set (`spine.jsonl`, touched thread directories, the
+day's event log, recorded at each write site and never guessed) through `autogit.AddPaths` with no
+integrity flags, so it costs O(write set) with no tree walk and turn-repository commits are not
+validated. Structural changes (creating or closing a thread, creating a project) ride the per-turn
+commit and fold into the day at rollover. A hand-edit is therefore absorbed at the next full
+staging pass: a clean-stop checkpoint, or the archival and day-commit steps of the day rollover.
+The §5.5 re-prompt caps live entirely inside a turn, ahead of step 3.
+
+The journal is `turn-journal.jsonl` in the store directory (flat, operational, gitignored): one
+record per line, `{turn, kind: prompt|response, at, bytes}`, fsync per append. The truncate to
+empty at turn commit carries no fsync (`store.TruncateJournal`). A power-loss resurrection of a
+stale-but-truncated journal is the redundant-journal case, case 5 (`turn == head turn id`)
+(`TestCell5_ResurrectedTruncatedJournal`), and the next turn's first append fsync makes the
+truncate durable before any new authoritative dirt can exist. A torn append is bounded to that one
+turn's content, which is the ≤1-turn bar. A torn final line is skipped by the scan, never parsed.
+On a torn turn the journal bytes are written to a recovery artifact and surfaced to the user
+(**Open:** U4 — the channel). They are never auto-replayed into the authoritative files, because a
+turn's derivation (tag parse, symbol extraction, engagement) is not replayable.
+
+#### Recovery cases
+
+Turn cases 4, 5 and 6 evaluate against the turn repository; case 12 against the history
+repository. An archive entry awaiting back-fill is an entry of the "Archive index" whose
+`commit_hash` is still empty.
+
+| Case | Trigger | Action |
+|---|---|---|
+| 1 clean | no marker, turn repository state present, store working tree clean against turn repository HEAD, turn repository HEAD == watermark, journal empty | no-op — O(1) open |
+| 2 derived-stale | no marker, clean, derived stale | rebuild derived; set watermark = turn repository HEAD |
+| 3 hand-edit | markerless dirty against turn repository HEAD, watermark present | never reset — a legitimate hand-edit, absorbed at the next full staging pass |
+| 4 torn turn | journal non-empty, dirty, `head turn id ≠ turn` | preserve and surface the journal → quarantine dirty tracked bytes byte-exact → reset the store working tree to the turn repository's HEAD (≤1 turn) → remove untracked debris in the authoritative-file namespace (excluding `logs/`) → re-append log bytes → truncate the journal |
+| 5 turn committed | journal non-empty, clean, `head turn id == turn` | redundant journal (turn already committed) — truncate, zero loss |
+| 6 turn no-writes | journal non-empty, clean, `head turn id ≠ turn` | nothing landed structurally — preserve and surface the journal, truncate |
+| 7 (composite) | case 4 coinciding with an archive entry awaiting back-fill | case 4, then the case 9 back-fill pass |
+| 8 archival | `op=archival` marker | detect only → reported as a pending completion; the roll-forward completes the batch (no reset, no re-archive as drift); marker left in place until completion |
+| 9 back-fill repair | archive entry awaiting back-fill (any case, post-normalization) | locate the deletion commit (the child of the entry's `parent_commit_hash`, by tree comparison) and back-fill its hash; unlocatable ⇒ `recovery.unrepairable`, the entry stays refused, never guessed |
+| 10 consolidation | `op=sleep` marker | clear the marker; the memory service self-heals (gc and rebuild are idempotent) |
+| 11 recovery re-entry | `op=recovery` (crash during recovery) | re-run under the original marker; every phase is idempotent, so it converges |
+| 12 legacy adopt | dirty, no watermark ever | greenfield or legacy: verify-gated adopt-commit to the history repository (`Personant-Day` trailer), back-fill repair, full rebuild, then turn-repository init (see "Day rollover") |
+
+Dual-repository operation rows:
+
+| Op | Action |
+|---|---|
+| `op=barrier` | detect only → reported as a pending completion; the memory service runs the idempotent day-rollover completion. The turn repository state observable is irrelevant to classification. |
+| `op=rebaseline` | `rm -rf .git-daily` plus turn-repository init, unconditionally; no history-repository touch |
+| turn-repository init rows (no marker, turn repository missing or half-created) | greenfield (no watermark) → adopt if the history repository is dirty, then turn-repository init and rebuild; benign morning (turn repository missing, watermark present) → turn-repository init, rebuild iff derived is stale; interrupted init or corrupt directory → `rm -rf`, then turn-repository init. A missing turn repository is normal, never a data-loss signature. |
+
+An orthogonal heal runs on every path, before classification: an additive event-log tail-heal (last
+byte ≠ `\n` ⇒ append one `\n`, never truncate).
+
+#### Repository invariants
+
+- **No-reset rule:** archival and the day rollover never reset the store working tree (their
+  recovery is re-drive or repair); only turn recovery resets, and only ever to the turn
+  repository's HEAD (≤1 turn).
+- **Day-commit guard:** the day-commit is guarded by history repository HEAD being a
+  day-commit-shape commit (one the day-commit step made, as opposed to a back-fill or adopt commit
+  that carries the same trailer) with `Personant-Day == N`, not merely a trailered commit, so a
+  re-drive after a crash never mints a second day-commit.
+- **Capture-before-removal rule:** `.git-daily` is deleted only after the store working tree is
+  captured to the history repository.
+- **Watermark rule:** the watermark tracks the turn repository's HEAD, re-set by derived rebuild and
+  by turn-repository init (the re-init at day rollover, or the init of a missing repository).
+- **History-writer rule:** the history repository is written by the day rollover (its archival and
+  day-commit steps, and the lifecycle tags it derives) and by three recovery paths — case 9
+  back-fill repair, case 12 adopt and archival roll-forward completion — and by nothing else; the
+  checkpoint and the archive restore target the turn repository. Every such writer, day-commit and
+  archival alike, validates thread registry integrity before minting, so history repository HEAD
+  always passes it.
+- **Ignore-block rule:** both `.git/` and `.git-daily/` are in the managed `.gitignore` block (the
+  part of the store's `.gitignore` that Personant writes and keeps current), so neither repository
+  sees the other's git directory as untracked debris.
+
+#### Day rollover
+
+The rollover fires on new-day detection — the day index exceeds the head day number — checked at
+service-run open, after startup recovery, and before each turn. It runs under an
+`op=barrier {day: N}` marker. Its steps, in order:
+
+1. **Rollover marker step:** write the `op=barrier` marker. It owns the whole sequence, including
+   the archival step, which opens no nested `op=archival` scope.
+2. **Archival step:** archival-if-pressure against the history repository via the batch archive
+   (see "Closing a thread"; no nested marker). Batch membership is recorded durably before any
+   deletion, and its capture commit stages the full store working tree into the history repository,
+   which makes the turn-repository removal step safe (capture-before-removal rule). The step is
+   skipped while the registry is not under size pressure, and the day-commit step is then the sole
+   store-working-tree capture.
+3. **Excerpt-storage step:** each live thread's turn excerpts move between individual files and its
+   excerpt bundle to match the placement rule (see "Thread directory"). Store working tree only,
+   byte-preserving and idempotent: every excerpt stays readable at every instant, and the moves
+   land in the day-commit step's commit. Tiers change at no other time.
+4. **File-retention step:** each live thread's tracked-file store drops entries whose latest read
+   or write has left the recent-excerpt window, every file no kept entry names, and a legacy
+   `files.json`. Store working tree only and idempotent; the deletions land in the day-commit
+   step's commit.
+5. **Day-commit step:** commit the store working tree to the history repository with
+   `Personant-Day: N`, staging everything including overnight hand-edits. The staged tree is
+   validated for thread registry integrity before the commit is minted (history-writer rule). The
+   step is guarded by the day-commit guard, and an empty day still produces exactly one trailered
+   day-commit, so the head day number is always defined.
+6. **Derived-rebuild step:** rebuild derived files from the now-committed store working tree,
+   re-setting the watermark against the pre-removal turn repository HEAD.
+7. **Turn-repository removal step:** `rm -rf .git-daily` (idempotent).
+8. **Turn-repository re-init step:** create the turn repository with a baseline commit of the
+   current store working tree, giving the baseline hash H_d.
+9. **Freshness-assert step:** set the watermark to H_d (watermark rule), assert that derived files
+   are fresh, and clear the marker.
+
+Only the archival and day-commit steps mutate the history repository; the turn-repository removal
+and re-init steps are pure turn-repository lifecycle; the derived-rebuild and freshness-assert
+steps touch derived files and the watermark. The authoritative content of the store working tree is
+untouched from the day-commit step through the freshness-assert step. It is only reduced by the
+archival step's removals, whose bytes are preserved in the history repository, and by the
+file-retention step, which deletes on purpose, including file versions written and superseded since
+the last day-commit, whose bytes never reach the history repository. The excerpt-storage step only
+rearranges it, without loss.
+
+**Turn-repository init** (`git init .git-daily`, a baseline commit of the store working tree, and
+the watermark set to the baseline hash) is exactly the turn-repository re-init and freshness-assert
+steps in isolation. It costs O(store working tree bytes), meaning the live, non-archived threads,
+independent of career-history length.
+
+**Lifecycle git tags.** After the day-commit step lands, inside the `op=barrier` scope and before
+the marker is cleared, the rollover derives git tags on the history repository from the sealed
+day's event log: `thread.created` → `thread/<id>/created`, `retire.complete` →
+`thread/<id>/retired` and `project.created` → `project/<id>/created`, all targeting that day's
+day-commit, and `archive.archived` → `thread/<id>/archived`, targeting the archival commit recorded
+in the thread's archive-index entry. Project open, close and switch are not mapped. The ref name is
+`<kind>/<id>/<event>_<stamp>`, e.g. `thread/thr_42/created_2026-05-08T03-12-00Z`; `<stamp>` is the
+event's UTC-normalized RFC3339 instant with time colons rewritten to hyphens (git refs forbid `:`),
+so names are unique and sort lexically as chronologically. Derivation is idempotent (skip if the
+exact name exists) and best-effort: a read, parse or tag fault logs `barrier.tag-error` and is
+skipped, never failing the seal. Day-scoping: the rollover for day N fires the next day, so
+`created`, `retired` and project lines are those with event day index N, while `archived` (emitted
+by the rollover itself) is not day-filtered; life events on earlier idle gap-days, completed days
+before N on which no rollover ran, go untagged.
+
+**Roll-forward completion** (a crash inside the rollover). Every crash window recovers by
+roll-forward, never a reset. The `op=barrier` marker, with its `day: N`, is the idempotent re-entry
+token, and every sub-action is guarded and idempotent, so re-entry converges. The archival step's
+completion re-derives the durable batch-membership worklist: ensure-removed →
+ensure-registry-removed → regen → the deletion commit (only if none has landed, else back-fill the
+located one) → back-fill. A deletion commit that already landed is back-filled, not duplicated
+(where roll-forward meets case 9), and completion must not infer state from
+store-working-tree-clean-versus-HEAD, because an overnight hand-edit would be misread as
+uncommitted removals. Completion also re-runs the archival step's pressure drain, so a rollover
+killed before archival does not defer the day's archival, and re-runs the excerpt-storage and
+file-retention steps while the day-commit has not landed, finishing any moves or deletions the
+crash interrupted.
+
+**Day-commit-shape guard.** New-day detection reads the head day number off any trailered
+history-repository commit; the guard's idempotence check fires only on a day-commit-shape HEAD for
+the target day. A trailered but non-day-shape HEAD (a roll-forward back-fill, an adopt) advances
+detection but does not satisfy the guard, so the real day-commit is still minted. Recovery is
+fork-free across a completion on the following day (N+1) and across adopt-then-rollover kill
+timings. Only completed days, strictly before the current clock day, are sealed, each exactly once
+(gap-day at-most-once).
+
+**Quarantine-and-proceed.** If the day-commit step's thread registry integrity check or the
+freshness-assert step's derived assert fails and still fails across one idempotent re-drive:
+(1) identify the offending paths; (2) quarantine their bytes byte-exact under
+`recovery/quarantine/<stamp>/`; (3) scoped-restore exactly those paths from history repository
+HEAD — path-scoped, never `reset --hard` and never a whole-store-working-tree restore; derived
+paths, absent from the history repository, are regenerated and verified instead, and an offending
+path absent from HEAD is quarantined and removed; (4) re-run the failing step once; (5) if it still
+fails, refuse to open with the marker left in place as the retry token, and name the quarantine
+directory in the report. This is safe because the restore is scoped and quarantined first (no-reset
+rule) and history repository HEAD always passes thread registry integrity validation
+(history-writer rule).
+
+**Archival crash completion.** Archival fires only at the rollover's archival step, so apart from
+the recovery paths the history-writer rule names, the history repository is written only at
+rollover. Completion is deterministic because membership is recorded before deletion (archive-index
+entries are appended with `parent_commit_hash`, `tree_hash`, `original_path` and the thread
+registry snapshot, and an empty `commit_hash`, before any thread directory is removed, leaving a
+durable worklist) and because an already-landed deletion commit is resolved as the child of the
+entry's `parent_commit_hash` by tree comparison, which is robust to overnight hand-edit dirt, so
+the roll-forward back-fills the existing commit instead of minting a duplicate
+(`recovery.LocateDeletionCommit`, see "Mechanism names"). A standalone
+batch runs under its own `op=archival` marker, outside any rollover; case 8 is likewise
+detect-then-complete, reporting it pending on marker presence alone while the memory service runs
+the same roll-forward tail. Turn and structural commits land in the turn repository and fold into
+the day at the rollover, so archival, which writes the history repository, never races a turn.
+
+**Intra-day derived staleness.** The turn path never sets the watermark; the day rollover owns
+freshness (derived-rebuild and freshness-assert steps). Between rollovers, derived files track the
+turn repository's per-turn state via the watermark, and a markerless hand-edit stays deferred
+(case 3) until the next full staging pass.
+
+**Greenfield and legacy.** A greenfield store (no watermark, no turn repository) takes the case 12
+verify-gated adopt-commit to the history repository, with `Personant-Day: <current day>` as the
+sole bootstrap carve-out, then back-fill repair, a full rebuild and a
+fresh turn-repository baseline. An `op=turn` marker file left by an older binary is honored and
+cleared. A missing turn repository on an existing store directory is the legacy-upgrade shape and
+stays absent through init (`store.Init` creates `.git-daily`, the turn repository, only alongside
+a fresh history repository), so case 12's adopt gate and the benign-morning row (turn-repository init with
+no adopt commit) discriminate correctly. Legacy archive entries awaiting back-fill take the general
+adopt-forward repair path, with no special case.
+
+#### Mechanism names
+
+Core recovery (`internal/recovery`) only detects
 day-rollover and archival cases and returns a typed `RecoveryReport.Pending`
 (`PendingCompletion{Kind, Day}`, plus `ScopedRestored` for quarantined-and-restored paths);
 `fileadapter.Reconcile`, which owns `ArchiveThreads` and both repository handles, completes them,
 which keeps `recovery` from importing the adapter. `recovery.LocateDeletionCommit`
 (`internal/recovery/stamp.go`) finds an already-landed deletion commit by a
-child-of-`ParentCommitHash` tree test; `store.TruncateJournal` carries the truncate-no-fsync proof
-(`TestCell5_ResurrectedTruncatedJournal`). `store.Init` creates `.git-daily` (the turn repository)
-only alongside a fresh history repository, so a missing turn repository on an existing store
-directory keeps its legacy-upgrade shape. The day rollover mints its day-commit with
+child-of-`ParentCommitHash` tree test. The day rollover mints its day-commit with
 `AllowEmptyCommits` after `CheckSpineIntegrity` on the staged tree, asserts `CheckDerivedFresh` in
 the freshness-assert step, and derives lifecycle tags through `autogit.TagStamp` / `ParseTagStamp`
 (the only formatters), reading the sealed day's log with the tolerant `eventlog` reader and
@@ -1316,11 +1680,17 @@ four `folio.settle.*` and `barrier.prune.postIndex` in `store`, and
 `barrier.postSettle.preDayCommit` and `barrier.postPrune.preDayCommit`, all walked by
 `TestBarrier_CrashWalk`; and `fs.applyEvents.preIndex` in `store`, between a turn's tracked-file
 writes and its index write, walked by `TestCrashMatrix_WTurnFileEvents`. Recovery handles and plumbs
-the `op=rebaseline` operation marker, but the mid-day arming trigger is not wired (ROADMAP.md).
+the `op=rebaseline` operation marker, the mid-day re-baseline that would delete and recreate the
+turn repository at a commit boundary when its loose objects cross a threshold, without touching the
+history repository or advancing the day; recovery routes an `op=rebaseline` crash straight to
+turn-repository init. The mid-day arming trigger is not wired (ROADMAP.md).
 Packing: after every `gcCheckEveryCommits` (64) turn-repository commits the adapter reads the turn
 repository's loose-object count and runs gc at `gcLooseObjectThreshold` (5000);
 `MemoryOps.Consolidate` (go-git `RepackObjects` + `Prune`) packs both repositories on the day-off
-idle window. Session checkpoint commits target the turn repository with a full `Add(".")` staging
+idle window. Packing is safe at any time because archived blobs stay reachable through the deletion
+commit's parent and Personant never rewrites the history repository's commits (the turn repository
+is disposable). An aggressive repack (`git gc --aggressive`) may be scheduled when pack size
+matters; none is scheduled today. Session checkpoint commits target the turn repository with a full `Add(".")` staging
 pass. The open sequence runs `memops.GateHomeFormat` before Reconcile;
 `version.UnversionedHomeFormat` is pinned at 1 forever and is never an alias of
 `version.CurrentHomeFormat`, so an unmigrated legacy store directory keeps resolving to format
@@ -1359,7 +1729,8 @@ provider settings.
 The memory service's judgments go through the host (SPEC §8.2.1); text generation for the
 summarizer, clusterer and recall judgment through the plugin's `experimental.generate` over
 opencode's providers; the embedder names an opencode provider in `[embedding]` (SPEC §8.2.2); how
-embeddings are requested through opencode is Open A12a.
+embeddings are requested through opencode is Open A12a. Where `[embedding] vectorLength` is set,
+the embeddings request carries it as the `dimensions` parameter.
 
 ### Model-family as platform
 
@@ -1472,7 +1843,8 @@ one like the embedding flush-batching cap is.)
 2. **Scenario tests** — handwritten lifecycle flows; mock model via canned responses; metrics emission
    per scenario.
 3. **Invariant validators** — callable from any test (`invariants.go`).
-4. **Churn tests** — randomized seeded sequences; invariants after every operation.
+4. **Churn tests** — randomized seeded sequences (80% engage / 10% create / 5% close / 5% switch);
+   invariants after every operation; a failure dumps the operation log and seed for replay.
 5. **Calibration tests** — same scenario, parameter sweeps; metrics matrices identify operating
    points.
 6. **Cross-run baseline comparison** — stored baselines (git-tracked); regression detection.
@@ -1481,6 +1853,9 @@ one like the embedding flush-batching cap is.)
 
 Acceptance is the SPEC §9.1 criterion, run as a converging loop, not a one-shot
 pass.
+
+The mock model's generated responses carry a counter suffix or a seed-derived UUID in the body
+text, so no two responses dedup accidentally.
 
 When making technique changes (parameter tweaks, algorithm adjustments), the question is always
 "what does the simulation say?" — not "does it compile and pass invariants?" Bake metrics emission
@@ -1497,7 +1872,7 @@ into new code from day one; bolting it on later is much more expensive.
 | `harness_run.go` | `RunScenario`, `runStep` (the seven named phase helpers: `stepSetup` / `stepSetClock` / `stepExecTurn` / `stepScrapeEventLog` / `stepMeasureRecall` / `stepRecordMetrics` / `stepCloseDays`), `restartSession`, and the final-gauge helpers (`foldEventLines`, `peakHistorySymbols`). |
 | `harness_resolvers.go` | Per-step resolver builders (`recallResolverFor`, `closureResolverFor`) and the invariant-cadence policy (`perStepInvariants`, `runInvariants`). |
 | `recall_fidelity.go` | Recall-fidelity measurement (`recordRecallFidelity`), the incremental log-tailer (`logTailer`), and `classifyRecoverability`. |
-| `invariants.go` | The invariant validator set (thread registry integrity, index drift, project refs, last-active validity, frontmatter-registry sync, engagement consistency, thread accounting, closed-thread consistency, archive resolvability, dedup consistency, budget overflow: the `Verify*` functions). `DefaultInvariants` = `cheapDefaultInvariants` (per-step: `VerifyLastActiveValid`, `VerifyNoBudgetOverflow`) + `heavyDefaultInvariants` (store-scale, day-cadenced on the sim). |
+| `invariants.go` | The invariant validator set (thread registry integrity, index drift, project refs, last-active validity, frontmatter-registry sync, engagement consistency, thread accounting, closed-thread consistency, archive resolvability, dedup consistency, budget overflow: the `Verify*` functions). `DefaultInvariants` = `cheapDefaultInvariants` (per-step: `VerifyLastActiveValid`, `VerifyNoBudgetOverflow`) + `heavyDefaultInvariants` (store-scale: once per sim day and once at end of run). |
 | `metric_keys.go` | Cross-seam metric-key table (see "State-ownership map" below). |
 | `sim/workload.go` | On-demand workload generator (`generator`, `GenerateWorkload`, `runWorkDay`/`runSession`/`runDayOff`). |
 | `sim/campaign.go`, `sim/wander.go`, `sim/intra.go` | Specialized step-sequence builders for the campaign, within-thread wander, and intra-thread recall workload variants. |
@@ -1562,20 +1937,29 @@ harness drive loop. The protocol is:
   `recall_unexplained_absence` (an expected thread that is absent from the thread registry and from
   the archive index) is always a memory store integrity failure and must stay 0, while an archived
   expected match that can be restored is forgiven (`TargetRecoverable`,
-  `RecallExpectedForgiven`).
+  `RecallExpectedForgiven`) and counted as `recall_archived_recoverable`.
 - Long-span precision decline is the SPEC §9.1 corpus-saturation floor.
+- Recall-fidelity series are `recall_fidelity_{precision,recall,f1}` and
+  `recall_fidelity_adversarial_{precision,recall,f1}`; the intra-thread descent divergence (SPEC
+  §9.4) is `recall_intra_descent_divergence`.
 - Live run configurations use `reaper.local` (gemma-4 family inference, `nomicai-modernbert-embed-base-bf16`
   embeddings). Service-in-loop raises per-turn cost from tens of milliseconds to single-digit
   seconds against roughly 20 minutes for a mock 120-day run, so the mock regime stays the default
   loop. The anchor-projection workload variants (`vague-new`, `drift`, `invert`, interleave) report
-  `drift_recall_origin`/`drift_recall_dest`, `abandoned_premise_recall`, `superseded_precision`,
-  `ever_central_count`/`history_len` and `projection_churn` through `metric_keys.go`.
+  `drift_recall_origin`/`drift_recall_dest`, `abandoned_premise_recall` (whether a query for an
+  abandoned premise still surfaces its thread), `superseded_precision` (the precision of recall that
+  matches through superseded symbols), `ever_central_count`/`history_len` and `projection_churn`
+  through `metric_keys.go`.
 - Cadence: the generator's day functions (`sim/workload.go` `runWorkDay`/`runSession`/`runDayOff`)
   and the harness day-close share SPEC §9.4.1's clock contract. The day-off emits a `SleepCycle`
   step the harness intercepts to drive consolidation, and a day-close is timestamped
-  `simDayCloseDate(d) = SimClockStart + d·SimDayLength` (`internal/scenarios/harness.go`). Tests:
+  `simDayCloseDate(d) = SimClockStart + d·SimDayLength` (`internal/scenarios/harness.go`). All fuzz (start jitter, per-turn spans, break, work-block boundary) draws from the single seeded
+  RNG in fixed order. Tests:
   `TestCadence_DayStartsNoPrecession` (at least 9 days), `TestCadence_DayOffPreservesPhase` and
-  `TestDayOffThroughHarness`. A simulated-clock read inside one turn (`clock.Timeline()` within
+  `TestDayOffThroughHarness`. A run of at least 9 days asserts that work boundaries after the
+  day-off stay on grid, that the day-off advances exactly one 24h slot on each side, that exactly one
+  0-turn day-off record appears with contiguous `sim_date`, and that the day count equals
+  `int(Duration/24h)`. A simulated-clock read inside one turn (`clock.Timeline()` within
   `turn.Run`) returns the same instant; decay-triggered closing keys off `TurnNumber − LastEngagedTurn`.
 - Crash injection: `internal/crashpoint` hooks (`crashpoint.At(name)`) are registered at every kill
   point. `RestartWithCrash` (`internal/scenarios/restart.go`) arms a point, drives the turn or
@@ -1623,13 +2007,13 @@ diagnostics; §9 measurement keys off the decision events. No event carries mult
 | `recall` | `offer` (`count=N`), `accept` (`thr=`, `layers=`, `ack=human\|auto` — `auto` is an auto-fetch band candidate fetched without asking; any accept-rate measure counts `ack=human` lines only), `decline` (`thr=`, `reason=not-relevant\|wrong-project\|already-known` — `already-known` is also the memory service's own verdict on a candidate already resident in the active set under `recall.ack-mode: banded`), `net-cap-hit`, `flush-backlog`, `W1-diag`, `fire-error`, `error`, `index-error`, `embed-error`, `debt-window-error`, `tree-error` |
 | `retire` | `prompt` (`thr=` and `inactivity=`\|`trigger=manual`\|`trigger=queued`, the last for a SPEC §3.5 drain point), `ack` (every applied close-out — close or WIP — `resolution=`, `edited=yes\|no`, `ack=human\|auto`; the ack-edit-rate indicator metric (a metric watched as a ratio) counts `ack=human` lines only), `pending` (a decayed thread queued as an exception for the drain point — `thr=`, `inactivity=`, `reason=anchors=N\|turns=N`; once per idle episode, not per scan), `defer`, `complete` (`resolution=`), `curator-error`, `load-error`, `resolver-error`, `apply-error`, `error` |
 | `archive` | `archived`, `recovered`, `recovered-record`, `skip`, `under-drain`, `error` |
-| `recovery` | (SPEC §4.5.8 startup recovery; forensic) `begin`, `complete` (`cells=`, `reset=`, `stamped=`, `unrepairable=`), `pending` (`op=`, `day=` — a rollover or archival completion left pending), `rollback` (torn-turn reset — `turn=`, `reverted=`, `debris=`), `journal-recovered` (preserved in-flight bytes — `turn=`, `records=`), `morning-init` (`baseline=`, `rebuilt=`), `adopt` (case 12 greenfield/legacy), `stamp-repaired` (case 9), `unrepairable` (archive entry stays refused — `thr=`, `reason=`), `quarantined` (byte-exact preserved path), `log-tail-repaired` |
-| `barrier` | (SPEC §4.5.8 day rollover steps; forensic) `begin` (`day=`), `archived` (archival step — `day=`, `count=`), `folio-settled` (excerpt-storage step, once per rollover — `day=`, `threads=`, `bound=`, `unbound=`), `folio-skip` (excerpt-storage step left an excerpt where it was — `thr=`, `name=`, `reason=too-large\|conflict\|unreadable`; for `unreadable` the name is `folio.jsonl` and nothing in the thread moved), `day-committed` (day-commit step — `day=`, optional `repaired=true`), `reborn` (turn-repository re-init step — `day=`, `baseline=`), `complete` (`day=`), `re-mint` (defensive day-commit step re-mint on a non-day-shape HEAD), `quarantined` (quarantine-and-proceed — `paths=`, `dir=`, `restored=`), `tag-error` (forensic; a lifecycle-tag derivation read/parse/tag fault — never fatal to the seal) |
+| `recovery` | (startup recovery, see "Crash recovery and the turn and history repositories"; forensic) `begin`, `complete` (`cells=`, `reset=`, `stamped=`, `unrepairable=`), `pending` (`op=`, `day=` — a rollover or archival completion left pending), `rollback` (torn-turn reset — `turn=`, `reverted=`, `debris=`), `journal-recovered` (preserved in-flight bytes — `turn=`, `records=`), `morning-init` (`baseline=`, `rebuilt=`), `adopt` (case 12 greenfield/legacy), `stamp-repaired` (case 9), `unrepairable` (archive entry stays refused — `thr=`, `reason=`), `quarantined` (byte-exact preserved path), `log-tail-repaired` |
+| `barrier` | (day rollover steps, see "Day rollover"; forensic) `begin` (`day=`), `archived` (archival step — `day=`, `count=`), `folio-settled` (excerpt-storage step, once per rollover — `day=`, `threads=`, `bound=`, `unbound=`), `folio-skip` (excerpt-storage step left an excerpt where it was — `thr=`, `name=`, `reason=too-large\|conflict\|unreadable`; for `unreadable` the name is `folio.jsonl` and nothing in the thread moved), `day-committed` (day-commit step — `day=`, optional `repaired=true`), `reborn` (turn-repository re-init step — `day=`, `baseline=`), `complete` (`day=`), `re-mint` (defensive day-commit step re-mint on a non-day-shape HEAD), `quarantined` (quarantine-and-proceed — `paths=`, `dir=`, `restored=`), `tag-error` (forensic; a lifecycle-tag derivation read/parse/tag fault — never fatal to the seal) |
 | `consolidate` | `sleep-cycle` |
 | `dedup` | `pruned`, `prune-skip`, `error` |
 | `fs` | `edit-no-path`, `write-error` |
 | `tool` | `result` (a tool result applied to memory as a `tool.result` delta, SPEC §3.0.1 — `name=`, `id=` the call id, `bytes=` the byte count BEFORE the SPEC §3.1 tool-output limit; an error result is a result; never the arguments). |
-| `staging` | `promoted`, `evicted` (expiry at window close, SPEC §3.10) |
+| `staging` | `promoted` (`normalized=`, `staged_at=`, `cited_at=`, `turn_span=`), `evicted` (expiry at window close, SPEC §3.10) |
 | `topic` | `re-prompt` (`cause=missing-thread` + `fetched=` for the §5.5 fetch, `cause=missing-tag` for the §3.3 missing-tag fallback, or `cause=empty-response` for the §3.3 empty-response fallback; **Open:** U3 — `cause=missing-thread` has no producer under opencode), `tag-missing`, `tag-invalid` (forensic; a near-miss tag candidate that failed strict validation — `reason=markdown-mangled\|bad-delimiters\|bad-thread-list\|bare-new-topic` + a short sanitized `snippet=`; additive to `tag-missing`), `warning` |
 | `session` | `started` (a service run started, SPEC §1.1 — `active=`; distinct from `system.bootstrap`), `ended` (a service run ended), `working-set-save-error`, `checkpoint-error` |
 | `project` | `created`, `switched`, `renamed` |
@@ -1714,7 +2098,7 @@ the catalog, including the design capture for consolidation and concurrent sessi
 | "Mock model is too narrow; let's use a real model in tests" | Adds non-determinism, network dependency, cost | Mock with scripted/generated responses as the default loop; a real model or embedder only in the opt-in live runs (`just integration-test`, the `sim` live toggles, `just sim-completeness-rung`, `just sim-tokenceiling-rung`) |
 | "Speculatively prefetch threads we *might* need" | Violates "every loaded thread is needed" | Model emits topic tag; memory service fetches what was named |
 | "Shorten the topic-tag instruction to save tokens" | While the in-band tag stands (Open: U3), emission is the load-bearing recognition signal | The system prompt's topic-tag directive is non-optional |
-| "Reset the store working tree when it's dirty on startup" | A markerless-dirty tree is a legitimate hand-edit; resetting on dirtiness destroys user work (and, when it is not yet in the history repository, a whole day) | Make `reset --hard` conditional on the operation marker/journal signal, never on dirtiness; absorb hand-edits forward (Spec §4.5.8 case 3) |
+| "Reset the store working tree when it's dirty on startup" | A markerless-dirty tree is a legitimate hand-edit; resetting on dirtiness destroys user work (and, when it is not yet in the history repository, a whole day) | Make `reset --hard` conditional on the operation marker/journal signal, never on dirtiness; absorb hand-edits forward (see "Crash recovery and the turn and history repositories", case 3) |
 | "Commit durability writes async / deferred (flush later)" | A commit lagging its authoritative writes reintroduces the torn-window ambiguity the operation marker/commit protocol exists to eliminate | Commit ordering is synchronous, always; cost comes from cheaper steps (scoped add, disposable turn repository), never from widening the loss window |
 
 ---
