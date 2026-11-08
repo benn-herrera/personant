@@ -6,8 +6,7 @@ Directive files are markdown documents with YAML frontmatter for parameter overr
 ---
 scope: user                         # one of: defaults | user | project
 project: null                       # null for defaults/user; the project's id (prj_<n>) for project-scoped
-parameters:
-  recall.ack-mode: always           # override system default of banded
+parameters: {}                      # §2.6.1 key: value overrides
 last_modified: 2026-05-08T19:42:00-07:00
 modification_source: accrual        # one of: install | user-edit | accrual (accrual = feedback directive tuning, §1.8: cross-project by default)
 ---

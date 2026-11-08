@@ -99,30 +99,6 @@ type State struct {
 	// internals are insulated behind it.
 	Recaller measure.Recaller
 
-	// RecallResolver resolves the §3.4 recall offer surfaced at turn
-	// close into accept/decline decisions. nil → recall stays log-only
-	// (no offer surfaced, and no auto-accept either — see
-	// surfaceRecallCandidates). The chat REPL installs an interactive
-	// resolver; the scenario harness installs a scripted one.
-	RecallResolver RecallResolver
-
-	// RecallAckMode is the §2.6.1 recall.ack-mode policy. The zero value
-	// is RecallAckBanded — a high-confidence candidate is fetched without
-	// asking and only the middle band is put to the resolver.
-	// RecallAckAlways restores the pre-2026-08-05 every-candidate prompt.
-	// The chat REPL reads the directive; the scenario harness pins
-	// RecallAckAlways (its scripted RecallAck IS a human ack).
-	RecallAckMode RecallAckMode
-
-	// OnAutoRecalled receives one RecallNotice per §3.4 auto-band recall
-	// the runtime fetched without asking. nil → the fetch is silent (the
-	// scenario harness and every non-interactive caller). Presentation
-	// seam only, with the same contract as OnPhase: it
-	// must not block and must not mutate State, and nothing in the
-	// pipeline observes it. The durable record is recall.accept ack=auto,
-	// not this.
-	OnAutoRecalled func(RecallNotice)
-
 	// Curator drafts the §3.5 closure summary + anchors for a thread
 	// that has decayed into idleness. NewState leaves it nil, and with no
 	// curator nothing closes; the scenario harness installs a
@@ -259,7 +235,7 @@ type State struct {
 	// recallSurfaced marks thread IDs that arrived in context via recall
 	// (§2.7.3 origin-provenance attribution source) — as opposed to direct
 	// engagement or switch. Both recall paths mark here through their shared
-	// chokepoint promoteToLayerB: the §3.4 recall-accept (applyRecallResolution,
+	// chokepoint promoteToLayerB: the §3.4 recall-accept (acceptRecallCandidate,
 	// turn-close) and the §5.5 mid-turn fetch (fetchThreadForReprompt). It is
 	// the "got here via recall" marker the
 	// turn-close derived_from population scores newly-emitted symbols against:
@@ -274,7 +250,7 @@ type State struct {
 	//
 	// Why a State field rather than threaded call/return (#2 option B):
 	// the §3.4 recall-accept stack runs at turn close (surfaceRecallCandidates
-	// → applyRecallResolution → promoteToLayerB), which is structurally AFTER
+	// → acceptRecallCandidate → promoteToLayerB), which is structurally AFTER
 	// the merge sites (engageOwner update + new-thread creation) within the
 	// same Run. The accepted-recall set therefore cannot be threaded forward
 	// to those callers in the same turn — it is produced too late. It is the

@@ -11,9 +11,7 @@
 - The mock runs (`just sim`, and the sim package under `just test`) run with a nil embedder, so the fine level and the
   completeness floor do not execute there; `just sim-completeness-rung` is the
   embedder-enabled run configuration that asserts every measurement probe in the flush-lag gap in
-  findability is surfaced. The scenario
-  harness pins `recall.ack-mode: always` (a scripted `Step.RecallAck` stands in for a user's
-  answer).
+  findability is surfaced.
 - The opening line of each turn in the log is `context.modified source=user.prompt`: the
   tag-fidelity grader (`internal/scenarios/sim/tagfidelity.go`) segments observed turns on it, so
   suppressing, reordering or duplicating that line must revisit the grader.

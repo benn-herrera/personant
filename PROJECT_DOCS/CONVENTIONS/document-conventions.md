@@ -14,7 +14,7 @@ How the project documents (THESIS, SPEC, ARCHITECTURE, CONVENTIONS) are written 
   `Open:` line alone: the text around it states only what is decided. (2) An `Open:` line followed
   by text that specifies a current mechanism: that text binds the implementation until the decision
   lands. A tag such as U3 names a pending decision; ROADMAP.md lists and sequences them.
-- **Unused SPEC section numbers** (§0, §4.3.1, §4.3.2, §4.3.4, §4.4–§4.4.4, §4.6, §6–§6.5, §7) are
+- **Unused SPEC section numbers** (§0, §4.3, §4.3.1, §4.3.2, §4.3.4, §4.4–§4.4.4, §4.6, §6–§6.5, §7) are
   never reassigned; code cites sections by number. Where a heading remains, its text says what
   replaced it.
 - **Moved sections.** A SPEC section marked "Format → ARCHITECTURE «X»" keeps its number and

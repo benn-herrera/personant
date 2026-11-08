@@ -6,7 +6,6 @@ import (
 
 	"personant/internal/prompt"
 	"personant/internal/scenarios"
-	"personant/internal/turn"
 )
 
 // campaignKind identifies which lifecycle program a campaign runs.
@@ -207,7 +206,6 @@ func (g *generator) campaignEngage(tt turnType, c *campaign, anchorTags []string
 		UserInput:    userInput,
 		MockResponse: scenarios.NewMockResponseWithTag(threads, anchorTags, body),
 		Annotation:   fmt.Sprintf("turn %d: %s campaign-%s (%s)", g.stepIndex+1, turnTypeName(tt), label, slot.Topic),
-		RecallAck:    &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
 	}
 	if tt == turnWork {
 		step.PreEvents = g.buildWorkPreEvents(idx, slot, false)
@@ -272,7 +270,6 @@ func (g *generator) campaignRecall(tt turnType, c *campaign, querySymbols []stri
 		Annotation:            fmt.Sprintf("turn %d: %s campaign-recall %s", g.stepIndex+1, turnTypeName(tt), bucket),
 		ExpectedRecallMatches: []string{g.threads[campIdx].threadID()},
 		RecallMode:            scenarios.RecallMeasureOnly,
-		RecallAck:             &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
 	}
 	// The carrier is deliberately NOT entered into the generator's Layer-B
 	// model (no g.engage): it is a measurement artifact, not a topical

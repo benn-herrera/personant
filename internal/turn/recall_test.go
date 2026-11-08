@@ -251,342 +251,116 @@ func TestRunNoRecallWhenNoSymbols(t *testing.T) {
 	}
 }
 
-// TestSurfaceRecall_AcceptPromotesToLayerB — with a resolver installed,
-// accepting exactly one of two offered candidates promotes that thread
-// into Layer B (ActiveThreads) and leaves the declined one out. Proves
-// the accept branch of applyRecallResolution wires through to
-// promoteToLayerB and that the offer is logged with its candidate count.
-func TestSurfaceRecall_AcceptPromotesToLayerB(t *testing.T) {
+// recallBandState seeds thr_1 at symbolic score 1.0 (anchors = the query,
+// at or above the 0.65 auto-fetch bar) and thr_2 at 0.5 (below it), and
+// returns a State with no resolver of any kind whose query is alpha+beta.
+func recallBandState(t *testing.T) (store.PersonantPaths, *State) {
+	t.Helper()
 	paths, meta := newTestHome(t)
-	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
-	seedThreadWithAnchors(t, paths, meta.ID, "thr_2", []string{"alpha", "beta", "zeta", "eta"})
-
+	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta"})
+	seedThreadWithAnchors(t, paths, meta.ID, "thr_2", []string{"alpha", "beta", "gamma", "delta"})
 	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
 	state.coalesce.addSymbol("alpha", "alpha", memops.SourceUser)
 	state.coalesce.addSymbol("beta", "beta", memops.SourceUser)
+	return paths, state
+}
 
-	// Accept only the candidate whose ThreadID is thr_1 — its index in
-	// offer.Candidates is not assumed, it is located by scanning.
-	state.RecallResolver = func(_ context.Context, offer RecallOffer) (RecallResolution, error) {
-		for i, c := range offer.Candidates {
-			if c.ThreadID == "thr_1" {
-				return RecallResolution{Accept: []int{i}, Reason: DeclineNotRelevant}, nil
-			}
-		}
-		t.Errorf("thr_1 not present in offer.Candidates: %v", offer.Candidates)
-		return RecallResolution{Reason: DeclineNotRelevant}, nil
+// recallFires reads thrID's §2.2 recall_fires counter off the spine.
+func recallFires(t *testing.T, paths store.PersonantPaths, thrID string) int {
+	t.Helper()
+	recs, err := store.ReadSpine(paths.Spine)
+	if err != nil {
+		t.Fatalf("read spine: %v", err)
 	}
+	for _, rec := range recs {
+		if rec.ID == thrID {
+			return rec.RecallFires
+		}
+	}
+	t.Fatalf("%s not on the spine", thrID)
+	return 0
+}
+
+// TestRecall_AutoBandCandidateIsFetched — with no resolver installed, a
+// candidate at or above its tier's auto-fetch bar is fetched into Layer B
+// through the accept path: promoted, marked recallSurfaced (the §2.7.3
+// derived_from source), counted in recall_fires, logged recall.accept, and
+// fetched through the §3.0 chain (exactly one thread.fetched delta). The
+// below-bar thr_2 gets none of it.
+func TestRecall_AutoBandCandidateIsFetched(t *testing.T) {
+	paths, state := recallBandState(t)
 
 	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
 		t.Fatalf("surfaceRecallCandidates: %v", err)
 	}
 
 	if !slices.Contains(state.ActiveThreads, "thr_1") {
-		t.Errorf("thr_1 accepted but not in ActiveThreads: %v", state.ActiveThreads)
+		t.Errorf("auto-band thr_1 not fetched into Layer B: %v", state.ActiveThreads)
 	}
-	if slices.Contains(state.ActiveThreads, "thr_2") {
-		t.Errorf("thr_2 declined but present in ActiveThreads: %v", state.ActiveThreads)
+	if _, ok := state.recallSurfaced["thr_1"]; !ok {
+		t.Errorf("fetched thr_1 not marked recallSurfaced: %v", state.recallSurfaced)
+	}
+	if got := recallFires(t, paths, "thr_1"); got != 1 {
+		t.Errorf("thr_1 recall_fires = %d, want 1", got)
 	}
 
-	// The §3.4 accept-path recallSurfaced marking now flows through the
-	// shared promoteToLayerB chokepoint (no longer an explicit block in
-	// applyRecallResolution). Accepted thr_1 is marked; declined thr_2 is not.
-	if _, ok := state.recallSurfaced["thr_1"]; !ok {
-		t.Errorf("accepted thr_1 must be marked recallSurfaced via promoteToLayerB; got %v", state.recallSurfaced)
+	logBody := readDayLog(t, paths)
+	if !strings.Contains(logBody, "recall.accept thr=thr_1 layers=symbolic\n") {
+		t.Errorf("want recall.accept thr=thr_1 layers=symbolic; log:\n%s", logBody)
+	}
+	if got := strings.Count(logBody, "context.modified source=thread.fetched"); got != 1 {
+		t.Errorf("thread.fetched delta count = %d, want 1 (thr_1 only); log:\n%s", got, logBody)
+	}
+}
+
+// TestRecall_BelowBarCandidateIsNotFetched — a candidate under its tier's
+// auto-fetch bar leaves its match-fire record and nothing else: no Layer-B
+// promotion, no recallSurfaced mark, no recall_fires bump, no recall.accept.
+func TestRecall_BelowBarCandidateIsNotFetched(t *testing.T) {
+	paths, state := recallBandState(t)
+
+	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
+		t.Fatalf("surfaceRecallCandidates: %v", err)
+	}
+
+	if slices.Contains(state.ActiveThreads, "thr_2") {
+		t.Errorf("below-bar thr_2 fetched into Layer B: %v", state.ActiveThreads)
 	}
 	if _, ok := state.recallSurfaced["thr_2"]; ok {
-		t.Errorf("declined thr_2 must not be marked recallSurfaced; got %v", state.recallSurfaced)
+		t.Errorf("below-bar thr_2 marked recallSurfaced: %v", state.recallSurfaced)
 	}
-
+	if got := recallFires(t, paths, "thr_2"); got != 0 {
+		t.Errorf("thr_2 recall_fires = %d, want 0", got)
+	}
 	logBody := readDayLog(t, paths)
-	for _, want := range []string{
-		"recall.offer count=2",
-		"recall.accept thr=thr_1",
-		"recall.decline thr=thr_2",
-	} {
-		if !strings.Contains(logBody, want) {
-			t.Errorf("log missing %q\nlog body:\n%s", want, logBody)
-		}
+	if !strings.Contains(logBody, "spine.match-fire thr_2 ") {
+		t.Errorf("below-bar thr_2 must still leave its match-fire record; log:\n%s", logBody)
+	}
+	if strings.Contains(logBody, "recall.accept thr=thr_2") {
+		t.Errorf("below-bar thr_2 logged recall.accept; log:\n%s", logBody)
 	}
 }
 
-// TestSurfaceRecall_AcceptFiresThreadFetchedDelta — the §3.0.5 "no gaps"
-// fix (M3 / guest G-F3): a recall-accept promotion mutates Layer B, so it
-// must go through the §3.0 hook chain like every other working-window
-// fetch — parity with fetchThreadForReprompt (§5.5). Accepting thr_1 must
-// fire a thread.fetched delta through onContextDelta, whose observable
-// effect is the chain's step-5 substrate event (context.modified
-// source=thread.fetched). The declined thr_2 fires no such delta, so
-// exactly one is expected.
-func TestSurfaceRecall_AcceptFiresThreadFetchedDelta(t *testing.T) {
-	paths, meta := newTestHome(t)
-	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
-	seedThreadWithAnchors(t, paths, meta.ID, "thr_2", []string{"alpha", "beta", "zeta", "eta"})
-
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
-	state.coalesce.addSymbol("alpha", "alpha", memops.SourceUser)
-	state.coalesce.addSymbol("beta", "beta", memops.SourceUser)
-
-	state.RecallResolver = func(_ context.Context, offer RecallOffer) (RecallResolution, error) {
-		for i, c := range offer.Candidates {
-			if c.ThreadID == "thr_1" {
-				return RecallResolution{Accept: []int{i}, Reason: DeclineNotRelevant}, nil
-			}
-		}
-		t.Errorf("thr_1 not present in offer.Candidates: %v", offer.Candidates)
-		return RecallResolution{Reason: DeclineNotRelevant}, nil
-	}
+// TestRecall_ResidentCandidateIsSkipped — an auto-band non-intra candidate
+// already resident in Layer B is already in context, so it is not fetched
+// again: no re-promotion (Layer-B order unchanged), no recall_fires bump, no
+// recall.accept. Without the skip it would re-fire every turn the topic
+// continued.
+func TestRecall_ResidentCandidateIsSkipped(t *testing.T) {
+	paths, state := recallBandState(t)
+	state.ActiveThreads = []string{"thr_9", "thr_1"}
 
 	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
 		t.Fatalf("surfaceRecallCandidates: %v", err)
 	}
 
-	logBody := readDayLog(t, paths)
-	// The chain's step-5 event is the observable proof the recall-accept
-	// promotion ran through onContextDelta. The fetched body is non-empty,
-	// so bytes>0; assert on the source token (the bytes count is incidental).
-	const fetchedEvent = "context.modified source=thread.fetched"
-	if !strings.Contains(logBody, fetchedEvent) {
-		t.Errorf("accepted promotion did not fire a thread.fetched delta through the chain;\nlog body:\n%s", logBody)
+	if want := []string{"thr_9", "thr_1"}; !slices.Equal(state.ActiveThreads, want) {
+		t.Errorf("resident thr_1 re-promoted: ActiveThreads = %v, want %v", state.ActiveThreads, want)
 	}
-	// Exactly one — the accepted thr_1 fires it; the declined thr_2 does not.
-	if got := strings.Count(logBody, fetchedEvent); got != 1 {
-		t.Errorf("thread.fetched delta count: got %d want 1 (only the accepted thread)\nlog body:\n%s", got, logBody)
+	if got := recallFires(t, paths, "thr_1"); got != 0 {
+		t.Errorf("resident thr_1 recall_fires = %d, want 0", got)
 	}
-	// Sanity: the promotion still happened and the accept was logged.
-	if !slices.Contains(state.ActiveThreads, "thr_1") {
-		t.Errorf("thr_1 accepted but not promoted to ActiveThreads: %v", state.ActiveThreads)
-	}
-	if !strings.Contains(logBody, "recall.accept thr=thr_1") {
-		t.Errorf("recall.accept thr=thr_1 not logged:\n%s", logBody)
-	}
-}
-
-// TestSurfaceRecall_DeclineAllLogsReason — a resolver that accepts
-// nothing declines every offered candidate, each decline carrying the
-// resolution's Reason. Proves Layer B is untouched on a full decline
-// and that the supplied DeclineReason is recorded verbatim.
-func TestSurfaceRecall_DeclineAllLogsReason(t *testing.T) {
-	paths, meta := newTestHome(t)
-	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
-	seedThreadWithAnchors(t, paths, meta.ID, "thr_2", []string{"alpha", "beta", "zeta", "eta"})
-
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
-	state.coalesce.addSymbol("alpha", "alpha", memops.SourceUser)
-	state.coalesce.addSymbol("beta", "beta", memops.SourceUser)
-
-	state.RecallResolver = func(_ context.Context, _ RecallOffer) (RecallResolution, error) {
-		return RecallResolution{Reason: DeclineWrongProject}, nil
-	}
-
-	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
-		t.Fatalf("surfaceRecallCandidates: %v", err)
-	}
-
-	if len(state.ActiveThreads) != 0 {
-		t.Errorf("nothing accepted but ActiveThreads non-empty: %v", state.ActiveThreads)
-	}
-
-	logBody := readDayLog(t, paths)
-	for _, want := range []string{
-		"recall.decline thr=thr_1 reason=wrong-project",
-		"recall.decline thr=thr_2 reason=wrong-project",
-	} {
-		if !strings.Contains(logBody, want) {
-			t.Errorf("log missing %q\nlog body:\n%s", want, logBody)
-		}
-	}
-	if strings.Contains(logBody, "recall.accept") {
-		t.Errorf("no candidate accepted but recall.accept logged:\n%s", logBody)
-	}
-}
-
-// bandedState builds a recall state with a resolver that records whether
-// it was consulted, for the §3.4 band tests. Query symbols are alpha+beta.
-func bandedState(t *testing.T, paths store.PersonantPaths, meta memops.ProjectMeta, asked *[]string) *State {
-	t.Helper()
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
-	state.coalesce.addSymbol("alpha", "alpha", memops.SourceUser)
-	state.coalesce.addSymbol("beta", "beta", memops.SourceUser)
-	state.RecallResolver = func(_ context.Context, offer RecallOffer) (RecallResolution, error) {
-		for _, c := range offer.Candidates {
-			*asked = append(*asked, c.ThreadID)
-		}
-		return RecallResolution{}, nil
-	}
-	return state
-}
-
-// TestSurfaceRecall_AutoBandFetchesWithoutAsking — a candidate at or above
-// its tier's auto bar (symbolic 1.0 ≥ 0.65) is fetched with no prompt: the
-// resolver is never consulted, the thread lands in Layer B, the notice hook
-// fires once, and the accept is logged ack=auto (§3.4 AMENDED 2026-08-05).
-func TestSurfaceRecall_AutoBandFetchesWithoutAsking(t *testing.T) {
-	paths, meta := newTestHome(t)
-	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta"})
-
-	var asked []string
-	state := bandedState(t, paths, meta, &asked)
-	var notices []RecallNotice
-	state.OnAutoRecalled = func(n RecallNotice) { notices = append(notices, n) }
-
-	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
-		t.Fatalf("surfaceRecallCandidates: %v", err)
-	}
-
-	if len(asked) != 0 {
-		t.Errorf("auto-band candidate was put to the resolver: %v", asked)
-	}
-	if !slices.Contains(state.ActiveThreads, "thr_1") {
-		t.Errorf("auto-accepted thr_1 not promoted to Layer B: %v", state.ActiveThreads)
-	}
-	if len(notices) != 1 || notices[0].ThreadID != "thr_1" {
-		t.Fatalf("want one auto-recall notice for thr_1, got %+v", notices)
-	}
-	if notices[0].Display == "" || notices[0].Gist == "" {
-		t.Errorf("notice must carry a display name and a gist, got %+v", notices[0])
-	}
-
-	logBody := readDayLog(t, paths)
-	if !strings.Contains(logBody, "recall.accept thr=thr_1 layers=symbolic ack=auto") {
-		t.Errorf("want recall.accept ... ack=auto; log:\n%s", logBody)
-	}
-	if strings.Contains(logBody, "recall.offer") {
-		t.Errorf("auto band must surface no offer:\n%s", logBody)
-	}
-}
-
-// TestSurfaceRecall_AskBandPromptsAndLogsHuman — a candidate below the
-// auto bar (symbolic 0.5 < 0.65) is put to the resolver, and its accept is
-// logged ack=human. The two ack kinds are the §3.5 canary discipline
-// applied to recall: an auto fetch must never read as a human decision.
-func TestSurfaceRecall_AskBandPromptsAndLogsHuman(t *testing.T) {
-	paths, meta := newTestHome(t)
-	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
-
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
-	state.coalesce.addSymbol("alpha", "alpha", memops.SourceUser)
-	state.coalesce.addSymbol("beta", "beta", memops.SourceUser)
-	var offered []RecallCandidate
-	state.RecallResolver = func(_ context.Context, offer RecallOffer) (RecallResolution, error) {
-		offered = offer.Candidates
-		return RecallResolution{Accept: []int{0}}, nil
-	}
-
-	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
-		t.Fatalf("surfaceRecallCandidates: %v", err)
-	}
-
-	if len(offered) != 1 || offered[0].ThreadID != "thr_1" {
-		t.Fatalf("want thr_1 offered, got %+v", offered)
-	}
-	// The offer carries the legible fields the redesigned prompt renders.
-	if offered[0].Display == "" || offered[0].Gist == "" {
-		t.Errorf("offered candidate missing display/gist: %+v", offered[0])
-	}
-	logBody := readDayLog(t, paths)
-	if !strings.Contains(logBody, "recall.accept thr=thr_1 layers=symbolic ack=human") {
-		t.Errorf("want recall.accept ... ack=human; log:\n%s", logBody)
-	}
-}
-
-// TestSurfaceRecall_AlwaysModeAsksEverything — the §2.6.1 escape hatch:
-// under recall.ack-mode: always even a top-scoring candidate goes to the
-// resolver, and nothing is fetched on its own.
-func TestSurfaceRecall_AlwaysModeAsksEverything(t *testing.T) {
-	paths, meta := newTestHome(t)
-	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta"})
-
-	var asked []string
-	state := bandedState(t, paths, meta, &asked)
-	state.RecallAckMode = RecallAckAlways
-
-	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
-		t.Fatalf("surfaceRecallCandidates: %v", err)
-	}
-
-	if len(asked) != 1 || asked[0] != "thr_1" {
-		t.Errorf("always-mode must ask about every candidate, asked=%v", asked)
-	}
-	if slices.Contains(state.ActiveThreads, "thr_1") {
-		t.Errorf("always-mode declined candidate was promoted anyway: %v", state.ActiveThreads)
-	}
-}
-
-// TestSurfaceRecall_ResidentCandidateIsNotAsked — a thread already in
-// Layer B is already in the context the offer proposes to pull it into, so
-// the banded path answers it itself (already-known) instead of asking. This
-// is what keeps the auto band from re-fetching and re-announcing the same
-// resident thread every turn a topic continues.
-func TestSurfaceRecall_ResidentCandidateIsNotAsked(t *testing.T) {
-	paths, meta := newTestHome(t)
-	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
-
-	var asked []string
-	state := bandedState(t, paths, meta, &asked)
-	state.ActiveThreads = []string{"thr_1"}
-
-	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
-		t.Fatalf("surfaceRecallCandidates: %v", err)
-	}
-
-	if len(asked) != 0 {
-		t.Errorf("resident thread was put to the resolver: %v", asked)
-	}
-	logBody := readDayLog(t, paths)
-	if !strings.Contains(logBody, "recall.decline thr=thr_1 reason=already-known") {
-		t.Errorf("want an already-known decline for the resident thread; log:\n%s", logBody)
-	}
-}
-
-// TestParseRecallAckMode — the §2.6.1 directive parser, including the
-// unrecognized-value contract (ok=false, caller keeps the default).
-func TestParseRecallAckMode(t *testing.T) {
-	for _, tc := range []struct {
-		in    string
-		want  RecallAckMode
-		valid bool
-	}{
-		{"banded", RecallAckBanded, true},
-		{" ALWAYS ", RecallAckAlways, true},
-		{"always", RecallAckAlways, true},
-		{"auto", "", false},
-		{"", "", false},
-	} {
-		t.Run(tc.in, func(t *testing.T) {
-			got, ok := ParseRecallAckMode(tc.in)
-			if ok != tc.valid || got != tc.want {
-				t.Errorf("ParseRecallAckMode(%q) = (%q, %v), want (%q, %v)", tc.in, got, ok, tc.want, tc.valid)
-			}
-		})
-	}
-}
-
-// TestSurfaceRecall_NoResolverStaysLogOnly — with no RecallResolver
-// installed, recall still runs and logs its per-layer matches, but no
-// offer is surfaced and no accept/decline verdict is recorded. Proves
-// the nil-resolver path is purely observational.
-func TestSurfaceRecall_NoResolverStaysLogOnly(t *testing.T) {
-	paths, meta := newTestHome(t)
-	seedThreadWithAnchors(t, paths, meta.ID, "thr_1", []string{"alpha", "beta", "gamma", "delta"})
-	seedThreadWithAnchors(t, paths, meta.ID, "thr_2", []string{"alpha", "beta", "zeta", "eta"})
-
-	state := NewState(fileadapter.NewFileAdapter(paths), meta, model.NewScriptedMock(nil, nil))
-	state.coalesce.addSymbol("alpha", "alpha", memops.SourceUser)
-	state.coalesce.addSymbol("beta", "beta", memops.SourceUser)
-	// RecallResolver deliberately left nil.
-
-	if err := surfaceRecallCandidates(context.Background(), state, "", map[string]struct{}{}, ""); err != nil {
-		t.Fatalf("surfaceRecallCandidates: %v", err)
-	}
-
-	logBody := readDayLog(t, paths)
-	if !strings.Contains(logBody, "spine.match-fire") {
-		t.Errorf("recall expected to run and log match-fire:\n%s", logBody)
-	}
-	for _, unwanted := range []string{"recall.offer", "recall.accept", "recall.decline"} {
-		if strings.Contains(logBody, unwanted) {
-			t.Errorf("nil resolver should stay log-only but log contains %q:\n%s", unwanted, logBody)
-		}
+	if logBody := readDayLog(t, paths); strings.Contains(logBody, "recall.accept") {
+		t.Errorf("resident candidate logged recall.accept; log:\n%s", logBody)
 	}
 }

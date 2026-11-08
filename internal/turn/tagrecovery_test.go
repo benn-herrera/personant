@@ -277,7 +277,9 @@ func TestRunRepromptCapOnePerCauseBothCausesOneTurn(t *testing.T) {
 func TestRunOwnerDefaultSurvivesRestartRecency(t *testing.T) {
 	paths, meta := newTestHome(t)
 	seedThreadAndSpine(t, paths, meta.ID, "thr_42")
-	seedThreadAndSpine(t, paths, meta.ID, "thr_43")
+	// Anchors disjoint from thr_42's, so neither thread's turns pull the
+	// other into the active set through recall.
+	seedThreadWithAnchors(t, paths, meta.ID, "thr_43", []string{"e", "f", "g", "h"})
 	ops := fileadapter.NewFileAdapter(paths)
 	pinClock(t, time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC))
 	ctx := context.Background()
@@ -301,9 +303,9 @@ func TestRunOwnerDefaultSurvivesRestartRecency(t *testing.T) {
 	// thr_43 tag is outside Layer B, so the §5.5 fetch consumes one extra
 	// scripted consult.
 	mock2 := model.NewScriptedMockPerConsult([]model.Response{
-		{Content: "*topic: thr_43 [a, b, c, d]*\nS2-T1."}, // aborted by fetch
-		{Content: "*topic: thr_43 [a, b, c, d]*\nS2-T1."}, // re-issued
-		{Content: "*topic: thr_43 [a, b, c, d]*\nS2-T2."},
+		{Content: "*topic: thr_43 [e, f, g, h]*\nS2-T1."}, // aborted by fetch
+		{Content: "*topic: thr_43 [e, f, g, h]*\nS2-T1."}, // re-issued
+		{Content: "*topic: thr_43 [e, f, g, h]*\nS2-T2."},
 		{Content: "No tag. S2-T3-FIRST."},
 		{Content: "Still no tag. S2-T3-RETRY."},
 	})

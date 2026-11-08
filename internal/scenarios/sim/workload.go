@@ -767,17 +767,15 @@ type bufStep struct {
 	// oracle/runtime divergence on the fine tier.
 	intraProbe *intraProbe
 
-	// layerBSnapshot is the generator's shadow Layer-B (thread indices,
-	// most-recently-engaged first) as it stood when THIS step was generated —
-	// i.e. after this step's engage() applied. It is captured at appendStep
-	// time because the generator runs a day-ahead buffer: the live g.layerB
-	// has already advanced to the GENERATION frontier (hundreds of steps
-	// ahead) by the time this step EXECUTES and its feedback arrives, so the
-	// live shadow cannot be compared against this step's post-turn runtime
-	// ActiveThreads. This per-step snapshot is the shadow that step's recall
-	// oracle actually used, and is what the runtime's post-turn Layer-B must
-	// agree with (burndown #8 cross-check).
-	layerBSnapshot []int
+	// recallCandidates is the recall oracle's expected set for a recall-
+	// opportunity step BEFORE the active-set residency filter, scored at
+	// generation time against the shadow retained sets as they stand at this
+	// step (they run ahead of execution, so they cannot be read later). Next()
+	// drops the threads resident in the runtime mirror (rtActive) when the step
+	// executes, giving the step's ExpectedRecallMatches; the mirror knows every
+	// observed recall fetch, which the generation-time g.layerB cannot. nil for
+	// a step whose expected set is not residency-derived.
+	recallCandidates []string
 }
 
 // dayBuf is one generated calendar day's steps plus the global step
@@ -821,10 +819,16 @@ func dayHasTurn(day dayBuf) bool {
 // (Seed, Duration, Corpus) — the determinism contract drainSteps
 // relies on.
 func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool) {
-	// Cross-check the shadow Layer-B model against the runtime's
-	// authoritative set (burndown #8). Observational only — it reads
+	// Apply the just-run turn to the runtime mirror, then cross-check the
+	// shadow Layer-B model and the mirror against the runtime's
+	// authoritative set (burndown #8, BD-4). Observational only — it reads
 	// feedback and bumps a counter; it draws no rng and emits no step, so
 	// the canonical stream stays byte-identical at a fixed seed.
+	g.lastRtSnapshot = nil
+	if g.rtPending != nil {
+		g.lastRtSnapshot = g.advanceRuntimeMirror(*g.rtPending, feedback.RecallFetchedIDs)
+		g.rtPending = nil
+	}
 	g.crossCheckLayerB(feedback)
 
 	// Tally the just-run step into its lifecycle recall bucket, if any. The
@@ -1021,22 +1025,15 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 			g.closeEpisodeHit()
 		case g.recallAttempts < 3:
 			// MISS with attempts remaining — inject a refinement turn
-			// (a different slot of the same topic, same primary thread).
-			// The refinement re-engages layerB[0] (an LRU no-op on both the
-			// shadow and the runtime), so it cannot introduce Layer-B drift;
-			// it is also injected at EXECUTION time, not via appendStep, so it
-			// carries no snapshot. Arm a nil snapshot so the burndown-#8
-			// cross-check skips it rather than re-using the prior step's.
+			// (a different slot of the same topic, same primary thread),
+			// at EXECUTION time, not via appendStep.
 			g.recallAttempts++
-			g.lastLayerBSnapshot = nil
 			ref := g.buildRefinementStep()
 			// The runtime executes the refinement as a real turn (TurnNumber++)
 			// that re-engages the frontier head (buildRefinementStep tags
-			// g.layerB[0]). Advance the runtime mirror the same way so decay
-			// timing stays aligned with the runtime; the reverse cross-check for
-			// this step is skipped anyway (lastLayerBSnapshot nil above), but the
-			// advance must happen so the NEXT step's mirror is turn-accurate.
-			g.lastRtSnapshot = g.advanceRuntimeMirror(g.threads[g.layerB[0]].threadID(), false)
+			// g.layerB[0]). Advance the runtime mirror the same way, so decay
+			// timing and the active-set cross-check stay turn-accurate.
+			g.rtPending = &rtTurnStep{engagedID: g.threads[g.layerB[0]].threadID()}
 			g.reconcileAt(&ref)
 			return ref, true
 		default:
@@ -1067,18 +1064,24 @@ func (g *generator) Next(feedback scenarios.StepFeedback) (scenarios.Step, bool)
 	g.lastVagueTurn = bs.vagueCampaignTurn
 	g.lastProbe = bs.probe
 	g.lastIntraProbe = bs.intraProbe
-	g.lastLayerBSnapshot = bs.layerBSnapshot
-	// Arm the runtime-mirror snapshot for the BD-4 reverse cross-check. A sleep-
+	// Declare a recall opportunity's expected matches against the runtime
+	// mirror as it stands before this turn: every observed fetch is in it.
+	if bs.recallCandidates != nil {
+		bs.step.ExpectedRecallMatches = withoutIDs(bs.recallCandidates, g.rtActive)
+	}
+	// Arm the runtime-mirror turn for the active-set cross-check. A sleep-
 	// cycle step is not a turn (the runtime routes it off the turn path, no
 	// TurnNumber++ and RuntimeLayerB nil), so the mirror must not advance for it;
 	// every other step engages g.threads[bs.engagedIdx] (the id the runtime's
 	// MockResponse tags — the single thread it moves to the front of
 	// ActiveThreads), with the mirror turn counter resetting on a RestartSession.
 	if bs.step.SleepCycle {
-		g.lastRtSnapshot = nil
+		g.rtPending = nil
 	} else {
-		g.lastRtSnapshot = g.advanceRuntimeMirror(
-			g.threads[bs.engagedIdx].threadID(), bs.step.RestartSession)
+		g.rtPending = &rtTurnStep{
+			engagedID: g.threads[bs.engagedIdx].threadID(),
+			restart:   bs.step.RestartSession,
+		}
 	}
 
 	// If this buffered step opens a new recall opportunity, start an
@@ -1242,8 +1245,9 @@ func (g *generator) buildRefinementStep() scenarios.Step {
 	// on the spine — those whose creating step has executed. Pass the
 	// executed-step count as the materialization cutoff; a thread from the
 	// day-ahead generation buffer whose creating step has not yet run is
-	// excluded, preventing the off-spine-not-archived false miss.
-	recallIDs := g.recallExpectedForMaterialized(idx, Q, false, g.executedStepCount())
+	// excluded, preventing the off-spine-not-archived false miss. Threads
+	// resident in the runtime mirror are dropped, as for every executed step.
+	recallIDs := withoutIDs(g.recallExpectedForMaterialized(idx, Q, false, g.executedStepCount()), g.rtActive)
 
 	step := scenarios.Step{
 		// The refinement's TimeDelta is a small jittered rapid gap — the
@@ -1263,7 +1267,6 @@ func (g *generator) buildRefinementStep() scenarios.Step {
 		),
 		Annotation: fmt.Sprintf("refinement attempt %d (%s)",
 			g.recallAttempts, slot.Topic),
-		RecallAck: &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
 	}
 	if len(recallIDs) > 0 {
 		step.ExpectedRecallMatches = recallIDs
@@ -1762,12 +1765,10 @@ const (
 
 	// metricSynthesisBorrowedSymbols is the run-total count of borrowed
 	// parent tags blended into synthesis threads — the sim-side
-	// observability for the derived_from realism element. NOTE (§2.7.3
-	// Part-2 finding): the sim's decline-all RecallAck means production
-	// never promotes a parent into recallSurfaced ∩ Layer-B, so it does
-	// NOT stamp derived_from end-to-end on these turns; this counter
-	// measures the workload's borrow volume, not a production stamp. The
-	// production rule is covered directly by Inc B unit tests.
+	// observability for the derived_from realism element. It measures the
+	// workload's borrow volume, not production stamps: production stamps
+	// derived_from only where recall fetched a parent into Layer B before
+	// the synthesis turn, which the generator neither predicts nor counts.
 	metricSynthesisBorrowedSymbols = "synthesis_derived_from_symbols"
 
 	// metricMaterialStructuralChangesPerDay is a histogram with one sample
@@ -1861,31 +1862,16 @@ type generator struct {
 	// the last ResumeWindowTurns turns.
 	lastEngagedTurn []int
 
-	// layerBShadowDivergence is the run-total count of cross-check failures
-	// between this shadow `layerB` model and the runtime's authoritative
-	// Layer-B set (StepFeedback.RuntimeLayerB / turn.State.ActiveThreads) —
-	// sim-harness review burndown #8. Each Next() compares the two: every
-	// runtime-resident thread (minus the measurement carrier, which the
-	// generator deliberately never enters into its shadow) MUST be present
-	// in the shadow; a runtime thread the shadow does not predict means the
-	// two LRUs have diverged (a tie-break or eviction-order subtlety), which
-	// would silently corrupt the recall oracle's expected-sets. 0 on a clean
-	// run; hard-gated == 0 when the runtime follows the canned plan
-	// (oracleGatesAssert; report-only under live inference, where the real
-	// model engages a different thread set than the plan). Each divergent
-	// step also routes a forensic pnlog.Warn so a CI failure has the
-	// offending id-sets without a re-run.
-	layerBShadowDivergence int
-
-	// layerBShadowReverseDivergence is the OPPOSITE-direction tally (BD-4): the
-	// run-total count of threads the runtime-mirror Layer-B (rtActive) holds
-	// that the runtime EVICTED (mirror-retained / runtime-evicted). The forward
-	// `layerBShadowDivergence` only catches a runtime thread the engage()-only
-	// shadow lacks; this catches a mirror thread the runtime lacks. Since the
-	// mirror (unlike the plain shadow) replicates the two documented legitimate
-	// eviction sources — measurement-carrier displacement and §3.5 decay closure
-	// — a nonzero here is a REAL runtime/mirror LRU disagreement, not modeled
-	// over-retention (B3). Report-only until the coordinator flips the gate.
+	// layerBShadowDivergence and layerBShadowReverseDivergence are the run
+	// totals of the SPEC §9.4 oracle-agreement check (crossCheckLayerB) between
+	// the runtime mirror (rtActive) and the runtime's active set: threads the
+	// runtime holds that the mirror lacks (forward, burndown #8) and threads
+	// the mirror holds that the runtime evicted (reverse, BD-4). Either means
+	// the recall oracle's expected sets are computed off a wrong active set.
+	// Hard-gated == 0 when the runtime follows the canned plan
+	// (oracleGatesAssert); report-only under live inference. Each divergent
+	// step also routes a forensic pnlog.Warn.
+	layerBShadowDivergence        int
 	layerBShadowReverseDivergence int
 
 	// Runtime-mirror Layer-B (BD-4 / B3 reverse cross-check). An INDEPENDENT,
@@ -1903,6 +1889,10 @@ type generator struct {
 	//      already dormant (never in the top-BTopK ActiveThreads it would need to be
 	//      in to affect this cross-check), so only turn-idle decay can evict a
 	//      resident thread.
+	// It also replicates the §3.4 automatic recall fetch, which promotes a thread
+	// into ActiveThreads at turn close without engaging it. The fetched ids are
+	// the runtime's observable output (StepFeedback.RecallFetchedIDs), never a
+	// prediction, so the mirror advances a turn only once its feedback arrives.
 	//
 	// It is maintained at EXECUTION time in Next() (not generation time) so it
 	// observes the true turn sequence — including execution-injected refinement
@@ -1912,15 +1902,18 @@ type generator struct {
 	//
 	// rtActive is the ActiveThreads mirror (thread ids, most-recent-first, capped
 	// at layerBCap == memops.DefaultBTopK — the same cap the forward shadow uses).
-	// rtLastEngaged[id] is the mirror turn at which id was last engaged (== the
-	// runtime's stored LastEngagedTurn). rtTurn is the mirror turn counter: it
-	// ++ once per executed turn and resets to 0 on a RestartSession step, exactly
-	// mirroring state.TurnNumber. lastRtSnapshot is the just-returned step's
-	// rtActive, compared against that step's runtime ActiveThreads on the next
-	// Next()'s feedback.
+	// rtLastEngaged[id] is the mirror turn at which active thread id was last
+	// engaged (== the runtime's stored LastEngagedTurn); a decay-retired thread
+	// leaves the map until it is engaged again. rtTurn is the mirror turn
+	// counter: it ++ once per executed turn and resets to 0 on a RestartSession
+	// step, exactly mirroring state.TurnNumber. rtPending is the just-returned
+	// step's turn, applied when its feedback arrives; nil for a sleep-cycle step.
+	// lastRtSnapshot is the mirror after that turn, compared against the
+	// runtime's post-turn ActiveThreads.
 	rtActive       []string
 	rtLastEngaged  map[string]int
 	rtTurn         int
+	rtPending      *rtTurnStep
 	lastRtSnapshot []string
 
 	// files[idx] is the §3.9 tracked-file state for thread idx: the
@@ -2039,9 +2032,8 @@ type generator struct {
 	// so synthesis samples a spread of parents, not always the lowest
 	// orders. synthesisBorrowedSymbols totals the borrowed parent tags
 	// blended into synthesis threads — the sim-side observability for the
-	// derived_from realism element (see the Part-2 finding in §2.7.3: the
-	// sim's decline-all RecallAck means production never stamps it
-	// end-to-end here). All advance only on actNew synthesis conversion;
+	// derived_from realism element (see metricSynthesisBorrowedSymbols for
+	// what it does and does not measure). All advance only on actNew synthesis conversion;
 	// the gate draw keeps them a pure function of (Seed, Duration, Corpus).
 	synthesisEvents          int
 	synthesisParentCounts    []int
@@ -2177,14 +2169,6 @@ type generator struct {
 	lastIntraProbe *intraProbe
 	embeddingRun   bool
 
-	// lastLayerBSnapshot is the just-RUN step's shadow Layer-B snapshot
-	// (bufStep.layerBSnapshot), armed when the step is drawn so the next
-	// Next()'s feedback cross-checks the runtime's post-turn ActiveThreads
-	// against the shadow that step's oracle used (burndown #8). nil for a
-	// step that carries no snapshot (the execution-time refinement, which is
-	// an LRU no-op) — the cross-check skips those.
-	lastLayerBSnapshot []int
-
 	// Intra-thread per-hop probe tallies (§9.2, #109). intraHopTotal is the
 	// per-hop observation count (the shared denominator); intraHopPredictHit
 	// is the oracle's predicted recoverability (the symbolic hop-recall curve,
@@ -2278,14 +2262,7 @@ type recallTally struct {
 // metadata into the current day, and advances the global step counter.
 // It is the on-demand replacement for the build-all generator's
 // `g.steps = append(g.steps, step)`.
-//
-// It also captures this step's shadow Layer-B snapshot (burndown #8): every
-// step's engage() has already run by the time the builder returns it, so
-// g.layerB here is exactly the post-engage shadow that step's recall oracle
-// used — the state the runtime's post-turn ActiveThreads must agree with. The
-// snapshot is copied because g.layerB is rewritten by every later engage().
 func (g *generator) appendStep(bs bufStep) {
-	bs.layerBSnapshot = append([]int(nil), g.layerB...)
 	g.day.steps = append(g.day.steps, bs)
 	g.stepIndex++
 }
@@ -2336,62 +2313,98 @@ func (g *generator) inLayerB(idx int) bool {
 	return slices.Contains(g.layerB, idx)
 }
 
-// advanceRuntimeMirror models one EXECUTED turn engaging engagedID in the
-// runtime-mirror Layer-B (rtActive) and returns the post-turn snapshot for the
-// BD-4 reverse cross-check. It is called once per returned step from Next() (a
-// buffered step, or an execution-injected refinement), so it sees the true turn
-// sequence. Draws no rng; pure observability.
+// layerBThreadIDs returns the generation-time Layer-B model as thread ids.
+func (g *generator) layerBThreadIDs() []string {
+	ids := make([]string, len(g.layerB))
+	for i, idx := range g.layerB {
+		ids[i] = g.threads[idx].threadID()
+	}
+	return ids
+}
+
+// withoutIDs returns ids minus every id in drop, order-preserving; nil when
+// nothing remains.
+func withoutIDs(ids, drop []string) []string {
+	var out []string
+	for _, id := range ids {
+		if !slices.Contains(drop, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// rtTurnStep is one executed turn as the runtime mirror applies it: the thread
+// the turn engages and whether a session relaunch precedes it.
+type rtTurnStep struct {
+	engagedID string
+	restart   bool
+}
+
+// advanceRuntimeMirror models one EXECUTED turn in the runtime-mirror Layer-B
+// (rtActive) and returns the post-turn snapshot for the BD-4 reverse
+// cross-check. Next() calls it when the turn's feedback arrives, with the ids
+// that turn's recall fetched (StepFeedback.RecallFetchedIDs, in log order).
+// Draws no rng; pure observability.
 //
 // restart mirrors the runtime's session relaunch: LoadSession resets TurnNumber
 // to 0 (so turn-idle decay is suppressed for pre-restart threads until rtTurn
 // climbs past their stored LastEngagedTurn) but RESTORES ActiveThreads from the
 // substrate — which equals the mirror's current rtActive — so membership is
-// unchanged. It then applies the two runtime paths that move a thread out of
-// ActiveThreads: updateLayerLRU (move-to-front + BTopK cap, rtEngage) and the
-// §3.5 turn-idle decay sweep (rtDecaySweep).
-func (g *generator) advanceRuntimeMirror(engagedID string, restart bool) []string {
-	if restart {
+// unchanged. It then applies the runtime's turn-close paths in the runtime's
+// order: updateLayerLRU (rtEngage), the §3.4 recall fetches (promoteToLayerB,
+// rtLift — no engagement stamp), and the §3.5 turn-idle decay sweep
+// (rtDecaySweep).
+func (g *generator) advanceRuntimeMirror(step rtTurnStep, fetched []string) []string {
+	if step.restart {
 		g.rtTurn = 0
 	}
 	g.rtTurn++
-	g.rtEngage(engagedID)
+	g.rtEngage(step.engagedID)
+	for _, id := range fetched {
+		g.rtLift(id)
+	}
 	g.rtDecaySweep()
 	return append([]string(nil), g.rtActive...)
 }
 
-// rtEngage replicates touchActiveLRU/updateLayerLRU for the runtime mirror:
-// lift id to the front of rtActive (de-duped), demote any BTopK overflow off
-// the tail (the demoted thread goes to Layer C, which this cross-check does not
-// track — only ActiveThreads membership matters here), and stamp its last-
-// engaged turn. Engaging a thread that had decayed out resurrects it (the
-// runtime's §2.2.1 re-engagement resurrection) simply by re-adding it here.
+// rtEngage replicates updateLayerLRU for the runtime mirror: rtLift, then stamp
+// its last-engaged turn. Engaging a thread that had decayed out resurrects it
+// (the runtime's §2.2.1 re-engagement resurrection) simply by re-adding it.
 func (g *generator) rtEngage(id string) {
+	g.rtLift(id)
+	g.rtLastEngaged[id] = g.rtTurn
+}
+
+// rtLift replicates touchActiveLRU: lift id to the front of rtActive
+// (de-duped) and demote any BTopK overflow off the tail (the demoted thread
+// goes to Layer C, which this cross-check does not track — only ActiveThreads
+// membership matters here).
+func (g *generator) rtLift(id string) {
 	g.rtActive = withoutString(g.rtActive, id)
 	g.rtActive = append([]string{id}, g.rtActive...)
 	if len(g.rtActive) > layerBCap {
 		g.rtActive = g.rtActive[:layerBCap]
 	}
-	g.rtLastEngaged[id] = g.rtTurn
 }
 
-// rtDecaySweep removes from rtActive every still-resident thread whose turn-idle
-// count has reached turn.DecayTurns — the §3.5 closure eviction (turn/closure.go
-// decayEligible turn-based branch). The `rtTurn >= last` guard mirrors
-// decayEligible's prior-session skip: after a restart, a pre-restart thread's
-// stored last-engaged turn exceeds the reset counter, so its turn signal does
-// not fire (the runtime then relies on wall-clock decay, which cannot evict a
-// resident thread — see the rtActive field doc). The just-engaged thread has
-// idle 0, so it is never swept.
+// rtDecaySweep retires every active thread whose turn-idle count has reached
+// turn.DecayTurns — the §3.5 closure (turn/closure.go decayEligible turn-based
+// branch), which scans every active thread, resident or not. A retired thread
+// leaves rtLastEngaged, so a later recall fetch of it is not swept again (the
+// runtime decays only active threads), and leaves rtActive. The `rtTurn >= last`
+// guard mirrors decayEligible's prior-session skip: after a restart, a
+// pre-restart thread's stored last-engaged turn exceeds the reset counter, so
+// its turn signal does not fire (wall-clock decay is not modeled — see the
+// rtActive field doc). The just-engaged thread has idle 0, so it is never
+// swept.
 func (g *generator) rtDecaySweep() {
-	kept := make([]string, 0, len(g.rtActive))
-	for _, id := range g.rtActive {
-		last, ok := g.rtLastEngaged[id]
-		if ok && g.rtTurn >= last && g.rtTurn-last >= turn.DecayTurns {
-			continue
+	for id, last := range g.rtLastEngaged {
+		if g.rtTurn >= last && g.rtTurn-last >= turn.DecayTurns {
+			delete(g.rtLastEngaged, id)
+			g.rtActive = withoutString(g.rtActive, id)
 		}
-		kept = append(kept, id)
 	}
-	g.rtActive = kept
 }
 
 // withoutString returns ss with the first occurrence of v removed,
@@ -2408,99 +2421,31 @@ func withoutString(ss []string, v string) []string {
 	return ss
 }
 
-// crossCheckLayerB compares the just-run step's shadow Layer-B (the snapshot
-// armed from its bufStep) against the runtime's authoritative set
-// (StepFeedback.RuntimeLayerB, a snapshot of turn.State.ActiveThreads taken
-// after that turn) — sim-harness review burndown #8. The shadow and the real
-// LRU were never cross-checked before; an eviction-order or tie-break
-// divergence would silently make the recall oracle compute wrong expected-sets
-// ("two models of one truth, assumed to agree").
-//
-// It compares the PER-STEP snapshot, not the live g.layerB, because the
-// generator runs a day-ahead buffer: by the time this step executes, the live
-// shadow has advanced hundreds of steps to the generation frontier. The
-// snapshot is the shadow as of this step's own engagement — the state the
-// runtime's post-turn Layer-B must agree with.
-//
-// The contract is a SUBSET, not strict equality, because of the measurement
-// carrier (§2.6 carrierIdx): when a carrier-hosted probe runs, the RUNTIME
-// engages the carrier (it lands at the front of ActiveThreads), but the
-// generator deliberately never runs the carrier through engage() — so the
-// shadow legitimately lacks the carrier, and the carrier may also have
-// displaced a genuine tail thread the shadow still holds. Removing the carrier
-// from the runtime side and asserting every remaining runtime-resident thread
-// is PRESENT in the shadow tolerates that modeled exclusion while still
-// catching the target defect: a thread the runtime put in Layer-B that the
-// generator's LRU model did not predict. The shadow being a strict superset
-// (it retains a thread the carrier evicted) is expected, not a divergence.
+// crossCheckLayerB is the SPEC §9.4 oracle-agreement check: the model the
+// recall oracle derives expected matches from — the runtime mirror, as it
+// stands after the just-run turn (lastRtSnapshot) — must equal the runtime's
+// authoritative active set (StepFeedback.RuntimeLayerB, turn.State.
+// ActiveThreads after that turn), in both directions, nothing excluded.
+// Forward (burndown #8): a runtime-resident thread the mirror lacks. Reverse
+// (BD-4): a mirror-held thread the runtime evicted.
 //
 // Observational only: it bumps a counter and routes a forensic warn; it draws
 // no rng and emits no step, so the canonical stream stays byte-identical.
-// Skips the zero-feedback drainSteps path (Index < 0), a sleep-cycle step
-// (RuntimeLayerB nil), and a step with no snapshot (the execution-time
-// refinement, an LRU no-op — lastLayerBSnapshot nil).
+// Skips the zero-feedback drainSteps path (Index < 0) and a sleep-cycle step
+// (RuntimeLayerB nil, no mirror turn).
 func (g *generator) crossCheckLayerB(feedback scenarios.StepFeedback) {
-	if feedback.Index < 0 || feedback.RuntimeLayerB == nil || g.lastLayerBSnapshot == nil {
+	if feedback.Index < 0 || feedback.RuntimeLayerB == nil || g.lastRtSnapshot == nil {
 		return
 	}
-	// This step's shadow Layer-B id set (indices → thr_N ids).
-	shadow := make(map[string]struct{}, len(g.lastLayerBSnapshot))
-	for _, idx := range g.lastLayerBSnapshot {
-		shadow[g.threads[idx].threadID()] = struct{}{}
+	if missing := withoutIDs(feedback.RuntimeLayerB, g.lastRtSnapshot); len(missing) > 0 {
+		g.layerBShadowDivergence += len(missing)
+		pnlog.Warn("sim step %d: Layer-B shadow divergence: runtime-resident %v absent from mirror %v — burndown #8 LRU drift",
+			feedback.Index, missing, g.lastRtSnapshot)
 	}
-	// The carrier is a measurement artifact the shadow never models; exclude it
-	// from the runtime side so its expected presence is not scored as drift.
-	var carrierID string
-	if g.carrier >= 0 {
-		carrierID = g.threads[g.carrier].threadID()
-	}
-	// Forward direction (#8): a runtime-resident thread (minus the carrier) the
-	// shadow did not predict. Also build the carrier-free runtime set for the
-	// reverse direction below.
-	runtimeSet := make(map[string]struct{}, len(feedback.RuntimeLayerB))
-	var divergent []string
-	for _, id := range feedback.RuntimeLayerB {
-		if id == carrierID {
-			continue
-		}
-		runtimeSet[id] = struct{}{}
-		if _, ok := shadow[id]; !ok {
-			divergent = append(divergent, id)
-		}
-	}
-	if len(divergent) > 0 {
-		g.layerBShadowDivergence += len(divergent)
-		pnlog.Warn("sim step %d: Layer-B shadow divergence: runtime-resident %v absent from shadow %v (carrier=%q) — burndown #8 LRU drift",
-			feedback.Index, divergent, g.lastLayerBSnapshot, carrierID)
-	}
-
-	// Reverse direction (BD-4 / B3): threads the RUNTIME-MIRROR (rtActive) holds
-	// that the runtime EVICTED (mirror-retained / runtime-evicted) — the class
-	// the forward subset check structurally cannot see.
-	//
-	// Unlike the engage()-only `layerB` shadow, the mirror replicates the two
-	// documented legitimate eviction sources — measurement-carrier displacement
-	// and §3.5 turn-idle decay closure (see the rtActive field doc) — so a
-	// residual here is now a REAL runtime/mirror LRU disagreement, not modeled
-	// over-retention. The carrier is excluded from both the mirror snapshot and
-	// the runtime set (runtimeSet already dropped it above), keeping the compare
-	// carrier-symmetric. Still report-only (the counter is folded into the
-	// metrics blob); the coordinator flips it to a == 0 gate once it demonstrably
-	// sits at 0. lastRtSnapshot is nil for the execution-injected refinement (no
-	// mirror snapshot armed there); the guard above skips it via lastLayerBSnapshot.
-	var reverseDivergent []string
-	for _, id := range g.lastRtSnapshot {
-		if id == carrierID {
-			continue
-		}
-		if _, ok := runtimeSet[id]; !ok {
-			reverseDivergent = append(reverseDivergent, id)
-		}
-	}
-	if len(reverseDivergent) > 0 {
-		g.layerBShadowReverseDivergence += len(reverseDivergent)
-		pnlog.Warn("sim step %d: Layer-B reverse divergence: mirror-held %v absent from runtime %v (carrier=%q) — BD-4 runtime-mirror LRU drift",
-			feedback.Index, reverseDivergent, g.lastRtSnapshot, carrierID)
+	if extra := withoutIDs(g.lastRtSnapshot, feedback.RuntimeLayerB); len(extra) > 0 {
+		g.layerBShadowReverseDivergence += len(extra)
+		pnlog.Warn("sim step %d: Layer-B reverse divergence: mirror-held %v absent from runtime %v — BD-4 runtime-mirror LRU drift",
+			feedback.Index, extra, feedback.RuntimeLayerB)
 	}
 }
 
@@ -2754,8 +2699,13 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 	// (SURPRISE; report).
 	curSlot := g.model.slots[g.threads[idx].cur]
 	Q := append(append([]string(nil), curSlot.Tags...), saltSymbol(g.threads[idx].order))
-	recallIDs := g.recallExpectedFor(idx, Q, isNew)
-	recallOpp := len(recallIDs) > 0
+	// The candidates are scored now; their residency filter runs at execution
+	// against the runtime mirror (bufStep.recallCandidates). Whether this turn
+	// is a recall opportunity shapes the step stream, so that decision reads
+	// the generation-time g.layerB, keeping the stream a pure function of
+	// (Seed, Duration, Corpus).
+	recallCands := g.recallExpectedFor(idx, Q, isNew)
+	recallOpp := len(withoutIDs(recallCands, g.layerBThreadIDs())) > 0
 
 	// §3.2 wander decision: a fraction of NORMAL threads, on an eligible
 	// engagement, advance to a different-topic slot, generalizing the
@@ -2816,22 +2766,19 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 		UserInput:    userInput,
 		MockResponse: buildMockResponse(isNew, thr.threadID(), anchorTags, slot),
 		Annotation:   annotation,
-		// RecallAck is always decline-all (the generator cannot
-		// predict the runtime's offer set, so accepting nothing is the
-		// only contract-safe choice — recall is *measured* here, not
-		// acted on).
-		RecallAck: &scenarios.RecallAck{Reason: turn.DeclineNotRelevant},
 	}
 
 	if tt == turnWork {
 		step.PreEvents = g.buildWorkPreEvents(idx, slot, userDictated)
 	}
 
-	// On a recall opportunity, declare the ground-truth match set so
-	// the harness records per-step recall fidelity. RecallMeasureOnly:
-	// a recall miss must not fail this smoke rung.
-	if recallOpp {
-		step.ExpectedRecallMatches = recallIDs
+	// On a recall opportunity, the ground-truth match set is declared when
+	// the step executes (Next, from recallCands) so the harness records
+	// per-step recall fidelity. RecallMeasureOnly: a recall miss must not
+	// fail this smoke rung.
+	if !recallOpp {
+		recallCands = nil
+	} else {
 		step.RecallMode = scenarios.RecallMeasureOnly
 	}
 
@@ -2842,7 +2789,7 @@ func (g *generator) buildStep(tt turnType, act action) bufStep {
 	// the within-session interleaving telemetry counts a wander as touching
 	// a new distinct slot (the distinct-slots-per-session signal then
 	// reflects genuine topic movement, not just the birth binding).
-	return bufStep{step: step, slotIdx: thr.cur, engagedIdx: idx}
+	return bufStep{step: step, slotIdx: thr.cur, engagedIdx: idx, recallCandidates: recallCands}
 }
 
 // selectEngagedThread picks the thread the upcoming step engages,
@@ -3060,9 +3007,9 @@ func simJaccard(q []string, t map[string]struct{}) float64 {
 	return float64(inter) / float64(union)
 }
 
-// recallExpectedFor computes the recall-opportunity oracle for the
-// engaging turn (§4.2): the dormant threads (not in Layer B, not the
-// engaged thread) whose shadow retained symbol set clears the
+// recallExpectedFor computes the recall-opportunity oracle's candidates for
+// the engaging turn (§4.2): the threads (not the engaged thread, not a
+// carrier) whose shadow retained symbol set clears the
 // symbolic-Jaccard threshold against the query Q. The caller passes Q as
 // the runtime builds it — the slot's topical mad-libs tags plus the
 // engaged thread's own salt (the runtime coalesces the turn's model
@@ -3070,7 +3017,10 @@ func simJaccard(q []string, t map[string]struct{}) float64 {
 // buildStep). The salt still suppresses non-sibling false positives:
 // each candidate carries its own distinct salt in the union and neither
 // shares the engaged salt, so the density mechanism holds (§2.2/§2.3).
-// Returns thread IDs in ascending creation order.
+// Returns thread IDs in ascending creation order. Active-set residency is
+// not applied here: a step's expected matches drop the threads resident in
+// the runtime mirror (rtActive) when it executes (withoutIDs in Next and in
+// buildRefinementStep).
 //
 // This replaces the old O(1) slot-equality rule, which was valid only
 // while every thread was monotonic. It is independent of the runtime
@@ -3135,7 +3085,7 @@ func (g *generator) recallExpectedForMaterialized(idx int, Q []string, isNew boo
 	}
 	var ids []string
 	for _, cand := range g.threads {
-		if cand.order == idx || g.inLayerB(cand.order) || g.isCarrier(cand.order) {
+		if cand.order == idx || g.isCarrier(cand.order) {
 			// A measurement carrier is excluded from the oracle scan: its
 			// retained set is a synthetic grab-bag of foreign measurement
 			// queries, not a genuine recall candidate. Runtime-side its

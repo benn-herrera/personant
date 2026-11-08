@@ -156,7 +156,7 @@ func crossProjectDecline(ctx context.Context, state *State, threadID, project, a
 // before-promote ordering can never diverge between them (a divergence would
 // reopen the §3.0.5 bypass class): the §5.5 mid-turn reprompt
 // (fetchThreadForReprompt) and the §3.4 recall-accept promotion
-// (applyRecallResolution). It deliberately does not add thrID to
+// (acceptRecallCandidate). It deliberately does not add thrID to
 // coalesce.threads: engagement is owed by a later response's tag, not by the
 // fetch action itself. promoteToLayerB owns the §2.7.3 recallSurfaced marking,
 // so the attribution timing (same-turn for a pre-merge reprompt, next-turn for
@@ -209,7 +209,7 @@ func fetchThreadForReprompt(ctx context.Context, state *State, thrID string) boo
 //
 // This is the shared recall-promotion chokepoint, so it owns the §2.7.3
 // recallSurfaced marking for BOTH callers: fetchThreadForReprompt (§5.5
-// mid-turn fetch) and applyRecallResolution (§3.4 recall-accept). Marking
+// mid-turn fetch) and acceptRecallCandidate (§3.4 recall-accept). Marking
 // here makes each path record the origin at its natural turn-lifecycle
 // point — accept runs at turn-close (after the merge), so its attribution
 // lands one turn later; a mid-turn fetch runs before the merge, so its

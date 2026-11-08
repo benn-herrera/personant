@@ -148,9 +148,7 @@ func newHarness(t *testing.T, sc Scenario) *Harness {
 	restore := clock.SetTimeline(func() time.Time { return h.pinnedClock })
 	t.Cleanup(restore)
 
-	// §3.5 curator + §3.4 recall ack policy — see installAckPolicy. A
-	// simulated relaunch (restartSession) re-applies it to the rebuilt State.
-	installAckPolicy(state)
+	installCurator(state)
 
 	// Install the scenario's custom recaller (embedding-in-loop seam, #98)
 	// and prime its index. A no-op when the scenario kept the default
@@ -160,26 +158,11 @@ func newHarness(t *testing.T, sc Scenario) *Harness {
 	return h
 }
 
-// installAckPolicy applies the harness's §3.5 curator and §3.4 recall ack
-// mode to a State, at construction AND after a simulated relaunch, since
-// turn.LoadSession builds a stock State that carries neither.
-//
-// The curator is a deterministic script, so closure scenarios never need
-// a live model. With it installed the closure scan runs every step and
-// closes each decayed thread as resolved.
-//
-// The §2.6.1 RECALL ack mode is pinned to `always` (AMENDED 2026-08-05):
-// a Step.RecallAck is a scripted human verdict on
-// every surfaced candidate, and the scripted resolver ERRORS when an id it
-// accepts was not offered — under the front end's `banded` default a
-// high-confidence candidate would be auto-accepted before the resolver saw
-// it and the scenario would fail on its own success. COVERAGE CONSEQUENCE,
-// stated rather than hidden: the banded default's AUTO path is unit-covered
-// (internal/turn) and NOT sim-covered; the banded/auto-mode sim rung owes
-// that coverage.
-func installAckPolicy(state *turn.State) {
+// installCurator installs the harness's deterministic curator on a State,
+// at construction and after a simulated relaunch, since turn.LoadSession
+// builds a State without one.
+func installCurator(state *turn.State) {
 	state.Curator = scriptedCurator{}
-	state.RecallAckMode = turn.RecallAckAlways
 }
 
 // scriptedCurator is the harness's deterministic Curator: it returns a

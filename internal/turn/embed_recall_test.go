@@ -146,16 +146,17 @@ func TestSurfaceRecall_IntraThreadFires(t *testing.T) {
 	}
 }
 
-// TestSurfaceRecall_AcceptedIntraHitDoesNotReOffer is the accept-
-// suppression regression (user ruling 2026-08-05). The intra-thread pass
-// targets the ENGAGED thread by id, so the thread-level exclusion set
-// cannot suppress it: before the fix, accepting an intra candidate left no
-// mark and the identical offer re-appeared on the next turn for as long as
-// the topic continued — the user answered, and was asked again.
+// TestRecall_FetchedIntraHitIsNotFetchedAgain is the §3.4 in-context
+// exclusion for intra-thread hits. The intra pass targets the ENGAGED thread
+// by id, so neither the thread-level exclusion set nor Layer-B residency can
+// suppress it: only the fetched excerpts' mark does. Without it the same
+// early chunk would be fetched again every turn the topic continued.
 //
-// It drives the real stack twice with the same query: the first pass must
-// offer the early chunk and accept it; the second must not offer it at all.
-func TestSurfaceRecall_AcceptedIntraHitDoesNotReOffer(t *testing.T) {
+// It drives the real stack with no resolver: the first pass fetches the
+// early chunk (an exact-text mock-embedder match clears the cosine auto
+// bar), the second, same query, fetches nothing, and a query for a
+// different early chunk of the now-resident thread is fetched again.
+func TestRecall_FetchedIntraHitIsNotFetchedAgain(t *testing.T) {
 	paths, meta := newTestHome(t)
 	body := "## Turn 1\ntrefoil knot topology invariant chirality\n\n" +
 		"## Turn 2\nmonsoon humidity precipitation tropics\n\n" +
@@ -190,45 +191,35 @@ func TestSurfaceRecall_AcceptedIntraHitDoesNotReOffer(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	// Count SURFACINGS, not prompts: an exact-text mock-embedder match
-	// clears the cosine auto bar, so the same hit that would be asked about
-	// in the ask band is auto-accepted here. The suppression contract is the
-	// same either way — an accept, by whichever band, ends the re-offer.
-	var offers int
-	state.RecallResolver = func(_ context.Context, offer RecallOffer) (RecallResolution, error) {
-		offers++
-		accept := make([]int, len(offer.Candidates))
-		for i := range offer.Candidates {
-			accept[i] = i
-		}
-		return RecallResolution{Accept: accept}, nil
+	fetches := func() int {
+		return strings.Count(readDayLog(t, paths), "recall.accept thr=thr_1 ")
 	}
-	state.OnAutoRecalled = func(RecallNotice) { offers++ }
 	engaged := map[string]struct{}{"thr_1": {}}
 	if err := surfaceRecallCandidates(context.Background(), state, query, engaged, "thr_1"); err != nil {
 		t.Fatalf("surfaceRecallCandidates (turn 1): %v", err)
 	}
-	if offers != 1 {
-		t.Fatalf("turn 1: want the intra hit surfaced once, got %d", offers)
+	if got := fetches(); got != 1 {
+		t.Fatalf("turn 1: want the intra hit fetched once, got %d", got)
 	}
 
-	// Turn 2: same query, same engaged thread. The accepted excerpts are in
-	// the window now, so there is nothing left to propose.
+	// Turn 2: same query, same engaged thread. The fetched excerpts are in
+	// the window now, so there is nothing left to fetch.
 	if err := surfaceRecallCandidates(context.Background(), state, query, engaged, "thr_1"); err != nil {
 		t.Fatalf("surfaceRecallCandidates (turn 2): %v", err)
 	}
-	if offers != 1 {
-		t.Errorf("accepted intra hit was surfaced again on the next turn (%d total)", offers)
+	if got := fetches(); got != 1 {
+		t.Errorf("fetched intra hit was fetched again on the next turn (%d total)", got)
 	}
 
-	// And the suppression is scoped to the accepted turns, not to the
-	// thread: a query for a DIFFERENT early chunk still surfaces.
+	// The exclusion is scoped to the fetched turns, not to the thread: a
+	// query for a DIFFERENT early chunk is still fetched, though thr_1 is
+	// now resident in Layer B.
 	if err := surfaceRecallCandidates(context.Background(), state,
 		"monsoon humidity precipitation tropics", engaged, "thr_1"); err != nil {
 		t.Fatalf("surfaceRecallCandidates (turn 3): %v", err)
 	}
-	if offers != 2 {
-		t.Errorf("a different early chunk must still surface; total=%d", offers)
+	if got := fetches(); got != 2 {
+		t.Errorf("a different early chunk must still be fetched; total=%d", got)
 	}
 }
 

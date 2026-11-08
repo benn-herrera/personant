@@ -178,6 +178,23 @@ func intraMatchFireSet(lines []string) []string {
 	return fireSetForMarker(lines, markerIntraMatchFire)
 }
 
+// markerRecallAccept is the turn-close line internal/turn logs once per
+// thread recall fetched into Layer B (`recall.accept thr=<id> layers=…`).
+const markerRecallAccept = "recall.accept "
+
+// recallFetchedIDs returns the thread ids of the step's recall.accept lines
+// in log order — the runtime's promotion order, which a Layer-B mirror must
+// replay — unlike the fire sets, which are de-duplicated and sorted.
+func recallFetchedIDs(lines []string) []string {
+	var out []string
+	for _, line := range lines {
+		if id, ok := eventThreadID(line, markerRecallAccept, "thr="); ok {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 // recordEmbedRecallFidelity records the embedding layer's per-step
 // precision/recall/F1 into the parallel embed_recall_fidelity_* series
 // (#98). It mirrors recordRecallFidelity's scoring but against the

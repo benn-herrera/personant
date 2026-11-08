@@ -1,47 +1,9 @@
 package scenarios
 
 import (
-	"context"
 	"errors"
 	"testing"
-
-	"personant/internal/turn"
 )
-
-// recallResolverFor builds a turn.RecallResolver from a step's scripted
-// RecallAck. A nil ack yields a nil resolver — recall stays log-only.
-// Otherwise the resolver accepts every offered candidate whose ThreadID
-// is in ack.AcceptThreadIDs and fails the test if a wanted ID never
-// appeared in the offer (a stale or mis-specified scenario).
-func recallResolverFor(t *testing.T, idx int, label string, ack *RecallAck) turn.RecallResolver {
-	if ack == nil {
-		return nil
-	}
-	return func(_ context.Context, offer turn.RecallOffer) (turn.RecallResolution, error) {
-		want := make(map[string]bool, len(ack.AcceptThreadIDs))
-		for _, id := range ack.AcceptThreadIDs {
-			want[id] = false // false = not yet seen in the offer
-		}
-		var accept []int
-		for i, c := range offer.Candidates {
-			if _, ok := want[c.ThreadID]; ok {
-				accept = append(accept, i)
-				want[c.ThreadID] = true
-			}
-		}
-		for id, seen := range want {
-			if !seen {
-				t.Errorf("scenario step %d (%s): RecallAck accepts %s but it was not in the recall offer",
-					idx+1, label, id)
-			}
-		}
-		reason := ack.Reason
-		if reason == "" {
-			reason = turn.DeclineNotRelevant
-		}
-		return turn.RecallResolution{Accept: accept, Reason: reason}, nil
-	}
-}
 
 // perStepInvariants resolves the invariant list to run after a step,
 // applying the derived-day-tick heavy-cadence policy when the scenario

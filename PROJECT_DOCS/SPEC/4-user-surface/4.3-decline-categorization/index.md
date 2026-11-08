@@ -1,9 +1,7 @@
 ### 4.3 Decline categorization
 
-Every decline is recorded with a reason from a fixed enum: `not-relevant` / `wrong-project` /
-`already-known`. The enum favors recall-tuning signal (why a candidate missed); it may be retuned
-when feedback directive tuning of recall ([§1.8](../../1-operating-model/1.8-memory-vetting.md)) is built.
+Unused: no recall candidate is declined. A candidate below the auto-fetch bar leaves only its
+match-fire record ([§3.4](../../3-core-algorithms/3.4-recall-matching/recall-candidates.md)).
 
-Contents:
-
-- [§4.3 Who supplies the reason](who-supplies-the-reason.md)
+§4.3.1 (REPL line editing and history) and §4.3.2 (turn progress indicator) are unused: opencode
+renders the terminal UI. §4.3.4 (tool receipts) is unused: opencode shows tool calls.

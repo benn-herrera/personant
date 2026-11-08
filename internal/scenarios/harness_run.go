@@ -207,6 +207,7 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 		RecallMatchFireIDs:     rec.matchFires,
 		EmbedMatchFireIDs:      rec.embedFireIDs,
 		IntraMatchFireIDs:      rec.intraFires,
+		RecallFetchedIDs:       recallFetchedIDs(stepLines),
 		RecallExpected:         len(step.ExpectedRecallMatches),
 		TargetRecoverable:      stepRecoverable(h, livePost),
 		RecallExpectedForgiven: rec.expectedForgiven,
@@ -219,7 +220,7 @@ func runStep(t *testing.T, h *Harness, idx int, step Step) StepFeedback {
 }
 
 // stepSetup runs the pre-turn phase: memory telemetry sampling, simulated
-// clean restart, mock-response install, and per-step resolver install. It
+// clean restart, and mock-response install. It
 // leaves h.State ready for the turn.
 func stepSetup(t *testing.T, h *Harness, idx int, label string, step Step) {
 	t.Helper()
@@ -249,8 +250,6 @@ func stepSetup(t *testing.T, h *Harness, idx int, label string, step Step) {
 	if h.liveClient == nil {
 		h.Mock.SetResponse(step.MockResponse)
 	}
-
-	h.State.RecallResolver = recallResolverFor(t, idx, label, step.RecallAck)
 }
 
 // stepSetClock slaves the pinned clock to the step's simulated instant.
@@ -709,13 +708,9 @@ func restartSession(t *testing.T, h *Harness, idx int, label string) {
 	if h.liveClient != nil {
 		rebuilt.Model = h.liveModel
 	}
-	// Re-install the ack policy — the scripted curator and the pinned §3.4
-	// recall ack mode. newHarness installs them on the original State, and
-	// turn.LoadSession carries none of them, so a relaunch that skipped this
-	// would silently run the rest of the scenario with closure disabled and
-	// under a different recall ack regime. The per-step RecallResolver is
-	// installed by runStep below, so it needs no handling here.
-	installAckPolicy(rebuilt)
+	// Without this the rest of the scenario would silently run with
+	// closure disabled.
+	installCurator(rebuilt)
 
 	// Re-install the scenario's custom recaller — turn.LoadSession built
 	// rebuilt with turn.NewState's nil-embedder default, so without this an

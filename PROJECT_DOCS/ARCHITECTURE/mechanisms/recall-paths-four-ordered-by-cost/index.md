@@ -6,7 +6,7 @@ Standard pattern: THESIS "The building blocks", row "Recall".
    request; the model recognizes prior threads directly when a turn engages them. It emits the
    topic tag at turn start. Handles synonyms and paraphrases for free, since the model does the
    recognizing.
-2. **Opportunistic surfacing** (deterministic backstop). When current-turn symbols match, above threshold, the anchors and history symbols of a thread of the active project that this turn did not engage — or, with an embedder configured, the turn's input is close in embedding similarity to a thread's indexed body — the thread is brought forward by band (SPEC §3.4). The embedding scan (`measure.Service`, `coarseFine`) selects the top threads by body vector and scores each by its best chunk; it is not limited to the active project, and another project's candidate is declined at the fetch (SPEC §3.2).
+2. **Opportunistic surfacing** (deterministic backstop). When current-turn symbols match, above threshold, the anchors and history symbols of a thread of the active project that this turn did not engage — or, with an embedder configured, the turn's input is close in embedding similarity to a thread's indexed body — a candidate in the auto-fetch band is fetched automatically through `acceptRecallCandidate` (SPEC §3.4). The embedding scan (`measure.Service`, `coarseFine`) selects the top threads by body vector and scores each by its best chunk; it is not limited to the active project, and another project's candidate is declined at the fetch (SPEC §3.2).
    The symbolic scorer matches on `T(thr) = anchors ∪ {h.normalized}` over the thread's
    `history_symbols`, so a `superseded` symbol stays matchable. The Jaccard numerator is a weighted
    sum: a matched symbol counts 1.0 if `active` in that thread and `recall.superseded-weight` if
@@ -47,16 +47,12 @@ Standard pattern: THESIS "The building blocks", row "Recall".
    startup; a miss is rebuilt, so a service run re-embeds only what changed, O(changed) rather than
    O(all).
 
-   In-context exclusion: when an intra-thread candidate is accepted, the service records its
+   In-context exclusion: when an intra-thread candidate is fetched, the service records its
    turn-excerpts as in-window for the engaged thread (`recallWindowTurns` in `internal/turn`), and
    the recall stack drops them from both the intra-thread scan and the lexical completeness floor.
    The mark ends when the thread is demoted out of the active set. It is held in memory only:
    `working-set.json` restores the active set after a restart, but the composed request then no
-   longer holds the accepted excerpts, and the marks and the window are rebuilt together.
-
-**Decline categorization** is an input to feedback directive tuning (cross-project aggregate only;
-see "Personalization through feedback directive tuning") so that a bad match does not suppress good
-offers. SPEC §4.3 holds the reason enum and its effects; how a reason is captured waits on U4.
+   longer holds the fetched excerpts, and the marks and the window are rebuilt together.
 
 Contents:
 

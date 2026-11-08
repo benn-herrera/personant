@@ -1328,7 +1328,7 @@ func recordWanderMetrics(h *scenarios.Harness, gen *generator) {
 //     today, recorded so a future variable-K distribution is visible).
 //   - metricSynthesisBorrowedSymbols (counter): total borrowed parent tags
 //     blended in — sim-side observability for the derived_from realism
-//     element (NOT a production stamp; see the metric doc / Part-2 finding).
+//     element (NOT a production stamp; see the metric doc).
 //   - metricMaterialStructuralChangesPerDay (histogram): one sample per
 //     sim-day, composing thread-creations + synthesis events (#42).
 //

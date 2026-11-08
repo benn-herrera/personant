@@ -30,15 +30,6 @@ const (
 	decayTime = 7 * 24 * time.Hour
 )
 
-// ackKind distinguishes a human ack from an auto-accept in the §2.8
-// recall.accept event (ack=human|auto).
-type ackKind string
-
-const (
-	ackHuman ackKind = "human"
-	ackAuto  ackKind = "auto"
-)
-
 // decayEligible reports whether rec is a decay-eligible thread at the
 // current turn and time, and returns a short detail string describing
 // which signal fired (for the retire.prompt log line).

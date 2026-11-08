@@ -48,7 +48,5 @@ Contents:
 
 - [§3.4 Embedding index — granularity, maintenance, persistence](embedding-index-granularity-maintenance-persistence.md)
 - [§3.4 Recall candidates](recall-candidates.md)
-- [§3.4 Banding](banding.md)
 - [§3.4 Recall skips content already in the request (in-context exclusion)](recall-skips-content-already-in-the-request-in-context-exclusion.md)
-- [§3.4 Mode parameter](mode-parameter.md)
 - [§3.4 Superseded symbols still match in recall (lifecycle-aware symbolic scorer)](superseded-symbols-still-match-in-recall-lifecycle-aware-symbolic-scorer.md)

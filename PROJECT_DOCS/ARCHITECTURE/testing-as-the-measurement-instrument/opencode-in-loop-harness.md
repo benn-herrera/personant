@@ -24,7 +24,7 @@ the in-process turn.
   `XDG_CACHE_HOME` under the run's data home, so the user's opencode database is never touched, and
   writes the isolated opencode config (the mock provider, `compaction.auto: false`, the plugin
   entry).
-- **Workload split.** The generator is reused as is: user input and acks go through the driver,
+- **Workload split.** The generator is reused as is: user input goes through the driver,
   the scripted model responses are installed in the mock, and `PreEvents` (`fs.read`, `fs.write`,
   `fs.commit`) reach the service through opencode's own tools against a fixture workspace.
 - **Determinism.** Commit author and committer dates are pinned to the memory system's clock

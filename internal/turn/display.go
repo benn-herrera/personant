@@ -7,10 +7,8 @@ import (
 )
 
 // display.go holds the ONE §2.2.2 display-form derivation the turn package
-// hands to the experience layer. Two surfaces need it — the §3.4 recall
-// offer (describeCandidates) and the §3.5 closure offer/notice — and a
-// second copy of the chain is exactly how one of them quietly starts
-// showing a bare thr_N again.
+// hands to the experience layer. A second copy of the chain is exactly
+// how a surface quietly starts showing a bare thr_N again.
 //
 // The runtime resolves the two fields; the front end renders them. Nothing
 // here formats: no separators, no parentheses, no id decoration. That is
