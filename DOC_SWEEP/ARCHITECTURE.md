@@ -91,7 +91,7 @@ noted).
   tail (the newest messages of the service run's in-run history, bounded to 35% of the live-turn reserve; `boundHistoryTail`, `internal/turn/livebudget.go`), the current user input and this turn's tool messages. Tool-call/tool-result pairs in the
   returned `messages` stay intact (integration-options report §4, item 4). Any other model call is
   kept off the provider: the `session.title` and `session.compaction` hooks supply `result`, which
-  skips the model call, so no model request reaches the provider uncomposed (SPEC §1).
+  skips the model call, so no model request reaches the provider uncomposed while the plugin answers its hooks (SPEC §1); on a hook failure the prototype fails open (see "Failure handling", U7).
 - **Wire shape.** A composed request carries one non-empty system part, no empty parts and no
   mid-conversation system messages. Under that shape prompt text reaches the model byte-exact
   (pre-probe results §5; probe results §6, lesson 8). The hook also resets `options.maxTokens`:
@@ -237,7 +237,7 @@ reached through the `MemoryOps.ComposeWorkingSet` port.
 | `BeginTurn` | `session.prompt` | budget, live-turn reject (refuse a single user prompt that exceeds its live-turn share; `internal/turn/livebudget.go`), day rollover, pre-turn snapshot, `TurnNumber++`, prompt journal, expiry of staged symbols, pre-event deltas (file deltas a step carries ahead of its prompt, `Step.PreEvents`), `user.prompt` delta |
 | `ComposeRequest` | `session.context` | working-set composition and request assembly, from this turn's messages in the hook input |
 | `IngestToolResult` | `tool.execute.after` | tool-result deltas, held and applied in call order |
-| `IngestModelResponse` | `session.execution.succeeded` | tag strip (remove the topic tag from the stored and shown response), response journal, ceiling check, `model.response` delta |
+| `IngestModelResponse` | `session.execution.succeeded` | tag strip (from the body the service keeps for in-run history; whether the text opencode stores and shows is stripped is U3, see "Topic-tag mechanics"), response journal, ceiling check, `model.response` delta |
 | `CloseTurn` | `session.execution.succeeded`, after `IngestModelResponse` | engagement, closing scan (the decay check for threads due to close), `CommitTurn`, working-set persist, transcript tail; idempotent |
 | `AbortTurn` | `session.execution.failed`, `.interrupted`, or a phase error | pre-authoritative rollback (before any authoritative write has landed) to the pre-turn snapshot |
 
@@ -334,7 +334,7 @@ the supported `session.remove` instead.
 | `internal/autogit/` | go-git-backed automatic git wrapper with bitflag systemic-validation policy |
 | `internal/recovery/` | startup reconcile orchestrator over the on-disk observables |
 | `internal/crashpoint/` | named kill-point hooks, test-armed and a no-op in production |
-| `internal/eventlog/` | daily-rotated plain-text event log |
+| `internal/eventlog/` | plain-text event log, one file per day |
 | `internal/dedup/` | content identifiers, write-time diffs, excerpt identifier lines and the composition plan; pure; depends only on go-git `plumbing` |
 | `internal/turn/` | the per-delta pipeline, the turn loop, per-turn coalescing (the turn buffer), the staging buffer, recall candidates and the decay-triggered flow for closing a thread |
 | `internal/recall/scoring/` | pure Jaccard and cosine recall primitives, store-independent; fine level (per-excerpt chunk vectors), beam descent, and the summary-tree build (a per-thread index for long threads, searched by beam descent) |
@@ -378,7 +378,7 @@ The model never mutates authoritative state directly. It proposes content; deter
 
 | Judgment | Deterministic check before it is kept |
 |---|---|
-| Topic tag: which threads a turn engages, plus an anchor list (SPEC §5.1) | `prompt.Parse` accepts only a line matching the tag pattern within the preamble scan; each thread entry must match `thr_\d+` or `*new-topic*`; extra tags are ignored with a `topic.warning`. Anchors are normalized (SPEC §2.7.2) and enter the symbol history as `model`-sourced symbols, never directly as anchors: the projection picks the anchors and caps their count. An unknown or other-project thread id is resolved or declined (SPEC §3.2). Anchor length is not checked (ROADMAP Near-term, "Anchor projection can emit an anchor `personant verify` rejects"). |
+| Topic tag: which threads a turn engages, plus an anchor list (SPEC §5.1) | `prompt.Parse` accepts only a line matching the tag pattern within the preamble scan; each thread entry must match `thr_\d+` or `*new-topic*` (the unclosed `*new-topic` is normalized to it); extra tags are ignored with a `topic.warning`. Anchors are normalized (SPEC §2.7.2) and enter the symbol history as `model`-sourced symbols, never directly as anchors: the projection picks the anchors and caps their count. An unknown or other-project thread id is resolved or declined (SPEC §3.2). Anchor length is not checked (ROADMAP Near-term, "Anchor projection can emit an anchor `personant verify` rejects"). |
 | Closing summary (the summarizer, SPEC §5.2) | Trimmed; an empty draft is not applied. The anchors written at close come from the projection, not the draft. Length is not checked before the write: `spine.entry-max-chars` is enforced only by `personant verify` at the history-repository write (ROADMAP Near-term, "Closing summaries are not length-bounded before they are written"). |
 | The clusterer's grouping (SPEC §5.3) | Not built. |
 | Model judgment on recall candidates (SPEC §3.4) | Not built: recall composes the symbolic and embedding signals only. |
@@ -472,7 +472,7 @@ Standard pattern: THESIS "The building blocks", row "The memory store".
 | Structured records | JSONL, sorted by id | line-grain diffs, not record-grain reformat |
 | Thread bodies | markdown + YAML frontmatter | hand-readable; standard tooling (Obsidian, Pandoc) |
 | Configuration | TOML (`config.toml` under `~/.config/personant/`) + markdown directives | hand-editable; no secret-bearing file (SPEC §2.1) |
-| Derived files | regenerable from authoritative files | drift cannot accumulate; `autogit.CheckDerivedFresh` fails a history-repository write that leaves a derived file stale |
+| Derived files | regenerable from authoritative files | drift cannot accumulate; `autogit.CheckDerivedFresh` fails a day rollover or archival batch that leaves a derived file stale |
 | Git management | automatic on the store directory, never on user's workspace | the service owns the store's git; the user owns the workspace's |
 
 ### Port abstraction policy
@@ -521,11 +521,11 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
     meta.json                       # project metadata (authoritative)
     digest.json                     # [derived] the project's other-projects slot entry
   directives/
-    defaults.md                     # baked-in defaults (read-only after install)
+    defaults.md                     # baked-in defaults; rewritten from the binary by every `personant init`
     user.md                         # user-wide overrides, including feedback directive tuning
     prj_<n>/project.md              # project-scoped directives
-  logs/YYYY-MM-DD.log               # plain-text, append-only, daily rotation
-  logs/archive/                     # created empty by init; nothing writes it (log rotation is not built)
+  logs/YYYY-MM-DD.log               # plain-text, append-only, one file per day
+  logs/archive/                     # created empty by init; nothing writes it (moving old day files there is not built)
   version.toml                      # authoritative, committed; format revision `format = N` (SPEC §9.1)
   README.md                         # layout documentation for human inspection
   last-active                       # operational; prj_<n> of the most recently active project
@@ -542,11 +542,13 @@ $PERSONANT_HOME/                    # default ~/.personant; configurable
 
 | Type | Examples | Drift policy |
 |---|---|---|
-| Authoritative | `spine.jsonl`, `threads/*`, `directives/*.md`, `projects/*/meta.json`, `logs/*.log`, `version.toml`, `archive/index.jsonl` | Source of truth; hand-editable. `logs/*.log` is the append-only turn-grain forensic record that crash recovery preserves and re-appends. |
-| Derived | `symbols.jsonl`, `projects/*/digest.json` | Regenerable from the authoritative files; a history-repository write fails if it leaves a derived file stale; turn-repository commits are not checked; never hand-edited. |
-| Operational | `.git/`, `.git-daily/`, `last-active`, `turn-journal.jsonl`, `op-in-progress.json`, `derived-watermark`, `working-set.json`, `.recall-cache/`, `recovery/` | System-managed, not drift-checked, and gitignored: the managed gitignore block (the part of the store's `.gitignore` that Personant writes and keeps current) lists each, both repositories' git-dirs included, so neither repository sees the other as untracked (the ignore-block rule; see "Crash recovery and the turn and history repositories"). |
+| Authoritative | `spine.jsonl`, `threads/*`, `directives/*.md`, `projects/*/meta.json`, `logs/*.log`, `version.toml`, `archive/index.jsonl` | Source of truth; hand-editable (`directives/defaults.md` is rewritten by every `personant init`). `logs/*.log` is the append-only turn-grain forensic record that crash recovery preserves and re-appends. |
+| Derived | `symbols.jsonl`, `projects/*/digest.json` | Regenerable from the authoritative files; a day rollover or archival batch fails if it leaves a derived file stale; turn-repository commits are not checked; never hand-edited. |
+| Operational | `.git-daily/`, `last-active`, `turn-journal.jsonl`, `op-in-progress.json`, `derived-watermark`, `working-set.json`, `.recall-cache/`, `recovery/` | System-managed, not drift-checked, and gitignored: the managed gitignore block (the part of the store's `.gitignore` that Personant writes and keeps current) lists each, `.git/` and `.git-daily/` included, so neither repository sees the other as untracked (the ignore-block rule; see "Crash recovery and the turn and history repositories"). |
 
-`.recall-cache/` and `working-set.json` are filed operational for different reasons. `.recall-cache/` holds derived vectors and summary trees (SPEC §3.4 *Persistence*), but regenerating it costs embedding calls, so it cannot be kept fresh at every history-repository write as derived files are. Instead each sidecar carries a content-staleness key, a stale or missing sidecar is rebuilt on load, and deleting the directory costs only re-embedding. `working-set.json` holds the active-set order and the dormant set, which no authoritative file records and nothing rebuilds. Losing it costs only recency: the next service run starts with both sets empty (`turn.LoadSession`); a malformed file fails the load.
+`.git/`, the history repository, is in no row: system-managed and gitignored like the operational files, it is the only home of archived threads (SPEC §3.8.1) and so irreplaceable; a missing one is refuse-to-open.
+
+`.recall-cache/` and `working-set.json` are filed operational for different reasons. `.recall-cache/` holds derived vectors and summary trees (SPEC §3.4 *Persistence*), but regenerating it costs embedding calls, so it cannot be kept fresh at every day rollover and archival batch as derived files are. Instead each sidecar carries a content-staleness key, a stale or missing sidecar is rebuilt on load, and deleting the directory costs only re-embedding. `working-set.json` holds the active-set order and the dormant set, which no authoritative file records and nothing rebuilds. Losing it costs only recency: the next service run starts with both sets empty (`turn.LoadSession`); a malformed file fails the load.
 
 ### Thread registry record (`spine.jsonl`)
 
@@ -557,8 +559,8 @@ diffs stay line-grain.
 interface SpineRecord {
   id: string;                        // /^thr_\d+$/; monotonic serial
   project: string;                   // /^prj_\d+$/; "prj_default" for unscoped threads
-  anchors: string[];                 // [derived] 0..anchor.projection-max (8)
-  anchors_projected_at_turn: number; // [derived] owner turn of last projection change (SPEC §3.2)
+  anchors: string[];                 // projected from history_symbols and stored; 0..anchor.projection-max (8)
+  anchors_projected_at_turn: number; // owner turn of last projection change (SPEC §3.2)
   summary: string;                   // 100-150 char closing summary, ≤ spine.entry-max-chars; set from the first response at creation; replaced by the closing summary
   description: string;               // triggering utterance; set once, never rewritten
   state: ThreadState;                // the SPEC §2.2.1 states, as their lowercase names
@@ -573,9 +575,10 @@ interface SpineRecord {
 
 `anchors_projected_at_turn` and `description` decode as 0 and empty on old records. `anchors` and `anchors_projected_at_turn` are derived (the anchor projection computes them from `history_symbols`) but stored in the authoritative record. The display line and the registry slot are generated from the record alone (SPEC §2.2, §2.2.2); without the stored copy, composing a request would read every `thread.md`. They are written at owner-turn close and at closing (`internal/turn/engage.go`, `internal/turn/closure.go`). `personant index rebuild` does not regenerate them, and no drift check covers them.
 
-At owner-turn close, after merge → project → trim (see "Projection"), the record is rewritten only
-when the projected anchor set differs from the prior one; `anchors_projected_at_turn` is then set
-to the current owner-turn index.
+At owner-turn close, after merge → project → trim (see "Projection"), the projected anchors are written
+to the record; `anchors_projected_at_turn` is set to the current owner-turn index only when the
+projected set differs from the prior one. Every engagement rewrites `last_engaged`,
+`last_engaged_turn` and `turn_count` (SPEC §3.2).
 
 #### Constraints enforced by `personant verify`
 
@@ -592,15 +595,17 @@ to the current owner-turn index.
 **Display form** — the display line, generated from the record and never stored; what the model sees of a thread:
 
 ```
-thr_<id> [<anchors joined with ", ">] — <summary> [<state>]
+thr_<id> [<anchors joined with ", ">] — <summary> [<STATE>]
 ```
+
+`<STATE>` is the state name uppercased.
 
 Example: `thr_88 [trefoil, unknot] — electron body-topology conflict;
 entries trf3bd / unk0bd added; awaiting Grant resolution [WIP]`.
 
 ### Thread directory (`threads/thr_<id>/`)
 
-- **`thread.md`** — YAML frontmatter (authoritative for metadata except the derived `anchors`) and a single `# <title>` line; no
+- **`thread.md`** — YAML frontmatter (authoritative for metadata except `anchors`, a stored projection) and a single `# <title>` line; no
   accumulating body, rewritten in full on every engagement.
 - **`turns/`** — the loose tier of excerpt storage: one terse excerpt file per owner turn, named by
   the thread's turn number zero-padded to 7 digits (`turns/0000024.md`). Appending a turn writes
@@ -625,7 +630,7 @@ anchors:
   - unknot
 history_symbols:
   - {raw: "trefoil", normalized: "trefoil", first_seen_turn: 142, count: 17, source: deterministic}
-  - {raw: "(3,2)-torus knot", normalized: "3-2-torus-knot", first_seen_turn: 145, count: 4,
+  - {raw: "(3,2)-torus knot", normalized: "32-torus-knot", first_seen_turn: 145, count: 4,
      source: model}
 ---
 
@@ -756,7 +761,7 @@ interface SymbolRecord {
   threads: string[];            // thread ids where it appears anywhere (anchor or history)
   anchor_in: string[];          // subset where it is an anchor
   superseded_in: string[];      // subset where its history entry is superseded (SPEC §3.4)
-  source_dominant: SymbolSource; // most common source across emissions
+  source_dominant: SymbolSource; // highest-ranked source across emissions (see "Symbol source")
 }
 ```
 
@@ -791,8 +796,7 @@ Remote URL normalization: lowercase host; strip trailing `.git`; `git@host:owner
 `https://host/owner/name` are the same URL. `prj_default` is reserved for threads created before any
 project was active: empty path fields, `name: default`.
 
-**`projects/prj_<n>/digest.json`** ([derived], regenerated whenever any thread in the project
-updates; other-projects slot content):
+**`projects/prj_<n>/digest.json`** ([derived], regenerated with the other derived files: at the day rollover, archival, restore and `personant index rebuild`; other-projects slot content):
 
 ```typescript
 interface ProjectDigest {
@@ -823,8 +827,7 @@ multi-word entities; a single-token entity that is a stop word is preserved. Sto
 
 ### Symbol source
 
-When several sources emit a symbol, `source_dominant` is the most frequent across its
-symbol-history entries; ties break `curator > user > model > deterministic`. In the symbol index a
+When several sources emit a symbol, the highest-ranked wins, `curator > user > model > deterministic` (`memops.DominantSource`): within a turn, across turns and in `source_dominant`. In the symbol index a
 thread's anchor counts as `curator`-sourced (`internal/index/symbols.go`): a stored label for
 anchors, not summarizer output, since the summarizer contributes no symbols (see "Symbol extraction").
 `source` records how a symbol was emitted; `derived_from` records which thread it came from; the
@@ -853,8 +856,8 @@ projection of it, with no model involved.
 #### Projection
 
 A pure function of current salience over all retained history symbols, active and
-superseded alike. Rank by (1) class: a high-specificity identifier above an ordinary symbol of
-equal count; (2) `count` descending; (3) recency: `last_active_turn` then `first_seen_turn`, newest
+superseded alike. Rank by (1) class: a high-specificity identifier (URL, file path, git SHA) above any ordinary symbol,
+whatever their counts; (2) `count` descending; (3) recency: `last_active_turn` then `first_seen_turn`, newest
 first; (4) `normalized` ascending. The top `anchor.projection-max` become `anchors`, in rank order;
 none gives an empty list. `ever_central` is not a ranking criterion; it only protects from trimming.
 
@@ -1040,7 +1043,7 @@ list by fetch order.
 | **Thread registry record** | one line of `spine.jsonl`; authoritative thread bookkeeping (id, project, anchors, summary, state, timestamps, turn_count, recall_fires) | "Storage and record formats" |
 | **Thread** | the turns, not necessarily consecutive, that work on one specific problem (SPEC §1.1, §3.2); identified by `thr_<n>` (stable forever); a directory holding `thread.md` (YAML frontmatter), serial turn excerpts and a tracked-file store | "Storage and record formats" |
 | **Project** | three identity levels: stable handle `prj_<n>`, mutable display name, optional remote identity (normalized git remote URL) | "Project metadata", SPEC §4.5 |
-| **Anchor symbol** | `[derived]` 0..8 normalized symbols, projected from retained `history_symbols` (see "Symbol extraction"); drive recall and appear in the display line | "Symbol lifecycle and anchor projection" |
+| **Anchor symbol** | 0..8 normalized symbols, projected from retained `history_symbols` (see "Symbol extraction") and stored in the record; drive recall and appear in the display line | "Symbol lifecycle and anchor projection" |
 | **History symbol** | per-thread accumulated symbol (`raw`, `normalized`, `first_seen_turn`, `count`, `source`) plus a `lifecycle` (`active`/`superseded`) and an `ever_central` latch; the thread's evolving identity and the recall match set; capped per `history.cap-per-thread`, trimmed with ever-central + high-specificity protection | "Storage and record formats" |
 | **Symbol category** | `identifier` (preserve case), `entity` (lowercase + hyphenate), `tag` (lowercase, leading `#` stripped) | "Symbol normalization" |
 | **Symbol source** | `deterministic` / `model` / `user` / `curator`; dominance: `curator > user > model > deterministic` | "Symbol source" |
@@ -1078,7 +1081,7 @@ Resting points are recognized by engagement decay (Spec §3.5). Fallback dissect
 The anchor set is what makes recall possible; the summary is what makes recognition cheap. The
 display form is in "Storage and record formats".
 
-### Symbol extraction (three passes ordered cheapest-first)
+### Symbol extraction (two passes ordered cheapest-first)
 
 Standard pattern: THESIS "The building blocks", row "Symbol extraction".
 
@@ -1086,15 +1089,15 @@ Standard pattern: THESIS "The building blocks", row "Symbol extraction".
    paths, URLs, code symbols, project-configured patterns, user `#tags`). Free, reliable, narrow.
 2. **Model-emitted** (every turn) — the topic tag's anchor list provides named-entity coverage the
    deterministic pass can't reach.
-3. **Summarizer** (at close) — the model drafts the closing summary (§3.5). Anchors are not summarizer-picked
-   (below).
+
+At close the summarizer drafts the closing summary (§3.5); it contributes no symbols, and anchors are not summarizer-picked (below).
 
 #### Anchors and symbol history
 
 `history_symbols` is the authoritative, accreting, weighted per-thread symbol history (capped at 40
-by default) and the recall match set. `anchors` is **not** a separately stored set — it is the
+by default) and the recall match set. `anchors` is the
 deterministic top-`AnchorProjectionMax` (computed by `ProjectAnchors`) **projection** of the
-thread's *retained* history symbols, re-derived each owner turn. `memops.AnchorProjectionMax` is a
+thread's *retained* history symbols, re-derived each owner turn and stored in the thread registry record and frontmatter. `memops.AnchorProjectionMax` is a
 compiled constant (8), not a config key: the SPEC §2.6.1 `anchor.projection-max` directive is not
 read. A symbol that falls out of the projection flips to **superseded** but is **retained** — an abandoned premise stays a findable recall handle, protected from capacity trimming
 by its `ever_central` latch while the protected set fits the cap. 0 anchors is legal (a vague-start thread that hasn't accreted a
@@ -1113,8 +1116,7 @@ accepted by the length-limited preamble scan (so the §5.5 fetch timing, the mis
 stream-filter suppression agree) and by the stream filter's Close-time trailing-line fallback; an
 all-whitespace response longer than that scan resolves as tag-less rather than empty, so it fires
 the missing-tag reminder. `fs.read` deltas buffer a write entry like `fs.write`, so a tag-less
-read-only turn pays the full missing-tag fallback; whether such a turn should count as
-conversational is an open calibration question.
+read-only turn pays the full missing-tag fallback.
 
 The parser (`internal/prompt/parser.go`) recognizes a tag with this RE2 pattern, compiled with
 `(?m)`:
@@ -1124,7 +1126,7 @@ The parser (`internal/prompt/parser.go`) recognizes a tag with this RE2 pattern,
 ```
 
 Group 1 is the thread list: comma-split, whitespace-trimmed, each entry validated against
-`thr_\d+|\*new-topic\*`. Group 2 is the anchor list: comma-split, whitespace-trimmed, then run
+`thr_\d+|\*new-topic\*`, the unclosed `*new-topic` accepted and normalized to `*new-topic*` (SPEC §5.1.2). Group 2 is the anchor list: comma-split, whitespace-trimmed, then run
 through the SPEC §2.7.2 normalization. The bare alias is the line-anchored pattern
 `^\s*\*new-topic\*\s*\[([^\]]*)\]\s*$`; a bare `*new-topic*` with no bracket pair stays invalid and
 is classified `bare-new-topic` (see "Event log format").
@@ -1147,7 +1149,7 @@ Standard pattern: THESIS "The building blocks", row "Recall".
    request; the model recognizes prior threads directly when a turn engages them. It emits the
    topic tag at turn start. Handles synonyms and paraphrases for free, since the model does the
    recognizing.
-2. **Opportunistic surfacing** (deterministic backstop). When current-turn symbols match, above threshold, the anchors and history symbols of a thread of the active project that this turn did not engage, the thread is brought forward by band (SPEC §3.4).
+2. **Opportunistic surfacing** (deterministic backstop). When current-turn symbols match, above threshold, the anchors and history symbols of a thread of the active project that this turn did not engage — or, with an embedder configured, the turn's input is close in embedding similarity to a thread's indexed body — the thread is brought forward by band (SPEC §3.4). The embedding scan (`measure.Service`, `coarseFine`) selects the top threads by body vector and scores each by its best chunk; it is not limited to the active project, and another project's candidate is declined at the fetch (SPEC §3.2).
    The symbolic scorer matches on `T(thr) = anchors ∪ {h.normalized}` over the thread's
    `history_symbols`, so a `superseded` symbol stays matchable. The Jaccard numerator is a weighted
    sum: a matched symbol counts 1.0 if `active` in that thread and `recall.superseded-weight` if
@@ -1217,7 +1219,7 @@ Triggers:
 Flow (SPEC §3.5): the summarizer drafts the closing summary; a closing writes the
 thread file and updates the thread registry, and demotion out of the active and dormant sets follows.
 
-Cold storage archival (implemented; `internal/memops/fileadapter/fileadapter_archive.go`,
+Cold storage archival (`internal/memops/fileadapter/fileadapter_archive.go`;
 `cmd/archive.go` `archive list`/`archive recover`): when thread registry size pressure builds, the
 memory service archives the oldest closed threads into cold storage, out of the thread registry, by
 removing their directories, committing the removal and recording an `archive/index.jsonl` entry. (Spec §3.8.)
@@ -1245,7 +1247,7 @@ Restore (`RecoverThread`, `autogit.CheckoutTree`):
 1. Look up the entry by `thr_id`; refuse with `ErrArchiveEntryNotFound` if absent, and refuse an
    entry whose `commit_hash` is empty.
 2. Restore the full `threads/thr_<n>/` subtree from the entry's `parent_commit_hash` commit; an
-   entry lacking it is restored from the deletion commit's first parent (`autogit.ParentCommitHash`).
+   entry lacking it (written before the field existed) is restored from the deletion commit's first parent (`autogit.ParentCommitHash`), the capture commit, since Personant makes no merge commits.
 3. Recompute the restored directory's tree hash and verify it against `tree_hash`. A mismatch
    deletes the partial restore and fails with `ErrArchiveIntegrity`, so a partial thread is never
    written onto the thread registry (SPEC §3.8.3).
@@ -1258,8 +1260,8 @@ Restore (`RecoverThread`, `autogit.CheckoutTree`):
 
 Archived threads are off live recall because the §3.4 scan covers the thread registry and
 per-thread frontmatter, and an archived thread has neither. `RecoverThread` and `ArchiveThreads`
-remain public port operations; a standalone `ArchiveThreads` is crash-recoverable through the same
-roll-forward.
+are public port operations; no product path calls `ArchiveThreads` outside the rollover (tests do), and such a call is crash-recoverable through the same
+roll-forward (case 8).
 
 ### Fallback dissection (worst-case path)
 
@@ -1309,7 +1311,7 @@ Not built; outcomes and open items: SPEC §1.8.
 
 Mechanism: behavior- and process-memory writes pass through the `MemoryOps` port, so the review stage sits at
 one port operation. The port has no directive-write operation today (`DirectiveParam` only reads).
-Threads are protected (SPEC §1.8) by the slots, the turn and history repositories and consolidation (see
+Threads are protected (SPEC §1.8) by the slots and the turn and history repositories; consolidation's content review is not built (see "Memory consolidation",
 "The composed request and its slots", "Crash recovery and the turn and history repositories").
 
 **Open:** which package holds the review stage and its provenance record.
@@ -1387,9 +1389,9 @@ A turn is written to the turn repository in three ordered steps:
 Staging is scoped to the turn's recorded write set (`spine.jsonl`, touched thread directories, the
 day's event log, recorded at each write site and never guessed) through `autogit.AddPaths` with no
 integrity flags, so it costs O(write set) with no tree walk and turn-repository commits are not
-validated. Structural changes (creating or closing a thread, creating a project) ride the per-turn
-commit and fold into the day at rollover. A hand-edit is therefore absorbed at the next full
-staging pass: a clean-stop checkpoint, or the archival and day-commit steps of the day rollover.
+validated. Creating or closing a thread rides the per-turn
+commit and folds into the day at rollover; creating a project takes a checkpoint (SPEC §3.11). A hand-edit is therefore absorbed at the next full
+staging pass: a checkpoint, or the archival and day-commit steps of the day rollover.
 The §5.5 re-prompt caps live entirely inside a turn, ahead of step 3.
 
 The journal is `turn-journal.jsonl` in the store directory (flat, operational, gitignored): one
@@ -1414,7 +1416,7 @@ repository. An archive entry awaiting back-fill is an entry of the "Archive inde
 | 1 clean | no marker, turn repository state present, store working tree clean against turn repository HEAD, turn repository HEAD == watermark, journal empty | no-op — O(1) open |
 | 2 derived-stale | no marker, clean, derived stale | rebuild derived; set watermark = turn repository HEAD |
 | 3 hand-edit | markerless dirty against turn repository HEAD, watermark present | never reset — a legitimate hand-edit, absorbed at the next full staging pass |
-| 4 torn turn | journal non-empty, dirty, `head turn id ≠ turn` | preserve and surface the journal → quarantine dirty tracked bytes byte-exact → reset the store working tree to the turn repository's HEAD (≤1 turn) → remove untracked debris in the authoritative-file namespace (excluding `logs/`) → re-append log bytes → truncate the journal |
+| 4 torn turn | journal non-empty, dirty, `head turn id ≠ turn` | preserve and surface the journal → quarantine dirty tracked bytes byte-exact → reset the store working tree to the turn repository's HEAD (≤1 turn) → move untracked debris in the authoritative-file namespace (excluding `logs/` and `recovery/`) into the same quarantine → re-append log bytes → truncate the journal |
 | 5 turn committed | journal non-empty, clean, `head turn id == turn` | redundant journal (turn already committed) — truncate, zero loss |
 | 6 turn no-writes | journal non-empty, clean, `head turn id ≠ turn` | nothing landed structurally — preserve and surface the journal, truncate |
 | 7 (composite) | case 4 coinciding with an archive entry awaiting back-fill | case 4, then the case 9 back-fill pass |
@@ -1562,8 +1564,8 @@ registry snapshot, and an empty `commit_hash`, before any thread directory is re
 durable worklist) and because an already-landed deletion commit is resolved as the child of the
 entry's `parent_commit_hash` by tree comparison, which is robust to overnight hand-edit dirt, so
 the roll-forward back-fills the existing commit instead of minting a duplicate
-(`recovery.LocateDeletionCommit`, see "Mechanism names"). A standalone
-batch runs under its own `op=archival` marker, outside any rollover; case 8 is likewise
+(`recovery.LocateDeletionCommit`, see "Mechanism names"). Outside a rollover only tests call `ArchiveThreads`; such a
+batch runs under its own `op=archival` marker, and case 8 is likewise
 detect-then-complete, reporting it pending on marker presence alone while the memory service runs
 the same roll-forward tail. Turn and structural commits land in the turn repository and fold into
 the day at the rollover, so archival, which writes the history repository, never races a turn.
@@ -1627,9 +1629,8 @@ the `op=rebaseline` operation marker, the mid-day re-baseline that would delete 
 turn repository at a commit boundary when its loose objects cross a threshold, without touching the
 history repository or advancing the day; recovery routes an `op=rebaseline` crash straight to
 turn-repository init. The mid-day arming trigger is not wired (ROADMAP.md).
-Packing: after every `gcCheckEveryCommits` (64) turn-repository commits the adapter reads the turn
-repository's loose-object count and runs gc at `gcLooseObjectThreshold` (5000);
-`MemoryOps.Consolidate` (go-git `RepackObjects` + `Prune`) packs both repositories on the simulation's day off (the harness's `SleepCycle` step). Packing is safe at any time because archived blobs stay reachable through the deletion
+Packing: `MemoryOps.Consolidate` (go-git `RepackObjects` + `Prune`) packs both repositories. After every `gcCheckEveryCommits` (64) turn-repository commits the adapter reads the turn
+repository's loose-object count and runs `Consolidate` at `gcLooseObjectThreshold` (5000); the simulation's day off (the harness's `SleepCycle` step) also runs it. Packing is safe at any time because archived blobs stay reachable through the deletion
 commit's parent and Personant never rewrites the history repository's commits (the turn repository
 is disposable). No aggressive repack (`git gc --aggressive`) is scheduled. Session checkpoint commits target the turn repository with a full `Add(".")` staging
 pass. The open sequence runs `memops.GateHomeFormat` before Reconcile;
@@ -1813,7 +1814,7 @@ Each of the following is owned in exactly one place:
 | Archived thread set | `Harness.archivedThreadIDs` — **index-derived** via `refreshArchivedSet` from the authoritative archive index (`store.LoadArchiveIndex`, entries with `RecoveredAt == ""`), reassigned wholesale; refreshed when a tailed batch carries an archive or restore line (the change trigger, not the source of truth). | The archival-forgiveness filter in recall fidelity and `VerifyThreadAccounting` both read this set; a restored thread drops out the instant its index entry records the restore, and a log-emission gap can no longer under-count it. |
 | Created thread set | `Harness.createdThreadIDs` — folded incrementally from tailed `thread.created` log lines. | Same pattern as above. |
 | Recall-preservation divergence tally | Accumulated directly in `runStep` (not read from `measure.Service` atomics post-run), so the tally survives `RestartSession`-driven Service churn. | A restart installs a fresh Service whose atomics start at zero; reading post-run would lose measurement probes (a measurement probe is a scripted step with `ExpectedRecallMatches` ground truth) from prior sessions. |
-| Active-set oracle | Generator-owned. Cross-checked each step against `StepFeedback.RuntimeLayerB` in two directions, both ==0 checks on mock and live-embedding run configurations and report-only under live inference: forward (`layerb_shadow_divergence`, service-resident threads absent from the oracle: LRU agreement) and reverse (`layerb_shadow_reverse_divergence`, checked against `rtActive` (the harness's mirror of the service's active set), which also replicates measurement-carrier displacement (a measurement carrier is a synthetic thread created to host a recall-measurement query, `sim/workload.go`) and §3.5 turn-idle decay-triggered closing). The declared exception to SPEC §9.4's event-log-only recall scoring. | The oracle's LRU is the generator's basis for expected-match sets; a divergence would corrupt recall measurements. |
+| Active-set oracle | Generator-owned. Cross-checked each step against `StepFeedback.RuntimeLayerB` in two directions, both ==0 checks on mock and live-embedding run configurations and report-only under live inference: forward (`layerb_shadow_divergence`, service-resident threads absent from the oracle: LRU agreement) and reverse (`layerb_shadow_reverse_divergence`, checked against `rtActive` (the harness's mirror of the service's active set), which also replicates measurement-carrier displacement (a measurement carrier is a synthetic thread created to host a recall-measurement query, `sim/workload.go`) and §3.5 turn-idle decay-triggered closing). One of the two declared exceptions to SPEC §9.4's event-log-only recall scoring. | The oracle's LRU is the generator's basis for expected-match sets; a divergence would corrupt recall measurements. |
 
 #### Generator ↔ harness protocol
 
@@ -1839,10 +1840,10 @@ harness drive loop. The protocol is:
   corpus workload); `just sim DURATION=<N>d` runs a chosen span (aliases `1d`/`1w`, Go duration
   forms such as `168h`) and `just test` runs the default `1d` span. Metrics come from
   `internal/metrics`; scenario steps carry `ExpectedRecallMatches` ground truth scored in
-  `RecallStrict` or `RecallMeasureOnly` mode, with baselines under
-  `testdata/baselines/<scenario>.json`. `just sim-baseline` records the committed baseline for a
-  duration and `just sim-fidelity` re-runs the mock sim under a chosen turn executor and compares
-  against it.
+  `RecallStrict` or `RecallMeasureOnly` mode. The baseline comparator — committed baselines under
+  `testdata/baselines/<scenario>.json`, `just sim-baseline` (records one for a duration) and
+  `just sim-fidelity` (re-runs the mock sim under a chosen executor and compares) — is the
+  prototype's, on `probe-path` (ROADMAP A2).
 - The mock runs (`just sim`, and the sim package under `just test`) run with a nil embedder, so the fine level and the
   completeness floor do not execute there; `just sim-completeness-rung` is the
   embedder-enabled run configuration that asserts every measurement probe in the flush-lag gap in

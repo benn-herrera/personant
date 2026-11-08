@@ -135,7 +135,7 @@ Personant ships defaults and imposes none.
   and are not reviewed per write. They are protected by
   budgeted slots (§3.1), provenance on every entry, reversibility through the memory store's git
   history (§3.11), mechanical checks on write (schema, length, provenance, dedup), and batch content
-  review in consolidation (the offline cycle that reviews and packs memory).
+  review in consolidation (the offline cycle that reviews and packs memory; the review is not yet built, §3.10.8).
 - **Standing behavior and process memory** is re-reviewed periodically when the policy enables
   it, because text that was sound for one model can mislead the next.
 
@@ -174,7 +174,7 @@ overrides it is in §8.2.3). The **memory store** is that directory with its git
 Authoritative files are plain text, versioned in git, and inspectable with ordinary tools. A user's
 direct edit to an authoritative file is never destroyed by crash recovery: it is absorbed (§4.5.8), or, where a torn turn's reset would revert it, preserved byte-exact in
 quarantine (a directory of recovered bytes, §4.5.8) first. Files derived from authoritative files are regenerable and never hand-edited; a
-write to the **history repository** (the memory store's permanent day-grain git repository, §3.11)
+day rollover or archival batch, which writes the **history repository** (the memory store's permanent day-grain git repository, §3.11),
 fails if it leaves a derived file stale (§8.3); between **day rollovers** (the once-a-day
 maintenance sequence, §4.5.8 (5)) derived files may lag by design (§4.5.8 (7)). **Operational**
 files are the gitignored runtime state the memory service manages to run (the turn journal, the
@@ -212,8 +212,8 @@ from the thread's retained symbol history (§2.7.4); the model never controls th
 
 A thread is in exactly one of these states:
 
-- `active` — currently **engaged** (referenced by a turn's symbols or by its **topic tag**, the
-  line that opens each model response and names the threads the turn engages, §5.1; §3.2) or recently
+- `active` — currently **engaged** (named by a turn's **topic tag**, the
+  line that opens each model response and names the threads the turn engages, §5.1, or bound as its owner by the §3.3 fallback; §3.2) or recently
   active (within the engagement decay window, `engagement.decay-turns` / `engagement.decay-time`,
   §2.6.1)
 - `paused` — the user explicitly paused it
@@ -263,7 +263,7 @@ grow with thread length.
   bounded count, which are read into the composed request), remain recall-indexed, and are the
   durable source of intra-thread recall (§3.4). Retention trimming is the deferred keep/toss step
   (the decision which retained excerpts to keep or discard, §3.10.8); v0.1 keeps all excerpts.
-- The number of files in a thread's directory does not grow with its count of excerpts. Excerpts are
+- The number of files in a thread's directory does not grow with its count of excerpts: the day rollover moves older excerpts out of individual files, and only an excerpt too large to move stays a file of its own. Excerpts are
   returned to readers byte-exact, whichever way they are stored; what a reader gets never depends on
   how an excerpt is stored.
 - Durable turn content lives only in excerpts, never the event log (§2.8).
@@ -311,7 +311,7 @@ path or remote.
 
 Unused → ARCHITECTURE «Storage and record formats» (the digest layout). The model sees every
 other project through its digest: the project's recent anchors and a one-line summary, derived from
-its threads and current with them.
+its threads; between day rollovers it may lag them (§2.1).
 
 ### 2.6 Directive file format (`directives/*.md`)
 
@@ -320,7 +320,7 @@ Directive files are markdown documents with YAML frontmatter for parameter overr
 ```markdown
 ---
 scope: user                         # one of: defaults | user | project
-project: null                       # null for defaults/user; project name for project-scoped
+project: null                       # null for defaults/user; the project's id (prj_<n>) for project-scoped
 parameters:
   closure.ack-mode: always          # override system default of auto
   recall.ack-mode: always           # override system default of banded
@@ -369,7 +369,7 @@ closure.ack-mode: auto              # auto | always (§3.5).
                                     # question confirming a step) as it decays.
 recall.symbolic-threshold: 0.4      # Jaccard threshold (overlap = shared symbols ÷ symbols in
                                     # either set) for opportunistic recall surfacing
-recall.cross-project-threshold: 0.5 # higher bar for cross-project surfacing
+recall.cross-project-threshold: 0.5 # higher bar for cross-project surfacing; cross-project recall is not built (§3.2)
 recall.ack-mode: banded             # banded | always (§3.4).
                                     # banded (default): a candidate at or above its
                                     # signal's auto-fetch threshold is fetched with one
@@ -401,7 +401,8 @@ spine.entry-max-chars: 200          # hard cap for a thread registry record's `s
 cross-project.digest-per-project-bytes: 150
 dissect.pressure-threshold: 0.90    # budget-pressure fraction triggering fallback dissection (§3.6)
 dedup.diff-literal-threshold: 0.7   # a change's diff at or above this fraction of the new
-                                    # content's size is not kept (§3.9.1)
+                                    # content's size is not kept (§3.9.1); a kept diff at or above
+                                    # it of the file's current size does not render (§3.9.2)
 dedup.live-diff-window: 3           # N most-recent changes per file kept (§3.9.1) and rendered as diffs (§3.9.2)
 dedup.literal-share-threshold: 0.25 # a file whose current content is at or above this fraction
                                     # of its thread's active-threads share is never expanded;
@@ -443,7 +444,7 @@ is involved. A symbol that falls out of the projection is marked superseded and 
 abandoned premise remains a findable recall handle; a symbol that was ever central is protected from
 capacity trimming (§2.3) while the protected set fits the cap. The history is
 bounded by `history.cap-per-thread` (40) and the projection by `anchor.projection-max` (8); flat
-history length and once-central count over a run is a §9 sim obligation, not a static guarantee.
+history never exceeds its cap; that it stays below the cap with a flat once-central count over a run, so protection never has to yield, is a §9 sim obligation, not a static guarantee.
 
 ### 2.8 Log event format (`logs/YYYY-MM-DD.log`)
 
@@ -455,8 +456,8 @@ absent from the vocabulary cannot be measured. Durable turn content is never in 
 #### Per-turn opening-line contract
 
 Exactly one `context.modified source=user.prompt` line per prompted
-turn, and every other line a turn produces follows it before the next turn's opening line;
-measurement segments turns on it, so it is never suppressed, reordered, or duplicated. A resumed
+turn. Lines from the turn's preparation — the day rollover, staged-symbol expiry and deltas that arrive ahead of the prompt — precede it; every other line the turn produces follows it before the next turn's opening line.
+Measurement segments turns on it, so it is never suppressed, reordered, or duplicated. A resumed
 turn (§3.0.4) has no user message and so no such line. **Open:** the opening line of a resumed turn
 (resume design).
 
@@ -524,7 +525,7 @@ logical sub-segment boundaries).
 
 - Symbol extraction runs before engagement (engagement depends on the extracted set).
 - Dedup runs after extraction; it keys file content by content id (§3.9.1).
-- Budget check runs last.
+- Budget check runs after dedup; logging runs last.
 
 #### 3.0.4 Turn boundaries and per-turn engagement coalescing
 
@@ -553,7 +554,7 @@ The **working set** — the memory content of the composed request — is render
 prompt as five memory slots, each truncated to a byte
 budget derived from `context.token-budget` and `layer.budget.percentages` (§2.6.1). The token
 ceiling is the authoritative whole-request check; each slot's byte budget is derived from it
-conservatively, so a request within its slot budgets is within the ceiling. The live-turn reserve
+conservatively, so the memory slots stay within their share of the ceiling. The live-turn reserve
 (`live_turn`, 15%) is carved from the byte total first; the five memory slots partition the
 remainder (directives 12, registry and other-projects together 18, active-threads 55, dormant-threads 15; the 18 is split between the registry (fixed, 10) and other-projects (the residue)). The whole request — system prompt + replayed
 transcript tail + current user input + this turn's tool results + tool definitions — is bounded
@@ -584,7 +585,7 @@ Three further slots carry content opencode supplies (§1.2, §1.3):
 
 #### Slot policies
 
-Every slot — the five memory slots and the three above — defines four things before it
+Every slot — the five memory slots, the live-turn reserve and the three above — defines four things before it
 ships: (1) its **budget**; (2) its **internal priority**, what is dropped first when its content
 exceeds its share; (3) its **overflow form**, what stands in for dropped content — the honest
 truncation notice, or a stand-in line that names the content and can reproduce it (§1.4); (4) its
@@ -593,7 +594,7 @@ them.
 
 **Unused-share reallocation** (a slot's unused share made available to other slots) **flows from
 fixed slots to dynamic ones; the slot giving up share reclaims it first.** A fixed slot —
-directives, project conventions and instructions, the registry — changes only on a visible event at
+directives (project convention files included), instructions, the registry — changes only on a visible event at
 a turn boundary, so its unused share is idle and is given up. A dynamic slot — live turn,
 active-threads, dormant-threads, and the opencode-expectations slot, whose todo and background-job
 updates arrive mid-turn — varies turn to turn and does not give up share. When a slot that gave up
@@ -612,7 +613,7 @@ Without a tool-definition slot the whole-request ceiling above cannot be enforce
 Tool output is bounded so it cannot exhaust the 15% live-turn
 budget:
 
-- A hard byte cap on tool-result inclusion in the composed request (default 8 KB; configurable).
+- A hard byte cap on tool-result inclusion in the composed request: 15% of the live-turn reserve (`live_turn`, §2.6.1).
   Above the cap: head + tail with an ellipsis notice. A truncation always carries its notice.
 - The cap is a **task-class** bound: it applies to `tool.result` and to `user.shell-capture`. It
   does **not** apply to the `fs.read`/`fs.write`/`fs.commit` deltas, whose content is the file body
@@ -694,19 +695,17 @@ by active-set order).
 #### Anchor projection at owner-turn close
 
 After the owner's symbol history is merged, the memory service
-re-derives the thread's anchors (§2.7.4); the thread's registry record changes only when its anchor
-set does. Engaged-but-not-owner threads do not re-project. Closing a thread runs a final projection
+re-derives the thread's anchors (§2.7.4) and records them in its registry record. Engaged-but-not-owner threads do not re-project. Closing a thread runs a final projection
 from its symbol history.
 
-### 3.3 Symbol extraction (three passes)
+### 3.3 Symbol extraction (two passes)
 
-Two passes run per §3.0.2 step 1, cheapest first; the third runs when a thread closes:
+Two passes run per §3.0.2 step 1, cheapest first:
 
 1. **Deterministic** — extraction from the delta (file paths, URLs, commit SHAs, hashtags).
 2. **Model-emitted** — tag symbols from the topic tag (§5.1) are folded in directly.
-3. **Summarizer** — when a thread closes the summarizer drafts its closing summary (§3.5). It does **not**
-   select anchors: the anchor set is the deterministic projection of retained `history_symbols`
-   (§2.7.4). It contributes no symbols.
+
+The summarizer, which drafts the closing summary when a thread closes (§3.5), does **not** select anchors and contributes no symbols: the anchor set is the deterministic projection of retained `history_symbols` (§2.7.4).
 
 Symbols from task-class deltas (§3.10.1) enter the staging buffer (§3.10.2); they reach `symbols.jsonl` only on citation-window promotion (§3.10.4).
 
@@ -714,7 +713,7 @@ Symbols from task-class deltas (§3.10.1) enter the staging buffer (§3.10.2); t
 
 A response with no valid
 topic tag never aborts the turn. Two regimes, split by whether the turn's deltas require owner
-binding (buffered §3.9 file edits):
+binding (buffered §3.9 file reads or writes):
 
 - **No binding required** (plain conversational turn): no
   re-prompt; the turn's content is kept like any other turn's (§3.4); `topic.tag-missing` is
@@ -896,8 +895,8 @@ holding more records than archival allows, §3.8).
 `[e]dit` choice, `always` mode, the pending-queue announcement) and the command that triggers each.
 The rules for decay, classification, the derived queue and the summarizer draft are decided.
 
-Engagement decay fires when `last_engaged` exceeds `engagement.decay-turns` OR
-`engagement.decay-time` (§2.6.1): `decay-time` catches extended user absence, `decay-turns` catches
+Engagement decay fires when a thread has gone unengaged for at least `engagement.decay-turns` turns OR at least
+`engagement.decay-time` since its `last_engaged` (§2.6.1): `decay-time` catches extended user absence, `decay-turns` catches
 low-frequency engagement in a busy session.
 
 The summarizer-drafted summary targets 100–150 chars: summary + anchors must fit the registry
@@ -969,7 +968,7 @@ The grouping is best effort: under stress, thread quality degrades gracefully; c
 
 ### 3.7 Cross-project digest maintenance
 
-Each project's digest stays current with its threads and within
+Each project's digest is brought current with its threads at each day rollover and archival, and stays within
 `cross-project.digest-per-project-bytes`.
 
 ### 3.8 Cold storage
@@ -1031,8 +1030,8 @@ integrity failure and must never occur.
 
 ### 3.9 Working-set content dedup
 
-This section covers the slots Personant composes into the working set (§3.1). opencode's
-stored transcript is never rewritten and its tool-result rows are never edited: a transcript row is
+This section covers the slots Personant composes into the working set (§3.1). Dedup never
+rewrites opencode's stored transcript or edits its tool-result rows (the §1.7 database cleanup is separate): a transcript row is
 dropped from the request once memory has captured it, so repeated file copies there never reach
 the model.
 
@@ -1052,7 +1051,7 @@ What is stored is the file's bytes, never a tool's formatted rendering of them.
 object id for those bytes takes, so a version control system that holds that version resolves it.
 
 **Positions.** Each `fs.read`, `fs.write` and `fs.commit` of a turn is recorded in the owning
-thread's excerpt for that turn as one content-id line — operation, content id (a commit hash for
+thread's excerpt for that turn as one content-id line — operation, a prefix of the content id (of the commit hash for
 `fs.commit`) and path — in delta order. A content-id line is written once and never rewritten.
 Personant never writes file bytes into an excerpt.
 
@@ -1132,7 +1131,7 @@ A content-id line alone is the normal form of every earlier read or write of a f
 commit: it says *that* the file was touched there, and in what order. When cognition needs the
 content of a version no longer kept, recovery is the user's path, through their version control.
 
-##### For active reasoning over content, content-id-only is insufficient
+##### Active reasoning keeps full content at the most recent position
 
 A file read or written in an engaged thread keeps its full content at its most recent position in
 the active-threads slot, when the context holds that position, however many positions precede it,
@@ -1256,15 +1255,15 @@ boundary of §4.5.8), at a cost that does not grow with the store.
 #### Per-day (history repository)
 
 The day rollover writes exactly one day-grain commit to the history repository (an empty day still
-yields one) plus the day's archive commits (§3.8). The history repository is bounded to ~365
-commits a year, and integrity checks run once a day: the day's commit passes thread registry
-integrity validation and leaves derived files fresh. The turn repository is deleted and recreated
+yields one) plus the day's archive commits (§3.8). The history repository grows by at most one day-commit a day (~365 a year) plus archival's bounded commits,
+and integrity checks run once a day: the day's commit passes thread registry
+integrity validation, and the rollover leaves derived files fresh. The turn repository is deleted and recreated
 at each rollover.
 
-**Checkpoint (clean service-run stop + mid-run structural) → turn repository.** A Personant
-**checkpoint** is a commit made at a clean service-run stop or after a mid-run structural change
-(creating or closing a thread, creating a project). Every checkpoint
-commits the whole store working tree, hand-edits included, to the turn repository. The history
+**Checkpoint (clean service-run stop + project creation) → turn repository.** A Personant
+**checkpoint** is a commit of the whole store working tree, hand-edits included, to the turn
+repository, made at a clean service-run stop and after a project is created. Creating or closing a
+thread lands in its turn's own commit. The history
 repository is written only at day rollover, apart from crash recovery (§4.5.8).
 
 #### gc cadence
@@ -1274,7 +1273,7 @@ The store's git repositories are packed automatically as they grow.
 #### Durability
 
 Content is durable to ≤1 turn at all times; the in-flight turn's prompt and response are
-recoverable from the moment the prompt is submitted. §4.5.8 governs crash recovery.
+recoverable from the moment the prompt is journaled; a failed journal write aborts the turn (§4.5.8 (7)). §4.5.8 governs crash recovery.
 
 ---
 
@@ -1368,8 +1367,8 @@ opencode and ingests the prompt and the partial turn. Until decided, the rule be
 A retracted prompt does **not enter memory**; only a deliberate
 re-submission puts its text there. No partial response is kept, at any point relative to the
 model's first token. Before the first authoritative write, an interrupt leaves memory exactly as if the
-turn never happened: turn count, staged symbols, active and dormant sets, symbol history and recall
-marks included, and the next start finds nothing to recover. After it, recovery
+turn never happened — turn count, staged symbols, active and dormant sets, symbol history and recall
+marks included — except that the event log keeps the lines the turn already wrote (sources and byte counts, never text) and gains its `system.turn-aborted` line; the next start finds nothing to recover. After it, recovery
 owns the turn (§4.5.8). Consequences:
 
 1. **Rollback.** An abort before any authoritative write restores that state to its pre-turn value
@@ -1536,7 +1535,7 @@ recovery → (day rollover if new-day) → service-run load**. The memory servic
 an unreconciled or unrepairable memory store. The **day rollover** is the once-a-day sequence defined in (5).
 
 **Durability bar: at most one turn may ever be lost**, under any termination timing; the in-flight turn's
-prompt and response are recoverable from the moment the prompt is submitted.
+prompt and response are recoverable from the moment the prompt is journaled; a failed journal write aborts the turn ((7)).
 
 ##### Recovery needs no clean shutdown
 
@@ -1550,21 +1549,21 @@ turn and history repositories".
 
 ##### (2) Turn transaction protocol
 
-A hand-edit to an authoritative file is committed at the next clean-stop checkpoint or day
-rollover, not with the next turn, and is never reverted. Recovery never re-drives the model.
+A hand-edit to an authoritative file is committed at the next checkpoint (§3.11) or day
+rollover, not with the next turn. Recovery never reverts it, except where a torn turn's reset covers its file; its bytes are then preserved in quarantine first ((4), §2.1). Recovery never re-drives the model.
 
 ##### (3) The journal
 
 On a torn turn, the turn's prompt and response bytes are preserved and surfaced to the user
-(**Open:** U4, the channel); they are never replayed into memory. The user re-issues if they choose.
+(**Open:** U4, the channel); the journal bytes are never replayed into memory. A torn turn that opencode kept is re-ingested from opencode's stored messages ((10)); otherwise the user re-issues if they choose.
 
 ##### (4) The recovery state machine
 
 Startup recovery classifies the on-disk state and repairs it idempotently: a hand-edit is never
-reset; a torn turn is reset to the last committed turn after its dirty bytes are quarantined; an
+reset outside a torn turn; a torn turn is reset to the last committed turn after its dirty bytes, a hand-edit's included, are quarantined; an
 interrupted day rollover or archival is completed forward; a missing turn repository is normal,
 never a sign of data loss; a crash during recovery converges on re-run; an archive entry that
-cannot be repaired stays refused, never guessed (`recovery.unrepairable`); a torn final line of the
+cannot be repaired stays refused for restore, never guessed (`recovery.unrepairable`), and does not stop the open; a torn final line of the
 event log is completed, never truncated.
 
 **Startup recovery reports once**: the repairs made, any paths quarantined-and-restored (empty on
@@ -1586,7 +1585,7 @@ repositories track the one store working tree at two cadences:
 | Repository | git-dir | cadence | role |
 |---|---|---|---|
 | **turn repository** | `.git-daily/` | per-turn | today's fine-grained recovery points; **deleted and recreated at each day rollover**; never career history |
-| **history repository** | `.git/` | per-day | career history — one day-grain commit per day + permanent archive commits (~365 commits/year); irreplaceable |
+| **history repository** | `.git/` | per-day | career history — one day-grain commit per day + permanent archive commits (~365 day-commits/year); irreplaceable |
 
 Archival and the day rollover never reset the store working tree; only torn-turn recovery does, and
 only to the last committed turn. A day is committed to the history repository at most once, however
@@ -1610,7 +1609,7 @@ throughout.
 After the day's commit, the history repository gains a tag for each thread created, closed or
 archived and each project created, named `<kind>/<id>/<event>_<stamp>` (e.g.
 `thread/thr_42/created_2026-05-08T03-12-00Z`), so names sort chronologically;
-`git show <tag>:spine.jsonl` reads the store as it stood then. A tagging fault never fails the
+`git show <tag>:spine.jsonl` reads the store as it stood then. A life event on an earlier day on which no rollover ran is not tagged. A tagging fault never fails the
 day's commit.
 
 ###### Roll-forward completion (crash inside the day rollover)
@@ -1923,7 +1922,7 @@ Detailed in §2.6. Briefly: `directives/defaults.md` < `directives/user.md` <
 The memory service owns the store directory's git repositories: it initializes them on first run
 and commits authoritative changes itself, with no user ack and no model. Every day-commit and
 archival write to `<store-dir>/.git/` leaves the memory store structurally sound (what
-`personant verify` checks) and its derived files fresh (what `personant index check` checks).
+`personant verify` checks), and every day rollover and archival batch leaves its derived files fresh (what `personant index check` checks).
 Turn-repository commits are checked by neither.
 
 #### No git pre-commit hook is installed
@@ -2158,9 +2157,9 @@ calendar days (ladder: §9.1). Output: metrics JSON plus a human-readable summar
 §9.1.
 
 Recall-fidelity scoring reads the event log (§2.8), not memory-service state, so a renamed event
-fails the measurement rather than silently zeroing a series. The one declared
-exception is the active-set oracle-agreement check above, which compares the generator's model with
-the memory service's active set.
+fails the measurement rather than silently zeroing a series. Two reads are declared
+exceptions: the active-set oracle-agreement check above, which compares the generator's model with
+the memory service's active set, and the set of archived threads, read from the archive index (§3.8.1) so that an archived expected match is excluded rather than counted a miss (§3.8.4).
 
 #### 9.4.1 Workload cadence model
 
