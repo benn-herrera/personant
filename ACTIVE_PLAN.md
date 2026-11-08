@@ -315,7 +315,7 @@ commit's hash is recorded in the table below; P1 reads the ruling files at its p
 |---|---|
 | N1, N2 | done (`af53921`) |
 | C1, C2 | done |
-| S1 | not started |
+| S1 | done |
 | M1, M2 | not started |
 | A1, A2 | not started |
 | X1 | not started |
