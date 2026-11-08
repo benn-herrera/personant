@@ -2,7 +2,7 @@
 
 | Path | Responsibility |
 |---|---|
-| `cmd/` | cobra subcommands: `init`, `index`, `verify`, `archive`, `version`; persistent flags `--home`, `--allow-newer-home`. Every verb that opens the memory store goes through the one `openHome` helper (format check, then Reconcile); `version` is exempt from the format check. |
+| `cmd/` | Standard pattern: THESIS "The building blocks", row "The CLI". cobra subcommands: `init`, `index`, `verify`, `archive`, `version`; persistent flags `--home`, `--allow-newer-home`. Every verb that opens the memory store goes through the one `openHome` helper (format check, then Reconcile); `version` is exempt from the format check. |
 | `internal/memops/` | the `MemoryOps` port: interface plus the domain types it trades in (`SpineRecord`, `Thread`, `ProjectMeta`, `Config`, the symbol enums, `Normalize`, `DominantSource`). The application layer depends only on this; it imports no internal package. |
 | `internal/memops/fileadapter/` | the memory-store adapter: JSONL + markdown + YAML + TOML + go-git on the store directory |
 | `internal/store/` | file storage for the memory store: paths, JSONL helpers, init, thread registry and project ops, thread I/O, excerpt bundles, project resolution. Depends on `memops` for the domain types. |

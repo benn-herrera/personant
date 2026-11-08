@@ -6,7 +6,7 @@
 - **Resumed turn.** The managed server resumes an interrupted turn with a synthetic continue
   message and a model step that has no prompt hook; the `context` hook still fires (resume probe
   §2). The service opens a resumed turn on a context call with no open turn, derives the turn's
-  suffix from the hook input or stored message IDs rather than from process memory, composes the
+  suffix from the hook input or stored message IDs rather than from in-process state, composes the
   request and ingests the resumed reply (SPEC §1.6, §4.5.8 (10)).
 - **Reconcile at service start.** After crash recovery (SPEC §4.5.8), the service diffs
   opencode's stored messages — the durable record of what the user saw — against memory's last

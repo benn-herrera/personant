@@ -29,4 +29,4 @@ Contents:
 - [§3.1 Slot policies](slot-policies.md)
 - [§3.1 Tool output in composed requests](tool-output-in-composed-requests.md)
 - [§3.1 Truncation policy](truncation-policy.md)
-- [§3.1 §5.5 mid-turn fetch](5-5-mid-turn-fetch.md)
+- [§3.1 Mid-turn fetch budget](mid-turn-fetch-budget.md)

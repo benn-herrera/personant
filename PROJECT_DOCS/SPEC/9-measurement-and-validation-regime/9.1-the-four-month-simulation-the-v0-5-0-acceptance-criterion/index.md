@@ -13,7 +13,7 @@ The acceptance criterion (memory service v0.5.0, Version lines):
   and this turn's tool results, plus injected fetches) never exceeds it, checked against the token count
   reported for the request. Any overflow is a fail. On mock run configurations a secondary check asserts each
   rendered slot stayed within its derived byte allocation ([§3.1](../../3-core-algorithms/3.1-working-set-composition/index.md)). Turn-time budget enforcement is
-  deferred past v0.1 ([§3.0.2](../../3-core-algorithms/3.0-all-content-enters-through-one-pipeline-deltas/3.0.2-the-per-delta-pipeline.md) step 4).
+  not required ([§3.0.2](../../3-core-algorithms/3.0-all-content-enters-through-one-pipeline-deltas/3.0.2-the-per-delta-pipeline.md) step 4).
 - **Operation runtime costs measured and within bounds.** Wall-clock P50/P95/P99 latency for:
   engagement update, recall match, thread fetch, thread close, archival, recovery, index rebuild, index
   check. "Within bounds" means stable across the simulation, not a threshold that grows with

@@ -13,7 +13,7 @@ Design rules for the `memops` port surface:
 3. **API surface is not frozen.** The port evolves when concrete evidence — a real second storage
    backend, a discovered constraint — shows the current shape needs to change.
 
-4. **Concessions are explicit, case-by-case, user-approved.** When a backend-specific concept
+4. **Concessions are explicit and case-by-case.** When a backend-specific concept
    legitimately needs to live at the port (performance, debuggability, no abstract framing exists
    yet), it's an explicit exception: name the concession, state the rationale, state what would
    cause it to be revisited. Implicit concessions — a backend term creeping in without

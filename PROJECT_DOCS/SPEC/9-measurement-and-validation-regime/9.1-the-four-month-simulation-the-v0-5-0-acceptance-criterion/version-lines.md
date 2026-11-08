@@ -2,7 +2,7 @@
 
 The memory service this spec defines carries a semver
 line; `personant version` prints the current value, `personant --version` prints it in one-line
-form, and `system.bootstrap` records it once per process open ([§2.8](../../2-data-model/2.8-log-event-format-logs-yyyy-mm-dd-log/index.md)). CONVENTIONS, "Versioning &
+form, and `system.bootstrap` records it once per process open ([§2.8](../../2-data-model/2.8-log-event-format-logs-yyyy-mm-dd-log/index.md)). CONVENTIONS, "Versioning and
 acceptance", carries the bump contract. The four-month acceptance criterion converges the memory
 service. Milestone:
 
@@ -10,7 +10,7 @@ service. Milestone:
   span with every identified realism element accounted for.
 
 **A further line, not semver: the store's on-disk format revision.** The **format revision** is the
-store's on-disk layout number. `<store-dir>/version.toml` ([§2.1](../../2-data-model/2.1-storage-layout/index.md)) carries it as one integer,
+store's on-disk layout number. `<store-dir>/version.toml` (ARCHITECTURE "Store directory layout"; its authoritative class, [§2.1](../../2-data-model/2.1-storage-layout/index.md)) carries it as one integer,
 `format = N`, recording the layout the store was written in; this binary writes one revision and
 may find another in a store. It advances independently of the semver line.
 

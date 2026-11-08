@@ -48,7 +48,7 @@ calendar days (ladder: [§9.1](../9.1-the-four-month-simulation-the-v0-5-0-accep
 Recall-fidelity scoring reads the event log ([§2.8](../../2-data-model/2.8-log-event-format-logs-yyyy-mm-dd-log/index.md)), not memory-service state, so a renamed event
 fails the measurement rather than silently zeroing a series. Two reads are declared
 exceptions: the active-set oracle-agreement check above, which compares the generator's model with
-the memory service's active set, and the set of archived threads, read from the archive index ([§3.8.1](../../3-core-algorithms/3.8-cold-storage/3.8.1-mechanism.md)) so that an archived expected match is excluded rather than counted a miss ([§3.8.4](../../3-core-algorithms/3.8-cold-storage/3.8.4-recall-treatment-of-archived-threads-v0-1-off-recall.md)).
+the memory service's active set, and the set of archived threads, read from the archive index ([§3.8.1](../../3-core-algorithms/3.8-cold-storage/3.8.1-mechanism.md)) so that an archived expected match is excluded rather than counted a miss ([§3.8.4](../../3-core-algorithms/3.8-cold-storage/3.8.4-recall-treatment-of-archived-threads-off-recall.md)).
 
 Contents:
 

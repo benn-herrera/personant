@@ -6,9 +6,10 @@ derived files. Do not write the following changes; report them to whoever assign
 row or clause they match, and continue only on that person's direction:
 
 - a change that matches a row of ARCHITECTURE "Anti-patterns to push back on";
-- a change that adds a path from a session's project work into behavior or process memory other
-  than SPEC §1.8's single write path, or that promotes a single-project pattern into behavior
-  memory (SPEC §1.8 "Feedback directive tuning").
+- a change that writes behavior or process memory other than through SPEC §1.8's single write
+  path, or that hard-codes a routing SPEC §1.8 leaves to the user's policy (SPEC §1.8 "Feedback
+  directive tuning").
+- a backend concept added at the `memops` port without the user's approval.
 
 When you propose a change or make a design decision, ask:
 
@@ -22,4 +23,5 @@ When you propose a change or make a design decision, ask:
 Also:
 
 - Bake metrics emission into new code from day one; bolting it on later is much more expensive.
+- Tests land with the feature, not after.
 

@@ -12,7 +12,7 @@ thread file and updates the thread registry, and demotion out of the active and 
 Cold storage archival (`internal/memops/fileadapter/fileadapter_archive.go`;
 `cmd/archive.go` `archive list`/`archive recover`): when thread registry size pressure builds, the
 memory service archives the oldest closed threads into cold storage, out of the thread registry, by
-removing their directories, committing the removal and recording an `archive/index.jsonl` entry. (Spec §3.8.)
+removing their directories, committing the removal and recording an `archive/index.jsonl` entry. (SPEC §3.8.)
 
 A batch meets the three results of SPEC §3.8.1 as follows:
 

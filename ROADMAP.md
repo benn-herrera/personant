@@ -41,7 +41,7 @@ the tagged clauses get a follow-up pass. Each entry states when it must be decid
   (`CommandDomain.transform` → `CommandEditor.add`), not a `commands/*.md` file. Open: for each of
   `/topic*`, `/topics`, `/done`, `/closures`, `/pause`, `/resume`, `/back-to`, `/no-revisit`,
   `/keep`, `/threads`, `/spine`, `/index-rebuild`, `/project*`, `/stats`, keep as a plugin command,
-  make autonomic, or drop; and the ack channel for the recall offer, closure review queue and
+  make automatic, or drop; and the ack channel for the recall offer, closing review queue and
   startup project prompts. Plugins have only a yes/no `permission.assert`
   (`OPENCODE_RESEARCH/OPENCODE_INTEGRATION_OPTIONS.md` §2.3). Readings: (a) plugin tools the model calls plus yes/no
   `permission.assert`; (b) opencode commands carrying a service-recognized marker (spoofable;
@@ -50,15 +50,15 @@ the tagged clauses get a follow-up pass. Each entry states when it must be decid
   read the answer next turn. Unverified: how the TUI shows a command whose `execute` sends no
   prompt, and how `execute` reports a result. Tagged at SPEC §3.4, §3.5, §3.10.1, §4.2, §4.3,
   §4.5.3–§4.5.8. **Decide before A12.**
-- [x] **U5 Inference for Personant's internal calls** (curator, dissector, embedder,
+- [x] **U5 Inference for Personant's internal calls** (summarizer, clusterer, embedder,
   memory-vetting reviewer). Personant has no inference path or provider configuration of its own:
   every call goes through opencode, text generation through the plugin's `experimental.generate`,
   embeddings per A12a (forking opencode if it has no route). The provider pool, `providers.toml`,
   the `ping` and `models` verbs and the `langchaingo/llms` dependency go. Follow-up pass: SPEC
   §1.8, §2.1, §5.2–§5.3, §8.1, §8.2.
 - [x] **U6 Front-end version line: retired.** `version.FrontEnd`, its bump contract, `test-fe` and
-  `fe-scope-check` go with the REPL; the substrate and home-format lines stay. Follow-up pass: SPEC
-  §9.1 "Two version lines", CONVENTIONS "Versioning", README Status and the justfile.
+  `fe-scope-check` go with the REPL; the memory store and home-format lines stay. Follow-up pass: SPEC
+  §9.1 "Version lines", CONVENTIONS "Versioning and acceptance", README Status and the justfile.
 - [ ] **U7 Plugin failure policy.** Fail open (leave the hook input unmodified; opencode's own
   composition reaches the model and memory silently misses the step) or fail closed (refuse the
   request; the session stops while the service is down). What opencode does when the `context` hook
@@ -79,7 +79,7 @@ the tagged clauses get a follow-up pass. Each entry states when it must be decid
   `decayEligible`). **Decide before A8.**
 - [ ] **U10 Model family.** ARCHITECTURE "Model-family as platform" targets one family (Gemma);
   opencode lets the user pick any model. (a) Keep one tuned family for the memory prompts and warn
-  on others. (b) Support whatever opencode runs and measure tag and curator quality per family,
+  on others. (b) Support whatever opencode runs and measure tag and summarizer quality per family,
   which grows the eval surface (U3's recall-tool option shrinks it). Gates no item below.
 - [ ] **U11 CONVENTIONS rule, not adopted.** External state (an agent's data home, telemetry) never
   lives inside `~/.personant/` or a test home, because crash recovery quarantines untracked files.
@@ -110,7 +110,7 @@ decisions named in them.
   trigger (prompt, context, tool deltas, turn close), exporting what `OPENCODE_RESEARCH/OPENCODE_PROBE_RESULTS.md` §8
   lists. The in-process sim reproduces its baselines unchanged. The probe counterpart
   (`internal/turn/probe_phases.go` on `probe-path`) is reference only, not ported. Unblocks A5.
-  (ARCHITECTURE "Runtime inversion".)
+  (ARCHITECTURE "Hook-driven turn phases".)
 - [ ] **A4. Decide whether acceptance needs an opencode-in-loop rung.** The SPEC §9.1 gate is the
   in-process four-month simulation; nothing written says whether it also needs a rung with opencode
   in the loop. Decide when A3 lands; a yes adds a rung to the ladder.
@@ -144,7 +144,7 @@ decisions named in them.
   byte accounting (orientation preamble, topic-tag directive and headers ride on top of the byte
   proxy unaccounted; a fixed deduction would zero the tiny ceilings the acceptance tests use).
   Settles whether `conventions_paths` (SPEC §2.5.1) overlaps the instructions slot, and the
-  stable-prefix claim for the now-dynamic expectations slot. (SPEC §3.1 "Slot answers".)
+  stable-prefix claim for the now-dynamic expectations slot. (SPEC §3.1 "Slot policies".)
 - [ ] **A8. Resume and recovery.** First: `newHarness` (`internal/scenarios/harness_setup.go`)
   does not run the startup reconcile that production runs, so a harness home's files stay
   uncommitted and crash recovery quarantines them; crash scenarios through the shared harness are
@@ -167,7 +167,7 @@ decisions named in them.
   re-engagement miss rate is inflated by spurious `*new-topic*` duplicates; SPEC §9.1 "Topic-tag
   fidelity"); runtime hot-reload of the topic-tag template (`internal/prompt/template.go`).
 - [ ] **A11. Commit-cost growth: fixed; opencode-in-loop re-measure remains.** Single-load staging
-  (`793890f`) and excerpt folios (`1cecf0c`–`631cd48`) hold per-turn commit cost flat (13–21 ms/turn
+  (`793890f`) and excerpt bundles (`1cecf0c`–`631cd48`) hold per-turn commit cost flat (13–21 ms/turn
   over 54 mock sim-days, `test/rundata/sim-workload-seed24095-dur2880h0m0s.261101104107`, stopped at
   day 54) and the daily index near 2,000 entries. What remains is the re-measure with opencode in the
   loop, worth running when it can show memory-side cost under real inference that a mock run
@@ -199,7 +199,7 @@ decisions named in them.
   opencode-side settings (`compaction.auto: false`, the plugin entry) in opencode's own format;
   Personant-only settings move to `~/.config/personant/` (`internal/store/paths.go` still places
   `config.toml` under the home, and `providers.toml`, which goes per **U5**); memory-native commands and the ack
-  channel per **U4**, including the recovery banner, project prompts and the closure-drain boundary
+  channel per **U4**, including the recovery banner, project prompts and the closing-drain boundary
   (an opencode session never "exits"). Implement the CLI verbs SPEC §4.1 keeps but `cmd/` lacks
   (`search`, `deps`, `log`), or remove them from SPEC. (SPEC §2.1, §4.1, §8; ARCHITECTURE "Single
   spelunking location".)
@@ -215,12 +215,11 @@ decisions named in them.
   `internal/modellist` and the provider pool, the `chat`, `ping` and `models` verbs (**U5**), and
   `version.FrontEnd`, `test-fe` and `fe-scope-check` (**U6**); then delete the readability,
   html-to-markdown, terminal/signal and `langchaingo/llms` dependencies. The old systems are not a fallback: nothing waits on the plugin route to remove
-  them. Plan: `ROADMAP_PLANS/strip-self-built-harness/entry-point.md` (parked after WP2 until the
-  doc sweep, `ACTIVE_PLAN.md`, lands).
+  them. Plan: `ROADMAP_PLANS/strip-self-built-harness/entry-point.md` (parked after WP2).
 - [ ] **B2. `recall_query_latency_*` does not measure recall.** The sim's p50/p95/p99 gauges
   (`metricRecallQueryLatencyP50/P95/P99`, `internal/scenarios/sim/workload.go`, populated in
   `sim/telemetry.go`) copy turn-duration percentiles instead of timing recall queries. (SPEC §9.4.)
-- [ ] **B3. opencode database cleanup.** Checkpoints must not grow opencode's database without
+- [ ] **B3. opencode database cleanup.** Checkpoint compactions must not grow opencode's database without
   bound and cleanup must never break a kept session's scrollback, fork or revert; use
   `modernc.org/sqlite` for any Go SQLite need. (SPEC §1.7; ARCHITECTURE "opencode database cleanup";
   `OPENCODE_RESEARCH/OPENCODE_PROBE_RESULTS.md` §3.4 for the measured growth.)
@@ -242,8 +241,8 @@ decisions named in them.
   open against one shared memory.
 
   Consequences, roughly in the order they bite: **thread safety** (concurrent sessions read and
-  mutate shared canonical state — spine, thread files, the §3.0 chain — and need real
-  synchronization at the substrate boundary); **per-session working set** ("the active thread"
+  mutate shared authoritative state — thread registry, thread files, the §3.0 chain — and need real
+  synchronization at the memory store boundary); **per-session working set** ("the active thread"
   becomes session-scoped; so does `session.started active=`, which is logged per service run while
   the active project is per opencode session); **cross-reference vs. isolation** (two active
   threads may legitimately cross-reference, but the user must also be able to declare two lines of
@@ -267,7 +266,7 @@ decisions named in them.
   to an opencode child session, or only steer the model toward one, is an open research question.
   Shares the sub-mind mechanics of B6. (SPEC §3.9.)
 - [ ] **B7. Agents and skills.** Whether and how opencode agent definitions and skills are
-  supported; candidate mapping: agent definitions as Layer E directives scoped per agent, skill
+  supported; candidate mapping: agent definitions as directives-slot directives scoped per agent, skill
   content as transient task-class.
 - [ ] **B8. `/compact` and `/clear` mapping.** Both are no-ops today because memory is not keyed on
   session (SPEC §1.1). Decide what they eventually map to and whether a TUI plugin can replace or
@@ -281,8 +280,8 @@ decisions named in them.
   behavior and process memory; mechanical write checks and batch content review for career memory. Open within
   it: the default acceptance policy, the rubric's content, which model reviews (through opencode, **U5**), the
   re-review cadence. (SPEC §1.8; ARCHITECTURE "Memory vetting".)
-- [ ] **B11. Directive accrual aggregation.** The cross-project digest, fallback dissection and
-  directive accrual (the old "Phase 5"): accrual may propose a behavior-memory change only from
+- [ ] **B11. Feedback directive tuning aggregation.** The cross-project digest, fallback dissection and
+  feedback directive tuning (the old "Phase 5"): tuning may propose a behavior-memory change only from
   patterns aggregated across projects, through the B10 review path. Define the boundary between
   behavior memory and process memory: every behavior adjustment learned in a project resolves to
   exactly one of (a) promotion to universal behavior memory, or (b) a process-memory proposal
@@ -290,8 +289,9 @@ decisions named in them.
   process-memory store it proposes into: directive text whose changes take the B10 review path.
   Open within it: the store's file layout and scope values, its place in directive precedence, how
   the categories that apply to a project and the active role are determined (B7's per-agent
-  directives are a candidate for role). (SPEC §1.8; THESIS "Three kinds of memory"; ARCHITECTURE "Personalization through directive
-  accrual".) Fallback dissection as ARCHITECTURE designed it: it fires when budget pressure
+  directives are a candidate for role). (SPEC §1.8; THESIS "Three kinds of memory"; ARCHITECTURE "Personalization through feedback directive
+  tuning".)
+- [ ] **B11a. Fallback dissection.** Intended design: it fires when budget pressure
   exceeds `dissect.pressure-threshold` and normal closing is not keeping up; the clusterer groups
   the oldest poorly threaded content into related clusters; each cluster becomes a thread
   directory and registry record shaped like a normally closed thread and closes through the
@@ -323,7 +323,7 @@ Concrete, mostly single-package items; independent of the sequence above unless 
   tracked-file store (`files.jsonl`, `files/`) in the history repository, and archival's capture
   commit pins it there too, so the content of every file the assistant read or wrote is kept
   permanently. SPEC §3.9.1 requires the store to live only
-  in the store working tree and the turn repository. Barrier completion's restore of the store
+  in the store working tree and the turn repository. Day-rollover completion's restore of the store
   from primary HEAD depends on the current behavior (ARCHITECTURE "Tracked-file store").
 - [ ] **Anchor projection can emit an anchor `personant verify` rejects.** `turn.ProjectAnchors`
   ranks high-specificity identifiers first with no length bound, and extraction admits URLs, file
@@ -351,10 +351,10 @@ Concrete, mostly single-package items; independent of the sequence above unless 
   are unfindable, against SPEC §3.4's completeness invariant. Session-as-thread routing (A10)
   gives every turn its session's thread as owner.
 - [ ] **Wire the mid-day re-baseline arming trigger.** The default-off knob that nukes and recreates
-  the daily DB when loose objects cross a threshold mid-session has recovery handling and marker
+  the turn repository when loose objects cross a threshold mid-session has recovery handling and marker
   plumbing in place; the arming trigger is not wired. Adjacent: whether intra-day derived-watermark
   staleness needs finer handling. (SPEC §3.11, §4.5.8 "Intra-day derived staleness".)
-- [ ] **Banded/auto-mode sim rung.** The closure ack-mode amendment (§3.5) and recall banding
+- [ ] **Banded/auto-mode sim rung.** The `closure.ack-mode` amendment (§3.5) and recall banding
   amendment (§3.4) are unit-covered, not sim-covered. Waits on **U4**. (SPEC §3.4, §3.5.)
 - [ ] **Directive-file plumbing for the remaining §2.6.1 parameters.** Only `closure.ack-mode` and
   `recall.ack-mode` are read live through `store.ReadParameter`; the rest (`context.token-budget`,
@@ -386,12 +386,13 @@ Concrete, mostly single-package items; independent of the sequence above unless 
   §3.9.2/§3.9.4 live-window handling of one literal appearing in prompt and file. (SPEC §3.9, §9.1.)
 - [ ] **`store.ThreadTurnWindow` imported directly by `internal/turn/engage.go`**, bypassing the
   `MemoryOps` port. Accepted while the file adapter is the only one; revisit when a second adapter
-  arrives. (ARCHITECTURE "Port-and-adapter".)
+  arrives. (ARCHITECTURE "Port-and-adapter at the memory store boundary".)
 - [ ] **Flush-job re-enqueue on failure.** A failed embedding flush job is not re-enqueued. Parked
   until live-run data shows failed embeds. (`internal/recall/measure`.)
 - [ ] **"Six-month" phrasings in Go comments.** Comments in `internal/memops`, `internal/autogit`,
   `internal/clock`, `internal/store` and `internal/scenarios/sim` still say six-month; the
   acceptance gate is 120 days. Sweep each file when next touched. (SPEC §9.1.)
+- [ ] **Code comments cite retired document names.** Comments in `internal/memops/fileadapter/` cite INV-1…INV-6 (no longer in ARCHITECTURE), `fileadapter.go` names a `turn/archival.go` drain that does not exist, `internal/turn/projection.go` says ever-central symbols rank in the high class and that class breaks ties of equal count (`rankClass` tests only `IsHighSpecificity`, and class outranks count), `fileadapter_barrier.go` says derived files never exist in history-repository HEAD (`digest.json` does), and several files say "sleep cycle"; a comment-only pass fixes them.
 
 ---
 
@@ -399,13 +400,13 @@ Concrete, mostly single-package items; independent of the sequence above unless 
 
 - [ ] **Event-log rotation.** `personant init` creates `logs/archive/` (`internal/store/init.go`)
   and startup recovery leaves it alone (`internal/recovery/logs.go`), but nothing rotates logs
-  into it. The layout ARCHITECTURE carried was monthly gzipped tarballs of logs older than 90 days
+  into it. Intended layout: monthly gzipped tarballs of logs older than 90 days
   (`logs/archive/YYYY-MM.tar.gz`), which would be the store's only non-text file and needs a
   storage class.
 - [ ] **Cross-project recall.** Not built: the other-projects slot carries each project's digest,
   but no recall path scans it, and a cross-project fetch or engagement is declined
   (`internal/turn/lru.go` `crossProjectDecline`; SPEC §3.1, §3.2), though SPEC §2.6.1 names
-  `recall.cross-project-threshold`. The design ARCHITECTURE carried: the digests scanned each turn
+  `recall.cross-project-threshold`. Intended design: the digests scanned each turn
   by the opportunistic-surfacing path, at a higher threshold.
 - [ ] **No production trigger for consolidation.** `MemoryOps.Consolidate` runs only from the
   turn-repository loose-object check (`internal/memops/fileadapter/fileadapter_recovery.go`) and
@@ -416,7 +417,7 @@ Concrete, mostly single-package items; independent of the sequence above unless 
   the clusterer, recall's model-judgment signal and the vetting reviewer (SPEC §8.2.1) — with
   deterministic code, so the memory service needs no model's services at all.
 - [ ] **Archive recall.** Match `archive/index.jsonl` anchors and offer a recovery-fetch so a
-  deep-cold thread resurfaces through the same opportunistic mechanism as a live one. The index
+  cold-storage thread resurfaces through the same opportunistic mechanism as a live one. The index
   already carries `anchors` and `spine_summary`: additive, no schema change. (SPEC §3.8.4.)
 - [ ] **Synthesis-attribution residual.** When a thread synthesizes a prior thread's idea by
   paraphrase with no recall hit, `derived_from` is left empty. Attributing it is a fuzzy judgment
@@ -458,37 +459,37 @@ Concrete, mostly single-package items; independent of the sequence above unless 
   `personant init` writes as well as `~/.config/personant/`.
 - [ ] **Multi-user** (v2.0; locked, not under active consideration).
 - [ ] **Weight-baked instinct from outcome history.** Once local fine-tuning is mature and stable,
-  the substrate's *outcome record*, not its content, becomes a training signal for a personal
-  alignment adapter. Substrate stays recall; weights become instinct. Baking memories by tuning on
-  raw substrate content is a bad trade (it displaces pretrained factual capacity for narrow recall
-  the substrate already holds verifiably); instead train on the shape of what worked and failed
+  the memory store's *outcome record*, not its content, becomes a training signal for a personal
+  alignment adapter. The memory store stays recall; weights become instinct. Baking memories by tuning on
+  raw memory store content is a bad trade (it displaces pretrained factual capacity for narrow recall
+  the memory store already holds verifiably); instead train on the shape of what worked and failed
   (decision durability, estimate calibration, code-survival durability, user-correction patterns)
   by preference-pair learning (DPO/IPO-style) over `(situation, approach_taken, observed_outcome)`
-  triples, producing a small low-rank LoRA on later layers. Constraints: the substrate remains
+  triples, producing a small low-rank LoRA on later layers. Constraints: the memory store remains
   source of truth; each training pass is gated, reviewed and reversible (pre-tuned model
-  preserved, LoRA tagged with its substrate snapshot hash, eval-gated promotion, rollback on
-  failed evals); substrate items used in a pass get a `consolidated_at:` annotation so nothing
-  bakes twice. Depends on mature local fine-tuning, outcome-labeled substrate at scale and a
+  preserved, LoRA tagged with its memory store snapshot hash, eval-gated promotion, rollback on
+  failed evals); memory store items used in a pass get a `consolidated_at:` annotation so nothing
+  bakes twice. Depends on mature local fine-tuning, outcome-labeled memory store content at scale and a
   tested eval methodology.
-- [ ] **Memory consolidation — the "sleep" cycle.** Full design capture is kept here;
+- [ ] **Memory consolidation.** Full design capture is kept here;
   `ARCHITECTURE.md` keeps a short now-stub covering what is built (`MemoryOps.Consolidate` git
   gc/repack, SPEC §3.11; `measure.RebuildTrees`) plus the interface fact SPEC §3.10.8 needs.
 
   Personant's memory layering is deliberately analogous to organic memory: working short-term (the
-  live working set), consolidated long-term (spine and thread bodies, mostly read), archival deep
-  memory (off-spine, rarely touched), and a metadata layer for operating on active context fast.
-  Under sustained use this organization fragments — threads close out of order, the spine accretes,
+  live working set), consolidated long-term (thread registry and thread bodies, mostly read), archival cold
+  storage (off the thread registry, rarely touched), and a metadata layer for operating on active context fast.
+  Under sustained use this organization fragments — threads close out of order, the thread registry accretes,
   derived structures and archival boundaries drift from ideal packing. In-turn maintenance keeps the
-  substrate *correct* but not *orderly*.
+  memory store *correct* but not *orderly*.
 
   The remedy is an offline **consolidation cycle**. During idle time (the day off, or any unused
   window) the runtime runs reorganization it cannot afford mid-turn: re-packing fragmented
-  structures, compacting the spine, advancing archival (beyond the git gc/repack and summary-tree
+  structures, compacting the thread registry, advancing archival (beyond the git gc/repack and summary-tree
   rebuild already wired), and making the final keep/toss calls on data the faster in-turn
   transient-data lifecycle (§3.0) left questionable — the SPEC §3.10.8 content-retention precision
   layer. It is also where batch content review of career memory (B10) runs. Concurrent sessions
   (B5) create exactly the tangle this pass would clear. The day-off is already a real idle window
-  in the acceptance workload model, and closure (§3.5) and archival (§3.8) are the mechanisms a
+  in the acceptance workload model, and closing (§3.5) and archival (§3.8) are the mechanisms a
   consolidation pass would tidy.
 
 ---
@@ -497,14 +498,13 @@ Concrete, mostly single-package items; independent of the sequence above unless 
 
 `ROADMAP_PLANS/` holds designs not under way. Those that still apply:
 
-- `strip-self-built-harness/` — B1, parked after WP2; resumes once the doc sweep (`ACTIVE_PLAN.md`)
-  has rediced `PROJECT_DOCS/`, with its contract rows re-mapped onto the rediced tree.
+- `strip-self-built-harness/` — parked after WP2 (ROADMAP B1).
 - `OPENCODE_SERVER_REPLACEMENT.md` — the fallback if the plugin route cannot give the memory system
   the control it needs (ARCHITECTURE "Plugin route").
 - `code-mode-support.md` — applies only to that fallback.
 - `within-thread-interleaving.md` — design for within-thread topic interleaving in the sim
   workload; not implemented (SPEC §9.1 "Workload interleaving").
 - `folio-deferred-shrink.md` — unbind writes loose copies without fsync and drops the duplicate
-  folio entries only once the copies are sealed in a day-commit; follows the excerpt-folio plan.
+  excerpt-bundle entries only once the copies are sealed in a day-commit; follows the excerpt-bundle plan.
   Open: whether a power-loss-torn loose copy is accepted as a residual or readers fall back to the
-  folio.
+  excerpt bundle.

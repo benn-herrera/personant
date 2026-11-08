@@ -15,7 +15,7 @@ Process-memory directive files do not exist yet (SPEC §1.8
 `Open:`).
 
 Every feedback-tuning proposal goes
-through "Memory vetting", the same review and acceptance path as any other. (Spec §1.8, §2.6.)
+through "Memory vetting", the same review and acceptance path as any other. (SPEC §1.8, §2.6.)
 
 **Open:** how cross-project aggregation is computed (what counts as a pattern, how many projects,
 what threshold); no aggregator exists, and the per-project statistics the recall loop collects

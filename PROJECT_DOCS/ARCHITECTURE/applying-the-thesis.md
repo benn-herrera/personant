@@ -1,6 +1,6 @@
 ## Applying the thesis
 
-THESIS states why Personant exists. This implementation applies two design rules at every layer:
+THESIS lists the standard pattern each piece follows. This implementation applies two design rules at every layer:
 
 > **Deterministic state as authoritative. The model in narrow judgment roles.**
 

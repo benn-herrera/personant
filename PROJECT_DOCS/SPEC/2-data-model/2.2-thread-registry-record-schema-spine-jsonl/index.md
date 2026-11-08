@@ -1,6 +1,6 @@
 ### 2.2 Thread registry record schema (`spine.jsonl`)
 
-Unused → ARCHITECTURE «Storage and record formats» (the record layout and field names). A person
+Format → ARCHITECTURE «Storage and record formats» (the record layout and field names). A person
 inspecting the store finds every thread as one record in the **thread registry**, a single file
 sorted by id, so a change to one thread shows as a one-line diff. A record carries the thread's
 project, **anchors** (the few **symbols** that currently identify it), summary, description, state,

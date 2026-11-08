@@ -4,7 +4,7 @@
 > memory service are not built yet, and parts of this document describe the target, not the
 > current tree. Progress: [`ROADMAP.md`](ROADMAP.md) Part A.
 
-Personant is a context-management and long-lived memory system designed to run under unmodified
+Personant is a memory system for a coding agent, designed to run under unmodified
 [opencode](https://opencode.ai) as a server plugin plus a Go memory service. It owns what enters
 every model request, so the agent keeps one continuous career across sessions and projects.
 What it is built from and what is new: [`THESIS.md`](THESIS.md); operating model:
@@ -167,7 +167,7 @@ Contract: [`SPEC.md`](SPEC.md) §4.5.8, and §1.6 for turns opencode itself inte
 ## Status
 
 The plugin route is not built; sequencing is in [`ROADMAP.md`](ROADMAP.md) Part A. The memory
-runtime beneath it (storage, turn chain, recall, closure, archival, crash recovery) exists and is
+runtime beneath it (storage, turn chain, recall, closing, archival, crash recovery) exists and is
 exercised in-process by the acceptance simulation ([`SPEC.md`](SPEC.md) §9.1). Open decisions are
 listed in `ROADMAP.md` "Pending decisions"; known defects are `ROADMAP.md` items.
 
@@ -186,7 +186,7 @@ writes" and "Storage non-negotiables".
 | `github.com/BurntSushi/toml` | BurntSushi | MIT | `providers.toml` and `config.toml` parsing |
 | `codeberg.org/readeck/go-readability/v2` | Readeck contributors | MIT | `web.fetch` — boilerplate-stripped article extraction (self-built harness) |
 | `github.com/JohannesKaufmann/html-to-markdown/v2` | Johannes Kaufmann | MIT | `web.fetch` — HTML → Markdown conversion (self-built harness) |
-| `github.com/go-git/go-git/v5` | go-git contributors | Apache 2.0 | `internal/autogit` — autonomic git operations on `~/.personant/` |
+| `github.com/go-git/go-git/v5` | go-git contributors | Apache 2.0 | `internal/autogit` — automatic git operations on `~/.personant/` |
 | `github.com/go-git/go-billy/v5` | go-git contributors | Apache 2.0 | `internal/autogit`, `internal/store` — filesystem layer under go-git |
 | `golang.org/x/net` | The Go Authors | BSD 3-Clause | `web.fetch` — HTML parsing (self-built harness) |
 | `github.com/spf13/cobra` | Steve Francia | Apache 2.0 | CLI subcommand dispatch (`cmd/`) |

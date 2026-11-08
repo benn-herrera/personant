@@ -8,7 +8,7 @@ engaged thread's (the current turn's owner, [§3.2](../3.2-topic-tagging-and-eng
 whole content is indexed by the time it leaves the working set.
 
 *Persistence (required).* The vectors are derived and regenerable, and are kept across service runs
-([§2.1](../../2-data-model/2.1-storage-layout/index.md) `.recall-cache/`), so a service run re-embeds only content that changed.
+(`.recall-cache/`: ARCHITECTURE "Store directory layout"; its operational class, [§2.1](../../2-data-model/2.1-storage-layout/index.md)), so a service run re-embeds only content that changed.
 
 *Long threads.* Intra-thread recall on very long single threads must work with **no performance
 decay**, validated in the [§9](../../9-measurement-and-validation-regime/index.md) acceptance simulation by a long-running-thread workload with explicit

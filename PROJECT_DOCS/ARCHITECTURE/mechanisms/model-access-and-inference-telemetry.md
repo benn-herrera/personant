@@ -13,7 +13,7 @@ source for the timing fields is established.
 The local provider is **oMLX**, an OpenAI-compatible endpoint, configured in opencode's own
 provider settings.
 
-The memory service's judgments go through the host (SPEC §8.2.1); text generation for the
+Production design, not built: The memory service's judgments go through the host (SPEC §8.2.1); text generation for the
 summarizer, clusterer and recall judgment through the plugin's `experimental.generate` (an opencode plugin hook, integration-options report §2.3) over
 opencode's providers; the embedder names an opencode provider in `[embedding]` (SPEC §8.2.2); how
 embeddings are requested through opencode is Open A12a (SPEC §8.2.1). Where `[embedding] vectorLength` is set,

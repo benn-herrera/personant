@@ -17,6 +17,6 @@ How the project documents (THESIS, SPEC, ARCHITECTURE, CONVENTIONS) are written 
 - **Unused SPEC section numbers** (§0, §4.3.1, §4.3.2, §4.3.4, §4.4–§4.4.4, §4.6, §6–§6.5, §7) are
   never reassigned; code cites sections by number. Where a heading remains, its text says what
   replaced it.
-- **Moved sections.** A SPEC heading marked "Unused → ARCHITECTURE «X»" keeps its number and
+- **Moved sections.** A SPEC section marked "Format → ARCHITECTURE «X»" keeps its number and
   states only the outcome; the schema or format lives in ARCHITECTURE section X. A §-citation of
-  that heading, in SPEC or in code, refers to X.
+  that section, in SPEC or in code, refers to X.

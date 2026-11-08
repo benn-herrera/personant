@@ -30,9 +30,9 @@ system the piece resembles and is not — the direction work on it must not drif
 | The memory service | A single-writer local process | A network server, multi-tenant service or database server |
 | The memory store | Human-readable text files under version control | A database engine; or a mirror of the user's repository: the project's files and history stay in its own version control |
 | Durability and crash recovery | Write-ahead journaling, commit points to recover to, an idempotent reconcile at startup | A transaction manager or a replication system |
-| Indexes | Derived index files, rebuildable from the canonical files | A search engine or a catalog service |
+| Indexes | Derived index files, rebuildable from the authoritative files | A search engine or a catalog service |
 | Symbol extraction | Pattern matching plus normalization rules | An NLP pipeline or an entity linker |
-| Recall | Lexical and embedding similarity scored against thresholds, indexed in the background | A vector database or a retrieval service |
+| Recall | Symbolic (Jaccard) and embedding similarity scored against thresholds, indexed in the background | A vector database or a retrieval service |
 | Context composition | Prompt assembly into budgeted slots in priority order, stable parts first | A prompt framework or a general RAG pipeline |
 | Content dedup | Content addressing and diffs | A version-control system |
 | Thread lifecycle | A state machine with decay timers | A task tracker or a workflow engine |
@@ -44,6 +44,8 @@ system the piece resembles and is not — the direction work on it must not drif
 | Career memory | Notes on techniques and solutions from past work, drawn from the record and recalled by relevance | A code library or package registry, or a copy of past projects' code |
 | Memory vetting | Review before commit, with a provenance record | An approval workflow system |
 | Model access | Judgments requested from the host, which runs the model; the memory service never calls a model | An inference client or provider configuration |
+
+Behavior memory has no row of its own; process memory is directive text (row "Directives").
 
 Where a piece is in this table, its conventional answer is the default. A design that grows a
 piece toward its "is not" column is out of scope, however natural the next step looks.
@@ -83,5 +85,5 @@ The memory that steers the agent comes in three kinds, separated by scope.
 Volumes:
 
 - [SPEC](SPEC/entry-point.md): Consumer-facing behaviors and outcomes
-- [ARCHITECTURE](ARCHITECTURE/entry-point.md): How this projects' implementation meets requirements designated by SPEC
+- [ARCHITECTURE](ARCHITECTURE/entry-point.md): How this project's implementation meets requirements designated by SPEC
 - [CONVENTIONS](CONVENTIONS/entry-point.md): Project-specific process and house rules

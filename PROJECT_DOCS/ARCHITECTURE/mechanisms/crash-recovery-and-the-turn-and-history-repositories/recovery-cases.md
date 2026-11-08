@@ -19,7 +19,7 @@ repository. An archive entry awaiting back-fill is an entry of the "Archive inde
 | 11 recovery re-entry | `op=recovery` (crash during recovery) | re-run under the original marker; every phase is idempotent, so it converges |
 | 12 legacy adopt | dirty, no watermark ever | greenfield or legacy: verify-gated adopt-commit to the history repository (`Personant-Day` trailer), back-fill repair, full rebuild, then turn-repository init (see "Day rollover") |
 
-Dual-repository operation rows:
+Turn- and history-repository rows:
 
 | Op | Action |
 |---|---|

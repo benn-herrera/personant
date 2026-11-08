@@ -15,6 +15,6 @@ The service performs many operations the model cannot. Most notably **git**:
   (`store.FindGitRoot`) and origin URL (`store.GetGitOriginURL`).
 - The memory service exposes no git tool for the store directory. The agent has opencode's shell,
   which can reach it, and nothing blocks it; crash recovery treats a broken hand-edit as legitimate
-  (quarantine, never delete). That the service is the only writer of the store directory is the
-  intent.
+  (quarantine, never delete). The service is the only writer of the store directory by
+  design; enforcing it is ROADMAP B12.
 

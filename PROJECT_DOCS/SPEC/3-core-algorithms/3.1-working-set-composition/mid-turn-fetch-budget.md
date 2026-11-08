@@ -1,4 +1,4 @@
-#### [§5.5](../../5-model-interaction/5.5-mid-turn-thread-fetch-system-injected/index.md) mid-turn fetch
+#### Mid-turn fetch budget
 
 **Open:** U3 — whether the in-band tag and its stream abort-and-re-issue
 are built under opencode or replaced by a recall tool. Until decided, the text below binds: when

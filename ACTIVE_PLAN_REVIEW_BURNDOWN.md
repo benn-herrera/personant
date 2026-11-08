@@ -201,7 +201,7 @@ sentence's ")." with "it moves only in the change that states the supported rele
 **B22. Citation fixes.**
 - SPEC §3.1, §3.4 and §9.1 `version-lines.md` cite §2.1 for `working-set.json`, `.recall-cache/`
   or `version.toml`, which §2.1 does not name. Cite the file and its class separately, e.g.
-  "(`working-set.json`: ARCHITECTURE "Store directory layout"; class [§2.1](…))".
+  "(`working-set.json`: ARCHITECTURE "Store directory layout"; class §2.1, linked)".
 - SPEC `9.1…/version-lines.md`: "Versioning & acceptance" → "Versioning and acceptance".
 - CONVENTIONS "Memory service: Go": "Dependencies" "below" → "House rules for agents,
   "Dependencies"".
@@ -220,7 +220,7 @@ sentence's ")." with "it moves only in the change that states the supported rele
 - "Explicit fetch" for restoring an archived thread: ARCHITECTURE `thread-lifecycle.md` "restorable
   by explicit fetch" → "restorable with `personant archive recover`"; SPEC §3.4 index, the
   completeness-invariant exception, becomes "archived threads, which are off live recall and
-  restored with `personant archive recover` ([§3.8.4](…))" (this is also B4's §3.4 edit); any
+  restored with `personant archive recover` (§3.8.4, linked)" (this is also B4's §3.4 edit); any
   other "explicit fetch" meaning restore → "restore (`personant archive recover`)".
 - ARCHITECTURE `automatic-vs-model-controlled.md`: "That the service is the only writer of the
   store directory is the intent." → "The service is the only writer of the store directory by

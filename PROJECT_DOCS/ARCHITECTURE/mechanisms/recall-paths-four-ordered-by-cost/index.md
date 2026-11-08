@@ -39,7 +39,7 @@ Standard pattern: THESIS "The building blocks", row "Recall".
    transition, which flushes a thread's remaining backlog when it decays out of the working set so
    its whole body is indexed before it becomes a pure recall target. The completeness floor scans `(1 + pending) × limit` excerpts: `limit` is the
    unembedded backlog limit (16) and `pending` counts enqueued-but-unpublished flush jobs — 0 at
-   steady state and at most 258 at the v0.1 queue depth of 256 (queue plus one in process plus one
+   steady state and at most 258 at the queue depth of 256 (queue plus one in process plus one
    blocked enqueue). Only a genuinely failed flush drops a pending job without publishing.
    Persisted vectors and summary trees are `.vec`/`.tree` sidecars under `.recall-cache/` in the
    store directory (`internal/recall/measure/veccache.go`, `treecache.go`). Each is keyed by a

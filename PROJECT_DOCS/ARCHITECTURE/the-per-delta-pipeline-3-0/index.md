@@ -1,8 +1,8 @@
 ## The per-delta pipeline (§3.0)
 
 The memory service takes content in as **deltas** (SPEC §3.0: each is one content addition to the
-window); a turn groups deltas. Every delta runs the per-delta pipeline, a fixed sequence of steps,
-so no content entering the window skips a step (**no gaps**).
+composed request); a turn groups deltas. Every delta runs the per-delta pipeline, a fixed sequence of steps,
+so no content entering the composed request skips a step (**no gaps**).
 
 **Delta taxonomy** (SPEC §3.0.1; the opencode mechanism behind each is in "Event observation"):
 
@@ -29,9 +29,9 @@ they change what the composer (`workset.Compose`) assembles.
 Delta order and turn attribution: see "Ordering and correlation".
 
 **Implementation contract** (§3.0.5): a single internal `onContextDelta(source, content, metadata)`
-entry point. **No delta reaches the working window without going through it.**
+entry point. **No delta reaches the composed request without going through it.**
 
-Step 4 (budget check) is a documented no-op in v0.1 (`internal/turn/chain.go`,
+Step 4 (budget check) is a documented no-op (`internal/turn/chain.go`,
 `TODO(phase-2-budget)`); `TestBudgetCheckIsExplicitNoOpV01` trips if it is half-enabled without a
 deliberate decision. Step 5 summarizes every task-class source to a metadata line (source, path,
 byte count) instead of logging the body, so a newly added task-class source inherits the

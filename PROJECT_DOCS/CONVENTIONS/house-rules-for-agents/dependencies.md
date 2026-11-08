@@ -1,7 +1,7 @@
 ### Dependencies
 
-General dependency discipline: ARCHITECTURE "Approved-when-earned
-dependencies". `go.mod` is the catalog.
+- **A dependency lands with its first consumer, never before**; no hand-built complex substitute
+  for one that would just work. `go.mod` is the catalog.
 - **Permanently out** (architectural conflict): `langchaingo/memory`, `langchaingo/chains`,
   `mattn/go-sqlite3`. Do not reintroduce.
 - **SQLite:** any Go SQLite need takes `modernc.org/sqlite` first.

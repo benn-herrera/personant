@@ -35,7 +35,7 @@ the mechanism.
   active-threads slot's oldest (compressed to summary). The directives, registry and
   other-projects slots are never evicted from the request.
 - **Tool output.** `boundTaskResultDeltas` (`internal/turn/livebudget.go`) applies the cap to the
-  delta, so the capped content is what the request carries and what the working window holds.
+  delta, so the capped content is what the request carries and what the composed request holds.
 - **File content.** `ComposeWorkingSet` loads each active-set thread's `files.jsonl` and runs one
   pure `dedup.Plan` across them. The plan gives each path that passes the size check a
   full-content candidate at its most recent position. It gives diffs at the path's N most recent

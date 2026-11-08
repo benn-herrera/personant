@@ -1,5 +1,7 @@
 ### Archive index (`archive/index.jsonl`)
 
+Standard pattern: THESIS "The building blocks", row "Cold storage".
+
 [Authoritative] One JSON line per archived thread, sorted by `thr_id`; SPEC §3.8.1 states what it
 must hold. The completed entry:
 

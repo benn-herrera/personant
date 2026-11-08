@@ -9,14 +9,14 @@ budget:
   does **not** apply to the `fs.read`/`fs.write`/`fs.commit` deltas, whose content is the file body
   written to the per-thread tracked-file store ([§3.9](../3.9-working-set-content-dedup/index.md)).
 - The cap is applied to the **delta**: the bounded content is what the composed request carries and
-  what the working window holds. The full body is not persisted ([§3.10.6](../3.10-transient-data-lifecycle/3.10.6-what-stays-transient.md)).
+  what the composed request holds. The full body is not persisted ([§3.10.6](../3.10-transient-data-lifecycle/3.10.6-what-stays-transient.md)).
 - The assistant can re-fetch with a narrower query or a byte range if it needs more.
 
 **LRU update rule** (driven by the [§3.0.4](../3.0-all-content-enters-through-one-pipeline-deltas/3.0.4-turn-boundaries-and-per-turn-engagement-coalescing.md) turn-close path). After a turn's engagements commit, each
 thread it engaged moves to the front of the active set, most recently engaged first
 (**active-set order**). A thread pushed past `layer.b-top-k` moves to the front of the dormant set.
 
-Active-set order and the dormant set persist across a relaunch (`working-set.json`, [§2.1](../../2-data-model/2.1-storage-layout/index.md));
+Active-set order and the dormant set persist across a relaunch (`working-set.json`: ARCHITECTURE "Store directory layout"; its operational class, [§2.1](../../2-data-model/2.1-storage-layout/index.md));
 active-set order is the recency signal [§3.3](../3.3-symbol-extraction-two-passes/index.md) owner-default uses. The dormant set is **not
 count-capped**: the dormant-threads slot's byte budget truncates it at composition time, and its
 truncation notice is the overflow indicator.

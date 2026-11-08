@@ -3,7 +3,7 @@
 Every referenced `thr_<n>` is resolved against the thread registry
 at turn close. An id that does not resolve is an **unknown thread id**: not in the thread registry
 (`thread.engaged-miss`) or belonging to another project (`thread.engaged-cross-project` —
-cross-project engagement is not built in v0.1 and is declined). An unknown thread id is logged and
+cross-project engagement is declined). An unknown thread id is logged and
 dropped: it never enters the engaged set, the active set, or the persisted working set; never owns
 the turn or receives the [§3.9](../3.9-working-set-content-dedup/index.md) file-edit binding; and a declined cross-project record is never
 mutated. When the tag's would-be owner (the lowest-id existing referenced thread) is an unknown

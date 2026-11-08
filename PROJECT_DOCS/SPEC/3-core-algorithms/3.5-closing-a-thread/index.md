@@ -17,27 +17,27 @@ The summarizer-drafted summary targets 100–150 chars: summary + anchors must f
 slot's budget at realistic thread registry size while letting the model recognize prior engagement
 without fetching the body.
 
-**Routine close-outs are auto-accepted; exceptions are batched at drain points.** A **drain point**
-is a moment at which the queued exception close-outs are put to the user. At the decay-detection
+**Routine closings are auto-accepted; exceptions are batched at drain points.** A **drain point**
+is a moment at which the queued exception closings are put to the user. At the decay-detection
 scan (run at turn close, finding the threads whose engagement has decayed) each candidate is
 classified:
 
 - **Exception** — the thread is anchor-rich (≥ 6
-  anchors). These criteria are provisional
-  values pending real-use data.
+  anchors). This threshold is a provisional
+  value pending real-use data.
 - **Routine** — everything else.
 
-A **routine** close-out is applied without asking: the summarizer's summary, `resolution=resolved`,
+A **routine** closing is applied without asking: the summarizer's summary, `resolution=resolved`,
 the same frontmatter + thread registry write and demotion out of the active and dormant sets an
 accepted ack performs, and ONE user-visible
 line, `closed thr_N: <display name> — <summary>` (the id leads because `/back-to <thr_id>` is the
 revision path). It rides the turn transaction already open around turn close ([§4.5.8](../../4-user-surface/4.5-project-identity-and-the-project-s-directory/4.5.8-startup-recovery-after-unclean-shutdown.md)) and adds no
-commit path of its own. **The revision path for a wrongly-summarized routine close-out is
+commit path of its own. **The revision path for a wrongly-summarized routine closing is
 re-engagement** (`/back-to`, [§4.2](../../4-user-surface/4.2-session-commands/index.md)): it returns the thread to `active`, and its next close re-drafts
 the summary.
 
-An **exception** close-out is **queued** silently: no summarizer call, no question, one
-`retire.pending` event (the `retire.*` events record closings). The queue is **derived, never stored** — a pending close-out is a
+An **exception** closing is **queued** silently: no summarizer call, no question, one
+`retire.pending` event (the `retire.*` events record closings). The queue is **derived, never stored** — a pending closing is a
 decay-eligible thread that classified as an exception — so it is crash-safe and correct across
 restarts. It is drained with the full interactive closing dialog at **drain points only**, and on
 demand via `/closures` ([§4.2](../../4-user-surface/4.2-session-commands/index.md)). An opencode session never exits, so there is no clean-exit drain

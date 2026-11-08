@@ -54,7 +54,7 @@ A turn-excerpt file (`turns/0000024.md`):
   durable source the fine-level index embeds for intra-thread recall. An excerpt is
   decision-class content; raw task-class output (SPEC §3.0.1, §3.10.1) is never written as one (SPEC §3.10.6). Durable
   turn content lives only in excerpts, never the event log. Retention trimming is the deferred
-  keep/toss stage (SPEC §3.10.8); v0.1 keeps all excerpts.
+  keep/toss stage (SPEC §3.10.8); all excerpts are kept.
 - **Excerpt storage tiers.** A thread's excerpts are split between loose files (`turns/`, the loose
   tier) and its excerpt bundle (`folio.jsonl`, the bundled tier) so the number of files git tracks in
   the store does not grow with thread length (SPEC §2.3). Excerpts change tier only in the day
@@ -87,7 +87,7 @@ A turn-excerpt file (`turns/0000024.md`):
     before writing anything for the thread, since Go's JSON encoder would silently replace invalid
     bytes; a violation fails the day rollover with `store.ErrExcerptNotUTF8` naming the file, never
     a skip or a repair.
-- **Tracked-file store.** One index and its content files per thread, written at turn close
+- **Tracked-file store.** Standard pattern: THESIS "The building blocks", row "Content dedup". One index and its content files per thread, written at turn close
   for the owner's file events (`store.ApplyFileEvents`) and pruned in the day rollover's
   file-retention step (`store.PruneTrackedFiles`).
   - **Out of date — SPEC §3.9.1 governs.** Everything here that relies on the tracked-file store

@@ -14,8 +14,7 @@ session directory:
 2. Session directory path → known project's `current_root_path` / `historical_root_paths`.
 3. `last-active` confirmation.
 
-**Open:** U4 — the channel for the interactive steps (the last-active confirmation, the final
-fallback, the remote-adoption and collision questions, the file-move question) and the command for
+**Open:** U4 — the channel for the interactive steps (the last-active confirmation, the remote-adoption and collision questions, the file-move question) and the command for
 an explicit selection.
 
 When a project gains a remote URL after creation (local-only → published), the memory service

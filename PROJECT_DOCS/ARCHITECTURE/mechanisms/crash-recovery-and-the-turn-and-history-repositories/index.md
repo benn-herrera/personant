@@ -6,7 +6,7 @@ The memory service can be hard-killed (SIGKILL, power loss) at any instant, so r
 as a **deterministic cold-start reconciliation** — no signal handler doing teardown work, no model
 in the loop, no user acknowledgement. On-disk state alone determines the outcome. The load-bearing
 property: **the store working tree is the truth; git is a recovery-point index over it.** No
-authoritative byte of the store working tree lives only in the turn repository, so the turn repository can be recreated from the store working tree and losing it is never losing content. Archived threads live only in the history repository (cold storage, SPEC §3.8), so a missing history repository is refuse-to-open. (Spec §4.5.8.)
+authoritative byte of the store working tree lives only in the turn repository, so the turn repository can be recreated from the store working tree and losing it is never losing content. Archived threads live only in the history repository (cold storage, SPEC §3.8), so a missing history repository is refuse-to-open. (SPEC §4.5.8.)
 
 Two git repositories track the one store working tree: the turn repository, per-turn and
 disposable, and the history repository, day-grain and permanent (cadence, cost bar and ≤1-turn

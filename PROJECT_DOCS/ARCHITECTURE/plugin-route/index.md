@@ -2,6 +2,9 @@
 
 Standard pattern: THESIS "The building blocks", rows "The opencode plugin" and "The memory service".
 
+In every leaf of Plugin route, present tense states the production design, which is not built yet
+(see "Tense").
+
 This section cites six research reports, all under `OPENCODE_RESEARCH/` at the repository root:
 
 - the integration-options report, `OPENCODE_RESEARCH/OPENCODE_INTEGRATION_OPTIONS.md`

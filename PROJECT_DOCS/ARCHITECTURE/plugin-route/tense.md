@@ -1,6 +1,6 @@
 ### Tense
 
-In this section and the ones that follow it, present tense states the production
+In every Plugin route leaf, present tense states the production
 design. Facts about the prototype, the throwaway implementation built to test this route, are marked
 "the prototype"; the production service and plugin are not built. The prototype lives on branch
 `probe-path` and is not on the build branch: every path, recipe and executor this document names as

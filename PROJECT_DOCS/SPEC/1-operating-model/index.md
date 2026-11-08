@@ -2,8 +2,9 @@
 
 Personant runs under unmodified opencode as a plugin plus the **memory service**, a local process
 that holds all memory state. Personant owns what enters every model request: composition
-(assembling each request, the **composed request**, from memory, [§3.1](../3-core-algorithms/3.1-working-set-composition/index.md)), compaction (shrinking a
-long conversation to fit the context window) and summarization (condensing older content), and
+(assembling each request, the **composed request**, from memory, [§3.1](../3-core-algorithms/3.1-working-set-composition/index.md)), which takes the
+place of opencode's compaction; summarization (condensing older content,
+[§5.2](../5-model-interaction/5.2-summarizer-prompt-for-closing-summary.md)); and
 recall (surfacing older **threads** — each the durable record of one problem being worked on —
 relevant to the current work, [§3.4](../3-core-algorithms/3.4-recall-matching/index.md)). opencode
 owns everything else: the terminal UI, session storage, the message data model, the event stream,
