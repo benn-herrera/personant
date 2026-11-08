@@ -182,7 +182,7 @@ decisions named in them.
   This misses SPEC §3.9's intent. Older copies were meant to be replaced in place where the context
   holds them. The build instead appends a per-version identifier list in a separate tracked-files
   section, and ties retention to the user's git. The fix is to implement the designed in-place
-  dedup (`ACTIVE_PLAN/`). Secondary, smaller: `LoadThreadFiles` decodes `files.json` twice per
+  dedup. Secondary, smaller: `LoadThreadFiles` decodes `files.json` twice per
   engaged turn (compose and `AgeFileChains`). The same `LiveWindow` cost also runs in the sim
   harness's `VerifyNoBudgetOverflow`, which roughly doubles the sim's run time. Rule out after the
   fix: residual growth in `CommitTurn` CPU, `ReadThreadBody` → `readExcerptText`, and
@@ -213,7 +213,8 @@ decisions named in them.
   `internal/modellist` and the provider pool, the `chat`, `ping` and `models` verbs (**U5**), and
   `version.FrontEnd`, `test-fe` and `fe-scope-check` (**U6**); then delete the readability,
   html-to-markdown, terminal/signal and `langchaingo/llms` dependencies. The old systems are not a fallback: nothing waits on the plugin route to remove
-  them. Plan: `ACTIVE_PLAN/entry-point.md`.
+  them. Plan: `ROADMAP_PLANS/strip-self-built-harness/entry-point.md` (parked after WP2 until the
+  doc sweep, `ACTIVE_PLAN.md`, lands).
 - [ ] **B2. `recall_query_latency_*` does not measure recall.** The sim's p50/p95/p99 gauges
   (`metricRecallQueryLatencyP50/P95/P99`, `internal/scenarios/sim/workload.go`, populated in
   `sim/telemetry.go`) copy turn-duration percentiles instead of timing recall queries. (SPEC §9.4.)
@@ -440,6 +441,8 @@ Concrete, mostly single-package items; independent of the sequence above unless 
 
 `ROADMAP_PLANS/` holds designs not under way. Those that still apply:
 
+- `strip-self-built-harness/` — B1, parked after WP2; resumes once the doc sweep (`ACTIVE_PLAN.md`)
+  has rediced `PROJECT_DOCS/`, with its contract rows re-mapped onto the rediced tree.
 - `OPENCODE_SERVER_REPLACEMENT.md` — the fallback if the plugin route cannot give the memory system
   the control it needs (ARCHITECTURE "Plugin route").
 - `code-mode-support.md` — applies only to that fallback.

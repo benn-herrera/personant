@@ -281,6 +281,8 @@ Not collisions (standard words pinned by context): "budget" as cost (2175), dire
 | accrual, directive accrual | feedback directive tuning; "feedback tuning" where directives are already the subject | Owner. "Tuning" alone reads as model tuning; "directive" covers behavior memory, process memory and parameters, and avoids giving "process" a second sense. |
 | assembly window, FIFO window | recent-excerpt window | Same thing: a thread's newest excerpts, up to `ThreadTurnWindow`, read into the composed request (ARCHITECTURE "Assembly window vs retention"). |
 | warm window, warm / cold excerpts | out of SPEC | A storage tier (loose files vs `folio.jsonl`; `HotExcerptTail` in `internal/store/folio.go`) is mechanism. SPEC keeps the outcome: excerpts are returned byte-exact however stored. ARCHITECTURE names the tiers as excerpt storage tiers, distinct from THESIS's cold storage. |
+| in-context exclusion scope | the composed request: content already in it is not added again, whatever session or service run | Owner. A session or service-run boundary does not make duplicated content in context any cheaper. |
+| accept suppression (the intra-thread re-fire) | in-context exclusion; heading "Recall skips content already in the request (in-context exclusion)" | Owner. The old name gave the trigger and an internal event, not what the rule does; excluding results already in the context is ordinary retrieval practice. |
 
 ## Apply pass
 
@@ -357,6 +359,4 @@ Not collisions (standard words pinned by context): "budget" as cost (2175), dire
 - "bootstrap carve-out" (§4.5.8 (8)) and "init" in the startup order.
 - The production day boundary and timezone: never stated (UTC only for the simulation, §9.4.1).
 - "sub-mind split and re-merge" and "Code Mode" (§1): undefined.
-- Accept suppression (§3.4, ~880): "Session-scoped" became "Service-run scoped". It fits
-  "nothing is persisted", but under concurrent sessions the two spans differ. Confirm.
 - "the next service run's startup recovery" (§3.4, ~836): crash recovery or the index cache load.

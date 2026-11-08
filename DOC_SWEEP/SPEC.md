@@ -868,14 +868,15 @@ Under `banded`, a candidate already resident in the active set is answered by th
 itself: `recall.decline reason=already-known`, no question, no line. An intra-thread hit is exempt
 (its subject is the engaged thread's early content).
 
-#### Accept suppression (the intra-thread re-fire)
+#### Recall skips content already in the request (in-context exclusion)
 
-An accepted intra candidate is not offered again
-while it is resident: the memory service records the accepted turn-excerpts as in-window for the
+**In-context exclusion:** an accepted intra-thread candidate is not offered again while it is in
+the request: the memory service records the accepted turn-excerpts as in-window for the
 engaged thread, and the recall stack drops them from BOTH the fine level and the lexical
 completeness floor. This is not a completeness exception — the content is in the working window —
-and the mark ends when the thread is demoted out of the active set. Service-run scoped; nothing is
-persisted.
+and the mark ends when the thread is demoted out of the active set. The exclusion is scoped to the
+composed request: content already in it is not added a second time, whatever session or service
+run the request belongs to. Nothing is persisted.
 
 #### Mode parameter
 

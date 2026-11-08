@@ -64,10 +64,12 @@ it, open questions.
   stdin, so the reader cannot open repository files by absolute path either. `DOC_SWEEP/cold-read.sh`
   runs it. A world-writable directory (`/var/tmp`) is unsafe: any local user can plant a
   `CLAUDE.md` there or above it.
-- Before putting a cold-read finding to the owner, check what is already written: the active plan,
-  ROADMAP's decisions and items, and these notes. Only a finding none of them settles goes for a
-  ruling (case: of seven SPEC "is not" crossings, five were already settled by the strip plan's
-  removals, a pending ROADMAP decision, "SPEC holds no mechanism", or the borderline rule).
+- Before putting any question to the owner — a cold-read finding, an open item, a plan's question
+  list — check what is already written: the active plan, ROADMAP's decisions and items, these
+  notes, and the code. Only what none of them settles goes for a ruling (cases: of seven SPEC "is
+  not" crossings, five were already settled by the strip plan's removals, a pending ROADMAP
+  decision, "SPEC holds no mechanism", or the borderline rule; "what is a day in production" was
+  answered by `internal/autogit/day.go`, which SPEC had never stated).
 - A cold read of a long SPEC returns dozens of internal contradictions alongside the crossings;
   triage to the crossings and THESIS conflicts, and hold the rest for the contradictions pass.
 
