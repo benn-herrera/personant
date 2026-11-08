@@ -30,26 +30,15 @@ in a list is checked, the **list is disposed of**: removed from this file, its h
 SPEC and ARCHITECTURE tag clauses that wait on a decision with `Open: Un`. Once a decision is made,
 the tagged clauses get a follow-up pass. Each entry states when it must be decided.
 
-- [ ] **U3 Topic tag.** Keep the in-band topic tag, which needs a stream abort-and-re-issue spike
-  and per-protocol wire code in the plugin, and which stays in opencode's transcript unless the
-  plugin strips it; or replace it with a recall tool the model calls, which rewrites SPEC
-  §5.1/§5.5 and the tag-fidelity measures. Tagged at SPEC §3.0.1, §3.1, §5.1, §5.5, §9.1.
-  **Decide before A10.**
-- [ ] **U4 Memory-native commands and the ack channel.** Commands that alias opencode behavior
-  (`/model`, `/models`, `/thinking`, `/key`, `/cd-project`, `/terminal-setup`, `/help`, `/version`,
-  `/quit`) are retired; where a memory-native command survives it is a plugin-registered command
-  (`CommandDomain.transform` → `CommandEditor.add`), not a `commands/*.md` file. Open: for each of
-  `/topic*`, `/topics`, `/done`, `/closures`, `/pause`, `/resume`, `/back-to`, `/no-revisit`,
-  `/keep`, `/threads`, `/spine`, `/index-rebuild`, `/project*`, `/stats`, keep as a plugin command,
-  make automatic, or drop; and the ack channel for the recall offer, closing review queue and
-  startup project prompts. Plugins have only a yes/no `permission.assert`
-  (`OPENCODE_RESEARCH/OPENCODE_INTEGRATION_OPTIONS.md` §2.3). Readings: (a) plugin tools the model calls plus yes/no
-  `permission.assert`; (b) opencode commands carrying a service-recognized marker (spoofable;
-  `OPENCODE_RESEARCH/OPENCODE_CONTEXT_INJECTIONS.md` §2); (c) an out-of-band `personant` CLI; (d) AUTO-only, no
-  interactive acks; (e) hand the question to the model through the opencode-expectations slot and
-  read the answer next turn. Unverified: how the TUI shows a command whose `execute` sends no
-  prompt, and how `execute` reports a result. Tagged at SPEC §3.4, §3.5, §3.10.1, §4.2, §4.3,
-  §4.5.3–§4.5.8. **Decide before A12.**
+- [ ] **U3 Model-supplied anchors.** Sessions set thread boundaries (**U12**), so
+  the topic tag's thread list has no job. Open: whether the model still contributes per-turn
+  anchors (`source = model`), in band at response start (which needs the stream
+  abort-and-re-issue and transcript stripping) or through a tool, or not at all; and whether a
+  recall tool the model calls replaces the §5.5 fetch trigger. Tagged at SPEC §3.0.1, §3.1,
+  §5.1, §5.5, §9.1. **Decide in A10.**
+- [x] **U4 Memory-native commands and the ack channel: none.** Personant registers
+  no command in opencode and asks the user nothing: no ack channel, offers, review queue, project
+  prompts or recovery banner. The memory work runs automatically (SPEC §3.4, §3.5, §4.5).
 - [x] **U5 Inference for Personant's internal calls** (summarizer, clusterer, embedder,
   memory-vetting reviewer). Personant has no inference path or provider configuration of its own:
   every call goes through opencode, text generation through the plugin's `experimental.generate`,
@@ -64,11 +53,11 @@ the tagged clauses get a follow-up pass. Each entry states when it must be decid
   request; the session stops while the service is down). What opencode does when the `context` hook
   throws or the service refuses is unestablished (`OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md` §6). Blocks
   ARCHITECTURE "Plugin route". A5 ships fail-open as the interim; **decide before A9 finalises.**
-- [ ] **U8 Interrupted prompts and retraction.** SPEC §4.3.3 says a retracted prompt never enters
-  memory; opencode's interrupt keeps the prompt in the transcript the user sees. (a) Keep the rule:
-  memory forgets what the TUI shows. (b) Conform to opencode: ingest the prompt and the partial
-  turn. Also fixes reconcile's treatment of retracted turns (SPEC §4.5.8 (10)). **Decide before
-  A8.**
+- [x] **U8 Interrupted prompts and retraction: Personant's rule.** A retracted prompt
+  never enters memory, whatever opencode's transcript shows: Personant composes its own context,
+  and the transcript does not decide what enters it. Follow-up pass: SPEC §4.3.3, §4.5.8 (10);
+  ARCHITECTURE 'Invariant for the production phase split', 'Start order and resume', 'Event log
+  format'.
 - [ ] **U9 Restart persistence.** After a service restart the model sees no earlier conversation
   while the TUI shows all of it (`OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md` §3); today only the working set
   reloads. (a) Persist in-run history and the turn counter. (b) Rebuild them from opencode's stored
@@ -86,6 +75,14 @@ the tagged clauses get a follow-up pass. Each entry states when it must be decid
   The requirement for opencode's data home holds either way (`OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md` §5,
   ARCHITECTURE "Start order and resume"); the question is whether it becomes a general CONVENTIONS
   rule. Yes or no; adopt into CONVENTIONS if yes.
+- [x] **U12 Session as thread.** A project is opencode's project directory and
+  a bundle of threads; an opencode session is one thread. Recall works across a project's
+  threads, and across projects for career-level memory. Sessions, not in-band topic tags, set
+  thread boundaries: a returned-to session keeps its thread, and a new session on an old topic
+  relies on recall. Follow-up pass: SPEC §1.1, §3.0.4, §3.2, §3.3, §5.1, §5.5, §9.1, and an
+  optional opencode session ID on the thread (frontmatter and thread registry) with a store
+  format-revision bump.
+  Plan: A10.
 
 ---
 
@@ -151,21 +148,21 @@ decisions named in them.
   not evidence until it does. Then: a recovery turn on a context call with no preceding prompt;
   reconcile against opencode's stored messages at service start; start order (service listening
   before opencode, managed background server included); opencode's data home outside
-  `~/.personant/`; restart persistence per **U9**. If **U8** keeps retraction, add a record that
-  distinguishes a retraction rollback from a crash rollback (reconcile skips retracted turns but no
-  record tells the two apart). (`OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md` §§4–5; SPEC §1.6,
+  `~/.personant/`; restart persistence per **U9**. Add a record that
+  distinguishes a retraction rollback from a crash rollback, so reconcile re-ingests
+  crash rollbacks and never a retracted turn (**U8**). (`OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md` §§4–5; SPEC §1.6,
   §4.5.8.)
 - [ ] **A9. Plugin failure policy.** Spike what opencode does when the `context` hook throws or the
   service refuses, then decide **U7** and adjust A5's fail-open interim. (ARCHITECTURE "Plugin
   route"; `OPENCODE_RESEARCH/OPENCODE_RESUME_PROBE.md` §6.)
-- [ ] **A10. Topic tag** per **U3** (stream-abort spike, or recall tool), together with the missing
-  `derived_from` lineage: no thread carries lineage through opencode while in-process runs do;
-  candidate causes are tool deltas now ordered after `user.prompt` and the §5.5 mid-turn fetch not
-  firing (`OPENCODE_RESEARCH/OPENCODE_PROBE_RESULTS.md` §11). Behind this item, whichever U3 branch is taken:
-  residual never-attempted tags and a doubled anchor-list shape the parser
-  (`internal/prompt/parser.go`) does not absorb; the tag-fidelity instrument limits (no `topic.tag-parsed` event; the
-  re-engagement miss rate is inflated by spurious `*new-topic*` duplicates; SPEC §9.1 "Topic-tag
-  fidelity"); runtime hot-reload of the topic-tag template (`internal/prompt/template.go`).
+- [ ] **A10. Session-as-thread routing** per **U12**, settling **U3**. Turns route
+  to the session's thread; the topic tag's thread list, unknown-thread-id resolution, the
+  missing-tag fallback and the tag-triggered §5.5 fetch go; the session ID is stored on the thread; the sim
+  generator's unit becomes the session, and the tag-fidelity measures go. Needs session IDs from
+  the plugin (A5). Re-check the missing `derived_from` lineage under opencode
+  (`OPENCODE_RESEARCH/OPENCODE_PROBE_RESULTS.md` §11) now that recall fetches automatically. The
+  parser and tag-fidelity residuals of the old topic-tag item apply only if U3 keeps an in-band
+  tag. (SPEC §1.1, §3.2, §5.1, §5.5, §9.1.)
 - [ ] **A11. Commit-cost growth: fixed; opencode-in-loop re-measure remains.** Single-load staging
   (`793890f`) and excerpt bundles (`1cecf0c`–`631cd48`) hold per-turn commit cost flat (13–21 ms/turn
   over 54 mock sim-days, `test/rundata/sim-workload-seed24095-dur2880h0m0s.261101104107`, stopped at
@@ -195,14 +192,12 @@ decisions named in them.
   `FileAdapter.LoadThread`. Measured per-turn ratio over the seed-24095 mock sim: 1.27 from day 9 to
   day 20 and 1.47 from day 9 to day 31 (`ReadThreadBody` → `readExcerptText` alone: 1.21 and 1.44),
   against a flat band of 1.25. Small in absolute terms (≈ 1.3% of sim CPU at day 31). (SPEC §9.1.)
-- [ ] **A12. Install, config and the user command and ack channel.** `personant init` writes the
-  opencode-side settings (`compaction.auto: false`, the plugin entry) in opencode's own format;
-  Personant-only settings move to `~/.config/personant/` (`internal/store/paths.go` still places
-  `config.toml` under the home, and `providers.toml`, which goes per **U5**); memory-native commands and the ack
-  channel per **U4**, including the recovery banner, project prompts and the closing-drain boundary
-  (an opencode session never "exits"). Implement the CLI verbs SPEC §4.1 keeps but `cmd/` lacks
-  (`search`, `deps`, `log`), or remove them from SPEC. (SPEC §2.1, §4.1, §8; ARCHITECTURE "Single
-  spelunking location".)
+- [ ] **A12. Install and config.** `personant init` writes the opencode-side
+  settings (`compaction.auto: false`, the plugin entry) in opencode's own format, and the
+  `~/.config/personant/config.toml` template once A12a fixes what `[embedding] model` names; the
+  store directory holds no settings file. Implement the CLI verbs SPEC §4.1 keeps but `cmd/`
+  lacks (`search`, `deps`, `log`), or remove them from SPEC. (SPEC §2.1, §4.1, §8; ARCHITECTURE
+  "One inspection location".)
 - [ ] **A12a. Embeddings through opencode.** Recall's embedding index (SPEC §3.4) needs an
   embedding endpoint, and Personant has no inference path of its own (**U5**). Establish opencode's
   route for embeddings; if it has none, fork opencode to add one. No Personant-side endpoint
@@ -210,7 +205,7 @@ decisions named in them.
 
 ### Part B: after the first usable build
 
-- [ ] **B1. Retire the self-built harness.** Remove `internal/chat`, `internal/term`,
+- [x] **B1. Retire the self-built harness.** Remove `internal/chat`, `internal/term`,
   `internal/shell`, `internal/tools` and `internal/tools/web`, `internal/ping`,
   `internal/modellist` and the provider pool, the `chat`, `ping` and `models` verbs (**U5**), and
   `version.FrontEnd`, `test-fe` and `fe-scope-check` (**U6**); then delete the readability,
@@ -354,12 +349,13 @@ Concrete, mostly single-package items; independent of the sequence above unless 
   the turn repository when loose objects cross a threshold mid-session has recovery handling and marker
   plumbing in place; the arming trigger is not wired. Adjacent: whether intra-day derived-watermark
   staleness needs finer handling. (SPEC §3.11, §4.5.8 "Intra-day derived staleness".)
-- [ ] **Banded/auto-mode sim rung.** The `closure.ack-mode` amendment (§3.5) and recall banding
+- [x] **Banded/auto-mode sim rung.** The `closure.ack-mode` amendment (§3.5) and recall banding
   amendment (§3.4) are unit-covered, not sim-covered. Waits on **U4**. (SPEC §3.4, §3.5.)
-- [ ] **Directive-file plumbing for the remaining §2.6.1 parameters.** Only `closure.ack-mode` and
-  `recall.ack-mode` are read live through `store.ReadParameter`; the rest (`context.token-budget`,
-  `staging.window-turns`, `history.cap-per-thread`, `anchor.projection-max`,
-  `spine.entry-max-chars`, and so on) are compiled-in constants. (SPEC §2.6.1, §3.10.3, §3.1.)
+  Covered: the mock gate runs the automatic closing and recall paths.
+- [ ] **Directive-file plumbing for the §2.6.1 parameters.** No §2.6.1 parameter is read from directive files; every
+  key (`context.token-budget`, `staging.window-turns`, `history.cap-per-thread`,
+  `anchor.projection-max`, `spine.entry-max-chars`, and so on) is a compiled-in constant. The
+  reader is built with its first consumer. (SPEC §2.6.1, §3.10.3, §3.1.)
 - [ ] **Intra-thread recall-preservation follow-ups.** Re-verify
   `recall_intra_descent_divergence == 0` at a narrower beam (now k=8); build the brute-force O(n)
   backstop for the user-asserted-confidence fallback path. (SPEC §3.4.)

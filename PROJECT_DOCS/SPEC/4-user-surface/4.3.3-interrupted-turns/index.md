@@ -3,8 +3,9 @@
 Interrupt keys and terminal handling are opencode's. This section keeps the memory half: what an
 interrupted turn leaves in memory.
 
-**Open:** U8 — whether memory forgets what opencode's transcript still shows, or conforms to
-opencode and ingests the prompt and the partial turn. Until decided, the rule below binds.
+Personant composes its own context: what opencode's transcript shows does not
+decide what enters memory, so the rule below holds where the transcript keeps the interrupted
+prompt.
 
 Contents:
 

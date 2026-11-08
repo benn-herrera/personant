@@ -62,7 +62,7 @@ open items: [`SPEC.md`](SPEC.md) §1.1.
 
 opencode's configuration, Personant's own settings and the memory home: [`SPEC.md`](SPEC.md) §8.1,
 §8.2.2 and §2.1; [`ARCHITECTURE.md`](ARCHITECTURE.md) "One inspection location". The current
-code does not match them yet (ROADMAP A12).
+code does not match them yet (ROADMAP A12, A12a).
 
 ## Build Targets
 

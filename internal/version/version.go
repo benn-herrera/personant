@@ -26,7 +26,7 @@ import (
 )
 
 // Substrate is the version of the runtime + MemoryOps port.
-const Substrate = "0.2.7"
+const Substrate = "0.2.8"
 
 // CurrentHomeFormat is the home on-disk format revision this binary
 // writes and understands. Format 2 adds optional per-thread folio.jsonl

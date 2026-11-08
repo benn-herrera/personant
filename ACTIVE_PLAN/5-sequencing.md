@@ -28,6 +28,6 @@ WP3–WP10's contract rows are mapped onto the documents as rediced by the doc s
 | WP7 | done; `just sim` run `test/rundata/sim-workload-seed24095-dur168h0m0s.261108040155` |
 | WP8 | done |
 | WP9 | done |
-| WP10 | not started |
+| WP10 | done |
 | Post-sprint review | not started |
 
