@@ -23,7 +23,6 @@ const (
 	LogCategoryStaging     = "staging"
 	LogCategorySystem      = "system"
 	LogCategoryThread      = "thread"
-	LogCategoryTool        = "tool"
 	LogCategoryTopic       = "topic"
 	LogCategoryUser        = "user"
 	LogCategoryWorkset     = "workset"

@@ -243,7 +243,7 @@ func (m *MockClient) Consult(ctx context.Context, req Request) (Response, error)
 // then splits it across chunks for incremental delivery. The number of
 // chunks is set by SetMockChunks (default DefaultMockChunks).
 //
-// All non-content fields (FinishReason, Usage, ToolCalls) attach to the
+// All non-content fields (FinishReason, Usage) attach to the
 // final chunk so iteration order matches a real provider.
 func (m *MockClient) ConsultStream(ctx context.Context, req Request) (StreamReader, error) {
 	resp, err := m.Consult(ctx, req)
@@ -400,8 +400,8 @@ func (m *MockClient) makeBody(counter int) string {
 }
 
 // mockStreamReader splits a Response.Content into N near-equal chunks and
-// hands them out one Next() call at a time. Tool-calls, finish_reason,
-// and usage attach to the final chunk so iteration matches a real
+// hands them out one Next() call at a time. finish_reason and usage
+// attach to the final chunk so iteration matches a real
 // provider's emission order.
 type mockStreamReader struct {
 	ctx     context.Context
@@ -439,7 +439,6 @@ func (r *mockStreamReader) Next() (Chunk, error) {
 		// Final chunk carries the non-content fields.
 		chunk.FinishReason = r.full.FinishReason
 		chunk.Usage = r.full.Usage
-		chunk.ToolCalls = r.full.ToolCalls
 	}
 	return chunk, nil
 }
@@ -456,7 +455,6 @@ func (r *mockStreamReader) Final() Response {
 	if r.idx == len(r.pieces) {
 		out.FinishReason = r.full.FinishReason
 		out.Usage = r.full.Usage
-		out.ToolCalls = r.full.ToolCalls
 	}
 	return out
 }

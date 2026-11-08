@@ -21,7 +21,7 @@ WP3–WP10's contract rows are mapped onto the documents as rediced by the doc s
 |---|---|
 | WP1 | done |
 | WP2 | done |
-| WP3 | not started |
+| WP3 | done |
 | WP4 | not started |
 | WP5 | not started |
 | WP6 | not started |

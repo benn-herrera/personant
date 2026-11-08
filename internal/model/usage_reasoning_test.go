@@ -1,9 +1,12 @@
 package model
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -64,18 +67,14 @@ func TestEncodeRequestStreamOptions(t *testing.T) {
 // TestStreamUsageOnlyFinalChunk: with include_usage the provider ends the
 // stream with a CHOICES-LESS chunk carrying only `usage`. It must decode
 // (not error, not mis-index), land in Final().Usage, and disturb nothing
-// else — content accumulation, finish reason, and the tool-call merge all
-// come from the chunks before it.
+// else — content accumulation and finish reason both come from the chunks
+// before it.
 func TestStreamUsageOnlyFinalChunk(t *testing.T) {
 	const sse = `data: {"choices":[{"delta":{"content":"Hel"}}]}
 
-data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"search","arguments":"{\"q\":"}}]}}]}
-
 data: {"choices":[{"delta":{"content":"lo"}}]}
 
-data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"go\"}"}}]}}]}
-
-data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
+data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
 
 data: {"choices":[],"usage":{"prompt_tokens":41,"completion_tokens":9,"total_tokens":50}}
 
@@ -92,19 +91,14 @@ data: [DONE]
 	if final.Content != "Hello" {
 		t.Errorf("Final.Content = %q; want %q", final.Content, "Hello")
 	}
-	if final.FinishReason != "tool_calls" {
-		t.Errorf("Final.FinishReason = %q; want tool_calls", final.FinishReason)
-	}
-	got := projectCalls(final.ToolCalls)
-	want := []wantCall{{ID: "call_1", Function: "search", Args: `"{\"q\":\"go\"}"`}}
-	if len(got) != 1 || got[0] != want[0] {
-		t.Errorf("Final.ToolCalls = %+v; want %+v", got, want)
+	if final.FinishReason != "stop" {
+		t.Errorf("Final.FinishReason = %q; want stop", final.FinishReason)
 	}
 	// The usage-only chunk surfaces as a real (content-less) chunk rather
 	// than being swallowed: a caller counting chunks sees it, and it adds
 	// nothing to the body.
 	last := chunks[len(chunks)-1]
-	if last.Content != "" || last.Reasoning != "" || len(last.ToolCalls) != 0 {
+	if last.Content != "" || last.Reasoning != "" {
 		t.Errorf("usage-only chunk carried payload: %+v", last)
 	}
 	if last.Usage.TotalTokens != 50 {
@@ -211,7 +205,7 @@ data: [DONE]
 }
 
 // TestStreamReasoningOnly: a stream with no content deltas at all is a real
-// shape (a tool-call turn spends its whole generation on reasoning). The
+// shape (a reasoning-burn turn spends its whole generation on reasoning). The
 // body must come back empty rather than filled with scratch, and the usage
 // and finish reason still land.
 func TestStreamReasoningOnly(t *testing.T) {
@@ -246,33 +240,33 @@ data: [DONE]
 	}
 }
 
-// TestStreamReasoningInterleavedWithToolCalls: reasoning deltas arriving
-// between tool-call fragments must not disturb the index-keyed merge — the
-// argument concatenation is contiguous across them.
-func TestStreamReasoningInterleavedWithToolCalls(t *testing.T) {
-	const sse = `data: {"choices":[{"delta":{"reasoning_content":"I should search."}}]}
+// runStream serves the given SSE body from a test server, drains the
+// stream, and returns every chunk observed, Final(), and the TERMINAL
+// error from Next (io.EOF on a clean stream).
+func runStream(t *testing.T, sse string) ([]Chunk, Response, error) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(sse))
+	}))
+	defer srv.Close()
 
-data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_9","type":"function","function":{"name":"search","arguments":"{\"q\":"}}]}}]}
-
-data: {"choices":[{"delta":{"reasoning_content":"Which query?"}}]}
-
-data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"go\"}"}}]}}]}
-
-data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
-
-data: [DONE]
-
-`
-	_, final, err := runStream(t, sse)
-	if !errors.Is(err, io.EOF) {
-		t.Fatalf("stream did not end cleanly: %v", err)
+	c := NewHTTPClient(newTestProvider(srv.URL))
+	sr, err := c.ConsultStream(context.Background(), DefaultRequest("m", []Message{{Role: "user", Content: "go"}}))
+	if err != nil {
+		t.Fatalf("ConsultStream: %v", err)
 	}
-	if final.Content != "" {
-		t.Errorf("Final.Content = %q; want empty", final.Content)
+	defer sr.Close()
+
+	var chunks []Chunk
+	var termErr error
+	for {
+		chunk, err := sr.Next()
+		if err != nil {
+			termErr = err
+			break
+		}
+		chunks = append(chunks, chunk)
 	}
-	got := projectCalls(final.ToolCalls)
-	want := wantCall{ID: "call_9", Function: "search", Args: `"{\"q\":\"go\"}"`}
-	if len(got) != 1 || got[0] != want {
-		t.Errorf("Final.ToolCalls = %+v; want %+v", got, want)
-	}
+	return chunks, sr.Final(), termErr
 }

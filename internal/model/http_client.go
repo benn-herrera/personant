@@ -227,32 +227,8 @@ func scrubAuthorization(s, apiKey string) string {
 // --- wire format (OpenAI chat-completions) ---
 
 type wireMessage struct {
-	Role       string         `json:"role"`
-	Content    string         `json:"content,omitempty"`
-	ToolCalls  []wireToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-}
-
-type wireToolCall struct {
-	ID       string           `json:"id"`
-	Type     string           `json:"type"`
-	Function wireToolFunction `json:"function"`
-}
-
-type wireToolFunction struct {
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments,omitempty"`
-}
-
-type wireToolSpec struct {
-	Type     string             `json:"type"`
-	Function wireToolSpecParams `json:"function"`
-}
-
-type wireToolSpecParams struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	Parameters  json.RawMessage `json:"parameters,omitempty"`
+	Role    string `json:"role"`
+	Content string `json:"content,omitempty"`
 }
 
 // wireRequest is the chat-completions request body. Temperature and
@@ -263,8 +239,6 @@ type wireToolSpecParams struct {
 type wireRequest struct {
 	Model              string             `json:"model"`
 	Messages           []wireMessage      `json:"messages"`
-	Tools              []wireToolSpec     `json:"tools,omitempty"`
-	ToolChoice         string             `json:"tool_choice,omitempty"`
 	Temperature        float64            `json:"temperature"`
 	MaxTokens          int                `json:"max_tokens"`
 	Stop               []string           `json:"stop,omitempty"`
@@ -406,35 +380,7 @@ func encodeRequest(req Request, stream bool) ([]byte, error) {
 		wr.StreamOptions = &wireStreamOptions{IncludeUsage: true}
 	}
 	for _, m := range req.Messages {
-		wm := wireMessage{
-			Role:       m.Role,
-			Content:    m.Content,
-			ToolCallID: m.ToolCallID,
-		}
-		for _, tc := range m.ToolCalls {
-			wm.ToolCalls = append(wm.ToolCalls, wireToolCall{
-				ID:   tc.ID,
-				Type: "function",
-				Function: wireToolFunction{
-					Name:      tc.Function,
-					Arguments: tc.Args,
-				},
-			})
-		}
-		wr.Messages = append(wr.Messages, wm)
-	}
-	if len(req.Tools) > 0 {
-		wr.ToolChoice = "auto"
-		for _, t := range req.Tools {
-			wr.Tools = append(wr.Tools, wireToolSpec{
-				Type: "function",
-				Function: wireToolSpecParams{
-					Name:        t.Name,
-					Description: t.Description,
-					Parameters:  t.Parameters,
-				},
-			})
-		}
+		wr.Messages = append(wr.Messages, wireMessage{Role: m.Role, Content: m.Content})
 	}
 	return json.Marshal(wr)
 }
@@ -448,17 +394,9 @@ func decodeResponse(body []byte) (Response, error) {
 		return Response{}, fmt.Errorf("response contains no choices")
 	}
 	choice := w.Choices[0]
-	out := Response{
+	return Response{
 		Content:      choice.Message.Content,
 		FinishReason: choice.FinishReason,
 		Usage:        w.Usage.usage(),
-	}
-	for _, tc := range choice.Message.ToolCalls {
-		out.ToolCalls = append(out.ToolCalls, ToolCall{
-			ID:       tc.ID,
-			Function: tc.Function.Name,
-			Args:     tc.Function.Arguments,
-		})
-	}
-	return out, nil
+	}, nil
 }

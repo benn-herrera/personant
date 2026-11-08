@@ -184,10 +184,7 @@ writes" and "Storage non-negotiables".
 | Package | Author / Org | License | Use |
 |---|---|---|---|
 | `github.com/BurntSushi/toml` | BurntSushi | MIT | `providers.toml` and `config.toml` parsing |
-| `codeberg.org/readeck/go-readability/v2` | Readeck contributors | MIT | `web.fetch` — boilerplate-stripped article extraction (self-built harness) |
-| `github.com/JohannesKaufmann/html-to-markdown/v2` | Johannes Kaufmann | MIT | `web.fetch` — HTML → Markdown conversion (self-built harness) |
 | `github.com/go-git/go-git/v5` | go-git contributors | Apache 2.0 | `internal/autogit` — automatic git operations on `~/.personant/` |
 | `github.com/go-git/go-billy/v5` | go-git contributors | Apache 2.0 | `internal/autogit`, `internal/store` — filesystem layer under go-git |
-| `golang.org/x/net` | The Go Authors | BSD 3-Clause | `web.fetch` — HTML parsing (self-built harness) |
 | `github.com/spf13/cobra` | Steve Francia | Apache 2.0 | CLI subcommand dispatch (`cmd/`) |
 | `gopkg.in/yaml.v3` | Canonical Ltd. | MIT / Apache 2.0 | Thread frontmatter read/write |

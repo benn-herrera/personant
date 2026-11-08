@@ -37,7 +37,6 @@ diagnostics; §9 measurement keys off the decision events. No event carries mult
 | `consolidate` | `sleep-cycle` |
 | `dedup` | `pruned`, `prune-skip`, `error` |
 | `fs` | `edit-no-path`, `write-error` |
-| `tool` | `result` (a tool result applied to memory as a `tool.result` delta, SPEC §3.0.1 — `name=`, `id=` the call id, `bytes=` the byte count BEFORE the SPEC §3.1 tool-output limit; an error result is a result; never the arguments). |
 | `staging` | `promoted` (`normalized=`, `staged_at=`, `cited_at=`, `turn_span=`), `evicted` (expiry at window close, SPEC §3.10) |
 | `topic` | `re-prompt` (`cause=missing-thread` + `fetched=` for the §5.5 fetch, `cause=missing-tag` for the §3.3 missing-tag fallback, or `cause=empty-response` for the §3.3 empty-response fallback; **Open:** U3 — `cause=missing-thread` has no producer under opencode), `tag-missing`, `tag-invalid` (forensic; a near-miss tag candidate that failed strict validation — `reason=markdown-mangled\|bad-delimiters\|bad-thread-list\|bare-new-topic` + a short sanitized `snippet=`; additive to `tag-missing`), `warning` |
 | `session` | `started` (a service run started, SPEC §1.1 — `active=`; distinct from `system.bootstrap`), `ended` (a service run ended), `working-set-save-error`, `checkpoint-error` |

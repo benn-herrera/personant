@@ -13,9 +13,6 @@
   off-standard gain is substantial. The record goes in the message of the commit that pins the
   module with `just add-dependency`, and is written before that recipe runs. (Origin: commit
   5692c75.)
-- **Pending removal with their consumers** (ROADMAP.md B1, "Retire the self-built harness"):
-  `codeberg.org/readeck/go-readability/v2` and `github.com/JohannesKaufmann/html-to-markdown/v2`
-  serve only `internal/tools/web/`. Both entries go in the change that removes their consumer.
 - **Application code talks to `MemoryOps`, not to the memory store directly.** Package-level
   detail and the store-independent exceptions: ARCHITECTURE "Port-and-adapter at the memory store
   boundary".

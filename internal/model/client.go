@@ -9,7 +9,6 @@ package model
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -63,7 +62,6 @@ type ModelInfo struct {
 type Request struct {
 	Model    string
 	Messages []Message
-	Tools    []ToolSpec
 
 	// Temperature is the sampling temperature, always wired on the wire.
 	// 0 means deterministic (greedy decode); it is NOT a "use server
@@ -113,45 +111,15 @@ func DefaultRequest(model string, messages []Message) Request {
 
 // Message is one turn in the chat history.
 //
-// Role is one of: "system", "user", "assistant", "tool". When Role is
-// "assistant" and the model returned tool calls, ToolCalls is populated.
-// When Role is "tool", Content carries the tool result and ToolCallID
-// identifies which prior assistant tool call this responds to.
+// Role is one of: "system", "user", "assistant".
 type Message struct {
-	Role       string
-	Content    string
-	ToolCalls  []ToolCall
-	ToolCallID string
-}
-
-// ToolSpec describes a tool the model may call. Parameters is an
-// OpenAI-style JSON-Schema fragment passed through verbatim; the runtime
-// does not validate or transform it.
-type ToolSpec struct {
-	Name        string
-	Description string
-	Parameters  json.RawMessage
-}
-
-// ToolCall is one tool invocation requested by the model.
-//
-// Args is the raw JSON value of the wire `arguments` field, NOT the
-// decoded argument object. OpenAI-compatible providers send arguments as
-// a JSON-encoded string, so Args typically reads `"{\"q\":\"go\"}"` —
-// unmarshal it into a string first, then unmarshal that string into the
-// argument struct. Both the blocking and the streaming path produce this
-// same representation, and encodeRequest replays it verbatim when the
-// call is echoed back to the provider in an assistant message.
-type ToolCall struct {
-	ID       string
-	Function string
-	Args     json.RawMessage
+	Role    string
+	Content string
 }
 
 // Response is one chat-completions result.
 type Response struct {
 	Content      string
-	ToolCalls    []ToolCall
 	Usage        Usage
 	FinishReason string
 }
@@ -159,16 +127,6 @@ type Response struct {
 // Chunk is one delta in a streamed chat-completion response. Most chunks
 // carry a non-empty Content; the final chunk(s) typically carry empty
 // Content but a non-empty FinishReason and Usage.
-//
-// ToolCalls is an IDENTITY-ONLY progress signal, not executable calls:
-// one entry per tool call this chunk carried a fragment for, holding the
-// ID and Function name known so far. Args is deliberately always nil —
-// a chunk holds a slice of the argument string, which is not valid JSON
-// on its own, so there is nothing safe to put there. It exists so a UI
-// can say "calling web.search…" the moment the name arrives.
-//
-// The complete, merged calls come from StreamReader.Final().ToolCalls,
-// which accumulates fragments by index across the whole stream.
 //
 // Reasoning carries thinking-mode output, kept strictly separate from
 // Content because they are different kinds of output: Content is the
@@ -183,7 +141,6 @@ type Response struct {
 type Chunk struct {
 	Content      string
 	Reasoning    string
-	ToolCalls    []ToolCall
 	FinishReason string
 	Usage        Usage
 }

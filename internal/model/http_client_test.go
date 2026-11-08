@@ -193,47 +193,6 @@ func TestHTTPClientContextCancellation(t *testing.T) {
 	}
 }
 
-// TestHTTPClientToolsSerialization: when Tools are present, the request
-// must include a tools array with the OpenAI shape and tool_choice = auto.
-func TestHTTPClientToolsSerialization(t *testing.T) {
-	var gotBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(body, &gotBody)
-		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],"usage":{}}`))
-	}))
-	defer srv.Close()
-
-	c := NewHTTPClient(newTestProvider(srv.URL))
-	_, err := c.Consult(context.Background(), Request{
-		Model:    "m",
-		Messages: []Message{{Role: "user", Content: "search please"}},
-		Tools: []ToolSpec{{
-			Name:        "search",
-			Description: "do a search",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"q":{"type":"string"}}}`),
-		}},
-	})
-	if err != nil {
-		t.Fatalf("Consult: %v", err)
-	}
-	if gotBody["tool_choice"] != "auto" {
-		t.Errorf("tool_choice: got %v, want auto", gotBody["tool_choice"])
-	}
-	tools, _ := gotBody["tools"].([]any)
-	if len(tools) != 1 {
-		t.Fatalf("tools count: got %d, want 1", len(tools))
-	}
-	tool := tools[0].(map[string]any)
-	if tool["type"] != "function" {
-		t.Errorf("tool type: got %v, want function", tool["type"])
-	}
-	fn := tool["function"].(map[string]any)
-	if fn["name"] != "search" {
-		t.Errorf("tool name: got %v, want search", fn["name"])
-	}
-}
-
 // TestHTTPClientErrorScrubsAPIKey: smoke-test the scrubber against a
 // pathological payload that intentionally embeds the key in the body.
 func TestHTTPClientErrorScrubsAPIKey(t *testing.T) {
