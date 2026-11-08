@@ -317,7 +317,7 @@ commit's hash is recorded in the table below; P1 reads the ruling files at its p
 | C1, C2 | done |
 | S1 | done |
 | M1, M2 | done |
-| A1, A2 | not started |
+| A1, A2 | A1 done (`DOC_SWEEP/architecture-content.md`, ROADMAP lines added); A2 under way |
 | X1 | not started |
 | R1, R2 | not started |
 | P1 | not started |

@@ -74,7 +74,9 @@ the tagged clauses get a follow-up pass. Each entry states when it must be decid
   reloads. (a) Persist in-run history and the turn counter. (b) Rebuild them from opencode's stored
   messages. (c) Accept: threads carry the memory. Sets a SPEC continuity outcome (SPEC §1.6,
   §4.5.8), and settles SPEC §4.3.3's rollback, which restores run-volatile state whose restart
-  persistence is this question. **Decide before A8.**
+  persistence is this question. The same counter drives turn-based decay and the unknown-thread-id
+  owner fallback through the stored `last_engaged_turn` (`internal/turn/closure.go`
+  `decayEligible`). **Decide before A8.**
 - [ ] **U10 Model family.** ARCHITECTURE "Model-family as platform" targets one family (Gemma);
   opencode lets the user pick any model. (a) Keep one tuned family for the memory prompts and warn
   on others. (b) Support whatever opencode runs and measure tag and curator quality per family,
@@ -289,7 +291,15 @@ decisions named in them.
   Open within it: the store's file layout and scope values, its place in directive precedence, how
   the categories that apply to a project and the active role are determined (B7's per-agent
   directives are a candidate for role). (SPEC §1.8; THESIS "Three kinds of memory"; ARCHITECTURE "Personalization through directive
-  accrual".)
+  accrual".) Fallback dissection as ARCHITECTURE designed it: it fires when budget pressure
+  exceeds `dissect.pressure-threshold` and normal closing is not keeping up; the clusterer groups
+  the oldest poorly threaded content into related clusters; each cluster becomes a thread
+  directory and registry record shaped like a normally closed thread and closes through the
+  closing flow; one mechanism covers the wandering user, one thread overrunning its share, and
+  content never cleanly threaded.
+- [ ] **Career memory has no store or write path.** SPEC §1.8 routes a pattern seen in one project
+  to career memory (a technique); nothing writes one and no layout exists, so B10's career-memory
+  write checks and batch review have no subject yet (ARCHITECTURE "Career memory").
 - [ ] **B12. Enforcement of "the LLM never touches the home's git tree".** opencode's shell reaches
   `~/.personant/`, so the statement cannot hold as written. Decide whether to enforce it (for
   example a plugin hook on shell tool calls) or restate it as intention in SPEC and ARCHITECTURE.
@@ -320,6 +330,16 @@ Concrete, mostly single-package items; independent of the sequence above unless 
   paths and hex ids up to 64 characters (`internal/turn/chain.go`), while `verify` errors on an
   anchor outside 3–50 characters (`internal/verify/verify.go`), so a thread whose top symbol is a
   long path fails the day-commit's thread registry integrity check.
+- [ ] **`meta.json` `thread_count` is never written.** `memops.ProjectMeta.ThreadCount` is
+  decoded and `personant verify` checks it is non-negative (`internal/verify/verify.go`), but no
+  code assigns it, so every project reads 0; the live count is `digest.json`'s
+  (`internal/index/digests.go`).
+- [ ] **Closing summaries are not length-bounded before they are written.**
+  `curator.DraftClosure` (`internal/curator/curator.go`) only trims the summarizer's draft, and
+  `applyClosureResolution` (`internal/turn/closure.go`) writes it to `spine.jsonl` as is. The only
+  check is `personant verify`'s `spine.entry-max-chars` bound (`internal/verify/verify.go`), which
+  `CheckSpineIntegrity` runs at the day-commit, so an over-long draft fails the day rollover's
+  thread registry integrity check (SPEC §2.2).
 - [ ] **Tag-less conversational turns are not kept.** `internal/turn/engage.go` returns before
   writing any excerpt for a turn with no topic tag and no file edits, so its prompt and response
   are unfindable, against SPEC §3.4's completeness invariant. Session-as-thread routing (A10)
@@ -371,6 +391,21 @@ Concrete, mostly single-package items; independent of the sequence above unless 
 
 ## Mid-term
 
+- [ ] **Event-log rotation.** `personant init` creates `logs/archive/` (`internal/store/init.go`)
+  and startup recovery leaves it alone (`internal/recovery/logs.go`), but nothing rotates logs
+  into it. The layout ARCHITECTURE carried was monthly gzipped tarballs of logs older than 90 days
+  (`logs/archive/YYYY-MM.tar.gz`), which would be the store's only non-text file and needs a
+  storage class.
+- [ ] **Cross-project recall.** Not built: the other-projects slot carries each project's digest,
+  but no recall path scans it, and a cross-project fetch or engagement is declined
+  (`internal/turn/lru.go` `crossProjectDecline`; SPEC §3.1, §3.2), though SPEC §2.6.1 names
+  `recall.cross-project-threshold`. The design ARCHITECTURE carried: the digests scanned each turn
+  by the opportunistic-surfacing path, at a higher threshold.
+- [ ] **No production trigger for consolidation.** `MemoryOps.Consolidate` runs only from the
+  turn-repository loose-object check (`internal/memops/fileadapter/fileadapter_recovery.go`) and
+  the scenario harness's day-off step, and `measure.RebuildTrees` only from that step
+  (`internal/scenarios/harness_run.go`), so outside the simulation no summary tree is built and
+  intra-thread recall always takes the flat scan (SPEC §3.4 *Long threads*).
 - [ ] **Deterministic-only memory.** Replace the memory-side model judgments — the summarizer,
   the clusterer, recall's model-judgment signal and the vetting reviewer (SPEC §8.2.1) — with
   deterministic code, so the memory service needs no model's services at all.
