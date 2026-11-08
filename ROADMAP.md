@@ -309,8 +309,9 @@ decisions named in them.
 Concrete, mostly single-package items; independent of the sequence above unless noted.
 
 - [ ] **Tracked-file content in the history repository.** The day commit puts each thread's
-  tracked-file store (`files.jsonl`, `files/`) in the history repository, so the content of every
-  file the assistant read or wrote is kept permanently. SPEC §3.9.1 requires the store to live only
+  tracked-file store (`files.jsonl`, `files/`) in the history repository, and archival's capture
+  commit pins it there too, so the content of every file the assistant read or wrote is kept
+  permanently. SPEC §3.9.1 requires the store to live only
   in the store working tree and the turn repository. Barrier completion's restore of the store
   from primary HEAD depends on the current behavior (ARCHITECTURE "Tracked-file store").
 - [ ] **Wire the mid-day re-baseline arming trigger.** The default-off knob that nukes and recreates
