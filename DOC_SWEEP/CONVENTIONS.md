@@ -18,7 +18,7 @@ row or clause they match, and continue only on that person's direction:
 - a change that matches a row of ARCHITECTURE "Anti-patterns to push back on";
 - a change that adds a path from a session's project work into behavior or process memory other
   than SPEC §1.8's single write path, or that promotes a single-project pattern into behavior
-  memory (SPEC §1.8 "Directive accrual").
+  memory (SPEC §1.8 "Feedback directive tuning").
 
 ## Plan & Execute Process
 
@@ -42,7 +42,7 @@ probe run is a run whose purpose is integration data.
   it lives, and is not fixed on the probe branch.
 - Probe runs use mock inference only: no live model and no live embedder. The live-inference and
   live-embedding sim modes stay available to every run that is not a probe run.
-- **A probe plan is exempt from the checkpoint gate and the post-sprint review.** Its packages gate
+- **A probe plan is exempt from the checkpoint gate and the post-plan review.** Its packages gate
   only on the runs that make its data trustworthy, plus `just test-run` for any production package
   they add a file to; its review is a spot check that the data it gathers measures what it claims.
 
@@ -71,14 +71,13 @@ setup on their own initiative; they propose it to the user instead.
 
 ### Pre-production: no transition scaffolding
 
-Replacing a mechanism before a release still writes a home-format migration when a stored format
-changes, so existing dev and sim homes keep opening.
+Replacing a mechanism before a release still writes a format migration when a stored format
+changes, so existing dev and sim memory stores keep opening.
 ### Versioning and acceptance
 
-The version lines and the home's on-disk
-format are defined in SPEC §9.1. Their current values live in `internal/version` and are never
-restated in prose; `personant version` prints them. The substrate line is semver; its MINOR bumps
-are developer fiat at the milestone gates.
+The memory service's semver line and the store's format revision are defined in SPEC §9.1. Their
+current values live in `internal/version` and are never restated in prose; `personant version`
+prints them. MINOR bumps of the semver line are developer fiat at the milestones.
 
 An acceptance claim states its coverage (simulated, modeled, parked) as SPEC §9.1's honesty clause
 requires.
@@ -98,7 +97,7 @@ the files its tests read, the env vars they read or the test flags change, so th
 of minutes) runs only when a change could alter its outcome. The cache keys what tests read by stat
 info (size, mode, mtime), not content, and covers every directory a test stats, opens or
 path-resolves. So a generator that rewrites a file tests read leaves identical content untouched; a
-test never creates or removes entries in a directory another package's tests read (run homes under
+test never creates or removes entries in a directory another package's tests read (run memory stores under
 `test/rundata/` are emptied, never replaced); and a miss is diagnosed with
 `just test-cache-why <pkg>`, which names the changed input. Probe plans gate as "Probe work" states.
 
@@ -116,9 +115,7 @@ dependencies". `go.mod` is the catalog.
 - **Permanently out** (architectural conflict): `langchaingo/memory`, `langchaingo/chains`,
   `mattn/go-sqlite3`. Do not reintroduce.
 - **SQLite:** any Go SQLite need takes `modernc.org/sqlite` first.
-- **Open:** U5 — how the service reaches its own models decides whether `langchaingo/llms` is
-  needed. Until then `langchaingo/llms` stays out; the OpenAI-compatible client in
-  `internal/model` covers the need.
+- `langchaingo/llms` stays out: the memory service makes no model calls (SPEC §8.2.1).
 - **Vet adoption and maintenance before proposing a dependency — from the registry, not the
   README.** Record, measured not asserted: (1) last release date; (2) `Imported by` count on
   pkg.go.dev; (3) deprecation status; (4) transitive dep count; (5) license. For a port, verify
@@ -140,7 +137,7 @@ simulated-world timestamps and `clock.Profiling()` / `clock.Since()` for real-ti
 measurement.
 ### Match the data model
 
-Spine records, thread frontmatter, the symbol index, project metadata
+Thread registry records, thread frontmatter, the symbol index, project metadata
 and log events have field-level formats in ARCHITECTURE "Storage and record formats" and
 "Event log format"; directive files in SPEC §2.6. Don't invent your own.
 ### Serialized data is debuggable
@@ -162,8 +159,8 @@ The opencode source clone at `../opencode` is read-only. Never edit it and never
 the installed release's tag; it moves only in the change that updates the `sim-opencode` version
 check (ARCHITECTURE "Plugin route", "Pinned release").
 - **Open:** U11 — whether to adopt the rule: never place external state (an agent's data home,
-  telemetry) inside `~/.personant/` or a test home, because crash recovery quarantines untracked
-  files. opencode's data home is already excluded (ARCHITECTURE "One inspection location").
+  telemetry) inside the store directory or a test memory store, because crash recovery
+  quarantines untracked files. opencode's data directory is already excluded (ARCHITECTURE "One inspection location").
 - **Spawned processes: self-limiting, or verified dead** (origin: commit 4fcb0e5). Binding on any
   background process an agent starts — load generators, watchers, servers, opencode servers,
   children of stress harnesses:
@@ -188,7 +185,7 @@ How the project documents (THESIS, SPEC, ARCHITECTURE, CONVENTIONS) are written 
 - **Field markings:**
   - `field: T` — required.
   - `field?: T` — optional.
-  - `[derived]` — regenerated from canonical sources; never hand-edited.
+  - `[derived]` — regenerated from authoritative files; never hand-edited.
 - **Pseudocode** is descriptive and language-neutral.
 - **Cross-references** cite SPEC by §-numbered section identifier (e.g. "see SPEC §2.2") and the
   other documents by section title.
