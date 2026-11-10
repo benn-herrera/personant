@@ -87,18 +87,18 @@ fmt-check:
       exit 1
     fi
 
-ADJAGENT_VER := "0.15.0"
+ADJAGENT_VER := "0.16.0"
 VENV := justfile_dir() / ".venv"
 PYTHON := "\"" + VENV + "/bin/python" + "\""
 ADJAGENT := "\"" + VENV + "/bin/adjagent" + "\""
 agents:
   #!/usr/bin/env bash
   set -euo pipefail
-  [[ -x {{PYTHON}} ]] || python3 -m venv "{{VENV}}"
+  [[ -x {{PYTHON}} ]] || { python3 -m venv "{{VENV}}" && {{PYTHON}} -m pip install --upgrade pip; }
   [[ -x {{ADJAGENT}} && "$({{ADJAGENT}} --version)" == "{{ADJAGENT_VER}}" ]] || \
-    {{PYTHON}} -m pip install --upgrade pip "git+https://github.com/benn-herrera/adjagent@v{{ADJAGENT_VER}}"
-  {{ADJAGENT}} install . --harness=claude
-  {{ADJAGENT}} install . --harness=opencode
+    {{PYTHON}} -m pip install "git+https://github.com/benn-herrera/adjagent@v{{ADJAGENT_VER}}"
+  {{ADJAGENT}} install devpro . --harness=claude
+  {{ADJAGENT}} install devpro . --harness=opencode
 
 # NOT the tool for adding one dependency (see add-dependency) — this is
 # deliberate whole-graph churn.
