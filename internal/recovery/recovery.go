@@ -4,7 +4,7 @@
 // no-op, and every unclean-shutdown shape maps to exactly one cell of
 // the recovery state machine below (the MAD-converged design in
 // mad-design/crash-stability/SOLUTION.md as amended by
-// ROADMAP_PLANS/dual-repo-barrier.md).
+// ROADMAP_DESIGNS/dual-repo-barrier.md).
 //
 // # Dual-repo model (#94 R3b)
 //

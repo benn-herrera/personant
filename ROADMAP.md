@@ -502,7 +502,7 @@ Concrete, mostly single-package items; independent of the sequence above unless 
 
 ## Parked plans
 
-`ROADMAP_PLANS/` holds designs not under way. Those that still apply:
+`ROADMAP_DESIGNS/` holds designs not under way. Those that still apply:
 
 - `OPENCODE_SERVER_REPLACEMENT.md` — the fallback if the plugin route cannot give the memory system
   the control it needs (ARCHITECTURE "Plugin route").

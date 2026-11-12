@@ -1,4 +1,4 @@
-# ROADMAP_PLANS
+# ROADMAP_DESIGNS
 
 Home for planned pending work that is not actively under way: a plan with enough design done that
 someone could pick it up and execute it, but which nobody is executing yet. Usually — not
