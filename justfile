@@ -87,18 +87,18 @@ fmt-check:
       exit 1
     fi
 
-ADJAGENT_VER := "0.16.0"
+DEVPRO_VER := "0.17.0"
 VENV := justfile_dir() / ".venv"
 PYTHON := "\"" + VENV + "/bin/python" + "\""
-ADJAGENT := "\"" + VENV + "/bin/adjagent" + "\""
+DEVPRO := "\"" + VENV + "/bin/devpro" + "\""
 agents:
   #!/usr/bin/env bash
   set -euo pipefail
   [[ -x {{PYTHON}} ]] || python3 -m venv --upgrade-deps "{{VENV}}"
-  [[ -x {{ADJAGENT}} && "$({{ADJAGENT}} --version)" == "{{ADJAGENT_VER}}" ]] || \
-    {{PYTHON}} -m pip install "git+https://github.com/benn-herrera/adjagent@v{{ADJAGENT_VER}}"
-  {{ADJAGENT}} install devpro . --harness=claude
-  {{ADJAGENT}} install devpro . --harness=opencode
+  [[ -x {{DEVPRO}} && "$({{DEVPRO}} --version)" == "{{DEVPRO_VER}}" ]] || \
+    {{PYTHON}} -m pip install "git+https://github.com/benn-herrera/devpro@v{{DEVPRO_VER}}"
+  {{DEVPRO}} install . --harness=opencode
+  {{DEVPRO}} install . --harness=claude
 
 # NOT the tool for adding one dependency (see add-dependency) — this is
 # deliberate whole-graph churn.
@@ -513,4 +513,4 @@ integration-test: build
 clean:
     rm -f {{ BINDIR }}/personant
 
-import? '.claude/skills/adjagent/skills/docdicer/tools/runner-snippets/docdicer.just'
+import? '.claude/skills/devpro/skills/docdicer/tools/runner-snippets/docdicer.just'
