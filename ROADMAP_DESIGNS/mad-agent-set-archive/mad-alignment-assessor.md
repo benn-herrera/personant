@@ -1,5 +1,5 @@
 ---
-# !GENERATED! from adjagent/definitions/mad_alignment_assessor.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !GENERATED! from devpro/definitions/mad_alignment_assessor.py — do not edit here: request changes from the devpro project; local needs belong in your CONVENTIONS.md.
 # !TUNING! family=claude seat=high member=opus tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: mad-alignment-assessor
 description: "Alignment assessor in a multi-model debate. Classifies structural agreement and disagreement between reviewer conclusions only; never evaluates argument quality or merit."

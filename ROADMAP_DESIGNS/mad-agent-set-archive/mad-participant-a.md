@@ -1,5 +1,5 @@
 ---
-# !GENERATED! from adjagent/definitions/mad_participant.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !GENERATED! from devpro/definitions/mad_participant.py — do not edit here: request changes from the devpro project; local needs belong in your CONVENTIONS.md.
 # !TUNING! family=claude seat=highest member=fable tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: mad-participant-a
 description: "Independent technical participant in a multi-model debate, review or design: produces the initial assessment or proposal and responds to debate rounds. Sees only the Alignment Assessor's structured map, never another participant's full output."

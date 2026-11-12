@@ -1,5 +1,5 @@
 ---
-# !GENERATED! from adjagent/definitions/mad_referees.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !GENERATED! from devpro/definitions/mad_referees.py — do not edit here: request changes from the devpro project; local needs belong in your CONVENTIONS.md.
 # !TUNING! family=claude seat=medium member=sonnet tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: mad-review-referee
 description: "Referee and coordinator for the multi-model debate review process: dispatches reviewers and the alignment assessor, manages debate rounds, applies the retirement gate, and generates the output documents — for critique of an artifact that exists; constructing a new design is `mad-design-referee`."

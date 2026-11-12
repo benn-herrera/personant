@@ -1,5 +1,5 @@
 ---
-# !GENERATED! from adjagent/definitions/mad_guest_liaison.py — do not edit here: request changes from the adjagent project; local needs belong in your CONVENTIONS.md.
+# !GENERATED! from devpro/definitions/mad_guest_liaison.py — do not edit here: request changes from the devpro project; local needs belong in your CONVENTIONS.md.
 # !TUNING! family=claude seat=medium member=sonnet tier=highest=fable,high=opus,medium=sonnet,low=haiku,lowest=haiku stock=highest,high,medium,low,lowest harness=claude
 name: mad-guest-liaison
 description: "Liaison for the multi-model debate process: relays messages to and from an external model via post-openai.py, presenting an identical interface to the Referee as a local participant."

@@ -5,8 +5,8 @@ session; the evidence cited is from that session's fourteen dispatched rows and 
 duplication sweep built at the end of it.*
 
 ## REFERENCE PROJECTS
-- ../../adjagent
-- ../../adjagent/kb_tools
+- ../../devpro
+- ../../devpro/kb_tools
 - ../../personant
 
 ## BLUF
