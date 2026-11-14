@@ -4,8 +4,8 @@ Project-specific process and house rules
 
 Must-see:
 
-- No user-facing behaviors or outcomes are designed here, that belongs to SPEC
-- No project mechanisms or code structure are put forth, that belongs to ARCHITECTURE
+- No user-facing behaviors or outcomes are designed here – that belongs to SPEC
+- No project mechanisms or code structure are put forth – that belongs to ARCHITECTURE
 - Always read [Two gates](build-test/two-gates-do-not-conflate-them.md) before choosing a gate check
 
 Contents:

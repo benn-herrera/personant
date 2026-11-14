@@ -4,9 +4,9 @@ Why this project has the shape it has
 
 This thesis does not:
 
-- Design user-facing behaviors or outcomes, that belongs to SPEC
-- Put forth project mechanisms or code structure, that belongs to ARCHITECTURE
-- Dictate project-specific process, that belongs to CONVENTIONS
+- Design user-facing behaviors or outcomes – that belongs to SPEC
+- Put forth project mechanisms, coding languages, or code structure – that belongs to ARCHITECTURE
+- Dictate project-specific process – that belongs to CONVENTIONS
 
 ## Personant in plain terms
 
