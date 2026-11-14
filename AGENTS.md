@@ -1,6 +1,6 @@
 # AGENTS – Personant
 
- <!-- vvv-devpro devpro 0.17.1 do not edit at or between marker lines. devpro-vvv -->
+ <!-- vvv-devpro devpro 0.17.2 do not edit at or between marker lines. devpro-vvv -->
  
 ## Scratch space
 **INVARIANT**: `/tmp` and other system-wide scratch locations are off limits. All scratch —
@@ -82,7 +82,8 @@ changes cannot be seen at its source or corrected there.
 - The full project document set:
   - THESIS.md — purpose, intent, the 'north star' for decisions; explicitly not spec or
     implementation
-  - SPEC.md — consumer-facing outcomes, such that any compliant implementation would be valid
+  - SPEC.md — consumer-facing outcomes, such that any compliant implementation in any language would
+    be valid
   - ARCHITECTURE.md — how this particular implementation meets SPEC.md
   - CONVENTIONS.md — project-specific additions to house rules and practices
 - Each states what the others do not; where one needs another's content it cites rather than
