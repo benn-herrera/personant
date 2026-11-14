@@ -87,18 +87,11 @@ fmt-check:
       exit 1
     fi
 
-DEVPRO_VER := "0.17.0"
-VENV := justfile_dir() / ".venv"
-PYTHON := "\"" + VENV + "/bin/python" + "\""
-DEVPRO := "\"" + VENV + "/bin/devpro" + "\""
+[doc("update devpro coding harness plugin")]
 agents:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  [[ -x {{PYTHON}} ]] || python3 -m venv --upgrade-deps "{{VENV}}"
-  [[ -x {{DEVPRO}} && "$({{DEVPRO}} --version)" == "{{DEVPRO_VER}}" ]] || \
-    {{PYTHON}} -m pip install "git+https://github.com/benn-herrera/devpro@v{{DEVPRO_VER}}"
-  {{DEVPRO}} install . --harness=opencode
-  {{DEVPRO}} install . --harness=claude
+  @command -v devpro > /dev/null || { echo 'devpro not installed. run `brew install benn-herrera/tap/devpro`' >&2; exit 1; }
+  devpro install . --harness=claude
+  devpro install . --harness=opencode
 
 # NOT the tool for adding one dependency (see add-dependency) — this is
 # deliberate whole-graph churn.
@@ -513,4 +506,4 @@ integration-test: build
 clean:
     rm -f {{ BINDIR }}/personant
 
-import? '.claude/skills/devpro/skills/docdicer/tools/runner-snippets/docdicer.just'
+import? '.opencode/plugins/devpro/skills/docdicer/tools/runner-snippets/docdicer.just'
